@@ -89,7 +89,43 @@ type kanbanBoardApp struct {
 	closeOnce sync.Once
 }
 
-var initialKanbanBoardCards = []kanbanCard{}
+var initialKanbanBoardCards = []kanbanCard{
+	{
+		ID:     "card-001",
+		Status: kanbanStatusBacklog,
+		Title:  "Finish RTP HEVC Packetizer",
+		Notes:  "Complete HEVC payload fragmentation, aggregation, and marker-bit handling for outbound RTP streams.",
+		Tags:   []string{"webrtc", "rtp", "hevc"},
+	},
+	{
+		ID:     "card-002",
+		Status: kanbanStatusBacklog,
+		Title:  "Add RTP Retransmission Buffer",
+		Notes:  "Keep recent RTP packets available for NACK-driven retransmission without unbounded memory growth.",
+		Tags:   []string{"webrtc", "rtp", "nack"},
+	},
+	{
+		ID:     "card-003",
+		Status: kanbanStatusBacklog,
+		Title:  "Implement ICE Restart Handling",
+		Notes:  "Support renegotiation paths that refresh ICE credentials and reconnect peers after network changes.",
+		Tags:   []string{"webrtc", "ice", "signaling"},
+	},
+	{
+		ID:     "card-004",
+		Status: kanbanStatusBacklog,
+		Title:  "Harden DTLS/SRTP Cleanup",
+		Notes:  "Ensure failed and closed peer connections release transports, tracks, and SRTP state promptly.",
+		Tags:   []string{"webrtc", "dtls", "srtp"},
+	},
+	{
+		ID:     "card-005",
+		Status: kanbanStatusBacklog,
+		Title:  "Add Simulcast Forwarding Controls",
+		Notes:  "Choose forwarded RTP layers per subscriber so the server can adapt streams to bandwidth and viewport size.",
+		Tags:   []string{"webrtc", "simulcast", "bandwidth"},
+	},
+}
 
 func newKanbanBoardApp() *kanbanBoardApp {
 	return &kanbanBoardApp{
