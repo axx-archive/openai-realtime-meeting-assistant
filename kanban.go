@@ -19,6 +19,7 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
+	defaultReasoningEffort    = "low"
 	realtimeEventChannelLabel = "oai-events"
 	realtimeInputTrackID      = "kanban-realtime:mixed-audio"
 	realtimeInputStreamID     = "kanban-realtime-input"
@@ -95,13 +96,6 @@ type kanbanBoardApp struct {
 
 var initialKanbanBoardCards = []kanbanCard{
 	{
-		ID:     "card-001",
-		Status: kanbanStatusBacklog,
-		Title:  "Finish RTP HEVC Packetizer",
-		Notes:  "Complete HEVC payload fragmentation, aggregation, and marker-bit handling for outbound RTP streams.",
-		Tags:   []string{"webrtc", "rtp", "hevc"},
-	},
-	{
 		ID:     "card-002",
 		Status: kanbanStatusBacklog,
 		Title:  "Add RTP Retransmission Buffer",
@@ -128,6 +122,13 @@ var initialKanbanBoardCards = []kanbanCard{
 		Title:  "Add Simulcast Forwarding Controls",
 		Notes:  "Choose forwarded RTP layers per subscriber so the server can adapt streams to bandwidth and viewport size.",
 		Tags:   []string{"webrtc", "simulcast", "bandwidth"},
+	},
+	{
+		ID:     "card-001",
+		Status: kanbanStatusBacklog,
+		Title:  "Finish RTP HEVC Packetizer",
+		Notes:  "Complete HEVC payload fragmentation, aggregation, and marker-bit handling for outbound RTP streams.",
+		Tags:   []string{"webrtc", "rtp", "hevc"},
 	},
 }
 
@@ -400,12 +401,15 @@ func (app *kanbanBoardApp) SendEvent(payload any) error {
 }
 
 func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
-	return map[string]any{
+	session := map[string]any{
 		"type":              "realtime",
 		"model":             model,
 		"output_modalities": []string{"text"},
 		"audio": map[string]any{
 			"input": map[string]any{
+				"noise_reduction": map[string]any{
+					"type": "near_field",
+				},
 				"transcription": map[string]any{
 					"model":    "gpt-4o-mini-transcribe",
 					"language": "en",
@@ -414,8 +418,8 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 					"type":                "server_vad",
 					"threshold":           0.5,
 					"prefix_padding_ms":   300,
-					"silence_duration_ms": 500,
-					"create_response":     false,
+					"silence_duration_ms": 200,
+					"create_response":     true,
 					"interrupt_response":  false,
 				},
 			},
@@ -424,6 +428,14 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 		"tools":        app.kanbanTools(),
 		"tool_choice":  "required",
 	}
+
+	if usesAdvancedCommandProfile(model) {
+		session["reasoning"] = map[string]any{
+			"effort": defaultReasoningEffort,
+		}
+	}
+
+	return session
 }
 
 func (app *kanbanBoardApp) sessionUpdateEvent() map[string]any {
@@ -439,6 +451,11 @@ func realtimeModel() string {
 	}
 
 	return defaultRealtimeModel
+}
+
+func usesAdvancedCommandProfile(model string) bool {
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	return normalizedModel == "gpt-realtime-2"
 }
 
 func (app *kanbanBoardApp) sessionInstructions() string {
@@ -590,18 +607,6 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		if event.Error != nil {
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
 			broadcastKanbanEvent("status", event.Error.Message)
-		}
-	case "conversation.item.input_audio_transcription.completed":
-		if strings.TrimSpace(event.Transcript) == "" {
-			return
-		}
-		if err := app.SendEvent(map[string]any{
-			"type": "response.create",
-			"response": map[string]any{
-				"output_modalities": []string{"text"},
-			},
-		}); err != nil {
-			log.Errorf("Failed to request Kanban Realtime response: %v", err)
 		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
