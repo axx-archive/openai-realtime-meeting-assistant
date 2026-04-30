@@ -253,6 +253,30 @@
         animation: confetti-pop 1000ms ease-out forwards;
       }
 
+      .toast-region {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 1100;
+        display: grid;
+        gap: 10px;
+        width: min(360px, calc(100vw - 36px));
+        pointer-events: none;
+      }
+
+      .toast {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 12px;
+        background: #303134;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.36);
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.35;
+        padding: 12px 14px;
+        animation: toast-in 180ms ease-out;
+      }
+
       .card strong {
         font-size: 14px;
         line-height: 1.3;
@@ -351,6 +375,18 @@
         }
       }
 
+      @keyframes toast-in {
+        0% {
+          opacity: 0;
+          transform: translate3d(0, 8px, 0) scale(0.98);
+        }
+
+        100% {
+          opacity: 1;
+          transform: translate3d(0, 0, 0) scale(1);
+        }
+      }
+
       @media (max-width: 1100px) {
         .workspace {
           grid-template-columns: minmax(0, 1fr) 320px;
@@ -440,6 +476,7 @@
         <span aria-hidden="true"></span>
       </footer>
     </main>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
     <script>
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
@@ -450,13 +487,15 @@
       const leaveButton = document.getElementById('leave')
       const localVideo = document.getElementById('localVideo')
       const videoStack = document.getElementById('videoStack')
+      const toastRegion = document.getElementById('toastRegion')
 
       let cards = []
       let pc
       let ws
       let localStream
+      let hasBoardSnapshot = false
       const remoteElements = new Map()
-      const cardStatuses = new Map()
+      const cardSnapshots = new Map()
 
       joinButton.addEventListener('click', joinRoom)
       leaveButton.addEventListener('click', leaveRoom)
@@ -529,7 +568,11 @@
         switch (message.event) {
           case 'board':
             cards = Array.isArray(message.data?.cards) ? message.data.cards : []
-            renderBoard(cardChanges(cards))
+            {
+              const changes = cardChanges(cards)
+              renderBoard(changes)
+              changes.messages.forEach(showToast)
+            }
             break
           case 'status':
             setLog(String(message.data || ''))
@@ -569,7 +612,7 @@
         }
       }
 
-      function renderBoard(changes = { moved: new Set(), completed: new Set() }) {
+      function renderBoard(changes = { moved: new Set(), completed: new Set(), messages: [] }) {
         boardEl.replaceChildren(...statuses.map(status => {
           const columnCards = cards.filter(card => card.status === status)
           const column = document.createElement('section')
@@ -642,27 +685,90 @@
       function cardChanges(nextCards) {
         const moved = new Set()
         const completed = new Set()
+        const messages = []
         const nextIds = new Set()
+        const shouldToast = hasBoardSnapshot
 
         for (const card of nextCards) {
           nextIds.add(card.id)
-          const previousStatus = cardStatuses.get(card.id)
-          if (previousStatus && previousStatus !== card.status) {
+          const previousCard = cardSnapshots.get(card.id)
+          if (!previousCard) {
+            if (shouldToast) {
+              messages.push(`Created "${card.title}" in ${card.status}`)
+            }
+            cardSnapshots.set(card.id, cardSnapshot(card))
+            continue
+          }
+
+          if (previousCard.status !== card.status) {
             moved.add(card.id)
             if (card.status === 'Done') {
               completed.add(card.id)
             }
+            if (shouldToast) {
+              messages.push(`Moved "${card.title}" to ${card.status}`)
+            }
+          } else if (previousCard.title !== card.title) {
+            if (shouldToast) {
+              messages.push(`Renamed "${previousCard.title}" to "${card.title}"`)
+            }
+          } else if (!sameTags(previousCard.tags, card.tags || [])) {
+            if (shouldToast) {
+              messages.push(`Updated tags on "${card.title}"`)
+            }
+          } else if (previousCard.notes !== (card.notes || '')) {
+            if (shouldToast) {
+              messages.push(`Updated "${card.title}"`)
+            }
           }
-          cardStatuses.set(card.id, card.status)
+
+          cardSnapshots.set(card.id, cardSnapshot(card))
         }
 
-        for (const cardId of cardStatuses.keys()) {
+        for (const [cardId, previousCard] of cardSnapshots.entries()) {
           if (!nextIds.has(cardId)) {
-            cardStatuses.delete(cardId)
+            if (shouldToast) {
+              messages.push(`Deleted "${previousCard.title}"`)
+            }
+            cardSnapshots.delete(cardId)
           }
         }
+        hasBoardSnapshot = true
 
-        return { moved, completed }
+        return { moved, completed, messages }
+      }
+
+      function cardSnapshot(card) {
+        return {
+          title: card.title || '',
+          status: card.status || '',
+          notes: card.notes || '',
+          tags: Array.isArray(card.tags) ? [...card.tags] : []
+        }
+      }
+
+      function sameTags(left, right) {
+        if (left.length !== right.length) {
+          return false
+        }
+
+        return left.every((tag, index) => tag === right[index])
+      }
+
+      function showToast(message) {
+        if (!message) {
+          return
+        }
+
+        const toast = document.createElement('div')
+        toast.className = 'toast'
+        toast.textContent = message
+        toastRegion.appendChild(toast)
+
+        while (toastRegion.children.length > 4) {
+          toastRegion.firstElementChild.remove()
+        }
+        window.setTimeout(() => toast.remove(), 4200)
       }
 
       function fireConfetti(anchor) {
