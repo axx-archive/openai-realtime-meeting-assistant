@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
@@ -112,8 +115,38 @@ func newPeerConnection() (*webrtc.PeerConnection, error) {
 	if nat1To1IP := os.Getenv("PION_NAT1TO1_IP"); nat1To1IP != "" {
 		settingEngine.SetNAT1To1IPs([]string{nat1To1IP}, webrtc.ICECandidateTypeHost)
 	}
+	if err := configureEphemeralUDPPortRange(&settingEngine); err != nil {
+		return nil, err
+	}
 
 	return webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine)).NewPeerConnection(webrtc.Configuration{})
+}
+
+func configureEphemeralUDPPortRange(settingEngine *webrtc.SettingEngine) error {
+	rawPortRange := strings.TrimSpace(os.Getenv("PION_UDP_PORT_RANGE"))
+	if rawPortRange == "" {
+		return nil
+	}
+
+	parts := strings.Split(rawPortRange, "-")
+	if len(parts) != 2 {
+		return fmt.Errorf("PION_UDP_PORT_RANGE must be formatted as min-max, got %q", rawPortRange)
+	}
+
+	minPort, err := strconv.ParseUint(strings.TrimSpace(parts[0]), 10, 16)
+	if err != nil {
+		return fmt.Errorf("parse PION_UDP_PORT_RANGE minimum: %w", err)
+	}
+	maxPort, err := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 16)
+	if err != nil {
+		return fmt.Errorf("parse PION_UDP_PORT_RANGE maximum: %w", err)
+	}
+
+	if err := settingEngine.SetEphemeralUDPPortRange(uint16(minPort), uint16(maxPort)); err != nil {
+		return fmt.Errorf("configure PION_UDP_PORT_RANGE: %w", err)
+	}
+
+	return nil
 }
 
 // Add to list of tracks and fire renegotation for all PeerConnections.
@@ -343,6 +376,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
 		log.Errorf("Failed to send Kanban board state: %v", err)
+	}
+	if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshot(20)); err != nil {
+		log.Errorf("Failed to send meeting memory: %v", err)
 	}
 	if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
 		log.Errorf("Failed to send Kanban status: %v", err)

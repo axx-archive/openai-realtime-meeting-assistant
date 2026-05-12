@@ -56,8 +56,10 @@ type kanbanBoardState struct {
 }
 
 type kanbanRealtimeEvent struct {
+	EventID    string `json:"event_id,omitempty"`
 	Type       string `json:"type,omitempty"`
 	Transcript string `json:"transcript,omitempty"`
+	ItemID     string `json:"item_id,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Arguments  string `json:"arguments,omitempty"`
 	CallID     string `json:"call_id,omitempty"`
@@ -84,6 +86,7 @@ type kanbanBoardApp struct {
 	nextCreatedIndex int
 	updatedAt        time.Time
 	handledCalls     map[string]struct{}
+	memory           *meetingMemoryStore
 
 	model      string
 	pc         *webrtc.PeerConnection
@@ -133,11 +136,17 @@ var initialKanbanBoardCards = []kanbanCard{
 }
 
 func newKanbanBoardApp() *kanbanBoardApp {
+	memory, err := newMeetingMemoryStore(meetingMemoryPath())
+	if err != nil {
+		log.Errorf("Meeting memory disabled: %v", err)
+	}
+
 	return &kanbanBoardApp{
 		cards:            cloneKanbanCards(initialKanbanBoardCards),
 		nextCreatedIndex: 1,
 		updatedAt:        time.Now().UTC(),
 		handledCalls:     map[string]struct{}{},
+		memory:           memory,
 	}
 }
 
@@ -470,6 +479,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"If a user says they started, began, picked up, or are working on something, move an existing related ticket to In Progress if one exists; otherwise create a concise In Progress ticket.",
 		"If a user says they are blocked, waiting on something, dependent on another team, or that work might slip, move or create the related ticket in Blocked and add blocked, dependency, or risk tags as appropriate.",
 		"Track meeting context across turns. If a follow-up sentence adds dependency, blocker, or schedule-risk context for the most recently discussed related card, update or move that existing ticket instead of creating a duplicate.",
+		"Meeting transcripts are saved as durable memory. If the user asks what was said, decided, discussed, remembered, mentioned earlier, or asks a recall question, call answer_memory_question with the user's question as the query.",
 		"If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for notes or tags when useful.",
 		"If a user asks to start, work on, pick up, or begin a ticket, move it to In Progress.",
 		"If a user asks to block, mark blocked, or note a dependency for a ticket, move it to Blocked and preserve the blocker details in notes.",
@@ -581,6 +591,19 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "answer_memory_question",
+			"description": "Answer a user question by recalling the saved meeting transcript and memory.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "The user's recall question or memory search query."},
+				},
+				"required":             []string{"query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "do_nothing",
 			"description": "Use this when the user is not asking to operate on the Kanban board, is only wrapping up, or says a handoff phrase like That's it from me.",
 			"parameters": map[string]any{
@@ -608,6 +631,8 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
 			broadcastKanbanEvent("status", event.Error.Message)
 		}
+	case "conversation.item.input_audio_transcription.completed":
+		app.rememberTranscript(event)
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
 			app.handleToolCall(*event.Item)
@@ -693,6 +718,8 @@ func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (m
 		return app.updateTicket(args)
 	case "delete_ticket":
 		return app.deleteTicket(args)
+	case "answer_memory_question":
+		return app.answerMemoryQuestion(args)
 	case "do_nothing":
 		reason := asString(args["reason"])
 		if reason == "" {
@@ -705,6 +732,46 @@ func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (m
 	default:
 		return nil, false, fmt.Errorf("unsupported function %q", outputItem.Name)
 	}
+}
+
+func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent) {
+	entry, appended, err := app.memory.appendTranscript(event.EventID, event.ItemID, event.Transcript)
+	if err != nil {
+		log.Errorf("Failed to write meeting memory: %v", err)
+		return
+	}
+	if !appended {
+		return
+	}
+
+	broadcastKanbanEvent("memory_transcript", entry)
+}
+
+func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
+	return app.memory.snapshot(limit)
+}
+
+func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
+	query := asString(args["query"])
+	if query == "" {
+		return nil, false, fmt.Errorf("query is required")
+	}
+
+	matches := app.memory.search(query, 5)
+	answer := buildMemoryAnswer(query, matches)
+	response := map[string]any{
+		"query":  query,
+		"answer": answer,
+	}
+
+	broadcastKanbanEvent("memory_answer", response)
+
+	return map[string]any{
+		"ok":      true,
+		"query":   query,
+		"answer":  answer,
+		"matches": len(matches),
+	}, false, nil
 }
 
 func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bool, error) {
