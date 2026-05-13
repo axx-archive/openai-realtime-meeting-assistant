@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,6 +90,7 @@ func main() {
 
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
+	http.HandleFunc("/archives/", meetingArchiveHandler)
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +110,29 @@ func main() {
 	if err = http.ListenAndServe(*addr, nil); err != nil { //nolint: gosec
 		log.Errorf("Failed to start http server: %v", err)
 	}
+}
+
+func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
+	archivePath, err := meetingArchivePath(archiveID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := os.Stat(archivePath); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	filename := filepath.Base(archivePath)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	http.ServeFile(w, r, archivePath)
 }
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -340,6 +365,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	}
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
+	participantName := "participant"
+	participantAccepted := false
+	participantMu := sync.Mutex{}
+	currentParticipantName := func() string {
+		participantMu.Lock()
+		defer participantMu.Unlock()
+		return participantName
+	}
+	setParticipantName := func(name string) {
+		participantMu.Lock()
+		participantName = name
+		participantMu.Unlock()
+	}
 
 	// When this frame returns close the Websocket
 	defer c.Close() //nolint
@@ -364,24 +402,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 			return
 		}
-	}
-
-	// Add our new PeerConnection to global list
-	listLock.Lock()
-	peerConnections = append(peerConnections, peerConnectionState{
-		peerConnection: peerConnection,
-		websocket:      c,
-	})
-	listLock.Unlock()
-
-	if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
-		log.Errorf("Failed to send Kanban board state: %v", err)
-	}
-	if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshot(20)); err != nil {
-		log.Errorf("Failed to send meeting memory: %v", err)
-	}
-	if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
-		log.Errorf("Failed to send Kanban status: %v", err)
 	}
 
 	// Trickle ICE. Emit server candidate to client
@@ -425,6 +445,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		log.Infof("Got remote track: Kind=%s, ID=%s, PayloadType=%d", t.Kind(), t.ID(), t.PayloadType())
+		trackParticipantName := currentParticipantName()
+		broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
+			"participant": trackParticipantName,
+			"trackId":     t.ID(),
+			"streamId":    t.StreamID(),
+			"payloadType": t.PayloadType(),
+		})
+		broadcastKanbanEvent("participant_track", map[string]any{
+			"name":     trackParticipantName,
+			"kind":     t.Kind().String(),
+			"trackId":  t.ID(),
+			"streamId": t.StreamID(),
+		})
 
 		// Create a track to fan out our incoming media to all browser peers.
 		trackLocal := addTrack(t)
@@ -439,6 +472,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			defer roomMixer.removeTrack(audioTrackKey)
 		}
 		audioDecodeBuffer := make([]int16, roomAudioDecodeBufferSize(audioChannels))
+		announcedAudioPacket := false
+		announcedDecodedAudio := false
 
 		for {
 			packet, _, err := t.ReadRTP()
@@ -447,10 +482,22 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 
 			if audioDecoder != nil {
+				if !announcedAudioPacket {
+					announcedAudioPacket = true
+					broadcastAssistantEvent("audio", "browser microphone packets are reaching the server", nil)
+				}
 				pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)
 				if decodeErr != nil {
 					log.Errorf("Failed to decode room audio for track=%s: %v", t.ID(), decodeErr)
+					if !announcedDecodedAudio {
+						broadcastAssistantEvent("error", "server could not decode microphone audio: "+decodeErr.Error(), nil)
+						announcedDecodedAudio = true
+					}
 				} else {
+					if !announcedDecodedAudio && len(pcm) > 0 {
+						announcedDecodedAudio = true
+						broadcastAssistantEvent("audio", "browser microphone audio decoded on the server", nil)
+					}
 					roomMixer.submit(audioTrackKey, pcm)
 				}
 			}
@@ -467,9 +514,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	peerConnection.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
 		log.Infof("ICE connection state changed: %s", is)
 	})
-
-	// Signal for the new PeerConnection
-	signalPeerConnections()
 
 	message := &websocketMessage{}
 	for {
@@ -489,6 +533,57 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		}
 
 		switch message.Event {
+		case "participant":
+			payload := struct {
+				Name     string `json:"name"`
+				Password string `json:"password"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
+				log.Errorf("Failed to unmarshal participant payload: %v", err)
+				_ = sendKanbanEvent(c, "access_denied", "Could not read participant access details.")
+				continue
+			}
+			name := canonicalParticipantName(payload.Name)
+			if name == "" || !validMeetingPassword(payload.Password) {
+				_ = sendKanbanEvent(c, "access_denied", "Choose a listed participant and enter the room password.")
+				continue
+			}
+			setParticipantName(name)
+			if participantAccepted {
+				continue
+			}
+			participantAccepted = true
+			kanbanApp.noteParticipant(name)
+			listLock.Lock()
+			peerConnections = append(peerConnections, peerConnectionState{
+				peerConnection: peerConnection,
+				websocket:      c,
+			})
+			listLock.Unlock()
+			if err := sendKanbanEvent(c, "access_granted", map[string]any{
+				"name": name,
+			}); err != nil {
+				log.Errorf("Failed to send access grant: %v", err)
+			}
+			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
+				log.Errorf("Failed to send Kanban board state: %v", err)
+			}
+			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshot(20)); err != nil {
+				log.Errorf("Failed to send meeting memory: %v", err)
+			}
+			if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
+				log.Errorf("Failed to send Kanban status: %v", err)
+			}
+			if assistantStatus := kanbanApp.assistantStatusSnapshot(); assistantStatus != nil {
+				if err := sendKanbanEvent(c, "assistant_event", assistantStatus); err != nil {
+					log.Errorf("Failed to send assistant status: %v", err)
+				}
+			}
+			broadcastKanbanEvent("participant_joined", map[string]any{
+				"name": name,
+			})
+			broadcastKanbanEvent("participants", kanbanApp.participantSnapshot())
+			signalPeerConnections()
 		case "candidate":
 			candidate := webrtc.ICECandidateInit{}
 			if err := json.Unmarshal([]byte(message.Data), &candidate); err != nil {
@@ -519,6 +614,70 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 				return
 			}
+		case "assistant_query":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before asking the assistant.")
+				continue
+			}
+			query := struct {
+				Query string `json:"query"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &query); err != nil {
+				log.Errorf("Failed to unmarshal assistant query: %v", err)
+				if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
+					"kind":      "error",
+					"text":      "could not read assistant question",
+					"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+				}); writeErr != nil {
+					log.Errorf("Failed to send assistant query error: %v", writeErr)
+				}
+				continue
+			}
+			broadcastAssistantEvent("query", query.Query, nil)
+			if _, _, err := kanbanApp.answerMemoryQuestion(map[string]any{"query": query.Query}); err != nil {
+				log.Errorf("Failed to answer assistant query: %v", err)
+				if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
+					"kind":      "error",
+					"text":      err.Error(),
+					"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+				}); writeErr != nil {
+					log.Errorf("Failed to send assistant query error: %v", writeErr)
+				}
+			}
+		case "archive_meeting":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before archiving the meeting.")
+				continue
+			}
+			result, err := kanbanApp.archiveMeeting(currentParticipantName())
+			if err != nil {
+				log.Errorf("Failed to archive meeting: %v", err)
+				_ = sendKanbanEvent(c, "assistant_event", map[string]any{
+					"kind":      "error",
+					"text":      "could not archive the meeting: " + err.Error(),
+					"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				continue
+			}
+			broadcastKanbanEvent("meeting_archived", result)
+			broadcastKanbanEvent("memory", kanbanApp.memorySnapshot(20))
+		case "screen_share_started":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")
+				continue
+			}
+			broadcastKanbanEvent("screen_share_started", map[string]any{
+				"name": currentParticipantName(),
+			})
+			broadcastAssistantEvent("status", currentParticipantName()+" started sharing their screen", nil)
+		case "screen_share_stopped":
+			if !participantAccepted {
+				continue
+			}
+			broadcastKanbanEvent("screen_share_stopped", map[string]any{
+				"name": currentParticipantName(),
+			})
+			broadcastAssistantEvent("status", currentParticipantName()+" stopped sharing their screen", nil)
 		default:
 			log.Errorf("unknown message: %+v", message)
 		}

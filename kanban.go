@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,7 @@ type kanbanCard struct {
 	Status kanbanStatus `json:"status"`
 	Title  string       `json:"title"`
 	Notes  string       `json:"notes"`
+	Owner  string       `json:"owner,omitempty"`
 	Tags   []string     `json:"tags"`
 }
 
@@ -55,10 +57,29 @@ type kanbanBoardState struct {
 	UpdatedAt string       `json:"updatedAt,omitempty"`
 }
 
+type meetingArchive struct {
+	ID           string               `json:"id"`
+	ArchivedAt   time.Time            `json:"archivedAt"`
+	ArchivedBy   string               `json:"archivedBy,omitempty"`
+	Board        kanbanBoardState     `json:"board"`
+	Memory       []meetingMemoryEntry `json:"memory"`
+	Participants []string             `json:"participants,omitempty"`
+}
+
+type meetingArchiveResult struct {
+	ID          string `json:"id"`
+	ArchivedAt  string `json:"archivedAt"`
+	ArchivedBy  string `json:"archivedBy,omitempty"`
+	DownloadURL string `json:"downloadUrl"`
+	Summary     string `json:"summary"`
+}
+
 type kanbanRealtimeEvent struct {
 	EventID    string `json:"event_id,omitempty"`
 	Type       string `json:"type,omitempty"`
 	Transcript string `json:"transcript,omitempty"`
+	Text       string `json:"text,omitempty"`
+	Delta      string `json:"delta,omitempty"`
 	ItemID     string `json:"item_id,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Arguments  string `json:"arguments,omitempty"`
@@ -87,14 +108,20 @@ type kanbanBoardApp struct {
 	updatedAt        time.Time
 	handledCalls     map[string]struct{}
 	memory           *meetingMemoryStore
+	participants     map[string]time.Time
+	apiKey           string
+	restarting       bool
+	assistantStatus  string
 
-	model      string
-	pc         *webrtc.PeerConnection
-	events     *webrtc.DataChannel
-	inputTrack *webrtc.TrackLocalStaticSample
-	inputEnc   *opusEncoder
-	connected  bool
-	closeOnce  sync.Once
+	model                    string
+	pc                       *webrtc.PeerConnection
+	events                   *webrtc.DataChannel
+	inputTrack               *webrtc.TrackLocalStaticSample
+	inputEnc                 *opusEncoder
+	connected                bool
+	forwardedAudioNotice     bool
+	proactiveReconnectCancel chan struct{}
+	closeOnce                sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -103,6 +130,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Add RTP Retransmission Buffer",
 		Notes:  "Keep recent RTP packets available for NACK-driven retransmission without unbounded memory growth.",
+		Owner:  "Tim",
 		Tags:   []string{"webrtc", "rtp", "nack"},
 	},
 	{
@@ -110,6 +138,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Implement ICE Restart Handling",
 		Notes:  "Support renegotiation paths that refresh ICE credentials and reconnect peers after network changes.",
+		Owner:  "Tyler",
 		Tags:   []string{"webrtc", "ice", "signaling"},
 	},
 	{
@@ -117,6 +146,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Harden DTLS/SRTP Cleanup",
 		Notes:  "Ensure failed and closed peer connections release transports, tracks, and SRTP state promptly.",
+		Owner:  "Jake",
 		Tags:   []string{"webrtc", "dtls", "srtp"},
 	},
 	{
@@ -124,6 +154,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Add Simulcast Forwarding Controls",
 		Notes:  "Choose forwarded RTP layers per subscriber so the server can adapt streams to bandwidth and viewport size.",
+		Owner:  "Caitlyn",
 		Tags:   []string{"webrtc", "simulcast", "bandwidth"},
 	},
 	{
@@ -131,6 +162,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Finish RTP HEVC Packetizer",
 		Notes:  "Complete HEVC payload fragmentation, aggregation, and marker-bit handling for outbound RTP streams.",
+		Owner:  "AJ",
 		Tags:   []string{"webrtc", "rtp", "hevc"},
 	},
 }
@@ -147,6 +179,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		updatedAt:        time.Now().UTC(),
 		handledCalls:     map[string]struct{}{},
 		memory:           memory,
+		participants:     map[string]time.Time{},
 	}
 }
 
@@ -155,7 +188,14 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
+	app.mu.Lock()
+	app.apiKey = apiKey
+	app.mu.Unlock()
 
+	return app.startRealtimePeer(apiKey, realtimeModel())
+}
+
+func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error {
 	peerConnection, err := newPeerConnection()
 	if err != nil {
 		return fmt.Errorf("create Realtime peer connection: %w", err)
@@ -194,23 +234,25 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 		return fmt.Errorf("create Realtime event data channel: %w", err)
 	}
 
-	model := realtimeModel()
 	app.mu.Lock()
 	app.model = model
 	app.pc = peerConnection
 	app.events = events
 	app.inputTrack = inputTrack
 	app.inputEnc = inputEnc
+	app.forwardedAudioNotice = false
 	app.mu.Unlock()
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Infof("OpenAI Realtime peer state changed: %s", state.String())
 		broadcastKanbanEvent("status", "OpenAI Realtime: "+state.String())
+		broadcastAssistantEvent("status", "OpenAI Realtime: "+state.String(), nil)
 	})
 	events.OnOpen(func() {
 		log.Infof("OpenAI Realtime event channel opened")
 		_ = app.SendEvent(app.sessionUpdateEvent())
 		broadcastKanbanEvent("status", "Kanban assistant is listening")
+		broadcastAssistantEvent("status", "Kanban assistant is listening", nil)
 	})
 	events.OnMessage(func(message webrtc.DataChannelMessage) {
 		app.handleRealtimeEvent(message.Data)
@@ -220,15 +262,79 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 		if err := app.connectRealtimePeer(apiKey, model); err != nil {
 			log.Errorf("Failed to connect OpenAI Realtime peer: %v", err)
 			broadcastKanbanEvent("status", "OpenAI Realtime disabled: "+err.Error())
+			broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
 			_ = peerConnection.Close()
+			app.mu.Lock()
+			if app.pc == peerConnection {
+				app.pc = nil
+				app.events = nil
+				app.inputTrack = nil
+				app.inputEnc = nil
+				app.connected = false
+			}
+			app.mu.Unlock()
 			return
 		}
 		if roomMixer != nil {
 			roomMixer.setSink(realtimeMixedAudioSinkKey, app)
 		}
+		app.startProactiveRealtimeRestart(peerConnection)
 	}()
 
 	return nil
+}
+
+func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
+	app.mu.Lock()
+	if app.restarting {
+		app.mu.Unlock()
+		return
+	}
+	app.restarting = true
+	apiKey := app.apiKey
+	peerConnection := app.pc
+	app.pc = nil
+	app.events = nil
+	app.inputTrack = nil
+	app.inputEnc = nil
+	app.connected = false
+	app.forwardedAudioNotice = false
+	cancelProactiveRestart := app.proactiveReconnectCancel
+	app.proactiveReconnectCancel = nil
+	app.mu.Unlock()
+
+	defer func() {
+		app.mu.Lock()
+		app.restarting = false
+		app.mu.Unlock()
+	}()
+
+	if roomMixer != nil {
+		roomMixer.removeSink(realtimeMixedAudioSinkKey)
+	}
+	if cancelProactiveRestart != nil {
+		close(cancelProactiveRestart)
+	}
+	if peerConnection != nil {
+		_ = peerConnection.Close()
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		broadcastKanbanEvent("status", "OpenAI Realtime disabled: OPENAI_API_KEY is not configured")
+		broadcastAssistantEvent("error", "OpenAI Realtime disabled: OPENAI_API_KEY is not configured", nil)
+		return
+	}
+
+	if reason != "" {
+		log.Infof("Restarting OpenAI Realtime peer: %s", reason)
+		broadcastKanbanEvent("status", "OpenAI Realtime reconnecting: "+reason)
+		broadcastAssistantEvent("status", "OpenAI Realtime reconnecting: "+reason, nil)
+	}
+
+	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
+		log.Errorf("Failed to restart OpenAI Realtime peer: %v", err)
+		broadcastKanbanEvent("status", "OpenAI Realtime disabled: "+err.Error())
+		broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
+	}
 }
 
 func (app *kanbanBoardApp) Close() error {
@@ -240,7 +346,18 @@ func (app *kanbanBoardApp) Close() error {
 
 		app.mu.Lock()
 		peerConnection := app.pc
+		app.pc = nil
+		app.events = nil
+		app.inputTrack = nil
+		app.inputEnc = nil
+		app.connected = false
+		app.forwardedAudioNotice = false
+		cancelProactiveRestart := app.proactiveReconnectCancel
+		app.proactiveReconnectCancel = nil
 		app.mu.Unlock()
+		if cancelProactiveRestart != nil {
+			close(cancelProactiveRestart)
+		}
 		if peerConnection != nil {
 			closeErr = peerConnection.Close()
 		}
@@ -297,6 +414,35 @@ func (app *kanbanBoardApp) connectRealtimePeer(apiKey string, model string) erro
 	return nil
 }
 
+func (app *kanbanBoardApp) startProactiveRealtimeRestart(peerConnection *webrtc.PeerConnection) {
+	cancel := make(chan struct{})
+
+	app.mu.Lock()
+	if app.pc != peerConnection {
+		app.mu.Unlock()
+		close(cancel)
+		return
+	}
+	if app.proactiveReconnectCancel != nil {
+		close(app.proactiveReconnectCancel)
+	}
+	app.proactiveReconnectCancel = cancel
+	app.mu.Unlock()
+
+	go func() {
+		select {
+		case <-time.After(55 * time.Minute):
+			app.mu.Lock()
+			isCurrent := app.pc == peerConnection
+			app.mu.Unlock()
+			if isCurrent {
+				app.restartRealtimePeer("scheduled refresh before session expiration")
+			}
+		case <-cancel:
+		}
+	}()
+}
+
 func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 	if len(roomPCM) == 0 {
 		return nil
@@ -330,7 +476,20 @@ func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 		}
 	}
 
+	app.noteRealtimeAudioForwarded()
 	return nil
+}
+
+func (app *kanbanBoardApp) noteRealtimeAudioForwarded() {
+	app.mu.Lock()
+	if app.forwardedAudioNotice {
+		app.mu.Unlock()
+		return
+	}
+	app.forwardedAudioNotice = true
+	app.mu.Unlock()
+
+	broadcastAssistantEvent("audio", "mixed room audio is reaching the assistant", nil)
 }
 
 func drainRTCP(sender *webrtc.RTPSender) {
@@ -474,6 +633,8 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"Use the board card ids exactly as provided when operating on existing tickets.",
 		"Users may say ticket, card, task, issue, or sticky note; treat those as Kanban cards.",
 		"Available columns are Backlog, In Progress, Blocked, and Done.",
+		fmt.Sprintf("Known meeting participants are: %s.", strings.Join(meetingParticipantNames, ", ")),
+		"When the speaker names a person as responsible for work, set the ticket owner to that exact participant name. Leave owner Unassigned when responsibility is unclear.",
 		"This is used during standups and meetings. Treat concrete first-person status updates as implicit board operations; do not wait for the user to say create a ticket.",
 		"If a user says they shipped, fixed, completed, closed, or finished work, move an existing related ticket to Done if one exists; otherwise create a concise Done ticket.",
 		"If a user says they started, began, picked up, or are working on something, move an existing related ticket to In Progress if one exists; otherwise create a concise In Progress ticket.",
@@ -515,6 +676,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		"description": "Short labels that capture people, area, state, or risk. Use blocked/dependency/risk tags for blockers when appropriate.",
 		"items":       map[string]any{"type": "string"},
 	}
+	ownerProperty := map[string]any{
+		"type":        "string",
+		"description": "Responsible participant when the user names an owner or the work clearly belongs to someone.",
+		"enum":        append([]string{"Unassigned"}, meetingParticipantNames...),
+	}
 
 	return []map[string]any{
 		{
@@ -526,6 +692,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"title":  map[string]any{"type": "string", "description": "Concise title for the work, without speaker prefixes such as Sean:."},
 					"notes":  map[string]any{"type": "string", "description": "Useful context from the utterance, including blocker, dependency, or schedule-risk details."},
+					"owner":  ownerProperty,
 					"tags":   tagsProperty,
 					"status": statusProperty,
 				},
@@ -571,6 +738,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"card_id": map[string]any{"type": "string", "description": "Existing board card id."},
 					"title":   map[string]any{"type": "string", "description": "Replacement title, when the existing title should be made clearer."},
 					"notes":   map[string]any{"type": "string", "description": "Full replacement notes. Preserve useful existing notes while adding the new context."},
+					"owner":   ownerProperty,
 				},
 				"required":             []string{"card_id"},
 				"additionalProperties": false,
@@ -626,13 +794,31 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 	}
 
 	switch event.Type {
+	case "session.created", "session.updated":
+		broadcastAssistantEvent("status", "OpenAI Realtime session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
+			if event.Error.Code == "session_expired" {
+				broadcastAssistantEvent("status", "OpenAI Realtime session expired; reconnecting", nil)
+				go app.restartRealtimePeer(event.Error.Message)
+				return
+			}
 			broadcastKanbanEvent("status", event.Error.Message)
+			broadcastAssistantEvent("error", event.Error.Message, map[string]any{"code": event.Error.Code})
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		app.rememberTranscript(event)
+	case "conversation.item.input_audio_transcription.delta":
+		if text := strings.TrimSpace(event.Delta); text != "" {
+			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
+		}
+	case "input_audio_buffer.speech_started":
+		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
+	case "input_audio_buffer.speech_stopped":
+		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type})
+	case "input_audio_buffer.committed":
+		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type})
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
 			app.handleToolCall(*event.Item)
@@ -653,6 +839,10 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 				app.handleToolCall(outputItem)
 			}
 		}
+	default:
+		if text := strings.TrimSpace(event.Text); text != "" && strings.Contains(event.Type, "text") {
+			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
+		}
 	}
 }
 
@@ -670,12 +860,15 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 	app.handledCalls[outputItem.CallID] = struct{}{}
 	app.mu.Unlock()
 
+	broadcastAssistantEvent("action", "using "+humanizeToolName(outputItem.Name), map[string]any{"tool": outputItem.Name})
+
 	result, changed, err := app.applyToolCall(outputItem)
 	if err != nil {
 		result = map[string]any{
 			"ok":    false,
 			"error": err.Error(),
 		}
+		broadcastAssistantEvent("error", err.Error(), map[string]any{"tool": outputItem.Name})
 	}
 
 	if err := app.SendEvent(map[string]any{
@@ -687,15 +880,23 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 		},
 	}); err != nil {
 		log.Errorf("Failed to send Kanban function output: %v", err)
+		broadcastAssistantEvent("error", "could not send tool result to OpenAI Realtime", map[string]any{"tool": outputItem.Name})
 	}
 
 	if !changed {
+		if outputItem.Name == "do_nothing" {
+			if reason := asString(result["reason"]); reason != "" {
+				broadcastAssistantEvent("status", reason, map[string]any{"tool": outputItem.Name})
+			}
+		}
 		return
 	}
 
 	broadcastKanbanEvent("board", app.snapshotState())
+	broadcastAssistantEvent("action", humanizeToolName(outputItem.Name)+" complete", map[string]any{"tool": outputItem.Name})
 	if err := app.SendEvent(app.sessionUpdateEvent()); err != nil {
 		log.Errorf("Failed to refresh Kanban Realtime session: %v", err)
+		broadcastAssistantEvent("error", "could not refresh assistant board context", map[string]any{"tool": outputItem.Name})
 	}
 }
 
@@ -744,6 +945,7 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent) {
 		return
 	}
 
+	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
 	broadcastKanbanEvent("memory_transcript", entry)
 }
 
@@ -765,6 +967,7 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 	}
 
 	broadcastKanbanEvent("memory_answer", response)
+	broadcastAssistantEvent("answer", answer, map[string]any{"query": query})
 
 	return map[string]any{
 		"ok":      true,
@@ -781,6 +984,10 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 	}
 
 	notes := asString(args["notes"])
+	owner := normalizeCardOwner(args["owner"])
+	if owner == "" {
+		owner = "Unassigned"
+	}
 	tags := uniqueStrings(asStringSlice(args["tags"]))
 	status := kanbanStatusBacklog
 	if rawStatus, ok := args["status"]; ok {
@@ -799,6 +1006,7 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		Status: status,
 		Title:  title,
 		Notes:  notes,
+		Owner:  owner,
 		Tags:   tags,
 	}
 	app.cards = append(app.cards, card)
@@ -874,6 +1082,7 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 
 	title := asString(args["title"])
 	notes := asString(args["notes"])
+	owner := normalizeCardOwner(args["owner"])
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -887,6 +1096,9 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	}
 	if notes != "" {
 		card.Notes = notes
+	}
+	if owner != "" {
+		card.Owner = owner
 	}
 	app.touchLocked()
 
@@ -940,6 +1152,97 @@ func (app *kanbanBoardApp) snapshotState() kanbanBoardState {
 	return state
 }
 
+func (app *kanbanBoardApp) noteParticipant(name string) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return
+	}
+
+	app.mu.Lock()
+	app.participants[name] = time.Now().UTC()
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) participantSnapshot() []string {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	participants := make([]string, 0, len(app.participants))
+	for _, candidate := range meetingParticipantNames {
+		if _, ok := app.participants[candidate]; ok {
+			participants = append(participants, candidate)
+		}
+	}
+
+	return participants
+}
+
+func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResult, error) {
+	archivedBy = canonicalParticipantName(archivedBy)
+	archivedAt := time.Now().UTC()
+	archiveID := fmt.Sprintf("meeting-%s", archivedAt.Format("20060102-150405-000000000"))
+	archive := meetingArchive{
+		ID:           archiveID,
+		ArchivedAt:   archivedAt,
+		ArchivedBy:   archivedBy,
+		Board:        app.snapshotState(),
+		Memory:       app.memorySnapshot(2000),
+		Participants: app.participantSnapshot(),
+	}
+
+	archivePath, err := meetingArchivePath(archiveID)
+	if err != nil {
+		return meetingArchiveResult{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		return meetingArchiveResult{}, fmt.Errorf("create archive directory: %w", err)
+	}
+
+	rawArchive, err := json.MarshalIndent(archive, "", "  ")
+	if err != nil {
+		return meetingArchiveResult{}, fmt.Errorf("encode meeting archive: %w", err)
+	}
+	if err := os.WriteFile(archivePath, rawArchive, 0o600); err != nil {
+		return meetingArchiveResult{}, fmt.Errorf("write meeting archive: %w", err)
+	}
+
+	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), and %d participant(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants))
+	if archivedBy != "" {
+		summary = fmt.Sprintf("%s archived meeting %s with %d transcript item(s), %d board card(s), and %d participant(s).", archivedBy, archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants))
+	}
+	if app.memory != nil {
+		_, _, err = app.memory.appendArchive(archiveID, summary, map[string]string{
+			"archiveId":   archiveID,
+			"downloadUrl": meetingArchiveDownloadURL(archiveID),
+			"archivedBy":  archivedBy,
+		})
+		if err != nil {
+			return meetingArchiveResult{}, fmt.Errorf("remember meeting archive: %w", err)
+		}
+	}
+
+	return meetingArchiveResult{
+		ID:          archiveID,
+		ArchivedAt:  archivedAt.Format(time.RFC3339Nano),
+		ArchivedBy:  archivedBy,
+		DownloadURL: meetingArchiveDownloadURL(archiveID),
+		Summary:     summary,
+	}, nil
+}
+
+func meetingArchiveDownloadURL(archiveID string) string {
+	return "/archives/" + archiveID + ".json"
+}
+
+func meetingArchivePath(archiveID string) (string, error) {
+	archiveID = strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
+	if archiveID == "" || strings.Contains(archiveID, "/") || strings.Contains(archiveID, "\\") || strings.Contains(archiveID, "..") {
+		return "", fmt.Errorf("invalid archive id")
+	}
+
+	return filepath.Join(filepath.Dir(meetingMemoryPath()), "archives", archiveID+".json"), nil
+}
+
 func (app *kanbanBoardApp) createCardIDLocked() string {
 	for {
 		cardID := fmt.Sprintf("kanban-card-%03d", app.nextCreatedIndex)
@@ -980,8 +1283,21 @@ func cloneKanbanCard(card kanbanCard) kanbanCard {
 		Status: card.Status,
 		Title:  card.Title,
 		Notes:  card.Notes,
+		Owner:  card.Owner,
 		Tags:   append([]string(nil), card.Tags...),
 	}
+}
+
+func normalizeCardOwner(value any) string {
+	owner := asString(value)
+	if strings.EqualFold(owner, "Unassigned") {
+		return "Unassigned"
+	}
+	if canonicalOwner := canonicalParticipantName(owner); canonicalOwner != "" {
+		return canonicalOwner
+	}
+
+	return ""
 }
 
 func asString(value any) string {
@@ -1045,6 +1361,58 @@ func mustMarshalJSON(value any) string {
 	}
 
 	return string(raw)
+}
+
+func humanizeToolName(name string) string {
+	name = strings.TrimSpace(strings.ReplaceAll(name, "_", " "))
+	if name == "" {
+		return "tool"
+	}
+
+	return name
+}
+
+func (app *kanbanBoardApp) assistantStatusSnapshot() map[string]any {
+	if app == nil {
+		return nil
+	}
+
+	app.mu.Lock()
+	status := app.assistantStatus
+	app.mu.Unlock()
+	if strings.TrimSpace(status) == "" {
+		return nil
+	}
+
+	return map[string]any{
+		"kind":      "status",
+		"text":      status,
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func broadcastAssistantEvent(kind string, text string, metadata map[string]any) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	if kanbanApp != nil && (kind == "status" || kind == "error") {
+		kanbanApp.mu.Lock()
+		kanbanApp.assistantStatus = text
+		kanbanApp.mu.Unlock()
+	}
+
+	payload := map[string]any{
+		"kind":      kind,
+		"text":      text,
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for key, value := range metadata {
+		payload[key] = value
+	}
+
+	broadcastKanbanEvent("assistant_event", payload)
 }
 
 func sendKanbanEvent(websocket *threadSafeWriter, event string, data any) error {

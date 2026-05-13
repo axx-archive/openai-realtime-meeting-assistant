@@ -98,6 +98,10 @@
         --ease-soft: cubic-bezier(0.4, 0.0, 0.2, 1);
         --t-fast: 120ms;
         --t-base: 200ms;
+
+        /* one heartbeat for the whole screen — pulse, listening dot, identity chip
+           glow, anything else that breathes inherits this clock. */
+        --pulse-cycle: 2400ms;
       }
 
       * { box-sizing: border-box; }
@@ -164,25 +168,50 @@
         border-radius: 10px;
       }
 
+      /* Three stacked halos, phased — the brand's signature motion.
+         halo-1 leads (largest peak), halo-2 trails by 1/6 cycle, halo-3 by 1/3.
+         Default opacity 0 means the pulse is invisible until .is-listening latches. */
       .topbar__mark .listening-halo {
         position: absolute;
-        inset: -10px;
         border-radius: 999px;
         background: radial-gradient(circle, rgba(255,122,43,0.45) 0%, transparent 60%);
         z-index: 1;
         pointer-events: none;
         opacity: 0;
         transition: opacity var(--t-base) var(--ease-soft);
+        will-change: transform, opacity;
       }
+      .topbar__mark .listening-halo--1 { inset: -8px; }
+      .topbar__mark .listening-halo--2 { inset: -16px; }
+      .topbar__mark .listening-halo--3 { inset: -26px; }
 
-      .topbar__mark.is-listening .listening-halo {
-        opacity: 1;
-        animation: listening-pulse 2.4s var(--ease-soft) infinite;
+      .topbar__mark.is-listening .listening-halo--1 {
+        animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite;
       }
+      .topbar__mark.is-listening .listening-halo--2 {
+        animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite;
+        animation-delay: 400ms;
+      }
+      .topbar__mark.is-listening .listening-halo--3 {
+        animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite;
+        animation-delay: 800ms;
+      }
+      .topbar__mark.is-hot-ember .listening-halo--1 { animation-duration: 1800ms; }
+      .topbar__mark.is-hot-ember .listening-halo--2 { animation-duration: 1800ms; }
+      .topbar__mark.is-hot-ember .listening-halo--3 { animation-duration: 1800ms; }
+      .topbar__mark.is-hot-ember svg { filter: drop-shadow(0 0 14px rgba(255,122,43,0.65)); }
 
-      @keyframes listening-pulse {
-        0%, 100% { transform: scale(0.92); opacity: 0.55; }
-        50%      { transform: scale(1.08); opacity: 1; }
+      @keyframes pulse-halo-1 {
+        0%, 100% { transform: scale(0.88); opacity: 0; }
+        50%      { transform: scale(1.06); opacity: 0.55; }
+      }
+      @keyframes pulse-halo-2 {
+        0%, 100% { transform: scale(0.92); opacity: 0; }
+        50%      { transform: scale(1.10); opacity: 0.32; }
+      }
+      @keyframes pulse-halo-3 {
+        0%, 100% { transform: scale(0.94); opacity: 0; }
+        50%      { transform: scale(1.14); opacity: 0.14; }
       }
 
       .topbar__title { display: grid; gap: 1px; min-width: 0; }
@@ -197,8 +226,9 @@
         font-family: var(--font-mono);
         font-size: 11px;
         color: var(--fg-2);
-        letter-spacing: 0.04em;
+        letter-spacing: 0.10em;
         text-transform: uppercase;
+        font-feature-settings: "ss01" on, "ss02" on;
       }
 
       /* ---------- Status pill ---------- */
@@ -219,7 +249,7 @@
       .pill--listening .pill__dot {
         background: var(--ember-500);
         box-shadow: 0 0 8px var(--ember-500);
-        animation: dot-pulse 1.8s var(--ease-soft) infinite;
+        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
       }
       .pill--idle { background: var(--night-3); color: var(--fg-1); }
       .pill--idle .pill__dot { background: var(--fg-3); }
@@ -303,12 +333,142 @@
         text-overflow: ellipsis;
       }
 
+      /* ---------- Access panel ---------- */
+      .access-panel {
+        display: grid;
+        gap: var(--s-3);
+        background: var(--night-3);
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        padding: var(--s-3);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 12px 28px rgba(0, 0, 0, 0.14);
+      }
+
+      .access-panel header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .access-panel h2 {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--fg-0);
+        text-wrap: balance;
+      }
+
+      .access-state {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-2);
+      }
+
+      .access-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: var(--s-2);
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .field span {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-2);
+      }
+
+      .field select,
+      .field input {
+        width: 100%;
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(11, 8, 5, 0.56);
+        color: var(--fg-0);
+        font: inherit;
+        font-size: 13px;
+        padding: 9px var(--s-3);
+        outline: 0;
+        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
+      }
+
+      .field select:focus,
+      .field input:focus {
+        border-color: rgba(255, 122, 43, 0.65);
+        background: rgba(11, 8, 5, 0.76);
+        box-shadow: var(--glow-ember-sm);
+      }
+
+      .access-hint {
+        min-height: 18px;
+        color: var(--fg-2);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .access-panel.is-verified {
+        border-color: rgba(95, 190, 122, 0.26);
+        background: linear-gradient(180deg, rgba(95, 190, 122, 0.09), var(--night-3));
+      }
+
+      .access-panel.is-verified .access-state { color: var(--success); }
+
       /* ---------- Board (parchment) ---------- */
       .presentation-tile {
         position: relative;
         min-height: 0;
         min-width: 0;
         display: grid;
+      }
+
+      .screen-stage {
+        position: relative;
+        overflow: hidden;
+        display: none;
+        min-height: 0;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line);
+        background: var(--night-0);
+      }
+
+      .presentation-tile.is-screen-sharing .screen-stage {
+        display: block;
+      }
+
+      .presentation-tile.is-screen-sharing .board-surface {
+        display: none;
+      }
+
+      .screen-stage video {
+        width: 100%;
+        min-height: min(62vh, 680px);
+        object-fit: contain;
+        background: var(--night-0);
+      }
+
+      .screen-stage__label {
+        position: absolute;
+        left: var(--s-3);
+        bottom: var(--s-3);
+        padding: 6px 10px;
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.72);
+        color: var(--fg-0);
+        font-size: 12px;
+        font-weight: 500;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
       }
 
       .board-surface {
@@ -372,12 +532,33 @@
       .stack { display: grid; gap: var(--s-2); }
 
       .empty {
-        font-family: var(--font-sans);
-        font-size: 12px;
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 22px;
+        line-height: 1.15;
         color: var(--ash-500);
         padding: var(--s-3) 0;
-        font-style: italic;
+        font-optical-sizing: auto;
+        letter-spacing: -0.01em;
       }
+
+      /* When all four columns are empty, the board surface gets a single
+         centered hero line above the columns. */
+      .board-hero {
+        display: none;
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 26px;
+        line-height: 1.15;
+        color: var(--ash-500);
+        text-align: center;
+        letter-spacing: -0.01em;
+        padding: var(--s-7) var(--s-3) var(--s-4);
+        font-optical-sizing: auto;
+      }
+      .board-surface.is-empty .board-hero { display: block; }
+      .board-surface.is-empty .board { opacity: 0.42; }
+      .board-surface.is-empty .board { transition: opacity 200ms var(--ease-soft); }
 
       .card {
         display: grid;
@@ -388,15 +569,22 @@
         padding: var(--s-3);
         cursor: pointer;
         box-shadow: var(--shadow-light-1);
-        transition: box-shadow var(--t-base) var(--ease-soft),
+        /* Pre-hover staging: shadow lifts in 60ms (warm-up), then translate
+           kicks in at 60ms so it never feels like a pop. */
+        transition: box-shadow 60ms var(--ease-soft),
                     background var(--t-base) var(--ease-soft),
-                    border-color var(--t-base) var(--ease-soft);
+                    border-color var(--t-base) var(--ease-soft),
+                    transform 160ms var(--ease-soft) 60ms;
       }
 
-      .card:hover { background: #FFFAF0; box-shadow: var(--shadow-light-2); }
+      .card:hover {
+        background: #FFFAF0;
+        box-shadow: var(--shadow-light-2);
+        transform: translateY(-1px);
+      }
       .card:focus-visible {
-        outline: 2px solid var(--ember-500);
-        outline-offset: 2px;
+        outline: none;
+        box-shadow: var(--glow-ember-sm), var(--shadow-light-2);
       }
       .card:active { transform: scale(0.985); }
 
@@ -422,6 +610,22 @@
         color: var(--ash-600);
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      .card-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--s-2);
+        min-width: 0;
+        color: var(--ash-600);
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
+      .card-meta .owner-avatar {
+        width: 20px;
+        height: 20px;
+        border-width: 1px;
       }
 
       .owner-avatar {
@@ -466,6 +670,9 @@
         font-weight: 600;
         line-height: 1;
       }
+      .tags li[data-tag-kind="protocol"]  { --tag-bg: rgba(255, 122, 43, 0.12); --tag-color: var(--ember-700); }
+      .tags li[data-tag-kind="concern"]   { --tag-bg: rgba(255, 178, 63, 0.16); --tag-color: #8A5709; }
+      .tags li[data-tag-kind="mechanism"] { --tag-bg: var(--ash-100);            --tag-color: var(--ash-700); }
 
       /* ---------- Memory panel ---------- */
       .memory-panel {
@@ -511,6 +718,7 @@
         background: rgba(255, 235, 200, 0.04);
         border: 1px solid var(--line-faint);
         border-radius: var(--r-sm);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 22px rgba(0, 0, 0, 0.10);
         padding: var(--s-2) var(--s-3);
         color: var(--fg-0);
         font-size: 12px;
@@ -520,6 +728,11 @@
       .memory-item.answer {
         background: rgba(255, 122, 43, 0.10);
         border-color: rgba(255, 122, 43, 0.30);
+      }
+
+      .memory-item.archive {
+        background: rgba(82, 183, 136, 0.10);
+        border-color: rgba(82, 183, 136, 0.30);
       }
 
       .memory-meta {
@@ -532,9 +745,174 @@
       }
 
       .memory-item.answer .memory-meta { color: var(--ember-300); }
+      .memory-item.archive .memory-meta { color: #7ed7ad; }
+
+      /* ---------- Assistant panel ---------- */
+      .assistant-panel {
+        display: grid;
+        gap: var(--s-2);
+        background: linear-gradient(180deg, var(--night-3), var(--night-2));
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 18px 42px rgba(0, 0, 0, 0.18);
+        padding: var(--s-3);
+        min-height: 260px;
+      }
+
+      .assistant-panel header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .assistant-panel h2 {
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--fg-0);
+        text-wrap: balance;
+      }
+
+      .assistant-state {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-2);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .assistant-feed {
+        display: grid;
+        align-content: start;
+        gap: var(--s-2);
+        max-height: 320px;
+        overflow: auto;
+      }
+
+      .assistant-message {
+        display: grid;
+        gap: 6px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-sm);
+        background: rgba(255, 235, 200, 0.04);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 22px rgba(0, 0, 0, 0.12);
+        color: var(--fg-0);
+        padding: var(--s-2) var(--s-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .assistant-message--entering {
+        animation: assistant-message-in 180ms var(--ease-out);
+      }
+
+      .assistant-message--answer,
+      .assistant-message--action {
+        background: rgba(255, 122, 43, 0.10);
+        border-color: rgba(255, 122, 43, 0.28);
+      }
+
+      /* Passive system events stay warm-neutral so the screen has only one
+         color of "still listening" cue — the topbar pulse. Cool blue would
+         fight the brand. */
+      .assistant-message--audio,
+      .assistant-message--signal,
+      .assistant-message--status,
+      .assistant-message--query {
+        background: rgba(255, 235, 200, 0.04);
+        border-color: var(--line-faint);
+      }
+      .assistant-message--audio .assistant-meta,
+      .assistant-message--signal .assistant-meta,
+      .assistant-message--status .assistant-meta,
+      .assistant-message--query .assistant-meta { color: var(--fg-2); }
+
+      .assistant-message--error {
+        background: var(--danger-bg);
+        border-color: rgba(229, 87, 62, 0.34);
+      }
+
+      .assistant-meta {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-2);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .assistant-message--answer .assistant-meta,
+      .assistant-message--action .assistant-meta { color: var(--ember-300); }
+      .assistant-message--error .assistant-meta { color: var(--danger); }
+
+      .assistant-text {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant-link {
+        justify-self: start;
+        color: var(--ember-300);
+        font-size: 12px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .assistant-link:hover {
+        color: var(--ember-200);
+        text-decoration: underline;
+      }
+
+      .assistant-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--s-2);
+        align-items: center;
+        border-radius: 8px;
+        padding: 2px;
+        transition: box-shadow var(--t-base) var(--ease-soft);
+      }
+
+      .assistant-form:focus-within {
+        box-shadow: var(--glow-ember-sm);
+      }
+
+      .assistant-input {
+        min-width: 0;
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(11, 8, 5, 0.56);
+        color: var(--fg-0);
+        font: inherit;
+        font-size: 13px;
+        min-height: 40px;
+        padding: 10px var(--s-3);
+        outline: 0;
+        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft);
+      }
+
+      .assistant-input::placeholder { color: var(--fg-3); }
+      .assistant-input:focus {
+        border-color: rgba(255, 122, 43, 0.65);
+        background: rgba(11, 8, 5, 0.76);
+      }
+
+      .assistant-send {
+        min-height: 40px;
+        min-width: 0;
+        padding: 10px var(--s-3);
+      }
 
       /* ---------- Meeting bar ---------- */
       .meeting-bar {
+        position: sticky;
+        bottom: var(--s-3);
+        z-index: 900;
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
         align-items: center;
@@ -575,9 +953,10 @@
         align-items: center;
         justify-content: center;
         gap: var(--s-2);
+        min-height: 40px;
         min-width: 96px;
       }
-      .btn:active { transform: scale(0.985); }
+      .btn:active { transform: scale(0.96); }
       .btn:focus-visible {
         outline: 2px solid var(--ember-500);
         outline-offset: 2px;
@@ -609,11 +988,21 @@
         min-width: 0;
         padding: 9px;
         border-radius: var(--r-pill);
-        width: 38px;
-        height: 38px;
+        width: 40px;
+        height: 40px;
       }
       .btn--danger:hover:not([disabled]) { background: #EE6B53; }
       .btn--danger svg { display: block; }
+
+      .btn--secondary {
+        background: rgba(255, 235, 200, 0.06);
+        color: var(--fg-1);
+        border-color: var(--line-strong);
+      }
+      .btn--secondary:hover:not([disabled]) {
+        background: rgba(255, 235, 200, 0.10);
+        border-color: rgba(255, 235, 200, 0.22);
+      }
 
       /* ---------- Toasts ---------- */
       .toast-region {
@@ -671,9 +1060,10 @@
       }
 
       @keyframes spark-fly {
-        0%   { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1) rotate(0deg); }
-        70%  { opacity: 1; }
-        100% { opacity: 0; transform: translate3d(calc(-50% + var(--dx)), calc(-50% + var(--dy)), 0) scale(0.65) rotate(var(--rotation)); }
+        0%   { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.6) rotate(0deg); }
+        10%  { opacity: 1; transform: translate3d(calc(-50% + var(--dx) * 0.1), calc(-50% + var(--dy) * 0.1), 0) scale(1) rotate(calc(var(--rotation) * 0.1)); }
+        80%  { opacity: 1; transform: translate3d(calc(-50% + var(--dx) * 0.8), calc(-50% + var(--dy) * 0.8), 0) scale(0.95) rotate(calc(var(--rotation) * 0.8)); }
+        100% { opacity: 0; transform: translate3d(calc(-50% + var(--dx)), calc(-50% + var(--dy)), 0) scale(0) rotate(var(--rotation)); }
       }
 
       /* ---------- Comment preview ---------- */
@@ -847,15 +1237,20 @@
         100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
       }
 
+      @keyframes assistant-message-in {
+        0%   { opacity: 0; transform: translate3d(0, 6px, 0); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+
       @keyframes comment-preview-open {
-        0%   { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.9) rotate(-1.5deg); }
-        72%  { opacity: 1; transform: translate3d(0, -4px, 0) scale(1.025) rotate(0.5deg); }
+        0%   { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.96) rotate(-1deg); }
+        72%  { opacity: 1; transform: translate3d(0, -3px, 0) scale(1.01) rotate(0.35deg); }
         100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
       }
 
       @keyframes comment-preview-close {
         0%   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-        100% { opacity: 0; transform: translate3d(0, -18px, 0) scale(0.96) rotate(1deg); }
+        100% { opacity: 0; transform: translate3d(0, -10px, 0) scale(0.985) rotate(0.5deg); }
       }
 
       @media (max-width: 1100px) {
@@ -870,19 +1265,81 @@
         .video-rail { order: -1; overflow: visible; }
         .video-stack { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
         .meeting-bar { grid-template-columns: 1fr; justify-items: stretch; }
-        .controls { order: -1; }
+        .controls { order: -1; flex-wrap: wrap; }
       }
 
       @media (max-width: 640px) {
         .board { grid-template-columns: 1fr; min-width: 0; }
+        .access-grid { grid-template-columns: 1fr; }
+        .assistant-form { grid-template-columns: 1fr; }
+        .assistant-send { width: 100%; }
+        .btn { min-width: 0; }
+      }
+
+      /* ---------- Mount stagger (the room arrives) ----------
+         Each anchor element starts at opacity 0.5 with a 4-6px lift and slides
+         home with a staggered delay. The pulse is alive from frame 1; everything
+         else gathers around it. Fast-path skips the cascade entirely. */
+      .mount-stagger {
+        opacity: 0.5;
+        transform: translate3d(0, 6px, 0);
+        will-change: opacity, transform;
+      }
+      .is-mounting .mount-stagger {
+        animation: mount-rise 280ms var(--ease-out) forwards;
+      }
+      .is-mounting .topbar         { animation-delay: 60ms; }
+      .is-mounting .meeting-bar    { animation-delay: 120ms; }
+      .is-mounting .board-surface  { animation-delay: 180ms; }
+      .is-mounting .access-panel   { animation-delay: 320ms; }
+      .is-mounting .video-stack    { animation-delay: 380ms; }
+      .is-mounting .memory-panel   { animation-delay: 440ms; }
+      .is-mounting .assistant-panel{ animation-delay: 500ms; }
+
+      @keyframes mount-rise {
+        from { opacity: 0.5; transform: translate3d(0, 6px, 0); }
+        to   { opacity: 1;   transform: translate3d(0, 0, 0); }
+      }
+
+      .is-fast-mount .mount-stagger {
+        opacity: 1;
+        transform: none;
+        animation: none;
+      }
+
+      /* ---------- Reduced motion ----------
+         Pulse halos keep beating (the fire stays lit) but at half intensity;
+         everything else snaps. */
+      @media (prefers-reduced-motion: reduce) {
+        .mount-stagger { opacity: 1; transform: none; animation: none !important; }
+        .card { transition: box-shadow var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft); }
+        .card:hover { transform: none; }
+        .card.moved {
+          animation: none;
+          background: rgba(255, 122, 43, 0.12);
+        }
+        .toast { animation: none; }
+        .comment-preview { animation: none; }
+        .spark { display: none; }
+        .topbar__mark.is-listening .listening-halo--1 { animation-duration: 4800ms; }
+        .topbar__mark.is-listening .listening-halo--2 { animation-duration: 4800ms; }
+        .topbar__mark.is-listening .listening-halo--3 { animation-duration: 4800ms; }
+        .topbar__mark.is-listening .listening-halo {
+          /* Halve peak opacity for sensitive viewers. */
+          filter: opacity(0.5);
+        }
+        .pill--listening .pill__dot,
+        .pill--connecting .pill__dot { animation: none; }
       }
     </style>
   </head>
   <body>
-    <main>
-      <header class="topbar">
+    <main id="appShell">
+      <header class="topbar mount-stagger">
         <span id="brandMark" class="topbar__mark" aria-hidden="true">
-          <span class="listening-halo"></span>
+          <span class="listening-halo listening-halo--3"></span>
+          <span class="listening-halo listening-halo--2"></span>
+          <span class="listening-halo listening-halo--1"></span>
           <svg viewBox="0 0 64 64" fill="none">
             <defs>
               <radialGradient id="emberCore" cx="50%" cy="55%" r="55%">
@@ -913,20 +1370,52 @@
       </header>
 
       <div class="workspace">
-        <section class="presentation-tile" aria-label="Shared kanban board">
-          <div class="board-surface">
+        <section id="presentationTile" class="presentation-tile" aria-label="Shared workspace">
+          <div id="screenStage" class="screen-stage" aria-label="Shared screen">
+            <video id="screenStageVideo" autoplay muted playsinline></video>
+            <span id="screenStageLabel" class="screen-stage__label">screen share</span>
+          </div>
+          <div id="boardSurface" class="board-surface mount-stagger">
+            <p class="board-hero" aria-hidden="true">this room is empty. the fire is warm.</p>
             <section id="board" class="board" aria-label="Kanban board"></section>
           </div>
         </section>
 
         <aside class="video-rail" aria-label="Conference videos">
-          <div id="videoStack" class="video-stack">
+          <section id="accessPanel" class="access-panel mount-stagger" aria-label="Meeting access">
+            <header>
+              <h2>access</h2>
+              <span id="accessState" class="access-state">locked</span>
+            </header>
+            <div class="access-grid">
+              <label class="field">
+                <span>participant</span>
+                <select id="participantName" autocomplete="name">
+                  <option value="">Select your name</option>
+                  <option>Erick</option>
+                  <option>Tim</option>
+                  <option>Tyler</option>
+                  <option>Jake</option>
+                  <option>Tom</option>
+                  <option>Caitlyn</option>
+                  <option>Joel</option>
+                  <option>AJ</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>password</span>
+                <input id="roomPassword" type="password" autocomplete="current-password" placeholder="Room password">
+              </label>
+            </div>
+            <p id="accessHint" class="access-hint">Select your name and enter the room password.</p>
+          </section>
+          <div id="videoStack" class="video-stack mount-stagger">
             <div class="video-tile">
               <video id="localVideo" autoplay muted playsinline></video>
-              <span class="video-label">you</span>
+              <span id="localVideoLabel" class="video-label">you</span>
             </div>
           </div>
-          <section class="memory-panel" aria-label="Meeting memory">
+          <section class="memory-panel mount-stagger" aria-label="Meeting memory">
             <header>
               <h2>meeting memory</h2>
               <span id="memoryCount" class="memory-count">0 saved</span>
@@ -938,13 +1427,31 @@
               </article>
             </div>
           </section>
+          <section class="assistant-panel mount-stagger" aria-label="Assistant responses">
+            <header>
+              <h2>assistant</h2>
+              <span id="assistantState" class="assistant-state">ready</span>
+            </header>
+            <div id="assistantFeed" class="assistant-feed">
+              <article class="assistant-message assistant-message--status">
+                <span class="assistant-meta">ready</span>
+                <span class="assistant-text">waiting for room audio.</span>
+              </article>
+            </div>
+            <form id="assistantForm" class="assistant-form">
+              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="Ask meeting memory">
+              <button class="btn btn--primary assistant-send" type="submit">Ask</button>
+            </form>
+          </section>
         </aside>
       </div>
 
-      <footer class="meeting-bar">
+      <footer class="meeting-bar mount-stagger">
         <p id="log" class="log" aria-live="polite">team meeting</p>
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Join the room</button>
+          <button id="screenShare" class="btn btn--secondary" type="button" disabled>Share screen</button>
+          <button id="archiveMeeting" class="btn btn--secondary" type="button" disabled>Archive meeting</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"></path>
@@ -968,22 +1475,44 @@
       const logEl = document.getElementById('log')
       const joinButton = document.getElementById('join')
       const leaveButton = document.getElementById('leave')
+      const screenShareButton = document.getElementById('screenShare')
+      const archiveMeetingButton = document.getElementById('archiveMeeting')
+      const accessPanel = document.getElementById('accessPanel')
+      const accessState = document.getElementById('accessState')
+      const accessHint = document.getElementById('accessHint')
+      const participantNameInput = document.getElementById('participantName')
+      const roomPasswordInput = document.getElementById('roomPassword')
+      const presentationTile = document.getElementById('presentationTile')
+      const screenStage = document.getElementById('screenStage')
+      const screenStageVideo = document.getElementById('screenStageVideo')
+      const screenStageLabel = document.getElementById('screenStageLabel')
       const localVideo = document.getElementById('localVideo')
+      const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
       const toastRegion = document.getElementById('toastRegion')
       const commentPreviewRegion = document.getElementById('commentPreviewRegion')
       const cardDetailRegion = document.getElementById('cardDetailRegion')
       const memoryList = document.getElementById('memoryList')
       const memoryCount = document.getElementById('memoryCount')
+      const assistantFeed = document.getElementById('assistantFeed')
+      const assistantState = document.getElementById('assistantState')
+      const assistantForm = document.getElementById('assistantForm')
+      const assistantInput = document.getElementById('assistantInput')
 
       let cards = []
       let memoryEntries = []
+      let assistantMessages = []
       let pc
       let ws
       let localStream
+      let screenShareStream
+      let currentParticipantName = ''
+      let activeScreenShareParticipant = ''
       let hasBoardSnapshot = false
       let commentPreviewTimer
       const remoteElements = new Map()
+      const remoteStreamsByParticipant = new Map()
+      const remoteLabelsByStream = new Map()
       const cardSnapshots = new Map()
       const mediaConstraints = {
         video: {
@@ -1006,6 +1535,11 @@
 
       joinButton.addEventListener('click', joinRoom)
       leaveButton.addEventListener('click', leaveRoom)
+      screenShareButton.addEventListener('click', toggleScreenShare)
+      archiveMeetingButton.addEventListener('click', archiveMeeting)
+      participantNameInput.addEventListener('change', validateAccess)
+      roomPasswordInput.addEventListener('input', validateAccess)
+      assistantForm.addEventListener('submit', sendAssistantQuery)
       window.addEventListener('beforeunload', leaveRoom)
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
@@ -1019,9 +1553,37 @@
       })
 
       setConnectionState('idle', 'not connected')
+      validateAccess()
       renderBoard()
 
+      function selectedParticipantName() {
+        return participantNameInput.value.trim()
+      }
+
+      function hasValidAccess() {
+        return selectedParticipantName() !== '' && roomPasswordInput.value.trim() !== ''
+      }
+
+      function validateAccess() {
+        const verified = hasValidAccess()
+        joinButton.disabled = !verified || Boolean(pc)
+        accessPanel.classList.toggle('is-verified', verified)
+        accessState.textContent = verified ? 'ready' : 'locked'
+        accessHint.textContent = verified
+          ? `${selectedParticipantName()} is ready to join.`
+          : 'Select your name and enter the room password.'
+        return verified
+      }
+
       async function joinRoom() {
+        if (!validateAccess()) {
+          setLog('choose your name and enter the room password')
+          roomPasswordInput.focus()
+          return
+        }
+
+        currentParticipantName = selectedParticipantName()
+        localVideoLabel.textContent = currentParticipantName
         joinButton.disabled = true
         setConnectionState('connecting', 'connecting…')
         setLog('requesting camera and microphone')
@@ -1049,16 +1611,21 @@
             }
           }
 
-          for (const track of localStream.getTracks()) {
-            await addLocalTrack(track)
-          }
-
           const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
           ws = new WebSocket(`${scheme}://${window.location.host}/websocket`)
           ws.onopen = () => {
             leaveButton.disabled = false
-            setConnectionState('listening', 'the room is listening')
-            setLog('in the room')
+            screenShareButton.disabled = false
+            archiveMeetingButton.disabled = false
+            accessState.textContent = 'checking'
+            accessHint.textContent = 'Checking room access.'
+            ws.send(JSON.stringify({
+              event: 'participant',
+              data: JSON.stringify({
+                name: currentParticipantName,
+                password: roomPasswordInput.value
+              })
+            }))
           }
           ws.onmessage = event => handleSignal(JSON.parse(event.data))
           ws.onclose = () => leaveRoom()
@@ -1067,17 +1634,6 @@
           setLog(error.message || String(error))
           leaveRoom()
         }
-      }
-
-      async function addLocalTrack(track) {
-        const init = { streams: [localStream] }
-        const limits = outboundMediaLimits[track.kind]
-        if (limits) {
-          init.sendEncodings = [{ ...limits }]
-        }
-
-        const transceiver = pc.addTransceiver(track, init)
-        await configureOutboundSender(transceiver.sender, track)
       }
 
       async function configureOutboundSender(sender, track) {
@@ -1115,6 +1671,7 @@
           case 'offer': {
             const offer = JSON.parse(message.data)
             await pc.setRemoteDescription(offer)
+            await attachLocalTracksToOffer(offer)
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
@@ -1129,6 +1686,47 @@
             handleKanbanMessage(JSON.parse(message.data))
             break
         }
+      }
+
+      async function attachLocalTracksToOffer(offer) {
+        if (!localStream || !pc) {
+          return
+        }
+
+        const sections = remoteMediaSections(offer.sdp || '')
+        const localTracks = localStream.getTracks()
+        for (const transceiver of pc.getTransceivers()) {
+          const section = sections.get(transceiver.mid)
+          if (!section || section.direction !== 'recvonly') {
+            continue
+          }
+
+          const track = localTracks.find(candidate => candidate.kind === section.kind)
+          if (!track || transceiver.sender.track === track) {
+            continue
+          }
+
+          await transceiver.sender.replaceTrack(track)
+          transceiver.direction = 'sendonly'
+          await configureOutboundSender(transceiver.sender, track)
+        }
+      }
+
+      function remoteMediaSections(sdp) {
+        const sections = new Map()
+        const chunks = String(sdp || '').split(/\r?\nm=/)
+        for (let index = 1; index < chunks.length; index++) {
+          const lines = `m=${chunks[index]}`.split(/\r?\n/)
+          const kind = lines[0].slice(2).split(/\s+/)[0]
+          const mid = lines.find(line => line.startsWith('a=mid:'))?.slice(6)
+          if (!mid || !kind) {
+            continue
+          }
+          const direction = ['sendrecv', 'sendonly', 'recvonly', 'inactive']
+            .find(candidate => lines.includes(`a=${candidate}`)) || 'sendrecv'
+          sections.set(mid, { kind, direction })
+        }
+        return sections
       }
 
       function handleKanbanMessage(message) {
@@ -1148,22 +1746,298 @@
             break
           case 'memory_transcript':
             addMemoryEntry(message.data)
+            triggerHotEmber()
             break
           case 'memory_answer':
-            addMemoryEntry({
-              id: `answer-${Date.now()}`,
-              kind: 'answer',
-              text: message.data?.answer || 'no answer available.',
-              createdAt: new Date().toISOString(),
-              metadata: { query: message.data?.query || '' }
-            })
-            setLog(message.data?.answer || 'memory answer ready.')
-            showToast({ text: 'memory answer ready', kind: 'note' })
+            {
+              const answer = message.data?.answer || 'no answer available.'
+              addMemoryEntry({
+                id: `answer-${Date.now()}`,
+                kind: 'answer',
+                text: answer,
+                createdAt: new Date().toISOString(),
+                metadata: { query: message.data?.query || '' }
+              })
+              setLog(answer)
+              showToast({ text: 'memory answer ready', kind: 'note' })
+            }
             break
           case 'status':
-            setLog(String(message.data || ''))
+            handleStatusMessage(String(message.data || ''))
+            break
+          case 'assistant_event':
+            handleAssistantEvent(message.data)
+            break
+          case 'participants':
+            handleParticipants(message.data)
+            break
+          case 'participant_joined':
+            handleParticipantJoined(message.data)
+            break
+          case 'participant_track':
+            handleParticipantTrack(message.data)
+            break
+          case 'access_denied':
+            handleAccessDenied(String(message.data || 'access denied'))
+            break
+          case 'access_granted':
+            handleAccessGranted(message.data)
+            break
+          case 'meeting_archived':
+            handleMeetingArchived(message.data)
+            break
+          case 'screen_share_started':
+            handleScreenShareStarted(message.data)
+            break
+          case 'screen_share_stopped':
+            handleScreenShareStopped(message.data)
             break
         }
+      }
+
+      function handleStatusMessage(message) {
+        setLog(message)
+
+        const normalized = message.toLowerCase()
+        if (normalized.includes('kanban assistant is listening')) {
+          setConnectionState('listening', 'the room is listening')
+        } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
+          setConnectionState('connecting', 'connecting…')
+        } else if (normalized.includes('disabled') || normalized.includes('expired')) {
+          setConnectionState('offline', 'assistant offline')
+        }
+      }
+
+      function handleAssistantEvent(event) {
+        const text = String(event?.text || event?.message || '').trim()
+        if (!text) {
+          return
+        }
+
+        addAssistantMessage({
+          id: event?.id,
+          kind: event?.kind || 'status',
+          text,
+          downloadUrl: event?.downloadUrl,
+          createdAt: event?.createdAt || new Date().toISOString()
+        })
+
+        if (event?.kind === 'status') {
+          handleStatusMessage(text)
+        } else {
+          setLog(text)
+        }
+
+        if (event?.kind === 'transcript') {
+          // Assistant recognized speech — fire the hot-ember handshake.
+          // Auto-throttled inside triggerHotEmber so a stream of partials
+          // doesn't strobe.
+          triggerHotEmber()
+        }
+
+        if (event?.kind === 'error') {
+          showToast({ text, kind: 'error' })
+        }
+      }
+
+      function handleParticipants(participants) {
+        const names = Array.isArray(participants) ? participants.filter(Boolean).join(', ') : ''
+        if (names) {
+          setLog(`in room · ${names}`)
+        }
+      }
+
+      function handleParticipantJoined(participant) {
+        const name = participant?.name || 'participant'
+        addAssistantMessage({
+          kind: 'status',
+          text: `${name} joined the room.`
+        })
+      }
+
+      function handleParticipantTrack(track) {
+        const name = track?.name || 'participant'
+        const streamId = track?.streamId || ''
+        if (streamId) {
+          remoteLabelsByStream.set(streamId, name)
+          const tile = remoteElements.get(streamId)
+          if (tile) {
+            tile.querySelector('.video-label').textContent = name
+            const video = tile.querySelector('video')
+            if (video?.srcObject) {
+              remoteStreamsByParticipant.set(name, video.srcObject)
+              if (activeScreenShareParticipant === name) {
+                renderScreenStage()
+              }
+            }
+          }
+        }
+      }
+
+      function handleAccessDenied(message) {
+        leaveRoom()
+        accessPanel.classList.remove('is-verified')
+        accessState.textContent = 'locked'
+        accessHint.textContent = message
+        addAssistantMessage({ kind: 'error', text: message })
+      }
+
+      function handleAccessGranted(participant) {
+        const name = participant?.name || currentParticipantName || 'participant'
+        accessState.textContent = 'verified'
+        accessHint.textContent = `${name} is in the room.`
+        setConnectionState('listening', 'the room is listening')
+        setLog(`${name} is in the room`)
+      }
+
+      function handleMeetingArchived(result) {
+        if (!result?.downloadUrl) {
+          return
+        }
+
+        addAssistantMessage({
+          kind: 'archive',
+          text: result.summary || 'meeting archived.',
+          downloadUrl: result.downloadUrl,
+          createdAt: result.archivedAt || new Date().toISOString()
+        })
+        showToast({ text: 'meeting archive ready', kind: 'done' })
+      }
+
+      function handleScreenShareStarted(event) {
+        activeScreenShareParticipant = event?.name || 'participant'
+        renderScreenStage()
+      }
+
+      function handleScreenShareStopped(event) {
+        const name = event?.name || ''
+        if (!name || name === activeScreenShareParticipant) {
+          activeScreenShareParticipant = ''
+          renderScreenStage()
+        }
+      }
+
+      function sendAssistantQuery(event) {
+        event.preventDefault()
+
+        const query = assistantInput.value.trim()
+        if (!query) {
+          return
+        }
+        assistantInput.value = ''
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          const message = 'join the room before asking the assistant.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
+
+        ws.send(JSON.stringify({
+          event: 'assistant_query',
+          data: JSON.stringify({ query })
+        }))
+      }
+
+      function archiveMeeting() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          const message = 'join the room before archiving the meeting.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
+
+        archiveMeetingButton.disabled = true
+        ws.send(JSON.stringify({ event: 'archive_meeting', data: '{}' }))
+        window.setTimeout(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            archiveMeetingButton.disabled = false
+          }
+        }, 1400)
+      }
+
+      async function toggleScreenShare() {
+        if (screenShareStream) {
+          await stopScreenShare()
+          return
+        }
+
+        await startScreenShare()
+      }
+
+      async function startScreenShare() {
+        if (!pc || !ws || ws.readyState !== WebSocket.OPEN) {
+          const message = 'join the room before sharing your screen.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
+
+        try {
+          screenShareStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: false
+          })
+          const screenTrack = screenShareStream.getVideoTracks()[0]
+          const sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video')
+          if (!screenTrack || !sender) {
+            throw new Error('screen sharing is unavailable in this browser')
+          }
+
+          await sender.replaceTrack(screenTrack)
+          activeScreenShareParticipant = currentParticipantName
+          screenShareButton.textContent = 'Stop sharing'
+          renderScreenStage()
+          ws.send(JSON.stringify({ event: 'screen_share_started', data: '{}' }))
+          screenTrack.addEventListener('ended', () => {
+            stopScreenShare()
+          }, { once: true })
+        } catch (error) {
+          screenShareStream?.getTracks().forEach(track => track.stop())
+          screenShareStream = undefined
+          setLog(error.message || String(error))
+        }
+      }
+
+      async function stopScreenShare() {
+        if (!screenShareStream) {
+          return
+        }
+
+        const streamToStop = screenShareStream
+        screenShareStream = undefined
+        streamToStop?.getTracks().forEach(track => track.stop())
+
+        const cameraTrack = localStream?.getVideoTracks()[0]
+        const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
+        if (cameraTrack && sender) {
+          await sender.replaceTrack(cameraTrack)
+        }
+
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ event: 'screen_share_stopped', data: '{}' }))
+        }
+        if (activeScreenShareParticipant === currentParticipantName) {
+          activeScreenShareParticipant = ''
+        }
+        screenShareButton.textContent = 'Share screen'
+        renderScreenStage()
+      }
+
+      function renderScreenStage() {
+        if (!activeScreenShareParticipant) {
+          presentationTile.classList.remove('is-screen-sharing')
+          screenStageVideo.srcObject = null
+          screenStageLabel.textContent = 'screen share'
+          return
+        }
+
+        const stream = activeScreenShareParticipant === currentParticipantName
+          ? screenShareStream
+          : remoteStreamsByParticipant.get(activeScreenShareParticipant)
+        presentationTile.classList.add('is-screen-sharing')
+        screenStageVideo.srcObject = stream || null
+        screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
       }
 
       function addRemoteTrack(event) {
@@ -1186,15 +2060,25 @@
 
         const label = document.createElement('span')
         label.className = 'video-label'
-        label.textContent = 'participant'
+        const participantName = remoteLabelsByStream.get(stream.id) || 'participant'
+        label.textContent = participantName
 
         tile.append(video, label)
         videoStack.appendChild(tile)
         remoteElements.set(stream.id, tile)
+        if (participantName !== 'participant') {
+          remoteStreamsByParticipant.set(participantName, stream)
+        }
+        if (activeScreenShareParticipant === participantName) {
+          renderScreenStage()
+        }
 
         stream.onremovetrack = () => {
           tile.remove()
           remoteElements.delete(stream.id)
+          if (participantName !== 'participant') {
+            remoteStreamsByParticipant.delete(participantName)
+          }
         }
       }
 
@@ -1230,7 +2114,8 @@
 
       function renderMemoryEntry(entry) {
         const item = document.createElement('article')
-        item.className = `memory-item ${entry.kind === 'answer' ? 'answer' : ''}`.trim()
+        const kindClass = ['answer', 'archive'].includes(entry.kind) ? entry.kind : ''
+        item.className = `memory-item ${kindClass}`.trim()
 
         const meta = document.createElement('span')
         meta.className = 'memory-meta'
@@ -1251,7 +2136,89 @@
         if (entry.kind === 'answer') {
           return `answer · ${time}`
         }
+        if (entry.kind === 'archive') {
+          return `archive · ${time}`
+        }
         return `transcript · ${time}`
+      }
+
+      function addAssistantMessage(entry) {
+        if (!entry?.text) {
+          return
+        }
+
+        const message = {
+          id: entry.id || `assistant-${Date.now()}-${assistantMessages.length}`,
+          kind: entry.kind || 'status',
+          text: entry.text,
+          downloadUrl: entry.downloadUrl || '',
+          createdAt: entry.createdAt || new Date().toISOString()
+        }
+        assistantMessages.push(message)
+        if (assistantMessages.length > 40) {
+          assistantMessages = assistantMessages.slice(assistantMessages.length - 40)
+        }
+        renderAssistantMessages(message.id)
+      }
+
+      function renderAssistantMessages(enteringId = '') {
+        if (assistantMessages.length === 0) {
+          const empty = document.createElement('article')
+          empty.className = 'assistant-message assistant-message--status'
+          const meta = document.createElement('span')
+          meta.className = 'assistant-meta'
+          meta.textContent = 'ready'
+          const text = document.createElement('span')
+          text.className = 'assistant-text'
+          text.textContent = 'waiting for room audio.'
+          empty.append(meta, text)
+          assistantFeed.replaceChildren(empty)
+          assistantState.textContent = 'ready'
+          return
+        }
+
+        const latest = assistantMessages[assistantMessages.length - 1]
+        assistantState.textContent = assistantMessageKind(latest.kind)
+        assistantFeed.replaceChildren(...assistantMessages.map(entry => renderAssistantMessage(entry, entry.id === enteringId)))
+        assistantFeed.scrollTop = assistantFeed.scrollHeight
+      }
+
+      function renderAssistantMessage(entry, entering = false) {
+        const kind = assistantMessageKind(entry.kind)
+        const item = document.createElement('article')
+        item.className = `assistant-message assistant-message--${kind}${entering ? ' assistant-message--entering' : ''}`
+
+        const meta = document.createElement('span')
+        meta.className = 'assistant-meta'
+        meta.textContent = assistantMessageLabel(entry, kind)
+
+        const text = document.createElement('span')
+        text.className = 'assistant-text'
+        text.textContent = entry.text
+
+        item.append(meta, text)
+        if (entry.downloadUrl) {
+          const link = document.createElement('a')
+          link.className = 'assistant-link'
+          link.href = entry.downloadUrl
+          link.download = ''
+          link.textContent = 'Download archive'
+          item.appendChild(link)
+        }
+        return item
+      }
+
+      function assistantMessageKind(kind) {
+        const normalized = String(kind || 'status').toLowerCase().replace(/[^a-z0-9_-]/g, '')
+        return normalized || 'status'
+      }
+
+      function assistantMessageLabel(entry, kind) {
+        const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
+        const time = createdAt && !Number.isNaN(createdAt.valueOf())
+          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          : 'now'
+        return `${kind} · ${time}`
       }
 
       function renderBoard(changes = { moved: new Set(), completed: new Set(), toasts: [], commentPreviews: [] }) {
@@ -1287,6 +2254,7 @@
           column.append(header, stack)
           return column
         }))
+        updateBoardEmptyState()
       }
 
       function renderCard(card, moved = false, completed = false) {
@@ -1320,12 +2288,18 @@
         heading.append(title, renderOwnerAvatar(card))
         article.appendChild(heading)
 
+        const meta = document.createElement('div')
+        meta.className = 'card-meta'
+        meta.textContent = `owner · ${cardOwner(card).name}`
+        article.appendChild(meta)
+
         if (card.tags?.length > 0) {
           const tags = document.createElement('ul')
           tags.className = 'tags'
           tags.setAttribute('aria-label', `${card.title} tags`)
           tags.append(...card.tags.map(tag => {
             const item = document.createElement('li')
+            item.dataset.tagKind = tagKind(tag)
             const colors = tagColors(tag)
             item.style.setProperty('--tag-bg', colors.background)
             item.style.setProperty('--tag-color', colors.color)
@@ -1349,20 +2323,8 @@
       }
 
       function cardOwner(card) {
-        const owners = [
-          'Avery Chen',
-          'Blake Stone',
-          'Casey Morgan',
-          'Dana Patel',
-          'Emery Brooks',
-          'Finley Rao',
-          'Harper Kim',
-          'Jordan Lee'
-        ]
-        const seed = String(card?.id || card?.title || 'kanban-card')
-        const hash = hashString(seed)
         return {
-          name: owners[hash % owners.length]
+          name: card?.owner || 'Unassigned'
         }
       }
 
@@ -1487,6 +2449,7 @@
         tags.setAttribute('aria-label', `${card.title || 'Card'} tags`)
         tags.append(...(card.tags || []).map(tag => {
           const item = document.createElement('li')
+          item.dataset.tagKind = tagKind(tag)
           const colors = tagColors(tag)
           item.style.setProperty('--tag-bg', colors.background)
           item.style.setProperty('--tag-color', colors.color)
@@ -1576,6 +2539,7 @@
           title: card.title || '',
           status: card.status || '',
           notes: card.notes || '',
+          owner: card.owner || '',
           tags: Array.isArray(card.tags) ? [...card.tags] : []
         }
       }
@@ -1710,29 +2674,50 @@
       }
 
       // Warm ember/amber sparks — no rainbow.
-      const SPARK_PALETTE = ['#FFD27A', '#FFB23F', '#FF8A3D', '#FF7A2B', '#ED5A14', '#C13E07', '#FFF1E3']
+      // Warm-only palette. No rainbow. Cream reads as the hottest spark.
+      const SPARK_PALETTE = ['#FFF1E3', '#FFD27A', '#FFB23F', '#FF8A3D', '#FF7A2B', '#ED5A14']
+      const SPARK_COUNT = 14
+      const SPARK_RATE_LIMIT_MS = 6000
+      let lastSparksAt = 0
 
       function fireSparks(anchor) {
+        const now = performance.now()
+        // Rate-limit: if a burst fired within the window, drop this one.
+        // Wiggle/glow/toast still fire on the calling path.
+        if (now - lastSparksAt < SPARK_RATE_LIMIT_MS) {
+          return
+        }
+        lastSparksAt = now
+
         const rect = anchor.getBoundingClientRect()
         const originX = rect.left + rect.width / 2
         const originY = rect.top + Math.min(rect.height / 2, 48)
 
-        for (let index = 0; index < 24; index++) {
-          const piece = document.createElement('span')
-          const angle = (Math.PI * 2 * index) / 24
-          const distance = 46 + Math.random() * 58
-          const drift = (Math.random() - 0.5) * 42
+        // Physics: initial upward velocity (-260..-180 px/s), horizontal drift
+        // (-90..+90 px/s), gravity 480 px/s² down, lifetime 1000ms with 0-600ms
+        // random delay so the cinders puff outward unevenly.
+        const lifetimeMs = 1000
+        const gravity = 480
 
+        for (let i = 0; i < SPARK_COUNT; i++) {
+          const vy = -180 - Math.random() * 80
+          const vx = (Math.random() - 0.5) * 180
+          const t = lifetimeMs / 1000
+          const dx = vx * t
+          const dy = vy * t + 0.5 * gravity * t * t
+          const rotation = (Math.random() - 0.5) * 720
+          const delay = Math.random() * 600
+          const piece = document.createElement('span')
           piece.className = 'spark'
           piece.style.left = `${originX}px`
           piece.style.top = `${originY}px`
-          piece.style.setProperty('--dx', `${Math.cos(angle) * distance + drift}px`)
-          piece.style.setProperty('--dy', `${Math.sin(angle) * distance + 42 + Math.random() * 28}px`)
-          piece.style.setProperty('--rotation', `${Math.random() * 720 - 360}deg`)
-          piece.style.setProperty('--spark-color', SPARK_PALETTE[index % SPARK_PALETTE.length])
-
+          piece.style.setProperty('--dx', `${dx}px`)
+          piece.style.setProperty('--dy', `${dy}px`)
+          piece.style.setProperty('--rotation', `${rotation}deg`)
+          piece.style.setProperty('--spark-color', SPARK_PALETTE[i % SPARK_PALETTE.length])
+          piece.style.animationDelay = `${delay}ms`
           document.body.appendChild(piece)
-          window.setTimeout(() => piece.remove(), 1050)
+          window.setTimeout(() => piece.remove(), lifetimeMs + delay + 50)
         }
       }
 
@@ -1751,8 +2736,11 @@
       }
 
       function leaveRoom() {
-        joinButton.disabled = false
+        stopScreenShare().catch(() => {})
         leaveButton.disabled = true
+        screenShareButton.disabled = true
+        archiveMeetingButton.disabled = true
+        screenShareButton.textContent = 'Share screen'
 
         if (ws && ws.readyState !== WebSocket.CLOSED) {
           ws.close()
@@ -1769,11 +2757,18 @@
         }
         localStream = undefined
         localVideo.srcObject = null
+        localVideoLabel.textContent = 'you'
 
         remoteElements.forEach(tile => tile.remove())
         remoteElements.clear()
+        remoteStreamsByParticipant.clear()
+        remoteLabelsByStream.clear()
+        activeScreenShareParticipant = ''
+        currentParticipantName = ''
+        renderScreenStage()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
+        validateAccess()
       }
 
       function setConnectionState(state, label) {
@@ -1783,11 +2778,70 @@
           brandMarkEl.classList.add('is-listening')
         } else {
           brandMarkEl.classList.remove('is-listening')
+          brandMarkEl.classList.remove('is-hot-ember')
         }
       }
 
       function setLog(message) {
         logEl.textContent = message
+      }
+
+      // Hot-ember handshake: compresses the pulse cycle from 2400ms → 1800ms
+      // and gains a drop-shadow glow on the mark for 1.6s, then settles. The
+      // 8s suppression window prevents continuous speech from strobing the
+      // pulse like a VU meter — the room reacts to recognition, not audio.
+      let hotEmberTimer = null
+      let lastHotEmberAt = 0
+      const HOT_EMBER_DURATION = 1600
+      const HOT_EMBER_SUPPRESS = 8000
+      function triggerHotEmber() {
+        const now = performance.now()
+        if (now - lastHotEmberAt < HOT_EMBER_SUPPRESS) {
+          return
+        }
+        lastHotEmberAt = now
+        brandMarkEl.classList.add('is-hot-ember')
+        window.clearTimeout(hotEmberTimer)
+        hotEmberTimer = window.setTimeout(() => {
+          brandMarkEl.classList.remove('is-hot-ember')
+        }, HOT_EMBER_DURATION)
+      }
+
+      // Categorize tags so the chip color encodes meaning, not hash.
+      // Falls through to "mechanism" (ash) if unknown — neutral default.
+      const TAG_TAXONOMY = {
+        protocol: new Set(['webrtc', 'rtp', 'srtp', 'dtls', 'ice', 'nack', 'sdp', 'turn', 'stun']),
+        concern:  new Set(['risk', 'bandwidth', 'signaling', 'security', 'latency', 'blocked', 'auth']),
+        mechanism:new Set(['simulcast', 'hevc', 'opus', 'h264', 'vp8', 'vp9', 'rtcp', 'fec'])
+      }
+      function tagKind(tag) {
+        const t = String(tag || '').toLowerCase().trim()
+        if (TAG_TAXONOMY.protocol.has(t))  return 'protocol'
+        if (TAG_TAXONOMY.concern.has(t))   return 'concern'
+        if (TAG_TAXONOMY.mechanism.has(t)) return 'mechanism'
+        return 'mechanism'
+      }
+
+      // Mount bootstrap: first-load runs the staggered cascade, subsequent
+      // loads in the same tab take the fast path. Reduced-motion honored
+      // by the CSS .is-fast-mount branch + media query.
+      ;(function bootstrapMount() {
+        const shell = document.getElementById('appShell')
+        if (!shell) return
+        const cameFromCascade = sessionStorage.getItem('bonfire_mounted') === '1'
+        if (cameFromCascade) {
+          shell.classList.add('is-fast-mount')
+        } else {
+          shell.classList.add('is-mounting')
+          window.setTimeout(() => sessionStorage.setItem('bonfire_mounted', '1'), 900)
+        }
+      })()
+
+      // Toggle the empty-board hero when all four columns are empty.
+      function updateBoardEmptyState() {
+        const surface = document.getElementById('boardSurface')
+        if (!surface) return
+        surface.classList.toggle('is-empty', cards.length === 0)
       }
     </script>
   </body>

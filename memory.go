@@ -15,6 +15,7 @@ import (
 
 const (
 	meetingMemoryKindTranscript = "transcript"
+	meetingMemoryKindArchive    = "archive"
 	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
 )
 
@@ -101,14 +102,33 @@ func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string,
 		id = fmt.Sprintf("transcript-%d", time.Now().UnixNano())
 	}
 
+	return store.appendEntry(meetingMemoryKindTranscript, id, transcript, map[string]string{
+		"itemId": itemID,
+	})
+}
+
+func (store *meetingMemoryStore) appendArchive(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindArchive, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	text = normalizeMemoryText(text)
+	if store == nil || text == "" {
+		return meetingMemoryEntry{}, false, nil
+	}
+	if strings.TrimSpace(kind) == "" {
+		kind = meetingMemoryKindTranscript
+	}
+	if strings.TrimSpace(id) == "" {
+		id = fmt.Sprintf("%s-%d", kind, time.Now().UnixNano())
+	}
+
 	entry := meetingMemoryEntry{
-		ID:        id,
-		Kind:      meetingMemoryKindTranscript,
-		Text:      transcript,
+		ID:        strings.TrimSpace(id),
+		Kind:      strings.TrimSpace(kind),
+		Text:      text,
 		CreatedAt: time.Now().UTC(),
-		Metadata: map[string]string{
-			"itemId": itemID,
-		},
+		Metadata:  metadata,
 	}
 
 	store.mu.Lock()

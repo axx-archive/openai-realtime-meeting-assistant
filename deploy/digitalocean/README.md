@@ -53,7 +53,7 @@ The room will be available at:
 https://$MEETING_HOST
 ```
 
-Open the URL, click Join room, and allow camera and microphone access. Other participants can join the same URL natively in the browser.
+Open the URL, choose a listed participant name, enter the room password, click Join room, and allow camera and microphone access. Other participants can join the same URL natively in the browser.
 
 ## Operations
 
@@ -75,4 +75,4 @@ Stop:
 docker compose down
 ```
 
-This demo has no built-in authentication. Anyone who can reach the URL can join the room.
+This demo has a lightweight room gate enforced by the server-side participant/password check. Treat it as a meeting-room passcode, not as full identity or account authentication.
