@@ -82,6 +82,8 @@
         --s-4:  16px;
         --s-5:  20px;
         --s-6:  24px;
+        --s-7:  32px;
+        --s-8:  48px;
 
         /* ---------- Shadows ---------- */
         --shadow-1: 0 1px 2px rgba(15, 8, 2, 0.45);
@@ -394,28 +396,39 @@
       .field input,
       .field textarea {
         width: 100%;
-        min-height: 40px;
+        height: 40px;
         border: 1px solid var(--line);
         border-radius: var(--r-sm);
-        background: rgba(11, 8, 5, 0.56);
+        background-color: rgba(11, 8, 5, 0.56);
         color: var(--fg-0);
         font: inherit;
         font-size: 13px;
-        padding: 9px var(--s-3);
+        padding: 0 var(--s-3);
         outline: 0;
-        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
+        transition: border-color var(--t-base) var(--ease-soft), background-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
+      }
+
+      .field select {
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 32px;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%23948876' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
       }
 
       .field select:focus,
       .field input:focus,
       .field textarea:focus {
         border-color: rgba(255, 122, 43, 0.65);
-        background: rgba(11, 8, 5, 0.76);
+        background-color: rgba(11, 8, 5, 0.76);
         box-shadow: var(--glow-ember-sm);
       }
 
       .field textarea {
+        height: auto;
         min-height: 96px;
+        padding: 9px var(--s-3);
         resize: vertical;
       }
 
@@ -1275,14 +1288,18 @@
       .card-detail-form .field select,
       .card-detail-form .field textarea {
         border-color: var(--line-light);
-        background: #FFFCF6;
+        background-color: #FFFCF6;
         color: var(--fg-inverse);
+      }
+
+      .card-detail-form .field select {
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%236E6457' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
       }
 
       .card-detail-form .field input:focus,
       .card-detail-form .field select:focus,
       .card-detail-form .field textarea:focus {
-        background: #FFF;
+        background-color: #FFF;
       }
 
       .card-detail-grid {

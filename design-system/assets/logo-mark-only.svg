@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" width="64" height="64">
+  <defs>
+    <radialGradient id="emberCore2" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#FFF1E3"></stop>
+      <stop offset="22%" stop-color="#FFD27A"></stop>
+      <stop offset="55%" stop-color="#FF7A2B"></stop>
+      <stop offset="100%" stop-color="#5F1D03"></stop>
+    </radialGradient>
+    <radialGradient id="emberHalo2" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#FF7A2B" stop-opacity="0.4"></stop>
+      <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="36" r="28" fill="url(#emberHalo2)"></circle>
+  <circle cx="32" cy="36" r="14" fill="url(#emberCore2)"></circle>
+  <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FFF1E3" fill-opacity="0.55"></ellipse>
+</svg>

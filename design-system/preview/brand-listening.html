@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Listening signature</title><link rel="stylesheet" href="_base.css"></head><body>
+<div class="card">
+  <span class="label">Signature motion · 2400ms pulse</span>
+  <div style="display:flex;align-items:center;gap:36px;margin-top:24px;">
+    <span style="position:relative;width:88px;height:88px;display:inline-flex;align-items:center;justify-content:center;">
+      <span style="position:absolute;inset:-26px;border-radius:999px;background:radial-gradient(circle, rgba(255,122,43,0.45) 0%, transparent 60%);animation:p3 2400ms cubic-bezier(0.4,0,0.2,1) infinite;animation-delay:800ms;"></span>
+      <span style="position:absolute;inset:-16px;border-radius:999px;background:radial-gradient(circle, rgba(255,122,43,0.45) 0%, transparent 60%);animation:p2 2400ms cubic-bezier(0.4,0,0.2,1) infinite;animation-delay:400ms;"></span>
+      <span style="position:absolute;inset:-8px;border-radius:999px;background:radial-gradient(circle, rgba(255,122,43,0.45) 0%, transparent 60%);animation:p1 2400ms cubic-bezier(0.4,0,0.2,1) infinite;"></span>
+      <svg viewBox="0 0 64 64" width="100%" height="100%" style="position:relative;z-index:2;">
+        <defs>
+          <radialGradient id="ec2" cx="50%" cy="55%" r="55%"><stop offset="0%" stop-color="#FFF1E3"/><stop offset="22%" stop-color="#FFD27A"/><stop offset="55%" stop-color="#FF7A2B"/><stop offset="100%" stop-color="#5F1D03"/></radialGradient>
+          <radialGradient id="eh2" cx="50%" cy="55%" r="55%"><stop offset="0%" stop-color="#FF7A2B" stop-opacity="0.4"/><stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"/></radialGradient>
+        </defs>
+        <rect width="64" height="64" rx="14" fill="#110D09"/>
+        <circle cx="32" cy="36" r="28" fill="url(#eh2)"/>
+        <circle cx="32" cy="36" r="14" fill="url(#ec2)"/>
+        <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FFF1E3" fill-opacity="0.55"/>
+      </svg>
+    </span>
+    <div style="display:grid;gap:6px;">
+      <div style="font-family:var(--font-sans);font-size:15px;font-weight:600;color:var(--fg-0);">the room is listening</div>
+      <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--fg-3);">3 halos · 400ms phase offset · ease-soft</div>
+    </div>
+  </div>
+  <style>
+    @keyframes p1 { 0%,100% { transform:scale(0.88); opacity:0; } 50% { transform:scale(1.06); opacity:0.55; } }
+    @keyframes p2 { 0%,100% { transform:scale(0.92); opacity:0; } 50% { transform:scale(1.10); opacity:0.32; } }
+    @keyframes p3 { 0%,100% { transform:scale(0.94); opacity:0; } 50% { transform:scale(1.14); opacity:0.14; } }
+  </style>
+</div></body></html>
