@@ -30,6 +30,8 @@ Edit `.env`:
 
 ```bash
 OPENAI_API_KEY=sk-proj-...
+MEETING_ROOM_PASSWORD=<room-passcode>
+MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io
 MEETING_MEMORY_PATH=/app/data/meeting-memory.jsonl
 PION_NAT1TO1_IP=<droplet-public-ip>
 PION_UDP_PORT_RANGE=40000-40100
@@ -37,6 +39,16 @@ MEETING_HOST=<droplet-public-ip>.nip.io
 ```
 
 For a real domain, set `MEETING_HOST` to the domain after creating an A record that points at the Droplet.
+
+To email generated meeting notes when **Send notes** archives the room, also configure SMTP:
+
+```bash
+MEETING_NOTES_SMTP_HOST=smtp.example.com
+MEETING_NOTES_SMTP_PORT=587
+MEETING_NOTES_SMTP_USERNAME=...
+MEETING_NOTES_SMTP_PASSWORD=...
+MEETING_NOTES_SMTP_FROM=meeting-notes@shareability.com
+```
 
 ## Launch
 

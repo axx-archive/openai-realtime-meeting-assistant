@@ -70,7 +70,8 @@ When the server starts, it creates the OpenAI Realtime peer if `OPENAI_API_KEY` 
 3. Allow camera and microphone access.
 4. Speak naturally about the work on the board. The mixed room audio is sent to the Realtime assistant, and board changes are broadcast to everyone in the room.
 5. Open the same URL in another browser tab or on another device to join as another participant.
-6. Click **Leave** to disconnect that browser from the room and stop its local media tracks.
+6. Click **Send notes** to archive the meeting, generate meeting notes, and email them to the participants when SMTP is configured.
+7. Click **Leave** to disconnect that browser from the room and stop its local media tracks.
 
 ## Demo flow
 
@@ -110,6 +111,24 @@ You can update:
 - The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
 - The browser UI in `index.html`.
 - The HTTP bind address with the `-addr` flag in `main.go`.
+
+### Meeting access and notes
+
+- Set `MEETING_ROOM_PASSWORD` to change the room passcode. If unset, the demo passcode is used.
+- Set `MEETING_ALLOWED_ORIGINS` to a comma-separated list of allowed browser origins for WebSocket access. If unset, same-host origins are allowed.
+- Meeting notes are generated when **Send notes** archives the meeting. The notes include detected decisions and the latest status for every active board card.
+- Participant email addresses use the Shareability convention: `name@shareability.com`, except Erick maps to `e@shareability.com`.
+- To email notes automatically, configure SMTP:
+
+  ```bash
+  export MEETING_NOTES_SMTP_HOST=smtp.example.com
+  export MEETING_NOTES_SMTP_PORT=587
+  export MEETING_NOTES_SMTP_USERNAME=...
+  export MEETING_NOTES_SMTP_PASSWORD=...
+  export MEETING_NOTES_SMTP_FROM=meeting-notes@shareability.com
+  ```
+
+  If SMTP is not configured, the archive still includes generated notes and reports that email delivery was skipped.
 
 ## License
 

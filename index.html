@@ -253,6 +253,8 @@
       }
       .pill--idle { background: var(--night-3); color: var(--fg-1); }
       .pill--idle .pill__dot { background: var(--fg-3); }
+      .pill--room { background: var(--success-bg); color: var(--success); }
+      .pill--room .pill__dot { background: var(--success); }
       .pill--connecting { background: var(--info-bg); color: var(--info); }
       .pill--connecting .pill__dot {
         background: var(--info);
@@ -389,7 +391,8 @@
       }
 
       .field select,
-      .field input {
+      .field input,
+      .field textarea {
         width: 100%;
         min-height: 40px;
         border: 1px solid var(--line);
@@ -404,10 +407,16 @@
       }
 
       .field select:focus,
-      .field input:focus {
+      .field input:focus,
+      .field textarea:focus {
         border-color: rgba(255, 122, 43, 0.65);
         background: rgba(11, 8, 5, 0.76);
         box-shadow: var(--glow-ember-sm);
+      }
+
+      .field textarea {
+        min-height: 96px;
+        resize: vertical;
       }
 
       .access-hint {
@@ -480,6 +489,37 @@
         color: var(--fg-inverse);
         padding: var(--s-4);
         border: 1px solid var(--line);
+      }
+
+      .board-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-3);
+        margin-bottom: var(--s-3);
+      }
+
+      .board-status {
+        min-width: 0;
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .board-tools {
+        display: flex;
+        align-items: center;
+        gap: var(--s-2);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .board-surface.is-locked .board {
+        opacity: 0.42;
       }
 
       .board {
@@ -557,6 +597,7 @@
         font-optical-sizing: auto;
       }
       .board-surface.is-empty .board-hero { display: block; }
+      .board-surface.is-locked .board-hero { display: block; }
       .board-surface.is-empty .board { opacity: 0.42; }
       .board-surface.is-empty .board { transition: opacity 200ms var(--ease-soft); }
 
@@ -1221,6 +1262,59 @@
         color: var(--fg-inverse);
       }
 
+      .card-detail-form {
+        display: grid;
+        gap: var(--s-3);
+      }
+
+      .card-detail-form .field span {
+        color: var(--ash-600);
+      }
+
+      .card-detail-form .field input,
+      .card-detail-form .field select,
+      .card-detail-form .field textarea {
+        border-color: var(--line-light);
+        background: #FFFCF6;
+        color: var(--fg-inverse);
+      }
+
+      .card-detail-form .field input:focus,
+      .card-detail-form .field select:focus,
+      .card-detail-form .field textarea:focus {
+        background: #FFF;
+      }
+
+      .card-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--s-3);
+      }
+
+      .card-detail-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-3);
+        flex-wrap: wrap;
+      }
+
+      .card-detail-actions__right {
+        display: flex;
+        align-items: center;
+        gap: var(--s-2);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .card-detail-actions .btn--danger {
+        width: auto;
+        min-width: 96px;
+        height: auto;
+        border-radius: var(--r-sm);
+        padding: 10px var(--s-4);
+      }
+
       @keyframes card-move-wiggle {
         0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
         12%  { transform: translate3d(-10px, -12px, 0) rotate(-4deg) scale(1.05); }
@@ -1270,10 +1364,14 @@
 
       @media (max-width: 640px) {
         .board { grid-template-columns: 1fr; min-width: 0; }
+        .board-toolbar { align-items: stretch; flex-direction: column; }
+        .board-tools { justify-content: stretch; }
+        .board-tools .btn { flex: 1 1 140px; }
         .access-grid { grid-template-columns: 1fr; }
         .assistant-form { grid-template-columns: 1fr; }
         .assistant-send { width: 100%; }
         .btn { min-width: 0; }
+        .card-detail-grid { grid-template-columns: 1fr; }
       }
 
       /* ---------- Mount stagger (the room arrives) ----------
@@ -1376,7 +1474,14 @@
             <span id="screenStageLabel" class="screen-stage__label">screen share</span>
           </div>
           <div id="boardSurface" class="board-surface mount-stagger">
-            <p class="board-hero" aria-hidden="true">this room is empty. the fire is warm.</p>
+            <div class="board-toolbar" aria-label="Board tools">
+              <span id="boardState" class="board-status">waiting room</span>
+              <div class="board-tools">
+                <button id="newCard" class="btn btn--secondary" type="button" disabled>New card</button>
+                <button id="undoDelete" class="btn btn--secondary" type="button" disabled>Undo delete</button>
+              </div>
+            </div>
+            <p id="boardHero" class="board-hero" aria-hidden="true">join the room to load the board.</p>
             <section id="board" class="board" aria-label="Kanban board"></section>
           </div>
         </section>
@@ -1407,7 +1512,7 @@
                 <input id="roomPassword" type="password" autocomplete="current-password" placeholder="Room password">
               </label>
             </div>
-            <p id="accessHint" class="access-hint">Select your name and enter the room password.</p>
+            <p id="accessHint" class="access-hint">Verify access first. Camera and microphone start after the room lets you in.</p>
           </section>
           <div id="videoStack" class="video-stack mount-stagger">
             <div class="video-tile">
@@ -1451,7 +1556,7 @@
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Join the room</button>
           <button id="screenShare" class="btn btn--secondary" type="button" disabled>Share screen</button>
-          <button id="archiveMeeting" class="btn btn--secondary" type="button" disabled>Archive meeting</button>
+          <button id="archiveMeeting" class="btn btn--secondary" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"></path>
@@ -1469,6 +1574,11 @@
     <script>
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
       const boardEl = document.getElementById('board')
+      const boardSurface = document.getElementById('boardSurface')
+      const boardHero = document.getElementById('boardHero')
+      const boardState = document.getElementById('boardState')
+      const newCardButton = document.getElementById('newCard')
+      const undoDeleteButton = document.getElementById('undoDelete')
       const statusPillEl = document.getElementById('statusPill')
       const statusTextEl = document.getElementById('statusText')
       const brandMarkEl = document.getElementById('brandMark')
@@ -1509,6 +1619,9 @@
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let hasBoardSnapshot = false
+      let isBoardReady = false
+      let canEditBoard = false
+      let canUndoDelete = false
       let commentPreviewTimer
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
@@ -1537,6 +1650,8 @@
       leaveButton.addEventListener('click', leaveRoom)
       screenShareButton.addEventListener('click', toggleScreenShare)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
+      newCardButton.addEventListener('click', () => showCardEditor())
+      undoDeleteButton.addEventListener('click', undoDeleteTicket)
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
       assistantForm.addEventListener('submit', sendAssistantQuery)
@@ -1555,6 +1670,7 @@
       setConnectionState('idle', 'not connected')
       validateAccess()
       renderBoard()
+      updateBoardControls()
 
       function selectedParticipantName() {
         return participantNameInput.value.trim()
@@ -1566,12 +1682,12 @@
 
       function validateAccess() {
         const verified = hasValidAccess()
-        joinButton.disabled = !verified || Boolean(pc)
+        joinButton.disabled = !verified || Boolean(ws || pc)
         accessPanel.classList.toggle('is-verified', verified)
         accessState.textContent = verified ? 'ready' : 'locked'
         accessHint.textContent = verified
-          ? `${selectedParticipantName()} is ready to join.`
-          : 'Select your name and enter the room password.'
+          ? `${selectedParticipantName()} is ready to verify.`
+          : 'Verify access first. Camera and microphone start after the room lets you in.'
         return verified
       }
 
@@ -1586,37 +1702,12 @@
         localVideoLabel.textContent = currentParticipantName
         joinButton.disabled = true
         setConnectionState('connecting', 'connecting…')
-        setLog('requesting camera and microphone')
+        setLog('checking room access')
 
         try {
-          localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints)
-          localVideo.srcObject = localStream
-
-          pc = new RTCPeerConnection()
-          pc.ontrack = addRemoteTrack
-          pc.onicecandidate = event => {
-            if (!event.candidate || ws?.readyState !== WebSocket.OPEN) {
-              return
-            }
-            ws.send(JSON.stringify({ event: 'candidate', data: JSON.stringify(event.candidate) }))
-          }
-          pc.onconnectionstatechange = () => {
-            const state = pc.connectionState
-            if (state === 'connected') {
-              setConnectionState('listening', 'the room is listening')
-            } else if (state === 'connecting' || state === 'new') {
-              setConnectionState('connecting', 'connecting…')
-            } else if (['failed', 'closed', 'disconnected'].includes(state)) {
-              leaveRoom()
-            }
-          }
-
           const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
           ws = new WebSocket(`${scheme}://${window.location.host}/websocket`)
           ws.onopen = () => {
-            leaveButton.disabled = false
-            screenShareButton.disabled = false
-            archiveMeetingButton.disabled = false
             accessState.textContent = 'checking'
             accessHint.textContent = 'Checking room access.'
             ws.send(JSON.stringify({
@@ -1666,9 +1757,51 @@
         }
       }
 
+      async function beginMediaSession() {
+        if (!ws || ws.readyState !== WebSocket.OPEN || pc) {
+          return
+        }
+
+        setLog('requesting camera and microphone')
+        localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints)
+        localVideo.srcObject = localStream
+
+        pc = new RTCPeerConnection()
+        pc.ontrack = addRemoteTrack
+        pc.onicecandidate = event => {
+          if (!event.candidate || ws?.readyState !== WebSocket.OPEN) {
+            return
+          }
+          ws.send(JSON.stringify({ event: 'candidate', data: JSON.stringify(event.candidate) }))
+        }
+        pc.onconnectionstatechange = () => {
+          const state = pc.connectionState
+          if (state === 'connected') {
+            if (!statusPillEl.classList.contains('pill--listening')) {
+              setConnectionState('room', 'room connected')
+            }
+          } else if (state === 'connecting' || state === 'new') {
+            setConnectionState('connecting', 'connecting…')
+          } else if (['failed', 'closed', 'disconnected'].includes(state)) {
+            leaveRoom()
+          }
+        }
+
+        leaveButton.disabled = false
+        screenShareButton.disabled = false
+        archiveMeetingButton.disabled = false
+        canEditBoard = true
+        updateBoardControls()
+        ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
+      }
+
       async function handleSignal(message) {
         switch (message.event) {
           case 'offer': {
+            if (!pc) {
+              addAssistantMessage({ kind: 'error', text: 'media is not ready for the room offer yet.' })
+              return
+            }
             const offer = JSON.parse(message.data)
             await pc.setRemoteDescription(offer)
             await attachLocalTracksToOffer(offer)
@@ -1678,6 +1811,9 @@
             break
           }
           case 'candidate': {
+            if (!pc) {
+              return
+            }
             const candidate = JSON.parse(message.data)
             await pc.addIceCandidate(candidate)
             break
@@ -1732,13 +1868,19 @@
       function handleKanbanMessage(message) {
         switch (message.event) {
           case 'board':
+            isBoardReady = true
             cards = Array.isArray(message.data?.cards) ? message.data.cards : []
             {
               const changes = cardChanges(cards)
               renderBoard(changes)
+              updateBoardControls()
               changes.toasts.forEach(showToast)
               changes.commentPreviews.forEach(showCommentPreview)
             }
+            break
+          case 'undo_available':
+            canUndoDelete = Boolean(message.data)
+            updateBoardControls()
             break
           case 'memory':
             memoryEntries = Array.isArray(message.data) ? message.data : []
@@ -1801,6 +1943,8 @@
         const normalized = message.toLowerCase()
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
+        } else if (normalized.includes('connected to conference room')) {
+          setConnectionState('room', 'room connected')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
@@ -1875,6 +2019,9 @@
       }
 
       function handleAccessDenied(message) {
+        if (ws) {
+          ws.onclose = null
+        }
         leaveRoom()
         accessPanel.classList.remove('is-verified')
         accessState.textContent = 'locked'
@@ -1882,12 +2029,23 @@
         addAssistantMessage({ kind: 'error', text: message })
       }
 
-      function handleAccessGranted(participant) {
+      async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
         accessState.textContent = 'verified'
-        accessHint.textContent = `${name} is in the room.`
-        setConnectionState('listening', 'the room is listening')
-        setLog(`${name} is in the room`)
+        accessHint.textContent = `${name} is verified. Starting camera and microphone.`
+        setConnectionState('room', 'room connected')
+        setLog(`${name} is verified`)
+        try {
+          await beginMediaSession()
+          accessHint.textContent = `${name} is in the room.`
+          setLog(`${name} is in the room`)
+        } catch (error) {
+          const message = error.message || String(error)
+          accessHint.textContent = message
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          leaveRoom()
+        }
       }
 
       function handleMeetingArchived(result) {
@@ -1901,7 +2059,15 @@
           downloadUrl: result.downloadUrl,
           createdAt: result.archivedAt || new Date().toISOString()
         })
-        showToast({ text: 'meeting archive ready', kind: 'done' })
+        if (result.email?.sent) {
+          showToast({ text: 'meeting notes emailed', kind: 'done' })
+        } else if (result.email?.skipped) {
+          showToast({ text: 'meeting notes generated', kind: 'note' })
+        } else if (result.email?.error) {
+          showToast({ text: 'notes generated, email failed', kind: 'error' })
+        } else {
+          showToast({ text: 'meeting archive ready', kind: 'done' })
+        }
       }
 
       function handleScreenShareStarted(event) {
@@ -1948,10 +2114,12 @@
         }
 
         archiveMeetingButton.disabled = true
+        archiveMeetingButton.textContent = 'Generating notes'
         ws.send(JSON.stringify({ event: 'archive_meeting', data: '{}' }))
         window.setTimeout(() => {
           if (ws?.readyState === WebSocket.OPEN) {
             archiveMeetingButton.disabled = false
+            archiveMeetingButton.textContent = 'Send notes'
           }
         }, 1400)
       }
@@ -2392,16 +2560,29 @@
       }
 
       function showCardDetail(card) {
-        if (!card) {
+        showCardEditor(card)
+      }
+
+      function showCardEditor(card = null) {
+        if (!canEditBoard) {
+          showToast({ text: 'join the room before editing cards', kind: 'error' })
           return
         }
+        const isNew = !card
+        const draft = card || {
+          title: '',
+          status: 'Backlog',
+          owner: currentParticipantName || 'Unassigned',
+          tags: [],
+          notes: ''
+        }
+        const owner = cardOwner(draft)
 
-        const owner = cardOwner(card)
         const panel = document.createElement('article')
         panel.className = 'card-detail'
         panel.setAttribute('role', 'dialog')
         panel.setAttribute('aria-modal', 'true')
-        panel.setAttribute('aria-label', `Card details for ${card.title || 'untitled card'}`)
+        panel.setAttribute('aria-label', isNew ? 'New card' : `Edit card ${draft.title || 'untitled card'}`)
 
         const header = document.createElement('header')
         header.className = 'card-detail-header'
@@ -2409,33 +2590,173 @@
         const titleGroup = document.createElement('div')
         titleGroup.className = 'card-detail-title'
         const title = document.createElement('strong')
-        title.textContent = card.title || 'Untitled card'
+        title.textContent = isNew ? 'New card' : draft.title || 'Untitled card'
         const ownerText = document.createElement('span')
         ownerText.className = 'card-detail-owner'
-        ownerText.textContent = `owner · ${owner.name}`
+        ownerText.textContent = isNew ? 'manual project capture' : `owner · ${owner.name}`
         titleGroup.append(title, ownerText)
 
         const closeButton = document.createElement('button')
         closeButton.className = 'card-detail-close'
         closeButton.type = 'button'
-        closeButton.setAttribute('aria-label', 'Close card details')
+        closeButton.setAttribute('aria-label', 'Close card editor')
         closeButton.textContent = '×'
         closeButton.addEventListener('click', closeCardDetail)
 
-        header.append(renderOwnerAvatar(card, { large: true }), titleGroup, closeButton)
+        header.append(renderOwnerAvatar(draft, { large: true }), titleGroup, closeButton)
 
-        const details = document.createElement('div')
-        details.className = 'comment-preview-details'
-        details.appendChild(renderPreviewDetail('status', card.status || 'unassigned'))
-        details.appendChild(renderPreviewDetail('card id', card.id || 'no card id'))
-        details.appendChild(renderPreviewDetail('owner', owner.name))
-        details.appendChild(renderPreviewDetail('tags', card.tags?.length > 0 ? renderTagList(card) : 'no tags'))
-        details.appendChild(renderPreviewDetail('notes', card.notes || 'no notes yet.'))
+        const form = document.createElement('form')
+        form.className = 'card-detail-form'
+        form.addEventListener('submit', event => {
+          event.preventDefault()
+          saveCardEditor(form, draft, isNew)
+        })
 
-        panel.append(header, details)
+        const titleField = renderFormField('title', 'input', draft.title || '')
+        titleField.input.required = true
+        const statusField = renderSelectField('status', statuses, draft.status || 'Backlog')
+        const ownerField = renderSelectField('owner', ['Unassigned', ...participantNames()], owner.name)
+        const tagsField = renderFormField('tags', 'input', (draft.tags || []).join(', '))
+        tagsField.input.placeholder = 'webrtc, risk, bandwidth'
+        const notesField = renderFormField('notes', 'textarea', draft.notes || '')
+
+        const grid = document.createElement('div')
+        grid.className = 'card-detail-grid'
+        grid.append(statusField.field, ownerField.field)
+
+        const actions = document.createElement('div')
+        actions.className = 'card-detail-actions'
+        const deleteButton = document.createElement('button')
+        deleteButton.className = 'btn btn--danger'
+        deleteButton.type = 'button'
+        deleteButton.textContent = 'Delete'
+        deleteButton.disabled = isNew
+        deleteButton.addEventListener('click', () => deleteCardFromEditor(draft))
+
+        const rightActions = document.createElement('div')
+        rightActions.className = 'card-detail-actions__right'
+        const cancelButton = document.createElement('button')
+        cancelButton.className = 'btn btn--secondary'
+        cancelButton.type = 'button'
+        cancelButton.textContent = 'Cancel'
+        cancelButton.addEventListener('click', closeCardDetail)
+        const saveButton = document.createElement('button')
+        saveButton.className = 'btn btn--primary'
+        saveButton.type = 'submit'
+        saveButton.textContent = isNew ? 'Create card' : 'Save changes'
+        rightActions.append(cancelButton, saveButton)
+        actions.append(deleteButton, rightActions)
+
+        form.append(titleField.field, grid, tagsField.field, notesField.field, actions)
+        panel.append(header, form)
         cardDetailRegion.replaceChildren(panel)
         cardDetailRegion.classList.add('visible')
-        closeButton.focus()
+        titleField.input.focus()
+      }
+
+      function renderFormField(labelText, type, value) {
+        const field = document.createElement('label')
+        field.className = 'field'
+        const label = document.createElement('span')
+        label.textContent = labelText
+        const input = type === 'textarea'
+          ? document.createElement('textarea')
+          : document.createElement('input')
+        if (type !== 'textarea') {
+          input.type = 'text'
+        }
+        input.value = value
+        field.append(label, input)
+        return { field, input }
+      }
+
+      function renderSelectField(labelText, options, value) {
+        const field = document.createElement('label')
+        field.className = 'field'
+        const label = document.createElement('span')
+        label.textContent = labelText
+        const input = document.createElement('select')
+        for (const optionValue of options) {
+          const option = document.createElement('option')
+          option.value = optionValue
+          option.textContent = optionValue
+          option.selected = optionValue === value
+          input.appendChild(option)
+        }
+        field.append(label, input)
+        return { field, input }
+      }
+
+      function participantNames() {
+        return Array.from(participantNameInput.options)
+          .map(option => option.value || option.textContent)
+          .map(name => name.trim())
+          .filter(name => name && name !== 'Select your name')
+      }
+
+      function saveCardEditor(form, draft, isNew) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast({ text: 'join the room before editing cards', kind: 'error' })
+          return
+        }
+
+        const values = formValues(form)
+        const payload = {
+          title: values.title,
+          status: values.status,
+          owner: values.owner,
+          tags: tagsFromInput(values.tags),
+          notes: values.notes
+        }
+        if (!isNew) {
+          payload.card_id = draft.id
+        }
+        ws.send(JSON.stringify({
+          event: isNew ? 'manual_create_ticket' : 'manual_update_ticket',
+          data: JSON.stringify(payload)
+        }))
+        closeCardDetail()
+      }
+
+      function deleteCardFromEditor(card) {
+        if (!card) {
+          return
+        }
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast({ text: 'join the room before editing cards', kind: 'error' })
+          return
+        }
+        ws.send(JSON.stringify({
+          event: 'manual_delete_ticket',
+          data: JSON.stringify({ card_id: card.id })
+        }))
+        closeCardDetail()
+      }
+
+      function formValues(form) {
+        const fields = Array.from(form.querySelectorAll('.field'))
+        const values = {}
+        for (const field of fields) {
+          const label = field.querySelector('span')?.textContent || ''
+          const input = field.querySelector('input, select, textarea')
+          values[label] = input?.value.trim() || ''
+        }
+        return values
+      }
+
+      function tagsFromInput(value) {
+        return String(value || '')
+          .split(',')
+          .map(tag => tag.trim())
+          .filter(Boolean)
+      }
+
+      function undoDeleteTicket() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          showToast({ text: 'join the room before editing cards', kind: 'error' })
+          return
+        }
+        ws.send(JSON.stringify({ event: 'undo_delete_ticket', data: '{}' }))
       }
 
       function closeCardDetail() {
@@ -2741,6 +3062,7 @@
         screenShareButton.disabled = true
         archiveMeetingButton.disabled = true
         screenShareButton.textContent = 'Share screen'
+        archiveMeetingButton.textContent = 'Send notes'
 
         if (ws && ws.readyState !== WebSocket.CLOSED) {
           ws.close()
@@ -2765,7 +3087,15 @@
         remoteLabelsByStream.clear()
         activeScreenShareParticipant = ''
         currentParticipantName = ''
+        canEditBoard = false
+        canUndoDelete = false
+        isBoardReady = false
+        cards = []
+        hasBoardSnapshot = false
+        cardSnapshots.clear()
         renderScreenStage()
+        renderBoard()
+        updateBoardControls()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
         validateAccess()
@@ -2783,7 +3113,17 @@
       }
 
       function setLog(message) {
-        logEl.textContent = message
+        const text = String(message || '')
+        logEl.title = text
+        logEl.textContent = text.length > 180 ? `${text.slice(0, 177)}...` : text
+      }
+
+      function updateBoardControls() {
+        newCardButton.disabled = !canEditBoard
+        undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
+        boardState.textContent = isBoardReady
+          ? `${cards.length} project${cards.length === 1 ? '' : 's'}`
+          : 'waiting room'
       }
 
       // Hot-ember handshake: compresses the pulse cycle from 2400ms → 1800ms
@@ -2839,9 +3179,12 @@
 
       // Toggle the empty-board hero when all four columns are empty.
       function updateBoardEmptyState() {
-        const surface = document.getElementById('boardSurface')
-        if (!surface) return
-        surface.classList.toggle('is-empty', cards.length === 0)
+        if (!boardSurface) return
+        boardHero.textContent = isBoardReady
+          ? 'this room is empty. the fire is warm.'
+          : 'join the room to load the board.'
+        boardSurface.classList.toggle('is-empty', isBoardReady && cards.length === 0)
+        boardSurface.classList.toggle('is-locked', !isBoardReady)
       }
     </script>
   </body>

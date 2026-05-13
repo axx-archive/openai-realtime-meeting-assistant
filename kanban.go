@@ -64,14 +64,18 @@ type meetingArchive struct {
 	Board        kanbanBoardState     `json:"board"`
 	Memory       []meetingMemoryEntry `json:"memory"`
 	Participants []string             `json:"participants,omitempty"`
+	Notes        meetingNotes         `json:"notes"`
+	Email        meetingEmailStatus   `json:"email"`
 }
 
 type meetingArchiveResult struct {
-	ID          string `json:"id"`
-	ArchivedAt  string `json:"archivedAt"`
-	ArchivedBy  string `json:"archivedBy,omitempty"`
-	DownloadURL string `json:"downloadUrl"`
-	Summary     string `json:"summary"`
+	ID          string             `json:"id"`
+	ArchivedAt  string             `json:"archivedAt"`
+	ArchivedBy  string             `json:"archivedBy,omitempty"`
+	DownloadURL string             `json:"downloadUrl"`
+	Summary     string             `json:"summary"`
+	Notes       meetingNotes       `json:"notes"`
+	Email       meetingEmailStatus `json:"email"`
 }
 
 type kanbanRealtimeEvent struct {
@@ -102,16 +106,18 @@ type kanbanRealtimeOutputItem struct {
 }
 
 type kanbanBoardApp struct {
-	mu               sync.Mutex
-	cards            []kanbanCard
-	nextCreatedIndex int
-	updatedAt        time.Time
-	handledCalls     map[string]struct{}
-	memory           *meetingMemoryStore
-	participants     map[string]time.Time
-	apiKey           string
-	restarting       bool
-	assistantStatus  string
+	mu                sync.Mutex
+	cards             []kanbanCard
+	nextCreatedIndex  int
+	updatedAt         time.Time
+	handledCalls      map[string]struct{}
+	memory            *meetingMemoryStore
+	participants      map[string]time.Time
+	participantCounts map[string]int
+	lastDeletedCard   *kanbanCard
+	apiKey            string
+	restarting        bool
+	assistantStatus   string
 
 	model                    string
 	pc                       *webrtc.PeerConnection
@@ -174,12 +180,13 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	return &kanbanBoardApp{
-		cards:            cloneKanbanCards(initialKanbanBoardCards),
-		nextCreatedIndex: 1,
-		updatedAt:        time.Now().UTC(),
-		handledCalls:     map[string]struct{}{},
-		memory:           memory,
-		participants:     map[string]time.Time{},
+		cards:             cloneKanbanCards(initialKanbanBoardCards),
+		nextCreatedIndex:  1,
+		updatedAt:         time.Now().UTC(),
+		handledCalls:      map[string]struct{}{},
+		memory:            memory,
+		participants:      map[string]time.Time{},
+		participantCounts: map[string]int{},
 	}
 }
 
@@ -893,6 +900,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 	}
 
 	broadcastKanbanEvent("board", app.snapshotState())
+	broadcastKanbanEvent("undo_available", app.canUndoDelete())
 	broadcastAssistantEvent("action", humanizeToolName(outputItem.Name)+" complete", map[string]any{"tool": outputItem.Name})
 	if err := app.SendEvent(app.sessionUpdateEvent()); err != nil {
 		log.Errorf("Failed to refresh Kanban Realtime session: %v", err)
@@ -1109,6 +1117,48 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	}, true, nil
 }
 
+func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]any, bool, error) {
+	cardID := asString(args["card_id"])
+	if cardID == "" {
+		return nil, false, fmt.Errorf("card_id is required")
+	}
+
+	title := asString(args["title"])
+	if title == "" {
+		return nil, false, fmt.Errorf("title is required")
+	}
+	status, err := parseKanbanStatus(args["status"])
+	if err != nil {
+		return nil, false, err
+	}
+	owner := normalizeCardOwner(args["owner"])
+	if owner == "" {
+		owner = "Unassigned"
+	}
+	notes := asString(args["notes"])
+	tags := uniqueStrings(asStringSlice(args["tags"]))
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	card, ok := app.findCardLocked(cardID)
+	if !ok {
+		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
+	}
+	card.Title = title
+	card.Status = status
+	card.Owner = owner
+	card.Notes = notes
+	card.Tags = tags
+	app.touchLocked()
+
+	return map[string]any{
+		"ok":      true,
+		"updated": true,
+		"card_id": cardID,
+	}, true, nil
+}
+
 func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bool, error) {
 	cardID := asString(args["card_id"])
 	if cardID == "" {
@@ -1128,6 +1178,8 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 	if index == -1 {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
+	deletedCard := cloneKanbanCard(app.cards[index])
+	app.lastDeletedCard = &deletedCard
 	app.cards = append(app.cards[:index], app.cards[index+1:]...)
 	app.touchLocked()
 
@@ -1136,6 +1188,36 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 		"deleted": true,
 		"card_id": cardID,
 	}, true, nil
+}
+
+func (app *kanbanBoardApp) restoreLastDeletedTicket() (map[string]any, bool, error) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.lastDeletedCard == nil {
+		return nil, false, fmt.Errorf("no deleted ticket to restore")
+	}
+
+	restoredCard := cloneKanbanCard(*app.lastDeletedCard)
+	if _, exists := app.findCardLocked(restoredCard.ID); exists {
+		restoredCard.ID = app.createCardIDLocked()
+	}
+	app.cards = append(app.cards, restoredCard)
+	app.lastDeletedCard = nil
+	app.touchLocked()
+
+	return map[string]any{
+		"ok":       true,
+		"restored": true,
+		"card_id":  restoredCard.ID,
+	}, true, nil
+}
+
+func (app *kanbanBoardApp) canUndoDelete() bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.lastDeletedCard != nil
 }
 
 func (app *kanbanBoardApp) snapshotState() kanbanBoardState {
@@ -1160,7 +1242,26 @@ func (app *kanbanBoardApp) noteParticipant(name string) {
 
 	app.mu.Lock()
 	app.participants[name] = time.Now().UTC()
+	app.participantCounts[name]++
 	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) forgetParticipant(name string) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.participantCounts[name] <= 1 {
+		delete(app.participantCounts, name)
+		delete(app.participants, name)
+		return
+	}
+	app.participantCounts[name]--
+	app.participants[name] = time.Now().UTC()
 }
 
 func (app *kanbanBoardApp) participantSnapshot() []string {
@@ -1169,7 +1270,7 @@ func (app *kanbanBoardApp) participantSnapshot() []string {
 
 	participants := make([]string, 0, len(app.participants))
 	for _, candidate := range meetingParticipantNames {
-		if _, ok := app.participants[candidate]; ok {
+		if app.participantCounts[candidate] > 0 {
 			participants = append(participants, candidate)
 		}
 	}
@@ -1181,13 +1282,27 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	archivedBy = canonicalParticipantName(archivedBy)
 	archivedAt := time.Now().UTC()
 	archiveID := fmt.Sprintf("meeting-%s", archivedAt.Format("20060102-150405-000000000"))
+	board := app.snapshotState()
+	memory := app.memorySnapshot(2000)
+	participants := app.participantSnapshot()
+	if len(participants) == 0 && archivedBy != "" {
+		participants = []string{archivedBy}
+	}
+	notes := buildMeetingNotes(archiveID, archivedAt, archivedBy, board, memory, participants)
+	email := meetingEmailStatus{
+		Recipients: participantEmails(participants),
+		Skipped:    true,
+		Reason:     "Email delivery has not run yet.",
+	}
 	archive := meetingArchive{
 		ID:           archiveID,
 		ArchivedAt:   archivedAt,
 		ArchivedBy:   archivedBy,
-		Board:        app.snapshotState(),
-		Memory:       app.memorySnapshot(2000),
-		Participants: app.participantSnapshot(),
+		Board:        board,
+		Memory:       memory,
+		Participants: participants,
+		Notes:        notes,
+		Email:        email,
 	}
 
 	archivePath, err := meetingArchivePath(archiveID)
@@ -1198,17 +1313,26 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		return meetingArchiveResult{}, fmt.Errorf("create archive directory: %w", err)
 	}
 
-	rawArchive, err := json.MarshalIndent(archive, "", "  ")
-	if err != nil {
-		return meetingArchiveResult{}, fmt.Errorf("encode meeting archive: %w", err)
-	}
-	if err := os.WriteFile(archivePath, rawArchive, 0o600); err != nil {
+	if err := writeMeetingArchive(archivePath, archive); err != nil {
 		return meetingArchiveResult{}, fmt.Errorf("write meeting archive: %w", err)
 	}
 
-	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), and %d participant(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants))
+	email = sendMeetingNotesEmail(email.Recipients, notes)
+	archive.Email = email
+	if err := writeMeetingArchive(archivePath, archive); err != nil {
+		return meetingArchiveResult{}, fmt.Errorf("write meeting archive email status: %w", err)
+	}
+
+	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), %d participant(s), and %d project status item(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants), len(notes.ProjectStatuses))
 	if archivedBy != "" {
-		summary = fmt.Sprintf("%s archived meeting %s with %d transcript item(s), %d board card(s), and %d participant(s).", archivedBy, archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants))
+		summary = fmt.Sprintf("%s archived meeting %s with %d transcript item(s), %d board card(s), %d participant(s), and %d project status item(s).", archivedBy, archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants), len(notes.ProjectStatuses))
+	}
+	if email.Sent {
+		summary += fmt.Sprintf(" Meeting notes were emailed to %d recipient(s).", len(email.Recipients))
+	} else if email.Skipped {
+		summary += " Meeting notes were generated but not emailed: " + email.Reason
+	} else if email.Error != "" {
+		summary += " Meeting notes were generated, but email failed: " + email.Error
 	}
 	if app.memory != nil {
 		_, _, err = app.memory.appendArchive(archiveID, summary, map[string]string{
@@ -1227,7 +1351,21 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		ArchivedBy:  archivedBy,
 		DownloadURL: meetingArchiveDownloadURL(archiveID),
 		Summary:     summary,
+		Notes:       notes,
+		Email:       email,
 	}, nil
+}
+
+func writeMeetingArchive(path string, archive meetingArchive) error {
+	rawArchive, err := json.MarshalIndent(archive, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode meeting archive: %w", err)
+	}
+	if err := os.WriteFile(path, rawArchive, 0o600); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func meetingArchiveDownloadURL(archiveID string) string {

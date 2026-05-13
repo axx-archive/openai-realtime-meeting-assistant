@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,7 +24,7 @@ import (
 var (
 	addr     = flag.String("addr", ":3000", "http service address")
 	upgrader = websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: websocketOriginAllowed,
 	}
 	indexTemplate = &template.Template{}
 
@@ -79,6 +80,7 @@ func main() {
 	defer kanbanApp.Close()
 	if err := kanbanApp.JoinConferenceRoom(); err != nil {
 		log.Errorf("Kanban Realtime peer disabled: %v", err)
+		broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
 	}
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
@@ -172,6 +174,26 @@ func configureEphemeralUDPPortRange(settingEngine *webrtc.SettingEngine) error {
 	}
 
 	return nil
+}
+
+func websocketOriginAllowed(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+
+	for _, allowedOrigin := range strings.Split(os.Getenv("MEETING_ALLOWED_ORIGINS"), ",") {
+		if strings.EqualFold(strings.TrimSpace(allowedOrigin), origin) {
+			return true
+		}
+	}
+
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	return strings.EqualFold(parsedOrigin.Host, r.Host)
 }
 
 // Add to list of tracks and fire renegotation for all PeerConnections.
@@ -367,6 +389,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
 	participantName := "participant"
 	participantAccepted := false
+	mediaJoined := false
 	participantMu := sync.Mutex{}
 	currentParticipantName := func() string {
 		participantMu.Lock()
@@ -381,6 +404,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	// When this frame returns close the Websocket
 	defer c.Close() //nolint
+	defer func() {
+		if participantAccepted {
+			kanbanApp.forgetParticipant(currentParticipantName())
+			broadcastKanbanEvent("participants", kanbanApp.participantSnapshot())
+		}
+	}()
 
 	// Create new PeerConnection
 	peerConnection, err := newPeerConnection()
@@ -554,12 +583,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			participantAccepted = true
 			kanbanApp.noteParticipant(name)
-			listLock.Lock()
-			peerConnections = append(peerConnections, peerConnectionState{
-				peerConnection: peerConnection,
-				websocket:      c,
-			})
-			listLock.Unlock()
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name": name,
 			}); err != nil {
@@ -567,6 +590,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
 				log.Errorf("Failed to send Kanban board state: %v", err)
+			}
+			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
+				log.Errorf("Failed to send undo state: %v", err)
 			}
 			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshot(20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
@@ -583,6 +609,27 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"name": name,
 			})
 			broadcastKanbanEvent("participants", kanbanApp.participantSnapshot())
+		case "media_ready":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before joining media.")
+				continue
+			}
+			if mediaJoined {
+				continue
+			}
+			mediaJoined = true
+			listLock.Lock()
+			peerConnections = append(peerConnections, peerConnectionState{
+				peerConnection: peerConnection,
+				websocket:      c,
+			})
+			listLock.Unlock()
+			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
+				log.Errorf("Failed to send Kanban board state after media join: %v", err)
+			}
+			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
+				log.Errorf("Failed to send undo state after media join: %v", err)
+			}
 			signalPeerConnections()
 		case "candidate":
 			candidate := webrtc.ICECandidateInit{}
@@ -644,6 +691,53 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					log.Errorf("Failed to send assistant query error: %v", writeErr)
 				}
 			}
+		case "manual_create_ticket":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
+				continue
+			}
+			args, err := manualBoardArgs(message)
+			if err != nil {
+				sendManualBoardError(c, err)
+				continue
+			}
+			broadcastManualBoardMutation(c, currentParticipantName(), "created a card", func() (map[string]any, bool, error) {
+				return kanbanApp.createTicket(args)
+			})
+		case "manual_update_ticket":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
+				continue
+			}
+			args, err := manualBoardArgs(message)
+			if err != nil {
+				sendManualBoardError(c, err)
+				continue
+			}
+			broadcastManualBoardMutation(c, currentParticipantName(), "updated a card", func() (map[string]any, bool, error) {
+				return kanbanApp.updateTicketDetails(args)
+			})
+		case "manual_delete_ticket":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
+				continue
+			}
+			args, err := manualBoardArgs(message)
+			if err != nil {
+				sendManualBoardError(c, err)
+				continue
+			}
+			broadcastManualBoardMutation(c, currentParticipantName(), "deleted a card", func() (map[string]any, bool, error) {
+				return kanbanApp.deleteTicket(args)
+			})
+		case "undo_delete_ticket":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
+				continue
+			}
+			broadcastManualBoardMutation(c, currentParticipantName(), "restored the last deleted card", func() (map[string]any, bool, error) {
+				return kanbanApp.restoreLastDeletedTicket()
+			})
 		case "archive_meeting":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before archiving the meeting.")
@@ -682,6 +776,43 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			log.Errorf("unknown message: %+v", message)
 		}
 	}
+}
+
+func manualBoardArgs(message *websocketMessage) (map[string]any, error) {
+	args := map[string]any{}
+	if strings.TrimSpace(message.Data) == "" {
+		return args, nil
+	}
+	if err := json.Unmarshal([]byte(message.Data), &args); err != nil {
+		return nil, fmt.Errorf("could not read board edit: %w", err)
+	}
+
+	return args, nil
+}
+
+func sendManualBoardError(c *threadSafeWriter, err error) {
+	if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
+		"kind":      "error",
+		"text":      err.Error(),
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}); writeErr != nil {
+		log.Errorf("Failed to send manual board error: %v", writeErr)
+	}
+}
+
+func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action string, apply func() (map[string]any, bool, error)) {
+	_, changed, err := apply()
+	if err != nil {
+		sendManualBoardError(c, err)
+		return
+	}
+	if !changed {
+		return
+	}
+
+	broadcastKanbanEvent("board", kanbanApp.snapshotState())
+	broadcastKanbanEvent("undo_available", kanbanApp.canUndoDelete())
+	broadcastAssistantEvent("action", fmt.Sprintf("%s %s", actor, action), nil)
 }
 
 // Helper to make Gorilla Websockets threadsafe.

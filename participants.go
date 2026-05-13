@@ -1,8 +1,11 @@
 package main
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
-const meetingRoomPassword = "B0NFIRE!"
+const defaultMeetingRoomPassword = "B0NFIRE!"
 
 var meetingParticipantNames = []string{
 	"Erick",
@@ -27,5 +30,43 @@ func canonicalParticipantName(name string) string {
 }
 
 func validMeetingPassword(password string) bool {
-	return strings.TrimSpace(password) == meetingRoomPassword
+	return strings.TrimSpace(password) == configuredMeetingRoomPassword()
+}
+
+func configuredMeetingRoomPassword() string {
+	if password := strings.TrimSpace(os.Getenv("MEETING_ROOM_PASSWORD")); password != "" {
+		return password
+	}
+
+	return defaultMeetingRoomPassword
+}
+
+func participantEmail(name string) string {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return ""
+	}
+	if strings.EqualFold(name, "Erick") {
+		return "e@shareability.com"
+	}
+
+	return strings.ToLower(name) + "@shareability.com"
+}
+
+func participantEmails(names []string) []string {
+	emails := make([]string, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		email := participantEmail(name)
+		if email == "" {
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		emails = append(emails, email)
+	}
+
+	return emails
 }
