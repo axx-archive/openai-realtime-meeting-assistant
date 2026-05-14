@@ -1048,6 +1048,47 @@
         justify-content: center;
       }
 
+      .device-control {
+        flex: 1 1 220px;
+        min-width: min(220px, 40vw);
+        max-width: 280px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .device-control span {
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.10em;
+      }
+
+      .device-select {
+        width: 100%;
+        min-height: 38px;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        background: rgba(255, 235, 200, 0.06);
+        color: var(--fg-1);
+        font-family: var(--font-sans);
+        font-size: 12.5px;
+        font-weight: 500;
+        line-height: 1;
+        padding: 0 30px 0 12px;
+        outline: 0;
+      }
+
+      .device-select:focus-visible {
+        border-color: rgba(255, 122, 43, 0.65);
+        box-shadow: var(--glow-ember-sm);
+      }
+
+      .device-select[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
       .btn {
         font-family: var(--font-sans);
         font-weight: 500;
@@ -1987,7 +2028,7 @@
 
       .hearth-stage {
         position: relative;
-        min-height: min(62vh, 620px);
+        min-height: min(74vh, 820px);
         height: 100%;
         display: grid;
         place-items: center;
@@ -2007,13 +2048,13 @@
         z-index: 1;
         display: grid;
         justify-items: center;
-        gap: var(--s-6);
+        gap: var(--s-5);
         width: 100%;
       }
 
       .hearth-speaker {
         position: relative;
-        width: min(64%, 640px);
+        width: min(88%, 1120px);
         min-width: 280px;
         aspect-ratio: 16 / 9;
         display: grid;
@@ -2135,20 +2176,20 @@
         flex-wrap: wrap;
         align-items: flex-end;
         justify-content: center;
-        gap: var(--s-5);
+        gap: var(--s-3);
         overflow: visible;
       }
 
       .hearth-seat {
         position: relative;
-        width: 38px;
-        height: 38px;
-        aspect-ratio: auto;
+        width: clamp(148px, 12vw, 220px);
+        height: auto;
+        aspect-ratio: 16 / 9;
         display: grid;
         place-items: center;
         overflow: hidden;
         border-width: 1px;
-        border-radius: 10px;
+        border-radius: 12px;
         background: #221812;
       }
 
@@ -2166,8 +2207,8 @@
       }
 
       .hearth-seat .owner-avatar {
-        width: 100%;
-        height: 100%;
+        width: 46px;
+        height: 46px;
         border: 0;
         box-shadow: none;
       }
@@ -2649,11 +2690,10 @@
           padding: var(--s-4);
         }
         .hearth-speaker {
-          width: min(100%, 320px);
+          width: min(100%, 420px);
         }
         .hearth-seat {
-          width: 68px;
-          height: 68px;
+          width: min(44vw, 150px);
         }
         .hearth-seat .owner-avatar {
           width: 44px;
@@ -2967,6 +3007,12 @@
         <p id="log" class="log" aria-live="polite">team meeting</p>
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Join the room</button>
+          <label class="device-control">
+            <span>mic</span>
+            <select id="micSelect" class="device-select" disabled>
+              <option value="">microphone</option>
+            </select>
+          </label>
           <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
           <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
@@ -3004,6 +3050,7 @@
       const joinButton = document.getElementById('join')
       const joinAccessButton = document.getElementById('joinAccess')
       const leaveButton = document.getElementById('leave')
+      const micSelect = document.getElementById('micSelect')
       const screenShareButton = document.getElementById('screenShare')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
       const accessPanel = document.getElementById('accessPanel')
@@ -3045,6 +3092,7 @@
       let ws
       let localStream
       let screenShareStream
+      let isReplacingLocalAudio = false
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
@@ -3089,6 +3137,7 @@
       joinButton.addEventListener('click', joinRoom)
       joinAccessButton.addEventListener('click', joinRoom)
       leaveButton.addEventListener('click', leaveRoom)
+      micSelect.addEventListener('change', switchMicrophone)
       screenShareButton.addEventListener('click', toggleScreenShare)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
@@ -3099,6 +3148,11 @@
       roomPasswordInput.addEventListener('input', validateAccess)
       assistantForm.addEventListener('submit', sendAssistantQuery)
       window.addEventListener('beforeunload', leaveRoom)
+      navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+        refreshAudioInputDevices().catch(error => {
+          console.warn('Could not refresh audio devices', error)
+        })
+      })
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
           if (appShell.classList.contains('is-board-expanded')) {
@@ -3289,7 +3343,8 @@
         setLog('requesting camera and microphone')
         localStream = await getPreferredUserMedia()
         localVideo.srcObject = localStream
-        attachAudioMonitor('local', currentParticipantName, localStream.getAudioTracks()[0], { play: false, setsActiveSpeaker: false })
+        wireLocalAudioTrack(localStream.getAudioTracks()[0])
+        await refreshAudioInputDevices()
         updateHearthParticipants()
 
         pc = new RTCPeerConnection()
@@ -3336,10 +3391,7 @@
         try {
           const audioStream = await navigator.mediaDevices.getUserMedia({
             video: false,
-            audio: {
-              ...mediaConstraints.audio,
-              deviceId: { exact: preferredAudioDeviceId }
-            }
+            audio: audioConstraintsForDevice(preferredAudioDeviceId)
           })
           const preferredAudioTrack = audioStream.getAudioTracks()[0]
           if (!preferredAudioTrack) {
@@ -3352,6 +3404,179 @@
         } catch (error) {
           console.warn('Could not switch away from continuity microphone', error)
           return stream
+        }
+      }
+
+      function audioConstraintsForDevice(deviceId) {
+        return deviceId
+          ? { ...mediaConstraints.audio, deviceId: { exact: deviceId } }
+          : { ...mediaConstraints.audio }
+      }
+
+      function localAudioTrack() {
+        return (localStream?.getAudioTracks?.() || [])[0] || null
+      }
+
+      function localAudioDeviceId() {
+        return localAudioTrack()?.getSettings?.().deviceId || ''
+      }
+
+      function wireLocalAudioTrack(track) {
+        if (!track) {
+          return
+        }
+        attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
+        track.addEventListener('ended', handleLocalAudioEnded, { once: true })
+      }
+
+      async function refreshAudioInputDevices(selectedDeviceId = localAudioDeviceId()) {
+        if (!localStream || !navigator.mediaDevices?.enumerateDevices) {
+          micSelect.disabled = true
+          micSelect.replaceChildren(audioInputOption('', 'microphone'))
+          return
+        }
+
+        let devices = []
+        try {
+          devices = await navigator.mediaDevices.enumerateDevices()
+        } catch (error) {
+          console.warn('Could not enumerate audio devices', error)
+          micSelect.disabled = true
+          return
+        }
+
+        const audioInputs = devices.filter(device => device.kind === 'audioinput')
+        const options = [audioInputOption('', 'system default')]
+        audioInputs
+          .filter(device => device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications')
+          .forEach((device, index) => {
+            options.push(audioInputOption(device.deviceId, audioInputLabel(device, index)))
+          })
+
+        micSelect.replaceChildren(...options)
+        micSelect.value = options.some(option => option.value === selectedDeviceId) ? selectedDeviceId : ''
+        micSelect.disabled = !localStream || options.length < 2
+      }
+
+      function audioInputOption(value, label) {
+        const option = document.createElement('option')
+        option.value = value
+        option.textContent = label
+        return option
+      }
+
+      function audioInputLabel(device, index) {
+        return (device.label || '').replace(/^(default|communications)\s*-\s*/i, '').trim()
+          || `microphone ${index + 1}`
+      }
+
+      async function switchMicrophone() {
+        if (!localStream || !navigator.mediaDevices?.getUserMedia) {
+          return
+        }
+
+        const selectedDeviceId = micSelect.value
+        const previousDeviceId = localAudioDeviceId()
+        micSelect.disabled = true
+
+        let audioStream
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: audioConstraintsForDevice(selectedDeviceId)
+          })
+          const nextTrack = audioStream.getAudioTracks()[0]
+          if (!nextTrack) {
+            throw new Error('selected microphone did not provide audio')
+          }
+          await replaceLocalAudioTrack(nextTrack)
+          await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
+          setLog(`using ${nextTrack.label || 'selected microphone'}`)
+        } catch (error) {
+          audioStream?.getTracks().forEach(track => track.stop())
+          console.warn('Could not switch microphone', error)
+          setLog('could not switch microphone; keeping the current one')
+          await refreshAudioInputDevices(previousDeviceId)
+        }
+      }
+
+      async function replaceLocalAudioTrack(nextTrack) {
+        if (!localStream || !nextTrack) {
+          return
+        }
+
+        const previousTrack = localAudioTrack()
+        if (previousTrack === nextTrack) {
+          return
+        }
+
+        const audioSender = pc?.getSenders().find(sender => sender.track?.kind === 'audio')
+        if (audioSender) {
+          await audioSender.replaceTrack(nextTrack)
+          await configureOutboundSender(audioSender, nextTrack)
+        }
+
+        if (previousTrack) {
+          localStream.removeTrack(previousTrack)
+        }
+        localStream.addTrack(nextTrack)
+
+        detachAudioMonitor('local')
+        isReplacingLocalAudio = true
+        try {
+          previousTrack?.stop()
+        } finally {
+          window.setTimeout(() => {
+            isReplacingLocalAudio = false
+          }, 0)
+        }
+
+        wireLocalAudioTrack(nextTrack)
+        updateHearthParticipants()
+      }
+
+      async function handleLocalAudioEnded() {
+        if (isReplacingLocalAudio || !localStream || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        await recoverLocalMicrophone()
+      }
+
+      async function recoverLocalMicrophone() {
+        const selectedDeviceId = micSelect.value || localAudioDeviceId()
+        let audioStream
+        try {
+          audioStream = await getFallbackAudioStream(selectedDeviceId)
+          const nextTrack = audioStream.getAudioTracks()[0]
+          if (!nextTrack) {
+            throw new Error('microphone did not provide audio')
+          }
+          await replaceLocalAudioTrack(nextTrack)
+          await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
+          setLog(`microphone reconnected: ${nextTrack.label || 'system default'}`)
+        } catch (error) {
+          audioStream?.getTracks().forEach(track => track.stop())
+          console.warn('Could not recover microphone', error)
+          setLog('microphone disconnected; choose another mic')
+          await refreshAudioInputDevices('')
+        }
+      }
+
+      async function getFallbackAudioStream(deviceId) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: audioConstraintsForDevice(deviceId)
+          })
+        } catch (error) {
+          if (!deviceId) {
+            throw error
+          }
+          console.warn('Selected microphone disappeared; trying system default', error)
+          return navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: audioConstraintsForDevice('')
+          })
         }
       }
 
@@ -5282,6 +5507,8 @@
       function leaveRoom() {
         stopScreenShare().catch(() => {})
         leaveButton.disabled = true
+        micSelect.disabled = true
+        micSelect.replaceChildren(audioInputOption('', 'microphone'))
         screenShareButton.disabled = true
         archiveMeetingButton.disabled = true
         screenShareButton.textContent = 'Share screen'
@@ -5301,6 +5528,7 @@
           localStream.getTracks().forEach(track => track.stop())
         }
         localStream = undefined
+        isReplacingLocalAudio = false
         localVideo.srcObject = null
         localVideoLabel.textContent = 'you'
         clearAudioMonitors()
