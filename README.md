@@ -115,6 +115,8 @@ You can update:
 - The Realtime instructions in `sessionInstructions` in `kanban.go`.
 - The tools exposed to the model in `kanbanTools` in `kanban.go`.
 - The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
+- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`low`, `medium`, or `high`); the default is `medium` for `gpt-realtime-2`.
+- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `auto` eagerness.
 - The browser UI in `index.html`.
 - The HTTP bind address with the `-addr` flag in `main.go`.
 

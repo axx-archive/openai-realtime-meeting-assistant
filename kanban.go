@@ -20,7 +20,9 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
-	defaultReasoningEffort    = "low"
+	defaultReasoningEffort    = "medium"
+	defaultRealtimeVADType    = "semantic_vad"
+	defaultVADEagerness       = "auto"
 	defaultKanbanBoardPath    = "data/kanban-board.json"
 	realtimeEventChannelLabel = "oai-events"
 	realtimeInputTrackID      = "kanban-realtime:mixed-audio"
@@ -730,14 +732,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 					"model":    "gpt-4o-mini-transcribe",
 					"language": "en",
 				},
-				"turn_detection": map[string]any{
-					"type":                "server_vad",
-					"threshold":           0.5,
-					"prefix_padding_ms":   300,
-					"silence_duration_ms": 200,
-					"create_response":     true,
-					"interrupt_response":  false,
-				},
+				"turn_detection": realtimeTurnDetectionConfig(),
 			},
 		},
 		"instructions": app.sessionInstructions(),
@@ -747,7 +742,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 
 	if usesAdvancedCommandProfile(model) {
 		session["reasoning"] = map[string]any{
-			"effort": defaultReasoningEffort,
+			"effort": realtimeReasoningEffort(),
 		}
 	}
 
@@ -769,6 +764,58 @@ func realtimeModel() string {
 	return defaultRealtimeModel
 }
 
+func realtimeReasoningEffort() string {
+	effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_REASONING_EFFORT")))
+	switch effort {
+	case "low", "medium", "high":
+		return effort
+	default:
+		return defaultReasoningEffort
+	}
+}
+
+func realtimeTurnDetectionConfig() map[string]any {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_VAD_TYPE"))) {
+	case "server_vad":
+		return map[string]any{
+			"type":                "server_vad",
+			"threshold":           0.5,
+			"prefix_padding_ms":   300,
+			"silence_duration_ms": 300,
+			"create_response":     true,
+			"interrupt_response":  false,
+		}
+	case "semantic_vad", "":
+		return map[string]any{
+			"type":               "semantic_vad",
+			"eagerness":          realtimeVADEagerness(),
+			"create_response":    true,
+			"interrupt_response": false,
+		}
+	default:
+		return realtimeTurnDetectionConfigWithDefaults()
+	}
+}
+
+func realtimeTurnDetectionConfigWithDefaults() map[string]any {
+	return map[string]any{
+		"type":               defaultRealtimeVADType,
+		"eagerness":          realtimeVADEagerness(),
+		"create_response":    true,
+		"interrupt_response": false,
+	}
+}
+
+func realtimeVADEagerness() string {
+	eagerness := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_VAD_EAGERNESS")))
+	switch eagerness {
+	case "low", "medium", "high", "auto":
+		return eagerness
+	default:
+		return defaultVADEagerness
+	}
+}
+
 func usesAdvancedCommandProfile(model string) bool {
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
 	return normalizedModel == "gpt-realtime-2"
@@ -776,32 +823,17 @@ func usesAdvancedCommandProfile(model string) bool {
 
 func (app *kanbanBoardApp) sessionInstructions() string {
 	return strings.Join([]string{
-		"You are a voice-operated Kanban board operator.",
-		"Listen to the user and decide whether they want to create a ticket, move a ticket between columns, add tags to a ticket, update a ticket, delete a ticket, or do nothing.",
-		"Use the board card ids exactly as provided when operating on existing tickets.",
-		"Users may say ticket, card, task, issue, or sticky note; treat those as Kanban cards.",
-		"Available columns are Backlog, In Progress, Blocked, and Done.",
-		fmt.Sprintf("Known meeting participants are: %s.", strings.Join(meetingParticipantNames, ", ")),
-		"When the speaker names a person as responsible for work, set the ticket owner to that exact participant name. Leave owner Unassigned when responsibility is unclear.",
-		"This is used during standups and meetings. Treat concrete first-person status updates as implicit board operations; do not wait for the user to say create a ticket.",
-		"If a user says they shipped, fixed, completed, closed, or finished work, move an existing related ticket to Done if one exists; otherwise create a concise Done ticket.",
-		"If a user says they started, began, picked up, or are working on something, move an existing related ticket to In Progress if one exists; otherwise create a concise In Progress ticket.",
-		"If a user says they are blocked, waiting on something, dependent on another team, or that work might slip, move or create the related ticket in Blocked and add blocked, dependency, or risk tags as appropriate.",
-		"Track meeting context across turns. If a follow-up sentence adds dependency, blocker, or schedule-risk context for the most recently discussed related card, update or move that existing ticket instead of creating a duplicate.",
-		"Meeting transcripts are saved as durable memory. If the user asks what was said, decided, discussed, remembered, mentioned earlier, or asks a recall question, call answer_memory_question with the user's question as the query.",
-		"If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for notes or tags when useful.",
-		"If a user asks to start, work on, pick up, or begin a ticket, move it to In Progress.",
-		"If a user asks to block, mark blocked, or note a dependency for a ticket, move it to Blocked and preserve the blocker details in notes.",
-		"If a user asks to ship, finish, complete, close, or mark done, move it to Done.",
-		"If a user asks to park, punt, defer, or move something back, move it to Backlog.",
-		"If a user asks to add a tag, call add_tags; do not replace existing tags.",
-		"If one transcript contains multiple status updates, call one tool for each board operation.",
-		"If the user asks for an operation or gives an implicit status update, call the relevant tool. Prefer tools over text replies.",
-		"If the user is only wrapping up, handing off, giving filler, or saying something like That's it from me, call do_nothing with a short reason.",
-		"If the user is not asking for a board operation and is not giving a concrete status update, call do_nothing with a short reason.",
-		"Do not narrate board operations aloud.",
-		fmt.Sprintf("Current Kanban board JSON: %s", app.boardContextJSON()),
-	}, " ")
+		"# Role\nYou are a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
+		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
+		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
+		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
+		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
+		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
+		"# Tool policy\nIf one utterance changes status, notes, owner, and tags for the same existing card, prefer one update_ticket call with all changed fields. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation.",
+		"# Memory policy\nMeeting transcripts are saved as durable memory. If the user asks what was said, decided, discussed, remembered, mentioned earlier, or asks any recall question, call answer_memory_question with the user's full question as the query.",
+		"# No-op policy\nIf the user is wrapping up, handing off, giving filler, or not giving a concrete board operation or recall request, call do_nothing with a short user-visible reason.",
+		"# Response policy\nPrefer tools over text replies. Do not narrate board operations aloud.",
+	}, "\n\n")
 }
 
 func (app *kanbanBoardApp) boardContextJSON() string {
@@ -824,6 +856,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		"description": "Short labels that capture people, area, state, or risk. Use blocked/dependency/risk tags for blockers when appropriate.",
 		"items":       map[string]any{"type": "string"},
 	}
+	tagsToAddProperty := map[string]any{
+		"type":        "array",
+		"description": "Tags to add to the existing card. Existing tags are preserved.",
+		"items":       map[string]any{"type": "string"},
+	}
 	ownerProperty := map[string]any{
 		"type":        "string",
 		"description": "Responsible participant when the user names an owner or the work clearly belongs to someone.",
@@ -844,7 +881,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"tags":   tagsProperty,
 					"status": statusProperty,
 				},
-				"required":             []string{"title", "notes", "tags"},
+				"required":             []string{"title", "notes", "owner", "tags", "status"},
 				"additionalProperties": false,
 			},
 		},
@@ -870,7 +907,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"card_id": map[string]any{"type": "string", "description": "Existing board card id."},
-					"tags":    tagsProperty,
+					"tags":    tagsToAddProperty,
 				},
 				"required":             []string{"card_id", "tags"},
 				"additionalProperties": false,
@@ -879,7 +916,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "update_ticket",
-			"description": "Update the title or notes of an existing Kanban ticket/card. Use this to merge follow-up standup details, dependency details, or slip-risk context into the existing notes.",
+			"description": "Update one existing Kanban ticket/card atomically. Prefer this when one utterance changes status, owner, notes, title, or tags for the same card.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -887,6 +924,8 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"title":   map[string]any{"type": "string", "description": "Replacement title, when the existing title should be made clearer."},
 					"notes":   map[string]any{"type": "string", "description": "Full replacement notes. Preserve useful existing notes while adding the new context."},
 					"owner":   ownerProperty,
+					"tags":    tagsToAddProperty,
+					"status":  statusProperty,
 				},
 				"required":             []string{"card_id"},
 				"additionalProperties": false,
@@ -1238,6 +1277,15 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	title := asString(args["title"])
 	notes := asString(args["notes"])
 	owner := normalizeCardOwner(args["owner"])
+	tags := uniqueStrings(asStringSlice(args["tags"]))
+	var status kanbanStatus
+	if rawStatus, ok := args["status"]; ok && asString(rawStatus) != "" {
+		parsedStatus, err := parseKanbanStatus(rawStatus)
+		if err != nil {
+			return nil, false, err
+		}
+		status = parsedStatus
+	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -1255,6 +1303,12 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	if owner != "" {
 		card.Owner = owner
 	}
+	if status != "" {
+		card.Status = status
+	}
+	if len(tags) > 0 {
+		card.Tags = uniqueStrings(append(card.Tags, tags...))
+	}
 	if err := app.touchLocked(); err != nil {
 		return nil, false, err
 	}
@@ -1263,6 +1317,7 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 		"ok":      true,
 		"updated": true,
 		"card_id": cardID,
+		"card":    cloneKanbanCard(*card),
 	}, true, nil
 }
 
