@@ -2876,7 +2876,7 @@
             <div id="assistantFeed" class="assistant-feed">
               <article class="assistant-message assistant-message--status">
                 <span class="assistant-meta">ready</span>
-                <span class="assistant-text">waiting for room audio.</span>
+                <span class="assistant-text">ask Scout anything.</span>
               </article>
             </div>
             <form id="assistantForm" class="assistant-form">
@@ -3102,6 +3102,8 @@
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
+      let pendingActiveSpeakerName = ''
+      let pendingActiveSpeakerSince = 0
       let participantsInRoom = []
       let participantPreview = []
       let roomCapacity = 10
@@ -3124,9 +3126,9 @@
       let queuedRemoteCandidates = []
       const mediaConstraints = {
         video: {
-          width: { ideal: 640, max: 640 },
-          height: { ideal: 360, max: 360 },
-          frameRate: { ideal: 15, max: 15 },
+          width: { ideal: 960, max: 960 },
+          height: { ideal: 540, max: 540 },
+          frameRate: { ideal: 20, max: 20 },
           facingMode: 'user'
         },
         audio: {
@@ -3138,7 +3140,7 @@
       }
       const outboundMediaLimits = {
         audio: { maxBitrate: 24000 },
-        video: { maxBitrate: 450000, maxFramerate: 15 }
+        video: { maxBitrate: 850000, maxFramerate: 20 }
       }
 
       joinButton.addEventListener('click', joinRoom)
@@ -3336,6 +3338,9 @@
         }
         if (track.kind === 'video' && Number.isFinite(limits.maxFramerate)) {
           encoding.maxFramerate = limits.maxFramerate
+          if ('degradationPreference' in parameters) {
+            parameters.degradationPreference = 'maintain-resolution'
+          }
         }
 
         try {
@@ -3343,6 +3348,15 @@
         } catch (error) {
           console.warn('Could not apply outbound media limits', error)
         }
+      }
+
+      async function configureOutboundSenders() {
+        if (!pc) {
+          return
+        }
+        await Promise.all(pc.getSenders()
+          .filter(sender => sender.track)
+          .map(sender => configureOutboundSender(sender, sender.track)))
       }
 
       async function beginMediaSession() {
@@ -3644,6 +3658,7 @@
             await attachLocalTracksToOffer(offer)
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
+            await configureOutboundSenders()
             ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
             break
           }
@@ -4090,9 +4105,9 @@
       function renderScreenStage() {
         if (!activeScreenShareParticipant) {
           presentationTile.classList.remove('is-screen-sharing')
-          screenStageVideo.srcObject = null
+          setVideoElementStream(screenStageVideo, null)
           screenStageLabel.textContent = 'screen share'
-          screenSpeakerVideo.srcObject = null
+          setVideoElementStream(screenSpeakerVideo, null)
           screenSpeakerLabel.textContent = 'speaker'
           return
         }
@@ -4101,7 +4116,7 @@
           ? screenShareStream
           : remoteStreamsByParticipant.get(activeScreenShareParticipant)
         presentationTile.classList.add('is-screen-sharing')
-        screenStageVideo.srcObject = stream || null
+        setVideoElementStream(screenStageVideo, stream)
         screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
         updateSpeakerPictureInPicture()
       }
@@ -4133,6 +4148,8 @@
         const knownNames = participantNamesForRoom()
         if (candidate && knownNames.some(name => name.toLowerCase() === candidate.toLowerCase())) {
           activeSpeakerName = knownNames.find(name => name.toLowerCase() === candidate.toLowerCase()) || candidate
+          pendingActiveSpeakerName = ''
+          pendingActiveSpeakerSince = 0
         }
         updateHearthParticipants()
       }
@@ -4162,14 +4179,24 @@
         return remoteStreamsByParticipant.get(name) || null
       }
 
+      function setVideoElementStream(video, stream, { hidden = false, local = false } = {}) {
+        const nextStream = stream || null
+        if (video.srcObject !== nextStream) {
+          video.srcObject = nextStream
+          if (nextStream) {
+            video.play?.().catch(() => {})
+          }
+        }
+        video.hidden = hidden || !nextStream
+        video.classList.toggle('is-local', local)
+      }
+
       function updateHearthParticipants() {
         const speaker = activeSpeakerDisplayName()
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
 
-        activeSpeakerVideo.srcObject = stream || null
-        activeSpeakerVideo.hidden = !stream
-        activeSpeakerVideo.classList.toggle('is-local', speakerIsLocal)
+        setVideoElementStream(activeSpeakerVideo, stream, { local: speakerIsLocal })
         activeSpeakerAvatar.hidden = Boolean(stream)
         if (!stream) {
           activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
@@ -4198,9 +4225,7 @@
         const speaker = activeSpeakerDisplayName()
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
-        screenSpeakerVideo.srcObject = stream || null
-        screenSpeakerVideo.hidden = !stream
-        screenSpeakerVideo.classList.toggle('is-local', speakerIsLocal)
+        setVideoElementStream(screenSpeakerVideo, stream, { local: speakerIsLocal })
         screenSpeakerAvatar.hidden = Boolean(stream)
         if (!stream) {
           screenSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
@@ -4427,8 +4452,19 @@
             }
           }
           if (loudestName && loudestLevel > 0.045 && loudestName !== activeSpeakerName) {
-            activeSpeakerName = loudestName
-            updateHearthParticipants()
+            const now = performance.now()
+            if (pendingActiveSpeakerName !== loudestName) {
+              pendingActiveSpeakerName = loudestName
+              pendingActiveSpeakerSince = now
+            } else if (now - pendingActiveSpeakerSince >= 700) {
+              activeSpeakerName = loudestName
+              pendingActiveSpeakerName = ''
+              pendingActiveSpeakerSince = 0
+              updateHearthParticipants()
+            }
+          } else {
+            pendingActiveSpeakerName = ''
+            pendingActiveSpeakerSince = 0
           }
           audioLevelFrame = hasLiveAnalyser ? requestAnimationFrame(tick) : 0
         }
@@ -4585,6 +4621,9 @@
         if (!entry?.text) {
           return
         }
+        if (!isScoutFeedMessage(entry.kind)) {
+          return
+        }
 
         const message = {
           id: entry.id || `assistant-${Date.now()}-${assistantMessages.length}`,
@@ -4600,6 +4639,10 @@
         renderAssistantMessages(message.id)
       }
 
+      function isScoutFeedMessage(kind) {
+        return ['query', 'answer', 'error'].includes(assistantMessageKind(kind))
+      }
+
       function renderAssistantMessages(enteringId = '') {
         if (assistantMessages.length === 0) {
           const empty = document.createElement('article')
@@ -4609,7 +4652,7 @@
           meta.textContent = 'ready'
           const text = document.createElement('span')
           text.className = 'assistant-text'
-          text.textContent = 'waiting for room audio.'
+          text.textContent = 'ask Scout anything.'
           empty.append(meta, text)
           assistantFeed.replaceChildren(empty)
           assistantState.textContent = 'ready'
@@ -5581,6 +5624,8 @@
         participantPlaceholders.clear()
         activeScreenShareParticipant = ''
         activeSpeakerName = ''
+        pendingActiveSpeakerName = ''
+        pendingActiveSpeakerSince = 0
         participantsInRoom = []
         currentParticipantName = ''
         canEditBoard = false
