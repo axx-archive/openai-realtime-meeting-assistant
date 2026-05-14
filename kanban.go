@@ -21,6 +21,7 @@ const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
 	defaultReasoningEffort    = "low"
+	defaultKanbanBoardPath    = "data/kanban-board.json"
 	realtimeEventChannelLabel = "oai-events"
 	realtimeInputTrackID      = "kanban-realtime:mixed-audio"
 	realtimeInputStreamID     = "kanban-realtime-input"
@@ -179,15 +180,155 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		log.Errorf("Meeting memory disabled: %v", err)
 	}
 
-	return &kanbanBoardApp{
-		cards:             cloneKanbanCards(initialKanbanBoardCards),
-		nextCreatedIndex:  1,
-		updatedAt:         time.Now().UTC(),
+	cards := cloneKanbanCards(initialKanbanBoardCards)
+	updatedAt := time.Now().UTC()
+	loadedBoard := false
+	boardPersistenceHealthy := true
+	if board, ok, err := loadKanbanBoardState(kanbanBoardPath()); err != nil {
+		log.Errorf("Kanban board persistence disabled: %v", err)
+		boardPersistenceHealthy = false
+	} else if ok {
+		cards = cloneKanbanCards(board.Cards)
+		if parsedUpdatedAt, err := time.Parse(time.RFC3339Nano, board.UpdatedAt); err == nil {
+			updatedAt = parsedUpdatedAt.UTC()
+		}
+		loadedBoard = true
+	}
+
+	app := &kanbanBoardApp{
+		cards:             cards,
+		nextCreatedIndex:  nextKanbanCardIndex(cards),
+		updatedAt:         updatedAt,
 		handledCalls:      map[string]struct{}{},
 		memory:            memory,
 		participants:      map[string]time.Time{},
 		participantCounts: map[string]int{},
 	}
+	if !loadedBoard && boardPersistenceHealthy {
+		if err := app.persistBoard(); err != nil {
+			log.Errorf("Could not persist initial Kanban board: %v", err)
+		}
+	}
+
+	return app
+}
+
+func kanbanBoardPath() string {
+	if path := strings.TrimSpace(os.Getenv("KANBAN_BOARD_PATH")); path != "" {
+		return path
+	}
+	if memoryPath := meetingMemoryPath(); strings.TrimSpace(memoryPath) != "" {
+		return filepath.Join(filepath.Dir(memoryPath), "kanban-board.json")
+	}
+
+	return defaultKanbanBoardPath
+}
+
+func loadKanbanBoardState(path string) (kanbanBoardState, bool, error) {
+	rawBoard, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return kanbanBoardState{}, false, nil
+		}
+		return kanbanBoardState{}, false, fmt.Errorf("read Kanban board: %w", err)
+	}
+	if len(bytes.TrimSpace(rawBoard)) == 0 {
+		return kanbanBoardState{}, false, nil
+	}
+
+	var state kanbanBoardState
+	if err := json.Unmarshal(rawBoard, &state); err != nil {
+		return kanbanBoardState{}, false, fmt.Errorf("decode Kanban board: %w", err)
+	}
+	state.Cards = normalizeKanbanCards(state.Cards)
+
+	return state, true, nil
+}
+
+func writeKanbanBoardState(path string, state kanbanBoardState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create Kanban board directory: %w", err)
+	}
+
+	rawBoard, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode Kanban board: %w", err)
+	}
+	rawBoard = append(rawBoard, '\n')
+
+	tmpPath := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
+	if err := os.WriteFile(tmpPath, rawBoard, 0o600); err != nil {
+		return fmt.Errorf("write Kanban board: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace Kanban board: %w", err)
+	}
+
+	return nil
+}
+
+func normalizeKanbanCards(cards []kanbanCard) []kanbanCard {
+	normalized := make([]kanbanCard, 0, len(cards))
+	seenIDs := map[string]struct{}{}
+	for index, card := range cards {
+		card.ID = strings.TrimSpace(card.ID)
+		if card.ID == "" {
+			card.ID = fmt.Sprintf("persisted-card-%03d", index+1)
+		}
+		if _, exists := seenIDs[card.ID]; exists {
+			card.ID = fmt.Sprintf("%s-%d", card.ID, index+1)
+		}
+		seenIDs[card.ID] = struct{}{}
+
+		if !knownKanbanStatus(card.Status) {
+			card.Status = kanbanStatusBacklog
+		}
+		card.Title = strings.TrimSpace(card.Title)
+		if card.Title == "" {
+			card.Title = "Untitled card"
+		}
+		card.Notes = strings.TrimSpace(card.Notes)
+		card.Owner = normalizePersistedCardOwner(card.Owner)
+		card.Tags = uniqueStrings(card.Tags)
+		normalized = append(normalized, cloneKanbanCard(card))
+	}
+
+	return normalized
+}
+
+func normalizePersistedCardOwner(owner string) string {
+	owner = strings.TrimSpace(owner)
+	if owner == "" || strings.EqualFold(owner, "Unassigned") {
+		return "Unassigned"
+	}
+	if canonicalOwner := canonicalParticipantName(owner); canonicalOwner != "" {
+		return canonicalOwner
+	}
+
+	return owner
+}
+
+func knownKanbanStatus(status kanbanStatus) bool {
+	for _, candidate := range kanbanStatuses {
+		if status == candidate {
+			return true
+		}
+	}
+
+	return false
+}
+
+func nextKanbanCardIndex(cards []kanbanCard) int {
+	nextIndex := 1
+	for _, card := range cards {
+		var cardIndex int
+		if _, err := fmt.Sscanf(card.ID, "kanban-card-%d", &cardIndex); err == nil && cardIndex >= nextIndex {
+			nextIndex = cardIndex + 1
+		}
+	}
+
+	return nextIndex
 }
 
 func (app *kanbanBoardApp) JoinConferenceRoom() error {
@@ -1018,7 +1159,9 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		Tags:   tags,
 	}
 	app.cards = append(app.cards, card)
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -1046,7 +1189,9 @@ func (app *kanbanBoardApp) moveTicket(args map[string]any) (map[string]any, bool
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
 	card.Status = status
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -1072,7 +1217,9 @@ func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, e
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
 	card.Tags = uniqueStrings(append(card.Tags, tags...))
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":         true,
@@ -1108,7 +1255,9 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	if owner != "" {
 		card.Owner = owner
 	}
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -1150,7 +1299,9 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 	card.Owner = owner
 	card.Notes = notes
 	card.Tags = tags
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -1181,7 +1332,9 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 	deletedCard := cloneKanbanCard(app.cards[index])
 	app.lastDeletedCard = &deletedCard
 	app.cards = append(app.cards[:index], app.cards[index+1:]...)
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -1204,7 +1357,9 @@ func (app *kanbanBoardApp) restoreLastDeletedTicket() (map[string]any, bool, err
 	}
 	app.cards = append(app.cards, restoredCard)
 	app.lastDeletedCard = nil
-	app.touchLocked()
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
 
 	return map[string]any{
 		"ok":       true,
@@ -1453,8 +1608,27 @@ func (app *kanbanBoardApp) findCardLocked(cardID string) (*kanbanCard, bool) {
 	return nil, false
 }
 
-func (app *kanbanBoardApp) touchLocked() {
+func (app *kanbanBoardApp) touchLocked() error {
 	app.updatedAt = time.Now().UTC()
+	return app.persistBoardLocked()
+}
+
+func (app *kanbanBoardApp) persistBoard() error {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.persistBoardLocked()
+}
+
+func (app *kanbanBoardApp) persistBoardLocked() error {
+	state := kanbanBoardState{
+		Cards: cloneKanbanCards(app.cards),
+	}
+	if !app.updatedAt.IsZero() {
+		state.UpdatedAt = app.updatedAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	return writeKanbanBoardState(kanbanBoardPath(), state)
 }
 
 func cloneKanbanCards(cards []kanbanCard) []kanbanCard {
