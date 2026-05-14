@@ -93,6 +93,7 @@ func main() {
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
+	http.HandleFunc("/participants", participantsHandler)
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,18 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	http.ServeFile(w, r, archivePath)
+}
+
+func participantsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(kanbanApp.roomSnapshot()); err != nil {
+		log.Errorf("Failed to encode participant snapshot: %v", err)
+	}
 }
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -290,7 +303,9 @@ func signalPeerConnections() { // nolint
 				}
 
 				if _, ok := existingSenders[trackID]; !ok {
-					if _, err := peer.peerConnection.AddTrack(trackLocal); err != nil {
+					if _, err := peer.peerConnection.AddTransceiverFromTrack(trackLocal, webrtc.RTPTransceiverInit{
+						Direction: webrtc.RTPTransceiverDirectionSendonly,
+					}); err != nil {
 						return true
 					}
 				}
@@ -390,6 +405,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	participantName := "participant"
 	participantAccepted := false
 	mediaJoined := false
+	pendingRemoteCandidates := make([]webrtc.ICECandidateInit, 0)
 	participantMu := sync.Mutex{}
 	currentParticipantName := func() string {
 		participantMu.Lock()
@@ -407,7 +423,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	defer func() {
 		if participantAccepted {
 			kanbanApp.forgetParticipant(currentParticipantName())
-			broadcastKanbanEvent("participants", kanbanApp.participantSnapshot())
+			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 		}
 	}()
 
@@ -577,14 +593,18 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Choose a listed participant and enter the room password.")
 				continue
 			}
-			setParticipantName(name)
 			if participantAccepted {
 				continue
 			}
+			admittedName, err := kanbanApp.admitParticipant(name)
+			if err != nil {
+				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
+				continue
+			}
+			setParticipantName(admittedName)
 			participantAccepted = true
-			kanbanApp.noteParticipant(name)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
-				"name": name,
+				"name": admittedName,
 			}); err != nil {
 				log.Errorf("Failed to send access grant: %v", err)
 			}
@@ -606,9 +626,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 			}
 			broadcastKanbanEvent("participant_joined", map[string]any{
-				"name": name,
+				"name": admittedName,
 			})
-			broadcastKanbanEvent("participants", kanbanApp.participantSnapshot())
+			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 		case "media_ready":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before joining media.")
@@ -641,10 +661,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 			log.Infof("Got candidate: %v", candidate)
 
+			if peerConnection.RemoteDescription() == nil {
+				pendingRemoteCandidates = append(pendingRemoteCandidates, candidate)
+				log.Infof("Queued ICE candidate until remote description is set")
+				continue
+			}
+
 			if err := peerConnection.AddICECandidate(candidate); err != nil {
 				log.Errorf("Failed to add ICE candidate: %v", err)
-
-				return
 			}
 		case "answer":
 			answer := webrtc.SessionDescription{}
@@ -661,6 +685,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 				return
 			}
+			for _, candidate := range pendingRemoteCandidates {
+				if err := peerConnection.AddICECandidate(candidate); err != nil {
+					log.Errorf("Failed to add queued ICE candidate: %v", err)
+				}
+			}
+			pendingRemoteCandidates = pendingRemoteCandidates[:0]
 		case "assistant_query":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before asking the assistant.")

@@ -1234,16 +1234,24 @@ func (app *kanbanBoardApp) snapshotState() kanbanBoardState {
 	return state
 }
 
-func (app *kanbanBoardApp) noteParticipant(name string) {
+func (app *kanbanBoardApp) admitParticipant(name string) (string, error) {
 	name = canonicalParticipantName(name)
 	if name == "" {
-		return
+		return "", fmt.Errorf("choose a listed participant and enter the room password")
 	}
 
 	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	capacity := configuredMeetingRoomCapacity()
+	if active := app.activeParticipantCountLocked(); active >= capacity {
+		return "", fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
+	}
+
 	app.participants[name] = time.Now().UTC()
 	app.participantCounts[name]++
-	app.mu.Unlock()
+
+	return name, nil
 }
 
 func (app *kanbanBoardApp) forgetParticipant(name string) {
@@ -1264,10 +1272,32 @@ func (app *kanbanBoardApp) forgetParticipant(name string) {
 	app.participants[name] = time.Now().UTC()
 }
 
+func (app *kanbanBoardApp) activeParticipantCount() int {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.activeParticipantCountLocked()
+}
+
+func (app *kanbanBoardApp) activeParticipantCountLocked() int {
+	active := 0
+	for _, count := range app.participantCounts {
+		if count > 0 {
+			active += count
+		}
+	}
+
+	return active
+}
+
 func (app *kanbanBoardApp) participantSnapshot() []string {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
+	return app.participantSnapshotLocked()
+}
+
+func (app *kanbanBoardApp) participantSnapshotLocked() []string {
 	participants := make([]string, 0, len(app.participants))
 	for _, candidate := range meetingParticipantNames {
 		if app.participantCounts[candidate] > 0 {
@@ -1276,6 +1306,27 @@ func (app *kanbanBoardApp) participantSnapshot() []string {
 	}
 
 	return participants
+}
+
+func (app *kanbanBoardApp) roomSnapshot() map[string]any {
+	capacity := configuredMeetingRoomCapacity()
+
+	app.mu.Lock()
+	participants := app.participantSnapshotLocked()
+	occupiedSeats := app.activeParticipantCountLocked()
+	app.mu.Unlock()
+
+	availableSeats := capacity - occupiedSeats
+	if availableSeats < 0 {
+		availableSeats = 0
+	}
+
+	return map[string]any{
+		"participants":   participants,
+		"capacity":       capacity,
+		"occupiedSeats":  occupiedSeats,
+		"availableSeats": availableSeats,
+	}
 }
 
 func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResult, error) {

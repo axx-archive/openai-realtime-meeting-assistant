@@ -10,6 +10,7 @@ Caddy terminates HTTPS/WSS, and Docker publishes a small UDP range for WebRTC me
 - UDP ports 40000-40100 open.
 - A public IPv4 address.
 - A DNS host that points at the Droplet. For a quick demo, use `PUBLIC_IP.nip.io`.
+- Enough sustained outbound bandwidth for the room size. The default 10-seat video room needs roughly 45 Mbps egress before protocol overhead, so leave comfortable headroom.
 
 ## One-time Droplet setup
 
@@ -31,6 +32,7 @@ Edit `.env`:
 ```bash
 OPENAI_API_KEY=sk-proj-...
 MEETING_ROOM_PASSWORD=<room-passcode>
+MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io
 MEETING_MEMORY_PATH=/app/data/meeting-memory.jsonl
 PION_NAT1TO1_IP=<droplet-public-ip>

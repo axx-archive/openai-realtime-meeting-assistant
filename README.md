@@ -73,6 +73,12 @@ When the server starts, it creates the OpenAI Realtime peer if `OPENAI_API_KEY` 
 6. Click **Send notes** to archive the meeting, generate meeting notes, and email them to the participants when SMTP is configured.
 7. Click **Leave** to disconnect that browser from the room and stop its local media tracks.
 
+## Capacity target
+
+The room is budgeted for up to **10 concurrent browser participants with cameras on**. The browser publishes camera video at up to 640x360, 15fps, and about 450kbps, with mono Opus audio capped around 24kbps. The server forwards RTP video packets between peers and only decodes/mixes audio for the Realtime assistant.
+
+`MEETING_ROOM_MAX_PARTICIPANTS` defaults to `10`; the 11th participant is refused before camera and microphone capture starts. For a 10-person room, plan for roughly 45 Mbps of server video/audio egress before protocol overhead, and use a host/network with comfortable headroom above that.
+
 ## Demo flow
 
 **Use headphones or keep speaker volume low to avoid echo. Background audio can be picked up by the meeting mix and interpreted as board updates.**
@@ -115,6 +121,7 @@ You can update:
 ### Meeting access and notes
 
 - Set `MEETING_ROOM_PASSWORD` to change the room passcode. If unset, the demo passcode is used.
+- Set `MEETING_ROOM_MAX_PARTICIPANTS` to change the room capacity. The default is `10`.
 - Set `MEETING_ALLOWED_ORIGINS` to a comma-separated list of allowed browser origins for WebSocket access. If unset, same-host origins are allowed.
 - Meeting notes are generated when **Send notes** archives the meeting. The notes include detected decisions and the latest status for every active board card.
 - Participant email addresses use the Shareability convention: `name@shareability.com`, except Erick maps to `e@shareability.com`.

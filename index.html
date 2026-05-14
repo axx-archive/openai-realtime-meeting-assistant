@@ -114,6 +114,7 @@
         background: var(--night-1);
         color: var(--fg-0);
         font-family: var(--font-sans);
+        font-weight: 500;
         font-size: 14px;
         line-height: 1.5;
         font-feature-settings: "ss01" on, "cv11" on;
@@ -220,7 +221,7 @@
       .topbar__title h1 {
         font-family: var(--font-sans);
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 500;
         letter-spacing: -0.005em;
         color: var(--fg-0);
       }
@@ -229,7 +230,7 @@
         font-size: 11px;
         color: var(--fg-2);
         letter-spacing: 0.10em;
-        text-transform: uppercase;
+        text-transform: none;
         font-feature-settings: "ss01" on, "ss02" on;
       }
 
@@ -357,7 +358,7 @@
 
       .access-panel h2 {
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 500;
         color: var(--fg-0);
         text-wrap: balance;
       }
@@ -367,7 +368,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-2);
       }
 
@@ -375,6 +376,11 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--s-2);
+      }
+
+      .hearth-access .access-grid {
+        gap: var(--s-3);
+        margin-top: 28px;
       }
 
       .field {
@@ -388,7 +394,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-2);
       }
 
@@ -519,7 +525,7 @@
         font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
+        text-transform: none;
         font-variant-numeric: tabular-nums;
       }
 
@@ -562,10 +568,26 @@
       .column h2 {
         font-family: var(--font-sans);
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 500;
         line-height: 1.3;
         color: var(--fg-inverse);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
+
+      .column h2::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--ash-500);
+        flex: 0 0 auto;
+      }
+      .column--backlog h2::before { background: var(--ash-500); }
+      .column--in-progress h2::before { background: var(--ember-500); }
+      .column--blocked h2::before { background: var(--amber-500); }
+      .column--done h2::before { background: var(--success); }
 
       .count {
         display: inline-grid;
@@ -652,7 +674,7 @@
       .card-heading strong {
         font-family: var(--font-sans);
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 500;
         line-height: 1.3;
         color: var(--fg-inverse);
         min-width: 0;
@@ -690,12 +712,32 @@
         height: 28px;
         border: 2px solid #FFF;
         border-radius: 999px;
-        background: #F6F8FA;
+        background: transparent;
         box-shadow: 0 0 0 1px rgba(27, 19, 10, 0.18);
         flex-shrink: 0;
       }
-      .owner-avatar svg { display: block; width: 100%; height: 100%; }
+      .owner-avatar .monogram { width: 100%; height: 100%; }
       .owner-avatar.large { width: 44px; height: 44px; border-width: 3px; }
+
+      .monogram {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-sans);
+        font-size: 12.5px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        line-height: 1;
+      }
+
+      .mono--ember { background: linear-gradient(155deg, #FFD27A, #FF7A2B); color: #2A1604; }
+      .mono--amber { background: linear-gradient(155deg, #FFE4A8, #FFB23F); color: #3A2A05; }
+      .mono--rust  { background: linear-gradient(155deg, #FFB58A, #C13E07); color: #FFF1E3; }
+      .mono--ash   { background: linear-gradient(155deg, #D5C8A9, #948876); color: #1B130A; }
+      .mono--ink   { background: linear-gradient(155deg, #4D4538, #2A231C); color: #FAF5EC; }
 
       .card.moved {
         animation: card-move-wiggle 1100ms var(--ease-soft);
@@ -721,7 +763,7 @@
         color: var(--tag-color);
         font-family: var(--font-sans);
         font-size: 11px;
-        font-weight: 600;
+        font-weight: 500;
         line-height: 1;
       }
       .tags li[data-tag-kind="protocol"]  { --tag-bg: rgba(255, 122, 43, 0.12); --tag-color: var(--ember-700); }
@@ -748,7 +790,7 @@
       .memory-panel h2 {
         font-family: var(--font-sans);
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 500;
         color: var(--fg-0);
       }
 
@@ -794,7 +836,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-2);
       }
 
@@ -823,7 +865,7 @@
       .assistant-panel h2 {
         font-family: var(--font-sans);
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 500;
         color: var(--fg-0);
         text-wrap: balance;
       }
@@ -833,7 +875,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-2);
         font-variant-numeric: tabular-nums;
       }
@@ -857,6 +899,20 @@
         padding: var(--s-2) var(--s-3);
         font-size: 12px;
         line-height: 1.5;
+      }
+
+      .assistant-message--audio {
+        border-left: 2px solid var(--ember-500);
+        background: rgba(255, 122, 43, 0.06);
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .assistant-message--audio .assistant-text {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 15px;
+        line-height: 1.35;
+        color: var(--fg-0);
       }
 
       .assistant-message--entering {
@@ -894,7 +950,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-2);
         font-variant-numeric: tabular-nums;
       }
@@ -912,7 +968,7 @@
         justify-self: start;
         color: var(--ember-300);
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 500;
         text-decoration: none;
       }
 
@@ -995,9 +1051,10 @@
       .btn {
         font-family: var(--font-sans);
         font-weight: 500;
-        font-size: 14px;
-        border-radius: var(--r-sm);
-        padding: 10px var(--s-4);
+        font-size: 13.5px;
+        letter-spacing: -0.005em;
+        border-radius: 10px;
+        padding: 0 var(--s-4);
         transition: background var(--t-base) var(--ease-soft),
                     box-shadow var(--t-base) var(--ease-soft),
                     border-color var(--t-base) var(--ease-soft),
@@ -1007,7 +1064,7 @@
         align-items: center;
         justify-content: center;
         gap: var(--s-2);
-        min-height: 40px;
+        min-height: 38px;
         min-width: 96px;
       }
       .btn:active { transform: scale(0.96); }
@@ -1023,39 +1080,80 @@
       }
 
       .btn--primary {
-        background: var(--ember-500);
+        background: linear-gradient(180deg, #FF8A3D, #ED5A14);
         color: #2A1505;
-        border-color: var(--ember-500);
+        border-color: rgba(193, 62, 7, 0.2);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.25),
+          0 1px 0 rgba(255, 122, 43, 0.4),
+          0 8px 24px rgba(255, 90, 20, 0.25);
       }
       .btn--primary:hover:not([disabled]) {
-        background: var(--ember-400);
-        box-shadow: var(--glow-ember-sm);
+        background: linear-gradient(180deg, #FFA463, #ED5A14);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.28),
+          0 1px 0 rgba(255, 122, 43, 0.46),
+          0 10px 30px rgba(255, 90, 20, 0.30);
       }
       .btn--primary:active:not([disabled]) {
-        background: var(--ember-700);
+        background: linear-gradient(180deg, #ED5A14, #C13E07);
       }
 
       .btn--danger {
-        background: var(--danger);
-        color: #2A0F08;
-        border-color: var(--danger);
+        background: rgba(229, 87, 62, 0.12);
+        color: var(--danger);
+        border-color: rgba(229, 87, 62, 0.25);
         min-width: 0;
         padding: 9px;
         border-radius: var(--r-pill);
         width: 40px;
         height: 40px;
       }
-      .btn--danger:hover:not([disabled]) { background: #EE6B53; }
+      .btn--danger:hover:not([disabled]) { background: rgba(229, 87, 62, 0.18); }
       .btn--danger svg { display: block; }
 
-      .btn--secondary {
+      .btn--secondary,
+      .btn--ghost {
         background: rgba(255, 235, 200, 0.06);
         color: var(--fg-1);
         border-color: var(--line-strong);
       }
-      .btn--secondary:hover:not([disabled]) {
+      .btn--secondary:hover:not([disabled]),
+      .btn--ghost:hover:not([disabled]) {
         background: rgba(255, 235, 200, 0.10);
         border-color: rgba(255, 235, 200, 0.22);
+      }
+
+      .btn--text,
+      .text-link {
+        min-width: 0;
+        min-height: 0;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--ash-700);
+        box-shadow: none;
+        font-size: 13px;
+      }
+
+      .btn--text:hover:not([disabled]),
+      .text-link:hover:not([disabled]) {
+        color: var(--ember-700);
+        background: transparent;
+      }
+
+      .text-link--danger {
+        color: var(--danger);
+      }
+
+      .text-link--danger:hover:not([disabled]) {
+        color: #B22F1A;
+      }
+
+      .text-link[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
       }
 
       /* ---------- Toasts ---------- */
@@ -1155,7 +1253,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         border-radius: var(--r-pill);
         background: rgba(255, 122, 43, 0.12);
         color: var(--ember-700);
@@ -1165,7 +1263,7 @@
       .comment-preview-title {
         font-family: var(--font-sans);
         font-size: 18px;
-        font-weight: 600;
+        font-weight: 500;
         line-height: 1.25;
       }
 
@@ -1184,7 +1282,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--ash-600);
       }
 
@@ -1221,24 +1319,29 @@
       .card-detail-region.visible { display: grid; }
 
       .card-detail {
-        display: grid;
-        gap: var(--s-4);
-        width: min(620px, calc(100vw - 48px));
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        width: min(520px, calc(100vw - 48px));
         max-height: calc(100vh - 48px);
         overflow: auto;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-lg);
-        background: #FFF;
-        box-shadow: var(--shadow-3);
+        border: 1px solid #E6DDC6;
+        border-radius: 20px;
+        background: linear-gradient(180deg, #FFFCF4, #FAF6EE);
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.6) inset,
+          0 60px 120px rgba(0, 0, 0, 0.55),
+          0 12px 24px rgba(0, 0, 0, 0.35);
         color: var(--fg-inverse);
-        padding: var(--s-5);
+        padding: 0;
       }
 
       .card-detail-header {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: start;
-        gap: var(--s-3);
+        gap: 14px;
+        padding: 12px var(--s-6) 18px;
       }
 
       .card-detail-title {
@@ -1249,9 +1352,10 @@
 
       .card-detail-title strong {
         font-family: var(--font-sans);
-        font-size: 20px;
-        font-weight: 600;
-        line-height: 1.25;
+        font-size: 22px;
+        font-weight: 500;
+        letter-spacing: -0.015em;
+        line-height: 1.15;
       }
 
       .card-detail-owner {
@@ -1262,13 +1366,15 @@
 
       .card-detail-close {
         min-width: 0;
+        width: 30px;
+        height: 30px;
         border: 0;
         border-radius: var(--r-sm);
         background: transparent;
         color: var(--ash-600);
-        font-size: 22px;
+        font-size: 18px;
         line-height: 1;
-        padding: 4px 8px;
+        padding: 0;
       }
       .card-detail-close:hover {
         background: var(--ash-100);
@@ -1277,7 +1383,8 @@
 
       .card-detail-form {
         display: grid;
-        gap: var(--s-3);
+        gap: 14px;
+        padding: 18px var(--s-6) 4px;
       }
 
       .card-detail-form .field span {
@@ -1314,6 +1421,7 @@
         justify-content: space-between;
         gap: var(--s-3);
         flex-wrap: wrap;
+        padding: 2px 0 var(--s-4);
       }
 
       .card-detail-actions__right {
@@ -1330,6 +1438,209 @@
         height: auto;
         border-radius: var(--r-sm);
         padding: 10px var(--s-4);
+      }
+
+      .card-detail-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 22px var(--s-6) 0;
+      }
+
+      .card-detail-meta .status-pill,
+      .card-detail-meta .card-id-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border-radius: var(--r-pill);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        line-height: 1;
+        text-transform: none;
+      }
+
+      .card-detail-meta .status-pill {
+        background: #FFF;
+        border: 1px solid var(--line-light);
+        color: var(--ash-700);
+      }
+
+      .card-detail-meta .status-pill .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--warning);
+      }
+
+      .card-detail-meta .card-id-pill {
+        color: var(--ash-600);
+        background: transparent;
+        border: 0;
+      }
+
+      .card-detail-scout {
+        display: grid;
+        gap: 6px;
+        margin: 0 var(--s-6);
+        padding: 14px var(--s-4) 14px 18px;
+        border: 0;
+        border-left: 2px solid var(--ember-500);
+        border-radius: 4px 12px 12px 4px;
+        background: rgba(255, 122, 43, 0.05);
+      }
+
+      .card-detail-scout header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .card-detail-scout strong {
+        color: var(--ember-700);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+      }
+
+      .card-detail-scout span {
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: none;
+      }
+
+      .card-detail-scout p {
+        color: var(--ash-700);
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-style: italic;
+        letter-spacing: -0.005em;
+        line-height: 1.35;
+        text-wrap: pretty;
+      }
+
+      .card-detail-edit-label {
+        display: none;
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: none;
+      }
+
+      .card-detail-command {
+        display: grid;
+        gap: var(--s-3);
+        margin-top: var(--s-3);
+        padding: var(--s-4) var(--s-6) 18px;
+        border-top: 1px solid var(--line-light);
+        border-radius: 0;
+        background: rgba(46, 32, 12, 0.02);
+      }
+
+      .card-command-chips {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .card-command-chips span {
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: none;
+      }
+
+      .card-command-chip,
+      .scout-pill {
+        min-height: 28px;
+        padding: 0 12px;
+        border: 1px solid var(--line-light);
+        border-radius: var(--r-pill);
+        background: #FFF;
+        color: var(--ash-700);
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+        font-weight: 500;
+        letter-spacing: 0;
+        text-transform: none;
+        box-shadow: var(--shadow-light-1);
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .card-command-chip:hover {
+        background: rgba(255, 122, 43, 0.1);
+        border-color: rgba(255, 122, 43, 0.3);
+        color: var(--ember-700);
+      }
+
+      .card-command-chip:active {
+        transform: scale(0.96);
+      }
+
+      .card-command-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--s-2);
+        align-items: center;
+        padding: 6px;
+        border: 1px solid var(--line-light);
+        border-radius: 12px;
+        background: #FFF;
+      }
+
+      .card-command-form input {
+        min-width: 0;
+        min-height: 36px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-inverse);
+        font: inherit;
+        font-size: 13px;
+        outline: 0;
+        padding: 7px var(--s-2);
+      }
+
+      .card-command-form input::placeholder {
+        color: var(--ash-500);
+      }
+
+      .card-command-form button {
+        min-width: 0;
+        min-height: 30px;
+        padding: 8px var(--s-3);
+      }
+
+      .card-detail .btn--primary {
+        min-height: 32px;
+        padding: 0 14px;
+        font-size: 13px;
+      }
+
+      .card-detail .btn--ghost {
+        min-height: 30px;
+        border-color: var(--line-light);
+        background: transparent;
+        color: var(--ash-700);
+        box-shadow: none;
+      }
+
+      .card-detail .btn--ghost:hover:not([disabled]) {
+        background: #FFF6EB;
+        border-color: var(--ember-500);
+        color: var(--ember-700);
       }
 
       @keyframes card-move-wiggle {
@@ -1389,6 +1700,965 @@
         .assistant-send { width: 100%; }
         .btn { min-width: 0; }
         .card-detail-grid { grid-template-columns: 1fr; }
+      }
+
+      /* ---------- Hearth interface ---------- */
+      .workspace {
+        position: relative;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+      }
+
+      #appShell:not(.is-in-room) .workspace {
+        place-items: center;
+      }
+
+      #join {
+        display: none;
+      }
+
+      #appShell.is-in-room .workspace {
+        grid-template-columns: clamp(220px, 22vw, 280px) minmax(360px, 1fr) clamp(240px, 24vw, 300px);
+      }
+
+      #appShell:not(.is-in-room) .scout-rail,
+      #appShell:not(.is-in-room) .hearth-presentation,
+      #appShell:not(.is-in-room) .board-rail,
+      .board-expanded-surface {
+        display: none;
+      }
+
+      #appShell.is-in-room .hearth-access,
+      #appShell.is-board-expanded .hearth-access,
+      #appShell.is-board-expanded .scout-rail,
+      #appShell.is-board-expanded .hearth-presentation,
+      #appShell.is-board-expanded .board-rail {
+        display: none;
+      }
+
+      #appShell.is-board-expanded .workspace {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #appShell.is-board-expanded .meeting-bar {
+        display: none;
+      }
+
+      #appShell.is-board-expanded .board-expanded-surface {
+        display: grid;
+        animation: none !important;
+        opacity: 1;
+        transform: none;
+      }
+
+      .hearth-access {
+        position: relative;
+        width: min(460px, calc(100vw - 48px));
+        align-self: center;
+        justify-self: center;
+        overflow: visible;
+        padding: 0 var(--s-7) 28px;
+        border-radius: 22px;
+        background: linear-gradient(180deg, rgba(42, 35, 28, 0.55), rgba(21, 17, 13, 0.85));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 235, 200, 0.06),
+          0 24px 60px rgba(0, 0, 0, 0.45),
+          0 4px 16px rgba(0, 0, 0, 0.30);
+      }
+
+      .hearth-access.is-verified {
+        border-color: var(--line);
+        background: linear-gradient(180deg, rgba(42, 35, 28, 0.55), rgba(21, 17, 13, 0.85));
+      }
+
+      .hearth-access::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: -180px;
+        z-index: -1;
+        width: 320px;
+        height: 320px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.28), transparent 60%);
+        pointer-events: none;
+      }
+
+      .hearth-access header {
+        display: block;
+        text-align: center;
+      }
+
+      .hearth-access h2 {
+        font-family: var(--font-display);
+        font-size: 36px;
+        font-style: italic;
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
+        text-align: center;
+      }
+
+      .access-kicker {
+        margin-top: 10px;
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        text-transform: none;
+      }
+
+      .hearth-access__ember {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        margin: -22px auto 18px;
+        display: grid;
+        place-items: center;
+      }
+
+      .hearth-access__ember svg {
+        position: relative;
+        z-index: 2;
+        width: 100%;
+        height: 100%;
+        filter: drop-shadow(0 0 18px rgba(255, 122, 43, 0.45));
+      }
+
+      .hearth-access__halo {
+        position: absolute;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.45) 0%, transparent 64%);
+        pointer-events: none;
+      }
+
+      .hearth-access__halo--1 { inset: -150%; opacity: 0.68; }
+      .hearth-access__halo--2,
+      .hearth-access__halo--3 { display: none; }
+
+      .waiting-participants {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--fg-1);
+        font-size: 12.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .access-join {
+        width: 100%;
+        min-height: 44px;
+        margin-top: var(--s-5);
+      }
+
+      .hearth-access .access-state {
+        display: none;
+      }
+
+      .inside-row {
+        margin-top: var(--s-5);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-3);
+        padding-top: 18px;
+        border-top: 1px solid var(--line-faint);
+      }
+
+      .inside-row .who {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .stack-avatars {
+        display: flex;
+        flex-shrink: 0;
+      }
+
+      .stack-avatars:empty {
+        display: none;
+      }
+
+      .stack-avatars .monogram,
+      .stack-avatars .more {
+        width: 24px;
+        height: 24px;
+        border: 2px solid var(--night-1);
+        margin-left: -6px;
+        font-size: 11px;
+      }
+
+      .stack-avatars .monogram:first-child,
+      .stack-avatars .more:first-child {
+        margin-left: 0;
+      }
+
+      .stack-avatars .more {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: var(--night-3);
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .ready-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+      }
+
+      .ready-tag .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--fg-3);
+        box-shadow: none;
+      }
+
+      .hearth-access.is-verified .ready-tag {
+        color: var(--success);
+      }
+
+      .hearth-access.is-verified .ready-tag .dot {
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(95, 190, 122, 0.18);
+      }
+
+      .scout-rail {
+        min-width: 0;
+        display: grid;
+        align-content: start;
+      }
+
+      .assistant-panel.scout-panel {
+        min-height: 0;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        border-color: var(--line-faint);
+        border-radius: var(--r-lg);
+        background: linear-gradient(180deg, rgba(42, 35, 28, 0.35), rgba(21, 17, 13, 0.70));
+        backdrop-filter: blur(4px);
+      }
+
+      .scout-panel header h2 {
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .scout-subtitle {
+        margin-top: 2px;
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: none;
+      }
+
+      .memory-list--silent {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      .hearth-presentation {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--r-lg);
+        background: var(--night-0);
+        box-shadow: var(--shadow-2);
+      }
+
+      .hearth-stage {
+        position: relative;
+        min-height: min(62vh, 620px);
+        height: 100%;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        padding: var(--s-6);
+      }
+
+      .hearth-bloom {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at 50% 42%, rgba(255, 122, 43, 0.20) 0%, rgba(255, 122, 43, 0.06) 30%, transparent 62%);
+        pointer-events: none;
+      }
+
+      .hearth-center {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        justify-items: center;
+        gap: var(--s-6);
+        width: 100%;
+      }
+
+      .hearth-speaker {
+        position: relative;
+        width: min(64%, 640px);
+        min-width: 280px;
+        aspect-ratio: 16 / 9;
+        display: grid;
+        place-items: center;
+        overflow: visible;
+        border: 1px solid rgba(255, 122, 43, 0.35);
+        border-radius: var(--r-lg);
+        background: radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%);
+        box-shadow:
+          0 0 0 6px rgba(255, 122, 43, 0.06),
+          0 0 80px rgba(255, 122, 43, 0.15),
+          0 30px 60px rgba(0, 0, 0, 0.50);
+      }
+
+      .hearth-speaker video,
+      .screen-stage__pip video {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        object-fit: cover;
+        background: var(--night-0);
+      }
+
+      .hearth-speaker video.is-local,
+      .screen-stage__pip video.is-local {
+        transform: scaleX(-1);
+      }
+
+      .hearth-speaker video[hidden],
+      .screen-stage__pip video[hidden] {
+        display: none;
+      }
+
+      .speaker-avatar {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        width: 96px;
+        height: 96px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      .speaker-avatar[hidden] {
+        display: none;
+      }
+
+      .speaker-avatar .monogram {
+        width: 100%;
+        height: 100%;
+        font-size: 38px;
+      }
+
+      .speaker-halo {
+        display: none;
+      }
+
+      .speaker-halo--1 { inset: -16px; animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite; }
+      .speaker-halo--2 { inset: -36px; animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite 400ms; }
+      .speaker-halo--3 { inset: -64px; animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite 800ms; }
+
+      .speaker-name-pill {
+        position: absolute;
+        left: var(--s-3);
+        bottom: var(--s-3);
+        z-index: 2;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: calc(100% - 24px);
+        padding: 6px 10px;
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.78);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        color: var(--fg-0);
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .speaker-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--ember-500);
+        box-shadow: 0 0 6px var(--ember-500);
+        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+
+      .speaker-ember {
+        position: absolute;
+        top: var(--s-3);
+        right: var(--s-3);
+        z-index: 2;
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(11, 8, 5, 0.72);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+
+      .speaker-ember svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .hearth-seats {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: center;
+        gap: var(--s-5);
+        overflow: visible;
+      }
+
+      .hearth-seat {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        aspect-ratio: auto;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        border-width: 1px;
+        border-radius: 10px;
+        background: #221812;
+      }
+
+      .hearth-seat.is-active-speaker {
+        display: none;
+      }
+
+      .hearth-seat.is-local {
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+
+      .hearth-seat.is-placeholder {
+        border-style: dashed;
+        border-color: var(--line-strong);
+      }
+
+      .hearth-seat .owner-avatar {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        box-shadow: none;
+      }
+
+      .hearth-seat .owner-avatar .monogram {
+        border-radius: 10px;
+      }
+
+      .board-rail {
+        min-width: 0;
+        display: grid;
+        align-content: start;
+        gap: var(--s-3);
+        padding: var(--s-4) 14px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-lg);
+        background: linear-gradient(180deg, rgba(42, 35, 28, 0.35), rgba(21, 17, 13, 0.70));
+        backdrop-filter: blur(4px);
+      }
+
+      .board-rail__header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .board-rail__header h2 {
+        font-family: var(--font-sans);
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: -0.005em;
+        text-transform: none;
+        color: var(--fg-1);
+      }
+
+      .board-expand,
+      .board-collapse {
+        min-height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        color: var(--fg-2);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: -0.005em;
+        text-transform: none;
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .board-expand:hover:not([disabled]),
+      .board-collapse:hover:not([disabled]) {
+        background: rgba(255, 235, 200, 0.08);
+        border-color: var(--line-strong);
+        color: var(--fg-0);
+      }
+
+      .board-expand:active:not([disabled]),
+      .board-collapse:active:not([disabled]) {
+        transform: scale(0.96);
+      }
+
+      .board-expand[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .board-preview {
+        display: grid;
+        gap: var(--s-2);
+      }
+
+      .board-preview__empty {
+        padding: var(--s-4);
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-md);
+        background: rgba(11, 8, 5, 0.45);
+        color: var(--fg-3);
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-style: italic;
+        line-height: 1.15;
+      }
+
+      .board-preview__col {
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-md);
+        background: rgba(11, 8, 5, 0.45);
+      }
+
+      .board-preview__col header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .board-preview__col h3 {
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: none;
+      }
+
+      .board-preview__count,
+      .board-preview__more {
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .board-preview__col.is-empty .board-preview__more {
+        color: var(--fg-3);
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-style: italic;
+        letter-spacing: -0.005em;
+        text-transform: none;
+      }
+
+      .board-preview__card {
+        text-align: left;
+        padding: 7px 9px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-xs);
+        background: rgba(255, 235, 200, 0.04);
+        color: var(--fg-1);
+        font-size: 11px;
+        line-height: 1.35;
+        text-wrap: pretty;
+      }
+
+      .board-preview__card.is-moved {
+        border-color: rgba(255, 122, 43, 0.36);
+        background: rgba(255, 122, 43, 0.1);
+        color: var(--ember-300);
+      }
+
+      .screen-stage {
+        width: 100%;
+        height: 100%;
+        min-height: min(62vh, 620px);
+        box-shadow: var(--shadow-3);
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-stage {
+        display: none;
+      }
+
+      .presentation-tile.is-screen-sharing .screen-stage {
+        display: grid;
+      }
+
+      .screen-stage video#screenStageVideo {
+        min-height: 100%;
+      }
+
+      .screen-stage__pip {
+        position: absolute;
+        right: var(--s-4);
+        bottom: var(--s-4);
+        z-index: 2;
+        width: 72px;
+        height: 72px;
+        display: grid;
+        place-items: center;
+        overflow: visible;
+        border: 2px solid var(--ember-500);
+        border-radius: 999px;
+        background: var(--night-0);
+        box-shadow: var(--glow-ember-md);
+      }
+
+      .screen-stage__pip .speaker-avatar {
+        width: 52px;
+        height: 52px;
+      }
+
+      .screen-stage__pip-label {
+        position: absolute;
+        top: calc(100% + 5px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 8px;
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.78);
+        color: var(--ember-300);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: none;
+        white-space: nowrap;
+      }
+
+      .board-expanded-surface {
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 0;
+        min-height: min(72vh, 760px);
+        overflow: hidden;
+        border-color: var(--line-light);
+        box-shadow: var(--shadow-light-2);
+        padding: 0;
+      }
+
+      .board-expanded-top {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: var(--s-4);
+        padding: var(--s-4) 28px;
+        border: 0;
+        border-bottom: 1px solid var(--line-light);
+        border-radius: 0;
+        background: #FFF;
+        box-shadow: none;
+      }
+
+      .board-expanded-brand {
+        display: flex;
+        align-items: center;
+        gap: var(--s-3);
+      }
+
+      .board-expanded-mark {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+      }
+
+      .board-expanded-mark svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+      }
+
+      .board-expanded-brand h2 {
+        color: var(--fg-inverse);
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .board-expanded-brand p {
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: none;
+      }
+
+      .board-huddle {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      .board-huddle.presence {
+        justify-self: center;
+        padding: 6px 12px 6px 6px;
+        border: 1px solid var(--line-light);
+        border-radius: var(--r-pill);
+        background: var(--ash-50);
+        color: var(--ash-700);
+      }
+
+      .presence-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+
+      .presence-pulse {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--ember-500);
+        box-shadow: 0 0 0 3px rgba(255, 122, 43, 0.18);
+      }
+
+      .board-huddle .stack-avatars .monogram,
+      .board-huddle .stack-avatars .more {
+        width: 22px;
+        height: 22px;
+        border-color: #FFF;
+        font-size: 10.5px;
+      }
+
+      .board-huddle .monogram.is-you {
+        box-shadow: 0 0 0 2px var(--ember-500);
+      }
+
+      .board-huddle__tile {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        min-width: 42px;
+      }
+
+      .board-huddle__media {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        border: 2px solid #FFF;
+        border-radius: 999px;
+        background: var(--night-0);
+        box-shadow: var(--shadow-light-1);
+      }
+
+      .board-huddle__tile.is-speaker .board-huddle__media {
+        width: 50px;
+        height: 50px;
+        border-color: var(--ember-500);
+        box-shadow: var(--glow-ember-md);
+      }
+
+      .board-huddle__media video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .board-huddle__media svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .board-huddle__media video.is-local {
+        transform: scaleX(-1);
+      }
+
+      .board-huddle__label {
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.06em;
+        text-transform: none;
+      }
+
+      .board-huddle__tile.is-speaker .board-huddle__label {
+        color: var(--ember-700);
+        font-weight: 500;
+      }
+
+      .board-collapse,
+      .board-back {
+        justify-self: end;
+        min-height: 0;
+        padding: 8px 12px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--ash-700);
+        box-shadow: none;
+        font-family: var(--font-sans);
+        font-size: 13px;
+        letter-spacing: -0.005em;
+        text-transform: none;
+      }
+
+      .board-collapse:hover:not([disabled]),
+      .board-back:hover:not([disabled]) {
+        background: var(--ash-50);
+        border-color: var(--line-light);
+        color: var(--fg-inverse);
+      }
+
+      .board-back svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.6;
+      }
+
+      .board-expanded-surface .board {
+        min-height: 0;
+        overflow: auto;
+        padding: 0 28px var(--s-6);
+        gap: 14px;
+      }
+
+      .board-expanded-surface .board-toolbar {
+        padding: 18px 28px 12px;
+        margin-bottom: 0;
+      }
+
+      .board-expanded-surface .column {
+        border-radius: 14px;
+        padding: 14px 12px;
+        gap: 10px;
+        min-height: 320px;
+      }
+
+      .board-expanded-surface .column header {
+        padding: 4px 6px 8px;
+        border-bottom: 1px dashed var(--line-light);
+        margin-bottom: 2px;
+      }
+
+      .board-expanded-surface .btn--ghost,
+      .board-expanded-surface .btn--secondary {
+        min-height: 32px;
+        border-color: var(--line-light);
+        border-radius: 8px;
+        background: #FFF;
+        color: var(--fg-inverse);
+      }
+
+      .board-expanded-surface .btn--ghost:hover:not([disabled]),
+      .board-expanded-surface .btn--secondary:hover:not([disabled]) {
+        background: #FFFAF0;
+        border-color: var(--line-light);
+      }
+
+      @media (max-width: 1100px) {
+        #appShell.is-in-room .workspace {
+          grid-template-columns: minmax(0, 1fr) clamp(240px, 30vw, 300px);
+        }
+        #appShell.is-in-room .scout-rail {
+          grid-column: 1 / -1;
+          order: 3;
+        }
+        .scout-panel {
+          min-height: 0;
+        }
+        .assistant-feed {
+          max-height: 180px;
+        }
+      }
+
+      @media (max-width: 860px) {
+        #appShell.is-in-room .workspace {
+          grid-template-columns: 1fr;
+        }
+        .board-rail,
+        .scout-rail {
+          order: 3;
+        }
+        .hearth-presentation {
+          min-height: 420px;
+        }
+        .board-expanded-top {
+          grid-template-columns: 1fr;
+        }
+        .board-huddle {
+          justify-content: flex-start;
+          overflow-x: auto;
+          padding-bottom: 2px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .hearth-access {
+          width: calc(100vw - 32px);
+          padding: var(--s-4);
+        }
+        .hearth-access__ember {
+          width: 96px;
+          height: 96px;
+          bottom: calc(100% + var(--s-3));
+        }
+        .hearth-stage {
+          padding: var(--s-4);
+        }
+        .hearth-speaker {
+          width: min(100%, 320px);
+        }
+        .hearth-seat {
+          width: 68px;
+          height: 68px;
+        }
+        .hearth-seat .owner-avatar {
+          width: 44px;
+          height: 44px;
+        }
       }
 
       /* ---------- Mount stagger (the room arrives) ----------
@@ -1485,73 +2755,76 @@
       </header>
 
       <div class="workspace">
-        <section id="presentationTile" class="presentation-tile" aria-label="Shared workspace">
-          <div id="screenStage" class="screen-stage" aria-label="Shared screen">
-            <video id="screenStageVideo" autoplay muted playsinline></video>
-            <span id="screenStageLabel" class="screen-stage__label">screen share</span>
+        <section id="accessPanel" class="access-panel hearth-access mount-stagger" aria-label="Meeting access">
+          <div class="hearth-access__ember" aria-hidden="true">
+            <span class="hearth-access__halo hearth-access__halo--3"></span>
+            <span class="hearth-access__halo hearth-access__halo--2"></span>
+            <span class="hearth-access__halo hearth-access__halo--1"></span>
+            <svg viewBox="0 0 64 64" fill="none">
+              <defs>
+                <radialGradient id="accessEmberCore" cx="50%" cy="55%" r="55%">
+                  <stop offset="0%" stop-color="#FFF1E3"></stop>
+                  <stop offset="22%" stop-color="#FFD27A"></stop>
+                  <stop offset="55%" stop-color="#FF7A2B"></stop>
+                  <stop offset="100%" stop-color="#5F1D03"></stop>
+                </radialGradient>
+                <radialGradient id="accessEmberHalo" cx="50%" cy="55%" r="55%">
+                  <stop offset="0%" stop-color="#FF7A2B" stop-opacity="0.4"></stop>
+                  <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
+                </radialGradient>
+              </defs>
+              <circle cx="32" cy="36" r="28" fill="url(#accessEmberHalo)"></circle>
+              <circle cx="32" cy="36" r="14" fill="url(#accessEmberCore)"></circle>
+              <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FFF1E3" fill-opacity="0.55"></ellipse>
+            </svg>
           </div>
-          <div id="boardSurface" class="board-surface mount-stagger">
-            <div class="board-toolbar" aria-label="Board tools">
-              <span id="boardState" class="board-status">waiting room</span>
-              <div class="board-tools">
-                <button id="newCard" class="btn btn--secondary" type="button" disabled>New card</button>
-                <button id="undoDelete" class="btn btn--secondary" type="button" disabled>Undo delete</button>
-              </div>
+          <header>
+            <div>
+              <h2>find your seat<br>at the fire.</h2>
+              <p class="access-kicker">standup · platform team</p>
             </div>
-            <p id="boardHero" class="board-hero" aria-hidden="true">join the room to load the board.</p>
-            <section id="board" class="board" aria-label="Kanban board"></section>
+            <span id="accessState" class="access-state">locked</span>
+          </header>
+          <div class="access-grid">
+            <label class="field">
+              <span>participant</span>
+              <select id="participantName" autocomplete="name">
+                <option value="">Select your name</option>
+                <option>Erick</option>
+                <option>Tim</option>
+                <option>Tyler</option>
+                <option>Jake</option>
+                <option>Tom</option>
+                <option>Caitlyn</option>
+                <option>Joel</option>
+                <option>AJ</option>
+                <option>Guest 1</option>
+                <option>Guest 2</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>room code</span>
+              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="Room password">
+            </label>
+          </div>
+          <p id="accessHint" class="access-hint">Verify access first. Camera and microphone start after the room lets you in.</p>
+          <button id="joinAccess" class="btn btn--primary access-join" type="button">Join the room</button>
+          <div class="inside-row">
+            <div class="who">
+              <div id="participantAvatarStack" class="stack-avatars" aria-hidden="true"></div>
+              <span id="waitingParticipants" class="waiting-participants">10 seats ready.</span>
+            </div>
+            <span class="ready-tag"><span class="dot"></span><span id="accessReadyTag">locked</span></span>
           </div>
         </section>
 
-        <aside class="video-rail" aria-label="Conference videos">
-          <section id="accessPanel" class="access-panel mount-stagger" aria-label="Meeting access">
+        <aside class="scout-rail mount-stagger" aria-label="Scout">
+          <section class="assistant-panel scout-panel" aria-label="Scout responses">
             <header>
-              <h2>access</h2>
-              <span id="accessState" class="access-state">locked</span>
-            </header>
-            <div class="access-grid">
-              <label class="field">
-                <span>participant</span>
-                <select id="participantName" autocomplete="name">
-                  <option value="">Select your name</option>
-                  <option>Erick</option>
-                  <option>Tim</option>
-                  <option>Tyler</option>
-                  <option>Jake</option>
-                  <option>Tom</option>
-                  <option>Caitlyn</option>
-                  <option>Joel</option>
-                  <option>AJ</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>password</span>
-                <input id="roomPassword" type="password" autocomplete="current-password" placeholder="Room password">
-              </label>
-            </div>
-            <p id="accessHint" class="access-hint">Verify access first. Camera and microphone start after the room lets you in.</p>
-          </section>
-          <div id="videoStack" class="video-stack mount-stagger">
-            <div class="video-tile">
-              <video id="localVideo" autoplay muted playsinline></video>
-              <span id="localVideoLabel" class="video-label">you</span>
-            </div>
-          </div>
-          <section class="memory-panel mount-stagger" aria-label="Meeting memory">
-            <header>
-              <h2>meeting memory</h2>
-              <span id="memoryCount" class="memory-count">0 saved</span>
-            </header>
-            <div id="memoryList" class="memory-list">
-              <article class="memory-item">
-                <span class="memory-meta">ready</span>
-                <span>memory starts when the room speaks.</span>
-              </article>
-            </div>
-          </section>
-          <section class="assistant-panel mount-stagger" aria-label="Assistant responses">
-            <header>
-              <h2>assistant</h2>
+              <div>
+                <h2>Scout</h2>
+                <p class="scout-subtitle">memory · <span id="memoryCount">0 saved</span></p>
+              </div>
               <span id="assistantState" class="assistant-state">ready</span>
             </header>
             <div id="assistantFeed" class="assistant-feed">
@@ -1561,19 +2834,141 @@
               </article>
             </div>
             <form id="assistantForm" class="assistant-form">
-              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="Ask meeting memory">
+              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="Ask Scout anything">
               <button class="btn btn--primary assistant-send" type="submit">Ask</button>
             </form>
           </section>
+          <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
+            <article class="memory-item">
+              <span class="memory-meta">ready</span>
+              <span>memory starts when the room speaks.</span>
+            </article>
+          </div>
         </aside>
+
+        <section id="presentationTile" class="presentation-tile hearth-presentation mount-stagger" aria-label="Shared workspace">
+          <div id="screenStage" class="screen-stage" aria-label="Shared screen">
+            <video id="screenStageVideo" autoplay muted playsinline></video>
+            <span id="screenStageLabel" class="screen-stage__label">screen share</span>
+            <div class="screen-stage__pip" aria-hidden="true">
+              <video id="screenSpeakerVideo" autoplay muted playsinline></video>
+              <span id="screenSpeakerAvatar" class="speaker-avatar"></span>
+              <span id="screenSpeakerLabel" class="screen-stage__pip-label">speaker</span>
+            </div>
+          </div>
+
+          <div id="hearthStage" class="hearth-stage" aria-label="Room videos">
+            <div class="hearth-bloom" aria-hidden="true"></div>
+            <div class="hearth-center">
+              <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
+                <span class="speaker-halo speaker-halo--1" aria-hidden="true"></span>
+                <span class="speaker-halo speaker-halo--2" aria-hidden="true"></span>
+                <span class="speaker-halo speaker-halo--3" aria-hidden="true"></span>
+                <video id="activeSpeakerVideo" autoplay muted playsinline></video>
+                <span id="activeSpeakerAvatar" class="speaker-avatar"></span>
+                <span class="speaker-ember" aria-hidden="true">
+                  <svg viewBox="0 0 64 64" fill="none">
+                    <defs>
+                      <radialGradient id="speakerEmberCore" cx="50%" cy="55%" r="55%">
+                        <stop offset="0%" stop-color="#FFF1E3"></stop>
+                        <stop offset="22%" stop-color="#FFD27A"></stop>
+                        <stop offset="55%" stop-color="#FF7A2B"></stop>
+                        <stop offset="100%" stop-color="#5F1D03"></stop>
+                      </radialGradient>
+                    </defs>
+                    <circle cx="32" cy="36" r="14" fill="url(#speakerEmberCore)"></circle>
+                    <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FFF1E3" fill-opacity="0.55"></ellipse>
+                  </svg>
+                </span>
+                <span class="speaker-name-pill">
+                  <span class="speaker-dot"></span>
+                  <span id="activeSpeakerLabel">the room · waiting</span>
+                </span>
+              </article>
+
+              <div id="videoStack" class="video-stack hearth-seats">
+                <div class="video-tile hearth-seat is-local" data-participant="">
+                  <video id="localVideo" autoplay muted playsinline></video>
+                  <span id="localVideoLabel" class="video-label">you</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside id="boardRail" class="board-rail mount-stagger" aria-label="Standup board preview">
+          <header class="board-rail__header">
+            <div>
+              <h2>board · standup</h2>
+              <span id="boardPreviewState" class="board-status">waiting room</span>
+            </div>
+            <button id="expandBoard" class="board-expand" type="button" aria-expanded="false" disabled>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <line x1="21" y1="3" x2="14" y2="10"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+              </svg>
+              expand
+            </button>
+          </header>
+          <div id="boardPreview" class="board-preview">
+            <p class="board-preview__empty">join the room to load the board.</p>
+          </div>
+        </aside>
+
+        <div id="boardSurface" class="board-surface board-expanded-surface mount-stagger">
+          <header class="board-expanded-top">
+            <div class="board-expanded-brand">
+              <span class="board-expanded-mark" aria-hidden="true">
+                <svg viewBox="0 0 64 64" fill="none">
+                  <defs>
+                    <radialGradient id="boardEmberCore" cx="50%" cy="55%" r="55%">
+                      <stop offset="0%" stop-color="#FFF1E3"></stop>
+                      <stop offset="22%" stop-color="#FFD27A"></stop>
+                      <stop offset="55%" stop-color="#FF7A2B"></stop>
+                      <stop offset="100%" stop-color="#5F1D03"></stop>
+                    </radialGradient>
+                  </defs>
+                  <rect width="64" height="64" rx="14" fill="#110D09"></rect>
+                  <circle cx="32" cy="36" r="14" fill="url(#boardEmberCore)"></circle>
+                  <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FFF1E3" fill-opacity="0.55"></ellipse>
+                </svg>
+              </span>
+              <div>
+                <h2>standup board</h2>
+                <p>board · expanded view</p>
+              </div>
+            </div>
+            <div id="boardHuddle" class="board-huddle presence" aria-label="Room huddle"></div>
+            <button id="collapseBoard" class="board-collapse board-back" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="4 14 10 14 10 20"></polyline>
+                <polyline points="20 10 14 10 14 4"></polyline>
+                <line x1="14" y1="10" x2="21" y2="3"></line>
+                <line x1="3" y1="21" x2="10" y2="14"></line>
+              </svg>
+              back to the fire
+            </button>
+          </header>
+          <div class="board-toolbar" aria-label="Board tools">
+            <span id="boardState" class="board-status">waiting room</span>
+            <div class="board-tools">
+              <button id="newCard" class="btn btn--ghost" type="button" disabled>New card</button>
+              <button id="undoDelete" class="btn btn--ghost" type="button" disabled>Undo delete</button>
+            </div>
+          </div>
+          <p id="boardHero" class="board-hero" aria-hidden="true">join the room to load the board.</p>
+          <section id="board" class="board" aria-label="Kanban board"></section>
+        </div>
       </div>
 
       <footer class="meeting-bar mount-stagger">
         <p id="log" class="log" aria-live="polite">team meeting</p>
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Join the room</button>
-          <button id="screenShare" class="btn btn--secondary" type="button" disabled>Share screen</button>
-          <button id="archiveMeeting" class="btn btn--secondary" type="button" disabled>Send notes</button>
+          <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
+          <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"></path>
@@ -1590,10 +2985,16 @@
 
     <script>
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
+      const appShell = document.getElementById('appShell')
       const boardEl = document.getElementById('board')
       const boardSurface = document.getElementById('boardSurface')
       const boardHero = document.getElementById('boardHero')
       const boardState = document.getElementById('boardState')
+      const boardPreview = document.getElementById('boardPreview')
+      const boardPreviewState = document.getElementById('boardPreviewState')
+      const expandBoardButton = document.getElementById('expandBoard')
+      const collapseBoardButton = document.getElementById('collapseBoard')
+      const boardHuddle = document.getElementById('boardHuddle')
       const newCardButton = document.getElementById('newCard')
       const undoDeleteButton = document.getElementById('undoDelete')
       const statusPillEl = document.getElementById('statusPill')
@@ -1601,21 +3002,32 @@
       const brandMarkEl = document.getElementById('brandMark')
       const logEl = document.getElementById('log')
       const joinButton = document.getElementById('join')
+      const joinAccessButton = document.getElementById('joinAccess')
       const leaveButton = document.getElementById('leave')
       const screenShareButton = document.getElementById('screenShare')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
       const accessPanel = document.getElementById('accessPanel')
       const accessState = document.getElementById('accessState')
       const accessHint = document.getElementById('accessHint')
+      const accessReadyTag = document.getElementById('accessReadyTag')
       const participantNameInput = document.getElementById('participantName')
       const roomPasswordInput = document.getElementById('roomPassword')
       const presentationTile = document.getElementById('presentationTile')
       const screenStage = document.getElementById('screenStage')
       const screenStageVideo = document.getElementById('screenStageVideo')
       const screenStageLabel = document.getElementById('screenStageLabel')
+      const screenSpeakerVideo = document.getElementById('screenSpeakerVideo')
+      const screenSpeakerAvatar = document.getElementById('screenSpeakerAvatar')
+      const screenSpeakerLabel = document.getElementById('screenSpeakerLabel')
+      const activeSpeakerTile = document.getElementById('activeSpeakerTile')
+      const activeSpeakerVideo = document.getElementById('activeSpeakerVideo')
+      const activeSpeakerAvatar = document.getElementById('activeSpeakerAvatar')
+      const activeSpeakerLabel = document.getElementById('activeSpeakerLabel')
       const localVideo = document.getElementById('localVideo')
       const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
+      const waitingParticipants = document.getElementById('waitingParticipants')
+      const participantAvatarStack = document.getElementById('participantAvatarStack')
       const toastRegion = document.getElementById('toastRegion')
       const commentPreviewRegion = document.getElementById('commentPreviewRegion')
       const cardDetailRegion = document.getElementById('cardDetailRegion')
@@ -1635,6 +3047,11 @@
       let screenShareStream
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
+      let activeSpeakerName = ''
+      let participantsInRoom = []
+      let participantPreview = []
+      let roomCapacity = 10
+      let occupiedSeats = 0
       let hasBoardSnapshot = false
       let isBoardReady = false
       let canEditBoard = false
@@ -1643,7 +3060,13 @@
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
       const remoteLabelsByStream = new Map()
+      const remoteLabelsByTrack = new Map()
+      const participantPlaceholders = new Map()
+      const audioMonitors = new Map()
       const cardSnapshots = new Map()
+      let audioContext
+      let audioLevelFrame = 0
+      let queuedRemoteCandidates = []
       const mediaConstraints = {
         video: {
           width: { ideal: 640, max: 640 },
@@ -1664,17 +3087,24 @@
       }
 
       joinButton.addEventListener('click', joinRoom)
+      joinAccessButton.addEventListener('click', joinRoom)
       leaveButton.addEventListener('click', leaveRoom)
       screenShareButton.addEventListener('click', toggleScreenShare)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
+      expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
+      collapseBoardButton.addEventListener('click', () => setBoardExpanded(false))
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
       assistantForm.addEventListener('submit', sendAssistantQuery)
       window.addEventListener('beforeunload', leaveRoom)
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
+          if (appShell.classList.contains('is-board-expanded')) {
+            setBoardExpanded(false)
+            return
+          }
           closeCardDetail()
         }
       })
@@ -1688,6 +3118,10 @@
       validateAccess()
       renderBoard()
       updateBoardControls()
+      renderBoardPreview()
+      updateHearthParticipants()
+      loadParticipantPreview()
+      window.setInterval(loadParticipantPreview, 15000)
 
       function selectedParticipantName() {
         return participantNameInput.value.trim()
@@ -1700,12 +3134,77 @@
       function validateAccess() {
         const verified = hasValidAccess()
         joinButton.disabled = !verified || Boolean(ws || pc)
+        joinAccessButton.disabled = joinButton.disabled
         accessPanel.classList.toggle('is-verified', verified)
         accessState.textContent = verified ? 'ready' : 'locked'
+        accessReadyTag.textContent = verified ? 'ready' : 'locked'
         accessHint.textContent = verified
           ? `${selectedParticipantName()} is ready to verify.`
           : 'Verify access first. Camera and microphone start after the room lets you in.'
+        updateHearthParticipants()
+        updateParticipantPreviewText()
         return verified
+      }
+
+      async function loadParticipantPreview() {
+        try {
+          const response = await fetch('/participants', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          participantPreview = applyRoomSnapshot(payload)
+          updateParticipantPreviewText()
+        } catch {
+          // The room can still be joined if the preview endpoint is unavailable.
+        }
+      }
+
+      function applyRoomSnapshot(payload) {
+        const names = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.participants) ? payload.participants : []
+        if (!Array.isArray(payload)) {
+          roomCapacity = Number.isFinite(Number(payload?.capacity)) ? Number(payload.capacity) : roomCapacity
+          occupiedSeats = Number.isFinite(Number(payload?.occupiedSeats)) ? Number(payload.occupiedSeats) : names.length
+        } else {
+          occupiedSeats = names.length
+        }
+        return names.filter(Boolean)
+      }
+
+      function updateParticipantPreviewText() {
+        if (!waitingParticipants) {
+          return
+        }
+        const names = appShell.classList.contains('is-in-room') ? participantsInRoom : participantPreview
+        const seatCount = Math.max(occupiedSeats, names.length)
+        renderAvatarStack(participantAvatarStack, names, { max: 3, markCurrent: true, dark: true })
+        if (!names.length) {
+          waitingParticipants.textContent = `${roomCapacity} seats ready.`
+          return
+        }
+        const speaker = activeSpeakerDisplayName()
+        const liveSpeaker = speaker && speaker !== 'the room' && names.includes(speaker) ? `${speaker} is speaking` : names.slice(0, 2).join(', ')
+        waitingParticipants.textContent = `${seatCount} inside · ${liveSpeaker}`
+      }
+
+      function setRoomView(inRoom) {
+        appShell.classList.toggle('is-in-room', inRoom)
+        if (!inRoom) {
+          setBoardExpanded(false)
+        }
+        updateParticipantPreviewText()
+        updateHearthParticipants()
+      }
+
+      function setBoardExpanded(expanded) {
+        if (expanded && !isBoardReady) {
+          return
+        }
+        appShell.classList.toggle('is-board-expanded', expanded)
+        expandBoardButton.setAttribute('aria-expanded', String(expanded))
+        renderBoardHuddle()
       }
 
       async function joinRoom() {
@@ -1717,7 +3216,10 @@
 
         currentParticipantName = selectedParticipantName()
         localVideoLabel.textContent = currentParticipantName
+        localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
+        updateHearthParticipants()
         joinButton.disabled = true
+        joinAccessButton.disabled = true
         setConnectionState('connecting', 'connecting…')
         setLog('checking room access')
 
@@ -1726,7 +3228,7 @@
           ws = new WebSocket(`${scheme}://${window.location.host}/websocket`)
           ws.onopen = () => {
             accessState.textContent = 'checking'
-            accessHint.textContent = 'Checking room access.'
+            accessHint.textContent = 'checking room access.'
             ws.send(JSON.stringify({
               event: 'participant',
               data: JSON.stringify({
@@ -1735,7 +3237,12 @@
               })
             }))
           }
-          ws.onmessage = event => handleSignal(JSON.parse(event.data))
+          ws.onmessage = event => {
+            handleSignal(JSON.parse(event.data)).catch(error => {
+              console.warn('Signal handling failed', error)
+              setLog(error.message || String(error))
+            })
+          }
           ws.onclose = () => leaveRoom()
           ws.onerror = () => setLog('websocket error')
         } catch (error) {
@@ -1780,8 +3287,10 @@
         }
 
         setLog('requesting camera and microphone')
-        localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints)
+        localStream = await getPreferredUserMedia()
         localVideo.srcObject = localStream
+        attachAudioMonitor('local', currentParticipantName, localStream.getAudioTracks()[0], { play: false, setsActiveSpeaker: false })
+        updateHearthParticipants()
 
         pc = new RTCPeerConnection()
         pc.ontrack = addRemoteTrack
@@ -1795,7 +3304,7 @@
           const state = pc.connectionState
           if (state === 'connected') {
             if (!statusPillEl.classList.contains('pill--listening')) {
-              setConnectionState('room', 'room connected')
+              setConnectionState('room', 'in the room')
             }
           } else if (state === 'connecting' || state === 'new') {
             setConnectionState('connecting', 'connecting…')
@@ -1812,6 +3321,81 @@
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
       }
 
+      async function getPreferredUserMedia() {
+        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints)
+        const preferredAudioDeviceId = await preferredAudioInputDeviceId(stream)
+        if (!preferredAudioDeviceId) {
+          return stream
+        }
+
+        const currentAudioTrack = stream.getAudioTracks()[0]
+        if (currentAudioTrack?.getSettings?.().deviceId === preferredAudioDeviceId) {
+          return stream
+        }
+
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: {
+              ...mediaConstraints.audio,
+              deviceId: { exact: preferredAudioDeviceId }
+            }
+          })
+          const preferredAudioTrack = audioStream.getAudioTracks()[0]
+          if (!preferredAudioTrack) {
+            return stream
+          }
+
+          currentAudioTrack?.stop()
+          setLog(`using ${preferredAudioTrack.label || 'computer microphone'}`)
+          return new MediaStream([...stream.getVideoTracks(), preferredAudioTrack])
+        } catch (error) {
+          console.warn('Could not switch away from continuity microphone', error)
+          return stream
+        }
+      }
+
+      async function preferredAudioInputDeviceId(stream) {
+        const currentAudioTrack = stream.getAudioTracks()[0]
+        if (!currentAudioTrack || !navigator.mediaDevices?.enumerateDevices) {
+          return ''
+        }
+
+        const currentDeviceId = currentAudioTrack.getSettings?.().deviceId || ''
+        const currentLabel = currentAudioTrack.label || ''
+        let devices = []
+        try {
+          devices = await navigator.mediaDevices.enumerateDevices()
+        } catch {
+          return ''
+        }
+
+        const audioInputs = devices.filter(device => device.kind === 'audioinput' && device.deviceId)
+        if (audioInputs.length < 2) {
+          return ''
+        }
+
+        const currentDevice = audioInputs.find(device => device.deviceId === currentDeviceId) || { label: currentLabel }
+        if (!isContinuityAudioInput(currentDevice) && !isContinuityAudioInput({ label: currentLabel })) {
+          return ''
+        }
+
+        const computerMic = audioInputs.find(device => isComputerAudioInput(device) && !isContinuityAudioInput(device))
+        if (computerMic) {
+          return computerMic.deviceId
+        }
+
+        return audioInputs.find(device => !isContinuityAudioInput(device))?.deviceId || ''
+      }
+
+      function isContinuityAudioInput(device) {
+        return /(iphone|ipad|continuity)/i.test(device?.label || '')
+      }
+
+      function isComputerAudioInput(device) {
+        return /(built.?in|internal|macbook|imac|studio display|display audio|computer)/i.test(device?.label || '')
+      }
+
       async function handleSignal(message) {
         switch (message.event) {
           case 'offer': {
@@ -1821,6 +3405,7 @@
             }
             const offer = JSON.parse(message.data)
             await pc.setRemoteDescription(offer)
+            await flushQueuedRemoteCandidates()
             await attachLocalTracksToOffer(offer)
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
@@ -1832,12 +3417,31 @@
               return
             }
             const candidate = JSON.parse(message.data)
-            await pc.addIceCandidate(candidate)
+            await addRemoteIceCandidate(candidate)
             break
           }
           case 'kanban':
             handleKanbanMessage(JSON.parse(message.data))
             break
+        }
+      }
+
+      async function addRemoteIceCandidate(candidate) {
+        if (!pc || !candidate) {
+          return
+        }
+        if (!pc.remoteDescription) {
+          queuedRemoteCandidates.push(candidate)
+          return
+        }
+        await pc.addIceCandidate(candidate)
+      }
+
+      async function flushQueuedRemoteCandidates() {
+        const candidates = queuedRemoteCandidates
+        queuedRemoteCandidates = []
+        for (const candidate of candidates) {
+          await addRemoteIceCandidate(candidate)
         }
       }
 
@@ -1877,7 +3481,9 @@
           }
           const direction = ['sendrecv', 'sendonly', 'recvonly', 'inactive']
             .find(candidate => lines.includes(`a=${candidate}`)) || 'sendrecv'
-          sections.set(mid, { kind, direction })
+          const msid = lines.find(line => line.startsWith('a=msid:'))?.slice(7).trim() || ''
+          const trackId = msid.split(/\s+/)[1] || ''
+          sections.set(mid, { kind, direction, trackId })
         }
         return sections
       }
@@ -1905,6 +3511,7 @@
             break
           case 'memory_transcript':
             addMemoryEntry(message.data)
+            setActiveSpeakerFromText(message.data?.text || message.data?.transcript || '')
             triggerHotEmber()
             break
           case 'memory_answer':
@@ -1961,7 +3568,7 @@
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
         } else if (normalized.includes('connected to conference room')) {
-          setConnectionState('room', 'room connected')
+          setConnectionState('room', 'in the room')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
@@ -1990,6 +3597,7 @@
         }
 
         if (event?.kind === 'transcript') {
+          setActiveSpeakerFromText(text)
           // Assistant recognized speech — fire the hot-ember handshake.
           // Auto-throttled inside triggerHotEmber so a stream of partials
           // doesn't strobe.
@@ -2002,10 +3610,13 @@
       }
 
       function handleParticipants(participants) {
-        const names = Array.isArray(participants) ? participants.filter(Boolean).join(', ') : ''
+        participantsInRoom = applyRoomSnapshot(participants)
+        const names = participantsInRoom.join(', ')
         if (names) {
           setLog(`in room · ${names}`)
         }
+        updateParticipantPreviewText()
+        updateHearthParticipants()
       }
 
       function handleParticipantJoined(participant) {
@@ -2014,23 +3625,49 @@
           kind: 'status',
           text: `${name} joined the room.`
         })
+        if (!participantsInRoom.includes(name)) {
+          participantsInRoom.push(name)
+        }
+        updateParticipantPreviewText()
+        updateHearthParticipants()
       }
 
       function handleParticipantTrack(track) {
         const name = track?.name || 'participant'
+        const trackId = track?.trackId || ''
         const streamId = track?.streamId || ''
+        if (trackId) {
+          remoteLabelsByTrack.set(trackId, name)
+          renameAudioMonitor(trackId, name)
+          relabelRemoteTile(trackId, name)
+        }
         if (streamId) {
           remoteLabelsByStream.set(streamId, name)
-          const tile = remoteElements.get(streamId)
-          if (tile) {
-            tile.querySelector('.video-label').textContent = name
-            const video = tile.querySelector('video')
-            if (video?.srcObject) {
-              remoteStreamsByParticipant.set(name, video.srcObject)
-              if (activeScreenShareParticipant === name) {
-                renderScreenStage()
-              }
-            }
+          renameAudioMonitor(streamId, name)
+          relabelRemoteTile(streamId, name)
+        }
+        if (trackId || streamId) {
+          removeParticipantPlaceholder(name)
+          updateHearthParticipants()
+        }
+      }
+
+      function relabelRemoteTile(key, name) {
+        const tile = remoteElements.get(key)
+        if (!tile || !name) {
+          return
+        }
+        tile.querySelector('.video-label').textContent = name
+        const previousName = tile.dataset.participant
+        tile.dataset.participant = name
+        const video = tile.querySelector('video')
+        if (previousName && previousName !== 'participant' && previousName !== name) {
+          remoteStreamsByParticipant.delete(previousName)
+        }
+        if (video?.srcObject) {
+          remoteStreamsByParticipant.set(name, video.srcObject)
+          if (activeScreenShareParticipant === name) {
+            renderScreenStage()
           }
         }
       }
@@ -2048,9 +3685,13 @@
 
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
+        currentParticipantName = name
+        localVideoLabel.textContent = name
+        localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
+        setRoomView(true)
         accessState.textContent = 'verified'
         accessHint.textContent = `${name} is verified. Starting camera and microphone.`
-        setConnectionState('room', 'room connected')
+        setConnectionState('room', 'in the room')
         setLog(`${name} is verified`)
         try {
           await beginMediaSession()
@@ -2090,6 +3731,7 @@
       function handleScreenShareStarted(event) {
         activeScreenShareParticipant = event?.name || 'participant'
         renderScreenStage()
+        updateHearthParticipants()
       }
 
       function handleScreenShareStopped(event) {
@@ -2097,6 +3739,7 @@
         if (!name || name === activeScreenShareParticipant) {
           activeScreenShareParticipant = ''
           renderScreenStage()
+          updateHearthParticipants()
         }
       }
 
@@ -2214,6 +3857,8 @@
           presentationTile.classList.remove('is-screen-sharing')
           screenStageVideo.srcObject = null
           screenStageLabel.textContent = 'screen share'
+          screenSpeakerVideo.srcObject = null
+          screenSpeakerLabel.textContent = 'speaker'
           return
         }
 
@@ -2223,48 +3868,394 @@
         presentationTile.classList.add('is-screen-sharing')
         screenStageVideo.srcObject = stream || null
         screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
+        updateSpeakerPictureInPicture()
+      }
+
+      function participantNamesForRoom() {
+        const names = [
+          currentParticipantName,
+          selectedParticipantName(),
+          ...participantsInRoom,
+          ...participantPreview
+        ]
+          .map(name => String(name || '').trim())
+          .filter(Boolean)
+        return Array.from(new Set(names))
+      }
+
+      function visibleParticipantNames() {
+        const names = participantNamesForRoom()
+        if (names.length > 0) {
+          return names
+        }
+        return ['the room']
+      }
+
+      function setActiveSpeakerFromText(text) {
+        const value = String(text || '').trim()
+        const explicit = value.match(/^([A-Z][A-Za-z]+)\s*:/)
+        const candidate = explicit?.[1]
+        const knownNames = participantNamesForRoom()
+        if (candidate && knownNames.some(name => name.toLowerCase() === candidate.toLowerCase())) {
+          activeSpeakerName = knownNames.find(name => name.toLowerCase() === candidate.toLowerCase()) || candidate
+        }
+        updateHearthParticipants()
+      }
+
+      function activeSpeakerDisplayName() {
+        const names = visibleParticipantNames()
+        if (activeSpeakerName && names.includes(activeSpeakerName)) {
+          return activeSpeakerName
+        }
+        const remoteName = names.find(name => name !== currentParticipantName && remoteStreamsByParticipant.has(name))
+        if (remoteName) {
+          return remoteName
+        }
+        if (currentParticipantName && names.includes(currentParticipantName)) {
+          return currentParticipantName
+        }
+        return names[0]
+      }
+
+      function participantStream(name) {
+        if (!name || name === 'the room') {
+          return null
+        }
+        if (name === currentParticipantName) {
+          return localStream
+        }
+        return remoteStreamsByParticipant.get(name) || null
+      }
+
+      function updateHearthParticipants() {
+        const speaker = activeSpeakerDisplayName()
+        const stream = participantStream(speaker)
+        const speakerIsLocal = speaker === currentParticipantName
+
+        activeSpeakerVideo.srcObject = stream || null
+        activeSpeakerVideo.hidden = !stream
+        activeSpeakerVideo.classList.toggle('is-local', speakerIsLocal)
+        activeSpeakerAvatar.hidden = Boolean(stream)
+        if (!stream) {
+          activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
+        }
+        activeSpeakerLabel.textContent = speaker === 'the room'
+          ? 'the room · waiting'
+          : `${speaker}${speakerIsLocal ? ' · you' : ''} · speaking`
+        activeSpeakerTile.classList.toggle('has-video', Boolean(stream))
+
+        const localTile = localVideo.closest('.video-tile')
+        if (localTile) {
+          localTile.dataset.participant = currentParticipantName || selectedParticipantName()
+        }
+
+        syncParticipantPlaceholders()
+        for (const tile of videoStack.querySelectorAll('.video-tile')) {
+          const name = tile.dataset.participant || ''
+          tile.classList.toggle('is-active-speaker', Boolean(name && name === speaker))
+        }
+
+        updateSpeakerPictureInPicture()
+        renderBoardHuddle()
+      }
+
+      function updateSpeakerPictureInPicture() {
+        const speaker = activeSpeakerDisplayName()
+        const stream = participantStream(speaker)
+        const speakerIsLocal = speaker === currentParticipantName
+        screenSpeakerVideo.srcObject = stream || null
+        screenSpeakerVideo.hidden = !stream
+        screenSpeakerVideo.classList.toggle('is-local', speakerIsLocal)
+        screenSpeakerAvatar.hidden = Boolean(stream)
+        if (!stream) {
+          screenSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
+        }
+        screenSpeakerLabel.textContent = speaker === 'the room' ? 'speaker' : speaker.toLowerCase()
+      }
+
+      function syncParticipantPlaceholders() {
+        const names = participantNamesForRoom()
+        const represented = new Set()
+        for (const tile of videoStack.querySelectorAll('.video-tile')) {
+          const name = tile.dataset.participant
+          if (name) {
+            represented.add(name)
+          }
+        }
+        for (const [name, tile] of participantPlaceholders.entries()) {
+          if (!names.includes(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+            tile.remove()
+            participantPlaceholders.delete(name)
+          }
+        }
+        for (const name of names) {
+          if (!name || represented.has(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+            continue
+          }
+          const tile = document.createElement('div')
+          tile.className = 'video-tile hearth-seat is-placeholder'
+          tile.dataset.participant = name
+          const avatar = document.createElement('span')
+          avatar.className = 'owner-avatar'
+          avatar.appendChild(renderIdenticon(name))
+          const label = document.createElement('span')
+          label.className = 'video-label'
+          label.textContent = name
+          tile.append(avatar, label)
+          participantPlaceholders.set(name, tile)
+          videoStack.appendChild(tile)
+        }
+      }
+
+      function removeParticipantPlaceholder(name) {
+        const tile = participantPlaceholders.get(name)
+        if (!tile) {
+          return
+        }
+        tile.remove()
+        participantPlaceholders.delete(name)
+      }
+
+      function renderBoardHuddle() {
+        if (!boardHuddle) {
+          return
+        }
+        const names = visibleParticipantNames()
+        const stack = document.createElement('div')
+        stack.className = 'stack-avatars'
+        renderAvatarStack(stack, names, { max: 4, markCurrent: true })
+
+        const label = document.createElement('span')
+        label.className = 'presence-label'
+        const pulse = document.createElement('span')
+        pulse.className = 'presence-pulse'
+        const count = names.length || Math.max(occupiedSeats, participantPreview.length)
+        label.append(pulse, document.createTextNode(`${count || 0} in the room`))
+
+        boardHuddle.replaceChildren(stack, label)
+      }
+
+      function ensureAudioContext() {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext
+          if (!AudioContextClass) {
+            return null
+          }
+          audioContext = new AudioContextClass()
+        }
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {})
+        }
+        return audioContext
+      }
+
+      function attachAudioMonitor(key, name, track, options = {}) {
+        if (!track) {
+          return
+        }
+        detachAudioMonitor(key)
+        const context = ensureAudioContext()
+        if (!context) {
+          return
+        }
+
+        const stream = new MediaStream([track])
+        let source
+        let analyser
+        try {
+          source = context.createMediaStreamSource(stream)
+          analyser = context.createAnalyser()
+        } catch {
+          return
+        }
+        analyser.fftSize = 512
+        analyser.smoothingTimeConstant = 0.75
+        source.connect(analyser)
+
+        let playingThroughContext = false
+        if (options.play) {
+          try {
+            source.connect(context.destination)
+            playingThroughContext = true
+          } catch {
+            playingThroughContext = false
+          }
+        }
+
+        let audio
+        if (options.play && !playingThroughContext) {
+          audio = document.createElement('audio')
+          audio.autoplay = true
+          audio.playsInline = true
+          audio.srcObject = stream
+          audio.setAttribute('aria-hidden', 'true')
+          audio.style.display = 'none'
+          document.body.appendChild(audio)
+          audio.play().catch(() => {})
+        }
+
+        audioMonitors.set(key, {
+          name: name || 'participant',
+          analyser,
+          data: new Uint8Array(analyser.fftSize),
+          source,
+          audio,
+          playingThroughContext,
+          setsActiveSpeaker: options.setsActiveSpeaker !== false,
+          stream
+        })
+        track.addEventListener('ended', () => detachAudioMonitor(key), { once: true })
+        startAudioLevelLoop()
+      }
+
+      function renameAudioMonitor(key, name) {
+        const monitor = audioMonitors.get(key)
+        if (!monitor || !name) {
+          return
+        }
+        monitor.name = name
+      }
+
+      function detachAudioMonitor(key) {
+        const monitor = audioMonitors.get(key)
+        if (!monitor) {
+          return
+        }
+        monitor.audio?.remove()
+        try {
+          monitor.source.disconnect()
+        } catch {
+          // Already disconnected.
+        }
+        audioMonitors.delete(key)
+      }
+
+      function clearAudioMonitors() {
+        for (const key of Array.from(audioMonitors.keys())) {
+          detachAudioMonitor(key)
+        }
+        if (audioLevelFrame) {
+          cancelAnimationFrame(audioLevelFrame)
+          audioLevelFrame = 0
+        }
+      }
+
+      function startAudioLevelLoop() {
+        if (audioLevelFrame) {
+          return
+        }
+        const tick = () => {
+          let loudestName = ''
+          let loudestLevel = 0
+          for (const monitor of audioMonitors.values()) {
+            if (!monitor.setsActiveSpeaker) {
+              continue
+            }
+            monitor.analyser.getByteTimeDomainData(monitor.data)
+            let sum = 0
+            for (const sample of monitor.data) {
+              const normalized = (sample - 128) / 128
+              sum += normalized * normalized
+            }
+            const level = Math.sqrt(sum / monitor.data.length)
+            if (level > loudestLevel) {
+              loudestLevel = level
+              loudestName = monitor.name
+            }
+          }
+          if (loudestName && loudestLevel > 0.045 && loudestName !== activeSpeakerName) {
+            activeSpeakerName = loudestName
+            updateHearthParticipants()
+          }
+          audioLevelFrame = audioMonitors.size > 0 ? requestAnimationFrame(tick) : 0
+        }
+        audioLevelFrame = requestAnimationFrame(tick)
+      }
+
+      function addRemoteAudioTrack(event) {
+        const key = remoteTrackKey(event)
+        const name = participantNameForRemoteTrack(event)
+        attachAudioMonitor(key, name, event.track, { play: true })
       }
 
       function addRemoteTrack(event) {
         if (event.track.kind === 'audio') {
+          addRemoteAudioTrack(event)
           return
         }
 
-        const stream = event.streams[0]
-        if (!stream || remoteElements.has(stream.id)) {
+        const key = remoteTrackKey(event)
+        const stream = event.streams[0] || new MediaStream([event.track])
+        if (remoteElements.has(key)) {
           return
         }
 
         const tile = document.createElement('div')
-        tile.className = 'video-tile'
+        tile.className = 'video-tile hearth-seat'
 
         const video = document.createElement('video')
         video.autoplay = true
+        video.muted = true
+        video.defaultMuted = true
         video.playsInline = true
         video.srcObject = stream
 
         const label = document.createElement('span')
         label.className = 'video-label'
-        const participantName = remoteLabelsByStream.get(stream.id) || 'participant'
+        const participantName = participantNameForRemoteTrack(event)
         label.textContent = participantName
+        tile.dataset.participant = participantName
+        tile.dataset.remoteKey = key
 
         tile.append(video, label)
         videoStack.appendChild(tile)
-        remoteElements.set(stream.id, tile)
+        remoteElements.set(key, tile)
         if (participantName !== 'participant') {
           remoteStreamsByParticipant.set(participantName, stream)
+          removeParticipantPlaceholder(participantName)
         }
         if (activeScreenShareParticipant === participantName) {
           renderScreenStage()
         }
+        updateHearthParticipants()
 
-        stream.onremovetrack = () => {
+        const removeRemoteTile = () => {
           tile.remove()
-          remoteElements.delete(stream.id)
+          remoteElements.delete(key)
           if (participantName !== 'participant') {
             remoteStreamsByParticipant.delete(participantName)
           }
+          updateHearthParticipants()
         }
+        stream.onremovetrack = removeRemoteTile
+        event.track.addEventListener('ended', removeRemoteTile, { once: true })
+      }
+
+      function remoteTrackKey(event) {
+        return event.streams[0]?.id || remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id
+      }
+
+      function participantNameForRemoteTrack(event) {
+        const streamId = event.streams[0]?.id || ''
+        const sdpTrackId = remoteSDPTrackIdForMid(event.transceiver?.mid)
+        return remoteLabelsByStream.get(streamId)
+          || remoteLabelsByTrack.get(event.track.id)
+          || remoteLabelsByTrack.get(sdpTrackId)
+          || inferredRemoteParticipantName()
+          || 'participant'
+      }
+
+      function remoteSDPTrackIdForMid(mid) {
+        if (!pc?.remoteDescription || mid == null) {
+          return ''
+        }
+        const sections = remoteMediaSections(pc.remoteDescription.sdp || '')
+        return sections.get(String(mid))?.trackId || ''
+      }
+
+      function inferredRemoteParticipantName() {
+        const remoteNames = participantNamesForRoom().filter(name => name && name !== currentParticipantName)
+        return remoteNames.length === 1 ? remoteNames[0] : ''
       }
 
       function addMemoryEntry(entry) {
@@ -2410,7 +4401,7 @@
         boardEl.replaceChildren(...statuses.map(status => {
           const columnCards = cards.filter(card => card.status === status)
           const column = document.createElement('section')
-          column.className = 'column'
+          column.className = `column ${statusClass(status)}`
           column.setAttribute('aria-label', `${status} cards`)
 
           const header = document.createElement('header')
@@ -2426,7 +4417,7 @@
           if (columnCards.length === 0) {
             const empty = document.createElement('div')
             empty.className = 'empty'
-            empty.textContent = 'nothing here yet'
+            empty.textContent = 'nothing here yet.'
             stack.appendChild(empty)
           } else {
             stack.append(...columnCards.map(card => renderCard(
@@ -2440,6 +4431,68 @@
           return column
         }))
         updateBoardEmptyState()
+        renderBoardPreview(changes)
+      }
+
+      function renderBoardPreview(changes = { moved: new Set() }) {
+        if (!boardPreview) {
+          return
+        }
+        if (!isBoardReady) {
+          const empty = document.createElement('p')
+          empty.className = 'board-preview__empty'
+          empty.textContent = 'join the room to load the board.'
+          boardPreview.replaceChildren(empty)
+          return
+        }
+        if (cards.length === 0) {
+          const empty = document.createElement('p')
+          empty.className = 'board-preview__empty'
+          empty.textContent = 'this room is empty. the fire is warm.'
+          boardPreview.replaceChildren(empty)
+          return
+        }
+
+        const columns = statuses.map(status => {
+          const columnCards = cards.filter(card => card.status === status)
+          const column = document.createElement('section')
+          column.className = `board-preview__col ${statusClass(status)}`
+
+          const header = document.createElement('header')
+          const title = document.createElement('h3')
+          title.textContent = status
+          const count = document.createElement('span')
+          count.className = 'board-preview__count'
+          count.textContent = String(columnCards.length)
+          header.append(title, count)
+          column.appendChild(header)
+
+          if (columnCards.length === 0) {
+            column.classList.add('is-empty')
+            const empty = document.createElement('div')
+            empty.className = 'board-preview__more'
+            empty.textContent = 'nothing here yet'
+            column.appendChild(empty)
+            return column
+          }
+
+          const first = columnCards[0]
+          const card = document.createElement('button')
+          card.className = `board-preview__card${changes.moved?.has(first.id) ? ' is-moved' : ''}`
+          card.type = 'button'
+          card.textContent = first.title || 'untitled card'
+          card.addEventListener('click', () => showCardDetail(first))
+          column.appendChild(card)
+
+          if (columnCards.length > 1) {
+            const more = document.createElement('div')
+            more.className = 'board-preview__more'
+            more.textContent = `+ ${columnCards.length - 1} more`
+            column.appendChild(more)
+          }
+          return column
+        })
+        boardPreview.replaceChildren(...columns)
       }
 
       function renderCard(card, moved = false, completed = false) {
@@ -2514,56 +4567,49 @@
       }
 
       function renderIdenticon(seed) {
-        const svgNS = 'http://www.w3.org/2000/svg'
-        const svg = document.createElementNS(svgNS, 'svg')
-        svg.setAttribute('viewBox', '0 0 5 5')
-        svg.setAttribute('aria-hidden', 'true')
-
-        const background = document.createElementNS(svgNS, 'rect')
-        background.setAttribute('width', '5')
-        background.setAttribute('height', '5')
-        background.setAttribute('fill', '#F6F8FA')
-        svg.appendChild(background)
-
-        // Warm-clamped identicon: hues 18°-60°, saturation 60-80%, lightness 26-40%.
-        const hue = 18 + (hashString(`${seed}:hue`) % 42)
-        const sat = 60 + (hashString(`${seed}:sat`) % 20)
-        const lit = 26 + (hashString(`${seed}:lit`) % 14)
-        const color = `hsl(${hue} ${sat}% ${lit}%)`
-
-        const patternHash = hashString(`${seed}:pattern`)
-        let filled = 0
-
-        for (let y = 0; y < 5; y++) {
-          for (let x = 0; x < 3; x++) {
-            const bitIndex = y * 3 + x
-            if (((patternHash >>> bitIndex) & 1) === 0) {
-              continue
-            }
-
-            appendIdenticonCell(svg, x, y, color)
-            filled++
-            if (x !== 2) {
-              appendIdenticonCell(svg, 4 - x, y, color)
-            }
-          }
-        }
-
-        if (filled === 0) {
-          appendIdenticonCell(svg, 2, 2, color)
-        }
-
-        return svg
+        const text = String(seed || 'the room').trim()
+        const chip = document.createElement('span')
+        chip.className = `monogram ${monogramTone(text)}`
+        chip.setAttribute('aria-hidden', 'true')
+        chip.textContent = monogramInitial(text)
+        return chip
       }
 
-      function appendIdenticonCell(svg, x, y, color) {
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-        rect.setAttribute('x', String(x))
-        rect.setAttribute('y', String(y))
-        rect.setAttribute('width', '1')
-        rect.setAttribute('height', '1')
-        rect.setAttribute('fill', color)
-        svg.appendChild(rect)
+      function monogramInitial(seed) {
+        const cleaned = String(seed || '').trim()
+        if (!cleaned || cleaned === 'the room') {
+          return 'B'
+        }
+        const letter = cleaned.match(/[A-Za-z0-9]/)?.[0] || 'B'
+        return letter.toUpperCase()
+      }
+
+      function monogramTone(seed) {
+        const tones = ['mono--ember', 'mono--amber', 'mono--rust', 'mono--ash', 'mono--ink']
+        return tones[hashString(`${seed}:tone`) % tones.length]
+      }
+
+      function renderAvatarStack(container, names, options = {}) {
+        if (!container) {
+          return
+        }
+        const visible = [...new Set((names || []).filter(Boolean))]
+        const max = options.max || 4
+        const chips = visible.slice(0, max).map(name => {
+          const chip = renderIdenticon(name)
+          chip.title = name
+          if (options.markCurrent && currentParticipantName && name === currentParticipantName) {
+            chip.classList.add('is-you')
+          }
+          return chip
+        })
+        if (visible.length > max) {
+          const more = document.createElement('span')
+          more.className = 'more'
+          more.textContent = `+${visible.length - max}`
+          chips.push(more)
+        }
+        container.replaceChildren(...chips)
       }
 
       function hashString(value) {
@@ -2601,6 +4647,18 @@
         panel.setAttribute('aria-modal', 'true')
         panel.setAttribute('aria-label', isNew ? 'New card' : `Edit card ${draft.title || 'untitled card'}`)
 
+        const metaBar = document.createElement('div')
+        metaBar.className = 'card-detail-meta'
+        const statusPill = document.createElement('span')
+        statusPill.className = 'status-pill'
+        const statusDot = document.createElement('span')
+        statusDot.className = 'dot'
+        statusPill.append(statusDot, document.createTextNode(draft.status || 'Backlog'))
+        const idPill = document.createElement('span')
+        idPill.className = 'card-id-pill'
+        idPill.textContent = isNew ? 'manual capture' : `id · ${draft.id || 'card'}`
+        metaBar.append(statusPill, idPill)
+
         const header = document.createElement('header')
         header.className = 'card-detail-header'
 
@@ -2622,12 +4680,18 @@
 
         header.append(renderOwnerAvatar(draft, { large: true }), titleGroup, closeButton)
 
+        const scoutSummary = renderCardScoutSummary(draft, isNew)
+
         const form = document.createElement('form')
         form.className = 'card-detail-form'
         form.addEventListener('submit', event => {
           event.preventDefault()
           saveCardEditor(form, draft, isNew)
         })
+
+        const editLabel = document.createElement('div')
+        editLabel.className = 'card-detail-edit-label'
+        editLabel.textContent = 'manual edits'
 
         const titleField = renderFormField('title', 'input', draft.title || '')
         titleField.input.required = true
@@ -2644,16 +4708,16 @@
         const actions = document.createElement('div')
         actions.className = 'card-detail-actions'
         const deleteButton = document.createElement('button')
-        deleteButton.className = 'btn btn--danger'
+        deleteButton.className = 'text-link text-link--danger'
         deleteButton.type = 'button'
-        deleteButton.textContent = 'Delete'
+        deleteButton.textContent = 'Delete card'
         deleteButton.disabled = isNew
         deleteButton.addEventListener('click', () => deleteCardFromEditor(draft))
 
         const rightActions = document.createElement('div')
         rightActions.className = 'card-detail-actions__right'
         const cancelButton = document.createElement('button')
-        cancelButton.className = 'btn btn--secondary'
+        cancelButton.className = 'text-link'
         cancelButton.type = 'button'
         cancelButton.textContent = 'Cancel'
         cancelButton.addEventListener('click', closeCardDetail)
@@ -2664,11 +4728,153 @@
         rightActions.append(cancelButton, saveButton)
         actions.append(deleteButton, rightActions)
 
-        form.append(titleField.field, grid, tagsField.field, notesField.field, actions)
-        panel.append(header, form)
+        form.append(editLabel, titleField.field, grid, tagsField.field, notesField.field, actions)
+        panel.append(metaBar, header, scoutSummary, form)
+        if (!isNew) {
+          panel.append(renderCardCommand(draft))
+        }
         cardDetailRegion.replaceChildren(panel)
         cardDetailRegion.classList.add('visible')
         titleField.input.focus()
+      }
+
+      function renderCardScoutSummary(card, isNew) {
+        const section = document.createElement('section')
+        section.className = 'card-detail-scout'
+        const header = document.createElement('header')
+        const title = document.createElement('strong')
+        title.textContent = 'Scout'
+        const when = document.createElement('span')
+        when.textContent = isNew ? 'new card' : 'card context'
+        header.append(title, when)
+        const text = document.createElement('p')
+        if (isNew) {
+          text.textContent = 'Capture a card manually, or say it aloud in the room and Scout can place it on the board.'
+        } else {
+          const notes = String(card.notes || '').trim()
+          const context = notes
+            ? notes
+            : `${card.title || 'This card'} is currently in ${card.status || 'Backlog'} and owned by ${cardOwner(card).name}. Use the command box below for quick updates.`
+          text.textContent = `"${context}"`
+        }
+        section.append(header, text)
+        return section
+      }
+
+      function renderCardCommand(card) {
+        const section = document.createElement('section')
+        section.className = 'card-detail-command'
+
+        const chips = document.createElement('div')
+        chips.className = 'card-command-chips'
+        const label = document.createElement('span')
+        label.textContent = 'ask scout'
+        chips.appendChild(label)
+
+        const commands = [
+          'mark blocked',
+          'mark done',
+          'assign to Jake',
+          'add tag bandwidth'
+        ]
+
+        const form = document.createElement('form')
+        form.className = 'card-command-form'
+        const input = document.createElement('input')
+        input.type = 'text'
+        input.placeholder = 'tell Scout what to do with this card…'
+        const submit = document.createElement('button')
+        submit.className = 'btn btn--ghost'
+        submit.type = 'submit'
+        submit.textContent = 'Ask'
+        form.append(input, submit)
+        form.addEventListener('submit', event => {
+          event.preventDefault()
+          sendCardCommand(card, input)
+        })
+
+        for (const command of commands) {
+          const chip = document.createElement('button')
+          chip.type = 'button'
+          chip.className = 'card-command-chip scout-pill'
+          chip.textContent = command
+          chip.addEventListener('click', () => {
+            input.value = command
+            sendCardCommand(card, input)
+          })
+          chips.appendChild(chip)
+        }
+
+        section.append(chips, form)
+        return section
+      }
+
+      function sendCardCommand(card, input) {
+        if (!card?.id || !ws || ws.readyState !== WebSocket.OPEN) {
+          showToast({ text: 'join the room before editing cards', kind: 'error' })
+          return
+        }
+
+        const command = input.value.trim()
+        if (!command) {
+          return
+        }
+
+        const payload = {
+          card_id: card.id,
+          title: card.title || '',
+          status: card.status || 'Backlog',
+          owner: cardOwner(card).name,
+          tags: Array.isArray(card.tags) ? [...card.tags] : [],
+          notes: card.notes || ''
+        }
+
+        const statusMatch = command.match(/\b(?:mark|move|set)\s+(?:as\s+|to\s+)?(backlog|in progress|blocked|done)\b/i)
+        const assignMatch = command.match(/\bassign(?:\s+to)?\s+([A-Za-z]+)\b/i)
+        const tagMatch = command.match(/\badd\s+tag\s+(.+)$/i)
+        const noteMatch = command.match(/\b(?:add\s+)?note\s+(.+)$/i)
+        const renameMatch = command.match(/\brename\s+(?:to\s+)?(.+)$/i)
+
+        if (statusMatch) {
+          payload.status = normalizeStatus(statusMatch[1])
+        } else if (assignMatch) {
+          const assignee = participantNames().find(name => name.toLowerCase() === assignMatch[1].toLowerCase())
+          if (!assignee) {
+            showToast({ text: `Scout does not know ${assignMatch[1]}`, kind: 'error' })
+            return
+          }
+          payload.owner = assignee
+        } else if (tagMatch) {
+          const tag = tagMatch[1].trim().replace(/^["']|["']$/g, '')
+          if (tag && !payload.tags.includes(tag)) {
+            payload.tags.push(tag)
+          }
+        } else if (noteMatch) {
+          const note = noteMatch[1].trim()
+          payload.notes = [payload.notes, note].filter(Boolean).join('\n')
+        } else if (renameMatch) {
+          payload.title = renameMatch[1].trim()
+        } else {
+          showToast({ text: 'try: mark blocked, assign to Jake, add tag bandwidth, note follow up', kind: 'note' })
+          return
+        }
+
+        ws.send(JSON.stringify({
+          event: 'manual_update_ticket',
+          data: JSON.stringify(payload)
+        }))
+        input.value = ''
+        showToast({ text: 'Scout updated the card', kind: 'move' })
+        closeCardDetail()
+      }
+
+      function normalizeStatus(value) {
+        const normalized = String(value || '').toLowerCase()
+        return statuses.find(status => status.toLowerCase() === normalized) || 'Backlog'
+      }
+
+      function statusClass(status) {
+        return `column--${String(status || '').toLowerCase().replace(/\s+/g, '-')}`
       }
 
       function renderFormField(labelText, type, value) {
@@ -3097,12 +5303,19 @@
         localStream = undefined
         localVideo.srcObject = null
         localVideoLabel.textContent = 'you'
+        clearAudioMonitors()
 
         remoteElements.forEach(tile => tile.remove())
         remoteElements.clear()
         remoteStreamsByParticipant.clear()
         remoteLabelsByStream.clear()
+        remoteLabelsByTrack.clear()
+        queuedRemoteCandidates = []
+        participantPlaceholders.forEach(tile => tile.remove())
+        participantPlaceholders.clear()
         activeScreenShareParticipant = ''
+        activeSpeakerName = ''
+        participantsInRoom = []
         currentParticipantName = ''
         canEditBoard = false
         canUndoDelete = false
@@ -3115,7 +5328,9 @@
         updateBoardControls()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
+        setRoomView(false)
         validateAccess()
+        loadParticipantPreview()
       }
 
       function setConnectionState(state, label) {
@@ -3138,9 +5353,11 @@
       function updateBoardControls() {
         newCardButton.disabled = !canEditBoard
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
+        expandBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
           ? `${cards.length} project${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
+        boardPreviewState.textContent = boardState.textContent
       }
 
       // Hot-ember handshake: compresses the pulse cycle from 2400ms → 1800ms

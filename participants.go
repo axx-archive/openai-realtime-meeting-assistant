@@ -2,10 +2,14 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
-const defaultMeetingRoomPassword = "B0NFIRE!"
+const (
+	defaultMeetingRoomPassword = "B0NFIRE!"
+	defaultMeetingRoomCapacity = 10
+)
 
 var meetingParticipantNames = []string{
 	"Erick",
@@ -16,6 +20,8 @@ var meetingParticipantNames = []string{
 	"Caitlyn",
 	"Joel",
 	"AJ",
+	"Guest 1",
+	"Guest 2",
 }
 
 func canonicalParticipantName(name string) string {
@@ -41,9 +47,26 @@ func configuredMeetingRoomPassword() string {
 	return defaultMeetingRoomPassword
 }
 
+func configuredMeetingRoomCapacity() int {
+	rawCapacity := strings.TrimSpace(os.Getenv("MEETING_ROOM_MAX_PARTICIPANTS"))
+	if rawCapacity == "" {
+		return defaultMeetingRoomCapacity
+	}
+
+	capacity, err := strconv.Atoi(rawCapacity)
+	if err != nil || capacity < 1 {
+		return defaultMeetingRoomCapacity
+	}
+
+	return capacity
+}
+
 func participantEmail(name string) string {
 	name = canonicalParticipantName(name)
 	if name == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(name), "guest ") {
 		return ""
 	}
 	if strings.EqualFold(name, "Erick") {
