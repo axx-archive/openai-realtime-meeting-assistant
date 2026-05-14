@@ -97,6 +97,7 @@ func main() {
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if err = indexTemplate.Execute(w, "ws://"+r.Host+"/websocket"); err != nil {
 			log.Errorf("Failed to parse index template: %v", err)
 		}
