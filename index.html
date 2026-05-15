@@ -108,9 +108,14 @@
 
       * { box-sizing: border-box; }
 
+      html {
+        overflow-x: hidden;
+      }
+
       html, body {
         margin: 0;
         min-height: 100vh;
+        min-height: 100svh;
         background: var(--night-1);
         color: var(--fg-0);
         font-family: var(--font-sans);
@@ -121,6 +126,7 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
+        overflow-x: hidden;
       }
 
       h1, h2, p { margin: 0; }
@@ -138,7 +144,8 @@
         grid-template-rows: auto minmax(0, 1fr) auto;
         gap: var(--s-3);
         min-height: 100vh;
-        padding: var(--s-3);
+        min-height: 100svh;
+        padding: max(var(--s-3), env(safe-area-inset-top)) max(var(--s-3), env(safe-area-inset-right)) max(var(--s-3), env(safe-area-inset-bottom)) max(var(--s-3), env(safe-area-inset-left));
       }
 
       /* ---------- Topbar ---------- */
@@ -440,9 +447,12 @@
 
       .access-hint {
         min-height: 18px;
+        min-width: 0;
         color: var(--fg-2);
         font-size: 12px;
         line-height: 1.45;
+        overflow-wrap: anywhere;
+        text-wrap: pretty;
       }
 
       .access-panel.is-verified {
@@ -2707,6 +2717,553 @@
         }
       }
 
+      /* ---------- Responsive polish ----------
+         Keep the room intentionally dense on desktop, then switch to a clear
+         stage → board → Scout flow once the rails can no longer breathe. */
+      @supports (min-height: 100dvh) {
+        html,
+        body,
+        main {
+          min-height: 100dvh;
+        }
+      }
+
+      .board-expand,
+      .board-collapse,
+      .board-back,
+      .board-preview__card,
+      .card-detail-close,
+      .text-link {
+        min-height: 40px;
+      }
+
+      .card-detail-close,
+      .text-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      @media (max-width: 1100px) {
+        #appShell.is-in-room .workspace {
+          align-items: start;
+        }
+
+        .hearth-stage {
+          min-height: clamp(500px, 66svh, 720px);
+        }
+
+        .hearth-speaker {
+          width: min(94%, 900px);
+        }
+
+        .hearth-seats {
+          gap: var(--s-2);
+        }
+
+        .hearth-seat {
+          width: clamp(136px, 16vw, 180px);
+        }
+
+        .assistant-panel.scout-panel {
+          min-height: 220px;
+        }
+      }
+
+      @media (max-width: 860px) {
+        #appShell.is-in-room .workspace {
+          align-content: start;
+          gap: var(--s-2);
+        }
+
+        .hearth-presentation {
+          order: 0;
+          min-height: 0;
+        }
+
+        .board-rail {
+          order: 1;
+        }
+
+        .scout-rail {
+          order: 2;
+        }
+
+        .hearth-stage {
+          min-height: clamp(420px, 58svh, 640px);
+          padding: var(--s-5);
+        }
+
+        .hearth-speaker {
+          width: min(100%, 680px);
+        }
+
+        .hearth-seats {
+          max-width: 100%;
+        }
+
+        .board-rail,
+        .assistant-panel.scout-panel {
+          border-radius: var(--r-md);
+        }
+
+        .board-preview {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .board-preview__empty {
+          grid-column: 1 / -1;
+        }
+
+        .assistant-feed {
+          max-height: min(260px, 32svh);
+        }
+
+        .meeting-bar {
+          bottom: max(var(--s-3), env(safe-area-inset-bottom));
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .workspace {
+          padding-bottom: 132px;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
+          position: fixed;
+          right: max(var(--s-3), env(safe-area-inset-right));
+          bottom: max(var(--s-3), env(safe-area-inset-bottom));
+          left: max(var(--s-3), env(safe-area-inset-left));
+        }
+
+        .board-expanded-top {
+          gap: var(--s-3);
+          padding: 14px var(--s-4);
+        }
+
+        .board-expanded-brand {
+          min-width: 0;
+        }
+
+        .board-huddle.presence {
+          justify-self: stretch;
+          justify-content: flex-start;
+          max-width: 100%;
+          overflow-x: auto;
+        }
+
+        .board-collapse,
+        .board-back {
+          justify-self: start;
+        }
+
+        #appShell.is-board-expanded .workspace {
+          align-content: stretch;
+        }
+
+        #appShell.is-board-expanded .board-expanded-surface {
+          min-height: 0;
+          height: calc(100svh - 128px);
+        }
+      }
+
+      @media (max-width: 640px) {
+        main {
+          gap: var(--s-2);
+          padding: max(var(--s-2), env(safe-area-inset-top)) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
+        }
+
+        .topbar {
+          min-height: 0;
+          gap: var(--s-2);
+          padding: 10px;
+          border-radius: var(--r-md);
+        }
+
+        .topbar__mark {
+          width: 32px;
+          height: 32px;
+        }
+
+        .topbar .pill {
+          max-width: 100%;
+          min-height: 32px;
+        }
+
+        .pill {
+          min-height: 32px;
+        }
+
+        .hearth-access {
+          width: min(100%, calc(100vw - 16px));
+          padding: 0 var(--s-4) var(--s-4);
+          border-radius: 18px;
+        }
+
+        .hearth-access::before {
+          top: -130px;
+          width: 260px;
+          height: 260px;
+        }
+
+        .hearth-access__ember {
+          width: 56px;
+          height: 56px;
+          margin: -28px auto 14px;
+          bottom: auto;
+        }
+
+        .hearth-access h2 {
+          font-size: clamp(28px, 8vw, 32px);
+          text-wrap: balance;
+        }
+
+        .hearth-access .access-grid {
+          gap: var(--s-2);
+          margin-top: var(--s-4);
+        }
+
+        .access-hint {
+          min-height: 0;
+        }
+
+        .inside-row {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: var(--s-2);
+        }
+
+        .hearth-stage {
+          min-height: clamp(320px, 48svh, 440px);
+          padding: var(--s-3);
+        }
+
+        .hearth-center {
+          gap: var(--s-3);
+        }
+
+        .hearth-speaker {
+          width: 100%;
+          min-width: 0;
+          border-radius: 12px;
+        }
+
+        .speaker-avatar {
+          width: 72px;
+          height: 72px;
+        }
+
+        .speaker-avatar .monogram {
+          font-size: 30px;
+        }
+
+        .speaker-name-pill {
+          left: var(--s-2);
+          bottom: var(--s-2);
+          max-width: calc(100% - 16px);
+          padding: 6px 9px;
+        }
+
+        .speaker-ember {
+          top: var(--s-2);
+          right: var(--s-2);
+        }
+
+        .hearth-seats {
+          width: 100%;
+          justify-content: flex-start;
+          gap: var(--s-2);
+        }
+
+        .hearth-seat {
+          width: min(156px, calc((100% - var(--s-2)) / 2));
+          min-width: 0;
+          border-radius: 10px;
+        }
+
+        .video-label {
+          left: 6px;
+          bottom: 6px;
+          max-width: calc(100% - 12px);
+        }
+
+        .board-rail {
+          padding: var(--s-3);
+        }
+
+        .board-rail__header {
+          align-items: center;
+        }
+
+        .board-expand {
+          padding: 8px 10px;
+        }
+
+        .board-preview {
+          grid-template-columns: 1fr;
+        }
+
+        .assistant-panel {
+          min-height: 0;
+          border-radius: var(--r-md);
+        }
+
+        .assistant-feed {
+          max-height: 280px;
+        }
+
+        .assistant-form {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .assistant-send {
+          width: auto;
+          min-width: 56px;
+        }
+
+        .meeting-bar {
+          gap: var(--s-2);
+          padding: var(--s-2);
+          border-radius: var(--r-md);
+        }
+
+        .log {
+          min-width: 0;
+          overflow: hidden;
+          font-size: 12px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .controls {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+          align-items: end;
+          gap: var(--s-2);
+          width: 100%;
+        }
+
+        .device-control {
+          grid-column: 1 / -1;
+          width: 100%;
+          min-width: 0;
+          max-width: none;
+        }
+
+        .device-select {
+          min-height: 40px;
+        }
+
+        #screenShare,
+        #archiveMeeting {
+          width: 100%;
+          min-width: 0;
+          padding-right: var(--s-2);
+          padding-left: var(--s-2);
+          white-space: nowrap;
+        }
+
+        #leave {
+          width: 44px;
+          height: 44px;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .workspace {
+          padding-bottom: 160px;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
+          right: max(var(--s-2), env(safe-area-inset-right));
+          bottom: max(var(--s-2), env(safe-area-inset-bottom));
+          left: max(var(--s-2), env(safe-area-inset-left));
+        }
+
+        .board-expanded-surface {
+          border-radius: var(--r-md);
+        }
+
+        .board-expanded-top {
+          padding: var(--s-3);
+        }
+
+        .board-expanded-brand p {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .board-huddle.presence {
+          padding: 6px 8px;
+        }
+
+        .board-expanded-surface .board-toolbar {
+          gap: var(--s-2);
+          padding: var(--s-3);
+        }
+
+        .board-expanded-surface .board {
+          align-items: start;
+          grid-auto-rows: max-content;
+          gap: var(--s-3);
+          padding: 0 var(--s-3) var(--s-3);
+        }
+
+        .board-expanded-surface .column {
+          align-self: start;
+          min-height: auto;
+          border-radius: 12px;
+        }
+
+        .board-tools {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          width: 100%;
+        }
+
+        .board-tools .btn {
+          width: 100%;
+        }
+
+        .card-detail-region {
+          align-items: start;
+          overflow: auto;
+          padding: max(var(--s-2), env(safe-area-inset-top)) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
+        }
+
+        .card-detail {
+          width: 100%;
+          max-height: calc(100svh - 16px);
+          border-radius: 16px;
+        }
+
+        .card-detail-meta {
+          padding: 14px var(--s-4) 0;
+        }
+
+        .card-detail-header {
+          gap: 10px;
+          padding: 10px var(--s-4) 14px;
+        }
+
+        .owner-avatar.large {
+          width: 40px;
+          height: 40px;
+        }
+
+        .card-detail-title strong {
+          font-size: 20px;
+          text-wrap: balance;
+        }
+
+        .card-detail-close {
+          width: 40px;
+          height: 40px;
+        }
+
+        .card-detail-scout {
+          margin: 0 var(--s-4);
+          padding: 12px 14px;
+        }
+
+        .card-detail-form {
+          gap: var(--s-3);
+          padding: 14px var(--s-4) 4px;
+        }
+
+        .card-detail-command {
+          padding: 14px var(--s-4) var(--s-4);
+        }
+
+        .card-detail-actions {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: var(--s-2);
+        }
+
+        .card-detail-actions__right {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          width: 100%;
+        }
+
+        .card-command-chips {
+          align-items: stretch;
+        }
+
+        .card-command-chip,
+        .scout-pill {
+          min-height: 40px;
+        }
+
+        .card-command-form {
+          grid-template-columns: 1fr;
+          padding: var(--s-2);
+        }
+
+        .card-command-form button {
+          width: 100%;
+          min-height: 40px;
+        }
+
+        .toast-region {
+          right: var(--s-2);
+          bottom: max(96px, calc(env(safe-area-inset-bottom) + 96px));
+          left: var(--s-2);
+          width: auto;
+        }
+
+        .comment-preview-region {
+          padding: var(--s-2);
+        }
+
+        .comment-preview {
+          width: 100%;
+          max-height: calc(100svh - 16px);
+          overflow: auto;
+          padding: var(--s-4);
+        }
+      }
+
+      @media (max-width: 420px) {
+        .hearth-stage {
+          min-height: clamp(300px, 44svh, 380px);
+        }
+
+        .card-detail-actions__right {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 360px) {
+        .topbar__title p {
+          letter-spacing: 0.06em;
+        }
+
+        .btn {
+          font-size: 13px;
+        }
+
+        .controls {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+        }
+
+        #leave {
+          width: 40px;
+          height: 40px;
+        }
+
+        .hearth-access h2 {
+          font-size: 27px;
+        }
+
+        .board-rail__header {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .board-expand {
+          width: 100%;
+        }
+      }
+
       /* ---------- Mount stagger (the room arrives) ----------
          Each anchor element starts at opacity 0.5 with a 4-6px lift and slides
          home with a staggered delay. The pulse is alive from frame 1; everything
@@ -3128,19 +3685,20 @@
         video: {
           width: { ideal: 960, max: 960 },
           height: { ideal: 540, max: 540 },
-          frameRate: { ideal: 20, max: 20 },
+          frameRate: { ideal: 24, max: 24 },
           facingMode: 'user'
         },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          sampleRate: { ideal: 48000 },
           channelCount: { ideal: 1, max: 1 }
         }
       }
       const outboundMediaLimits = {
-        audio: { maxBitrate: 24000 },
-        video: { maxBitrate: 850000, maxFramerate: 20 }
+        audio: { maxBitrate: 48000 },
+        video: { maxBitrate: 1150000, maxFramerate: 24 }
       }
 
       joinButton.addEventListener('click', joinRoom)

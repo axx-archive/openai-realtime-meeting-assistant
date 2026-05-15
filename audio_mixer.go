@@ -11,8 +11,9 @@ import (
 
 const (
 	roomAudioSampleRate = 48000
-	roomAudioChannels   = 2
+	roomAudioChannels   = 1
 	roomAudioMaxFrameMs = 60
+	roomAudioActivePeak = 256
 
 	roomAudioMixInterval  = 20 * time.Millisecond
 	roomAudioMixFrameSize = roomAudioSampleRate / 50 * roomAudioChannels
@@ -191,13 +192,18 @@ func mixAudioFrame(sources map[string]*audioSource) []int16 {
 		return nil
 	}
 
+	mixSources := activeAudioSources(readySources)
+	if len(mixSources) == 0 {
+		mixSources = readySources
+	}
+
 	mixedPCM := make([]int16, roomAudioMixFrameSize)
 	for sampleIndex := range mixedPCM {
 		var sampleSum int32
-		for _, source := range readySources {
+		for _, source := range mixSources {
 			sampleSum += int32(source.buffer[sampleIndex])
 		}
-		mixedPCM[sampleIndex] = clampPCM16(sampleSum / int32(len(readySources)))
+		mixedPCM[sampleIndex] = clampPCM16(sampleSum / int32(len(mixSources)))
 	}
 
 	for _, source := range readySources {
@@ -205,6 +211,31 @@ func mixAudioFrame(sources map[string]*audioSource) []int16 {
 	}
 
 	return mixedPCM
+}
+
+func activeAudioSources(sources []*audioSource) []*audioSource {
+	activeSources := make([]*audioSource, 0, len(sources))
+	for _, source := range sources {
+		if sourceAudioActive(source) {
+			activeSources = append(activeSources, source)
+		}
+	}
+
+	return activeSources
+}
+
+func sourceAudioActive(source *audioSource) bool {
+	if source == nil || len(source.buffer) < roomAudioMixFrameSize {
+		return false
+	}
+
+	for _, sample := range source.buffer[:roomAudioMixFrameSize] {
+		if sample >= roomAudioActivePeak || sample <= -roomAudioActivePeak {
+			return true
+		}
+	}
+
+	return false
 }
 
 func clampPCM16(sample int32) int16 {
@@ -284,15 +315,13 @@ func decodeOpusToRoomPCM(decoder *opusDecoder, buffer []int16, channels int, pay
 func normalizeRoomAudioPCM(pcm []int16, channels int) []int16 {
 	switch channels {
 	case 1:
-		stereoPCM := make([]int16, len(pcm)*roomAudioChannels)
-		for sampleIndex, sample := range pcm {
-			baseIndex := sampleIndex * roomAudioChannels
-			stereoPCM[baseIndex] = sample
-			stereoPCM[baseIndex+1] = sample
-		}
-		return stereoPCM
-	case roomAudioChannels:
 		return append([]int16(nil), pcm...)
+	case 2:
+		monoPCM := make([]int16, 0, len(pcm)/2)
+		for sampleIndex := 0; sampleIndex+1 < len(pcm); sampleIndex += 2 {
+			monoPCM = append(monoPCM, clampPCM16((int32(pcm[sampleIndex])+int32(pcm[sampleIndex+1]))/2))
+		}
+		return monoPCM
 	default:
 		return nil
 	}

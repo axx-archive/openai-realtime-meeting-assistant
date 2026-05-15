@@ -3,6 +3,10 @@ package main
 /*
 #cgo pkg-config: opus
 #include <opus.h>
+
+static int set_opus_bitrate(OpusEncoder *encoder, opus_int32 bitrate) {
+	return opus_encoder_ctl(encoder, OPUS_SET_BITRATE(bitrate));
+}
 */
 import "C"
 
@@ -11,7 +15,10 @@ import (
 	"unsafe"
 )
 
-const opusMaxPacketSize = 4096
+const (
+	opusMaxPacketSize         = 4096
+	realtimeOpusBitrateBitsec = 64000
+)
 
 type opusEncoder struct {
 	ptr      *C.OpusEncoder
@@ -39,6 +46,9 @@ func newOpusEncoder(sampleRate int, channels int) (*opusEncoder, error) {
 		C.OPUS_APPLICATION_VOIP,
 	); code != 0 {
 		return nil, fmt.Errorf("init opus encoder: %s", opusErrorText(code))
+	}
+	if code := C.set_opus_bitrate(encoder.ptr, C.opus_int32(realtimeOpusBitrateBitsec)); code != 0 {
+		return nil, fmt.Errorf("set opus bitrate: %s", opusErrorText(code))
 	}
 
 	return encoder, nil
