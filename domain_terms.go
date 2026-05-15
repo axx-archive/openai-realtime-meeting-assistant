@@ -27,6 +27,13 @@ var domainTermCorrections = []struct {
 	{regexp.MustCompile(`(?i)\bn[\s.-]*a[\s.-]*c[\s.-]*k\b`), "NACK"},
 }
 
+var (
+	leadingNarratedRequestSentencePattern = regexp.MustCompile(`(?i)^\s*user\s+(?:requested|asked)(?:\s+scout)?(?:\s+to)?\s+[^.?!]*[.?!]\s*`)
+	leadingUserNarrationPattern           = regexp.MustCompile(`(?i)^\s*user\s+(?:said|says|requested|asked)(?:\s+scout)?(?:\s+to|that)?\s+`)
+	boardOnlyRequestPattern               = regexp.MustCompile(`(?i)^(?:add(?:ing)?|create|creating|put|place|placing)\s+["']?[^"'.]+["']?\s+(?:to|on)\s+the\s+board\.?$`)
+	leadingStatusLabelPattern             = regexp.MustCompile(`(?i)^\s*(?:blocked|done|in progress|backlog)\s*:\s*`)
+)
+
 var meetingDomainVocabulary = []string{
 	"Boot Barn",
 	"The Bonfire",
@@ -93,6 +100,36 @@ func canonicalizeDomainTerms(value string) string {
 
 func canonicalizeBoardText(value string) string {
 	return strings.Join(strings.Fields(canonicalizeDomainTerms(value)), " ")
+}
+
+func cleanBoardNotes(value string) string {
+	notes := strings.Trim(canonicalizeBoardText(value), "\"'")
+	if notes == "" {
+		return ""
+	}
+
+	if leadingNarratedRequestSentencePattern.MatchString(notes) {
+		cleanedNotes := strings.TrimSpace(leadingNarratedRequestSentencePattern.ReplaceAllString(notes, ""))
+		if cleanedNotes == "" {
+			return ""
+		}
+		notes = cleanedNotes
+	}
+	notes = strings.TrimSpace(leadingUserNarrationPattern.ReplaceAllString(notes, ""))
+	if boardOnlyRequestPattern.MatchString(notes) {
+		return ""
+	}
+	notes = strings.TrimSpace(leadingStatusLabelPattern.ReplaceAllString(notes, ""))
+
+	return capitalizeLeadingASCII(strings.Trim(notes, "\"'"))
+}
+
+func capitalizeLeadingASCII(value string) string {
+	if value == "" || value[0] < 'a' || value[0] > 'z' {
+		return value
+	}
+
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func canonicalizeBoardTags(values []string) []string {

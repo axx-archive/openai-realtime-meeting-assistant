@@ -47,3 +47,51 @@ func TestCardToolsCanonicalizeDomainTerms(t *testing.T) {
 		t.Fatalf("tags=%v, want %v", got, want)
 	}
 }
+
+func TestCleanBoardNotesRemovesUserRequestNarration(t *testing.T) {
+	got := cleanBoardNotes("User requested adding 'Impossible moments' to the board. Blocked: waiting on Erick to provide update.")
+	want := "Waiting on Erick to provide update."
+	if got != want {
+		t.Fatalf("notes=%q, want %q", got, want)
+	}
+}
+
+func TestCleanBoardNotesKeepsDirectFacts(t *testing.T) {
+	got := cleanBoardNotes("User said Boot Barn is waiting on legal review.")
+	want := "Boot Barn is waiting on legal review."
+	if got != want {
+		t.Fatalf("notes=%q, want %q", got, want)
+	}
+}
+
+func TestCleanBoardNotesDropsBoardOnlyNarration(t *testing.T) {
+	got := cleanBoardNotes("User requested adding Impossible Moments to the board.")
+	if got != "" {
+		t.Fatalf("notes=%q, want empty notes", got)
+	}
+}
+
+func TestCardToolsCleanBoardNotes(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", t.TempDir()+"/memory.jsonl")
+	t.Setenv("KANBAN_BOARD_PATH", t.TempDir()+"/board.json")
+
+	app := newKanbanBoardApp()
+	result, changed, err := app.createTicket(map[string]any{
+		"title":  "Impossible Moments",
+		"notes":  "User requested adding 'Impossible moments' to the board. Blocked: waiting on Erick to provide update.",
+		"owner":  "Erick",
+		"tags":   []any{"project", "blocked", "dependency"},
+		"status": "Blocked",
+	})
+	if err != nil {
+		t.Fatalf("createTicket: %v", err)
+	}
+	if !changed {
+		t.Fatal("createTicket changed=false, want true")
+	}
+
+	card := result["card"].(kanbanCard)
+	if card.Notes != "Waiting on Erick to provide update." {
+		t.Fatalf("notes=%q, want direct project fact", card.Notes)
+	}
+}

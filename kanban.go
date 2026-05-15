@@ -210,6 +210,10 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		if err := app.persistBoard(); err != nil {
 			log.Errorf("Could not persist initial Kanban board: %v", err)
 		}
+	} else if loadedBoard && boardPersistenceHealthy {
+		if err := app.persistBoard(); err != nil {
+			log.Errorf("Could not persist normalized Kanban board: %v", err)
+		}
 	}
 
 	return app
@@ -290,7 +294,7 @@ func normalizeKanbanCards(cards []kanbanCard) []kanbanCard {
 		if card.Title == "" {
 			card.Title = "Untitled card"
 		}
-		card.Notes = strings.TrimSpace(card.Notes)
+		card.Notes = cleanBoardNotes(card.Notes)
 		card.Owner = normalizePersistedCardOwner(card.Owner)
 		card.Tags = uniqueStrings(card.Tags)
 		normalized = append(normalized, cloneKanbanCard(card))
@@ -828,6 +832,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
+		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
 		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
@@ -879,7 +884,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"title":  map[string]any{"type": "string", "description": "Concise title for the work, without speaker prefixes such as Sean:. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
-					"notes":  map[string]any{"type": "string", "description": "Useful context from the utterance, including blocker, dependency, or schedule-risk details. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
+					"notes":  map[string]any{"type": "string", "description": "Direct project facts only. Include blocker, dependency, or schedule-risk details, but do not narrate the command or write phrases like User requested, User said, or asked to add this to the board. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
 					"owner":  ownerProperty,
 					"tags":   tagsProperty,
 					"status": statusProperty,
@@ -925,7 +930,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"card_id": map[string]any{"type": "string", "description": "Existing board card id."},
 					"title":   map[string]any{"type": "string", "description": "Replacement title, when the existing title should be made clearer. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
-					"notes":   map[string]any{"type": "string", "description": "Full replacement notes. Preserve useful existing notes while adding the new context. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
+					"notes":   map[string]any{"type": "string", "description": "Full replacement notes as direct project facts. Preserve useful existing notes while adding the new context, but do not narrate the command or write phrases like User requested, User said, or asked to update this card. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
 					"owner":   ownerProperty,
 					"tags":    tagsToAddProperty,
 					"status":  statusProperty,
@@ -1174,7 +1179,7 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		return nil, false, fmt.Errorf("title is required")
 	}
 
-	notes := canonicalizeBoardText(asString(args["notes"]))
+	notes := cleanBoardNotes(asString(args["notes"]))
 	owner := normalizeCardOwner(args["owner"])
 	if owner == "" {
 		owner = "Unassigned"
@@ -1278,7 +1283,7 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	}
 
 	title := canonicalizeBoardText(asString(args["title"]))
-	notes := canonicalizeBoardText(asString(args["notes"]))
+	notes := cleanBoardNotes(asString(args["notes"]))
 	owner := normalizeCardOwner(args["owner"])
 	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 	var status kanbanStatus
@@ -1342,7 +1347,7 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 	if owner == "" {
 		owner = "Unassigned"
 	}
-	notes := canonicalizeBoardText(asString(args["notes"]))
+	notes := cleanBoardNotes(asString(args["notes"]))
 	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 
 	app.mu.Lock()
