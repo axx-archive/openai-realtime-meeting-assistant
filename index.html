@@ -1105,6 +1105,22 @@
         cursor: not-allowed;
       }
 
+      #muteMic {
+        min-width: 92px;
+        min-height: 38px;
+        gap: 7px;
+      }
+
+      #muteMic svg {
+        flex: 0 0 auto;
+      }
+
+      #muteMic.is-muted {
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.14);
+        color: var(--ember-300);
+      }
+
       .btn {
         font-family: var(--font-sans);
         font-weight: 500;
@@ -3035,7 +3051,7 @@
 
         .controls {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px 44px;
           align-items: end;
           gap: var(--s-2);
           width: 100%;
@@ -3059,6 +3075,17 @@
           padding-right: var(--s-2);
           padding-left: var(--s-2);
           white-space: nowrap;
+        }
+
+        #muteMic {
+          width: 44px;
+          min-width: 0;
+          height: 44px;
+          padding: 0;
+        }
+
+        #muteMic .mute-label {
+          display: none;
         }
 
         #leave {
@@ -3242,7 +3269,12 @@
         }
 
         .controls {
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px 40px;
+        }
+
+        #muteMic {
+          width: 40px;
+          height: 40px;
         }
 
         #leave {
@@ -3576,6 +3608,14 @@
               <option value="">microphone</option>
             </select>
           </label>
+          <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
+            <svg class="mute-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <path d="M12 19v3"></path>
+            </svg>
+            <span class="mute-label">Mute</span>
+          </button>
           <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
           <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
@@ -3614,6 +3654,7 @@
       const joinAccessButton = document.getElementById('joinAccess')
       const leaveButton = document.getElementById('leave')
       const micSelect = document.getElementById('micSelect')
+      const muteMicButton = document.getElementById('muteMic')
       const screenShareButton = document.getElementById('screenShare')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
       const accessPanel = document.getElementById('accessPanel')
@@ -3656,6 +3697,7 @@
       let localStream
       let screenShareStream
       let isReplacingLocalAudio = false
+      let isMicMuted = false
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
@@ -3705,6 +3747,7 @@
       joinAccessButton.addEventListener('click', joinRoom)
       leaveButton.addEventListener('click', leaveRoom)
       micSelect.addEventListener('change', switchMicrophone)
+      muteMicButton.addEventListener('click', toggleLocalMute)
       screenShareButton.addEventListener('click', toggleScreenShare)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
@@ -3923,9 +3966,11 @@
         }
 
         setLog('requesting camera and microphone')
+        isMicMuted = false
         localStream = await getPreferredUserMedia()
         localVideo.srcObject = localStream
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
+        updateMuteButton()
         await refreshAudioInputDevices()
         updateHearthParticipants()
 
@@ -4007,8 +4052,44 @@
         if (!track) {
           return
         }
+        track.enabled = !isMicMuted
         attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
         track.addEventListener('ended', handleLocalAudioEnded, { once: true })
+      }
+
+      function toggleLocalMute() {
+        if (!localStream) {
+          return
+        }
+        setLocalMute(!isMicMuted, { announce: true })
+      }
+
+      function setLocalMute(muted, options = {}) {
+        isMicMuted = Boolean(muted)
+        const track = localAudioTrack()
+        if (track) {
+          track.enabled = !isMicMuted
+        }
+        updateMuteButton()
+        if (options.announce) {
+          setLog(isMicMuted ? 'microphone muted' : 'microphone live')
+        }
+      }
+
+      function updateMuteButton() {
+        if (!muteMicButton) {
+          return
+        }
+        const label = muteMicButton.querySelector('.mute-label')
+        const muted = Boolean(isMicMuted)
+        muteMicButton.disabled = !localStream
+        muteMicButton.classList.toggle('is-muted', muted)
+        muteMicButton.setAttribute('aria-pressed', muted ? 'true' : 'false')
+        muteMicButton.setAttribute('aria-label', muted ? 'Unmute microphone' : 'Mute microphone')
+        muteMicButton.title = muted ? 'Unmute microphone' : 'Mute microphone'
+        if (label) {
+          label.textContent = muted ? 'Unmute' : 'Mute'
+        }
       }
 
       async function refreshAudioInputDevices(selectedDeviceId = localAudioDeviceId()) {
@@ -4091,6 +4172,7 @@
         if (previousTrack === nextTrack) {
           return
         }
+        nextTrack.enabled = !isMicMuted
 
         const audioSender = pc?.getSenders().find(sender => sender.track?.kind === 'audio')
         if (audioSender) {
@@ -6168,6 +6250,8 @@
         }
         localStream = undefined
         isReplacingLocalAudio = false
+        isMicMuted = false
+        updateMuteButton()
         localVideo.srcObject = null
         localVideoLabel.textContent = 'you'
         clearAudioMonitors()

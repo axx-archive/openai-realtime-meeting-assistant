@@ -788,14 +788,14 @@ func realtimeTurnDetectionConfig() map[string]any {
 			"prefix_padding_ms":   300,
 			"silence_duration_ms": 300,
 			"create_response":     true,
-			"interrupt_response":  false,
+			"interrupt_response":  true,
 		}
 	case "semantic_vad", "":
 		return map[string]any{
 			"type":               "semantic_vad",
 			"eagerness":          realtimeVADEagerness(),
 			"create_response":    true,
-			"interrupt_response": false,
+			"interrupt_response": true,
 		}
 	default:
 		return realtimeTurnDetectionConfigWithDefaults()
@@ -807,7 +807,7 @@ func realtimeTurnDetectionConfigWithDefaults() map[string]any {
 		"type":               defaultRealtimeVADType,
 		"eagerness":          realtimeVADEagerness(),
 		"create_response":    true,
-		"interrupt_response": false,
+		"interrupt_response": true,
 	}
 }
 
@@ -819,6 +819,15 @@ func realtimeVADEagerness() string {
 	default:
 		return defaultVADEagerness
 	}
+}
+
+func isRealtimeActiveResponseError(event kanbanRealtimeEvent) bool {
+	if event.Error == nil {
+		return false
+	}
+	message := strings.ToLower(event.Error.Message)
+	return strings.Contains(message, "active response in progress") &&
+		strings.Contains(message, "wait until the response is finished")
 }
 
 func usesAdvancedCommandProfile(model string) bool {
@@ -997,6 +1006,10 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			if event.Error.Code == "session_expired" {
 				broadcastAssistantEvent("status", "OpenAI Realtime session expired; reconnecting", nil)
 				go app.restartRealtimePeer(event.Error.Message)
+				return
+			}
+			if isRealtimeActiveResponseError(event) {
+				broadcastAssistantEvent("status", "Scout is still finishing the last turn.", map[string]any{"code": event.Error.Code})
 				return
 			}
 			broadcastKanbanEvent("status", event.Error.Message)

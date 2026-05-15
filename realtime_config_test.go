@@ -40,6 +40,9 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	if eagerness := turnDetection["eagerness"]; eagerness != defaultVADEagerness {
 		t.Fatalf("turn_detection.eagerness=%v, want %s", eagerness, defaultVADEagerness)
 	}
+	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
+		t.Fatalf("turn_detection.interrupt_response=%v, want true", interrupt)
+	}
 }
 
 func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
@@ -56,6 +59,24 @@ func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	}
 	if _, ok := turnDetection["eagerness"]; ok {
 		t.Fatal("server_vad config should not include semantic eagerness")
+	}
+	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
+		t.Fatalf("server_vad interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestDetectsRealtimeActiveResponseErrors(t *testing.T) {
+	event := kanbanRealtimeEvent{
+		Error: &struct {
+			Code    string `json:"code,omitempty"`
+			Message string `json:"message,omitempty"`
+		}{
+			Code:    "invalid_request_error",
+			Message: "Conversation already has an active response in progress: resp_123. Wait until the response is finished before creating a new one.",
+		},
+	}
+	if !isRealtimeActiveResponseError(event) {
+		t.Fatal("active response error was not detected")
 	}
 }
 
