@@ -55,3 +55,31 @@ func TestMeetingMemoryDedupesEventIDs(t *testing.T) {
 		t.Fatalf("entries=%d, want 1", len(entries))
 	}
 }
+
+func TestMeetingMemoryCanonicalizesAndSkipsWeakTranscriptFragments(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	entry, appended, err := store.appendTranscript("event-1", "item-1", " Suit Barn rollout is blocked by Web RTC review. ")
+	if err != nil {
+		t.Fatalf("appendTranscript: %v", err)
+	}
+	if !appended {
+		t.Fatal("appendTranscript appended=false, want true")
+	}
+	if !strings.Contains(entry.Text, "Boot Barn") || !strings.Contains(entry.Text, "WebRTC") {
+		t.Fatalf("entry text was not canonicalized: %q", entry.Text)
+	}
+
+	if _, appended, err := store.appendTranscript("event-2", "item-2", "the"); err != nil {
+		t.Fatalf("weak append: %v", err)
+	} else if appended {
+		t.Fatal("weak transcript appended=true, want false")
+	}
+
+	if entries := store.snapshot(10); len(entries) != 1 {
+		t.Fatalf("entries=%d, want 1", len(entries))
+	}
+}

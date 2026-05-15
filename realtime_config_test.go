@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,14 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
+	transcription := input["transcription"].(map[string]any)
+	if model := transcription["model"]; model != defaultRealtimeTranscriptionModel {
+		t.Fatalf("transcription.model=%v, want %s", model, defaultRealtimeTranscriptionModel)
+	}
+	prompt, ok := transcription["prompt"].(string)
+	if !ok || !strings.Contains(prompt, "Boot Barn") || !strings.Contains(prompt, "WebRTC") {
+		t.Fatalf("transcription prompt missing domain vocabulary: %v", transcription["prompt"])
+	}
 	turnDetection := input["turn_detection"].(map[string]any)
 	if vadType := turnDetection["type"]; vadType != "semantic_vad" {
 		t.Fatalf("turn_detection.type=%v, want semantic_vad", vadType)

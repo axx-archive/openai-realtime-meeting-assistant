@@ -21,6 +21,30 @@ const (
 
 var memoryTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
 
+var lowQualityTranscriptPhrases = map[string]struct{}{
+	"ah":        {},
+	"er":        {},
+	"hm":        {},
+	"hmm":       {},
+	"mm":        {},
+	"oh":        {},
+	"ok":        {},
+	"okay":      {},
+	"so":        {},
+	"test":      {},
+	"testing":   {},
+	"the":       {},
+	"uh":        {},
+	"um":        {},
+	"yeah":      {},
+	"yep":       {},
+	"assistant": {},
+	"thank you": {},
+	"thanks":    {},
+	"that's":    {},
+	"thats":     {},
+}
+
 type meetingMemoryStore struct {
 	mu      sync.Mutex
 	path    string
@@ -89,8 +113,8 @@ func meetingMemoryPath() string {
 }
 
 func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string, transcript string) (meetingMemoryEntry, bool, error) {
-	transcript = normalizeMemoryText(transcript)
-	if store == nil || transcript == "" {
+	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
+	if store == nil || transcript == "" || !transcriptLooksUseful(transcript) {
 		return meetingMemoryEntry{}, false, nil
 	}
 
@@ -174,7 +198,7 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 		return nil
 	}
 
-	query = normalizeMemoryText(query)
+	query = normalizeMemoryText(canonicalizeDomainTerms(query))
 	if query == "" {
 		return nil
 	}
@@ -221,7 +245,7 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 }
 
 func buildMemoryAnswer(query string, matches []meetingMemoryMatch) string {
-	query = normalizeMemoryText(query)
+	query = normalizeMemoryText(canonicalizeDomainTerms(query))
 	if len(matches) == 0 {
 		if query == "" {
 			return "I do not have enough meeting memory yet."
@@ -240,6 +264,32 @@ func buildMemoryAnswer(query string, matches []meetingMemoryMatch) string {
 
 func normalizeMemoryText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func transcriptLooksUseful(value string) bool {
+	normalized := strings.ToLower(strings.Trim(value, " \t\r\n.,!?;:'\"()[]{}"))
+	if normalized == "" {
+		return false
+	}
+	if _, ok := lowQualityTranscriptPhrases[normalized]; ok {
+		return false
+	}
+
+	tokens := memoryTokenPattern.FindAllString(normalized, -1)
+	if len(tokens) == 0 {
+		return false
+	}
+	meaningfulTokens := 0
+	for _, token := range tokens {
+		if _, ok := lowQualityTranscriptPhrases[token]; ok {
+			continue
+		}
+		if len(token) >= 3 {
+			meaningfulTokens++
+		}
+	}
+
+	return meaningfulTokens > 0
 }
 
 func uniqueMemoryTokens(value string) []string {

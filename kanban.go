@@ -22,7 +22,7 @@ const (
 	defaultRealtimeModel      = "gpt-realtime-2"
 	defaultReasoningEffort    = "medium"
 	defaultRealtimeVADType    = "semantic_vad"
-	defaultVADEagerness       = "auto"
+	defaultVADEagerness       = "low"
 	defaultKanbanBoardPath    = "data/kanban-board.json"
 	realtimeEventChannelLabel = "oai-events"
 	realtimeInputTrackID      = "kanban-realtime:mixed-audio"
@@ -729,8 +729,9 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 					"type": "near_field",
 				},
 				"transcription": map[string]any{
-					"model":    "gpt-4o-mini-transcribe",
+					"model":    realtimeTranscriptionModel(),
 					"language": "en",
+					"prompt":   realtimeTranscriptionPrompt(),
 				},
 				"turn_detection": realtimeTurnDetectionConfig(),
 			},
@@ -825,7 +826,9 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 	return strings.Join([]string{
 		"# Role\nYou are a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
 		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
+		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
+		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
 		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
@@ -853,12 +856,12 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 	}
 	tagsProperty := map[string]any{
 		"type":        "array",
-		"description": "Short labels that capture people, area, state, or risk. Use blocked/dependency/risk tags for blockers when appropriate.",
+		"description": "Short labels that capture people, area, state, or risk. Preserve exact domain spellings for proper nouns and acronyms. Use blocked/dependency/risk tags for blockers when appropriate.",
 		"items":       map[string]any{"type": "string"},
 	}
 	tagsToAddProperty := map[string]any{
 		"type":        "array",
-		"description": "Tags to add to the existing card. Existing tags are preserved.",
+		"description": "Tags to add to the existing card. Existing tags are preserved. Preserve exact domain spellings for proper nouns and acronyms.",
 		"items":       map[string]any{"type": "string"},
 	}
 	ownerProperty := map[string]any{
@@ -875,8 +878,8 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title":  map[string]any{"type": "string", "description": "Concise title for the work, without speaker prefixes such as Sean:."},
-					"notes":  map[string]any{"type": "string", "description": "Useful context from the utterance, including blocker, dependency, or schedule-risk details."},
+					"title":  map[string]any{"type": "string", "description": "Concise title for the work, without speaker prefixes such as Sean:. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
+					"notes":  map[string]any{"type": "string", "description": "Useful context from the utterance, including blocker, dependency, or schedule-risk details. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
 					"owner":  ownerProperty,
 					"tags":   tagsProperty,
 					"status": statusProperty,
@@ -921,8 +924,8 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"card_id": map[string]any{"type": "string", "description": "Existing board card id."},
-					"title":   map[string]any{"type": "string", "description": "Replacement title, when the existing title should be made clearer."},
-					"notes":   map[string]any{"type": "string", "description": "Full replacement notes. Preserve useful existing notes while adding the new context."},
+					"title":   map[string]any{"type": "string", "description": "Replacement title, when the existing title should be made clearer. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
+					"notes":   map[string]any{"type": "string", "description": "Full replacement notes. Preserve useful existing notes while adding the new context. Preserve exact proper nouns and domain spellings; if unsure, use do_nothing instead."},
 					"owner":   ownerProperty,
 					"tags":    tagsToAddProperty,
 					"status":  statusProperty,
@@ -997,7 +1000,7 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 	case "conversation.item.input_audio_transcription.completed":
 		app.rememberTranscript(event)
 	case "conversation.item.input_audio_transcription.delta":
-		if text := strings.TrimSpace(event.Delta); text != "" {
+		if text := canonicalizeBoardText(event.Delta); text != "" {
 			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
 		}
 	case "input_audio_buffer.speech_started":
@@ -1142,7 +1145,7 @@ func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 }
 
 func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
-	query := asString(args["query"])
+	query := canonicalizeBoardText(asString(args["query"]))
 	if query == "" {
 		return nil, false, fmt.Errorf("query is required")
 	}
@@ -1166,17 +1169,17 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 }
 
 func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bool, error) {
-	title := asString(args["title"])
+	title := canonicalizeBoardText(asString(args["title"]))
 	if title == "" {
 		return nil, false, fmt.Errorf("title is required")
 	}
 
-	notes := asString(args["notes"])
+	notes := canonicalizeBoardText(asString(args["notes"]))
 	owner := normalizeCardOwner(args["owner"])
 	if owner == "" {
 		owner = "Unassigned"
 	}
-	tags := uniqueStrings(asStringSlice(args["tags"]))
+	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 	status := kanbanStatusBacklog
 	if rawStatus, ok := args["status"]; ok {
 		parsedStatus, err := parseKanbanStatus(rawStatus)
@@ -1246,7 +1249,7 @@ func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, e
 		return nil, false, fmt.Errorf("card_id is required")
 	}
 
-	tags := uniqueStrings(asStringSlice(args["tags"]))
+	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -1274,10 +1277,10 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 		return nil, false, fmt.Errorf("card_id is required")
 	}
 
-	title := asString(args["title"])
-	notes := asString(args["notes"])
+	title := canonicalizeBoardText(asString(args["title"]))
+	notes := canonicalizeBoardText(asString(args["notes"]))
 	owner := normalizeCardOwner(args["owner"])
-	tags := uniqueStrings(asStringSlice(args["tags"]))
+	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 	var status kanbanStatus
 	if rawStatus, ok := args["status"]; ok && asString(rawStatus) != "" {
 		parsedStatus, err := parseKanbanStatus(rawStatus)
@@ -1327,7 +1330,7 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 		return nil, false, fmt.Errorf("card_id is required")
 	}
 
-	title := asString(args["title"])
+	title := canonicalizeBoardText(asString(args["title"]))
 	if title == "" {
 		return nil, false, fmt.Errorf("title is required")
 	}
@@ -1339,8 +1342,8 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 	if owner == "" {
 		owner = "Unassigned"
 	}
-	notes := asString(args["notes"])
-	tags := uniqueStrings(asStringSlice(args["tags"]))
+	notes := canonicalizeBoardText(asString(args["notes"]))
+	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
