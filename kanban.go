@@ -355,7 +355,7 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 		webrtc.RTPCodecCapability{
 			MimeType:  webrtc.MimeTypeOpus,
 			ClockRate: roomAudioSampleRate,
-			Channels:  roomAudioChannels,
+			Channels:  realtimeAudioChannels,
 		},
 		realtimeInputTrackID,
 		realtimeInputStreamID,
@@ -365,7 +365,7 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 		return fmt.Errorf("create Realtime mixed audio input track: %w", err)
 	}
 
-	inputEnc, err := newOpusEncoder(roomAudioSampleRate, roomAudioChannels)
+	inputEnc, err := newOpusEncoder(roomAudioSampleRate, realtimeAudioChannels)
 	if err != nil {
 		_ = peerConnection.Close()
 		return fmt.Errorf("create Realtime mixed audio encoder: %w", err)
@@ -613,7 +613,7 @@ func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 	for offset := 0; offset < len(roomPCM); offset += roomAudioMixFrameSize {
 		frame := roomPCM[offset : offset+roomAudioMixFrameSize]
 
-		opusFrame, err := inputEnc.Encode(frame)
+		opusFrame, err := inputEnc.Encode(roomPCMForRealtime(frame))
 		if err != nil {
 			return fmt.Errorf("encode mixed room audio: %w", err)
 		}

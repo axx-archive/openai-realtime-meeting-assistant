@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	roomAudioSampleRate = 48000
-	roomAudioChannels   = 1
-	roomAudioMaxFrameMs = 60
-	roomAudioActivePeak = 256
+	roomAudioSampleRate   = 48000
+	roomAudioChannels     = 1
+	realtimeAudioChannels = 2
+	roomAudioMaxFrameMs   = 60
+	roomAudioActivePeak   = 256
 
 	roomAudioMixInterval  = 20 * time.Millisecond
 	roomAudioMixFrameSize = roomAudioSampleRate / 50 * roomAudioChannels
@@ -325,4 +326,22 @@ func normalizeRoomAudioPCM(pcm []int16, channels int) []int16 {
 	default:
 		return nil
 	}
+}
+
+func roomPCMForRealtime(pcm []int16) []int16 {
+	if roomAudioChannels == realtimeAudioChannels {
+		return append([]int16(nil), pcm...)
+	}
+	if roomAudioChannels != 1 || realtimeAudioChannels != 2 {
+		return nil
+	}
+
+	stereoPCM := make([]int16, len(pcm)*realtimeAudioChannels)
+	for sampleIndex, sample := range pcm {
+		baseIndex := sampleIndex * realtimeAudioChannels
+		stereoPCM[baseIndex] = sample
+		stereoPCM[baseIndex+1] = sample
+	}
+
+	return stereoPCM
 }

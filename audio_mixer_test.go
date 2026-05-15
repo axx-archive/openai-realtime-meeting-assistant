@@ -54,3 +54,16 @@ func TestNormalizeRoomAudioPCMDownmixesStereoToMono(t *testing.T) {
 		}
 	}
 }
+
+func TestRoomPCMForRealtimeDuplicatesMonoForStereoOpus(t *testing.T) {
+	got := roomPCMForRealtime([]int16{120, -240})
+	want := []int16{120, 120, -240, -240}
+	if len(got) != len(want) {
+		t.Fatalf("realtime samples=%d, want %d", len(got), len(want))
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("realtime sample[%d]=%d, want %d", index, got[index], want[index])
+		}
+	}
+}
