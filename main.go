@@ -786,11 +786,36 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			broadcastKanbanEvent("meeting_archived", result)
 			broadcastKanbanEvent("memory", kanbanApp.memorySnapshot(20))
+		case "participant_media_state":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")
+				continue
+			}
+			payload := struct {
+				MicMuted      bool `json:"micMuted"`
+				CameraOff     bool `json:"cameraOff"`
+				ScreenSharing bool `json:"screenSharing"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
+				log.Errorf("Failed to unmarshal participant media state: %v", err)
+				continue
+			}
+			snapshot, err := kanbanApp.setParticipantMediaState(currentParticipantName(), participantMediaState{
+				MicMuted:      payload.MicMuted,
+				CameraOff:     payload.CameraOff,
+				ScreenSharing: payload.ScreenSharing,
+			})
+			if err != nil {
+				log.Errorf("Failed to update participant media state: %v", err)
+				continue
+			}
+			broadcastKanbanEvent("participants", snapshot)
 		case "screen_share_started":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")
 				continue
 			}
+			broadcastKanbanEvent("participants", kanbanApp.setParticipantScreenSharing(currentParticipantName(), true))
 			broadcastKanbanEvent("screen_share_started", map[string]any{
 				"name": currentParticipantName(),
 			})
@@ -799,6 +824,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted {
 				continue
 			}
+			broadcastKanbanEvent("participants", kanbanApp.setParticipantScreenSharing(currentParticipantName(), false))
 			broadcastKanbanEvent("screen_share_stopped", map[string]any{
 				"name": currentParticipantName(),
 			})

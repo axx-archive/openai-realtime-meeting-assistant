@@ -329,6 +329,7 @@
         position: absolute;
         bottom: var(--s-2);
         left: var(--s-2);
+        z-index: 3;
         max-width: calc(100% - 16px);
         padding: 5px var(--s-2);
         border-radius: var(--r-pill);
@@ -343,6 +344,83 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .tile-avatar {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        display: none;
+        place-items: center;
+        background: radial-gradient(circle at 50% 40%, var(--night-4), var(--night-0) 72%);
+      }
+
+      .video-tile.is-camera-off .tile-avatar {
+        display: grid;
+      }
+
+      .video-tile.is-camera-off video {
+        opacity: 0;
+      }
+
+      .tile-avatar .owner-avatar {
+        width: 56px;
+        height: 56px;
+        border: 0;
+        box-shadow: none;
+      }
+
+      .tile-avatar .monogram {
+        width: 100%;
+        height: 100%;
+        font-size: 24px;
+      }
+
+      .media-flags {
+        position: absolute;
+        top: var(--s-2);
+        left: var(--s-2);
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        max-width: calc(100% - 16px);
+        pointer-events: none;
+      }
+
+      .media-flag {
+        display: none;
+        align-items: center;
+        min-height: 20px;
+        padding: 4px 7px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.76);
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        line-height: 1;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+
+      .video-tile.is-muted .media-flag--muted,
+      .video-tile.is-camera-off .media-flag--camera,
+      .video-tile.is-sharing-screen .media-flag--share {
+        display: inline-flex;
+      }
+
+      .video-tile.is-sharing-screen {
+        border-color: rgba(255, 122, 43, 0.38);
+      }
+
+      .video-tile.is-sharing-screen .media-flag--share {
+        color: var(--ember-300);
+        border-color: rgba(255, 122, 43, 0.32);
+        background: rgba(255, 122, 43, 0.12);
       }
 
       /* ---------- Access panel ---------- */
@@ -1105,20 +1183,35 @@
         cursor: not-allowed;
       }
 
-      #muteMic {
+      #muteMic,
+      #toggleCamera {
         min-width: 92px;
         min-height: 38px;
         gap: 7px;
       }
 
-      #muteMic svg {
+      #muteMic svg,
+      #toggleCamera svg {
         flex: 0 0 auto;
       }
 
-      #muteMic.is-muted {
+      #muteMic.is-muted,
+      #toggleCamera.is-off {
         border-color: rgba(255, 122, 43, 0.44);
         background: rgba(255, 122, 43, 0.14);
         color: var(--ember-300);
+      }
+
+      .room-clock {
+        justify-self: end;
+        min-width: 0;
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
       }
 
       .btn {
@@ -1761,6 +1854,7 @@
         .video-stack { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
         .meeting-bar { grid-template-columns: 1fr; justify-items: stretch; }
         .controls { order: -1; flex-wrap: wrap; }
+        .room-clock { justify-self: start; }
       }
 
       @media (max-width: 640px) {
@@ -3051,7 +3145,7 @@
 
         .controls {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px 44px;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           align-items: end;
           gap: var(--s-2);
           width: 100%;
@@ -3068,8 +3162,10 @@
           min-height: 40px;
         }
 
+        #copyRoomLink,
         #screenShare,
         #archiveMeeting {
+          grid-column: span 2;
           width: 100%;
           min-width: 0;
           padding-right: var(--s-2);
@@ -3077,14 +3173,17 @@
           white-space: nowrap;
         }
 
-        #muteMic {
+        #muteMic,
+        #toggleCamera {
           width: 44px;
           min-width: 0;
           height: 44px;
           padding: 0;
+          justify-self: center;
         }
 
-        #muteMic .mute-label {
+        #muteMic .mute-label,
+        #toggleCamera .camera-label {
           display: none;
         }
 
@@ -3269,10 +3368,11 @@
         }
 
         .controls {
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px 40px;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
-        #muteMic {
+        #muteMic,
+        #toggleCamera {
           width: 40px;
           height: 40px;
         }
@@ -3524,6 +3624,12 @@
               <div id="videoStack" class="video-stack hearth-seats">
                 <div class="video-tile hearth-seat is-local" data-participant="">
                   <video id="localVideo" autoplay muted playsinline></video>
+                  <span id="localTileAvatar" class="tile-avatar" aria-hidden="true"></span>
+                  <span class="media-flags" aria-hidden="true">
+                    <span class="media-flag media-flag--muted">muted</span>
+                    <span class="media-flag media-flag--camera">camera off</span>
+                    <span class="media-flag media-flag--share">sharing</span>
+                  </span>
                   <span id="localVideoLabel" class="video-label">you</span>
                 </div>
               </div>
@@ -3616,7 +3722,15 @@
             </svg>
             <span class="mute-label">Mute</span>
           </button>
+          <button id="toggleCamera" class="btn btn--ghost" type="button" aria-label="Turn camera off" aria-pressed="false" title="Turn camera off" disabled>
+            <svg class="camera-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
+              <rect x="3" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+            <span class="camera-label">Camera</span>
+          </button>
           <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
+          <button id="copyRoomLink" class="btn btn--ghost" type="button">Copy link</button>
           <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3625,7 +3739,7 @@
             </svg>
           </button>
         </div>
-        <span aria-hidden="true"></span>
+        <span id="roomClock" class="room-clock" aria-live="polite">00:00 · 0/10</span>
       </footer>
     </main>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -3655,8 +3769,11 @@
       const leaveButton = document.getElementById('leave')
       const micSelect = document.getElementById('micSelect')
       const muteMicButton = document.getElementById('muteMic')
+      const toggleCameraButton = document.getElementById('toggleCamera')
       const screenShareButton = document.getElementById('screenShare')
+      const copyRoomLinkButton = document.getElementById('copyRoomLink')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
+      const roomClock = document.getElementById('roomClock')
       const accessPanel = document.getElementById('accessPanel')
       const accessState = document.getElementById('accessState')
       const accessHint = document.getElementById('accessHint')
@@ -3675,6 +3792,7 @@
       const activeSpeakerAvatar = document.getElementById('activeSpeakerAvatar')
       const activeSpeakerLabel = document.getElementById('activeSpeakerLabel')
       const localVideo = document.getElementById('localVideo')
+      const localTileAvatar = document.getElementById('localTileAvatar')
       const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
       const waitingParticipants = document.getElementById('waitingParticipants')
@@ -3698,6 +3816,7 @@
       let screenShareStream
       let isReplacingLocalAudio = false
       let isMicMuted = false
+      let isCameraOff = false
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
@@ -3712,11 +3831,14 @@
       let canEditBoard = false
       let canUndoDelete = false
       let commentPreviewTimer
+      let roomStartedAt = 0
+      let roomClockTimer = 0
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
       const remoteLabelsByStream = new Map()
       const remoteLabelsByTrack = new Map()
       const participantPlaceholders = new Map()
+      const participantMediaStates = new Map()
       const audioMonitors = new Map()
       const pendingRemoteAudioElements = new Set()
       const cardSnapshots = new Map()
@@ -3748,7 +3870,9 @@
       leaveButton.addEventListener('click', leaveRoom)
       micSelect.addEventListener('change', switchMicrophone)
       muteMicButton.addEventListener('click', toggleLocalMute)
+      toggleCameraButton.addEventListener('click', toggleLocalCamera)
       screenShareButton.addEventListener('click', toggleScreenShare)
+      copyRoomLinkButton.addEventListener('click', copyRoomLink)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
@@ -3773,6 +3897,23 @@
           }
           closeCardDetail()
         }
+        if (event.target?.matches?.('input, textarea, select, [contenteditable="true"]')) {
+          return
+        }
+        const key = event.key.toLowerCase()
+        if (key === 'm' && localStream) {
+          event.preventDefault()
+          toggleLocalMute()
+        } else if (key === 'v' && localStream) {
+          event.preventDefault()
+          toggleLocalCamera()
+        } else if (key === 'b' && isBoardReady) {
+          event.preventDefault()
+          setBoardExpanded(!appShell.classList.contains('is-board-expanded'))
+        } else if (key === 's' && pc) {
+          event.preventDefault()
+          toggleScreenShare().catch(error => setLog(error.message || String(error)))
+        }
       })
       cardDetailRegion.addEventListener('click', event => {
         if (event.target === cardDetailRegion) {
@@ -3784,6 +3925,9 @@
       validateAccess()
       renderBoard()
       updateBoardControls()
+      updateMuteButton()
+      updateCameraButton()
+      updateRoomClock()
       renderBoardPreview()
       updateHearthParticipants()
       loadParticipantPreview()
@@ -3833,10 +3977,69 @@
         if (!Array.isArray(payload)) {
           roomCapacity = Number.isFinite(Number(payload?.capacity)) ? Number(payload.capacity) : roomCapacity
           occupiedSeats = Number.isFinite(Number(payload?.occupiedSeats)) ? Number(payload.occupiedSeats) : names.length
+          applyParticipantMediaStates(payload?.mediaStates)
         } else {
           occupiedSeats = names.length
         }
+        updateRoomClock()
         return names.filter(Boolean)
+      }
+
+      function applyParticipantMediaStates(mediaStates) {
+        if (!mediaStates || typeof mediaStates !== 'object') {
+          return
+        }
+        participantMediaStates.clear()
+        for (const [name, state] of Object.entries(mediaStates)) {
+          participantMediaStates.set(name, {
+            micMuted: Boolean(state?.micMuted),
+            cameraOff: Boolean(state?.cameraOff),
+            screenSharing: Boolean(state?.screenSharing),
+            updatedAt: state?.updatedAt || ''
+          })
+        }
+        if (currentParticipantName) {
+          participantMediaStates.set(currentParticipantName, localParticipantMediaState())
+        }
+      }
+
+      function localParticipantMediaState() {
+        return {
+          micMuted: Boolean(isMicMuted),
+          cameraOff: Boolean(isCameraOff),
+          screenSharing: Boolean(screenShareStream),
+          updatedAt: new Date().toISOString()
+        }
+      }
+
+      function participantMediaState(name) {
+        const participantName = String(name || '').trim()
+        if (participantName && participantName === currentParticipantName) {
+          return localParticipantMediaState()
+        }
+        return participantMediaStates.get(participantName) || {}
+      }
+
+      function publishParticipantMediaState() {
+        if (!currentParticipantName) {
+          return
+        }
+        const state = localParticipantMediaState()
+        participantMediaStates.set(currentParticipantName, state)
+        updateParticipantPreviewText()
+        updateHearthParticipants()
+        updateRoomClock()
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        ws.send(JSON.stringify({
+          event: 'participant_media_state',
+          data: JSON.stringify({
+            micMuted: state.micMuted,
+            cameraOff: state.cameraOff,
+            screenSharing: state.screenSharing
+          })
+        }))
       }
 
       function updateParticipantPreviewText() {
@@ -3850,8 +4053,16 @@
           waitingParticipants.textContent = `${roomCapacity} seats ready.`
           return
         }
+        const sharing = names.find(name => participantMediaState(name).screenSharing)
+        if (sharing) {
+          waitingParticipants.textContent = `${seatCount} inside · ${sharing} is sharing`
+          return
+        }
         const speaker = activeSpeakerDisplayName()
-        const liveSpeaker = speaker && speaker !== 'the room' && names.includes(speaker) ? `${speaker} is speaking` : names.slice(0, 2).join(', ')
+        const speakerState = participantMediaState(speaker)
+        const liveSpeaker = speaker && speaker !== 'the room' && names.includes(speaker)
+          ? `${speaker} ${speakerState.micMuted ? 'is muted' : speakerState.cameraOff ? 'camera off' : 'is speaking'}`
+          : names.slice(0, 2).join(', ')
         waitingParticipants.textContent = `${seatCount} inside · ${liveSpeaker}`
       }
 
@@ -3967,10 +4178,13 @@
 
         setLog('requesting camera and microphone')
         isMicMuted = false
+        isCameraOff = false
         localStream = await getPreferredUserMedia()
         localVideo.srcObject = localStream
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
+        wireLocalVideoTrack(localStream.getVideoTracks()[0])
         updateMuteButton()
+        updateCameraButton()
         await refreshAudioInputDevices()
         updateHearthParticipants()
 
@@ -4001,6 +4215,8 @@
         canEditBoard = true
         updateBoardControls()
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
+        publishParticipantMediaState()
+        startRoomClock()
       }
 
       async function getPreferredUserMedia() {
@@ -4044,6 +4260,10 @@
         return (localStream?.getAudioTracks?.() || [])[0] || null
       }
 
+      function localVideoTrack() {
+        return (localStream?.getVideoTracks?.() || [])[0] || null
+      }
+
       function localAudioDeviceId() {
         return localAudioTrack()?.getSettings?.().deviceId || ''
       }
@@ -4055,6 +4275,19 @@
         track.enabled = !isMicMuted
         attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
         track.addEventListener('ended', handleLocalAudioEnded, { once: true })
+      }
+
+      function wireLocalVideoTrack(track) {
+        if (!track) {
+          return
+        }
+        track.enabled = !isCameraOff
+        track.addEventListener('ended', () => {
+          isCameraOff = true
+          updateCameraButton()
+          publishParticipantMediaState()
+          setLog('camera stopped')
+        }, { once: true })
       }
 
       function toggleLocalMute() {
@@ -4074,6 +4307,7 @@
         if (options.announce) {
           setLog(isMicMuted ? 'microphone muted' : 'microphone live')
         }
+        publishParticipantMediaState()
       }
 
       function updateMuteButton() {
@@ -4089,6 +4323,76 @@
         muteMicButton.title = muted ? 'Unmute microphone' : 'Mute microphone'
         if (label) {
           label.textContent = muted ? 'Unmute' : 'Mute'
+        }
+      }
+
+      function startRoomClock() {
+        if (!roomStartedAt) {
+          roomStartedAt = Date.now()
+        }
+        if (!roomClockTimer) {
+          roomClockTimer = window.setInterval(updateRoomClock, 1000)
+        }
+        updateRoomClock()
+      }
+
+      function stopRoomClock() {
+        if (roomClockTimer) {
+          window.clearInterval(roomClockTimer)
+          roomClockTimer = 0
+        }
+        roomStartedAt = 0
+        updateRoomClock()
+      }
+
+      function updateRoomClock() {
+        if (!roomClock) {
+          return
+        }
+        const elapsedSeconds = roomStartedAt ? Math.max(0, Math.floor((Date.now() - roomStartedAt) / 1000)) : 0
+        const minutes = Math.floor(elapsedSeconds / 60)
+        const seconds = elapsedSeconds % 60
+        const elapsed = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+        const seats = `${Math.max(occupiedSeats, participantsInRoom.length)}/${roomCapacity}`
+        const media = localStream
+          ? `${isMicMuted ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'}`
+          : 'waiting room'
+        roomClock.textContent = `${elapsed} · ${seats} · ${media}`
+      }
+
+      function toggleLocalCamera() {
+        if (!localStream) {
+          return
+        }
+        setLocalCameraOff(!isCameraOff, { announce: true })
+      }
+
+      function setLocalCameraOff(cameraOff, options = {}) {
+        isCameraOff = Boolean(cameraOff)
+        const track = localVideoTrack()
+        if (track) {
+          track.enabled = !isCameraOff
+        }
+        updateCameraButton()
+        publishParticipantMediaState()
+        if (options.announce) {
+          setLog(isCameraOff ? 'camera off' : 'camera live')
+        }
+      }
+
+      function updateCameraButton() {
+        if (!toggleCameraButton) {
+          return
+        }
+        const label = toggleCameraButton.querySelector('.camera-label')
+        const cameraOff = Boolean(isCameraOff)
+        toggleCameraButton.disabled = !localStream
+        toggleCameraButton.classList.toggle('is-off', cameraOff)
+        toggleCameraButton.setAttribute('aria-pressed', cameraOff ? 'true' : 'false')
+        toggleCameraButton.setAttribute('aria-label', cameraOff ? 'Turn camera on' : 'Turn camera off')
+        toggleCameraButton.title = cameraOff ? 'Turn camera on' : 'Turn camera off'
+        if (label) {
+          label.textContent = cameraOff ? 'Start video' : 'Camera'
         }
       }
 
@@ -4500,9 +4804,10 @@
       }
 
       function handleParticipants(participants) {
+        const previousNames = participantsInRoom.join(', ')
         participantsInRoom = applyRoomSnapshot(participants)
         const names = participantsInRoom.join(', ')
-        if (names) {
+        if (names && names !== previousNames) {
           setLog(`in room · ${names}`)
         }
         updateParticipantPreviewText()
@@ -4560,6 +4865,7 @@
             renderScreenStage()
           }
         }
+        applyParticipantMediaStateToTile(tile, name)
       }
 
       function handleAccessDenied(message) {
@@ -4620,6 +4926,8 @@
 
       function handleScreenShareStarted(event) {
         activeScreenShareParticipant = event?.name || 'participant'
+        const state = participantMediaState(activeScreenShareParticipant)
+        participantMediaStates.set(activeScreenShareParticipant, { ...state, screenSharing: true })
         renderScreenStage()
         updateHearthParticipants()
       }
@@ -4628,6 +4936,10 @@
         const name = event?.name || ''
         if (!name || name === activeScreenShareParticipant) {
           activeScreenShareParticipant = ''
+          if (name) {
+            const state = participantMediaState(name)
+            participantMediaStates.set(name, { ...state, screenSharing: false })
+          }
           renderScreenStage()
           updateHearthParticipants()
         }
@@ -4653,6 +4965,27 @@
           event: 'assistant_query',
           data: JSON.stringify({ query })
         }))
+      }
+
+      async function copyRoomLink() {
+        const url = window.location.href
+        try {
+          await navigator.clipboard.writeText(url)
+          showToast({ text: 'room link copied', kind: 'note' })
+          setLog('room link copied')
+        } catch {
+          const input = document.createElement('input')
+          input.value = url
+          input.setAttribute('aria-hidden', 'true')
+          input.style.position = 'fixed'
+          input.style.opacity = '0'
+          document.body.appendChild(input)
+          input.select()
+          document.execCommand('copy')
+          input.remove()
+          showToast({ text: 'room link copied', kind: 'note' })
+          setLog('room link copied')
+        }
       }
 
       function archiveMeeting() {
@@ -4706,6 +5039,7 @@
           activeScreenShareParticipant = currentParticipantName
           screenShareButton.textContent = 'Stop sharing'
           renderScreenStage()
+          publishParticipantMediaState()
           ws.send(JSON.stringify({ event: 'screen_share_started', data: '{}' }))
           screenTrack.addEventListener('ended', () => {
             stopScreenShare()
@@ -4740,6 +5074,7 @@
         }
         screenShareButton.textContent = 'Share screen'
         renderScreenStage()
+        publishParticipantMediaState()
       }
 
       function renderScreenStage() {
@@ -4835,15 +5170,21 @@
         const speaker = activeSpeakerDisplayName()
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
+        const speakerMedia = participantMediaState(speaker)
+        const speakerCameraOff = Boolean(speakerMedia.cameraOff)
 
-        setVideoElementStream(activeSpeakerVideo, stream, { local: speakerIsLocal })
-        activeSpeakerAvatar.hidden = Boolean(stream)
-        if (!stream) {
+        setVideoElementStream(activeSpeakerVideo, stream, { local: speakerIsLocal, hidden: speakerCameraOff })
+        activeSpeakerAvatar.hidden = Boolean(stream && !speakerCameraOff)
+        if (!stream || speakerCameraOff) {
           activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
+        const speakerStateLabel = [
+          speakerMedia.micMuted ? 'muted' : '',
+          speakerCameraOff ? 'camera off' : ''
+        ].filter(Boolean).join(' · ') || 'speaking'
         activeSpeakerLabel.textContent = speaker === 'the room'
           ? 'the room · waiting'
-          : `${speaker}${speakerIsLocal ? ' · you' : ''} · speaking`
+          : `${speaker}${speakerIsLocal ? ' · you' : ''} · ${speakerStateLabel}`
         activeSpeakerTile.classList.toggle('has-video', Boolean(stream))
 
         const localTile = localVideo.closest('.video-tile')
@@ -4855,6 +5196,7 @@
         for (const tile of videoStack.querySelectorAll('.video-tile')) {
           const name = tile.dataset.participant || ''
           tile.classList.toggle('is-active-speaker', Boolean(name && name === speaker))
+          applyParticipantMediaStateToTile(tile, name)
         }
 
         updateSpeakerPictureInPicture()
@@ -4865,9 +5207,10 @@
         const speaker = activeSpeakerDisplayName()
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
-        setVideoElementStream(screenSpeakerVideo, stream, { local: speakerIsLocal })
-        screenSpeakerAvatar.hidden = Boolean(stream)
-        if (!stream) {
+        const speakerCameraOff = Boolean(participantMediaState(speaker).cameraOff)
+        setVideoElementStream(screenSpeakerVideo, stream, { local: speakerIsLocal, hidden: speakerCameraOff })
+        screenSpeakerAvatar.hidden = Boolean(stream && !speakerCameraOff)
+        if (!stream || speakerCameraOff) {
           screenSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
         screenSpeakerLabel.textContent = speaker === 'the room' ? 'speaker' : speaker.toLowerCase()
@@ -4901,10 +5244,63 @@
           const label = document.createElement('span')
           label.className = 'video-label'
           label.textContent = name
-          tile.append(avatar, label)
+          tile.append(avatar, renderMediaFlags(), label)
           participantPlaceholders.set(name, tile)
           videoStack.appendChild(tile)
         }
+      }
+
+      function applyParticipantMediaStateToTile(tile, name) {
+        if (!tile) {
+          return
+        }
+        const participantName = String(name || tile.dataset.participant || '').trim()
+        const state = participantMediaState(participantName)
+        const cameraOff = Boolean(state.cameraOff)
+        const muted = Boolean(state.micMuted)
+        const sharing = Boolean(state.screenSharing)
+        tile.classList.toggle('is-camera-off', cameraOff)
+        tile.classList.toggle('is-muted', muted)
+        tile.classList.toggle('is-sharing-screen', sharing)
+        const video = tile.querySelector('video')
+        if (video) {
+          video.hidden = cameraOff
+        }
+        let avatar = tile.querySelector('.tile-avatar')
+        if (!avatar && video) {
+          avatar = document.createElement('span')
+          avatar.className = 'tile-avatar'
+          video.insertAdjacentElement('afterend', avatar)
+        }
+        if (avatar) {
+          avatar.replaceChildren(renderOwnerAvatar({ owner: participantName || 'the room' }))
+        }
+        if (!tile.querySelector('.media-flags')) {
+          const label = tile.querySelector('.video-label')
+          const flags = renderMediaFlags()
+          if (label) {
+            tile.insertBefore(flags, label)
+          } else {
+            tile.appendChild(flags)
+          }
+        }
+      }
+
+      function renderMediaFlags() {
+        const flags = document.createElement('span')
+        flags.className = 'media-flags'
+        flags.setAttribute('aria-hidden', 'true')
+        for (const [kind, label] of [
+          ['muted', 'muted'],
+          ['camera', 'camera off'],
+          ['share', 'sharing']
+        ]) {
+          const flag = document.createElement('span')
+          flag.className = `media-flag media-flag--${kind}`
+          flag.textContent = label
+          flags.appendChild(flag)
+        }
+        return flags
       }
 
       function removeParticipantPlaceholder(name) {
@@ -4930,7 +5326,8 @@
         const pulse = document.createElement('span')
         pulse.className = 'presence-pulse'
         const count = names.length || Math.max(occupiedSeats, participantPreview.length)
-        label.append(pulse, document.createTextNode(`${count || 0} in the room`))
+        const sharing = names.find(name => participantMediaState(name).screenSharing)
+        label.append(pulse, document.createTextNode(sharing ? `${sharing} sharing` : `${count || 0} in the room`))
 
         boardHuddle.replaceChildren(stack, label)
       }
@@ -5146,7 +5543,9 @@
         tile.dataset.participant = participantName
         tile.dataset.remoteKey = key
 
-        tile.append(video, label)
+        const avatar = document.createElement('span')
+        avatar.className = 'tile-avatar'
+        tile.append(video, avatar, renderMediaFlags(), label)
         videoStack.appendChild(tile)
         remoteElements.set(key, tile)
         if (participantName !== 'participant') {
@@ -5156,6 +5555,7 @@
         if (activeScreenShareParticipant === participantName) {
           renderScreenStage()
         }
+        applyParticipantMediaStateToTile(tile, participantName)
         updateHearthParticipants()
 
         const removeRemoteTile = () => {
@@ -6251,9 +6651,12 @@
         localStream = undefined
         isReplacingLocalAudio = false
         isMicMuted = false
+        isCameraOff = false
         updateMuteButton()
+        updateCameraButton()
         localVideo.srcObject = null
         localVideoLabel.textContent = 'you'
+        localVideo.closest('.video-tile')?.classList.remove('is-muted', 'is-camera-off', 'is-sharing-screen')
         clearAudioMonitors()
 
         remoteElements.forEach(tile => tile.remove())
@@ -6264,6 +6667,7 @@
         queuedRemoteCandidates = []
         participantPlaceholders.forEach(tile => tile.remove())
         participantPlaceholders.clear()
+        participantMediaStates.clear()
         activeScreenShareParticipant = ''
         activeSpeakerName = ''
         pendingActiveSpeakerName = ''
@@ -6279,6 +6683,7 @@
         renderScreenStage()
         renderBoard()
         updateBoardControls()
+        stopRoomClock()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
         setRoomView(false)

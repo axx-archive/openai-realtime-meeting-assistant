@@ -52,6 +52,41 @@ func TestAdmitParticipantEnforcesCapacity(t *testing.T) {
 	}
 }
 
+func TestRoomSnapshotIncludesParticipantMediaState(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+
+	app := newKanbanBoardApp()
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admit AJ: %v", err)
+	}
+	if _, err := app.setParticipantMediaState("AJ", participantMediaState{
+		MicMuted:  true,
+		CameraOff: true,
+	}); err != nil {
+		t.Fatalf("set media state: %v", err)
+	}
+
+	snapshot := app.roomSnapshot()
+	rawMediaStates, ok := snapshot["mediaStates"].(map[string]participantMediaState)
+	if !ok {
+		t.Fatalf("mediaStates=%T, want map[string]participantMediaState", snapshot["mediaStates"])
+	}
+	ajState := rawMediaStates["AJ"]
+	if !ajState.MicMuted || !ajState.CameraOff {
+		t.Fatalf("AJ media state=%+v, want muted camera-off", ajState)
+	}
+	if ajState.UpdatedAt == "" {
+		t.Fatal("AJ media state UpdatedAt is empty")
+	}
+
+	app.forgetParticipant("AJ")
+	snapshot = app.roomSnapshot()
+	rawMediaStates = snapshot["mediaStates"].(map[string]participantMediaState)
+	if _, ok := rawMediaStates["AJ"]; ok {
+		t.Fatal("AJ media state remained after participant left")
+	}
+}
+
 func TestGuestSeatsDoNotCreateEmailRecipients(t *testing.T) {
 	if canonicalParticipantName("guest 1") != "Guest 1" {
 		t.Fatal("guest seat should be a canonical participant")

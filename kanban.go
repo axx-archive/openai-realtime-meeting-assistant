@@ -60,6 +60,13 @@ type kanbanBoardState struct {
 	UpdatedAt string       `json:"updatedAt,omitempty"`
 }
 
+type participantMediaState struct {
+	MicMuted      bool   `json:"micMuted"`
+	CameraOff     bool   `json:"cameraOff"`
+	ScreenSharing bool   `json:"screenSharing"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+}
+
 type meetingArchive struct {
 	ID           string               `json:"id"`
 	ArchivedAt   time.Time            `json:"archivedAt"`
@@ -117,6 +124,7 @@ type kanbanBoardApp struct {
 	memory            *meetingMemoryStore
 	participants      map[string]time.Time
 	participantCounts map[string]int
+	participantMedia  map[string]participantMediaState
 	lastDeletedCard   *kanbanCard
 	apiKey            string
 	restarting        bool
@@ -205,6 +213,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		memory:            memory,
 		participants:      map[string]time.Time{},
 		participantCounts: map[string]int{},
+		participantMedia:  map[string]participantMediaState{},
 	}
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
@@ -1481,6 +1490,11 @@ func (app *kanbanBoardApp) admitParticipant(name string) (string, error) {
 
 	app.participants[name] = time.Now().UTC()
 	app.participantCounts[name]++
+	if _, ok := app.participantMedia[name]; !ok {
+		app.participantMedia[name] = participantMediaState{
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+	}
 
 	return name, nil
 }
@@ -1497,6 +1511,7 @@ func (app *kanbanBoardApp) forgetParticipant(name string) {
 	if app.participantCounts[name] <= 1 {
 		delete(app.participantCounts, name)
 		delete(app.participants, name)
+		delete(app.participantMedia, name)
 		return
 	}
 	app.participantCounts[name]--
@@ -1543,13 +1558,62 @@ func (app *kanbanBoardApp) roomSnapshot() map[string]any {
 	capacity := configuredMeetingRoomCapacity()
 
 	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.roomSnapshotLocked(capacity)
+}
+
+func (app *kanbanBoardApp) setParticipantMediaState(name string, state participantMediaState) (map[string]any, error) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return nil, fmt.Errorf("unknown participant")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.participantCounts[name] <= 0 {
+		return nil, fmt.Errorf("%s is not in the room", name)
+	}
+
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	app.participantMedia[name] = state
+
+	return app.roomSnapshotLocked(configuredMeetingRoomCapacity()), nil
+}
+
+func (app *kanbanBoardApp) setParticipantScreenSharing(name string, screenSharing bool) map[string]any {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return app.roomSnapshot()
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.participantCounts[name] <= 0 {
+		return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+	}
+
+	state := app.participantMedia[name]
+	state.ScreenSharing = screenSharing
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	app.participantMedia[name] = state
+
+	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+}
+
+func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 	participants := app.participantSnapshotLocked()
 	occupiedSeats := app.activeParticipantCountLocked()
-	app.mu.Unlock()
 
 	availableSeats := capacity - occupiedSeats
 	if availableSeats < 0 {
 		availableSeats = 0
+	}
+	mediaStates := make(map[string]participantMediaState, len(participants))
+	for _, participant := range participants {
+		mediaStates[participant] = app.participantMedia[participant]
 	}
 
 	return map[string]any{
@@ -1557,6 +1621,7 @@ func (app *kanbanBoardApp) roomSnapshot() map[string]any {
 		"capacity":       capacity,
 		"occupiedSeats":  occupiedSeats,
 		"availableSeats": availableSeats,
+		"mediaStates":    mediaStates,
 	}
 }
 
