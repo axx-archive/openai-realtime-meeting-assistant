@@ -3,3 +3,4 @@
 openai-realtime-meeting-assistant
 *.test
 deploy/digitalocean/.env
+data/

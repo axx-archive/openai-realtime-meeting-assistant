@@ -190,7 +190,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		log.Errorf("Meeting memory disabled: %v", err)
 	}
 
-	cards := cloneKanbanCards(initialKanbanBoardCards)
+	cards := normalizeKanbanCards(initialKanbanBoardCards)
 	updatedAt := time.Now().UTC()
 	loadedBoard := false
 	boardPersistenceHealthy := true
@@ -261,23 +261,27 @@ func loadKanbanBoardState(path string) (kanbanBoardState, bool, error) {
 }
 
 func writeKanbanBoardState(path string, state kanbanBoardState) error {
+	return writeJSONFileAtomically(path, "Kanban board", state)
+}
+
+func writeJSONFileAtomically(path string, description string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create Kanban board directory: %w", err)
+		return fmt.Errorf("create %s directory: %w", description, err)
 	}
 
-	rawBoard, err := json.MarshalIndent(state, "", "  ")
+	rawJSON, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode Kanban board: %w", err)
+		return fmt.Errorf("encode %s: %w", description, err)
 	}
-	rawBoard = append(rawBoard, '\n')
+	rawJSON = append(rawJSON, '\n')
 
 	tmpPath := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, rawBoard, 0o600); err != nil {
-		return fmt.Errorf("write Kanban board: %w", err)
+	if err := os.WriteFile(tmpPath, rawJSON, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", description, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace Kanban board: %w", err)
+		return fmt.Errorf("replace %s: %w", description, err)
 	}
 
 	return nil
@@ -305,7 +309,7 @@ func normalizeKanbanCards(cards []kanbanCard) []kanbanCard {
 		}
 		card.Notes = cleanBoardNotes(card.Notes)
 		card.Owner = normalizePersistedCardOwner(card.Owner)
-		card.Tags = uniqueStrings(card.Tags)
+		card.Tags = canonicalizeBoardTags(card.Tags)
 		normalized = append(normalized, cloneKanbanCard(card))
 	}
 
@@ -1257,6 +1261,14 @@ func (app *kanbanBoardApp) moveTicket(args map[string]any) (map[string]any, bool
 	if !ok {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
+	if card.Status == status {
+		return map[string]any{
+			"ok":      true,
+			"moved":   false,
+			"card_id": cardID,
+			"status":  status,
+		}, false, nil
+	}
 	card.Status = status
 	if err := app.touchLocked(); err != nil {
 		return nil, false, err
@@ -1277,6 +1289,9 @@ func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, e
 	}
 
 	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
+	if len(tags) == 0 {
+		return nil, false, fmt.Errorf("tags are required")
+	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -1285,7 +1300,16 @@ func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, e
 	if !ok {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
-	card.Tags = uniqueStrings(append(card.Tags, tags...))
+	nextTags := uniqueStrings(append(card.Tags, tags...))
+	if stringSlicesEqual(card.Tags, nextTags) {
+		return map[string]any{
+			"ok":         true,
+			"tags_added": false,
+			"card_id":    cardID,
+			"tags":       append([]string(nil), tags...),
+		}, false, nil
+	}
+	card.Tags = nextTags
 	if err := app.touchLocked(); err != nil {
 		return nil, false, err
 	}
@@ -1324,20 +1348,37 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	if !ok {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
-	if title != "" {
+	changed := false
+	if title != "" && card.Title != title {
 		card.Title = title
+		changed = true
 	}
-	if notes != "" {
+	if notes != "" && card.Notes != notes {
 		card.Notes = notes
+		changed = true
 	}
-	if owner != "" {
+	if owner != "" && card.Owner != owner {
 		card.Owner = owner
+		changed = true
 	}
-	if status != "" {
+	if status != "" && card.Status != status {
 		card.Status = status
+		changed = true
 	}
 	if len(tags) > 0 {
-		card.Tags = uniqueStrings(append(card.Tags, tags...))
+		nextTags := uniqueStrings(append(card.Tags, tags...))
+		if !stringSlicesEqual(card.Tags, nextTags) {
+			card.Tags = nextTags
+			changed = true
+		}
+	}
+	if !changed {
+		return map[string]any{
+			"ok":      true,
+			"updated": false,
+			"card_id": cardID,
+			"card":    cloneKanbanCard(*card),
+		}, false, nil
 	}
 	if err := app.touchLocked(); err != nil {
 		return nil, false, err
@@ -1378,6 +1419,17 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
+	}
+	if card.Title == title &&
+		card.Status == status &&
+		card.Owner == owner &&
+		card.Notes == notes &&
+		stringSlicesEqual(card.Tags, tags) {
+		return map[string]any{
+			"ok":      true,
+			"updated": false,
+			"card_id": cardID,
+		}, false, nil
 	}
 	card.Title = title
 	card.Status = status
@@ -1656,9 +1708,6 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if err != nil {
 		return meetingArchiveResult{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
-		return meetingArchiveResult{}, fmt.Errorf("create archive directory: %w", err)
-	}
 
 	if err := writeMeetingArchive(archivePath, archive); err != nil {
 		return meetingArchiveResult{}, fmt.Errorf("write meeting archive: %w", err)
@@ -1704,15 +1753,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 }
 
 func writeMeetingArchive(path string, archive meetingArchive) error {
-	rawArchive, err := json.MarshalIndent(archive, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode meeting archive: %w", err)
-	}
-	if err := os.WriteFile(path, rawArchive, 0o600); err != nil {
-		return err
-	}
-
-	return nil
+	return writeJSONFileAtomically(path, "meeting archive", archive)
 }
 
 func meetingArchiveDownloadURL(archiveID string) string {
@@ -1856,6 +1897,19 @@ func uniqueStrings(values []string) []string {
 	}
 
 	return result
+}
+
+func stringSlicesEqual(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+
+	return true
 }
 
 func mustMarshalJSON(value any) string {

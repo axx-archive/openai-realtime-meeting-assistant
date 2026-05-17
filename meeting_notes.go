@@ -51,6 +51,8 @@ type meetingNotesSMTPConfig struct {
 	AllowNoRecipient bool
 }
 
+const smtpConnectionTimeout = 10 * time.Second
+
 var decisionKeywords = []string{
 	"decided",
 	"decision",
@@ -289,13 +291,16 @@ func newSMTPClient(config meetingNotesSMTPConfig) (*smtp.Client, error) {
 	host := strings.TrimSpace(config.Host)
 	port := strings.TrimSpace(config.Port)
 	address := net.JoinHostPort(host, port)
+	dialer := &net.Dialer{
+		Timeout: smtpConnectionTimeout,
+	}
 	tlsConfig := &tls.Config{
 		ServerName:         host,
 		InsecureSkipVerify: config.InsecureSkipTLS, //nolint:gosec
 	}
 
 	if port == "465" {
-		connection, err := tls.Dial("tcp", address, tlsConfig)
+		connection, err := tls.DialWithDialer(dialer, "tcp", address, tlsConfig)
 		if err != nil {
 			return nil, fmt.Errorf("connect to SMTP over TLS: %w", err)
 		}
@@ -307,9 +312,14 @@ func newSMTPClient(config meetingNotesSMTPConfig) (*smtp.Client, error) {
 		return client, nil
 	}
 
-	client, err := smtp.Dial(address)
+	connection, err := dialer.Dial("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("connect to SMTP: %w", err)
+	}
+	client, err := smtp.NewClient(connection, host)
+	if err != nil {
+		_ = connection.Close()
+		return nil, fmt.Errorf("create SMTP client: %w", err)
 	}
 	if !config.DisableStartTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {

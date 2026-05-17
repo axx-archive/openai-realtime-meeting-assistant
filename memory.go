@@ -85,6 +85,7 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		var entry meetingMemoryEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {

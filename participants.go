@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"os"
 	"strconv"
 	"strings"
@@ -36,7 +38,12 @@ func canonicalParticipantName(name string) string {
 }
 
 func validMeetingPassword(password string) bool {
-	return strings.TrimSpace(password) == configuredMeetingRoomPassword()
+	providedPassword := strings.TrimSpace(password)
+	configuredPassword := configuredMeetingRoomPassword()
+	providedHash := sha256.Sum256([]byte(providedPassword))
+	configuredHash := sha256.Sum256([]byte(configuredPassword))
+
+	return subtle.ConstantTimeCompare(providedHash[:], configuredHash[:]) == 1
 }
 
 func configuredMeetingRoomPassword() string {

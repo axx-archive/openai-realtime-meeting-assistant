@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,7 +25,7 @@ var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
 	}
-	indexTemplate = &template.Template{}
+	indexHTML []byte
 
 	// lock for peerConnections and trackLocals
 	listLock        sync.RWMutex
@@ -84,11 +83,11 @@ func main() {
 	}
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
-	indexHTML, err := os.ReadFile("index.html")
+	var err error
+	indexHTML, err = os.ReadFile("index.html")
 	if err != nil {
 		panic(err)
 	}
-	indexTemplate = template.Must(template.New("").Parse(string(indexHTML)))
 
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
@@ -98,8 +97,9 @@ func main() {
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if err = indexTemplate.Execute(w, "ws://"+r.Host+"/websocket"); err != nil {
-			log.Errorf("Failed to parse index template: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, writeErr := w.Write(indexHTML); writeErr != nil {
+			log.Errorf("Failed to serve index page: %v", writeErr)
 		}
 	})
 
@@ -122,6 +122,7 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
 	archivePath, err := meetingArchivePath(archiveID)
 	if err != nil {
@@ -145,6 +146,7 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(kanbanApp.roomSnapshot()); err != nil {
 		log.Errorf("Failed to encode participant snapshot: %v", err)
@@ -211,26 +213,44 @@ func websocketOriginAllowed(r *http.Request) bool {
 }
 
 // Add to list of tracks and fire renegotation for all PeerConnections.
-func addTrack(t *webrtc.TrackRemote) *webrtc.TrackLocalStaticRTP { // nolint
-	listLock.Lock()
-	defer func() {
-		listLock.Unlock()
-		signalPeerConnections()
-	}()
-
+func addTrack(t *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
-	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
+	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	trackLocals[t.ID()] = trackLocal
+	listLock.Lock()
+	trackLocals[trackLocal.ID()] = trackLocal
+	listLock.Unlock()
+	signalPeerConnections()
 
-	return trackLocal
+	return trackLocal, nil
+}
+
+func forwardedRemoteTrackID(t *webrtc.TrackRemote) string {
+	return forwardedTrackLocalID(t.StreamID(), t.ID(), uint32(t.SSRC()))
+}
+
+func forwardedTrackLocalID(streamID string, trackID string, ssrc uint32) string {
+	return fmt.Sprintf("%s:%s:%d", mediaIDPart(streamID, "stream"), mediaIDPart(trackID, "track"), ssrc)
+}
+
+func mediaIDPart(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+
+	return strings.Join(strings.Fields(value), "_")
 }
 
 // Remove from list of tracks and fire renegotation for all PeerConnections.
 func removeTrack(t *webrtc.TrackLocalStaticRTP) {
+	if t == nil {
+		return
+	}
+
 	listLock.Lock()
 	defer func() {
 		listLock.Unlock()
@@ -268,7 +288,7 @@ func signalPeerConnections() { // nolint
 				continue
 			}
 
-			// map of sender we already are seanding, so we don't double send
+			// Map senders we already have, so we do not double-send tracks.
 			existingSenders := map[string]bool{}
 
 			for _, sender := range peer.peerConnection.GetSenders() {
@@ -279,7 +299,7 @@ func signalPeerConnections() { // nolint
 				trackID := sender.Track().ID()
 				existingSenders[trackID] = true
 
-				// If we have a RTPSender that doesn't map to a existing track remove and signal
+				// If we have an RTPSender that does not map to an existing track, remove and signal.
 				trackLocal, ok := trackLocals[trackID]
 				if !ok || !peer.acceptsTrack(trackLocal) {
 					if err := peer.peerConnection.RemoveTrack(sender); err != nil {
@@ -297,7 +317,7 @@ func signalPeerConnections() { // nolint
 				existingSenders[receiver.Track().ID()] = true
 			}
 
-			// Add all track we aren't sending yet to the PeerConnection
+			// Add every track we are not sending yet to the PeerConnection.
 			for trackID, trackLocal := range trackLocals {
 				if !peer.acceptsTrack(trackLocal) {
 					continue
@@ -374,8 +394,8 @@ func signalPeerConnections() { // nolint
 
 // dispatchKeyFrame sends a keyframe to all PeerConnections, used everytime a new user joins the call.
 func dispatchKeyFrame() {
-	listLock.Lock()
-	defer listLock.Unlock()
+	listLock.RLock()
+	defer listLock.RUnlock()
 
 	for i := range peerConnections {
 		for _, receiver := range peerConnections[i].peerConnection.GetReceivers() {
@@ -492,21 +512,28 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		log.Infof("Got remote track: Kind=%s, ID=%s, PayloadType=%d", t.Kind(), t.ID(), t.PayloadType())
 		trackParticipantName := currentParticipantName()
+		forwardedTrackID := forwardedRemoteTrackID(t)
 		broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
-			"participant": trackParticipantName,
-			"trackId":     t.ID(),
-			"streamId":    t.StreamID(),
-			"payloadType": t.PayloadType(),
+			"participant":   trackParticipantName,
+			"trackId":       forwardedTrackID,
+			"sourceTrackId": t.ID(),
+			"streamId":      t.StreamID(),
+			"payloadType":   t.PayloadType(),
 		})
 		broadcastKanbanEvent("participant_track", map[string]any{
-			"name":     trackParticipantName,
-			"kind":     t.Kind().String(),
-			"trackId":  t.ID(),
-			"streamId": t.StreamID(),
+			"name":          trackParticipantName,
+			"kind":          t.Kind().String(),
+			"trackId":       forwardedTrackID,
+			"sourceTrackId": t.ID(),
+			"streamId":      t.StreamID(),
 		})
 
 		// Create a track to fan out our incoming media to all browser peers.
-		trackLocal := addTrack(t)
+		trackLocal, err := addTrack(t)
+		if err != nil {
+			log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
+			return
+		}
 		defer removeTrack(trackLocal)
 
 		audioDecoder, audioChannels, err := newRoomAudioDecoder(t)

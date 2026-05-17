@@ -83,3 +83,26 @@ func TestMeetingMemoryCanonicalizesAndSkipsWeakTranscriptFragments(t *testing.T)
 		t.Fatalf("entries=%d, want 1", len(entries))
 	}
 }
+
+func TestMeetingMemoryLoadsLargeEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	largeTranscript := strings.Repeat("billing review is still blocking launch. ", 3000)
+	if _, appended, err := store.appendTranscript("event-large", "item-large", largeTranscript); err != nil {
+		t.Fatalf("append large transcript: %v", err)
+	} else if !appended {
+		t.Fatal("large transcript appended=false, want true")
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	if entries := reloaded.snapshot(10); len(entries) != 1 {
+		t.Fatalf("entries=%d, want 1", len(entries))
+	}
+}

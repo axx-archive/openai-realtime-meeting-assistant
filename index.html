@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>The Bonfire</title>
+    <title>Bonfire</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
@@ -151,7 +151,7 @@
       /* ---------- Topbar ---------- */
       .topbar {
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: auto auto 1fr auto;
         gap: var(--s-3);
         align-items: center;
         min-height: 56px;
@@ -159,6 +159,46 @@
         border: 1px solid var(--line);
         border-radius: var(--r-md);
         background: linear-gradient(180deg, var(--night-2), var(--night-1));
+      }
+
+      .topbar__meta {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.10em;
+        color: var(--fg-2);
+        text-transform: lowercase;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .topbar__meta-item {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .topbar__meta-item b {
+        color: var(--fg-0);
+        font-weight: 500;
+        letter-spacing: 0.04em;
+      }
+      .topbar__meta-sep {
+        width: 1px;
+        height: 14px;
+        background: var(--line);
+        flex: 0 0 auto;
+      }
+      .topbar__meta-pill {
+        flex: 0 0 auto;
+        font-family: var(--font-sans);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      #appShell:not(.is-in-room) .topbar__meta {
+        display: none;
       }
 
       .topbar__mark {
@@ -227,8 +267,8 @@
       .topbar__title { display: grid; gap: 1px; min-width: 0; }
       .topbar__title h1 {
         font-family: var(--font-sans);
-        font-size: 14px;
-        font-weight: 500;
+        font-size: 15px;
+        font-weight: 600;
         letter-spacing: -0.005em;
         color: var(--fg-0);
       }
@@ -239,6 +279,10 @@
         letter-spacing: 0.10em;
         text-transform: none;
         font-feature-settings: "ss01" on, "ss02" on;
+      }
+
+      .topbar__title p:empty {
+        display: none;
       }
 
       /* ---------- Status pill ---------- */
@@ -792,6 +836,41 @@
         border-width: 1px;
       }
 
+      .card-date {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        line-height: 1.2;
+        text-transform: none;
+      }
+
+      .card-date__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        flex: 0 0 auto;
+      }
+
+      .card-date[data-date-state="today"],
+      .card-date[data-date-state="soon"] {
+        color: var(--ember-700);
+      }
+
+      .card-date[data-date-state="overdue"] {
+        color: #A93226;
+      }
+
+      .card-date[data-date-state="done"] {
+        color: #3E7D52;
+      }
+
       .owner-avatar {
         display: inline-grid;
         place-items: center;
@@ -835,28 +914,7 @@
         will-change: transform;
       }
 
-      .tags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .tags li {
-        padding: 4px 8px;
-        border-radius: var(--r-xs);
-        background: var(--tag-bg);
-        color: var(--tag-color);
-        font-family: var(--font-sans);
-        font-size: 11px;
-        font-weight: 500;
-        line-height: 1;
-      }
-      .tags li[data-tag-kind="protocol"]  { --tag-bg: rgba(255, 122, 43, 0.12); --tag-color: var(--ember-700); }
-      .tags li[data-tag-kind="concern"]   { --tag-bg: rgba(255, 178, 63, 0.16); --tag-color: #8A5709; }
-      .tags li[data-tag-kind="mechanism"] { --tag-bg: var(--ash-100);            --tag-color: var(--ash-700); }
+      /* tags removed from kanban cards per design spec */
 
       /* ---------- Memory panel ---------- */
       .memory-panel {
@@ -1693,6 +1751,142 @@
         text-wrap: pretty;
       }
 
+      .card-detail-key-dates {
+        display: grid;
+        gap: var(--s-3);
+        margin: 14px var(--s-6) 0;
+        padding: 14px;
+        border: 1px solid var(--line-light);
+        border-radius: 14px;
+        background: #FFF;
+        box-shadow: var(--shadow-light-1);
+      }
+
+      .card-detail-key-dates header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .card-detail-key-dates h3 {
+        margin: 0;
+        color: var(--fg-inverse);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .card-detail-key-dates p {
+        margin: 0;
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+      }
+
+      .card-detail-key-dates__title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .card-detail-key-dates__icon {
+        color: var(--ash-600);
+        display: inline-grid;
+        place-items: center;
+      }
+      .card-detail-key-dates__sub {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.10em;
+        color: var(--ash-600);
+        text-transform: lowercase;
+        margin-left: 4px;
+      }
+
+      .key-date-timeline {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(var(--key-date-count, 4), minmax(0, 1fr));
+        gap: 0;
+        padding-top: 4px;
+      }
+
+      .key-date-timeline::before {
+        content: '';
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        top: 16px;
+        height: 2px;
+        background: linear-gradient(90deg, #88C29A 0%, #88C29A 35%, #F0BF85 35%, #F0BF85 60%, #EAE1CF 60%, #EAE1CF 100%);
+        border-radius: 2px;
+      }
+
+      .key-date-step {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 7px;
+        padding: 0 4px;
+        min-width: 0;
+      }
+
+      .key-date-step__dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: #FFFFFF;
+        border: 2px solid #BFB39A;
+        margin-left: 3px;
+        box-shadow: 0 0 0 3px #FFFFFF;
+        display: grid;
+        place-items: center;
+      }
+
+      .key-date-step.is-done .key-date-step__dot {
+        background: #88C29A;
+        border-color: #5DA378;
+      }
+      .key-date-step.is-done .key-date-step__dot::after {
+        content: '';
+        width: 5px;
+        height: 3px;
+        border-left: 1.4px solid #FFFFFF;
+        border-bottom: 1.4px solid #FFFFFF;
+        transform: rotate(-45deg) translateY(-1px);
+      }
+
+      .key-date-step.is-today .key-date-step__dot {
+        background: var(--ember-500);
+        border-color: var(--ember-700);
+        box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 6px rgba(255, 122, 43, 0.18);
+      }
+
+      .key-date-step__label {
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--fg-inverse);
+        line-height: 1.25;
+      }
+      .key-date-step.is-done .key-date-step__label,
+      .key-date-step.is-upcoming .key-date-step__label {
+        color: var(--ash-700);
+      }
+
+      .key-date-step__date {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        color: var(--ash-600);
+        text-transform: lowercase;
+      }
+      .key-date-step.is-today .key-date-step__date {
+        color: var(--ember-700);
+        font-weight: 500;
+      }
+
       .card-detail-edit-label {
         display: none;
         color: var(--ash-600);
@@ -1846,9 +2040,15 @@
         .board { grid-template-columns: repeat(4, minmax(160px, 1fr)); min-width: 688px; }
       }
 
+      @media (max-width: 1100px) {
+        .topbar { grid-template-columns: auto 1fr auto; }
+        .topbar__meta { display: none; }
+      }
+
       @media (max-width: 860px) {
         .topbar { grid-template-columns: auto 1fr; }
         .topbar .pill { grid-column: 1 / -1; justify-self: start; }
+        .topbar__meta { display: none; }
         .workspace { grid-template-columns: 1fr; }
         .video-rail { order: -1; overflow: visible; }
         .video-stack { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
@@ -2111,26 +2311,240 @@
 
       .assistant-panel.scout-panel {
         min-height: 0;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto auto auto minmax(0, 1fr);
         border-color: var(--line-faint);
         border-radius: var(--r-lg);
         background: linear-gradient(180deg, rgba(42, 35, 28, 0.35), rgba(21, 17, 13, 0.70));
         backdrop-filter: blur(4px);
       }
 
-      .scout-panel header h2 {
+      .scout-panel header h2,
+      .scout-panel .scout-panel__title h2 {
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .scout-panel__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+      }
+
+      .scout-panel__title {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .scout-panel__mark {
+        display: inline-grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: rgba(255, 122, 43, 0.12);
+        color: var(--ember-300);
+        flex: 0 0 auto;
+      }
+
+      .scout-panel .assistant-state {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.10em;
+        color: #7FCB94;
+        text-transform: lowercase;
+      }
+
+      .scout-panel .assistant-state__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: #7FCB94;
+        box-shadow: 0 0 6px #7FCB94;
+        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
       }
 
       .scout-subtitle {
-        margin-top: 2px;
+        display: none;
+      }
+
+      .scout-ask {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        gap: 8px;
+        align-items: center;
+        padding: 4px 6px 4px 12px;
+        border: 1px solid rgba(255, 122, 43, 0.22);
+        border-radius: 11px;
+        background: rgba(255, 122, 43, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(255, 122, 43, 0.04), 0 0 22px rgba(255, 122, 43, 0.06);
+      }
+
+      .scout-ask:focus-within {
+        box-shadow: var(--glow-ember-sm);
+        border-color: rgba(255, 122, 43, 0.45);
+      }
+
+      .scout-ask__icon {
+        display: inline-grid;
+        place-items: center;
         color: var(--fg-2);
+      }
+
+      .scout-ask__kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(11, 8, 5, 0.4);
+        border: 1px solid var(--line);
+        color: var(--fg-2);
+        line-height: 1.4;
+      }
+
+      .scout-ask .assistant-input {
+        min-height: 36px;
+        border: 0;
+        background: transparent;
+        padding: 7px 0;
+        font-size: 13.5px;
+      }
+
+      .scout-ask .assistant-input:focus {
+        background: transparent;
+        border-color: transparent;
+      }
+
+      .scout-ask .assistant-send {
+        min-height: 32px;
+        min-width: 48px;
+        padding: 0 12px;
+        font-size: 12.5px;
+      }
+
+      .scout-foot {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding-top: var(--s-2);
+        border-top: 1px solid var(--line-faint);
+        margin-top: 4px;
+      }
+
+      .scout-foot__chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 6px;
+        background: rgba(255, 235, 200, 0.04);
+        border: 1px solid var(--line-faint);
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        color: var(--fg-2);
+        text-transform: lowercase;
+      }
+
+      .scout-activity__label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .scout-activity__count {
+        color: var(--fg-0);
+        background: rgba(255, 235, 200, 0.06);
+        padding: 1px 7px;
+        border-radius: 999px;
+        letter-spacing: 0.04em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .scout-activity__chev {
+        color: var(--fg-3);
+        transition: transform var(--t-base) var(--ease-soft);
+      }
+      .scout-activity[open] .scout-activity__chev {
+        transform: rotate(180deg);
+      }
+
+      .scout-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .scout-chip {
+        min-height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-pill);
+        background: rgba(255, 235, 200, 0.04);
+        color: var(--fg-1);
+        font-size: 12px;
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .scout-chip:hover {
+        background: rgba(255, 235, 200, 0.08);
+        border-color: var(--line);
+        color: var(--fg-0);
+      }
+
+      .scout-chip:active {
+        transform: scale(0.96);
+      }
+
+      .scout-chip.is-private {
+        border-color: rgba(255, 122, 43, 0.24);
+        background: rgba(255, 122, 43, 0.10);
+        color: var(--ember-300);
+      }
+
+      .scout-activity {
+        display: grid;
+        gap: var(--s-2);
+        min-width: 0;
+        border-top: 1px solid var(--line-faint);
+        padding-top: var(--s-2);
+      }
+
+      .scout-activity summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+        min-height: 32px;
+        color: var(--fg-2);
+        cursor: pointer;
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.12em;
+        list-style: none;
         text-transform: none;
+      }
+
+      .scout-activity summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .scout-activity__count {
+        color: var(--fg-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .scout-activity[open] .assistant-feed {
+        margin-top: var(--s-2);
       }
 
       .memory-list--silent {
@@ -2157,7 +2571,8 @@
         min-height: min(74vh, 820px);
         height: 100%;
         display: grid;
-        place-items: center;
+        grid-template-rows: auto minmax(0, 1fr);
+        place-items: stretch;
         overflow: hidden;
         padding: var(--s-6);
       }
@@ -2176,6 +2591,119 @@
         justify-items: center;
         gap: var(--s-5);
         width: 100%;
+        min-height: 0;
+      }
+
+      .stage-toolbar {
+        position: relative;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-2);
+        margin-bottom: var(--s-4);
+      }
+
+      .stage-segmented {
+        display: inline-flex;
+        gap: 3px;
+        padding: 3px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.46);
+      }
+
+      .stage-segmented button,
+      .stage-tool,
+      .pin-speaker {
+        min-height: 32px;
+        border-radius: var(--r-pill);
+        color: var(--fg-2);
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 500;
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .stage-segmented button {
+        padding: 0 12px;
+        border: 0;
+      }
+
+      .stage-segmented button[aria-pressed="true"] {
+        background: rgba(255, 235, 200, 0.10);
+        color: var(--fg-0);
+      }
+
+      .stage-tool {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 12px;
+        border: 1px solid var(--line-faint);
+        background: rgba(11, 8, 5, 0.46);
+      }
+
+      .stage-segmented button:hover,
+      .stage-tool:hover,
+      .pin-speaker:hover {
+        background: rgba(255, 235, 200, 0.08);
+        color: var(--fg-0);
+      }
+
+      .stage-segmented button:active,
+      .stage-tool:active,
+      .pin-speaker:active {
+        transform: scale(0.96);
+      }
+
+      .pin-speaker {
+        position: absolute;
+        top: var(--s-2);
+        right: var(--s-2);
+        z-index: 5;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 32px;
+        width: 32px;
+        padding: 0;
+        border: 1px solid var(--line);
+        background: rgba(11, 8, 5, 0.66);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+
+      .pin-speaker[aria-pressed="true"] {
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.16);
+        color: var(--ember-300);
+      }
+
+      .hearth-stage[data-stage-mode="gallery"] .hearth-center {
+        height: 100%;
+        justify-items: stretch;
+        gap: 0;
+      }
+
+      .hearth-stage[data-stage-mode="gallery"] .hearth-speaker {
+        display: none;
+      }
+
+      .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-auto-rows: minmax(180px, 1fr);
+        align-items: stretch;
+        justify-content: stretch;
+        width: 100%;
+        height: 100%;
+      }
+
+      .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
+        width: 100%;
+        height: 100%;
+        aspect-ratio: auto;
       }
 
       .hearth-speaker {
@@ -2319,7 +2847,7 @@
         background: #221812;
       }
 
-      .hearth-seat.is-active-speaker {
+      .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat.is-active-speaker {
         display: none;
       }
 
@@ -2365,10 +2893,87 @@
       .board-rail__header h2 {
         font-family: var(--font-sans);
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
         letter-spacing: -0.005em;
         text-transform: none;
+        color: var(--fg-0);
+      }
+
+      .board-rail__subtitle {
+        display: block;
+        margin-top: 3px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+      }
+
+      .board-rail__summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--s-2);
+        padding: 10px 12px;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-md);
+        background: rgba(255, 235, 200, 0.03);
+      }
+      .board-rail__summary[hidden] { display: none; }
+
+      .board-stat {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .board-stat__value {
+        font-family: var(--font-mono);
+        font-size: 16px;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        color: var(--fg-0);
+        line-height: 1.1;
+      }
+      .board-stat__value--warn { color: var(--warning); }
+      .board-stat__value--done { color: #7FCB94; }
+      .board-stat__label {
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        font-weight: 500;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+      }
+
+      .board-rail__col-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 2px;
+      }
+      .board-rail__col-label .l {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
         color: var(--fg-1);
+      }
+      .board-rail__col-label .l .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+      }
+      .board-rail__col-label .n {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--fg-3);
+        background: rgba(255, 235, 200, 0.04);
+        border-radius: 999px;
+        padding: 1px 7px;
       }
 
       .board-expand,
@@ -2410,6 +3015,8 @@
       .board-preview {
         display: grid;
         gap: var(--s-2);
+        min-height: 0;
+        overflow-y: auto;
       }
 
       .board-preview__empty {
@@ -2426,62 +3033,81 @@
 
       .board-preview__col {
         display: grid;
-        gap: 6px;
-        padding: 10px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-md);
-        background: rgba(11, 8, 5, 0.45);
-      }
-
-      .board-preview__col header {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--s-2);
-      }
-
-      .board-preview__col h3 {
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        text-transform: none;
-      }
-
-      .board-preview__count,
-      .board-preview__more {
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 9px;
-        font-variant-numeric: tabular-nums;
+        gap: 8px;
       }
 
       .board-preview__col.is-empty .board-preview__more {
-        color: var(--fg-3);
+        color: var(--ash-500);
         font-family: var(--font-display);
-        font-size: 13px;
         font-style: italic;
+        font-size: 14px;
         letter-spacing: -0.005em;
-        text-transform: none;
+        padding: 6px 2px;
       }
 
       .board-preview__card {
+        display: grid;
+        gap: 8px;
+        width: 100%;
         text-align: left;
-        padding: 7px 9px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-xs);
-        background: rgba(255, 235, 200, 0.04);
-        color: var(--fg-1);
-        font-size: 11px;
-        line-height: 1.35;
+        padding: 10px 12px;
+        border: 1px solid var(--line-light);
+        border-radius: 12px;
+        background: #FFFFFF;
+        color: var(--fg-inverse);
+        font-size: 13.5px;
+        line-height: 1.3;
         text-wrap: pretty;
+        box-shadow: 0 1px 2px rgba(60, 35, 10, 0.05);
+        transition: background var(--t-base) var(--ease-soft),
+                    border-color var(--t-base) var(--ease-soft),
+                    box-shadow 60ms var(--ease-soft),
+                    transform 160ms var(--ease-soft) 60ms;
+        cursor: pointer;
+      }
+
+      .board-preview__card:hover {
+        background: #FFFAF0;
+        box-shadow: var(--shadow-light-2);
+        transform: translateY(-1px);
+      }
+      .board-preview__card:focus-visible {
+        outline: none;
+        box-shadow: var(--glow-ember-sm), var(--shadow-light-2);
+      }
+
+      .board-preview__card[data-date-state="today"] {
+        background: linear-gradient(180deg, #FFFBF1 0%, #FFFAEC 100%);
+        border-color: #EFD8A8;
+      }
+
+      .board-preview__card-heading {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 8px;
+      }
+
+      .board-preview__card-title {
+        min-width: 0;
+        font-weight: 500;
+        color: var(--fg-inverse);
+        overflow-wrap: break-word;
+      }
+
+      .board-preview__card .owner-avatar {
+        width: 22px;
+        height: 22px;
+        border-width: 2px;
+      }
+
+      .board-preview__card .card-date {
+        font-size: 10px;
       }
 
       .board-preview__card.is-moved {
-        border-color: rgba(255, 122, 43, 0.36);
-        background: rgba(255, 122, 43, 0.1);
-        color: var(--ember-300);
+        border-color: var(--ember-500);
+        box-shadow: var(--glow-ember-md);
       }
 
       .screen-stage {
@@ -2548,6 +3174,7 @@
         border-color: var(--line-light);
         box-shadow: var(--shadow-light-2);
         padding: 0;
+        position: relative;
       }
 
       .board-expanded-top {
@@ -2728,7 +3355,7 @@
       .board-expanded-surface .board {
         min-height: 0;
         overflow: auto;
-        padding: 0 28px var(--s-6);
+        padding: 0 28px 132px;
         gap: 14px;
       }
 
@@ -2763,6 +3390,255 @@
       .board-expanded-surface .btn--secondary:hover:not([disabled]) {
         background: #FFFAF0;
         border-color: var(--line-light);
+      }
+
+      .board-dock-wrap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 22px;
+        z-index: 20;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+      }
+
+      .board-dock {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        border: 1px solid rgba(255, 235, 200, 0.12);
+        border-radius: 999px;
+        background: rgba(20, 14, 9, 0.92);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        color: var(--fg-0);
+        pointer-events: auto;
+        max-width: calc(100vw - 36px);
+      }
+
+      .board-video-strip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-right: 10px;
+        margin-right: 4px;
+        border-right: 1px solid rgba(255, 235, 200, 0.10);
+        min-width: 0;
+        max-width: min(44vw, 460px);
+      }
+
+      .board-video-tile {
+        position: relative;
+        width: 78px;
+        aspect-ratio: 4/3;
+        height: auto;
+        overflow: hidden;
+        border: 1px solid rgba(255, 235, 200, 0.10);
+        border-radius: 10px;
+        background: var(--night-0);
+        color: var(--fg-0);
+        transition: width 220ms var(--ease-out), transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 200ms var(--ease-soft);
+      }
+
+      .board-video-tile.is-speaker {
+        width: 96px;
+        border-color: rgba(255, 122, 43, 0.58);
+        box-shadow: 0 0 0 1px rgba(255, 122, 43, 0.55), 0 0 22px rgba(255, 122, 43, 0.22);
+      }
+
+      .board-video-tile:hover,
+      .board-video-tile:focus-visible {
+        width: 140px;
+        transform: translateY(-4px);
+        border-color: rgba(255, 122, 43, 0.44);
+        outline: none;
+        z-index: 2;
+      }
+      .board-video-tile.is-speaker:hover,
+      .board-video-tile.is-speaker:focus-visible {
+        width: 160px;
+      }
+
+      .board-video-tile video,
+      .board-video-tile .owner-avatar {
+        width: 100%;
+        height: 100%;
+      }
+
+      .board-video-tile video {
+        object-fit: cover;
+      }
+
+      .board-video-tile video.is-local {
+        transform: scaleX(-1);
+      }
+
+      .board-video-tile .owner-avatar {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .board-video-tile .monogram {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        font-size: 18px;
+      }
+
+      .board-video-label {
+        position: absolute;
+        left: 6px;
+        bottom: 5px;
+        max-width: calc(100% - 12px);
+        overflow: hidden;
+        padding: 3px 6px;
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.68);
+        color: var(--fg-0);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        line-height: 1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .board-dock-now {
+        padding: 0 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.10em;
+        color: var(--fg-2);
+        text-transform: lowercase;
+        white-space: nowrap;
+      }
+      .board-dock-now b {
+        color: var(--ember-300);
+        font-weight: 500;
+      }
+
+      .board-dock-sep {
+        width: 1px;
+        height: 22px;
+        background: rgba(255, 235, 200, 0.10);
+        margin: 0 2px;
+      }
+
+      .board-dock-icon,
+      .board-dock-btn {
+        min-height: 38px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--fg-1);
+        box-shadow: none;
+        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .board-dock-icon {
+        width: 38px;
+        height: 38px;
+        display: inline-grid;
+        place-items: center;
+        padding: 0;
+      }
+
+      .board-dock-icon:hover:not([disabled]),
+      .board-dock-btn:hover:not([disabled]) {
+        background: rgba(255, 235, 200, 0.06);
+        color: var(--fg-0);
+      }
+      .board-dock-icon:active,
+      .board-dock-btn:active { transform: scale(0.96); }
+
+      .board-dock-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 14px;
+        background: rgba(255, 235, 200, 0.06);
+        color: var(--fg-0);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .board-dock-btn.primary {
+        background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
+        color: var(--fg-inverse);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 0 rgba(255, 122, 43, 0.4), 0 8px 24px rgba(255, 90, 20, 0.25);
+      }
+      .board-dock-btn.primary:hover:not([disabled]) {
+        background: linear-gradient(180deg, var(--ember-300), var(--ember-600));
+        color: var(--fg-inverse);
+      }
+
+      .board-dock-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 12px;
+        font-size: 13px;
+      }
+
+      .board-dock-icon:hover,
+      .board-dock-btn:hover {
+        background: #FFFAF0;
+        border-color: rgba(255, 122, 43, 0.26);
+        color: var(--fg-inverse);
+      }
+
+      .board-dock-icon:active,
+      .board-dock-btn:active {
+        transform: scale(0.96);
+      }
+
+      .board-dock-btn.primary {
+        border-color: rgba(193, 62, 7, 0.2);
+        background: linear-gradient(180deg, #FF8A3D, #ED5A14);
+        color: #2A1505;
+      }
+
+      .board-menu-wrap {
+        position: relative;
+      }
+
+      .board-menu {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 10px);
+        display: grid;
+        gap: 4px;
+        min-width: 220px;
+        padding: 6px;
+        border: 1px solid rgba(255, 235, 200, 0.10);
+        border-radius: 12px;
+        background: #1A140E;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+      }
+
+      .board-menu[hidden] {
+        display: none;
+      }
+
+      .board-menu button {
+        min-height: 34px;
+        justify-content: flex-start;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 8px;
+        color: var(--fg-1);
+        font-size: 13px;
+        text-align: left;
+      }
+
+      .board-menu button:hover {
+        background: rgba(255, 235, 200, 0.06);
+        color: var(--fg-0);
       }
 
       @media (max-width: 1100px) {
@@ -2902,6 +3778,19 @@
         .hearth-stage {
           min-height: clamp(420px, 58svh, 640px);
           padding: var(--s-5);
+        }
+
+        .stage-toolbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .stage-segmented {
+          width: 100%;
+        }
+
+        .stage-segmented button {
+          flex: 1;
         }
 
         .hearth-speaker {
@@ -3229,7 +4118,41 @@
           align-items: start;
           grid-auto-rows: max-content;
           gap: var(--s-3);
-          padding: 0 var(--s-3) var(--s-3);
+          padding: 0 var(--s-3) 148px;
+        }
+
+        .board-dock-wrap {
+          bottom: var(--s-2);
+          width: calc(100% - 16px);
+        }
+
+        .board-dock {
+          display: grid;
+          grid-template-columns: 1fr auto auto auto;
+          justify-content: stretch;
+          gap: var(--s-2);
+          min-height: 0;
+          padding: var(--s-2);
+        }
+
+        .board-video-strip {
+          grid-column: 1 / -1;
+          max-width: none;
+          overflow-x: auto;
+          padding-bottom: 2px;
+        }
+
+        .board-video-tile {
+          flex: 0 0 auto;
+        }
+
+        .board-dock-now,
+        .board-dock-sep {
+          display: none;
+        }
+
+        .board-dock-btn {
+          justify-content: center;
         }
 
         .board-expanded-surface .column {
@@ -3287,6 +4210,11 @@
         .card-detail-scout {
           margin: 0 var(--s-4);
           padding: 12px 14px;
+        }
+
+        .card-detail-key-dates {
+          margin: 12px var(--s-4) 0;
+          padding: 12px;
         }
 
         .card-detail-form {
@@ -3480,8 +4408,20 @@
           </svg>
         </span>
         <div class="topbar__title">
-          <h1>The Bonfire</h1>
-          <p>agentic meeting room</p>
+          <h1>Bonfire</h1>
+          <p></p>
+        </div>
+        <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
+          <span class="topbar__meta-item"><b id="topbarProject">platform standup</b></span>
+          <span class="topbar__meta-sep" aria-hidden="true"></span>
+          <span class="topbar__meta-item" id="topbarDate">—</span>
+          <span class="topbar__meta-sep" aria-hidden="true"></span>
+          <span class="topbar__meta-item" id="topbarElapsed">00:00 elapsed</span>
+          <span class="topbar__meta-sep" aria-hidden="true"></span>
+          <span id="topbarRoomPill" class="pill pill--room topbar__meta-pill" data-state="waiting">
+            <span class="pill__dot"></span>
+            <span id="topbarRoomState">in the room</span>
+          </span>
         </div>
         <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
           <span class="pill__dot"></span>
@@ -3555,23 +4495,72 @@
 
         <aside class="scout-rail mount-stagger" aria-label="Scout">
           <section class="assistant-panel scout-panel" aria-label="Scout responses">
-            <header>
-              <div>
+            <header class="scout-panel__header">
+              <div class="scout-panel__title">
+                <span class="scout-panel__mark" aria-hidden="true">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
+                    <path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path>
+                  </svg>
+                </span>
                 <h2>Scout</h2>
-                <p class="scout-subtitle">memory · <span id="memoryCount">0 saved</span></p>
               </div>
-              <span id="assistantState" class="assistant-state">ready</span>
+              <span id="assistantState" class="assistant-state">
+                <span class="assistant-state__dot" aria-hidden="true"></span>
+                <span id="assistantStateText">ready</span>
+              </span>
             </header>
-            <div id="assistantFeed" class="assistant-feed">
-              <article class="assistant-message assistant-message--status">
-                <span class="assistant-meta">ready</span>
-                <span class="assistant-text">ask Scout anything.</span>
-              </article>
-            </div>
-            <form id="assistantForm" class="assistant-form">
-              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="Ask Scout anything">
-              <button class="btn btn--primary assistant-send" type="submit">Ask</button>
+            <form id="assistantForm" class="assistant-form scout-ask">
+              <span class="scout-ask__icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="M21 21l-4.35-4.35"></path>
+                </svg>
+              </span>
+              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout — this room, past meetings, or private updates…">
+              <span class="scout-ask__kbd" aria-hidden="true">⌘K</span>
+              <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
             </form>
+            <div class="scout-chips" aria-label="Scout suggestions">
+              <button class="scout-chip" type="button" data-scout-query="summarize this meeting so far">summarize this meeting</button>
+              <button class="scout-chip" type="button" data-scout-query="what did Tim commit to last week?">what did Tim commit to?</button>
+              <button class="scout-chip" type="button" data-scout-query="what is blocked?">recap last week</button>
+              <button class="scout-chip is-private" type="button" data-scout-query="private: update my board">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="5" y="11" width="14" height="10"></rect>
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+                </svg>
+                private update
+              </button>
+            </div>
+            <details class="scout-activity">
+              <summary>
+                <span class="scout-activity__label">room activity <span id="scoutActivityCount" class="scout-activity__count">0</span></span>
+                <svg class="scout-activity__chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+              </summary>
+              <div id="assistantFeed" class="assistant-feed">
+                <article class="assistant-message assistant-message--status">
+                  <span class="assistant-meta">ready</span>
+                  <span class="assistant-text">ask Scout anything.</span>
+                </article>
+              </div>
+            </details>
+            <footer class="scout-foot" aria-label="Scout summary">
+              <span class="scout-foot__chip" id="scoutFootMemory">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M12 7v5l3 2"></path>
+                </svg>
+                memory · <span id="memoryCount">0 saved</span>
+              </span>
+              <span class="scout-foot__chip" id="scoutFootDue">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="16"></rect>
+                  <path d="M3 9h18"></path><path d="M8 3v4"></path><path d="M16 3v4"></path>
+                </svg>
+                <span id="scoutFootDueText">0 due this week</span>
+              </span>
+            </footer>
           </section>
           <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
             <article class="memory-item">
@@ -3594,6 +4583,13 @@
 
           <div id="hearthStage" class="hearth-stage" aria-label="Room videos">
             <div class="hearth-bloom" aria-hidden="true"></div>
+            <div class="stage-toolbar" aria-label="Stage layout">
+              <div class="stage-segmented" role="group" aria-label="Video layout">
+                <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
+                <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
+              </div>
+              <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
+            </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
                 <span class="speaker-halo speaker-halo--1" aria-hidden="true"></span>
@@ -3630,6 +4626,13 @@
                     <span class="media-flag media-flag--camera">camera off</span>
                     <span class="media-flag media-flag--share">sharing</span>
                   </span>
+                  <button class="pin-speaker" type="button" aria-label="Pin speaker" aria-pressed="false" title="pin to stage">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 2v6"></path>
+                      <path d="M5 8h14l-2 6H7L5 8Z"></path>
+                      <path d="M12 14v8"></path>
+                    </svg>
+                  </button>
                   <span id="localVideoLabel" class="video-label">you</span>
                 </div>
               </div>
@@ -3640,11 +4643,11 @@
         <aside id="boardRail" class="board-rail mount-stagger" aria-label="Standup board preview">
           <header class="board-rail__header">
             <div>
-              <h2>board · standup</h2>
-              <span id="boardPreviewState" class="board-status">waiting room</span>
+              <h2>Standup board</h2>
+              <span id="boardPreviewState" class="board-rail__subtitle">platform · <span id="boardRailCount">0 cards</span></span>
             </div>
             <button id="expandBoard" class="board-expand" type="button" aria-expanded="false" disabled>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="15 3 21 3 21 9"></polyline>
                 <polyline points="9 21 3 21 3 15"></polyline>
                 <line x1="21" y1="3" x2="14" y2="10"></line>
@@ -3653,6 +4656,20 @@
               expand
             </button>
           </header>
+          <div id="boardRailSummary" class="board-rail__summary" aria-label="Board summary" hidden>
+            <div class="board-stat">
+              <span class="board-stat__value" id="boardStatDue">0</span>
+              <span class="board-stat__label">due this week</span>
+            </div>
+            <div class="board-stat">
+              <span class="board-stat__value board-stat__value--warn" id="boardStatOverdue">0</span>
+              <span class="board-stat__label">overdue</span>
+            </div>
+            <div class="board-stat">
+              <span class="board-stat__value board-stat__value--done" id="boardStatShipped">0</span>
+              <span class="board-stat__label">shipped today</span>
+            </div>
+          </div>
           <div id="boardPreview" class="board-preview">
             <p class="board-preview__empty">join the room to load the board.</p>
           </div>
@@ -3701,6 +4718,49 @@
           </div>
           <p id="boardHero" class="board-hero" aria-hidden="true">join the room to load the board.</p>
           <section id="board" class="board" aria-label="Kanban board"></section>
+          <div id="boardDock" class="board-dock-wrap" aria-label="Expanded board controls">
+            <div class="board-dock">
+              <div id="boardVideoStrip" class="board-video-strip" aria-label="Room video strip"></div>
+              <span id="boardDockNow" class="board-dock-now">room visible</span>
+              <span class="board-dock-sep" aria-hidden="true"></span>
+              <button id="boardDockMute" class="board-dock-icon" type="button" aria-label="Mute microphone" title="mic">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <path d="M12 19v3"></path>
+                </svg>
+              </button>
+              <button id="boardDockCamera" class="board-dock-icon" type="button" aria-label="Toggle camera" title="camera">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
+                  <rect x="3" y="6" width="12" height="12" rx="2"></rect>
+                </svg>
+              </button>
+              <button id="boardDockShare" class="board-dock-icon" type="button" aria-label="Share screen" title="share screen">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2" y="4" width="20" height="12" rx="2"></rect>
+                  <path d="M8 20h8"></path>
+                  <path d="M12 16v4"></path>
+                </svg>
+              </button>
+              <button id="boardDockArchive" class="board-dock-btn primary" type="button">send notes</button>
+              <div class="board-menu-wrap">
+                <button id="boardDockMenuButton" class="board-dock-icon" type="button" aria-label="More board actions" aria-expanded="false" title="more">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <circle cx="12" cy="5" r="1.7"></circle>
+                    <circle cx="12" cy="12" r="1.7"></circle>
+                    <circle cx="12" cy="19" r="1.7"></circle>
+                  </svg>
+                </button>
+                <div id="boardDockMenu" class="board-menu" hidden>
+                  <button type="button" data-board-menu-action="new-card">new card</button>
+                  <button type="button" data-board-menu-action="undo-delete">undo delete</button>
+                  <button type="button" data-board-menu-action="copy-link">copy room link</button>
+                  <button type="button" data-board-menu-action="back">back to the fire</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3758,6 +4818,14 @@
       const expandBoardButton = document.getElementById('expandBoard')
       const collapseBoardButton = document.getElementById('collapseBoard')
       const boardHuddle = document.getElementById('boardHuddle')
+      const boardVideoStrip = document.getElementById('boardVideoStrip')
+      const boardDockNow = document.getElementById('boardDockNow')
+      const boardDockMute = document.getElementById('boardDockMute')
+      const boardDockCamera = document.getElementById('boardDockCamera')
+      const boardDockShare = document.getElementById('boardDockShare')
+      const boardDockArchive = document.getElementById('boardDockArchive')
+      const boardDockMenuButton = document.getElementById('boardDockMenuButton')
+      const boardDockMenu = document.getElementById('boardDockMenu')
       const newCardButton = document.getElementById('newCard')
       const undoDeleteButton = document.getElementById('undoDelete')
       const statusPillEl = document.getElementById('statusPill')
@@ -3791,6 +4859,9 @@
       const activeSpeakerVideo = document.getElementById('activeSpeakerVideo')
       const activeSpeakerAvatar = document.getElementById('activeSpeakerAvatar')
       const activeSpeakerLabel = document.getElementById('activeSpeakerLabel')
+      const hearthStage = document.getElementById('hearthStage')
+      const stageModeButtons = Array.from(document.querySelectorAll('button[data-stage-mode]'))
+      const pinActiveSpeakerButton = document.getElementById('pinActiveSpeaker')
       const localVideo = document.getElementById('localVideo')
       const localTileAvatar = document.getElementById('localTileAvatar')
       const localVideoLabel = document.getElementById('localVideoLabel')
@@ -3806,6 +4877,7 @@
       const assistantState = document.getElementById('assistantState')
       const assistantForm = document.getElementById('assistantForm')
       const assistantInput = document.getElementById('assistantInput')
+      const scoutActivityCount = document.getElementById('scoutActivityCount')
 
       let cards = []
       let memoryEntries = []
@@ -3820,6 +4892,8 @@
       let currentParticipantName = ''
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
+      let pinnedSpeakerName = ''
+      let stageMode = 'gallery'
       let pendingActiveSpeakerName = ''
       let pendingActiveSpeakerSince = 0
       let participantsInRoom = []
@@ -3842,6 +4916,7 @@
       const audioMonitors = new Map()
       const pendingRemoteAudioElements = new Set()
       const cardSnapshots = new Map()
+      let cardDateOverrides = loadCardDateOverrides()
       let audioContext
       let audioLevelFrame = 0
       let queuedRemoteCandidates = []
@@ -3878,12 +4953,40 @@
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
       expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
       collapseBoardButton.addEventListener('click', () => setBoardExpanded(false))
+      stageModeButtons.forEach(button => {
+        button.addEventListener('click', () => setStageMode(button.dataset.stageMode || 'gallery'))
+      })
+      pinActiveSpeakerButton.addEventListener('click', () => togglePinnedSpeaker(activeSpeakerDisplayName({ ignorePinned: true })))
+      boardDockMute.addEventListener('click', () => muteMicButton.disabled || muteMicButton.click())
+      boardDockCamera.addEventListener('click', () => toggleCameraButton.disabled || toggleCameraButton.click())
+      boardDockShare.addEventListener('click', () => screenShareButton.disabled || screenShareButton.click())
+      boardDockArchive.addEventListener('click', () => archiveMeetingButton.disabled || archiveMeetingButton.click())
+      boardDockMenuButton.addEventListener('click', event => {
+        event.stopPropagation()
+        toggleBoardDockMenu()
+      })
+      boardDockMenu.addEventListener('click', event => {
+        const action = event.target?.dataset?.boardMenuAction
+        if (!action) return
+        handleBoardMenuAction(action)
+      })
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
       assistantForm.addEventListener('submit', sendAssistantQuery)
+      document.querySelectorAll('[data-scout-query]').forEach(button => {
+        button.addEventListener('click', () => {
+          assistantInput.value = button.dataset.scoutQuery || ''
+          assistantInput.focus()
+        })
+      })
       window.addEventListener('beforeunload', leaveRoom)
       window.addEventListener('pointerdown', unlockRoomAudioPlayback, { passive: true })
       window.addEventListener('keydown', unlockRoomAudioPlayback)
+      window.addEventListener('click', event => {
+        if (!boardDockMenu.hidden && !boardDockMenu.contains(event.target) && event.target !== boardDockMenuButton) {
+          closeBoardDockMenu()
+        }
+      })
       navigator.mediaDevices?.addEventListener?.('devicechange', () => {
         refreshAudioInputDevices().catch(error => {
           console.warn('Could not refresh audio devices', error)
@@ -3929,6 +5032,7 @@
       updateCameraButton()
       updateRoomClock()
       renderBoardPreview()
+      setStageMode('gallery')
       updateHearthParticipants()
       loadParticipantPreview()
       window.setInterval(loadParticipantPreview, 15000)
@@ -4020,6 +5124,15 @@
         return participantMediaStates.get(participantName) || {}
       }
 
+      function isCurrentParticipantName(name) {
+        const participantName = String(name || '').trim()
+        return Boolean(
+          participantName &&
+          currentParticipantName &&
+          participantName.toLowerCase() === currentParticipantName.toLowerCase()
+        )
+      }
+
       function publishParticipantMediaState() {
         if (!currentParticipantName) {
           return
@@ -4082,6 +5195,72 @@
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
         renderBoardHuddle()
+        renderBoardDock()
+        closeBoardDockMenu()
+      }
+
+      function setStageMode(mode) {
+        stageMode = mode === 'speaker' ? 'speaker' : 'gallery'
+        hearthStage.dataset.stageMode = stageMode
+        updateStageControls()
+        updateHearthParticipants()
+      }
+
+      function togglePinnedSpeaker(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'the room') {
+          return
+        }
+        pinnedSpeakerName = pinnedSpeakerName === participantName ? '' : participantName
+        if (pinnedSpeakerName) {
+          stageMode = 'speaker'
+          hearthStage.dataset.stageMode = stageMode
+        }
+        updateStageControls()
+        updateHearthParticipants()
+      }
+
+      function updateStageControls() {
+        const effectiveMode = presentationTile.classList.contains('is-screen-sharing') ? 'screenshare' : stageMode
+        hearthStage.dataset.stageMode = stageMode
+        stageModeButtons.forEach(button => {
+          const pressed = button.dataset.stageMode === stageMode
+          button.setAttribute('aria-pressed', pressed ? 'true' : 'false')
+        })
+        const pinned = Boolean(pinnedSpeakerName)
+        const active = pinnedSpeakerName || activeSpeakerDisplayName({ ignorePinned: true })
+        pinActiveSpeakerButton.setAttribute('aria-pressed', pinned ? 'true' : 'false')
+        pinActiveSpeakerButton.textContent = pinned ? `unpin ${pinnedSpeakerName}` : `pin ${active === 'the room' ? 'speaker' : active}`
+        pinActiveSpeakerButton.disabled = effectiveMode === 'screenshare' || active === 'the room'
+        for (const button of videoStack.querySelectorAll('.pin-speaker')) {
+          const name = button.closest('.video-tile')?.dataset.participant || ''
+          button.setAttribute('aria-pressed', pinnedSpeakerName && name === pinnedSpeakerName ? 'true' : 'false')
+          button.title = pinnedSpeakerName && name === pinnedSpeakerName ? 'unpin speaker' : 'pin to stage'
+          button.setAttribute('aria-label', pinnedSpeakerName && name === pinnedSpeakerName ? `Unpin ${name}` : `Pin ${name || 'speaker'} to stage`)
+        }
+      }
+
+      function toggleBoardDockMenu(force) {
+        const open = typeof force === 'boolean' ? force : boardDockMenu.hidden
+        boardDockMenu.hidden = !open
+        boardDockMenuButton.setAttribute('aria-expanded', open ? 'true' : 'false')
+      }
+
+      function closeBoardDockMenu() {
+        toggleBoardDockMenu(false)
+      }
+
+      function handleBoardMenuAction(action) {
+        closeBoardDockMenu()
+        if (action === 'new-card') {
+          newCardButton.disabled || newCardButton.click()
+        } else if (action === 'undo-delete') {
+          undoDeleteButton.disabled || undoDeleteButton.click()
+        } else if (action === 'copy-link') {
+          copyRoomLinkButton.click()
+        } else if (action === 'back') {
+          setBoardExpanded(false)
+        }
       }
 
       async function joinRoom() {
@@ -4308,6 +5487,7 @@
           setLog(isMicMuted ? 'microphone muted' : 'microphone live')
         }
         publishParticipantMediaState()
+        updateBoardDockControls()
       }
 
       function updateMuteButton() {
@@ -4324,6 +5504,7 @@
         if (label) {
           label.textContent = muted ? 'Unmute' : 'Mute'
         }
+        updateBoardDockControls()
       }
 
       function startRoomClock() {
@@ -4346,9 +5527,6 @@
       }
 
       function updateRoomClock() {
-        if (!roomClock) {
-          return
-        }
         const elapsedSeconds = roomStartedAt ? Math.max(0, Math.floor((Date.now() - roomStartedAt) / 1000)) : 0
         const minutes = Math.floor(elapsedSeconds / 60)
         const seconds = elapsedSeconds % 60
@@ -4357,7 +5535,32 @@
         const media = localStream
           ? `${isMicMuted ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'}`
           : 'waiting room'
-        roomClock.textContent = `${elapsed} · ${seats} · ${media}`
+        if (roomClock) {
+          roomClock.textContent = `${elapsed} · ${seats} · ${media}`
+        }
+
+        // Sync topbar meta strip
+        const topbarElapsed = document.getElementById('topbarElapsed')
+        const topbarDate = document.getElementById('topbarDate')
+        const topbarRoomPill = document.getElementById('topbarRoomPill')
+        const topbarRoomState = document.getElementById('topbarRoomState')
+        if (topbarElapsed) {
+          topbarElapsed.textContent = roomStartedAt ? `${elapsed} elapsed` : 'not started'
+        }
+        if (topbarDate) {
+          const fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+          topbarDate.textContent = fmt.format(new Date()).toLowerCase()
+        }
+        if (topbarRoomPill && topbarRoomState) {
+          const inRoom = Boolean(localStream)
+          if (inRoom) {
+            topbarRoomPill.className = 'pill pill--room topbar__meta-pill'
+            topbarRoomState.textContent = 'in the room'
+          } else {
+            topbarRoomPill.className = 'pill pill--idle topbar__meta-pill'
+            topbarRoomState.textContent = 'waiting room'
+          }
+        }
       }
 
       function toggleLocalCamera() {
@@ -4378,6 +5581,7 @@
         if (options.announce) {
           setLog(isCameraOff ? 'camera off' : 'camera live')
         }
+        updateBoardDockControls()
       }
 
       function updateCameraButton() {
@@ -4394,6 +5598,7 @@
         if (label) {
           label.textContent = cameraOff ? 'Start video' : 'Camera'
         }
+        updateBoardDockControls()
       }
 
       async function refreshAudioInputDevices(selectedDeviceId = localAudioDeviceId()) {
@@ -4834,11 +6039,23 @@
         if (trackId) {
           remoteLabelsByTrack.set(trackId, name)
           renameAudioMonitor(trackId, name)
-          relabelRemoteTile(trackId, name)
         }
         if (streamId) {
           remoteLabelsByStream.set(streamId, name)
           renameAudioMonitor(streamId, name)
+        }
+        if (isCurrentParticipantName(name)) {
+          removeRemoteParticipantTrack(trackId, name)
+          if (streamId !== trackId) {
+            removeRemoteParticipantTrack(streamId, name)
+          }
+          removeRemoteSelfTracks()
+          return
+        }
+        if (trackId) {
+          relabelRemoteTile(trackId, name)
+        }
+        if (streamId) {
           relabelRemoteTile(streamId, name)
         }
         if (trackId || streamId) {
@@ -4848,6 +6065,10 @@
       }
 
       function relabelRemoteTile(key, name) {
+        if (isCurrentParticipantName(name)) {
+          removeRemoteParticipantTrack(key, name)
+          return
+        }
         const tile = remoteElements.get(key)
         if (!tile || !name) {
           return
@@ -4866,6 +6087,50 @@
           }
         }
         applyParticipantMediaStateToTile(tile, name)
+      }
+
+      function removeRemoteParticipantTrack(key, name) {
+        const tile = key ? remoteElements.get(key) : null
+        if (tile) {
+          tile.remove()
+          remoteElements.delete(key)
+        }
+        if (name) {
+          remoteStreamsByParticipant.delete(name)
+        }
+        if (key) {
+          detachAudioMonitor(key)
+        }
+        updateHearthParticipants()
+      }
+
+      function removeRemoteSelfTracks() {
+        const localName = currentParticipantName
+        if (!localName) {
+          return
+        }
+        let removed = false
+        for (const [key, tile] of Array.from(remoteElements.entries())) {
+          if (!isCurrentParticipantName(tile.dataset.participant)) {
+            continue
+          }
+          tile.remove()
+          remoteElements.delete(key)
+          detachAudioMonitor(key)
+          removed = true
+        }
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          if (isCurrentParticipantName(monitor.name)) {
+            detachAudioMonitor(key)
+            removed = true
+          }
+        }
+        if (remoteStreamsByParticipant.delete(localName)) {
+          removed = true
+        }
+        if (removed) {
+          updateHearthParticipants()
+        }
       }
 
       function handleAccessDenied(message) {
@@ -4954,6 +6219,13 @@
         }
         assistantInput.value = ''
 
+        if (/^private\s*:/i.test(query)) {
+          const privateText = query.replace(/^private\s*:\s*/i, '').trim() || 'private update'
+          addAssistantMessage({ kind: 'answer', text: `private Scout note saved locally: ${privateText}` })
+          setLog('private Scout note saved')
+          return
+        }
+
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           const message = 'join the room before asking the assistant.'
           addAssistantMessage({ kind: 'error', text: message })
@@ -5039,6 +6311,7 @@
           activeScreenShareParticipant = currentParticipantName
           screenShareButton.textContent = 'Stop sharing'
           renderScreenStage()
+          updateBoardDockControls()
           publishParticipantMediaState()
           ws.send(JSON.stringify({ event: 'screen_share_started', data: '{}' }))
           screenTrack.addEventListener('ended', () => {
@@ -5074,6 +6347,7 @@
         }
         screenShareButton.textContent = 'Share screen'
         renderScreenStage()
+        updateBoardDockControls()
         publishParticipantMediaState()
       }
 
@@ -5084,6 +6358,8 @@
           screenStageLabel.textContent = 'screen share'
           setVideoElementStream(screenSpeakerVideo, null)
           screenSpeakerLabel.textContent = 'speaker'
+          updateStageControls()
+          updateBoardDockControls()
           return
         }
 
@@ -5094,6 +6370,8 @@
         setVideoElementStream(screenStageVideo, stream)
         screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
         updateSpeakerPictureInPicture()
+        updateStageControls()
+        updateBoardDockControls()
       }
 
       function participantNamesForRoom() {
@@ -5129,8 +6407,11 @@
         updateHearthParticipants()
       }
 
-      function activeSpeakerDisplayName() {
+      function activeSpeakerDisplayName(options = {}) {
         const names = visibleParticipantNames()
+        if (!options.ignorePinned && pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
+          return pinnedSpeakerName
+        }
         if (activeSpeakerName && names.includes(activeSpeakerName)) {
           return activeSpeakerName
         }
@@ -5167,6 +6448,9 @@
       }
 
       function updateHearthParticipants() {
+        if (pinnedSpeakerName && !visibleParticipantNames().includes(pinnedSpeakerName)) {
+          pinnedSpeakerName = ''
+        }
         const speaker = activeSpeakerDisplayName()
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
@@ -5196,11 +6480,14 @@
         for (const tile of videoStack.querySelectorAll('.video-tile')) {
           const name = tile.dataset.participant || ''
           tile.classList.toggle('is-active-speaker', Boolean(name && name === speaker))
+          ensurePinButton(tile, name)
           applyParticipantMediaStateToTile(tile, name)
         }
 
         updateSpeakerPictureInPicture()
         renderBoardHuddle()
+        renderBoardDock()
+        updateStageControls()
       }
 
       function updateSpeakerPictureInPicture() {
@@ -5248,6 +6535,33 @@
           participantPlaceholders.set(name, tile)
           videoStack.appendChild(tile)
         }
+      }
+
+      function ensurePinButton(tile, name) {
+        if (!tile || !name || name === 'the room') {
+          return
+        }
+        let button = tile.querySelector('.pin-speaker')
+        if (!button) {
+          button = document.createElement('button')
+          button.className = 'pin-speaker'
+          button.type = 'button'
+          button.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v6"></path><path d="M5 8h14l-2 6H7L5 8Z"></path><path d="M12 14v8"></path></svg>'
+          button.addEventListener('click', event => {
+            event.stopPropagation()
+            togglePinnedSpeaker(tile.dataset.participant || name)
+          })
+          const label = tile.querySelector('.video-label')
+          if (label) {
+            tile.insertBefore(button, label)
+          } else {
+            tile.appendChild(button)
+          }
+        }
+        const isPinned = pinnedSpeakerName && name === pinnedSpeakerName
+        button.setAttribute('aria-pressed', isPinned ? 'true' : 'false')
+        button.setAttribute('aria-label', isPinned ? `Unpin ${name}` : `Pin ${name} to stage`)
+        button.title = isPinned ? 'unpin speaker' : 'pin to stage'
       }
 
       function applyParticipantMediaStateToTile(tile, name) {
@@ -5330,6 +6644,73 @@
         label.append(pulse, document.createTextNode(sharing ? `${sharing} sharing` : `${count || 0} in the room`))
 
         boardHuddle.replaceChildren(stack, label)
+      }
+
+      function renderBoardDock() {
+        if (!boardVideoStrip) {
+          return
+        }
+        const names = visibleParticipantNames().filter(name => name && name !== 'the room').slice(0, 6)
+        const speaker = activeSpeakerDisplayName()
+        const tiles = names.map(name => renderBoardVideoTile(name, name === speaker))
+        if (tiles.length === 0) {
+          const empty = document.createElement('span')
+          empty.className = 'board-dock-now'
+          empty.textContent = 'waiting for video'
+          boardVideoStrip.replaceChildren(empty)
+        } else {
+          boardVideoStrip.replaceChildren(...tiles)
+        }
+        if (boardDockNow) {
+          boardDockNow.textContent = speaker === 'the room'
+            ? 'room visible'
+            : `${speaker.toLowerCase()} ${pinnedSpeakerName === speaker ? 'pinned' : 'speaking'}`
+        }
+        updateBoardDockControls()
+      }
+
+      function renderBoardVideoTile(name, isSpeaker) {
+        const tile = document.createElement('button')
+        tile.type = 'button'
+        tile.className = `board-video-tile${isSpeaker ? ' is-speaker' : ''}`
+        tile.title = isSpeaker ? `${name} is on stage` : `pin ${name}`
+        tile.addEventListener('click', () => togglePinnedSpeaker(name))
+
+        const stream = participantStream(name)
+        const state = participantMediaState(name)
+        if (stream && !state.cameraOff) {
+          const video = document.createElement('video')
+          video.autoplay = true
+          video.muted = true
+          video.defaultMuted = true
+          video.playsInline = true
+          setVideoElementStream(video, stream, { local: name === currentParticipantName })
+          tile.appendChild(video)
+        } else {
+          tile.appendChild(renderOwnerAvatar({ owner: name }))
+        }
+
+        const label = document.createElement('span')
+        label.className = 'board-video-label'
+        label.textContent = name === currentParticipantName ? 'you' : name.toLowerCase()
+        tile.appendChild(label)
+        return tile
+      }
+
+      function updateBoardDockControls() {
+        if (!boardDockMute) {
+          return
+        }
+        boardDockMute.disabled = muteMicButton.disabled
+        boardDockMute.setAttribute('aria-pressed', isMicMuted ? 'true' : 'false')
+        boardDockMute.title = isMicMuted ? 'unmute microphone' : 'mute microphone'
+        boardDockCamera.disabled = toggleCameraButton.disabled
+        boardDockCamera.setAttribute('aria-pressed', isCameraOff ? 'true' : 'false')
+        boardDockCamera.title = isCameraOff ? 'start video' : 'turn camera off'
+        boardDockShare.disabled = screenShareButton.disabled
+        boardDockShare.setAttribute('aria-pressed', screenShareStream ? 'true' : 'false')
+        boardDockShare.title = screenShareStream ? 'stop sharing' : 'share screen'
+        boardDockArchive.disabled = archiveMeetingButton.disabled
       }
 
       function ensureAudioContext() {
@@ -5428,6 +6809,10 @@
         if (!monitor || !name) {
           return
         }
+        if (isCurrentParticipantName(name)) {
+          detachAudioMonitor(key)
+          return
+        }
         monitor.name = name
         if (monitor.audio) {
           monitor.audio.dataset.participant = name
@@ -5511,6 +6896,10 @@
       function addRemoteAudioTrack(event) {
         const key = remoteTrackKey(event)
         const name = participantNameForRemoteTrack(event)
+        if (isCurrentParticipantName(name)) {
+          detachAudioMonitor(key)
+          return
+        }
         attachAudioMonitor(key, name, event.track, { play: true })
       }
 
@@ -5522,6 +6911,11 @@
 
         const key = remoteTrackKey(event)
         const stream = event.streams[0] || new MediaStream([event.track])
+        const participantName = participantNameForRemoteTrack(event)
+        if (isCurrentParticipantName(participantName)) {
+          removeRemoteParticipantTrack(key, participantName)
+          return
+        }
         if (remoteElements.has(key)) {
           return
         }
@@ -5538,7 +6932,6 @@
 
         const label = document.createElement('span')
         label.className = 'video-label'
-        const participantName = participantNameForRemoteTrack(event)
         label.textContent = participantName
         tile.dataset.participant = participantName
         tile.dataset.remoteKey = key
@@ -5695,12 +7088,14 @@
           text.textContent = 'ask Scout anything.'
           empty.append(meta, text)
           assistantFeed.replaceChildren(empty)
-          assistantState.textContent = 'ready'
+          setAssistantStateText('ready')
+          scoutActivityCount.textContent = '0'
           return
         }
 
         const latest = assistantMessages[assistantMessages.length - 1]
-        assistantState.textContent = assistantMessageKind(latest.kind)
+        setAssistantStateText(assistantMessageKind(latest.kind))
+        scoutActivityCount.textContent = String(assistantMessages.length)
         assistantFeed.replaceChildren(...assistantMessages.map(entry => renderAssistantMessage(entry, entry.id === enteringId)))
         assistantFeed.scrollTop = assistantFeed.scrollHeight
       }
@@ -5741,6 +7136,101 @@
           ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
           : 'now'
         return `${kind} · ${time}`
+      }
+
+      function loadCardDateOverrides() {
+        try {
+          const raw = window.localStorage?.getItem('bonfire.cardDateOverrides')
+          return raw ? JSON.parse(raw) || {} : {}
+        } catch {
+          return {}
+        }
+      }
+
+      function saveCardDateOverride(card, dueDate) {
+        const key = cardDateKey(card)
+        if (!key) {
+          return
+        }
+        const value = String(dueDate || '').trim()
+        if (value) {
+          cardDateOverrides[key] = { dueDate: value }
+        } else {
+          delete cardDateOverrides[key]
+        }
+        try {
+          window.localStorage?.setItem('bonfire.cardDateOverrides', JSON.stringify(cardDateOverrides))
+        } catch {
+          // Local key dates are optional polish; the shared board remains usable.
+        }
+      }
+
+      function cardDateKey(card) {
+        return String(card?.id || card?.title || '').trim()
+      }
+
+      function cardDueDate(card) {
+        const override = cardDateOverrides[cardDateKey(card)]?.dueDate
+        return String(override || card?.dueDate || card?.due_date || '').trim()
+      }
+
+      function cardKeyDates(card) {
+        const explicitDates = Array.isArray(card?.keyDates)
+          ? card.keyDates
+          : Array.isArray(card?.key_dates) ? card.key_dates : []
+        const normalized = explicitDates
+          .map(item => ({
+            label: String(item?.label || item?.name || '').trim(),
+            date: String(item?.date || item?.value || '').trim()
+          }))
+          .filter(item => item.label && item.date)
+        if (normalized.length > 0) {
+          return normalized.slice(0, 4)
+        }
+
+        const dueDate = cardDueDate(card)
+        if (dueDate) {
+          return [{ label: 'due', date: dueDate }]
+        }
+
+        const seed = hashString(`${card?.id || card?.title || 'card'}:date`)
+        const offset = 2 + (seed % 18)
+        const base = new Date(2026, 4, 17 + offset)
+        const date = base.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        if (card?.status === 'Done') {
+          return [{ label: 'shipped', date }]
+        }
+        if (card?.status === 'Blocked') {
+          return [{ label: 'review', date }]
+        }
+        return [{ label: 'due', date }]
+      }
+
+      function cardDateState(card) {
+        if (card?.status === 'Done') {
+          return 'done'
+        }
+        const text = cardKeyDates(card)[0]?.date || ''
+        if (/overdue/i.test(text)) {
+          return 'overdue'
+        }
+        if (/today/i.test(text)) {
+          return 'today'
+        }
+        return 'soon'
+      }
+
+      function renderCardDate(card) {
+        const keyDate = cardKeyDates(card)[0]
+        const row = document.createElement('span')
+        row.className = 'card-date'
+        row.dataset.dateState = cardDateState(card)
+        const dot = document.createElement('span')
+        dot.className = 'card-date__dot'
+        const text = document.createElement('span')
+        text.textContent = keyDate ? `${keyDate.label} · ${keyDate.date}` : 'date not set'
+        row.append(dot, text)
+        return row
       }
 
       function renderBoard(changes = { moved: new Set(), completed: new Set(), toasts: [], commentPreviews: [] }) {
@@ -5784,7 +7274,13 @@
         if (!boardPreview) {
           return
         }
+        const railSummary = document.getElementById('boardRailSummary')
+        const railCount = document.getElementById('boardRailCount')
+        if (railCount) {
+          railCount.textContent = `${cards.length} card${cards.length === 1 ? '' : 's'}`
+        }
         if (!isBoardReady) {
+          if (railSummary) railSummary.hidden = true
           const empty = document.createElement('p')
           empty.className = 'board-preview__empty'
           empty.textContent = 'join the room to load the board.'
@@ -5792,6 +7288,7 @@
           return
         }
         if (cards.length === 0) {
+          if (railSummary) railSummary.hidden = true
           const empty = document.createElement('p')
           empty.className = 'board-preview__empty'
           empty.textContent = 'this room is empty. the fire is warm.'
@@ -5799,18 +7296,45 @@
           return
         }
 
-        const columns = statuses.map(status => {
+        // populate summary stats from card dates
+        if (railSummary) {
+          railSummary.hidden = false
+          let due = 0, overdue = 0, shipped = 0
+          for (const card of cards) {
+            const state = cardDateState(card)
+            if (state === 'overdue') overdue++
+            else if (state === 'today' || state === 'soon') due++
+            if (state === 'done') shipped++
+          }
+          const setStat = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = String(n) }
+          setStat('boardStatDue', due)
+          setStat('boardStatOverdue', overdue)
+          setStat('boardStatShipped', shipped)
+          const scoutFootDueText = document.getElementById('scoutFootDueText')
+          if (scoutFootDueText) {
+            scoutFootDueText.textContent = `${due} due this week`
+          }
+        }
+
+        // rail shows In Progress + Blocked columns (multi-card)
+        const railStatuses = ['In Progress', 'Blocked']
+        const columns = railStatuses.map(status => {
           const columnCards = cards.filter(card => card.status === status)
           const column = document.createElement('section')
           column.className = `board-preview__col ${statusClass(status)}`
 
           const header = document.createElement('header')
-          const title = document.createElement('h3')
-          title.textContent = status
+          header.className = 'board-rail__col-label'
+          const left = document.createElement('span')
+          left.className = 'l'
+          const dot = document.createElement('span')
+          dot.className = 'dot'
+          dot.style.background = status === 'In Progress' ? 'var(--ember-500)' : 'var(--warning)'
+          left.append(dot, document.createTextNode(' ' + status.toLowerCase()))
           const count = document.createElement('span')
-          count.className = 'board-preview__count'
+          count.className = 'n'
           count.textContent = String(columnCards.length)
-          header.append(title, count)
+          header.append(left, count)
           column.appendChild(header)
 
           if (columnCards.length === 0) {
@@ -5822,23 +7346,35 @@
             return column
           }
 
-          const first = columnCards[0]
-          const card = document.createElement('button')
-          card.className = `board-preview__card${changes.moved?.has(first.id) ? ' is-moved' : ''}`
-          card.type = 'button'
-          card.textContent = first.title || 'untitled card'
-          card.addEventListener('click', () => showCardDetail(first))
-          column.appendChild(card)
-
-          if (columnCards.length > 1) {
-            const more = document.createElement('div')
-            more.className = 'board-preview__more'
-            more.textContent = `+ ${columnCards.length - 1} more`
-            column.appendChild(more)
+          for (const c of columnCards) {
+            const card = document.createElement('button')
+            card.className = `board-preview__card${changes.moved?.has(c.id) ? ' is-moved' : ''}`
+            card.type = 'button'
+            const date = renderCardDate(c)
+            const dateState = date.dataset.dateState
+            if (dateState) card.dataset.dateState = dateState
+            const heading = document.createElement('div')
+            heading.className = 'board-preview__card-heading'
+            const cardTitle = document.createElement('span')
+            cardTitle.className = 'board-preview__card-title'
+            cardTitle.textContent = c.title || 'untitled card'
+            heading.append(cardTitle, renderOwnerAvatar(c))
+            card.append(heading, date)
+            card.addEventListener('click', () => showCardDetail(c))
+            column.appendChild(card)
           }
           return column
         })
         boardPreview.replaceChildren(...columns)
+      }
+
+      function setAssistantStateText(text) {
+        const node = document.getElementById('assistantStateText')
+        if (node) {
+          node.textContent = text
+        } else if (assistantState) {
+          assistantState.textContent = text
+        }
       }
 
       function renderCard(card, moved = false, completed = false) {
@@ -5872,26 +7408,7 @@
         heading.append(title, renderOwnerAvatar(card))
         article.appendChild(heading)
 
-        const meta = document.createElement('div')
-        meta.className = 'card-meta'
-        meta.textContent = `owner · ${cardOwner(card).name}`
-        article.appendChild(meta)
-
-        if (card.tags?.length > 0) {
-          const tags = document.createElement('ul')
-          tags.className = 'tags'
-          tags.setAttribute('aria-label', `${card.title} tags`)
-          tags.append(...card.tags.map(tag => {
-            const item = document.createElement('li')
-            item.dataset.tagKind = tagKind(tag)
-            const colors = tagColors(tag)
-            item.style.setProperty('--tag-bg', colors.background)
-            item.style.setProperty('--tag-color', colors.color)
-            item.textContent = tag
-            return item
-          }))
-          article.appendChild(tags)
-        }
+        article.appendChild(renderCardDate(card))
 
         return article
       }
@@ -6027,6 +7544,7 @@
         header.append(renderOwnerAvatar(draft, { large: true }), titleGroup, closeButton)
 
         const scoutSummary = renderCardScoutSummary(draft, isNew)
+        const keyDates = renderCardKeyDates(draft)
 
         const form = document.createElement('form')
         form.className = 'card-detail-form'
@@ -6043,13 +7561,13 @@
         titleField.input.required = true
         const statusField = renderSelectField('status', statuses, draft.status || 'Backlog')
         const ownerField = renderSelectField('owner', ['Unassigned', ...participantNames()], owner.name)
-        const tagsField = renderFormField('tags', 'input', (draft.tags || []).join(', '))
-        tagsField.input.placeholder = 'webrtc, risk, bandwidth'
+        const dueField = renderFormField('due date', 'input', cardDueDate(draft))
+        dueField.input.placeholder = 'May 22'
         const notesField = renderFormField('notes', 'textarea', draft.notes || '')
 
         const grid = document.createElement('div')
         grid.className = 'card-detail-grid'
-        grid.append(statusField.field, ownerField.field)
+        grid.append(statusField.field, ownerField.field, dueField.field)
 
         const actions = document.createElement('div')
         actions.className = 'card-detail-actions'
@@ -6074,8 +7592,8 @@
         rightActions.append(cancelButton, saveButton)
         actions.append(deleteButton, rightActions)
 
-        form.append(editLabel, titleField.field, grid, tagsField.field, notesField.field, actions)
-        panel.append(metaBar, header, scoutSummary, form)
+        form.append(editLabel, titleField.field, grid, notesField.field, actions)
+        panel.append(metaBar, header, scoutSummary, keyDates, form)
         if (!isNew) {
           panel.append(renderCardCommand(draft))
         }
@@ -6107,6 +7625,91 @@
         return section
       }
 
+      function makeIconSvg(paths, opts = {}) {
+        const size = String(opts.size || 13)
+        const svgNS = 'http://www.w3.org/2000/svg'
+        const svg = document.createElementNS(svgNS, 'svg')
+        svg.setAttribute('width', size)
+        svg.setAttribute('height', size)
+        svg.setAttribute('viewBox', '0 0 24 24')
+        svg.setAttribute('fill', 'none')
+        svg.setAttribute('stroke', 'currentColor')
+        svg.setAttribute('stroke-width', String(opts.strokeWidth || 1.75))
+        svg.setAttribute('stroke-linecap', 'round')
+        svg.setAttribute('stroke-linejoin', 'round')
+        for (const d of paths) {
+          if (d.tag === 'rect') {
+            const r = document.createElementNS(svgNS, 'rect')
+            for (const [k, v] of Object.entries(d.attrs || {})) r.setAttribute(k, v)
+            svg.appendChild(r)
+          } else if (d.tag === 'circle') {
+            const c = document.createElementNS(svgNS, 'circle')
+            for (const [k, v] of Object.entries(d.attrs || {})) c.setAttribute(k, v)
+            svg.appendChild(c)
+          } else {
+            const p = document.createElementNS(svgNS, 'path')
+            p.setAttribute('d', d)
+            svg.appendChild(p)
+          }
+        }
+        return svg
+      }
+
+      function renderCardKeyDates(card) {
+        const section = document.createElement('section')
+        section.className = 'card-detail-key-dates'
+
+        const header = document.createElement('header')
+        const titleWrap = document.createElement('div')
+        titleWrap.className = 'card-detail-key-dates__title'
+        const calIcon = document.createElement('span')
+        calIcon.className = 'card-detail-key-dates__icon'
+        calIcon.setAttribute('aria-hidden', 'true')
+        calIcon.appendChild(makeIconSvg([
+          { tag: 'rect', attrs: { x: '3', y: '5', width: '18', height: '16' } },
+          'M3 9h18', 'M8 3v4', 'M16 3v4'
+        ]))
+        const title = document.createElement('h3')
+        title.textContent = 'Key dates'
+        const sub = document.createElement('span')
+        sub.className = 'card-detail-key-dates__sub'
+        const items = cardKeyDates(card)
+        sub.textContent = `· ${items.length} milestone${items.length === 1 ? '' : 's'}`
+        titleWrap.append(calIcon, title, sub)
+        header.appendChild(titleWrap)
+
+        const today = new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }).toLowerCase()
+        const states = items.map((item, i) => {
+          const lower = (item.label + ' ' + item.date).toLowerCase()
+          if (/shipped|kickoff|locked|complete/.test(item.label.toLowerCase())) return 'done'
+          if (lower.includes(today) || /today/.test(item.date)) return 'today'
+          if (i === 0 && items.length > 1) return 'done'
+          return 'upcoming'
+        })
+
+        const timeline = document.createElement('div')
+        timeline.className = 'key-date-timeline'
+        timeline.style.setProperty('--key-date-count', String(items.length))
+
+        items.forEach((item, i) => {
+          const step = document.createElement('div')
+          step.className = `key-date-step is-${states[i]}`
+          const dot = document.createElement('span')
+          dot.className = 'key-date-step__dot'
+          const label = document.createElement('span')
+          label.className = 'key-date-step__label'
+          label.textContent = item.label
+          const date = document.createElement('span')
+          date.className = 'key-date-step__date'
+          date.textContent = item.date
+          step.append(dot, label, date)
+          timeline.appendChild(step)
+        })
+
+        section.append(header, timeline)
+        return section
+      }
+
       function renderCardCommand(card) {
         const section = document.createElement('section')
         section.className = 'card-detail-command'
@@ -6121,7 +7724,7 @@
           'mark blocked',
           'mark done',
           'assign to Jake',
-          'add tag bandwidth'
+          'set due May 22'
         ]
 
         const form = document.createElement('form')
@@ -6177,7 +7780,7 @@
 
         const statusMatch = command.match(/\b(?:mark|move|set)\s+(?:as\s+|to\s+)?(backlog|in progress|blocked|done)\b/i)
         const assignMatch = command.match(/\bassign(?:\s+to)?\s+([A-Za-z]+)\b/i)
-        const tagMatch = command.match(/\badd\s+tag\s+(.+)$/i)
+        const dueMatch = command.match(/\b(?:set\s+)?due\s+(.+)$/i)
         const noteMatch = command.match(/\b(?:add\s+)?note\s+(.+)$/i)
         const renameMatch = command.match(/\brename\s+(?:to\s+)?(.+)$/i)
 
@@ -6190,18 +7793,18 @@
             return
           }
           payload.owner = assignee
-        } else if (tagMatch) {
-          const tag = tagMatch[1].trim().replace(/^["']|["']$/g, '')
-          if (tag && !payload.tags.includes(tag)) {
-            payload.tags.push(tag)
-          }
+        } else if (dueMatch) {
+          const dueDate = dueMatch[1].trim().replace(/^["']|["']$/g, '')
+          saveCardDateOverride(card, dueDate)
+          payload.dueDate = dueDate
+          renderBoard()
         } else if (noteMatch) {
           const note = noteMatch[1].trim()
           payload.notes = [payload.notes, note].filter(Boolean).join('\n')
         } else if (renameMatch) {
           payload.title = renameMatch[1].trim()
         } else {
-          showToast({ text: 'try: mark blocked, assign to Jake, add tag bandwidth, note follow up', kind: 'note' })
+          showToast({ text: 'try: mark blocked, assign to Jake, set due May 22, note follow up', kind: 'note' })
           return
         }
 
@@ -6270,16 +7873,20 @@
         }
 
         const values = formValues(form)
+        saveCardDateOverride(draft, values['due date'])
         const payload = {
           title: values.title,
           status: values.status,
           owner: values.owner,
-          tags: tagsFromInput(values.tags),
-          notes: values.notes
+          tags: Array.isArray(draft.tags) ? [...draft.tags] : [],
+          notes: values.notes,
+          dueDate: values['due date'] || ''
         }
         if (!isNew) {
           payload.card_id = draft.id
         }
+        renderBoard()
+        renderBoardPreview()
         ws.send(JSON.stringify({
           event: isNew ? 'manual_create_ticket' : 'manual_update_ticket',
           data: JSON.stringify(payload)
@@ -6388,12 +7995,6 @@
             }
           }
 
-          if (!sameTags(previousCard.tags, card.tags || [])) {
-            if (shouldToast) {
-              toasts.push({ text: `tags updated on ${card.title}`, kind: 'move' })
-            }
-          }
-
           if (previousCard.notes !== (card.notes || '')) {
             if (shouldToast) {
               const comment = addedComment(previousCard.notes, card.notes || '')
@@ -6430,7 +8031,9 @@
           status: card.status || '',
           notes: card.notes || '',
           owner: card.owner || '',
-          tags: Array.isArray(card.tags) ? [...card.tags] : []
+          tags: Array.isArray(card.tags) ? [...card.tags] : [],
+          dueDate: cardDueDate(card),
+          keyDates: cardKeyDates(card)
         }
       }
 
@@ -6506,11 +8109,7 @@
         details.appendChild(renderPreviewDetail('status', preview.card.status || 'unassigned'))
         details.appendChild(renderPreviewDetail('card id', preview.card.id || 'no card id'))
         details.appendChild(renderPreviewDetail('owner', cardOwner(preview.card).name))
-        if (preview.card.tags?.length > 0) {
-          details.appendChild(renderPreviewDetail('tags', renderTagList(preview.card)))
-        } else {
-          details.appendChild(renderPreviewDetail('tags', 'no tags'))
-        }
+        details.appendChild(renderPreviewDetail('key date', renderCardDate(preview.card)))
         details.appendChild(renderPreviewDetail('notes', preview.card.notes || 'no notes yet.'))
 
         const latest = document.createElement('div')
@@ -6634,6 +8233,7 @@
         archiveMeetingButton.disabled = true
         screenShareButton.textContent = 'Share screen'
         archiveMeetingButton.textContent = 'Send notes'
+        updateBoardDockControls()
 
         if (ws && ws.readyState !== WebSocket.CLOSED) {
           ws.close()
@@ -6670,6 +8270,8 @@
         participantMediaStates.clear()
         activeScreenShareParticipant = ''
         activeSpeakerName = ''
+        pinnedSpeakerName = ''
+        stageMode = 'gallery'
         pendingActiveSpeakerName = ''
         pendingActiveSpeakerSince = 0
         participantsInRoom = []
@@ -6681,6 +8283,7 @@
         hasBoardSnapshot = false
         cardSnapshots.clear()
         renderScreenStage()
+        setStageMode('gallery')
         renderBoard()
         updateBoardControls()
         stopRoomClock()
@@ -6716,6 +8319,7 @@
           ? `${cards.length} project${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
         boardPreviewState.textContent = boardState.textContent
+        updateBoardDockControls()
       }
 
       // Hot-ember handshake: compresses the pulse cycle from 2400ms → 1800ms
