@@ -25,6 +25,13 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
+	output := audio["output"].(map[string]any)
+	if voice := output["voice"]; voice != defaultRealtimeVoice {
+		t.Fatalf("audio.output.voice=%v, want %s", voice, defaultRealtimeVoice)
+	}
+	if got, want := session["output_modalities"], []string{"audio"}; !sameStringSlice(got.([]string), want) {
+		t.Fatalf("output_modalities=%v, want %v", got, want)
+	}
 	transcription := input["transcription"].(map[string]any)
 	if model := transcription["model"]; model != defaultRealtimeTranscriptionModel {
 		t.Fatalf("transcription.model=%v, want %s", model, defaultRealtimeTranscriptionModel)
@@ -62,6 +69,38 @@ func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("server_vad interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestRealtimeVoiceEnvironmentOverride(t *testing.T) {
+	t.Setenv("OPENAI_REALTIME_VOICE", "cedar")
+
+	if voice := realtimeVoice(); voice != "cedar" {
+		t.Fatalf("realtimeVoice=%q, want cedar", voice)
+	}
+}
+
+func TestScoutWakePhraseRequiresLeadingHeyScout(t *testing.T) {
+	for _, transcript := range []string{
+		"Hey Scout, what is blocked?",
+		"hey scout what did Tim commit to last week",
+		"Hey, Scout: summarize this meeting.",
+	} {
+		if !transcriptStartsWithScoutWakePhrase(transcript) {
+			t.Fatalf("wake phrase was not detected in %q", transcript)
+		}
+	}
+
+	for _, transcript := range []string{
+		"Can you ask Scout what is blocked?",
+		"Scout, what is blocked?",
+		"They said hey Scout in the last meeting.",
+		"Hey team, Scout should ignore this.",
+		"",
+	} {
+		if transcriptStartsWithScoutWakePhrase(transcript) {
+			t.Fatalf("wake phrase should not be detected in %q", transcript)
+		}
 	}
 }
 

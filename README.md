@@ -68,7 +68,7 @@ When the server starts, it creates the OpenAI Realtime peer if `OPENAI_API_KEY` 
 1. Open [http://localhost:3000](http://localhost:3000).
 2. Click **Join room**.
 3. Allow camera and microphone access.
-4. Speak naturally about the work on the board. The mixed room audio is sent to the Realtime assistant, and board changes are broadcast to everyone in the room.
+4. Speak naturally about the work on the board. The mixed room audio is sent to the Realtime assistant, and board changes are broadcast to everyone in the room. Scout only speaks back when a turn starts with **"Hey Scout"**.
 5. Open the same URL in another browser tab or on another device to join as another participant.
 6. Click **Send notes** to archive the meeting, generate meeting notes, and email them to the participants when SMTP is configured.
 7. Click **Leave** to disconnect that browser from the room and stop its local media tracks.
@@ -94,6 +94,8 @@ The demo starts with a few WebRTC-related Kanban cards in the Backlog column. Tr
 
 The board should update in place. Card moves animate, completed work triggers confetti, and note updates can show a short comment preview.
 
+Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
+
 ### Configured interactions
 
 The assistant is configured as a voice-operated Kanban board operator. It can:
@@ -116,6 +118,7 @@ You can update:
 - The tools exposed to the model in `kanbanTools` in `kanban.go`.
 - The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
 - The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
+- The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
 - The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`low`, `medium`, or `high`); the default is `medium` for `gpt-realtime-2`.
 - The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `low` eagerness.
 - The browser UI in `index.html`.

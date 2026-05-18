@@ -23,11 +23,16 @@ const (
 	defaultReasoningEffort    = "medium"
 	defaultRealtimeVADType    = "semantic_vad"
 	defaultVADEagerness       = "low"
+	defaultRealtimeVoice      = "marin"
 	defaultKanbanBoardPath    = "data/kanban-board.json"
 	realtimeEventChannelLabel = "oai-events"
 	realtimeInputTrackID      = "kanban-realtime:mixed-audio"
 	realtimeInputStreamID     = "kanban-realtime-input"
 	realtimeMixedAudioSinkKey = "kanban-realtime"
+	scoutParticipantName      = "Scout"
+	scoutWakePhraseFirstWord  = "hey"
+	scoutWakePhraseSecondWord = "scout"
+	scoutVoiceArmDuration     = 12 * time.Second
 )
 
 type kanbanStatus string
@@ -137,6 +142,9 @@ type kanbanBoardApp struct {
 	inputEnc                 *opusEncoder
 	connected                bool
 	forwardedAudioNotice     bool
+	scoutVoiceArmedAt        time.Time
+	scoutVoiceArmedUntil     time.Time
+	scoutSpokenResponse      bool
 	proactiveReconnectCancel chan struct{}
 	closeOnce                sync.Once
 }
@@ -408,6 +416,9 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	app.inputTrack = inputTrack
 	app.inputEnc = inputEnc
 	app.forwardedAudioNotice = false
+	app.scoutVoiceArmedAt = time.Time{}
+	app.scoutVoiceArmedUntil = time.Time{}
+	app.scoutSpokenResponse = false
 	app.mu.Unlock()
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -424,6 +435,9 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	events.OnMessage(func(message webrtc.DataChannelMessage) {
 		app.handleRealtimeEvent(message.Data)
 	})
+	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		app.forwardRealtimeOutputTrack(t)
+	})
 
 	go func() {
 		if err := app.connectRealtimePeer(apiKey, model); err != nil {
@@ -438,6 +452,10 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 				app.inputTrack = nil
 				app.inputEnc = nil
 				app.connected = false
+				app.forwardedAudioNotice = false
+				app.scoutVoiceArmedAt = time.Time{}
+				app.scoutVoiceArmedUntil = time.Time{}
+				app.scoutSpokenResponse = false
 			}
 			app.mu.Unlock()
 			return
@@ -466,6 +484,9 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 	app.inputEnc = nil
 	app.connected = false
 	app.forwardedAudioNotice = false
+	app.scoutVoiceArmedAt = time.Time{}
+	app.scoutVoiceArmedUntil = time.Time{}
+	app.scoutSpokenResponse = false
 	cancelProactiveRestart := app.proactiveReconnectCancel
 	app.proactiveReconnectCancel = nil
 	app.mu.Unlock()
@@ -519,6 +540,9 @@ func (app *kanbanBoardApp) Close() error {
 		app.inputEnc = nil
 		app.connected = false
 		app.forwardedAudioNotice = false
+		app.scoutVoiceArmedAt = time.Time{}
+		app.scoutVoiceArmedUntil = time.Time{}
+		app.scoutSpokenResponse = false
 		cancelProactiveRestart := app.proactiveReconnectCancel
 		app.proactiveReconnectCancel = nil
 		app.mu.Unlock()
@@ -659,6 +683,53 @@ func (app *kanbanBoardApp) noteRealtimeAudioForwarded() {
 	broadcastAssistantEvent("audio", "mixed room audio is reaching the assistant", nil)
 }
 
+func (app *kanbanBoardApp) forwardRealtimeOutputTrack(t *webrtc.TrackRemote) {
+	if t == nil {
+		return
+	}
+
+	log.Infof("Got OpenAI Realtime output track: Kind=%s, ID=%s, PayloadType=%d", t.Kind(), t.ID(), t.PayloadType())
+	if t.Kind() != webrtc.RTPCodecTypeAudio {
+		return
+	}
+
+	forwardedTrackID := forwardedRemoteTrackID(t)
+	broadcastAssistantEvent("audio", "Scout voice connected", map[string]any{
+		"trackId":       forwardedTrackID,
+		"sourceTrackId": t.ID(),
+		"streamId":      t.StreamID(),
+		"payloadType":   t.PayloadType(),
+	})
+	broadcastKanbanEvent("participant_track", map[string]any{
+		"name":          scoutParticipantName,
+		"kind":          t.Kind().String(),
+		"trackId":       forwardedTrackID,
+		"sourceTrackId": t.ID(),
+		"streamId":      t.StreamID(),
+	})
+
+	trackLocal, err := addTrack(t, scoutParticipantName)
+	if err != nil {
+		log.Errorf("Failed to create local track for Scout voice=%s: %v", t.ID(), err)
+		return
+	}
+	defer removeTrack(trackLocal)
+
+	for {
+		packet, _, err := t.ReadRTP()
+		if err != nil {
+			return
+		}
+
+		packet.Extension = false
+		packet.Extensions = nil
+
+		if err := trackLocal.WriteRTP(packet); err != nil {
+			return
+		}
+	}
+}
+
 func drainRTCP(sender *webrtc.RTPSender) {
 	buffer := make([]byte, 1500)
 	for {
@@ -739,7 +810,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 	session := map[string]any{
 		"type":              "realtime",
 		"model":             model,
-		"output_modalities": []string{"text"},
+		"output_modalities": []string{"audio"},
 		"audio": map[string]any{
 			"input": map[string]any{
 				"noise_reduction": map[string]any{
@@ -751,6 +822,9 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 					"prompt":   realtimeTranscriptionPrompt(),
 				},
 				"turn_detection": realtimeTurnDetectionConfig(),
+			},
+			"output": map[string]any{
+				"voice": realtimeVoice(),
 			},
 		},
 		"instructions": app.sessionInstructions(),
@@ -790,6 +864,14 @@ func realtimeReasoningEffort() string {
 	default:
 		return defaultReasoningEffort
 	}
+}
+
+func realtimeVoice() string {
+	if voice := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_VOICE")); voice != "" {
+		return voice
+	}
+
+	return defaultRealtimeVoice
 }
 
 func realtimeTurnDetectionConfig() map[string]any {
@@ -848,6 +930,105 @@ func usesAdvancedCommandProfile(model string) bool {
 	return normalizedModel == "gpt-realtime-2"
 }
 
+func transcriptStartsWithScoutWakePhrase(text string) bool {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+
+	return len(words) >= 2 &&
+		words[0] == scoutWakePhraseFirstWord &&
+		words[1] == scoutWakePhraseSecondWord
+}
+
+func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
+	if !transcriptStartsWithScoutWakePhrase(transcript) {
+		return
+	}
+
+	now := time.Now()
+	app.mu.Lock()
+	app.scoutVoiceArmedAt = now
+	app.scoutVoiceArmedUntil = now.Add(scoutVoiceArmDuration)
+	app.mu.Unlock()
+
+	broadcastAssistantEvent("status", "Scout heard the wake phrase.", map[string]any{"wakePhrase": "Hey Scout"})
+}
+
+func (app *kanbanBoardApp) clearScoutVoiceArmForNewSpeech() {
+	now := time.Now()
+
+	app.mu.Lock()
+	if !app.scoutVoiceArmedAt.IsZero() && now.After(app.scoutVoiceArmedAt) {
+		app.scoutVoiceArmedAt = time.Time{}
+		app.scoutVoiceArmedUntil = time.Time{}
+	}
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) markScoutSpokenResponsePending(toolName string, result map[string]any, changed bool) {
+	if !scoutToolShouldSpeak(toolName, result, changed) {
+		return
+	}
+
+	now := time.Now()
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.scoutVoiceArmedUntil.IsZero() || now.After(app.scoutVoiceArmedUntil) {
+		return
+	}
+
+	app.scoutVoiceArmedAt = time.Time{}
+	app.scoutVoiceArmedUntil = time.Time{}
+	app.scoutSpokenResponse = true
+}
+
+func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool) bool {
+	if ok, exists := result["ok"].(bool); exists && !ok {
+		return true
+	}
+
+	switch toolName {
+	case "answer_memory_question", "do_nothing":
+		return true
+	default:
+		return changed
+	}
+}
+
+func (app *kanbanBoardApp) flushScoutSpokenResponseIfPending() {
+	app.mu.Lock()
+	if !app.scoutSpokenResponse {
+		app.mu.Unlock()
+		return
+	}
+	app.scoutSpokenResponse = false
+	app.mu.Unlock()
+
+	if err := app.SendEvent(map[string]any{
+		"type": "response.create",
+		"response": map[string]any{
+			"output_modalities": []string{"audio"},
+			"tool_choice":       "none",
+			"instructions":      scoutSpokenResponseInstructions(),
+		},
+	}); err != nil {
+		log.Errorf("Failed to request Scout spoken response: %v", err)
+		broadcastAssistantEvent("error", "could not ask Scout to speak", nil)
+	}
+}
+
+func scoutSpokenResponseInstructions() string {
+	return strings.Join([]string{
+		"Speak to the room as Scout.",
+		"The user already started this turn with Hey Scout, so answer aloud now.",
+		"Do not call tools.",
+		"Do not repeat or mention the wake phrase.",
+		"If the tool result contains an answer or reason, say it plainly.",
+		"If the tool result completed a board update, acknowledge it in one short sentence.",
+	}, " ")
+}
+
 func (app *kanbanBoardApp) sessionInstructions() string {
 	return strings.Join([]string{
 		"# Role\nYou are a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
@@ -862,7 +1043,8 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Tool policy\nIf one utterance changes status, notes, owner, and tags for the same existing card, prefer one update_ticket call with all changed fields. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation.",
 		"# Memory policy\nMeeting transcripts are saved as durable memory. If the user asks what was said, decided, discussed, remembered, mentioned earlier, or asks any recall question, call answer_memory_question with the user's full question as the query.",
 		"# No-op policy\nIf the user is wrapping up, handing off, giving filler, or not giving a concrete board operation or recall request, call do_nothing with a short user-visible reason.",
-		"# Response policy\nPrefer tools over text replies. Do not narrate board operations aloud.",
+		"# Wake phrase\nOnly speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
+		"# Response policy\nPrefer tools over text replies. Do not narrate board operations aloud unless the utterance started with Hey Scout; then keep any spoken response to one short sentence.",
 	}, "\n\n")
 }
 
@@ -1029,17 +1211,27 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			broadcastAssistantEvent("error", event.Error.Message, map[string]any{"code": event.Error.Code})
 		}
 	case "conversation.item.input_audio_transcription.completed":
+		app.armScoutVoiceResponse(event.Transcript)
 		app.rememberTranscript(event)
 	case "conversation.item.input_audio_transcription.delta":
 		if text := canonicalizeBoardText(event.Delta); text != "" {
 			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
 		}
 	case "input_audio_buffer.speech_started":
+		app.clearScoutVoiceArmForNewSpeech()
 		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
 		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.committed":
 		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type})
+	case "response.output_audio_transcript.done":
+		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
+			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
+		}
+	case "response.output_text.done":
+		if text := canonicalizeBoardText(firstNonEmptyString(event.Text, event.Transcript)); text != "" {
+			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
+		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
 			app.handleToolCall(*event.Item)
@@ -1052,14 +1244,14 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			CallID:    event.CallID,
 		})
 	case "response.done":
-		if event.Response == nil {
-			return
-		}
-		for _, outputItem := range event.Response.Output {
-			if outputItem.Type == "function_call" {
-				app.handleToolCall(outputItem)
+		if event.Response != nil {
+			for _, outputItem := range event.Response.Output {
+				if outputItem.Type == "function_call" {
+					app.handleToolCall(outputItem)
+				}
 			}
 		}
+		app.flushScoutSpokenResponseIfPending()
 	default:
 		if text := strings.TrimSpace(event.Text); text != "" && strings.Contains(event.Type, "text") {
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
@@ -1091,6 +1283,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 		}
 		broadcastAssistantEvent("error", err.Error(), map[string]any{"tool": outputItem.Name})
 	}
+	app.markScoutSpokenResponsePending(outputItem.Name, result, changed)
 
 	if err := app.SendEvent(map[string]any{
 		"type": "conversation.item.create",
@@ -1852,6 +2045,16 @@ func asString(value any) string {
 	}
 
 	return strings.TrimSpace(candidate)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+
+	return ""
 }
 
 func asStringSlice(value any) []string {
