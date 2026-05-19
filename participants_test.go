@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pion/webrtc/v4"
 )
 
 func TestMeetingRoomDefaultSupportsTenParticipants(t *testing.T) {
@@ -52,6 +54,130 @@ func TestAdmitParticipantEnforcesCapacity(t *testing.T) {
 	}
 }
 
+func TestAdmitParticipantAllowsSameNameReconnectWhenRoomFull(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_ROOM_MAX_PARTICIPANTS", "2")
+
+	app := newKanbanBoardApp()
+	if _, err := app.admitParticipantSession("AJ", "aj-old"); err != nil {
+		t.Fatalf("admit AJ: %v", err)
+	}
+	if _, err := app.admitParticipantSession("Tim", "tim"); err != nil {
+		t.Fatalf("admit Tim: %v", err)
+	}
+	if _, err := app.admitParticipantSession("AJ", "aj-new"); err != nil {
+		t.Fatalf("re-admit AJ in full room: %v", err)
+	}
+
+	if count := app.activeParticipantCount(); count != 2 {
+		t.Fatalf("active participants=%d, want unique count 2", count)
+	}
+
+	if app.forgetParticipantSession("AJ", "aj-old") {
+		t.Fatal("stale AJ session removed the fresh reconnect")
+	}
+	if snapshot := app.participantSnapshot(); !containsParticipant(snapshot, "AJ") {
+		t.Fatalf("AJ was removed by stale session cleanup: %v", snapshot)
+	}
+	if !app.forgetParticipantSession("AJ", "aj-new") {
+		t.Fatal("fresh AJ session was not removed")
+	}
+	if snapshot := app.participantSnapshot(); containsParticipant(snapshot, "AJ") {
+		t.Fatalf("AJ remained after fresh session left: %v", snapshot)
+	}
+}
+
+func TestParticipantReconnectResetsMediaState(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+
+	app := newKanbanBoardApp()
+	if _, err := app.admitParticipantSession("Joel", "joel-old"); err != nil {
+		t.Fatalf("admit Joel: %v", err)
+	}
+	if _, err := app.setParticipantMediaState("Joel", participantMediaState{
+		MicMuted:      true,
+		CameraOff:     true,
+		ScreenSharing: true,
+	}); err != nil {
+		t.Fatalf("set media state: %v", err)
+	}
+	if _, err := app.admitParticipantSession("Joel", "joel-new"); err != nil {
+		t.Fatalf("re-admit Joel: %v", err)
+	}
+
+	snapshot := app.roomSnapshot()
+	rawMediaStates, ok := snapshot["mediaStates"].(map[string]participantMediaState)
+	if !ok {
+		t.Fatalf("mediaStates=%T, want map[string]participantMediaState", snapshot["mediaStates"])
+	}
+	joelState := rawMediaStates["Joel"]
+	if joelState.MicMuted || joelState.CameraOff || joelState.ScreenSharing {
+		t.Fatalf("Joel media state=%+v, want reset after reconnect", joelState)
+	}
+}
+
+func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testing.T) {
+	codec := webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}
+	ajTrack, err := webrtc.NewTrackLocalStaticRTP(codec, "aj-video", "aj-stream")
+	if err != nil {
+		t.Fatalf("create AJ track: %v", err)
+	}
+	timTrack, err := webrtc.NewTrackLocalStaticRTP(codec, "tim-video", "tim-stream")
+	if err != nil {
+		t.Fatalf("create Tim track: %v", err)
+	}
+
+	listLock.Lock()
+	previousPeerConnections := peerConnections
+	previousTrackLocals := trackLocals
+	previousActiveParticipantConnections := activeParticipantConnections
+	previousTrackParticipants := trackParticipants
+	previousTrackParticipantSessions := trackParticipantSessions
+	activeParticipantConnections = map[string]peerConnectionState{
+		"AJ": {participantName: "AJ", sessionID: "old"},
+	}
+	peerConnections = []peerConnectionState{{participantName: "AJ", sessionID: "old"}}
+	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{
+		ajTrack.ID():  ajTrack,
+		timTrack.ID(): timTrack,
+	}
+	trackParticipants = map[string]string{
+		ajTrack.ID():  "AJ",
+		timTrack.ID(): "Tim",
+	}
+	trackParticipantSessions = map[string]string{
+		ajTrack.ID():  "old",
+		timTrack.ID(): "tim",
+	}
+	listLock.Unlock()
+	defer func() {
+		listLock.Lock()
+		peerConnections = previousPeerConnections
+		activeParticipantConnections = previousActiveParticipantConnections
+		trackLocals = previousTrackLocals
+		trackParticipants = previousTrackParticipants
+		trackParticipantSessions = previousTrackParticipantSessions
+		listLock.Unlock()
+	}()
+
+	replaceExistingParticipantSession("AJ", "new", nil, nil)
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	if len(peerConnections) != 0 {
+		t.Fatalf("peerConnections=%d, want stale AJ connection removed", len(peerConnections))
+	}
+	if state := activeParticipantConnections["AJ"]; state.sessionID != "new" {
+		t.Fatalf("active AJ session=%q, want replacement session", state.sessionID)
+	}
+	if _, ok := trackLocals[ajTrack.ID()]; ok {
+		t.Fatal("AJ track remained after replacement")
+	}
+	if _, ok := trackLocals[timTrack.ID()]; !ok {
+		t.Fatal("Tim track was removed during AJ replacement")
+	}
+}
+
 func TestRoomSnapshotIncludesParticipantMediaState(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 
@@ -94,4 +220,13 @@ func TestGuestSeatsDoNotCreateEmailRecipients(t *testing.T) {
 	if email := participantEmail("Guest 1"); email != "" {
 		t.Fatalf("guest email=%q, want empty", email)
 	}
+}
+
+func containsParticipant(participants []string, name string) bool {
+	for _, participant := range participants {
+		if participant == name {
+			return true
+		}
+	}
+	return false
 }

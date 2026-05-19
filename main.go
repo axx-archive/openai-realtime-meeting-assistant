@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -28,9 +29,13 @@ var (
 	indexHTML []byte
 
 	// lock for peerConnections and trackLocals
-	listLock        sync.RWMutex
-	peerConnections []peerConnectionState
-	trackLocals     map[string]*webrtc.TrackLocalStaticRTP
+	listLock                     sync.RWMutex
+	peerConnections              []peerConnectionState
+	activeParticipantConnections map[string]peerConnectionState
+	trackLocals                  map[string]*webrtc.TrackLocalStaticRTP
+	trackParticipants            map[string]string
+	trackParticipantSessions     map[string]string
+	participantSessionSeq        atomic.Uint64
 
 	log = logging.NewDefaultLoggerFactory().NewLogger("openai-realtime-meeting-assistant")
 
@@ -44,14 +49,19 @@ type websocketMessage struct {
 }
 
 type peerConnectionState struct {
-	peerConnection *webrtc.PeerConnection
-	websocket      *threadSafeWriter
-	acceptTrack    func(*webrtc.TrackLocalStaticRTP) bool
-	shouldSignal   func(desiredTrackCount int) bool
-	signal         func(gatherComplete <-chan struct{}) error
+	peerConnection  *webrtc.PeerConnection
+	websocket       *threadSafeWriter
+	participantName string
+	sessionID       string
+	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
+	shouldSignal    func(desiredTrackCount int) bool
+	signal          func(gatherComplete <-chan struct{}) error
 }
 
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
+	if track != nil && sameParticipantName(trackParticipants[track.ID()], p.participantName) {
+		return false
+	}
 	if p.acceptTrack == nil {
 		return true
 	}
@@ -73,6 +83,9 @@ func main() {
 
 	// Init other state
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
+	trackParticipants = map[string]string{}
+	trackParticipantSessions = map[string]string{}
+	activeParticipantConnections = map[string]peerConnectionState{}
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
@@ -213,7 +226,7 @@ func websocketOriginAllowed(r *http.Request) bool {
 }
 
 // Add to list of tracks and fire renegotation for all PeerConnections.
-func addTrack(t *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, error) { // nolint
+func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
@@ -221,7 +234,18 @@ func addTrack(t *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, error) { // n
 	}
 
 	listLock.Lock()
+	if trackLocals == nil {
+		trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
+	}
+	if trackParticipants == nil {
+		trackParticipants = map[string]string{}
+	}
+	if trackParticipantSessions == nil {
+		trackParticipantSessions = map[string]string{}
+	}
 	trackLocals[trackLocal.ID()] = trackLocal
+	trackParticipants[trackLocal.ID()] = canonicalParticipantName(participantName)
+	trackParticipantSessions[trackLocal.ID()] = sessionID
 	listLock.Unlock()
 	signalPeerConnections()
 
@@ -245,6 +269,12 @@ func mediaIDPart(value string, fallback string) string {
 	return strings.Join(strings.Fields(value), "_")
 }
 
+func sameParticipantName(a string, b string) bool {
+	a = canonicalParticipantName(a)
+	b = canonicalParticipantName(b)
+	return a != "" && b != "" && strings.EqualFold(a, b)
+}
+
 // Remove from list of tracks and fire renegotation for all PeerConnections.
 func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	if t == nil {
@@ -258,6 +288,126 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	}()
 
 	delete(trackLocals, t.ID())
+	delete(trackParticipants, t.ID())
+	delete(trackParticipantSessions, t.ID())
+}
+
+func removeParticipantTracksLocked(name string, sessionID string) bool {
+	removedTracks := false
+	for trackID, participantName := range trackParticipants {
+		if !sameParticipantName(participantName, name) {
+			continue
+		}
+		if sessionID != "" && trackParticipantSessions[trackID] != sessionID {
+			continue
+		}
+		delete(trackLocals, trackID)
+		delete(trackParticipants, trackID)
+		delete(trackParticipantSessions, trackID)
+		removedTracks = true
+	}
+
+	return removedTracks
+}
+
+func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return
+	}
+
+	var staleConnections []peerConnectionState
+	removedTracks := false
+
+	listLock.Lock()
+	if activeParticipantConnections == nil {
+		activeParticipantConnections = map[string]peerConnectionState{}
+	}
+	if existing, ok := activeParticipantConnections[name]; ok && existing.sessionID != sessionID {
+		staleConnections = append(staleConnections, existing)
+	}
+	activeParticipantConnections[name] = peerConnectionState{
+		peerConnection:  currentPeerConnection,
+		websocket:       currentWebsocket,
+		participantName: name,
+		sessionID:       sessionID,
+	}
+
+	retainedConnections := peerConnections[:0]
+	for _, state := range peerConnections {
+		isCurrentConnection := currentPeerConnection != nil && state.peerConnection == currentPeerConnection
+		if isCurrentConnection || !sameParticipantName(state.participantName, name) || state.sessionID == sessionID {
+			retainedConnections = append(retainedConnections, state)
+			continue
+		}
+		staleConnections = append(staleConnections, state)
+	}
+	peerConnections = retainedConnections
+
+	removedTracks = removeParticipantTracksLocked(name, "")
+	listLock.Unlock()
+
+	closeParticipantConnections(staleConnections)
+
+	if len(staleConnections) > 0 || removedTracks {
+		signalPeerConnections()
+	}
+}
+
+func unregisterParticipantSession(name string, sessionID string) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return
+	}
+
+	removedConnection := false
+	removedTracks := false
+
+	listLock.Lock()
+	if activeParticipantConnections != nil {
+		if current, ok := activeParticipantConnections[name]; ok && current.sessionID == sessionID {
+			delete(activeParticipantConnections, name)
+			removedConnection = true
+		}
+	}
+	retainedConnections := peerConnections[:0]
+	for _, state := range peerConnections {
+		if sameParticipantName(state.participantName, name) && state.sessionID == sessionID {
+			removedConnection = true
+			continue
+		}
+		retainedConnections = append(retainedConnections, state)
+	}
+	peerConnections = retainedConnections
+	removedTracks = removeParticipantTracksLocked(name, sessionID)
+	listLock.Unlock()
+
+	if removedConnection || removedTracks {
+		signalPeerConnections()
+	}
+}
+
+func closeParticipantConnections(states []peerConnectionState) {
+	closedPeerConnections := map[*webrtc.PeerConnection]struct{}{}
+	closedWebsockets := map[*threadSafeWriter]struct{}{}
+	for _, state := range states {
+		if state.peerConnection != nil {
+			if _, ok := closedPeerConnections[state.peerConnection]; !ok {
+				closedPeerConnections[state.peerConnection] = struct{}{}
+				_ = state.peerConnection.Close()
+			}
+		}
+		if state.websocket != nil {
+			if _, ok := closedWebsockets[state.websocket]; !ok {
+				closedWebsockets[state.websocket] = struct{}{}
+				_ = state.websocket.Close()
+			}
+		}
+	}
+}
+
+func nextParticipantSessionID() string {
+	return fmt.Sprintf("participant-%d-%d", time.Now().UnixNano(), participantSessionSeq.Add(1))
 }
 
 // signalPeerConnections updates each PeerConnection so that it is getting all the expected media tracks.
@@ -424,6 +574,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
 	participantName := "participant"
+	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
 	mediaJoined := false
 	pendingRemoteCandidates := make([]webrtc.ICECandidateInit, 0)
@@ -443,8 +594,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	defer c.Close() //nolint
 	defer func() {
 		if participantAccepted {
-			kanbanApp.forgetParticipant(currentParticipantName())
-			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+			name := currentParticipantName()
+			unregisterParticipantSession(name, participantSessionID)
+			if kanbanApp.forgetParticipantSession(name, participantSessionID) {
+				broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+			}
 		}
 	}()
 
@@ -512,6 +666,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		log.Infof("Got remote track: Kind=%s, ID=%s, PayloadType=%d", t.Kind(), t.ID(), t.PayloadType())
 		trackParticipantName := currentParticipantName()
+		trackParticipantSessionID := participantSessionID
 		forwardedTrackID := forwardedRemoteTrackID(t)
 		broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
 			"participant":   trackParticipantName,
@@ -529,7 +684,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		})
 
 		// Create a track to fan out our incoming media to all browser peers.
-		trackLocal, err := addTrack(t)
+		trackLocal, err := addTrack(t, trackParticipantName, trackParticipantSessionID)
 		if err != nil {
 			log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
 			return
@@ -605,6 +760,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			return
 		}
 
+		if participantAccepted && message.Event != "participant" && !kanbanApp.participantSessionCurrent(currentParticipantName(), participantSessionID) {
+			_ = sendKanbanEvent(c, "session_replaced", "This browser session was replaced by a newer room join.")
+			return
+		}
+
 		switch message.Event {
 		case "participant":
 			payload := struct {
@@ -624,17 +784,21 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if participantAccepted {
 				continue
 			}
-			admittedName, err := kanbanApp.admitParticipant(name)
+			admittedName, err := kanbanApp.admitParticipantSession(name, participantSessionID)
 			if err != nil {
 				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 				continue
 			}
 			setParticipantName(admittedName)
 			participantAccepted = true
+			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name": admittedName,
 			}); err != nil {
 				log.Errorf("Failed to send access grant: %v", err)
+			}
+			if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshot()); err != nil {
+				log.Errorf("Failed to send participant state: %v", err)
 			}
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
 				log.Errorf("Failed to send Kanban board state: %v", err)
@@ -668,8 +832,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			mediaJoined = true
 			listLock.Lock()
 			peerConnections = append(peerConnections, peerConnectionState{
-				peerConnection: peerConnection,
-				websocket:      c,
+				peerConnection:  peerConnection,
+				websocket:       c,
+				participantName: currentParticipantName(),
+				sessionID:       participantSessionID,
 			})
 			listLock.Unlock()
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
@@ -678,6 +844,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 				log.Errorf("Failed to send undo state after media join: %v", err)
 			}
+			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 			signalPeerConnections()
 		case "candidate":
 			candidate := webrtc.ICECandidateInit{}
@@ -905,7 +1072,22 @@ type threadSafeWriter struct {
 	sync.Mutex
 }
 
+func (t *threadSafeWriter) Close() error {
+	if t == nil || t.Conn == nil {
+		return nil
+	}
+
+	t.Lock()
+	defer t.Unlock()
+
+	return t.Conn.Close()
+}
+
 func (t *threadSafeWriter) WriteJSON(v any) error {
+	if t == nil || t.Conn == nil {
+		return fmt.Errorf("websocket is closed")
+	}
+
 	t.Lock()
 	defer t.Unlock()
 

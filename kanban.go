@@ -121,19 +121,20 @@ type kanbanRealtimeOutputItem struct {
 }
 
 type kanbanBoardApp struct {
-	mu                sync.Mutex
-	cards             []kanbanCard
-	nextCreatedIndex  int
-	updatedAt         time.Time
-	handledCalls      map[string]struct{}
-	memory            *meetingMemoryStore
-	participants      map[string]time.Time
-	participantCounts map[string]int
-	participantMedia  map[string]participantMediaState
-	lastDeletedCard   *kanbanCard
-	apiKey            string
-	restarting        bool
-	assistantStatus   string
+	mu                  sync.Mutex
+	cards               []kanbanCard
+	nextCreatedIndex    int
+	updatedAt           time.Time
+	handledCalls        map[string]struct{}
+	memory              *meetingMemoryStore
+	participants        map[string]time.Time
+	participantCounts   map[string]int
+	participantSessions map[string]string
+	participantMedia    map[string]participantMediaState
+	lastDeletedCard     *kanbanCard
+	apiKey              string
+	restarting          bool
+	assistantStatus     string
 
 	model                    string
 	pc                       *webrtc.PeerConnection
@@ -214,14 +215,15 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:             cards,
-		nextCreatedIndex:  nextKanbanCardIndex(cards),
-		updatedAt:         updatedAt,
-		handledCalls:      map[string]struct{}{},
-		memory:            memory,
-		participants:      map[string]time.Time{},
-		participantCounts: map[string]int{},
-		participantMedia:  map[string]participantMediaState{},
+		cards:               cards,
+		nextCreatedIndex:    nextKanbanCardIndex(cards),
+		updatedAt:           updatedAt,
+		handledCalls:        map[string]struct{}{},
+		memory:              memory,
+		participants:        map[string]time.Time{},
+		participantCounts:   map[string]int{},
+		participantSessions: map[string]string{},
+		participantMedia:    map[string]participantMediaState{},
 	}
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
@@ -708,7 +710,7 @@ func (app *kanbanBoardApp) forwardRealtimeOutputTrack(t *webrtc.TrackRemote) {
 		"streamId":      t.StreamID(),
 	})
 
-	trackLocal, err := addTrack(t, scoutParticipantName)
+	trackLocal, err := addTrack(t, scoutParticipantName, "scout")
 	if err != nil {
 		log.Errorf("Failed to create local track for Scout voice=%s: %v", t.ID(), err)
 		return
@@ -1720,6 +1722,10 @@ func (app *kanbanBoardApp) snapshotState() kanbanBoardState {
 }
 
 func (app *kanbanBoardApp) admitParticipant(name string) (string, error) {
+	return app.admitParticipantSession(name, "")
+}
+
+func (app *kanbanBoardApp) admitParticipantSession(name string, sessionID string) (string, error) {
 	name = canonicalParticipantName(name)
 	if name == "" {
 		return "", fmt.Errorf("choose a listed participant and enter the room password")
@@ -1729,38 +1735,66 @@ func (app *kanbanBoardApp) admitParticipant(name string) (string, error) {
 	defer app.mu.Unlock()
 
 	capacity := configuredMeetingRoomCapacity()
-	if active := app.activeParticipantCountLocked(); active >= capacity {
+	if active := app.activeParticipantCountLocked(); app.participantCounts[name] <= 0 && active >= capacity {
 		return "", fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
 	}
 
-	app.participants[name] = time.Now().UTC()
-	app.participantCounts[name]++
-	if _, ok := app.participantMedia[name]; !ok {
-		app.participantMedia[name] = participantMediaState{
-			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		}
+	now := time.Now().UTC()
+	app.participants[name] = now
+	app.participantCounts[name] = 1
+	app.participantSessions[name] = sessionID
+	app.participantMedia[name] = participantMediaState{
+		UpdatedAt: now.Format(time.RFC3339Nano),
 	}
 
 	return name, nil
 }
 
 func (app *kanbanBoardApp) forgetParticipant(name string) {
+	app.forgetParticipantSession(name, "")
+}
+
+func (app *kanbanBoardApp) forgetParticipantSession(name string, sessionID string) bool {
 	name = canonicalParticipantName(name)
 	if name == "" {
-		return
+		return false
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	if app.participantCounts[name] <= 1 {
-		delete(app.participantCounts, name)
-		delete(app.participants, name)
-		delete(app.participantMedia, name)
-		return
+	if sessionID != "" {
+		currentSessionID, ok := app.participantSessions[name]
+		if !ok || currentSessionID != sessionID {
+			return false
+		}
 	}
-	app.participantCounts[name]--
-	app.participants[name] = time.Now().UTC()
+
+	delete(app.participantCounts, name)
+	delete(app.participants, name)
+	delete(app.participantSessions, name)
+	delete(app.participantMedia, name)
+
+	return true
+}
+
+func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID string) bool {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return false
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.participantCounts[name] <= 0 {
+		return false
+	}
+	if sessionID == "" {
+		return true
+	}
+
+	return app.participantSessions[name] == sessionID
 }
 
 func (app *kanbanBoardApp) activeParticipantCount() int {
@@ -1774,7 +1808,7 @@ func (app *kanbanBoardApp) activeParticipantCountLocked() int {
 	active := 0
 	for _, count := range app.participantCounts {
 		if count > 0 {
-			active += count
+			active++
 		}
 	}
 

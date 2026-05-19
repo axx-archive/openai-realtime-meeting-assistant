@@ -75,9 +75,9 @@ When the server starts, it creates the OpenAI Realtime peer if `OPENAI_API_KEY` 
 
 ## Capacity target
 
-The room is budgeted for up to **10 concurrent browser participants with cameras on**. The browser publishes camera video at up to 960x540, 24fps, and about 1.15Mbps, with mono Opus audio capped around 48kbps. The server forwards RTP video packets between peers and only decodes/mixes audio for the Realtime assistant.
+The room is budgeted for up to **10 concurrent browser participants with cameras on**. The browser prefers camera video around 854x480, 24fps, and about 900kbps, with mono Opus audio capped around 48kbps. Screen share keeps a higher detail budget at about 1.6Mbps and 15fps. The server forwards RTP video packets between peers and only decodes/mixes audio for the Realtime assistant.
 
-`MEETING_ROOM_MAX_PARTICIPANTS` defaults to `10`; the 11th participant is refused before camera and microphone capture starts. For a 10-person room, plan for roughly 110 Mbps of server video/audio egress before protocol overhead, and use a host/network with comfortable headroom above that.
+`MEETING_ROOM_MAX_PARTICIPANTS` defaults to `10`; the 11th participant is refused before camera and microphone capture starts. For a 10-person room, plan for roughly 90 Mbps of server video/audio egress before protocol overhead, and use a host/network with comfortable headroom above that.
 
 ## Demo flow
 

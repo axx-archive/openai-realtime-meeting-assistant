@@ -6,53 +6,53 @@
     <title>Bonfire</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
     <style>
       :root {
         color-scheme: dark;
 
-        /* ---------- Stride terracotta ---------- */
+        /* ---------- Bonfire ember ---------- */
         --ember-50:  #FBF5F0;
         --ember-100: #F5E6D8;
         --ember-200: #E8C9B0;
         --ember-300: #D4A47A;
-        --ember-400: #D4845A;
-        --ember-500: #C2703E;
-        --ember-600: #A85C30;
-        --ember-700: #8B4A27;
-        --ember-800: #8B4A27;
+        --ember-400: #FF9A5E;
+        --ember-500: #FF7A2B;
+        --ember-600: #D95E16;
+        --ember-700: #9B441B;
+        --ember-800: #6F3016;
 
         --amber-300: #F5E6D8;
-        --amber-500: #D97706;
+        --amber-500: #C9852F;
 
-        /* ---------- Ink darks ---------- */
-        --night-0: #0A0A0A;
-        --night-1: #171717;
-        --night-2: #262626;
-        --night-3: #404040;
-        --night-4: #525252;
-        --night-5: #737373;
+        /* ---------- Warm night ---------- */
+        --night-0: #0B0805;
+        --night-1: #110D09;
+        --night-2: #15110D;
+        --night-3: #1D1814;
+        --night-4: #2A211A;
+        --night-5: #3A3027;
 
-        /* ---------- Sand / warm neutrals ---------- */
-        --ash-50:  #FAF8F5;
-        --ash-100: #F5F0EB;
-        --ash-200: #EDE5DC;
-        --ash-500: #737373;
-        --ash-600: #525252;
-        --ash-700: #404040;
+        /* ---------- Ash / parchment ---------- */
+        --ash-50:  #FAF6EE;
+        --ash-100: #F2ECDD;
+        --ash-200: #EAE1CF;
+        --ash-500: #948876;
+        --ash-600: #6E6457;
+        --ash-700: #4B4034;
 
         /* ---------- Foreground ---------- */
-        --fg-0: #FAF8F5;
-        --fg-1: #E5E5E5;
-        --fg-2: #A3A3A3;
-        --fg-3: #737373;
-        --fg-inverse: #0A0A0A;
+        --fg-0: #FAF5EC;
+        --fg-1: #D9D0BF;
+        --fg-2: #948876;
+        --fg-3: #655A4E;
+        --fg-inverse: #1B130A;
 
         /* ---------- Hairlines ---------- */
-        --line-faint:  rgba(255, 255, 255, 0.055);
-        --line:        rgba(255, 255, 255, 0.095);
-        --line-strong: rgba(255, 255, 255, 0.16);
-        --line-light:  #EDE5DC;
+        --line-faint:  rgba(255, 235, 200, 0.06);
+        --line:        rgba(255, 235, 200, 0.10);
+        --line-strong: rgba(255, 235, 200, 0.16);
+        --line-light:  #EAE1CF;
 
         /* ---------- Semantic ---------- */
         --success:    #10B981;
@@ -64,14 +64,14 @@
         --danger:     #EF4444;
         --danger-bg:  #FEF2F2;
         --danger-fg:  #DC2626;
-        --info:       #3B82F6;
-        --info-bg:    #EFF6FF;
-        --info-fg:    #2563EB;
+        --info:       #D4A47A;
+        --info-bg:    #FBF5F0;
+        --info-fg:    #8B4A27;
 
         /* ---------- Type ---------- */
-        --font-display: "DM Sans", "Avenir Next", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-        --font-sans:    "DM Sans", "Avenir Next", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-        --font-mono:    "JetBrains Mono", "SF Mono", "IBM Plex Mono", Menlo, ui-monospace, monospace;
+        --font-display: "Instrument Serif", "Times New Roman", ui-serif, serif;
+        --font-sans:    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        --font-mono:    "Geist Mono", "SF Mono", "IBM Plex Mono", Menlo, ui-monospace, monospace;
 
         /* ---------- Radii ---------- */
         --r-xs: 4px;
@@ -91,17 +91,21 @@
         --s-8:  48px;
 
         /* ---------- Shadows ---------- */
-        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-        --shadow-2: 0 16px 40px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.45);
-        --shadow-3: 0 32px 80px rgba(0, 0, 0, 0.48), 0 8px 24px rgba(0, 0, 0, 0.34);
-        --shadow-light-1: 0 1px 2px rgba(0, 0, 0, 0.06);
-        --shadow-light-2: 0 10px 28px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.06);
-        --shadow-panel: 0 18px 42px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.045);
-        --surface-panel: linear-gradient(180deg, rgba(38, 38, 38, 0.54), rgba(10, 10, 10, 0.78));
-        --surface-panel-soft: linear-gradient(180deg, rgba(38, 38, 38, 0.42), rgba(10, 10, 10, 0.68));
+        --shadow-1: 0 1px 2px rgba(15, 8, 2, 0.35);
+        --shadow-2: 0 16px 40px rgba(15, 8, 2, 0.42), 0 1px 2px rgba(15, 8, 2, 0.50);
+        --shadow-3: 0 32px 80px rgba(15, 8, 2, 0.56), 0 8px 24px rgba(15, 8, 2, 0.38);
+        --shadow-light-1: 0 1px 2px rgba(60, 35, 10, 0.06);
+        --shadow-light-2: 0 10px 28px rgba(60, 35, 10, 0.10), 0 1px 2px rgba(60, 35, 10, 0.06);
+        --shadow-panel: 0 18px 42px rgba(15, 8, 2, 0.38), inset 0 1px 0 rgba(255, 235, 200, 0.045);
+        --surface-panel: linear-gradient(180deg, rgba(29, 24, 20, 0.68), rgba(11, 8, 5, 0.88));
+        --surface-panel-soft: linear-gradient(180deg, rgba(29, 24, 20, 0.52), rgba(11, 8, 5, 0.76));
+        --glass-surface: linear-gradient(180deg, rgba(255, 235, 200, 0.105), rgba(255, 235, 200, 0.036) 38%, rgba(11, 8, 5, 0.72));
+        --glass-surface-quiet: linear-gradient(180deg, rgba(255, 235, 200, 0.07), rgba(255, 235, 200, 0.025) 42%, rgba(11, 8, 5, 0.64));
+        --glass-edge: rgba(255, 235, 200, 0.13);
+        --glass-highlight: inset 0 1px 0 rgba(255, 245, 230, 0.10), inset 0 -1px 0 rgba(255, 122, 43, 0.04);
 
-        --glow-ember-sm: 0 0 0 1px rgba(194, 112, 62, 0.42), 0 0 18px rgba(194, 112, 62, 0.20);
-        --glow-ember-md: 0 0 0 1px rgba(194, 112, 62, 0.52), 0 0 30px rgba(194, 112, 62, 0.28), 0 0 70px rgba(194, 112, 62, 0.12);
+        --glow-ember-sm: 0 0 0 1px rgba(255, 122, 43, 0.42), 0 0 18px rgba(255, 122, 43, 0.20);
+        --glow-ember-md: 0 0 0 1px rgba(255, 122, 43, 0.52), 0 0 30px rgba(255, 122, 43, 0.28), 0 0 70px rgba(255, 122, 43, 0.12);
 
         /* ---------- Motion ---------- */
         --ease-out:  cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -125,8 +129,8 @@
         min-height: 100vh;
         min-height: 100svh;
         background:
-          linear-gradient(180deg, rgba(194, 112, 62, 0.075) 0%, transparent 34%),
-          linear-gradient(180deg, #171717 0%, #0F0F0F 52%, #0A0A0A 100%);
+          linear-gradient(180deg, rgba(255, 122, 43, 0.07) 0%, transparent 34%),
+          linear-gradient(180deg, var(--night-2) 0%, var(--night-1) 48%, var(--night-0) 100%);
         color: var(--fg-0);
         font-family: var(--font-sans);
         font-weight: 400;
@@ -160,15 +164,26 @@
         padding: max(var(--s-3), env(safe-area-inset-top)) max(var(--s-3), env(safe-area-inset-right)) max(var(--s-3), env(safe-area-inset-bottom)) max(var(--s-3), env(safe-area-inset-left));
       }
 
+      main::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          radial-gradient(ellipse at 50% -10%, rgba(255, 122, 43, 0.14), transparent 42%),
+          linear-gradient(90deg, rgba(255, 235, 200, 0.022), transparent 18%, transparent 82%, rgba(255, 235, 200, 0.018));
+      }
+
       /* ---------- Topbar ---------- */
       .topbar {
         position: relative;
         display: grid;
-        grid-template-columns: auto auto 1fr auto;
+        grid-template-columns: auto 1fr auto;
         gap: var(--s-3);
         align-items: center;
         min-height: 44px;
-        padding: 2px 4px;
+        padding: 4px 6px;
         border: 0;
         border-radius: 0;
         background: transparent;
@@ -230,12 +245,7 @@
       }
 
       .topbar__mark {
-        position: relative;
-        width: 34px;
-        height: 34px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
+        display: none;
       }
 
       .topbar__mark svg {
@@ -248,7 +258,7 @@
           inset 0 1px 0 rgba(255, 255, 255, 0.10),
           0 0 0 1px rgba(255, 255, 255, 0.06),
           0 10px 24px rgba(0, 0, 0, 0.24),
-          0 0 28px rgba(194, 112, 62, 0.18);
+          0 0 28px rgba(255, 122, 43, 0.18);
       }
 
       /* Three stacked halos, phased — the brand's signature motion.
@@ -257,7 +267,7 @@
       .topbar__mark .listening-halo {
         position: absolute;
         border-radius: 999px;
-        background: radial-gradient(circle, rgba(194,112,62,0.45) 0%, transparent 60%);
+        background: radial-gradient(circle, rgba(255, 122, 43,0.45) 0%, transparent 60%);
         z-index: 1;
         pointer-events: none;
         opacity: 0;
@@ -282,7 +292,7 @@
       .topbar__mark.is-hot-ember .listening-halo--1 { animation-duration: 1800ms; }
       .topbar__mark.is-hot-ember .listening-halo--2 { animation-duration: 1800ms; }
       .topbar__mark.is-hot-ember .listening-halo--3 { animation-duration: 1800ms; }
-      .topbar__mark.is-hot-ember svg { filter: drop-shadow(0 0 14px rgba(194,112,62,0.65)); }
+      .topbar__mark.is-hot-ember svg { filter: drop-shadow(0 0 14px rgba(255, 122, 43,0.65)); }
 
       @keyframes pulse-halo-1 {
         0%, 100% { transform: scale(0.88); opacity: 0; }
@@ -308,9 +318,9 @@
       }
       .topbar__title p {
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: 10px;
         color: var(--fg-2);
-        letter-spacing: 0.10em;
+        letter-spacing: 0.11em;
         text-transform: none;
         font-feature-settings: "ss01" on, "ss02" on;
       }
@@ -337,7 +347,7 @@
         -webkit-backdrop-filter: blur(18px) saturate(1.18);
       }
       .pill__dot { width: 7px; height: 7px; border-radius: 999px; }
-      .pill--listening { background: rgba(194,112,62,0.12); color: var(--ember-300); }
+      .pill--listening { background: rgba(255, 122, 43,0.12); color: var(--ember-300); }
       .pill--listening .pill__dot {
         background: var(--ember-500);
         box-shadow: 0 0 8px var(--ember-500);
@@ -423,7 +433,7 @@
         max-width: calc(100% - 16px);
         padding: 5px var(--s-2);
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.72);
+        background: rgba(11, 8, 5, 0.72);
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
         color: var(--fg-0);
@@ -486,7 +496,7 @@
         padding: 4px 7px;
         border: 1px solid var(--line);
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.76);
+        background: rgba(11, 8, 5, 0.76);
         color: var(--fg-2);
         font-family: var(--font-mono);
         font-size: 9px;
@@ -504,13 +514,13 @@
       }
 
       .video-tile.is-sharing-screen {
-        border-color: rgba(194, 112, 62, 0.38);
+        border-color: rgba(255, 122, 43, 0.38);
       }
 
       .video-tile.is-sharing-screen .media-flag--share {
         color: var(--ember-300);
-        border-color: rgba(194, 112, 62, 0.32);
-        background: rgba(194, 112, 62, 0.12);
+        border-color: rgba(255, 122, 43, 0.32);
+        background: rgba(255, 122, 43, 0.12);
       }
 
       /* ---------- Access panel ---------- */
@@ -578,14 +588,20 @@
       .field textarea {
         width: 100%;
         height: 42px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-md);
-        background-color: rgba(10, 10, 10, 0.44);
+        border: 1px solid rgba(255, 235, 200, 0.10);
+        border-radius: 12px;
+        background-color: rgba(11, 8, 5, 0.38);
         color: var(--fg-0);
         font: inherit;
         font-size: 13px;
         padding: 0 var(--s-3);
         outline: 0;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 245, 230, 0.08),
+          inset 0 -1px 0 rgba(255, 122, 43, 0.035),
+          0 8px 24px rgba(15, 8, 2, 0.16);
+        backdrop-filter: blur(18px) saturate(1.16);
+        -webkit-backdrop-filter: blur(18px) saturate(1.16);
         transition: border-color var(--t-base) var(--ease-soft), background-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
       }
 
@@ -601,8 +617,8 @@
       .field select:focus,
       .field input:focus,
       .field textarea:focus {
-        border-color: rgba(194, 112, 62, 0.65);
-        background-color: rgba(10, 10, 10, 0.68);
+        border-color: rgba(255, 122, 43, 0.65);
+        background-color: rgba(11, 8, 5, 0.68);
         box-shadow: var(--glow-ember-sm);
       }
 
@@ -625,7 +641,7 @@
 
       .access-panel.is-verified {
         border-color: rgba(16, 185, 129, 0.26);
-        background: linear-gradient(180deg, rgba(16, 185, 129, 0.09), rgba(10, 10, 10, 0.78));
+        background: linear-gradient(180deg, rgba(16, 185, 129, 0.09), rgba(11, 8, 5, 0.78));
       }
 
       .access-panel.is-verified .access-state { color: var(--success); }
@@ -669,7 +685,7 @@
         bottom: var(--s-3);
         padding: 6px 10px;
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.72);
+        background: rgba(11, 8, 5, 0.72);
         color: var(--fg-0);
         font-size: 12px;
         font-weight: 500;
@@ -787,7 +803,8 @@
       .empty {
         font-family: var(--font-display);
         font-size: 19px;
-        font-weight: 600;
+        font-style: italic;
+        font-weight: 400;
         line-height: 1.15;
         color: var(--ash-600);
         padding: var(--s-3) 0;
@@ -801,7 +818,8 @@
         display: none;
         font-family: var(--font-display);
         font-size: 24px;
-        font-weight: 600;
+        font-style: italic;
+        font-weight: 400;
         line-height: 1.15;
         color: var(--ash-600);
         text-align: center;
@@ -926,7 +944,7 @@
         border: 2px solid #FFF;
         border-radius: 999px;
         background: transparent;
-        box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.14);
+        box-shadow: 0 0 0 1px rgba(11, 8, 5, 0.14);
         flex-shrink: 0;
       }
       .owner-avatar .monogram { width: 100%; height: 100%; }
@@ -946,11 +964,11 @@
         line-height: 1;
       }
 
-      .mono--ember { background: linear-gradient(155deg, #D4A47A, #C2703E); color: #0A0A0A; }
-      .mono--amber { background: linear-gradient(155deg, #F5E6D8, #D4A47A); color: #0A0A0A; }
+      .mono--ember { background: linear-gradient(155deg, #D4A47A, #FF7A2B); color: #0B0805; }
+      .mono--amber { background: linear-gradient(155deg, #F5E6D8, #D4A47A); color: #0B0805; }
       .mono--rust  { background: linear-gradient(155deg, #D4A47A, #8B4A27); color: #FBF5F0; }
-      .mono--ash   { background: linear-gradient(155deg, #F5F0EB, #A3A3A3); color: var(--fg-inverse); }
-      .mono--ink   { background: linear-gradient(155deg, #404040, #171717); color: var(--fg-0); }
+      .mono--ash   { background: linear-gradient(155deg, #F2ECDD, #948876); color: var(--fg-inverse); }
+      .mono--ink   { background: linear-gradient(155deg, #2A211A, #110D09); color: var(--fg-0); }
 
       .card.moved {
         animation: card-move-wiggle 1100ms var(--ease-soft);
@@ -1014,8 +1032,8 @@
       }
 
       .memory-item.answer {
-        background: rgba(194, 112, 62, 0.10);
-        border-color: rgba(194, 112, 62, 0.30);
+        background: rgba(255, 122, 43, 0.10);
+        border-color: rgba(255, 122, 43, 0.30);
       }
 
       .memory-item.archive {
@@ -1095,7 +1113,7 @@
 
       .assistant-message--audio {
         border-left: 2px solid var(--ember-500);
-        background: rgba(194, 112, 62, 0.06);
+        background: rgba(255, 122, 43, 0.06);
         grid-template-columns: minmax(0, 1fr);
       }
 
@@ -1113,8 +1131,8 @@
 
       .assistant-message--answer,
       .assistant-message--action {
-        background: rgba(194, 112, 62, 0.10);
-        border-color: rgba(194, 112, 62, 0.28);
+        background: rgba(255, 122, 43, 0.10);
+        border-color: rgba(255, 122, 43, 0.28);
       }
 
       /* Passive system events stay warm-neutral so the topbar pulse remains
@@ -1187,7 +1205,7 @@
         width: 100%;
         border: 1px solid var(--line);
         border-radius: var(--r-sm);
-        background: rgba(10, 10, 10, 0.56);
+        background: rgba(11, 8, 5, 0.56);
         color: var(--fg-0);
         font: inherit;
         font-size: 13px;
@@ -1199,8 +1217,8 @@
 
       .assistant-input::placeholder { color: var(--fg-3); }
       .assistant-input:focus {
-        border-color: rgba(194, 112, 62, 0.65);
-        background: rgba(10, 10, 10, 0.76);
+        border-color: rgba(255, 122, 43, 0.65);
+        background: rgba(11, 8, 5, 0.76);
       }
 
       .assistant-send {
@@ -1214,12 +1232,12 @@
         position: sticky;
         bottom: var(--s-3);
         z-index: 900;
-        display: grid;
-        grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+        display: flex;
         align-items: center;
+        justify-content: center;
         gap: 10px;
         justify-self: center;
-        width: min(100%, 1320px);
+        width: min(100%, 1440px);
         min-height: 0;
         padding: 0;
         border: 0;
@@ -1229,41 +1247,46 @@
       }
 
       .log {
-        justify-self: start;
-        max-width: min(320px, 24vw);
-        min-height: 40px;
-        display: inline-flex;
-        align-items: center;
-        padding: 0 14px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-pill);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035));
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 36px rgba(0, 0, 0, 0.24);
-        backdrop-filter: blur(18px) saturate(1.15);
-        -webkit-backdrop-filter: blur(18px) saturate(1.15);
-        font-family: var(--font-sans);
-        font-size: 13px;
-        color: var(--fg-1);
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
         overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
       }
 
       .controls {
+        position: relative;
+        overflow: hidden;
         display: inline-flex;
         align-items: center;
         gap: 6px;
         justify-content: center;
-        padding: 6px;
-        border: 1px solid var(--line-faint);
+        padding: 7px;
+        border: 1px solid var(--glass-edge);
         border-radius: var(--r-pill);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(10, 10, 10, 0.72));
+        background: var(--glass-surface);
         box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.08),
-          0 18px 50px rgba(0, 0, 0, 0.34),
-          0 0 50px rgba(194, 112, 62, 0.05);
-        backdrop-filter: blur(18px) saturate(1.16);
-        -webkit-backdrop-filter: blur(18px) saturate(1.16);
+          var(--glass-highlight),
+          0 18px 50px rgba(15, 8, 2, 0.42),
+          0 0 52px rgba(255, 122, 43, 0.06);
+        backdrop-filter: blur(24px) saturate(1.28);
+        -webkit-backdrop-filter: blur(24px) saturate(1.28);
+      }
+
+      .controls::before,
+      .board-dock::before {
+        content: "";
+        position: absolute;
+        inset: 1px 10px auto;
+        height: 1px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, transparent, rgba(255, 245, 230, 0.32), transparent);
+        pointer-events: none;
       }
 
       .device-control {
@@ -1305,7 +1328,7 @@
       }
 
       .device-select:focus-visible {
-        border-color: rgba(194, 112, 62, 0.65);
+        border-color: rgba(255, 122, 43, 0.65);
         box-shadow: var(--glow-ember-sm);
       }
 
@@ -1336,8 +1359,8 @@
 
       #muteMic.is-muted,
       #toggleCamera.is-off {
-        border-color: rgba(194, 112, 62, 0.44);
-        background: rgba(194, 112, 62, 0.14);
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.14);
         color: var(--ember-300);
       }
 
@@ -1355,6 +1378,10 @@
       }
 
       .room-clock {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        transform: translateY(-50%);
         min-height: 40px;
         display: inline-flex;
         align-items: center;
@@ -1363,12 +1390,12 @@
         min-width: 0;
         max-width: min(360px, 28vw);
         padding: 0 14px;
-        border: 1px solid var(--line-faint);
+        border: 1px solid var(--glass-edge);
         border-radius: var(--r-pill);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035));
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 36px rgba(0, 0, 0, 0.24);
-        backdrop-filter: blur(18px) saturate(1.15);
-        -webkit-backdrop-filter: blur(18px) saturate(1.15);
+        background: var(--glass-surface-quiet);
+        box-shadow: var(--glass-highlight), 0 16px 36px rgba(15, 8, 2, 0.30);
+        backdrop-filter: blur(22px) saturate(1.22);
+        -webkit-backdrop-filter: blur(22px) saturate(1.22);
         color: var(--fg-2);
         font-family: var(--font-mono);
         font-size: 10px;
@@ -1411,19 +1438,19 @@
 
       .btn--primary {
         background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
-        color: #0A0A0A;
-        border-color: rgba(194, 112, 62, 0.24);
+        color: #0B0805;
+        border-color: rgba(255, 122, 43, 0.24);
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.25),
-          0 1px 0 rgba(194, 112, 62, 0.4),
-          0 8px 24px rgba(194, 112, 62, 0.25);
+          0 1px 0 rgba(255, 122, 43, 0.4),
+          0 8px 24px rgba(255, 122, 43, 0.25);
       }
       .btn--primary:hover:not([disabled]) {
         background: linear-gradient(180deg, var(--ember-300), var(--ember-600));
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.28),
-          0 1px 0 rgba(194, 112, 62, 0.46),
-          0 10px 30px rgba(194, 112, 62, 0.30);
+          0 1px 0 rgba(255, 122, 43, 0.46),
+          0 10px 30px rgba(255, 122, 43, 0.30);
       }
       .btn--primary:active:not([disabled]) {
         background: linear-gradient(180deg, var(--ember-600), var(--ember-700));
@@ -1529,7 +1556,7 @@
       .toast--error .toast__bar { background: var(--danger); }
       .toast--error { border-color: rgba(239, 68, 68, 0.4); }
 
-      /* ---------- Sparks (formerly confetti) ---------- */
+      /* ---------- Sparks ---------- */
       .spark {
         position: fixed;
         z-index: 1000;
@@ -1585,7 +1612,7 @@
         letter-spacing: 0.08em;
         text-transform: none;
         border-radius: var(--r-pill);
-        background: rgba(194, 112, 62, 0.12);
+        background: rgba(255, 122, 43, 0.12);
         color: var(--ember-700);
         padding: 6px 10px;
       }
@@ -1628,8 +1655,8 @@
         display: grid;
         gap: 6px;
         border-radius: var(--r-md);
-        background: rgba(194, 112, 62, 0.08);
-        border: 1px solid rgba(194, 112, 62, 0.16);
+        background: rgba(255, 122, 43, 0.08);
+        border: 1px solid rgba(255, 122, 43, 0.16);
         padding: var(--s-3);
       }
 
@@ -1641,7 +1668,7 @@
         display: none;
         place-items: center;
         padding: var(--s-6);
-        background: rgba(10, 10, 10, 0.62);
+        background: rgba(11, 8, 5, 0.62);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
       }
@@ -1741,7 +1768,7 @@
 
       .card-detail-edit-button:hover,
       .key-date-add:hover {
-        border-color: rgba(194, 112, 62, 0.30);
+        border-color: rgba(255, 122, 43, 0.30);
         background: var(--ember-50);
         color: var(--ember-700);
       }
@@ -1830,7 +1857,7 @@
       .card-detail-form .field select,
       .card-detail-form .field textarea {
         border-color: var(--line-light);
-        background-color: #FAF8F5;
+        background-color: #FAF6EE;
         color: var(--fg-inverse);
       }
 
@@ -1931,7 +1958,7 @@
         border: 0;
         border-left: 2px solid var(--ember-500);
         border-radius: 4px 12px 12px 4px;
-        background: rgba(194, 112, 62, 0.05);
+        background: rgba(255, 122, 43, 0.05);
       }
 
       .card-detail-scout header {
@@ -2051,7 +2078,7 @@
         height: 14px;
         border-radius: 999px;
         background: #FFFFFF;
-        border: 2px solid #A3A3A3;
+        border: 2px solid #948876;
         margin-left: 0;
         box-shadow: 0 0 0 3px #FFFFFF, 0 1px 3px rgba(0, 0, 0, 0.12);
         display: grid;
@@ -2074,7 +2101,7 @@
       .key-date-step.is-today .key-date-step__dot {
         background: var(--ember-500);
         border-color: var(--ember-700);
-        box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 6px rgba(194, 112, 62, 0.13);
+        box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 6px rgba(255, 122, 43, 0.13);
       }
 
       .key-date-step__label {
@@ -2173,7 +2200,7 @@
         padding: var(--s-4) var(--s-6) 18px;
         border-top: 1px solid var(--line-light);
         border-radius: 0;
-        background: rgba(194, 112, 62, 0.02);
+        background: rgba(255, 122, 43, 0.02);
       }
 
       .card-command-chips {
@@ -2210,8 +2237,8 @@
       }
 
       .card-command-chip:hover {
-        background: rgba(194, 112, 62, 0.1);
-        border-color: rgba(194, 112, 62, 0.3);
+        background: rgba(255, 122, 43, 0.1);
+        border-color: rgba(255, 122, 43, 0.3);
         color: var(--ember-700);
       }
 
@@ -2352,6 +2379,7 @@
 
       #appShell:not(.is-in-room) .workspace {
         place-items: center;
+        min-height: min(760px, calc(100svh - 84px));
       }
 
       #join {
@@ -2359,7 +2387,12 @@
       }
 
       #appShell.is-in-room .workspace {
-        grid-template-columns: clamp(220px, 22vw, 280px) minmax(360px, 1fr) clamp(240px, 24vw, 300px);
+        grid-template-columns: clamp(280px, 24vw, 360px) minmax(420px, 1fr) clamp(280px, 22vw, 340px);
+      }
+
+      #appShell:not(.is-in-room) .meeting-bar,
+      #appShell:not(.is-in-room) .topbar > .pill {
+        display: none;
       }
 
       #appShell:not(.is-in-room) .scout-rail,
@@ -2394,36 +2427,66 @@
 
       .hearth-access {
         position: relative;
-        width: min(460px, calc(100vw - 48px));
+        width: min(520px, calc(100vw - 48px));
         align-self: center;
         justify-self: center;
         overflow: visible;
-        padding: 0 var(--s-7) 28px;
-        border-color: var(--line-faint);
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(38, 38, 38, 0.58), rgba(10, 10, 10, 0.82));
+        padding: 0 var(--s-7) 30px;
+        border-color: rgba(255, 235, 200, 0.12);
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at 50% -4%, rgba(255, 122, 43, 0.16), transparent 34%),
+          linear-gradient(135deg, rgba(255, 245, 230, 0.10) 0%, rgba(255, 245, 230, 0.025) 18%, transparent 46%),
+          linear-gradient(180deg, rgba(29, 24, 20, 0.54), rgba(11, 8, 5, 0.74));
         box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.06),
-          0 28px 72px rgba(0, 0, 0, 0.42),
-          0 0 70px rgba(194, 112, 62, 0.08);
+          inset 0 1px 0 rgba(255, 245, 230, 0.16),
+          inset 1px 0 0 rgba(255, 245, 230, 0.045),
+          inset 0 -1px 0 rgba(255, 122, 43, 0.08),
+          0 34px 90px rgba(15, 8, 2, 0.58),
+          0 0 110px rgba(255, 122, 43, 0.12);
+        backdrop-filter: blur(34px) saturate(1.34) brightness(1.06);
+        -webkit-backdrop-filter: blur(34px) saturate(1.34) brightness(1.06);
+      }
+
+      .hearth-access > * {
+        position: relative;
+        z-index: 1;
       }
 
       .hearth-access.is-verified {
-        border-color: var(--line);
-        background: linear-gradient(180deg, rgba(38, 38, 38, 0.58), rgba(10, 10, 10, 0.82));
+        border-color: rgba(255, 235, 200, 0.16);
+        background:
+          radial-gradient(circle at 50% -4%, rgba(255, 122, 43, 0.18), transparent 34%),
+          linear-gradient(135deg, rgba(255, 245, 230, 0.12) 0%, rgba(255, 245, 230, 0.03) 18%, transparent 46%),
+          linear-gradient(180deg, rgba(29, 24, 20, 0.56), rgba(11, 8, 5, 0.76));
       }
 
       .hearth-access::before {
         content: "";
         position: absolute;
         left: 50%;
-        top: -180px;
+        top: -190px;
         z-index: -1;
-        width: 320px;
-        height: 320px;
+        width: 360px;
+        height: 360px;
         transform: translateX(-50%);
         border-radius: 999px;
-        background: radial-gradient(circle, rgba(194, 112, 62, 0.28), transparent 60%);
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.28), transparent 62%);
+        pointer-events: none;
+      }
+
+      .hearth-access::after {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        z-index: 0;
+        border-radius: 27px;
+        background:
+          radial-gradient(ellipse at 18% 0%, rgba(255, 245, 230, 0.12), transparent 32%),
+          radial-gradient(ellipse at 88% 96%, rgba(255, 122, 43, 0.08), transparent 38%),
+          linear-gradient(105deg, transparent 0%, rgba(255, 245, 230, 0.06) 43%, rgba(255, 245, 230, 0.015) 52%, transparent 64%),
+          linear-gradient(to bottom, transparent calc(100% - 106px), rgba(255, 235, 200, 0.12) calc(100% - 105px), transparent calc(100% - 104px));
+        opacity: 0.78;
         pointer-events: none;
       }
 
@@ -2434,10 +2497,11 @@
 
       .hearth-access h2 {
         font-family: var(--font-display);
-        font-size: 42px;
-        font-weight: 700;
+        font-size: 46px;
+        font-style: italic;
+        font-weight: 400;
         letter-spacing: 0;
-        line-height: 0.94;
+        line-height: 0.96;
         text-align: center;
         text-wrap: balance;
       }
@@ -2454,9 +2518,9 @@
 
       .hearth-access__ember {
         position: relative;
-        width: 44px;
-        height: 44px;
-        margin: -22px auto 18px;
+        width: 54px;
+        height: 54px;
+        margin: -27px auto 18px;
         display: grid;
         place-items: center;
       }
@@ -2466,13 +2530,13 @@
         z-index: 2;
         width: 100%;
         height: 100%;
-        filter: drop-shadow(0 0 18px rgba(194, 112, 62, 0.45));
+        filter: drop-shadow(0 0 18px rgba(255, 122, 43, 0.45));
       }
 
       .hearth-access__halo {
         position: absolute;
         border-radius: 999px;
-        background: radial-gradient(circle, rgba(194, 112, 62, 0.45) 0%, transparent 64%);
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.45) 0%, transparent 64%);
         pointer-events: none;
       }
 
@@ -2491,8 +2555,21 @@
 
       .access-join {
         width: 100%;
-        min-height: 44px;
+        min-height: 48px;
         margin-top: var(--s-5);
+        border-radius: 16px;
+      }
+
+      .access-join[disabled] {
+        background:
+          linear-gradient(180deg, rgba(255, 245, 230, 0.08), rgba(255, 235, 200, 0.025)),
+          rgba(11, 8, 5, 0.22);
+        border-color: rgba(255, 235, 200, 0.10);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 245, 230, 0.08),
+          inset 0 -1px 0 rgba(255, 122, 43, 0.035);
+        color: var(--fg-3);
+        opacity: 1;
       }
 
       .hearth-access .access-state {
@@ -2506,7 +2583,7 @@
         justify-content: space-between;
         gap: var(--s-3);
         padding-top: 18px;
-        border-top: 1px solid var(--line-faint);
+        border-top: 1px solid rgba(255, 235, 200, 0.10);
       }
 
       .inside-row .who {
@@ -2586,11 +2663,16 @@
 
       .assistant-panel.scout-panel {
         min-height: 0;
-        grid-template-rows: auto auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
         border-color: var(--line-faint);
-        border-radius: var(--r-lg);
-        background: var(--surface-panel-soft);
-        box-shadow: var(--shadow-panel);
+        border-radius: 18px;
+        background: var(--glass-surface-quiet);
+        box-shadow:
+          var(--shadow-panel),
+          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
+        backdrop-filter: blur(22px) saturate(1.18);
+        -webkit-backdrop-filter: blur(22px) saturate(1.18);
+        padding: var(--s-4);
       }
 
       .scout-panel header h2,
@@ -2620,7 +2702,7 @@
         width: 22px;
         height: 22px;
         border-radius: 6px;
-        background: rgba(194, 112, 62, 0.12);
+        background: rgba(255, 122, 43, 0.12);
         color: var(--ember-300);
         flex: 0 0 auto;
       }
@@ -2651,19 +2733,19 @@
 
       .scout-ask {
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         gap: 8px;
         align-items: center;
-        padding: 4px 6px 4px 12px;
-        border: 1px solid rgba(194, 112, 62, 0.22);
-        border-radius: 11px;
-        background: rgba(194, 112, 62, 0.06);
-        box-shadow: inset 0 0 0 1px rgba(194, 112, 62, 0.04), 0 0 22px rgba(194, 112, 62, 0.06);
+        padding: 5px 6px 5px 12px;
+        border: 1px solid rgba(255, 122, 43, 0.22);
+        border-radius: 13px;
+        background: rgba(255, 235, 200, 0.045);
+        box-shadow: inset 0 0 0 1px rgba(255, 122, 43, 0.04), 0 0 24px rgba(255, 122, 43, 0.05);
       }
 
       .scout-ask:focus-within {
         box-shadow: var(--glow-ember-sm);
-        border-color: rgba(194, 112, 62, 0.45);
+        border-color: rgba(255, 122, 43, 0.45);
       }
 
       .scout-ask__icon {
@@ -2673,15 +2755,7 @@
       }
 
       .scout-ask__kbd {
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 4px;
-        background: rgba(10, 10, 10, 0.4);
-        border: 1px solid var(--line);
-        color: var(--fg-2);
-        line-height: 1.4;
+        display: none;
       }
 
       .scout-ask .assistant-input {
@@ -2705,7 +2779,7 @@
       }
 
       .scout-foot {
-        display: flex;
+        display: none;
         gap: 6px;
         flex-wrap: wrap;
         padding-top: var(--s-2);
@@ -2763,14 +2837,14 @@
         padding: 0 12px;
         border: 1px solid var(--line-faint);
         border-radius: var(--r-pill);
-        background: rgba(255, 255, 255, 0.04);
+        background: rgba(255, 235, 200, 0.04);
         color: var(--fg-1);
         font-size: 12px;
         transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
       }
 
       .scout-chip:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 235, 200, 0.08);
         border-color: var(--line);
         color: var(--fg-0);
       }
@@ -2780,15 +2854,17 @@
       }
 
       .scout-chip.is-private {
-        border-color: rgba(194, 112, 62, 0.24);
-        background: rgba(194, 112, 62, 0.10);
+        border-color: rgba(255, 122, 43, 0.24);
+        background: rgba(255, 122, 43, 0.10);
         color: var(--ember-300);
       }
 
       .scout-activity {
         display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
         gap: var(--s-2);
         min-width: 0;
+        min-height: 0;
         border-top: 1px solid var(--line-faint);
         padding-top: var(--s-2);
       }
@@ -2800,7 +2876,7 @@
         gap: var(--s-2);
         min-height: 40px;
         color: var(--fg-2);
-        cursor: pointer;
+        cursor: default;
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 500;
@@ -2813,13 +2889,27 @@
         display: none;
       }
 
+      .scout-activity summary {
+        pointer-events: none;
+      }
+
       .scout-activity__count {
         color: var(--fg-3);
         font-variant-numeric: tabular-nums;
       }
 
+      .scout-activity__count[hidden],
+      .scout-activity__chev {
+        display: none;
+      }
+
       .scout-activity[open] .assistant-feed {
         margin-top: var(--s-2);
+      }
+
+      .scout-panel .assistant-feed {
+        max-height: none;
+        min-height: 0;
       }
 
       .memory-list--silent {
@@ -2836,9 +2926,11 @@
         position: relative;
         overflow: hidden;
         border: 1px solid var(--line-faint);
-        border-radius: var(--r-lg);
+        border-radius: 20px;
         background: var(--night-0);
-        box-shadow: var(--shadow-panel);
+        box-shadow:
+          var(--shadow-panel),
+          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
       }
 
       .hearth-stage {
@@ -2855,7 +2947,9 @@
       .hearth-bloom {
         position: absolute;
         inset: 0;
-        background: radial-gradient(ellipse at 50% 42%, rgba(194, 112, 62, 0.20) 0%, rgba(194, 112, 62, 0.06) 30%, transparent 62%);
+        background:
+          radial-gradient(ellipse at 50% 42%, rgba(255, 122, 43, 0.22) 0%, rgba(255, 122, 43, 0.06) 30%, transparent 62%),
+          linear-gradient(180deg, rgba(255, 235, 200, 0.025), transparent 28%);
         pointer-events: none;
       }
 
@@ -2877,6 +2971,7 @@
         justify-content: space-between;
         gap: var(--s-2);
         margin-bottom: var(--s-4);
+        color: var(--fg-2);
       }
 
       .stage-segmented {
@@ -2885,7 +2980,7 @@
         padding: 3px;
         border: 1px solid var(--line-faint);
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.46);
+        background: rgba(11, 8, 5, 0.52);
       }
 
       .stage-segmented button,
@@ -2906,7 +3001,7 @@
       }
 
       .stage-segmented button[aria-pressed="true"] {
-        background: rgba(255, 255, 255, 0.10);
+        background: rgba(255, 235, 200, 0.10);
         color: var(--fg-0);
       }
 
@@ -2916,14 +3011,23 @@
         gap: 6px;
         padding: 0 12px;
         border: 1px solid var(--line-faint);
-        background: rgba(10, 10, 10, 0.46);
+        background: rgba(11, 8, 5, 0.52);
       }
 
       .stage-segmented button:hover,
       .stage-tool:hover,
       .pin-speaker:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 235, 200, 0.08);
         color: var(--fg-0);
+      }
+
+      .stage-segmented button:focus-visible,
+      .stage-tool:focus-visible,
+      .pin-speaker:focus-visible,
+      .scout-chip:focus-visible {
+        outline: 2px solid var(--ember-500);
+        outline-offset: 2px;
+        box-shadow: var(--glow-ember-sm);
       }
 
       .stage-segmented button:active,
@@ -2944,14 +3048,14 @@
         width: 40px;
         padding: 0;
         border: 1px solid var(--line-faint);
-        background: rgba(10, 10, 10, 0.66);
+        background: rgba(11, 8, 5, 0.66);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
       }
 
       .pin-speaker[aria-pressed="true"] {
-        border-color: rgba(194, 112, 62, 0.44);
-        background: rgba(194, 112, 62, 0.16);
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.16);
         color: var(--ember-300);
       }
 
@@ -2983,19 +3087,21 @@
 
       .hearth-speaker {
         position: relative;
-        width: min(88%, 1120px);
+        width: min(92%, 1180px);
         min-width: 280px;
         aspect-ratio: 16 / 9;
         display: grid;
         place-items: center;
         overflow: visible;
-        border: 1px solid rgba(194, 112, 62, 0.35);
+        border: 1px solid rgba(255, 122, 43, 0.35);
         border-radius: var(--r-lg);
-        background: radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%);
+        background:
+          radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%),
+          var(--night-0);
         box-shadow:
-          0 0 0 6px rgba(194, 112, 62, 0.06),
-          0 0 80px rgba(194, 112, 62, 0.15),
-          0 30px 60px rgba(0, 0, 0, 0.50);
+          0 0 0 6px rgba(255, 122, 43, 0.055),
+          0 0 90px rgba(255, 122, 43, 0.16),
+          0 34px 70px rgba(15, 8, 2, 0.58);
       }
 
       .hearth-speaker video,
@@ -3061,7 +3167,7 @@
         max-width: calc(100% - 24px);
         padding: 6px 10px;
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.78);
+        background: rgba(11, 8, 5, 0.78);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
         color: var(--fg-0);
@@ -3081,18 +3187,7 @@
       }
 
       .speaker-ember {
-        position: absolute;
-        top: var(--s-3);
-        right: var(--s-3);
-        z-index: 2;
-        width: 22px;
-        height: 22px;
-        display: grid;
-        place-items: center;
-        border-radius: 999px;
-        background: rgba(10, 10, 10, 0.72);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
+        display: none;
       }
 
       .speaker-ember svg {
@@ -3153,11 +3248,15 @@
         display: grid;
         align-content: start;
         gap: var(--s-3);
-        padding: var(--s-4) 14px;
+        padding: var(--s-4);
         border: 1px solid var(--line-faint);
-        border-radius: var(--r-lg);
-        background: var(--surface-panel-soft);
-        box-shadow: var(--shadow-panel);
+        border-radius: 18px;
+        background: var(--glass-surface-quiet);
+        box-shadow:
+          var(--shadow-panel),
+          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
+        backdrop-filter: blur(22px) saturate(1.18);
+        -webkit-backdrop-filter: blur(22px) saturate(1.18);
       }
 
       .board-rail__header {
@@ -3184,7 +3283,7 @@
         font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
+        text-transform: none;
         color: var(--fg-3);
       }
 
@@ -3194,8 +3293,8 @@
         gap: var(--s-2);
         padding: 10px 12px;
         border: 1px solid var(--line-faint);
-        border-radius: var(--r-md);
-        background: rgba(255, 255, 255, 0.035);
+        border-radius: 12px;
+        background: rgba(255, 235, 200, 0.035);
       }
       .board-rail__summary[hidden] { display: none; }
 
@@ -3219,7 +3318,8 @@
         font-size: 9.5px;
         font-weight: 500;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
+        line-height: 1.15;
+        text-transform: none;
         color: var(--fg-3);
       }
 
@@ -3301,11 +3401,12 @@
         padding: var(--s-4);
         border: 1px solid var(--line-faint);
         border-radius: var(--r-md);
-        background: rgba(10, 10, 10, 0.45);
+        background: rgba(11, 8, 5, 0.45);
         color: var(--fg-3);
         font-family: var(--font-display);
         font-size: 16px;
-        font-weight: 600;
+        font-style: italic;
+        font-weight: 400;
         letter-spacing: 0;
         line-height: 1.15;
         text-wrap: pretty;
@@ -3320,7 +3421,8 @@
         color: var(--ash-500);
         font-family: var(--font-display);
         font-size: 13px;
-        font-weight: 600;
+        font-style: italic;
+        font-weight: 400;
         letter-spacing: 0;
         padding: 6px 2px;
       }
@@ -3330,7 +3432,7 @@
         gap: 8px;
         width: 100%;
         text-align: left;
-        padding: 10px 12px;
+        padding: 11px 12px;
         border: 1px solid var(--line-light);
         border-radius: 12px;
         background: #FFFFFF;
@@ -3437,7 +3539,7 @@
         transform: translateX(-50%);
         padding: 4px 8px;
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.78);
+        background: rgba(11, 8, 5, 0.78);
         color: var(--ember-300);
         font-family: var(--font-mono);
         font-size: 9px;
@@ -3533,7 +3635,7 @@
         height: 6px;
         border-radius: 999px;
         background: var(--ember-500);
-        box-shadow: 0 0 0 3px rgba(194, 112, 62, 0.18);
+        box-shadow: 0 0 0 3px rgba(255, 122, 43, 0.18);
       }
 
       .board-huddle .stack-avatars .monogram,
@@ -3688,10 +3790,10 @@
         align-items: center;
         gap: 8px;
         padding: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 235, 200, 0.12);
         border-radius: 999px;
-        background: rgba(10, 10, 10, 0.92);
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
+        background: rgba(11, 8, 5, 0.92);
+        box-shadow: 0 16px 40px rgba(15, 8, 2, 0.34), 0 2px 8px rgba(15, 8, 2, 0.22);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
         color: var(--fg-0);
@@ -3725,15 +3827,15 @@
 
       .board-video-tile.is-speaker {
         width: 96px;
-        border-color: rgba(194, 112, 62, 0.58);
-        box-shadow: 0 0 0 1px rgba(194, 112, 62, 0.55), 0 0 22px rgba(194, 112, 62, 0.22);
+        border-color: rgba(255, 122, 43, 0.58);
+        box-shadow: 0 0 0 1px rgba(255, 122, 43, 0.55), 0 0 22px rgba(255, 122, 43, 0.22);
       }
 
       .board-video-tile:hover,
       .board-video-tile:focus-visible {
         width: 140px;
         transform: translateY(-4px);
-        border-color: rgba(194, 112, 62, 0.44);
+        border-color: rgba(255, 122, 43, 0.44);
         outline: none;
         z-index: 2;
       }
@@ -3777,7 +3879,7 @@
         overflow: hidden;
         padding: 3px 6px;
         border-radius: var(--r-pill);
-        background: rgba(10, 10, 10, 0.68);
+        background: rgba(11, 8, 5, 0.68);
         color: var(--fg-0);
         font-family: var(--font-mono);
         font-size: 9px;
@@ -3853,7 +3955,7 @@
       .board-dock-btn.primary {
         background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
         color: var(--fg-inverse);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 0 rgba(194, 112, 62, 0.4), 0 8px 24px rgba(194, 112, 62, 0.25);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 0 rgba(255, 122, 43, 0.4), 0 8px 24px rgba(255, 122, 43, 0.25);
       }
       .board-dock-btn.primary:hover:not([disabled]) {
         background: linear-gradient(180deg, var(--ember-300), var(--ember-600));
@@ -3881,9 +3983,9 @@
       }
 
       .board-dock-btn.primary {
-        border-color: rgba(194, 112, 62, 0.2);
+        border-color: rgba(255, 122, 43, 0.2);
         background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
-        color: #0A0A0A;
+        color: #0B0805;
       }
 
       .board-menu-wrap {
@@ -4126,7 +4228,7 @@
           padding: 8px;
           border-color: rgba(255, 255, 255, 0.11);
           border-radius: 24px;
-          background: rgba(10, 10, 10, 0.88);
+          background: rgba(11, 8, 5, 0.88);
           box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
           backdrop-filter: blur(14px);
           -webkit-backdrop-filter: blur(14px);
@@ -4608,7 +4710,7 @@
           padding: 8px;
           border-radius: 24px;
           border-color: rgba(255, 255, 255, 0.11);
-          background: rgba(10, 10, 10, 0.88);
+          background: rgba(11, 8, 5, 0.88);
           box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
           backdrop-filter: blur(14px);
           -webkit-backdrop-filter: blur(14px);
@@ -4879,7 +4981,7 @@
           margin: 0 calc(var(--s-4) * -1);
           padding: var(--s-2) var(--s-4);
           border-top: 1px solid var(--line-light);
-          background: linear-gradient(180deg, rgba(250, 248, 245, 0.88), #FAF8F5 42%);
+          background: linear-gradient(180deg, rgba(250, 248, 245, 0.88), #FAF6EE 42%);
         }
 
         .card-detail-actions__right {
@@ -5019,7 +5121,7 @@
         .card:hover { transform: none; }
         .card.moved {
           animation: none;
-          background: rgba(194, 112, 62, 0.12);
+          background: rgba(255, 122, 43, 0.12);
         }
         .toast { animation: none; }
         .comment-preview { animation: none; }
@@ -5048,15 +5150,15 @@
               <radialGradient id="emberCore" cx="50%" cy="55%" r="55%">
                 <stop offset="0%"   stop-color="#FBF5F0"></stop>
                 <stop offset="22%"  stop-color="#D4A47A"></stop>
-                <stop offset="55%"  stop-color="#C2703E"></stop>
+                <stop offset="55%"  stop-color="#FF7A2B"></stop>
                 <stop offset="100%" stop-color="#8B4A27"></stop>
               </radialGradient>
               <radialGradient id="emberHalo" cx="50%" cy="55%" r="55%">
-                <stop offset="0%"   stop-color="#C2703E" stop-opacity="0.4"></stop>
-                <stop offset="100%" stop-color="#C2703E" stop-opacity="0"></stop>
+                <stop offset="0%"   stop-color="#FF7A2B" stop-opacity="0.4"></stop>
+                <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
               </radialGradient>
             </defs>
-            <circle cx="32" cy="32" r="31" fill="#171717"></circle>
+            <circle cx="32" cy="32" r="31" fill="#110D09"></circle>
             <circle cx="32" cy="36" r="27" fill="url(#emberHalo)"></circle>
             <circle cx="32" cy="36" r="14" fill="url(#emberCore)"></circle>
             <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
@@ -5064,7 +5166,7 @@
         </span>
         <div class="topbar__title">
           <h1>Bonfire</h1>
-          <p></p>
+          <p>agentic meeting room</p>
         </div>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item"><b id="topbarProject">platform standup</b></span>
@@ -5095,12 +5197,12 @@
                 <radialGradient id="accessEmberCore" cx="50%" cy="55%" r="55%">
                   <stop offset="0%" stop-color="#FBF5F0"></stop>
                   <stop offset="22%" stop-color="#D4A47A"></stop>
-                  <stop offset="55%" stop-color="#C2703E"></stop>
+                  <stop offset="55%" stop-color="#FF7A2B"></stop>
                   <stop offset="100%" stop-color="#8B4A27"></stop>
                 </radialGradient>
                 <radialGradient id="accessEmberHalo" cx="50%" cy="55%" r="55%">
-                  <stop offset="0%" stop-color="#C2703E" stop-opacity="0.4"></stop>
-                  <stop offset="100%" stop-color="#C2703E" stop-opacity="0"></stop>
+                  <stop offset="0%" stop-color="#FF7A2B" stop-opacity="0.4"></stop>
+                  <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
                 </radialGradient>
               </defs>
               <circle cx="32" cy="36" r="28" fill="url(#accessEmberHalo)"></circle>
@@ -5110,7 +5212,7 @@
           </div>
           <header>
             <div>
-              <h2>step into<br>the room.</h2>
+              <h2>join<br>the fire.</h2>
               <p class="access-kicker">standup · platform team</p>
             </div>
             <span id="accessState" class="access-state">locked</span>
@@ -5119,7 +5221,7 @@
             <label class="field">
               <span>participant</span>
               <select id="participantName" autocomplete="name">
-                <option value="">Select your name</option>
+                <option value="">choose your name</option>
                 <option>Erick</option>
                 <option>Tim</option>
                 <option>Tyler</option>
@@ -5134,11 +5236,11 @@
             </label>
             <label class="field">
               <span>room code</span>
-              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="Room password">
+              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="room code">
             </label>
           </div>
-          <p id="accessHint" class="access-hint">Verify access first. Camera and microphone start after the room lets you in.</p>
-          <button id="joinAccess" class="btn btn--primary access-join" type="button">Join the room</button>
+          <p id="accessHint" class="access-hint">verify access first. camera and microphone start after the room lets you in.</p>
+          <button id="joinAccess" class="btn btn--primary access-join" type="button">Enter</button>
           <div class="inside-row">
             <div class="who">
               <div id="participantAvatarStack" class="stack-avatars" aria-hidden="true"></div>
@@ -5173,24 +5275,11 @@
                 </svg>
               </span>
               <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout — this room, past meetings, or private updates…">
-              <span class="scout-ask__kbd" aria-hidden="true">⌘K</span>
               <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
             </form>
-            <div class="scout-chips" aria-label="Scout suggestions">
-              <button class="scout-chip" type="button" data-scout-query="summarize this meeting so far">summarize this meeting</button>
-              <button class="scout-chip" type="button" data-scout-query="what did Tim commit to last week?">what did Tim commit to?</button>
-              <button class="scout-chip" type="button" data-scout-query="what is blocked?">recap last week</button>
-              <button class="scout-chip is-private" type="button" data-scout-query="private: update my board">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="5" y="11" width="14" height="10"></rect>
-                  <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
-                </svg>
-                private update
-              </button>
-            </div>
-            <details class="scout-activity">
+            <details class="scout-activity" open>
               <summary>
-                <span class="scout-activity__label">room activity <span id="scoutActivityCount" class="scout-activity__count">0</span></span>
+                <span class="scout-activity__label">chat <span id="scoutActivityCount" class="scout-activity__count" hidden>0</span></span>
                 <svg class="scout-activity__chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
               </summary>
               <div id="assistantFeed" class="assistant-feed">
@@ -5200,22 +5289,6 @@
                 </article>
               </div>
             </details>
-            <footer class="scout-foot" aria-label="Scout summary">
-              <span class="scout-foot__chip" id="scoutFootMemory">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9"></circle>
-                  <path d="M12 7v5l3 2"></path>
-                </svg>
-                memory · <span id="memoryCount">0 saved</span>
-              </span>
-              <span class="scout-foot__chip" id="scoutFootDue">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="3" y="5" width="18" height="16"></rect>
-                  <path d="M3 9h18"></path><path d="M8 3v4"></path><path d="M16 3v4"></path>
-                </svg>
-                <span id="scoutFootDueText">0 due this week</span>
-              </span>
-            </footer>
           </section>
           <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
             <article class="memory-item">
@@ -5258,7 +5331,7 @@
                       <radialGradient id="speakerEmberCore" cx="50%" cy="55%" r="55%">
                         <stop offset="0%" stop-color="#FBF5F0"></stop>
                         <stop offset="22%" stop-color="#D4A47A"></stop>
-                        <stop offset="55%" stop-color="#C2703E"></stop>
+                        <stop offset="55%" stop-color="#FF7A2B"></stop>
                         <stop offset="100%" stop-color="#8B4A27"></stop>
                       </radialGradient>
                     </defs>
@@ -5298,7 +5371,7 @@
         <aside id="boardRail" class="board-rail mount-stagger" aria-label="Standup board preview">
           <header class="board-rail__header">
             <div>
-              <h2>Standup board</h2>
+              <h2>standup board</h2>
               <span id="boardPreviewState" class="board-rail__subtitle">platform · <span id="boardRailCount">0 cards</span></span>
             </div>
             <button id="expandBoard" class="board-expand" type="button" aria-expanded="false" disabled>
@@ -5339,11 +5412,11 @@
                     <radialGradient id="boardEmberCore" cx="50%" cy="55%" r="55%">
                       <stop offset="0%" stop-color="#FBF5F0"></stop>
                       <stop offset="22%" stop-color="#D4A47A"></stop>
-                      <stop offset="55%" stop-color="#C2703E"></stop>
+                      <stop offset="55%" stop-color="#FF7A2B"></stop>
                       <stop offset="100%" stop-color="#8B4A27"></stop>
                     </radialGradient>
                   </defs>
-                  <rect width="64" height="64" rx="14" fill="#171717"></rect>
+                  <rect width="64" height="64" rx="14" fill="#110D09"></rect>
                   <circle cx="32" cy="36" r="14" fill="url(#boardEmberCore)"></circle>
                   <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
                 </svg>
@@ -5562,6 +5635,8 @@
       let commentPreviewTimer
       let roomStartedAt = 0
       let roomClockTimer = 0
+      let connectionRecoveryTimer = 0
+      let isLeavingRoom = false
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
       const remoteLabelsByStream = new Map()
@@ -5569,7 +5644,7 @@
       const participantPlaceholders = new Map()
       const participantMediaStates = new Map()
       const audioMonitors = new Map()
-      const pendingRemoteAudioElements = new Set()
+      const pendingRemotePlaybackElements = new Set()
       const cardSnapshots = new Map()
       let cardDateOverrides = loadCardDateOverrides()
       let audioContext
@@ -5577,8 +5652,8 @@
       let queuedRemoteCandidates = []
       const mediaConstraints = {
         video: {
-          width: { ideal: 960, max: 960 },
-          height: { ideal: 540, max: 540 },
+          width: { ideal: 854, max: 960 },
+          height: { ideal: 480, max: 540 },
           frameRate: { ideal: 24, max: 24 },
           facingMode: 'user'
         },
@@ -5592,8 +5667,15 @@
       }
       const outboundMediaLimits = {
         audio: { maxBitrate: 48000 },
-        video: { maxBitrate: 1150000, maxFramerate: 24 }
+        video: {
+          maxBitrate: 900000,
+          maxFramerate: 24,
+          screenShareMaxBitrate: 1600000,
+          screenShareMaxFramerate: 15
+        }
       }
+      const cameraContentHint = 'motion'
+      const screenShareContentHint = 'detail'
 
       joinButton.addEventListener('click', joinRoom)
       joinAccessButton.addEventListener('click', joinRoom)
@@ -5687,7 +5769,7 @@
       updateCameraButton()
       updateRoomClock()
       renderBoardPreview()
-      setStageMode('gallery')
+      setStageMode('speaker')
       updateHearthParticipants()
       loadParticipantPreview()
       window.setInterval(loadParticipantPreview, 15000)
@@ -5709,7 +5791,7 @@
         accessReadyTag.textContent = verified ? 'ready' : 'locked'
         accessHint.textContent = verified
           ? `${selectedParticipantName()} is ready to verify.`
-          : 'Verify access first. Camera and microphone start after the room lets you in.'
+          : 'verify access first. camera and microphone start after the room lets you in.'
         updateHearthParticipants()
         updateParticipantPreviewText()
         return verified
@@ -5741,7 +5823,25 @@
           occupiedSeats = names.length
         }
         updateRoomClock()
-        return names.filter(Boolean)
+        return normalizeParticipantList(names)
+      }
+
+      function normalizeParticipantList(names) {
+        const normalized = []
+        const seen = new Set()
+        for (const name of names || []) {
+          const cleanName = String(name || '').trim()
+          if (!cleanName) {
+            continue
+          }
+          const key = cleanName.toLowerCase()
+          if (seen.has(key)) {
+            continue
+          }
+          seen.add(key)
+          normalized.push(cleanName)
+        }
+        return normalized
       }
 
       function applyParticipantMediaStates(mediaStates) {
@@ -5759,6 +5859,10 @@
         }
         if (currentParticipantName) {
           participantMediaStates.set(currentParticipantName, localParticipantMediaState())
+        }
+        if (activeScreenShareParticipant && !participantMediaState(activeScreenShareParticipant).screenSharing) {
+          activeScreenShareParticipant = ''
+          renderScreenStage()
         }
       }
 
@@ -5978,14 +6082,23 @@
           return
         }
 
+        const isScreenShare = track.kind === 'video' && track.contentHint === screenShareContentHint
         const encoding = parameters.encodings[0]
-        if (Number.isFinite(limits.maxBitrate)) {
-          encoding.maxBitrate = limits.maxBitrate
+        const maxBitrate = isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)
+          ? limits.screenShareMaxBitrate
+          : limits.maxBitrate
+        if (Number.isFinite(maxBitrate)) {
+          encoding.maxBitrate = maxBitrate
         }
-        if (track.kind === 'video' && Number.isFinite(limits.maxFramerate)) {
-          encoding.maxFramerate = limits.maxFramerate
+        const maxFramerate = isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)
+          ? limits.screenShareMaxFramerate
+          : limits.maxFramerate
+        if (track.kind === 'video' && Number.isFinite(maxFramerate)) {
+          encoding.maxFramerate = maxFramerate
           if ('degradationPreference' in parameters) {
-            parameters.degradationPreference = 'maintain-resolution'
+            parameters.degradationPreference = isScreenShare
+              ? 'maintain-resolution'
+              : 'maintain-framerate'
           }
         }
 
@@ -6023,6 +6136,7 @@
         updateHearthParticipants()
 
         pc = new RTCPeerConnection()
+        const sessionPeer = pc
         pc.ontrack = addRemoteTrack
         pc.onicecandidate = event => {
           if (!event.candidate || ws?.readyState !== WebSocket.OPEN) {
@@ -6031,14 +6145,22 @@
           ws.send(JSON.stringify({ event: 'candidate', data: JSON.stringify(event.candidate) }))
         }
         pc.onconnectionstatechange = () => {
-          const state = pc.connectionState
+          if (pc !== sessionPeer) {
+            return
+          }
+          const state = sessionPeer.connectionState
           if (state === 'connected') {
+            clearConnectionRecoveryTimer()
             if (!statusPillEl.classList.contains('pill--listening')) {
               setConnectionState('room', 'in the room')
             }
           } else if (state === 'connecting' || state === 'new') {
+            clearConnectionRecoveryTimer()
             setConnectionState('connecting', 'connecting…')
-          } else if (['failed', 'closed', 'disconnected'].includes(state)) {
+          } else if (state === 'disconnected') {
+            setConnectionState('connecting', 'reconnecting…')
+            scheduleConnectionRecovery(sessionPeer)
+          } else if (state === 'failed' || state === 'closed') {
             leaveRoom()
           }
         }
@@ -6051,6 +6173,23 @@
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
         publishParticipantMediaState()
         startRoomClock()
+      }
+
+      function clearConnectionRecoveryTimer() {
+        if (connectionRecoveryTimer) {
+          window.clearTimeout(connectionRecoveryTimer)
+          connectionRecoveryTimer = 0
+        }
+      }
+
+      function scheduleConnectionRecovery(sessionPeer) {
+        clearConnectionRecoveryTimer()
+        connectionRecoveryTimer = window.setTimeout(() => {
+          connectionRecoveryTimer = 0
+          if (pc === sessionPeer && sessionPeer.connectionState === 'disconnected') {
+            leaveRoom()
+          }
+        }, 8000)
       }
 
       async function getPreferredUserMedia() {
@@ -6115,6 +6254,7 @@
         if (!track) {
           return
         }
+        setTrackContentHint(track, cameraContentHint)
         track.enabled = !isCameraOff
         track.addEventListener('ended', () => {
           isCameraOff = true
@@ -6603,6 +6743,9 @@
           case 'access_granted':
             handleAccessGranted(message.data)
             break
+          case 'session_replaced':
+            handleSessionReplaced(String(message.data || 'this browser session was replaced.'))
+            break
           case 'meeting_archived':
             handleMeetingArchived(message.data)
             break
@@ -6664,9 +6807,18 @@
       }
 
       function handleParticipants(participants) {
-        const previousNames = participantsInRoom.join(', ')
+        const previousParticipants = participantsInRoom
+        const previousNames = previousParticipants.join(', ')
         participantsInRoom = applyRoomSnapshot(participants)
+        participantPreview = participantsInRoom
         const names = participantsInRoom.join(', ')
+        const nextKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))
+        for (const name of previousParticipants) {
+          if (!nextKeys.has(name.toLowerCase())) {
+            removeRemoteParticipantMediaByName(name)
+            participantMediaStates.delete(name)
+          }
+        }
         if (names && names !== previousNames) {
           setLog(`in room · ${names}`)
         }
@@ -6676,13 +6828,13 @@
 
       function handleParticipantJoined(participant) {
         const name = participant?.name || 'participant'
+        removeRemoteParticipantMediaByName(name)
         addAssistantMessage({
           kind: 'status',
           text: `${name} joined the room.`
         })
-        if (!participantsInRoom.includes(name)) {
-          participantsInRoom.push(name)
-        }
+        participantsInRoom = normalizeParticipantList([...participantsInRoom, name])
+        participantPreview = participantsInRoom
         updateParticipantPreviewText()
         updateHearthParticipants()
       }
@@ -6706,6 +6858,9 @@
           }
           removeRemoteSelfTracks()
           return
+        }
+        if (track?.kind === 'video' && name !== 'participant') {
+          removeRemoteParticipantVideoTracksByName(name, { exceptKeys: [trackId, streamId] })
         }
         if (trackId) {
           relabelRemoteTile(trackId, name)
@@ -6747,7 +6902,7 @@
       function removeRemoteParticipantTrack(key, name) {
         const tile = key ? remoteElements.get(key) : null
         if (tile) {
-          tile.remove()
+          disposeRemoteTile(tile)
           remoteElements.delete(key)
         }
         if (name) {
@@ -6757,6 +6912,75 @@
           detachAudioMonitor(key)
         }
         updateHearthParticipants()
+      }
+
+      function disposeRemoteTile(tile) {
+        if (!tile) {
+          return
+        }
+        const video = tile.querySelector('video')
+        if (video) {
+          pendingRemotePlaybackElements.delete(video)
+          video.pause?.()
+          video.srcObject = null
+        }
+        tile.remove()
+      }
+
+      function removeRemoteParticipantVideoTracksByName(name, options = {}) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+        const exceptKeys = new Set((options.exceptKeys || []).filter(Boolean))
+        let removed = false
+
+        for (const [key, tile] of Array.from(remoteElements.entries())) {
+          const tileName = String(tile.dataset.participant || '').trim()
+          if (exceptKeys.has(key) || !tileName || tileName === 'participant' || tileName.toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          disposeRemoteTile(tile)
+          remoteElements.delete(key)
+          removed = true
+        }
+
+        for (const streamName of Array.from(remoteStreamsByParticipant.keys())) {
+          if (streamName.toLowerCase() === participantName.toLowerCase()) {
+            remoteStreamsByParticipant.delete(streamName)
+            removed = true
+          }
+        }
+
+        if (removed) {
+          if (activeScreenShareParticipant.toLowerCase() === participantName.toLowerCase()) {
+            renderScreenStage()
+          }
+          updateHearthParticipants()
+        }
+        return removed
+      }
+
+      function removeRemoteParticipantMediaByName(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+
+        let removed = removeRemoteParticipantVideoTracksByName(participantName)
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          const monitorName = String(monitor.name || '').trim()
+          if (!monitorName || monitorName.toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          detachAudioMonitor(key)
+          removed = true
+        }
+
+        if (removed) {
+          updateHearthParticipants()
+        }
+        return removed
       }
 
       function removeRemoteSelfTracks() {
@@ -6797,6 +7021,17 @@
         accessState.textContent = 'locked'
         accessHint.textContent = message
         addAssistantMessage({ kind: 'error', text: message })
+      }
+
+      function handleSessionReplaced(message) {
+        if (ws) {
+          ws.onclose = null
+        }
+        leaveRoom()
+        accessPanel.classList.remove('is-verified')
+        accessState.textContent = 'replaced'
+        accessHint.textContent = message
+        setLog(message)
       }
 
       async function handleAccessGranted(participant) {
@@ -6962,7 +7197,9 @@
             throw new Error('screen sharing is unavailable in this browser')
           }
 
+          setTrackContentHint(screenTrack, screenShareContentHint)
           await sender.replaceTrack(screenTrack)
+          await configureOutboundSender(sender, screenTrack)
           activeScreenShareParticipant = currentParticipantName
           screenShareButton.textContent = 'Stop sharing'
           renderScreenStage()
@@ -6991,7 +7228,9 @@
         const cameraTrack = localStream?.getVideoTracks()[0]
         const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
         if (cameraTrack && sender) {
+          setTrackContentHint(cameraTrack, cameraContentHint)
           await sender.replaceTrack(cameraTrack)
+          await configureOutboundSender(sender, cameraTrack)
         }
 
         if (ws?.readyState === WebSocket.OPEN) {
@@ -7030,15 +7269,12 @@
       }
 
       function participantNamesForRoom() {
-        const names = [
+        return normalizeParticipantList([
           currentParticipantName,
           selectedParticipantName(),
           ...participantsInRoom,
           ...participantPreview
-        ]
-          .map(name => String(name || '').trim())
-          .filter(Boolean)
-        return Array.from(new Set(names))
+        ])
       }
 
       function visibleParticipantNames() {
@@ -7233,7 +7469,7 @@
         tile.classList.toggle('is-sharing-screen', sharing)
         const video = tile.querySelector('video')
         if (video) {
-          video.hidden = cameraOff
+          video.hidden = cameraOff && video.dataset.remotePlayback !== 'synced'
         }
         let avatar = tile.querySelector('.tile-avatar')
         if (!avatar && video) {
@@ -7384,8 +7620,8 @@
 
       function unlockRoomAudioPlayback() {
         ensureAudioContext()
-        for (const audio of Array.from(pendingRemoteAudioElements)) {
-          playRemoteAudio(audio)
+        for (const element of Array.from(pendingRemotePlaybackElements)) {
+          playRemoteMedia(element)
         }
       }
 
@@ -7400,22 +7636,87 @@
         audio.setAttribute('aria-hidden', 'true')
         audio.style.display = 'none'
         document.body.appendChild(audio)
-        playRemoteAudio(audio)
+        playRemoteMedia(audio)
         return audio
       }
 
-      function playRemoteAudio(audio) {
-        const playPromise = audio?.play?.()
+      function playRemoteMedia(element) {
+        const playPromise = element?.play?.()
         if (!playPromise?.then) {
           return
         }
         playPromise.then(() => {
-          pendingRemoteAudioElements.delete(audio)
+          pendingRemotePlaybackElements.delete(element)
         }).catch(error => {
-          pendingRemoteAudioElements.add(audio)
+          pendingRemotePlaybackElements.add(element)
           console.warn('Remote audio playback is waiting for a user gesture', error)
           setLog('click once to enable room audio')
         })
+      }
+
+      function liveTrack(track) {
+        return track && track.readyState !== 'ended'
+      }
+
+      function syncedRemotePlaybackStream(stream, audioTrack) {
+        const tracks = []
+        const seen = new Set()
+        const addTrack = track => {
+          if (!liveTrack(track) || seen.has(track.id)) {
+            return
+          }
+          seen.add(track.id)
+          tracks.push(track)
+        }
+        for (const track of stream?.getVideoTracks?.() || []) {
+          addTrack(track)
+        }
+        for (const track of stream?.getAudioTracks?.() || []) {
+          addTrack(track)
+        }
+        addTrack(audioTrack)
+        return new MediaStream(tracks)
+      }
+
+      function configureRemotePlaybackElement(element, stream, name, { muted = false } = {}) {
+        if (!element) {
+          return
+        }
+        element.autoplay = true
+        element.playsInline = true
+        element.muted = muted
+        element.defaultMuted = muted
+        element.volume = muted ? 0 : 1
+        element.dataset.participant = name || 'participant'
+        element.dataset.remotePlayback = muted ? 'muted' : 'synced'
+        if (element.srcObject !== stream) {
+          element.srcObject = stream
+        }
+        playRemoteMedia(element)
+      }
+
+      function removeOwnedAudioElement(element) {
+        if (!element) {
+          return
+        }
+        pendingRemotePlaybackElements.delete(element)
+        element.pause()
+        element.srcObject = null
+        element.remove()
+      }
+
+      function promoteRemotePlaybackToVideo(key, video, stream, name) {
+        configureRemotePlaybackElement(video, stream, name, { muted: true })
+      }
+
+      function demoteRemotePlaybackFromVideo(key, name) {
+        const monitor = audioMonitors.get(key)
+        if (!monitor || monitor.ownsAudioElement || !liveTrack(monitor.track)) {
+          return
+        }
+        pendingRemotePlaybackElements.delete(monitor.audio)
+        monitor.audio = createRemoteAudioElement(new MediaStream([monitor.track]), name || monitor.name)
+        monitor.ownsAudioElement = true
       }
 
       function attachAudioMonitor(key, name, track, options = {}) {
@@ -7425,7 +7726,18 @@
         detachAudioMonitor(key)
 
         const stream = new MediaStream([track])
-        const audio = options.play ? createRemoteAudioElement(stream, name) : null
+        let audio = null
+        let ownsAudioElement = false
+        if (options.play) {
+          if (options.playbackElement) {
+            const playbackStream = syncedRemotePlaybackStream(options.playbackStream || stream, track)
+            configureRemotePlaybackElement(options.playbackElement, playbackStream, name, { muted: false })
+            audio = options.playbackElement
+          } else {
+            audio = createRemoteAudioElement(stream, name)
+            ownsAudioElement = true
+          }
+        }
         const context = ensureAudioContext()
         let source
         let analyser
@@ -7446,10 +7758,12 @@
 
         audioMonitors.set(key, {
           name: name || 'participant',
+          track,
           analyser,
           data,
           source,
           audio,
+          ownsAudioElement,
           setsActiveSpeaker: options.setsActiveSpeaker !== false && Boolean(analyser),
           stream
         })
@@ -7480,10 +7794,17 @@
           return
         }
         if (monitor.audio) {
-          pendingRemoteAudioElements.delete(monitor.audio)
-          monitor.audio.pause()
-          monitor.audio.srcObject = null
-          monitor.audio.remove()
+          pendingRemotePlaybackElements.delete(monitor.audio)
+          if (monitor.ownsAudioElement) {
+            monitor.audio.pause()
+            monitor.audio.srcObject = null
+            monitor.audio.remove()
+          } else {
+            monitor.audio.muted = true
+            monitor.audio.defaultMuted = true
+            monitor.audio.volume = 0
+            monitor.audio.dataset.remotePlayback = 'muted'
+          }
         }
         try {
           monitor.source?.disconnect()
@@ -7555,7 +7876,8 @@
           detachAudioMonitor(key)
           return
         }
-        attachAudioMonitor(key, name, event.track, { play: true })
+        const stream = event.streams[0] || new MediaStream([event.track])
+        attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream })
       }
 
       function addRemoteTrack(event) {
@@ -7571,6 +7893,9 @@
           removeRemoteParticipantTrack(key, participantName)
           return
         }
+        if (participantName !== 'participant') {
+          removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: [key] })
+        }
         if (remoteElements.has(key)) {
           return
         }
@@ -7579,11 +7904,7 @@
         tile.className = 'video-tile hearth-seat'
 
         const video = document.createElement('video')
-        video.autoplay = true
-        video.muted = true
-        video.defaultMuted = true
-        video.playsInline = true
-        video.srcObject = stream
+        promoteRemotePlaybackToVideo(key, video, stream, participantName)
 
         const label = document.createElement('span')
         label.className = 'video-label'
@@ -7595,9 +7916,10 @@
         avatar.className = 'tile-avatar'
         tile.append(video, avatar, renderMediaFlags(), label)
         videoStack.appendChild(tile)
+        playRemoteMedia(video)
         remoteElements.set(key, tile)
         if (participantName !== 'participant') {
-          remoteStreamsByParticipant.set(participantName, stream)
+          remoteStreamsByParticipant.set(participantName, video.srcObject || stream)
           removeParticipantPlaceholder(participantName)
         }
         if (activeScreenShareParticipant === participantName) {
@@ -7607,19 +7929,35 @@
         updateHearthParticipants()
 
         const removeRemoteTile = () => {
-          tile.remove()
+          demoteRemotePlaybackFromVideo(key, participantName)
+          disposeRemoteTile(tile)
           remoteElements.delete(key)
           if (participantName !== 'participant') {
             remoteStreamsByParticipant.delete(participantName)
           }
           updateHearthParticipants()
         }
-        stream.onremovetrack = removeRemoteTile
+        stream.onremovetrack = removeEvent => {
+          if (removeEvent.track?.kind === 'video') {
+            removeRemoteTile()
+          }
+        }
         event.track.addEventListener('ended', removeRemoteTile, { once: true })
       }
 
+      function setTrackContentHint(track, hint) {
+        if (!track || !('contentHint' in track)) {
+          return
+        }
+        try {
+          track.contentHint = hint
+        } catch {
+          // Some browsers expose contentHint but reject values they do not understand.
+        }
+      }
+
       function remoteTrackKey(event) {
-        return event.streams[0]?.id || remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id
+        return remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id || event.streams[0]?.id
       }
 
       function participantNameForRemoteTrack(event) {
@@ -7658,7 +7996,9 @@
       }
 
       function renderMemory() {
-        memoryCount.textContent = `${memoryEntries.length} saved`
+        if (memoryCount) {
+          memoryCount.textContent = `${memoryEntries.length} saved`
+        }
         if (memoryEntries.length === 0) {
           const empty = document.createElement('article')
           empty.className = 'memory-item'
@@ -8686,7 +9026,7 @@
         return Array.from(participantNameInput.options)
           .map(option => option.value || option.textContent)
           .map(name => name.trim())
-          .filter(name => name && name !== 'Select your name')
+          .filter(name => name && name !== 'choose your name')
       }
 
       function saveCardEditor(form, draft, isNew) {
@@ -8999,7 +9339,7 @@
       }
 
       // Cool signal sparks for completed work, kept in one restrained family.
-      const SPARK_PALETTE = ['#FBF5F0', '#F5E6D8', '#E8C9B0', '#D4A47A', '#C2703E', '#A85C30']
+      const SPARK_PALETTE = ['#FBF5F0', '#F5E6D8', '#E8C9B0', '#D4A47A', '#FF7A2B', '#A85C30']
       const SPARK_COUNT = 14
       const SPARK_RATE_LIMIT_MS = 6000
       let lastSparksAt = 0
@@ -9062,7 +9402,12 @@
       }
 
       function leaveRoom() {
+        if (isLeavingRoom) {
+          return
+        }
+        isLeavingRoom = true
         stopScreenShare().catch(() => {})
+        clearConnectionRecoveryTimer()
         leaveButton.disabled = true
         micSelect.disabled = true
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
@@ -9072,15 +9417,21 @@
         archiveMeetingButton.textContent = 'Send notes'
         updateBoardDockControls()
 
-        if (ws && ws.readyState !== WebSocket.CLOSED) {
-          ws.close()
-        }
+        const socket = ws
         ws = undefined
-
-        if (pc) {
-          pc.close()
+        if (socket) {
+          socket.onclose = null
         }
+        if (socket && socket.readyState !== WebSocket.CLOSED) {
+          socket.close()
+        }
+
+        const peer = pc
         pc = undefined
+        if (peer) {
+          peer.onconnectionstatechange = null
+          peer.close()
+        }
 
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop())
@@ -9096,11 +9447,12 @@
         localVideo.closest('.video-tile')?.classList.remove('is-muted', 'is-camera-off', 'is-sharing-screen')
         clearAudioMonitors()
 
-        remoteElements.forEach(tile => tile.remove())
+        remoteElements.forEach(tile => disposeRemoteTile(tile))
         remoteElements.clear()
         remoteStreamsByParticipant.clear()
         remoteLabelsByStream.clear()
         remoteLabelsByTrack.clear()
+        pendingRemotePlaybackElements.clear()
         queuedRemoteCandidates = []
         participantPlaceholders.forEach(tile => tile.remove())
         participantPlaceholders.clear()
@@ -9129,6 +9481,7 @@
         setRoomView(false)
         validateAccess()
         loadParticipantPreview()
+        isLeavingRoom = false
       }
 
       function setConnectionState(state, label) {
@@ -9145,7 +9498,7 @@
       function setLog(message) {
         const text = String(message || '')
         logEl.title = text
-        logEl.textContent = text.length > 180 ? `${text.slice(0, 177)}...` : text
+        logEl.textContent = text.length > 180 ? `${text.slice(0, 177)}…` : text
       }
 
       function updateBoardControls() {
@@ -9153,7 +9506,7 @@
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
-          ? `${cards.length} project${cards.length === 1 ? '' : 's'}`
+          ? `${cards.length} card${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
         boardPreviewState.textContent = boardState.textContent
         updateBoardDockControls()
