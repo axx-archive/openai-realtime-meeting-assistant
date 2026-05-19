@@ -1364,8 +1364,32 @@
         color: var(--ember-300);
       }
 
+      .audio-settings-button {
+        min-width: 44px;
+        width: 44px;
+        min-height: 40px;
+        height: 40px;
+        padding: 0;
+        border-radius: var(--r-pill);
+      }
+
+      .audio-settings-button svg {
+        flex: 0 0 auto;
+      }
+
+      .audio-settings-button.is-voice-focus {
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.14);
+        color: var(--ember-300);
+      }
+
+      .audio-settings-label {
+        display: none;
+      }
+
       #appShell:not(.is-in-room) #muteMic,
       #appShell:not(.is-in-room) #toggleCamera,
+      #appShell:not(.is-in-room) #audioSettingsButton,
       #appShell:not(.is-in-room) #screenShare,
       #appShell:not(.is-in-room) #archiveMeeting,
       #appShell:not(.is-in-room) #leave,
@@ -1674,6 +1698,231 @@
       }
 
       .card-detail-region.visible { display: grid; }
+
+      .audio-settings-region {
+        position: fixed;
+        inset: 0;
+        z-index: 1260;
+        display: none;
+        place-items: center;
+        padding: var(--s-6);
+        background: rgba(11, 8, 5, 0.66);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+
+      .audio-settings-region.visible { display: grid; }
+
+      .audio-settings-panel {
+        width: min(560px, calc(100vw - 48px));
+        max-height: calc(100svh - 48px);
+        overflow: auto;
+        border: 1px solid var(--glass-edge);
+        border-radius: var(--r-lg);
+        background: var(--surface-panel);
+        box-shadow: var(--shadow-3), var(--glass-highlight);
+        color: var(--fg-0);
+      }
+
+      .audio-settings-panel:focus {
+        outline: none;
+      }
+
+      .audio-settings-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        gap: var(--s-3);
+        padding: var(--s-5) var(--s-5) var(--s-3);
+      }
+
+      .audio-settings-header h2 {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.2;
+      }
+
+      .audio-settings-header p,
+      .voice-profile p {
+        color: var(--fg-2);
+        font-size: 13px;
+        line-height: 1.45;
+        text-wrap: pretty;
+      }
+
+      .audio-settings-close {
+        width: 40px;
+        height: 40px;
+        min-width: 0;
+        padding: 0;
+        border-radius: var(--r-pill);
+      }
+
+      .audio-settings-body {
+        display: grid;
+        gap: var(--s-4);
+        padding: 0 var(--s-5) var(--s-5);
+      }
+
+      .noise-mode-group {
+        display: grid;
+        gap: var(--s-2);
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+
+      .noise-mode-group legend,
+      .voice-profile__label {
+        margin-bottom: var(--s-2);
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .noise-mode-option {
+        position: relative;
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: var(--s-3);
+        align-items: center;
+        min-height: 56px;
+        padding: var(--s-3);
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: rgba(255, 235, 200, 0.045);
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .noise-mode-option:hover {
+        border-color: var(--line-strong);
+        background: rgba(255, 235, 200, 0.07);
+      }
+
+      .noise-mode-option:active {
+        transform: scale(0.985);
+      }
+
+      .noise-mode-option input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .noise-mode-control {
+        width: 16px;
+        height: 16px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.56);
+      }
+
+      .noise-mode-option input:checked + .noise-mode-control {
+        border-color: rgba(255, 122, 43, 0.74);
+        background: radial-gradient(circle at 50% 50%, var(--ember-500) 0 34%, rgba(255, 122, 43, 0.16) 38% 100%);
+        box-shadow: 0 0 18px rgba(255, 122, 43, 0.18);
+      }
+
+      .noise-mode-option input:focus-visible + .noise-mode-control {
+        outline: 2px solid var(--ember-500);
+        outline-offset: 3px;
+      }
+
+      .noise-mode-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .noise-mode-text strong {
+        color: var(--fg-0);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .noise-mode-text span {
+        color: var(--fg-2);
+        font-size: 12.5px;
+        line-height: 1.35;
+      }
+
+      .voice-profile {
+        display: grid;
+        gap: var(--s-3);
+        min-width: 0;
+        padding: var(--s-4);
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: rgba(11, 8, 5, 0.34);
+      }
+
+      .voice-profile__meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s-3);
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.06em;
+        text-transform: lowercase;
+      }
+
+      .voice-meter {
+        position: relative;
+        overflow: hidden;
+        height: 8px;
+        border-radius: var(--r-pill);
+        background: rgba(255, 235, 200, 0.08);
+      }
+
+      .voice-meter__bar {
+        display: block;
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--amber-500), var(--ember-500));
+        box-shadow: 0 0 18px rgba(255, 122, 43, 0.22);
+        transition: width 80ms linear;
+      }
+
+      .voice-profile__actions,
+      .audio-settings-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--s-2);
+        flex-wrap: wrap;
+      }
+
+      .audio-settings-actions {
+        padding: 0 var(--s-5) var(--s-5);
+      }
+
+      @media (max-width: 640px) {
+        .audio-settings-region {
+          padding: var(--s-3);
+        }
+
+        .audio-settings-panel {
+          width: calc(100vw - 24px);
+          max-height: calc(100svh - 24px);
+        }
+
+        .audio-settings-header,
+        .audio-settings-body,
+        .audio-settings-actions {
+          padding-right: var(--s-4);
+          padding-left: var(--s-4);
+        }
+      }
 
       .card-detail {
         display: flex;
@@ -4243,7 +4492,7 @@
 
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: 44px 44px minmax(112px, 1fr) minmax(112px, 1fr) 44px;
+          grid-template-columns: 44px 44px 44px minmax(112px, 1fr) minmax(112px, 1fr) 44px;
           align-items: center;
           gap: 8px;
           width: 100%;
@@ -4258,6 +4507,7 @@
 
         #appShell.is-in-room #muteMic,
         #appShell.is-in-room #toggleCamera,
+        #appShell.is-in-room #audioSettingsButton,
         #appShell.is-in-room #leave {
           width: 44px;
           min-width: 0;
@@ -4280,15 +4530,15 @@
         }
 
         #appShell.is-in-room #screenShare {
-          grid-column: 3;
-        }
-
-        #appShell.is-in-room #archiveMeeting {
           grid-column: 4;
         }
 
-        #appShell.is-in-room #leave {
+        #appShell.is-in-room #archiveMeeting {
           grid-column: 5;
+        }
+
+        #appShell.is-in-room #leave {
+          grid-column: 6;
           grid-row: 1;
           justify-self: end;
         }
@@ -4659,7 +4909,8 @@
         }
 
         #muteMic,
-        #toggleCamera {
+        #toggleCamera,
+        #audioSettingsButton {
           width: 44px;
           min-width: 0;
           height: 44px;
@@ -4668,7 +4919,8 @@
         }
 
         #muteMic .mute-label,
-        #toggleCamera .camera-label {
+        #toggleCamera .camera-label,
+        #audioSettingsButton .audio-settings-label {
           display: none;
         }
 
@@ -4682,6 +4934,7 @@
 
         #appShell:not(.is-in-room) #muteMic,
         #appShell:not(.is-in-room) #toggleCamera,
+        #appShell:not(.is-in-room) #audioSettingsButton,
         #appShell:not(.is-in-room) #screenShare,
         #appShell:not(.is-in-room) #archiveMeeting,
         #appShell:not(.is-in-room) #leave,
@@ -4700,7 +4953,7 @@
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .workspace {
-          padding-bottom: 92px;
+          padding-bottom: 144px;
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
@@ -4729,6 +4982,17 @@
           align-items: center;
           gap: 8px;
           width: 100%;
+        }
+
+        #appShell.is-in-room #audioSettingsButton {
+          grid-column: 1 / 3;
+          grid-row: 2;
+          width: 100%;
+          justify-self: stretch;
+        }
+
+        #appShell.is-in-room #audioSettingsButton .audio-settings-label {
+          display: inline;
         }
 
         #appShell.is-in-room #screenShare,
@@ -5517,6 +5781,20 @@
             </svg>
             <span class="camera-label">Camera</span>
           </button>
+          <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 21v-7"></path>
+              <path d="M4 10V3"></path>
+              <path d="M12 21v-9"></path>
+              <path d="M12 8V3"></path>
+              <path d="M20 21v-5"></path>
+              <path d="M20 12V3"></path>
+              <path d="M2 14h4"></path>
+              <path d="M10 8h4"></path>
+              <path d="M18 16h4"></path>
+            </svg>
+            <span class="audio-settings-label">audio</span>
+          </button>
           <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
           <button id="copyRoomLink" class="btn btn--ghost" type="button">Copy link</button>
           <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
@@ -5533,6 +5811,71 @@
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
+    <div id="audioSettingsRegion" class="audio-settings-region" role="dialog" aria-modal="true" aria-labelledby="audioSettingsTitle">
+      <section class="audio-settings-panel" tabindex="-1">
+        <header class="audio-settings-header">
+          <div>
+            <h2 id="audioSettingsTitle">audio focus.</h2>
+            <p>the room cleans your microphone before it reaches people or Scout.</p>
+          </div>
+          <button id="audioSettingsClose" class="btn btn--ghost audio-settings-close" type="button" aria-label="Close audio settings" title="close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </header>
+        <div class="audio-settings-body">
+          <fieldset class="noise-mode-group">
+            <legend>noise reduction</legend>
+            <label class="noise-mode-option">
+              <input type="radio" name="audioNoiseMode" value="voice-focus">
+              <span class="noise-mode-control" aria-hidden="true"></span>
+              <span class="noise-mode-text">
+                <strong>voice focus</strong>
+                <span>browser cleanup plus an adaptive local voice gate.</span>
+              </span>
+            </label>
+            <label class="noise-mode-option">
+              <input type="radio" name="audioNoiseMode" value="standard">
+              <span class="noise-mode-control" aria-hidden="true"></span>
+              <span class="noise-mode-text">
+                <strong>standard</strong>
+                <span>browser echo cancellation and noise suppression only.</span>
+              </span>
+            </label>
+            <label class="noise-mode-option">
+              <input type="radio" name="audioNoiseMode" value="off">
+              <span class="noise-mode-control" aria-hidden="true"></span>
+              <span class="noise-mode-text">
+                <strong>raw mic</strong>
+                <span>no added cleanup beyond the microphone hardware.</span>
+              </span>
+            </label>
+          </fieldset>
+          <section class="voice-profile" aria-label="Voice focus profile">
+            <div>
+              <div class="voice-profile__label">voice profile</div>
+              <p>speak normally for a few seconds. the profile stays in this browser.</p>
+            </div>
+            <div class="voice-profile__meta">
+              <span id="voiceProfileState">adaptive profile</span>
+              <span id="voiceTrainingCountdown"></span>
+            </div>
+            <div class="voice-meter" aria-hidden="true">
+              <span id="voiceTrainingMeter" class="voice-meter__bar"></span>
+            </div>
+            <div class="voice-profile__actions">
+              <button id="trainVoiceFocus" class="btn btn--ghost" type="button">Train voice focus</button>
+              <button id="resetVoiceFocus" class="btn btn--text" type="button">reset</button>
+            </div>
+          </section>
+        </div>
+        <footer class="audio-settings-actions">
+          <button id="audioSettingsDone" class="btn btn--primary" type="button">Done</button>
+        </footer>
+      </section>
+    </div>
 
     <script>
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
@@ -5566,6 +5909,17 @@
       const micSelect = document.getElementById('micSelect')
       const muteMicButton = document.getElementById('muteMic')
       const toggleCameraButton = document.getElementById('toggleCamera')
+      const audioSettingsButton = document.getElementById('audioSettingsButton')
+      const audioSettingsRegion = document.getElementById('audioSettingsRegion')
+      const audioSettingsPanel = audioSettingsRegion.querySelector('.audio-settings-panel')
+      const audioSettingsClose = document.getElementById('audioSettingsClose')
+      const audioSettingsDone = document.getElementById('audioSettingsDone')
+      const audioNoiseModeInputs = Array.from(document.querySelectorAll('input[name="audioNoiseMode"]'))
+      const trainVoiceFocusButton = document.getElementById('trainVoiceFocus')
+      const resetVoiceFocusButton = document.getElementById('resetVoiceFocus')
+      const voiceProfileState = document.getElementById('voiceProfileState')
+      const voiceTrainingCountdown = document.getElementById('voiceTrainingCountdown')
+      const voiceTrainingMeter = document.getElementById('voiceTrainingMeter')
       const screenShareButton = document.getElementById('screenShare')
       const copyRoomLinkButton = document.getElementById('copyRoomLink')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
@@ -5650,6 +6004,25 @@
       let audioContext
       let audioLevelFrame = 0
       let queuedRemoteCandidates = []
+      let localAudioSourceTrack
+      let localAudioProcessor
+      let voiceFocusWorkletPromise
+      let voiceTrainingFrame = 0
+      let voiceTrainingCleanup = null
+      let voiceTrainingSamples = []
+      const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
+      const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
+      const audioModeLabels = {
+        'voice-focus': 'voice focus',
+        standard: 'standard cleanup',
+        off: 'raw mic'
+      }
+      const defaultVoiceProfile = {
+        noiseFloor: 0.012,
+        speechFloor: 0.075,
+        trainedAt: ''
+      }
+      let audioSettings = loadAudioSettings()
       const mediaConstraints = {
         video: {
           width: { ideal: 854, max: 960 },
@@ -5683,6 +6056,24 @@
       micSelect.addEventListener('change', switchMicrophone)
       muteMicButton.addEventListener('click', toggleLocalMute)
       toggleCameraButton.addEventListener('click', toggleLocalCamera)
+      audioSettingsButton.addEventListener('click', openAudioSettings)
+      audioSettingsClose.addEventListener('click', closeAudioSettings)
+      audioSettingsDone.addEventListener('click', closeAudioSettings)
+      audioSettingsRegion.addEventListener('click', event => {
+        if (event.target === audioSettingsRegion) {
+          closeAudioSettings()
+        }
+      })
+      audioNoiseModeInputs.forEach(input => {
+        input.addEventListener('change', () => {
+          if (!input.checked) {
+            return
+          }
+          setAudioNoiseMode(input.value)
+        })
+      })
+      trainVoiceFocusButton.addEventListener('click', trainVoiceFocus)
+      resetVoiceFocusButton.addEventListener('click', resetVoiceFocusProfile)
       screenShareButton.addEventListener('click', toggleScreenShare)
       copyRoomLinkButton.addEventListener('click', copyRoomLink)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
@@ -5731,6 +6122,10 @@
       })
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
+          if (audioSettingsRegion.classList.contains('visible')) {
+            closeAudioSettings()
+            return
+          }
           if (appShell.classList.contains('is-board-expanded')) {
             setBoardExpanded(false)
             return
@@ -5767,6 +6162,7 @@
       updateBoardControls()
       updateMuteButton()
       updateCameraButton()
+      renderAudioSettings()
       updateRoomClock()
       renderBoardPreview()
       setStageMode('speaker')
@@ -5776,6 +6172,302 @@
 
       function selectedParticipantName() {
         return participantNameInput.value.trim()
+      }
+
+      function loadAudioSettings() {
+        const defaults = {
+          mode: 'voice-focus',
+          profile: { ...defaultVoiceProfile }
+        }
+        try {
+          const saved = JSON.parse(window.localStorage?.getItem(audioSettingsStorageKey) || '{}')
+          const mode = Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode) ? saved.mode : defaults.mode
+          const profile = saved?.profile && typeof saved.profile === 'object'
+            ? {
+                noiseFloor: clampNumber(saved.profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+                speechFloor: clampNumber(saved.profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+                trainedAt: String(saved.profile.trainedAt || '')
+              }
+            : { ...defaultVoiceProfile }
+          return { mode, profile }
+        } catch {
+          return defaults
+        }
+      }
+
+      function saveAudioSettings() {
+        try {
+          window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify(audioSettings))
+        } catch {
+          // Audio still works if local storage is unavailable.
+        }
+      }
+
+      function clampNumber(value, min, max, fallback) {
+        const number = Number(value)
+        if (!Number.isFinite(number)) {
+          return fallback
+        }
+        return Math.min(max, Math.max(min, number))
+      }
+
+      function audioProcessingEnabled() {
+        return audioSettings.mode !== 'off'
+      }
+
+      function voiceFocusEnabled() {
+        return audioSettings.mode === 'voice-focus'
+      }
+
+      function audioModeLabel() {
+        return audioModeLabels[audioSettings.mode] || audioModeLabels['voice-focus']
+      }
+
+      function renderAudioSettings() {
+        audioNoiseModeInputs.forEach(input => {
+          input.checked = input.value === audioSettings.mode
+        })
+
+        const inRoom = Boolean(localStream)
+        audioSettingsButton.disabled = !inRoom
+        audioSettingsButton.classList.toggle('is-voice-focus', voiceFocusEnabled())
+        audioSettingsButton.title = audioModeLabel()
+        audioSettingsButton.setAttribute('aria-label', `Audio settings: ${audioModeLabel()}`)
+
+        const trainedAt = audioSettings.profile?.trainedAt || ''
+        voiceProfileState.textContent = trainedAt ? `trained ${formatTrainedAt(trainedAt)}` : 'adaptive profile'
+        resetVoiceFocusButton.disabled = !trainedAt
+        trainVoiceFocusButton.disabled = !inRoom || Boolean(voiceTrainingFrame)
+        trainVoiceFocusButton.textContent = voiceTrainingFrame ? 'Training…' : 'Train voice focus'
+        if (!voiceTrainingFrame) {
+          voiceTrainingCountdown.textContent = ''
+          voiceTrainingMeter.style.width = '0%'
+        }
+        updateRoomClock()
+      }
+
+      function formatTrainedAt(value) {
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) {
+          return 'in this browser'
+        }
+        return new Intl.DateTimeFormat(undefined, {
+          hour: 'numeric',
+          minute: '2-digit'
+        }).format(date).toLowerCase()
+      }
+
+      function openAudioSettings() {
+        if (audioSettingsButton.disabled) {
+          return
+        }
+        renderAudioSettings()
+        audioSettingsRegion.classList.add('visible')
+        audioSettingsPanel.focus()
+      }
+
+      function closeAudioSettings(options = {}) {
+        const wasOpen = audioSettingsRegion.classList.contains('visible')
+        audioSettingsRegion.classList.remove('visible')
+        cancelVoiceFocusTraining()
+        if (wasOpen && options.restoreFocus !== false) {
+          audioSettingsButton.focus()
+        }
+      }
+
+      function setAudioNoiseMode(mode) {
+        if (!Object.prototype.hasOwnProperty.call(audioModeLabels, mode) || audioSettings.mode === mode) {
+          return
+        }
+        audioSettings = {
+          ...audioSettings,
+          mode
+        }
+        saveAudioSettings()
+        renderAudioSettings()
+        applyAudioSettingsToLiveMicrophone({ announce: true }).catch(error => {
+          console.warn('Could not apply audio settings', error)
+          setLog('could not update audio focus')
+        })
+      }
+
+      async function resetVoiceFocusProfile() {
+        cancelVoiceFocusTraining()
+        audioSettings = {
+          ...audioSettings,
+          profile: { ...defaultVoiceProfile }
+        }
+        saveAudioSettings()
+        renderAudioSettings()
+        try {
+          await applyAudioSettingsToLiveMicrophone({ announce: true })
+        } catch (error) {
+          console.warn('Could not reset voice focus profile', error)
+          setLog('could not reset voice focus')
+        }
+      }
+
+      async function trainVoiceFocus() {
+        if (!localAudioSourceTrack || voiceTrainingFrame) {
+          return
+        }
+        const context = ensureAudioContext()
+        if (!context) {
+          setLog('audio focus is unavailable in this browser')
+          return
+        }
+
+        audioSettings = {
+          ...audioSettings,
+          mode: 'voice-focus'
+        }
+        saveAudioSettings()
+        renderAudioSettings()
+
+        const stream = new MediaStream([localAudioSourceTrack])
+        const source = context.createMediaStreamSource(stream)
+        const analyser = context.createAnalyser()
+        analyser.fftSize = 1024
+        analyser.smoothingTimeConstant = 0.35
+        source.connect(analyser)
+
+        const samples = new Float32Array(analyser.fftSize)
+        voiceTrainingSamples = []
+        const startedAt = performance.now()
+        const durationMs = 4200
+        voiceTrainingCleanup = () => {
+          try {
+            source.disconnect()
+          } catch {
+            // Already disconnected.
+          }
+          voiceTrainingCleanup = null
+        }
+
+        const tick = () => {
+          const elapsed = performance.now() - startedAt
+          analyser.getFloatTimeDomainData(samples)
+          const rms = rmsFromFloatSamples(samples)
+          voiceTrainingSamples.push(rms)
+          voiceTrainingMeter.style.width = `${Math.min(100, Math.round((rms / 0.24) * 100))}%`
+          voiceTrainingCountdown.textContent = `${Math.max(0, Math.ceil((durationMs - elapsed) / 1000))}s`
+
+          if (elapsed < durationMs) {
+            voiceTrainingFrame = requestAnimationFrame(tick)
+            renderAudioSettings()
+            return
+          }
+
+          finishVoiceFocusTraining().catch(error => {
+            console.warn('Could not finish voice focus training', error)
+            setLog('could not train voice focus')
+          })
+        }
+
+        setLog('training voice focus')
+        voiceTrainingFrame = requestAnimationFrame(tick)
+        renderAudioSettings()
+      }
+
+      async function finishVoiceFocusTraining() {
+        const samples = voiceTrainingSamples
+          .filter(sample => Number.isFinite(sample))
+          .sort((a, b) => a - b)
+        cancelVoiceFocusTraining({ keepSamples: true })
+
+        if (samples.length < 8) {
+          setLog('voice focus needs more microphone signal')
+          renderAudioSettings()
+          return
+        }
+
+        const noiseFloor = clampNumber(percentile(samples, 0.18), 0.004, 0.12, defaultVoiceProfile.noiseFloor)
+        const speechFloor = clampNumber(
+          Math.max(percentile(samples, 0.62), noiseFloor * 2.8, 0.035),
+          0.02,
+          0.45,
+          defaultVoiceProfile.speechFloor
+        )
+        audioSettings = {
+          ...audioSettings,
+          mode: 'voice-focus',
+          profile: {
+            noiseFloor,
+            speechFloor,
+            trainedAt: new Date().toISOString()
+          }
+        }
+        saveAudioSettings()
+        renderAudioSettings()
+        await applyAudioSettingsToLiveMicrophone({ announce: false })
+        setLog('voice focus trained')
+      }
+
+      function cancelVoiceFocusTraining(options = {}) {
+        if (voiceTrainingFrame) {
+          cancelAnimationFrame(voiceTrainingFrame)
+          voiceTrainingFrame = 0
+        }
+        voiceTrainingCleanup?.()
+        if (!options.keepSamples) {
+          voiceTrainingSamples = []
+        }
+        renderAudioSettings()
+      }
+
+      function percentile(sortedSamples, ratio) {
+        if (!sortedSamples.length) {
+          return 0
+        }
+        const index = Math.min(sortedSamples.length - 1, Math.max(0, Math.floor((sortedSamples.length - 1) * ratio)))
+        return sortedSamples[index]
+      }
+
+      function rmsFromFloatSamples(samples) {
+        if (!samples.length) {
+          return 0
+        }
+        let sum = 0
+        for (const sample of samples) {
+          sum += sample * sample
+        }
+        return Math.sqrt(sum / samples.length)
+      }
+
+      async function applyAudioSettingsToLiveMicrophone(options = {}) {
+        if (!localStream || !navigator.mediaDevices?.getUserMedia) {
+          renderAudioSettings()
+          return
+        }
+
+        const selectedDeviceId = micSelect.value || localAudioDeviceId()
+        micSelect.disabled = true
+        let audioStream
+        let replaced = false
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: audioConstraintsForDevice(selectedDeviceId)
+          })
+          const nextTrack = audioStream.getAudioTracks()[0]
+          if (!nextTrack) {
+            throw new Error('microphone did not provide audio')
+          }
+          await replaceLocalAudioTrack(nextTrack)
+          replaced = true
+          await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
+          if (options.announce) {
+            setLog(`${audioModeLabel()} enabled`)
+          }
+        } catch (error) {
+          if (!replaced) {
+            audioStream?.getTracks().forEach(track => track.stop())
+          }
+          await refreshAudioInputDevices(selectedDeviceId)
+          throw error
+        } finally {
+          renderAudioSettings()
+        }
       }
 
       function hasValidAccess() {
@@ -6126,12 +6818,14 @@
         setLog('requesting camera and microphone')
         isMicMuted = false
         isCameraOff = false
-        localStream = await getPreferredUserMedia()
+        const captureStream = await getPreferredUserMedia()
+        localStream = await createLocalMediaStream(captureStream)
         localVideo.srcObject = localStream
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
         updateMuteButton()
         updateCameraButton()
+        renderAudioSettings()
         await refreshAudioInputDevices()
         updateHearthParticipants()
 
@@ -6224,9 +6918,234 @@
       }
 
       function audioConstraintsForDevice(deviceId) {
+        const audioConstraints = {
+          ...mediaConstraints.audio,
+          echoCancellation: audioProcessingEnabled(),
+          noiseSuppression: audioProcessingEnabled(),
+          autoGainControl: audioProcessingEnabled()
+        }
         return deviceId
-          ? { ...mediaConstraints.audio, deviceId: { exact: deviceId } }
-          : { ...mediaConstraints.audio }
+          ? { ...audioConstraints, deviceId: { exact: deviceId } }
+          : audioConstraints
+      }
+
+      async function createLocalMediaStream(captureStream) {
+        const sourceTrack = captureStream.getAudioTracks()[0]
+        const videoTracks = captureStream.getVideoTracks()
+        const audio = await createOutboundAudioForSource(sourceTrack)
+        localAudioSourceTrack = sourceTrack || undefined
+        localAudioProcessor = audio.processor
+        return new MediaStream([...videoTracks, audio.track].filter(Boolean))
+      }
+
+      async function createOutboundAudioForSource(sourceTrack) {
+        if (!sourceTrack) {
+          return { track: null, processor: null }
+        }
+
+        sourceTrack.enabled = !isMicMuted
+        setTrackContentHint(sourceTrack, 'speech')
+
+        if (!voiceFocusEnabled()) {
+          return { track: sourceTrack, processor: null }
+        }
+
+        const context = ensureAudioContext()
+        if (!context?.createMediaStreamDestination) {
+          return { track: sourceTrack, processor: null }
+        }
+
+        let source
+        let highpass
+        let compressor
+        let voiceFocusNode
+        let destination
+        try {
+          const sourceStream = new MediaStream([sourceTrack])
+          source = context.createMediaStreamSource(sourceStream)
+          highpass = context.createBiquadFilter()
+          highpass.type = 'highpass'
+          highpass.frequency.value = 95
+          highpass.Q.value = 0.72
+
+          compressor = context.createDynamicsCompressor()
+          compressor.threshold.value = -34
+          compressor.knee.value = 18
+          compressor.ratio.value = 3
+          compressor.attack.value = 0.006
+          compressor.release.value = 0.16
+
+          destination = context.createMediaStreamDestination()
+          source.connect(highpass)
+          highpass.connect(compressor)
+
+          if (await ensureVoiceFocusWorklet(context)) {
+            voiceFocusNode = new AudioWorkletNode(context, voiceFocusProcessorName)
+            configureVoiceFocusNode(voiceFocusNode)
+            compressor.connect(voiceFocusNode)
+            voiceFocusNode.connect(destination)
+          } else {
+            compressor.connect(destination)
+          }
+
+          const outputTrack = destination.stream.getAudioTracks()[0]
+          outputTrack.enabled = !isMicMuted
+          setTrackContentHint(outputTrack, 'speech')
+          return {
+            track: outputTrack,
+            processor: {
+              sourceTrack,
+              outputTrack,
+              source,
+              highpass,
+              compressor,
+              voiceFocusNode,
+              destination
+            }
+          }
+        } catch (error) {
+          console.warn('Voice focus chain unavailable; using browser microphone processing', error)
+          cleanupAudioProcessor({ source, highpass, compressor, voiceFocusNode, destination })
+          return { track: sourceTrack, processor: null }
+        }
+      }
+
+      async function ensureVoiceFocusWorklet(context) {
+        if (!context?.audioWorklet || !window.AudioWorkletNode) {
+          return false
+        }
+        if (!voiceFocusWorkletPromise) {
+          const source = `
+class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    this.noiseFloor = 0.012
+    this.speechFloor = 0.075
+    this.strength = 0.82
+    this.gain = 1
+    this.releaseFrames = 0
+    this.calibrated = false
+    this.port.onmessage = event => {
+      const data = event.data || {}
+      if (data.type !== 'configure') return
+      this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
+      this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
+      this.strength = Math.max(0.25, Math.min(0.94, Number(data.strength) || this.strength))
+      this.calibrated = Boolean(data.calibrated)
+    }
+  }
+
+  process(inputs, outputs) {
+    const input = inputs[0]
+    const output = outputs[0]
+    if (!input || !output || !input.length || !output.length) {
+      return true
+    }
+
+    const reference = input[0]
+    if (!reference) {
+      return true
+    }
+
+    let sum = 0
+    let peak = 0
+    for (let index = 0; index < reference.length; index++) {
+      const sample = reference[index]
+      const amplitude = Math.abs(sample)
+      peak = Math.max(peak, amplitude)
+      sum += sample * sample
+    }
+
+    const rms = Math.sqrt(sum / Math.max(1, reference.length))
+    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.6 : 3.1), this.speechFloor * (this.calibrated ? 0.32 : 0.22), 0.012)
+    const closeAt = threshold * 0.58
+    const open = rms >= threshold || (peak >= threshold * 1.8 && rms >= closeAt)
+    if (open) {
+      this.releaseFrames = 14
+    } else if (this.releaseFrames > 0) {
+      this.releaseFrames--
+    }
+
+    if (!open && rms < this.noiseFloor * 1.8) {
+      this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.992 + rms * 0.008)
+    }
+
+    let targetGain = 1
+    if (!open && this.releaseFrames <= 0) {
+      if (rms <= closeAt) {
+        targetGain = 1 - this.strength
+      } else {
+        const blend = (rms - closeAt) / Math.max(0.0001, threshold - closeAt)
+        targetGain = (1 - this.strength) + blend * this.strength
+      }
+    }
+    const coefficient = targetGain > this.gain ? 0.28 : 0.055
+    this.gain += (targetGain - this.gain) * coefficient
+
+    for (let channel = 0; channel < output.length; channel++) {
+      const source = input[Math.min(channel, input.length - 1)] || reference
+      const target = output[channel]
+      for (let index = 0; index < target.length; index++) {
+        target[index] = (source[index] || 0) * this.gain
+      }
+    }
+    return true
+  }
+}
+
+registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
+`
+          const blob = new Blob([source], { type: 'text/javascript' })
+          const url = URL.createObjectURL(blob)
+          voiceFocusWorkletPromise = context.audioWorklet.addModule(url)
+            .catch(error => {
+              voiceFocusWorkletPromise = undefined
+              throw error
+            })
+            .finally(() => URL.revokeObjectURL(url))
+        }
+        try {
+          await voiceFocusWorkletPromise
+          return true
+        } catch (error) {
+          console.warn('Could not load voice focus worklet', error)
+          return false
+        }
+      }
+
+      function configureVoiceFocusNode(node) {
+        const profile = audioSettings.profile || defaultVoiceProfile
+        node?.port?.postMessage?.({
+          type: 'configure',
+          noiseFloor: profile.noiseFloor,
+          speechFloor: profile.speechFloor,
+          strength: 0.82,
+          calibrated: Boolean(profile.trainedAt)
+        })
+      }
+
+      function cleanupAudioProcessor(processor, options = {}) {
+        if (!processor) {
+          return
+        }
+        for (const node of [processor.source, processor.highpass, processor.compressor, processor.voiceFocusNode]) {
+          try {
+            node?.disconnect()
+          } catch {
+            // Already disconnected.
+          }
+        }
+        try {
+          processor.voiceFocusNode?.port?.close?.()
+        } catch {
+          // Some browsers do not expose a close method here.
+        }
+        if (options.stopOutput) {
+          processor.outputTrack?.stop?.()
+        }
+        if (options.stopSource) {
+          processor.sourceTrack?.stop?.()
+        }
       }
 
       function localAudioTrack() {
@@ -6238,7 +7157,7 @@
       }
 
       function localAudioDeviceId() {
-        return localAudioTrack()?.getSettings?.().deviceId || ''
+        return localAudioSourceTrack?.getSettings?.().deviceId || localAudioTrack()?.getSettings?.().deviceId || ''
       }
 
       function wireLocalAudioTrack(track) {
@@ -6248,6 +7167,9 @@
         track.enabled = !isMicMuted
         attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
         track.addEventListener('ended', handleLocalAudioEnded, { once: true })
+        if (localAudioSourceTrack && localAudioSourceTrack !== track) {
+          localAudioSourceTrack.addEventListener('ended', handleLocalAudioEnded, { once: true })
+        }
       }
 
       function wireLocalVideoTrack(track) {
@@ -6276,6 +7198,9 @@
         const track = localAudioTrack()
         if (track) {
           track.enabled = !isMicMuted
+        }
+        if (localAudioSourceTrack && localAudioSourceTrack !== track) {
+          localAudioSourceTrack.enabled = !isMicMuted
         }
         updateMuteButton()
         if (options.announce) {
@@ -6328,7 +7253,7 @@
         const elapsed = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
         const seats = `${Math.max(occupiedSeats, participantsInRoom.length)}/${roomCapacity}`
         const media = localStream
-          ? `${isMicMuted ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'}`
+          ? `${isMicMuted ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'} · ${audioModeLabel()}`
           : 'waiting room'
         if (roomClock) {
           roomClock.textContent = `${elapsed} · ${seats} · ${media}`
@@ -6447,6 +7372,7 @@
         micSelect.disabled = true
 
         let audioStream
+        let replaced = false
         try {
           audioStream = await navigator.mediaDevices.getUserMedia({
             video: false,
@@ -6457,10 +7383,13 @@
             throw new Error('selected microphone did not provide audio')
           }
           await replaceLocalAudioTrack(nextTrack)
+          replaced = true
           await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
           setLog(`using ${nextTrack.label || 'selected microphone'}`)
         } catch (error) {
-          audioStream?.getTracks().forEach(track => track.stop())
+          if (!replaced) {
+            audioStream?.getTracks().forEach(track => track.stop())
+          }
           console.warn('Could not switch microphone', error)
           setLog('could not switch microphone; keeping the current one')
           await refreshAudioInputDevices(previousDeviceId)
@@ -6473,33 +7402,52 @@
         }
 
         const previousTrack = localAudioTrack()
-        if (previousTrack === nextTrack) {
-          return
-        }
-        nextTrack.enabled = !isMicMuted
+        const previousSourceTrack = localAudioSourceTrack || previousTrack
+        const previousProcessor = localAudioProcessor
+        const nextAudio = await createOutboundAudioForSource(nextTrack)
+        const outboundTrack = nextAudio.track || nextTrack
+        outboundTrack.enabled = !isMicMuted
 
         const audioSender = pc?.getSenders().find(sender => sender.track?.kind === 'audio')
-        if (audioSender) {
-          await audioSender.replaceTrack(nextTrack)
-          await configureOutboundSender(audioSender, nextTrack)
+        try {
+          if (audioSender) {
+            await audioSender.replaceTrack(outboundTrack)
+            await configureOutboundSender(audioSender, outboundTrack)
+          }
+        } catch (error) {
+          cleanupAudioProcessor(nextAudio.processor, { stopSource: true, stopOutput: true })
+          if (!nextAudio.processor) {
+            nextTrack.stop()
+          }
+          throw error
         }
 
         if (previousTrack) {
           localStream.removeTrack(previousTrack)
         }
-        localStream.addTrack(nextTrack)
+        localStream.addTrack(outboundTrack)
+
+        localAudioSourceTrack = nextTrack
+        localAudioProcessor = nextAudio.processor
 
         detachAudioMonitor('local')
         isReplacingLocalAudio = true
         try {
-          previousTrack?.stop()
+          cleanupAudioProcessor(previousProcessor)
+          const tracksToStop = new Set([previousTrack, previousSourceTrack].filter(Boolean))
+          tracksToStop.delete(outboundTrack)
+          tracksToStop.delete(nextTrack)
+          for (const track of tracksToStop) {
+            track.stop()
+          }
         } finally {
           window.setTimeout(() => {
             isReplacingLocalAudio = false
           }, 0)
         }
 
-        wireLocalAudioTrack(nextTrack)
+        wireLocalAudioTrack(outboundTrack)
+        renderAudioSettings()
         updateHearthParticipants()
       }
 
@@ -6513,6 +7461,7 @@
       async function recoverLocalMicrophone() {
         const selectedDeviceId = micSelect.value || localAudioDeviceId()
         let audioStream
+        let replaced = false
         try {
           audioStream = await getFallbackAudioStream(selectedDeviceId)
           const nextTrack = audioStream.getAudioTracks()[0]
@@ -6520,10 +7469,13 @@
             throw new Error('microphone did not provide audio')
           }
           await replaceLocalAudioTrack(nextTrack)
+          replaced = true
           await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
           setLog(`microphone reconnected: ${nextTrack.label || 'system default'}`)
         } catch (error) {
-          audioStream?.getTracks().forEach(track => track.stop())
+          if (!replaced) {
+            audioStream?.getTracks().forEach(track => track.stop())
+          }
           console.warn('Could not recover microphone', error)
           setLog('microphone disconnected; choose another mic')
           await refreshAudioInputDevices('')
@@ -9415,6 +10367,7 @@
         archiveMeetingButton.disabled = true
         screenShareButton.textContent = 'Share screen'
         archiveMeetingButton.textContent = 'Send notes'
+        closeAudioSettings({ restoreFocus: false })
         updateBoardDockControls()
 
         const socket = ws
@@ -9436,12 +10389,16 @@
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop())
         }
+        cleanupAudioProcessor(localAudioProcessor, { stopSource: true })
+        localAudioProcessor = undefined
+        localAudioSourceTrack = undefined
         localStream = undefined
         isReplacingLocalAudio = false
         isMicMuted = false
         isCameraOff = false
         updateMuteButton()
         updateCameraButton()
+        renderAudioSettings()
         localVideo.srcObject = null
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.classList.remove('is-muted', 'is-camera-off', 'is-sharing-screen')

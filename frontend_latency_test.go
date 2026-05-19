@@ -103,6 +103,29 @@ func TestIndexKeepsRemoteAudioTracksIndependent(t *testing.T) {
 	}
 }
 
+func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"voice-focus",
+		"function createOutboundAudioForSource(sourceTrack)",
+		"ensureVoiceFocusWorklet(context)",
+		"new AudioWorkletNode(context, voiceFocusProcessorName)",
+		"highpass.type = 'highpass'",
+		"compressor.threshold.value = -34",
+		"function trainVoiceFocus()",
+		"localAudioSourceTrack?.getSettings?.().deviceId",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing voice focus noise reduction %q", want)
+		}
+	}
+}
+
 func functionBody(source string, signature string) string {
 	start := strings.Index(source, signature)
 	if start == -1 {

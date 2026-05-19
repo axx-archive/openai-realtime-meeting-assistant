@@ -26,6 +26,10 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
 	output := audio["output"].(map[string]any)
+	noiseReduction := input["noise_reduction"].(map[string]any)
+	if noiseType := noiseReduction["type"]; noiseType != "near_field" {
+		t.Fatalf("audio.input.noise_reduction.type=%v, want near_field", noiseType)
+	}
 	if voice := output["voice"]; voice != defaultRealtimeVoice {
 		t.Fatalf("audio.output.voice=%v, want %s", voice, defaultRealtimeVoice)
 	}

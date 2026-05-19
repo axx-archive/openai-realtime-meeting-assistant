@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,10 @@ const (
 	realtimeAudioChannels = 2
 	roomAudioMaxFrameMs   = 60
 	roomAudioActivePeak   = 256
+	roomAudioNoiseSeedRMS = 96.0
+	roomAudioMinSpeechRMS = 220.0
+	roomAudioGateRatio    = 3.2
+	roomAudioGateRelease  = 8
 
 	roomAudioMixInterval  = 20 * time.Millisecond
 	roomAudioMixFrameSize = roomAudioSampleRate / 50 * roomAudioChannels
@@ -41,7 +46,9 @@ type audioInput struct {
 }
 
 type audioSource struct {
-	buffer []int16
+	buffer      []int16
+	noiseFloor  float64
+	gateRelease int
 }
 
 func newAudioMixer() *audioMixer {
@@ -195,7 +202,10 @@ func mixAudioFrame(sources map[string]*audioSource) []int16 {
 
 	mixSources := activeAudioSources(readySources)
 	if len(mixSources) == 0 {
-		mixSources = readySources
+		for _, source := range readySources {
+			source.buffer = source.buffer[roomAudioMixFrameSize:]
+		}
+		return nil
 	}
 
 	mixedPCM := make([]int16, roomAudioMixFrameSize)
@@ -230,13 +240,67 @@ func sourceAudioActive(source *audioSource) bool {
 		return false
 	}
 
-	for _, sample := range source.buffer[:roomAudioMixFrameSize] {
-		if sample >= roomAudioActivePeak || sample <= -roomAudioActivePeak {
-			return true
-		}
+	rms, peak := audioFrameLevel(source.buffer[:roomAudioMixFrameSize])
+	if source.noiseFloor <= 0 {
+		source.noiseFloor = math.Max(roomAudioNoiseSeedRMS, math.Min(rms, roomAudioMinSpeechRMS))
+	}
+
+	threshold := math.Max(roomAudioMinSpeechRMS, source.noiseFloor*roomAudioGateRatio)
+	active := rms >= threshold || (peak >= roomAudioActivePeak && rms >= threshold*0.62)
+	if active {
+		source.gateRelease = roomAudioGateRelease
+		updateSourceNoiseFloor(source, rms, false)
+		return true
+	}
+
+	updateSourceNoiseFloor(source, rms, true)
+	if source.gateRelease > 0 {
+		source.gateRelease--
+		return true
 	}
 
 	return false
+}
+
+func audioFrameLevel(frame []int16) (float64, int16) {
+	if len(frame) == 0 {
+		return 0, 0
+	}
+
+	var sumSquares float64
+	var peak int32
+	for _, sample := range frame {
+		amplitude := int32(sample)
+		if amplitude < 0 {
+			amplitude = -amplitude
+		}
+		if amplitude > peak {
+			peak = amplitude
+		}
+		normalized := float64(sample)
+		sumSquares += normalized * normalized
+	}
+
+	return math.Sqrt(sumSquares / float64(len(frame))), int16(min(peak, int32(32767)))
+}
+
+func updateSourceNoiseFloor(source *audioSource, rms float64, quiet bool) {
+	if source == nil {
+		return
+	}
+	if source.noiseFloor <= 0 {
+		source.noiseFloor = math.Max(roomAudioNoiseSeedRMS, rms)
+		return
+	}
+
+	weight := 0.004
+	if quiet || rms < source.noiseFloor*1.7 {
+		weight = 0.06
+	}
+	source.noiseFloor = source.noiseFloor*(1-weight) + rms*weight
+	if source.noiseFloor < roomAudioNoiseSeedRMS {
+		source.noiseFloor = roomAudioNoiseSeedRMS
+	}
 }
 
 func clampPCM16(sample int32) int16 {

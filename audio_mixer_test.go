@@ -42,6 +42,46 @@ func TestMixAudioFrameAveragesActiveSpeakers(t *testing.T) {
 	}
 }
 
+func TestMixAudioFrameDropsSteadyBackgroundNoise(t *testing.T) {
+	noiseFrame := make([]int16, roomAudioMixFrameSize)
+	for index := range noiseFrame {
+		noiseFrame[index] = 120
+	}
+
+	source := &audioSource{buffer: append([]int16(nil), noiseFrame...)}
+	mixed := mixAudioFrame(map[string]*audioSource{
+		"hvac": source,
+	})
+	if len(mixed) != 0 {
+		t.Fatalf("mixed samples=%d, want quiet frame dropped", len(mixed))
+	}
+	if len(source.buffer) != 0 {
+		t.Fatalf("source buffered samples=%d, want drained quiet frame", len(source.buffer))
+	}
+}
+
+func TestSourceAudioActiveLearnsNoiseFloorButKeepsSpeech(t *testing.T) {
+	source := &audioSource{}
+	noiseFrame := make([]int16, roomAudioMixFrameSize)
+	speechFrame := make([]int16, roomAudioMixFrameSize)
+	for index := range noiseFrame {
+		noiseFrame[index] = 180
+		speechFrame[index] = 1000
+	}
+
+	for range 20 {
+		source.buffer = append(source.buffer[:0], noiseFrame...)
+		if sourceAudioActive(source) {
+			t.Fatal("steady background noise should stay gated")
+		}
+	}
+
+	source.buffer = append(source.buffer[:0], speechFrame...)
+	if !sourceAudioActive(source) {
+		t.Fatal("speech above the learned noise floor should pass")
+	}
+}
+
 func TestNormalizeRoomAudioPCMDownmixesStereoToMono(t *testing.T) {
 	got := normalizeRoomAudioPCM([]int16{100, 300, -400, -200}, 2)
 	want := []int16{200, -300}
