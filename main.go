@@ -89,6 +89,7 @@ func main() {
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
+	roomMixer.setActivityListener(kanbanApp)
 	defer kanbanApp.Close()
 	if err := kanbanApp.JoinConferenceRoom(); err != nil {
 		log.Errorf("Kanban Realtime peer disabled: %v", err)
@@ -726,7 +727,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						announcedDecodedAudio = true
 						broadcastAssistantEvent("audio", "browser microphone audio decoded on the server", nil)
 					}
-					roomMixer.submit(audioTrackKey, pcm)
+					roomMixer.submit(audioTrackKey, trackParticipantName, pcm)
 				}
 			}
 
@@ -905,17 +906,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 				continue
 			}
-			broadcastAssistantEvent("query", query.Query, nil)
-			if _, _, err := kanbanApp.answerMemoryQuestion(map[string]any{"query": query.Query}); err != nil {
-				log.Errorf("Failed to answer assistant query: %v", err)
-				if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
-					"kind":      "error",
-					"text":      err.Error(),
-					"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
-				}); writeErr != nil {
-					log.Errorf("Failed to send assistant query error: %v", writeErr)
-				}
-			}
+			assistantQuery := query.Query
+			broadcastAssistantEvent("query", assistantQuery, nil)
+			broadcastAssistantEvent("status", "Scout is checking the board and memory.", nil)
+			go answerAssistantQueryForClient(c, assistantQuery)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
@@ -1051,6 +1045,19 @@ func sendManualBoardError(c *threadSafeWriter, err error) {
 	}
 }
 
+func answerAssistantQueryForClient(c *threadSafeWriter, query string) {
+	if _, _, err := kanbanApp.answerAssistantQuery(query); err != nil {
+		log.Errorf("Failed to answer assistant query: %v", err)
+		if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
+			"kind":      "error",
+			"text":      err.Error(),
+			"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+		}); writeErr != nil {
+			log.Errorf("Failed to send assistant query error: %v", writeErr)
+		}
+	}
+}
+
 func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action string, apply func() (map[string]any, bool, error)) {
 	_, changed, err := apply()
 	if err != nil {
@@ -1064,6 +1071,7 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 	broadcastKanbanEvent("board", kanbanApp.snapshotState())
 	broadcastKanbanEvent("undo_available", kanbanApp.canUndoDelete())
 	broadcastAssistantEvent("action", fmt.Sprintf("%s %s", actor, action), nil)
+	kanbanApp.refreshRealtimeBoardContext(action)
 }
 
 // Helper to make Gorilla Websockets threadsafe.

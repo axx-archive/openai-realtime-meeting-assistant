@@ -15,6 +15,7 @@ import (
 
 const (
 	meetingMemoryKindTranscript = "transcript"
+	meetingMemoryKindBrain      = "brain"
 	meetingMemoryKindArchive    = "archive"
 	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
 )
@@ -114,6 +115,10 @@ func meetingMemoryPath() string {
 }
 
 func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string, transcript string) (meetingMemoryEntry, bool, error) {
+	return store.appendAttributedTranscript(eventID, itemID, "", "", transcript)
+}
+
+func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, itemID string, speaker string, speakerConfidence string, transcript string) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" || !transcriptLooksUseful(transcript) {
 		return meetingMemoryEntry{}, false, nil
@@ -127,9 +132,22 @@ func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string,
 		id = fmt.Sprintf("transcript-%d", time.Now().UnixNano())
 	}
 
-	return store.appendEntry(meetingMemoryKindTranscript, id, transcript, map[string]string{
+	metadata := map[string]string{
 		"itemId": itemID,
-	})
+	}
+	if speaker = normalizeTranscriptSpeaker(speaker); speaker != "" {
+		transcript = formatSpeakerTranscript(speaker, transcript)
+		metadata["speaker"] = speaker
+		if speakerConfidence != "" {
+			metadata["speakerConfidence"] = speakerConfidence
+		}
+	}
+
+	return store.appendEntry(meetingMemoryKindTranscript, id, transcript, metadata)
+}
+
+func (store *meetingMemoryStore) appendBrainWriteUp(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindBrain, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) appendArchive(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -137,12 +155,13 @@ func (store *meetingMemoryStore) appendArchive(id string, text string, metadata 
 }
 
 func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
-	text = normalizeMemoryText(text)
-	if store == nil || text == "" {
-		return meetingMemoryEntry{}, false, nil
-	}
 	if strings.TrimSpace(kind) == "" {
 		kind = meetingMemoryKindTranscript
+	}
+	kind = strings.TrimSpace(kind)
+	text = normalizeMemoryEntryText(kind, text)
+	if store == nil || text == "" {
+		return meetingMemoryEntry{}, false, nil
 	}
 	if strings.TrimSpace(id) == "" {
 		id = fmt.Sprintf("%s-%d", kind, time.Now().UnixNano())
@@ -150,7 +169,7 @@ func (store *meetingMemoryStore) appendEntry(kind string, id string, text string
 
 	entry := meetingMemoryEntry{
 		ID:        strings.TrimSpace(id),
-		Kind:      strings.TrimSpace(kind),
+		Kind:      kind,
 		Text:      text,
 		CreatedAt: time.Now().UTC(),
 		Metadata:  metadata,
@@ -263,8 +282,91 @@ func buildMemoryAnswer(query string, matches []meetingMemoryMatch) string {
 	return strings.Join(parts, "\n")
 }
 
+func normalizeTranscriptSpeaker(speaker string) string {
+	speaker = normalizeMemoryText(speaker)
+	if speaker == "" {
+		return ""
+	}
+
+	parts := strings.Split(speaker, "+")
+	normalizedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if canonical := canonicalParticipantName(part); canonical != "" {
+			normalizedParts = append(normalizedParts, canonical)
+		}
+	}
+	if len(normalizedParts) > 0 {
+		return strings.Join(uniqueStrings(normalizedParts), " + ")
+	}
+
+	if canonical := canonicalParticipantName(speaker); canonical != "" {
+		return canonical
+	}
+
+	return ""
+}
+
+func formatSpeakerTranscript(speaker string, transcript string) string {
+	speaker = normalizeTranscriptSpeaker(speaker)
+	transcript = normalizeMemoryText(transcript)
+	if speaker == "" || transcript == "" {
+		return transcript
+	}
+	if transcriptHasSpeakerPrefix(transcript, speaker) {
+		return transcript
+	}
+
+	return speaker + ": " + transcript
+}
+
+func transcriptHasSpeakerPrefix(transcript string, speaker string) bool {
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return false
+	}
+	for _, part := range strings.Split(speaker, "+") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(transcript), strings.ToLower(part)+":") {
+			return true
+		}
+	}
+
+	return false
+}
+
 func normalizeMemoryText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func normalizeMemoryEntryText(kind string, value string) string {
+	if kind != meetingMemoryKindBrain {
+		return normalizeMemoryText(value)
+	}
+
+	value = strings.ReplaceAll(strings.TrimSpace(value), "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	lines := strings.Split(value, "\n")
+	normalizedLines := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimRight(strings.TrimSpace(line), " ")
+		if line == "" {
+			if blank {
+				continue
+			}
+			blank = true
+			normalizedLines = append(normalizedLines, "")
+			continue
+		}
+		blank = false
+		normalizedLines = append(normalizedLines, line)
+	}
+
+	return strings.TrimSpace(strings.Join(normalizedLines, "\n"))
 }
 
 func transcriptLooksUseful(value string) bool {

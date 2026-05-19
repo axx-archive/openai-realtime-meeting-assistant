@@ -115,6 +115,7 @@ type kanbanRealtimeEvent struct {
 
 type kanbanRealtimeOutputItem struct {
 	Type      string `json:"type,omitempty"`
+	ID        string `json:"id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
@@ -146,7 +147,13 @@ type kanbanBoardApp struct {
 	scoutVoiceArmedAt        time.Time
 	scoutVoiceArmedUntil     time.Time
 	scoutSpokenResponse      bool
+	audioActivity            []participantAudioFrame
+	currentSpeechStartedAt   time.Time
+	currentSpeechStoppedAt   time.Time
 	proactiveReconnectCancel chan struct{}
+	brainWorkerCancel        chan struct{}
+	brainWorkerDone          chan struct{}
+	brainWorkerBaselineID    string
 	closeOnce                sync.Once
 }
 
@@ -369,7 +376,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.apiKey = apiKey
 	app.mu.Unlock()
 
-	return app.startRealtimePeer(apiKey, realtimeModel())
+	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
+		return err
+	}
+	app.startMeetingBrainWorker(apiKey)
+
+	return nil
 }
 
 func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error {
@@ -547,9 +559,20 @@ func (app *kanbanBoardApp) Close() error {
 		app.scoutSpokenResponse = false
 		cancelProactiveRestart := app.proactiveReconnectCancel
 		app.proactiveReconnectCancel = nil
+		brainWorkerCancel := app.brainWorkerCancel
+		brainWorkerDone := app.brainWorkerDone
+		app.brainWorkerCancel = nil
+		app.brainWorkerDone = nil
+		app.brainWorkerBaselineID = ""
 		app.mu.Unlock()
 		if cancelProactiveRestart != nil {
 			close(cancelProactiveRestart)
+		}
+		if brainWorkerCancel != nil {
+			close(brainWorkerCancel)
+			if brainWorkerDone != nil {
+				<-brainWorkerDone
+			}
 		}
 		if peerConnection != nil {
 			closeErr = peerConnection.Close()
@@ -850,6 +873,17 @@ func (app *kanbanBoardApp) sessionUpdateEvent() map[string]any {
 	}
 }
 
+func (app *kanbanBoardApp) refreshRealtimeBoardContext(reason string) {
+	if app == nil {
+		return
+	}
+	if err := app.SendEvent(app.sessionUpdateEvent()); err != nil {
+		if !strings.Contains(err.Error(), "Realtime event channel is unavailable") {
+			log.Errorf("Failed to refresh Realtime board context after %s: %v", reason, err)
+		}
+	}
+}
+
 func realtimeModel() string {
 	if model := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_MODEL")); model != "" {
 		return model
@@ -1043,7 +1077,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# Tool policy\nIf one utterance changes status, notes, owner, and tags for the same existing card, prefer one update_ticket call with all changed fields. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation.",
-		"# Memory policy\nMeeting transcripts are saved as durable memory. If the user asks what was said, decided, discussed, remembered, mentioned earlier, or asks any recall question, call answer_memory_question with the user's full question as the query.",
+		"# Memory policy\nMeeting transcripts are saved as durable memory with speaker labels when Scout can attribute the speaker. A scheduled brain worker also writes durable summaries with transcript references. If the user asks what was said, decided, discussed, remembered, mentioned earlier, how a meeting went, or asks any recall question, call answer_memory_question with the user's full question as the query.",
 		"# No-op policy\nIf the user is wrapping up, handing off, giving filler, or not giving a concrete board operation or recall request, call do_nothing with a short user-visible reason.",
 		"# Wake phrase\nOnly speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
 		"# Response policy\nPrefer tools over text replies. Do not narrate board operations aloud unless the utterance started with Hey Scout; then keep any spoken response to one short sentence.",
@@ -1161,7 +1195,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "answer_memory_question",
-			"description": "Answer a user question by recalling the saved meeting transcript and memory.",
+			"description": "Answer a user question by recalling the saved speaker-attributed transcript, brain write-ups, archives, and meeting memory.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1220,9 +1254,11 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
 		}
 	case "input_audio_buffer.speech_started":
+		app.noteRealtimeSpeechStarted()
 		app.clearScoutVoiceArmForNewSpeech()
 		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
+		app.noteRealtimeSpeechStopped()
 		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.committed":
 		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type})
@@ -1236,20 +1272,15 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
-			app.handleToolCall(*event.Item)
+			app.handleToolCall(*event.Item, false)
 		}
 	case "response.function_call_arguments.done":
-		app.handleToolCall(kanbanRealtimeOutputItem{
-			Type:      "function_call",
-			Name:      event.Name,
-			Arguments: event.Arguments,
-			CallID:    event.CallID,
-		})
+		app.handleToolCall(realtimeFunctionCallFromArgumentsDone(event), true)
 	case "response.done":
 		if event.Response != nil {
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {
-					app.handleToolCall(outputItem)
+					app.handleToolCall(outputItem, false)
 				}
 			}
 		}
@@ -1261,9 +1292,42 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 	}
 }
 
-func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
+func realtimeFunctionCallFromArgumentsDone(event kanbanRealtimeEvent) kanbanRealtimeOutputItem {
+	if event.Item != nil {
+		outputItem := *event.Item
+		if outputItem.Type == "" {
+			outputItem.Type = "function_call"
+		}
+		if outputItem.Name == "" {
+			outputItem.Name = event.Name
+		}
+		if outputItem.Arguments == "" {
+			outputItem.Arguments = event.Arguments
+		}
+		if outputItem.CallID == "" {
+			outputItem.CallID = event.CallID
+		}
+
+		return outputItem
+	}
+
+	return kanbanRealtimeOutputItem{
+		Type:      "function_call",
+		Name:      event.Name,
+		Arguments: event.Arguments,
+		CallID:    event.CallID,
+	}
+}
+
+func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, allowIncompleteArguments bool) {
 	if strings.TrimSpace(outputItem.CallID) == "" {
 		log.Errorf("Ignoring Kanban tool call %q without call_id", outputItem.Name)
+		return
+	}
+
+	args, parseErr := parseToolCallArguments(outputItem)
+	if parseErr != nil && allowIncompleteArguments && isIncompleteToolArgumentsError(parseErr) {
+		log.Infof("Waiting for complete %s arguments for call_id=%s", outputItem.Name, outputItem.CallID)
 		return
 	}
 
@@ -1277,7 +1341,14 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 
 	broadcastAssistantEvent("action", "using "+humanizeToolName(outputItem.Name), map[string]any{"tool": outputItem.Name})
 
-	result, changed, err := app.applyToolCall(outputItem)
+	var result map[string]any
+	var changed bool
+	var err error
+	if parseErr != nil {
+		err = parseErr
+	} else {
+		result, changed, err = app.applyToolCallArgs(outputItem.Name, args)
+	}
 	if err != nil {
 		result = map[string]any{
 			"ok":    false,
@@ -1318,14 +1389,31 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem) {
 }
 
 func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (map[string]any, bool, error) {
+	args, err := parseToolCallArguments(outputItem)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return app.applyToolCallArgs(outputItem.Name, args)
+}
+
+func parseToolCallArguments(outputItem kanbanRealtimeOutputItem) (map[string]any, error) {
 	args := map[string]any{}
 	if rawArgs := strings.TrimSpace(outputItem.Arguments); rawArgs != "" {
 		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-			return nil, false, fmt.Errorf("parse %s arguments: %w", outputItem.Name, err)
+			return nil, fmt.Errorf("parse %s arguments: %w", outputItem.Name, err)
 		}
 	}
 
-	switch outputItem.Name {
+	return args, nil
+}
+
+func isIncompleteToolArgumentsError(err error) bool {
+	return strings.Contains(err.Error(), "unexpected end of JSON input")
+}
+
+func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]any) (map[string]any, bool, error) {
+	switch toolName {
 	case "create_ticket":
 		return app.createTicket(args)
 	case "move_ticket":
@@ -1348,12 +1436,13 @@ func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (m
 			"reason": reason,
 		}, false, nil
 	default:
-		return nil, false, fmt.Errorf("unsupported function %q", outputItem.Name)
+		return nil, false, fmt.Errorf("unsupported function %q", toolName)
 	}
 }
 
 func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent) {
-	entry, appended, err := app.memory.appendTranscript(event.EventID, event.ItemID, event.Transcript)
+	speaker, confidence := app.speakerForCompletedTranscript(time.Now().UTC())
+	entry, appended, err := app.memory.appendAttributedTranscript(event.EventID, event.ItemID, speaker, confidence, event.Transcript)
 	if err != nil {
 		log.Errorf("Failed to write meeting memory: %v", err)
 		return
@@ -1376,8 +1465,14 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		return nil, false, fmt.Errorf("query is required")
 	}
 
-	matches := app.memory.search(query, 5)
-	answer := buildMemoryAnswer(query, matches)
+	matches, contextEntries := app.memoryMatchesAndContext(query)
+	answer, modelErr := app.answerMemoryQuestionWithModel(query, contextEntries)
+	if modelErr != nil {
+		log.Errorf("Failed to answer memory question with model: %v", modelErr)
+	}
+	if strings.TrimSpace(answer) == "" {
+		answer = buildMemoryAnswer(query, matches)
+	}
 	response := map[string]any{
 		"query":  query,
 		"answer": answer,
@@ -1391,6 +1486,7 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		"query":   query,
 		"answer":  answer,
 		"matches": len(matches),
+		"context": len(contextEntries),
 	}, false, nil
 }
 

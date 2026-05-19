@@ -1110,6 +1110,15 @@
         border-color: rgba(16, 185, 129, 0.30);
       }
 
+      .memory-item.brain {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 122, 43, 0.24);
+      }
+
+      .memory-item span:last-child {
+        white-space: pre-wrap;
+      }
+
       .memory-meta {
         font-family: var(--font-mono);
         font-size: 10px;
@@ -1121,6 +1130,7 @@
 
       .memory-item.answer .memory-meta { color: var(--ember-300); }
       .memory-item.archive .memory-meta { color: var(--success-fg); }
+      .memory-item.brain .memory-meta { color: var(--ember-300); }
 
       /* ---------- Assistant panel ---------- */
       .assistant-panel {
@@ -8098,6 +8108,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             setActiveSpeakerFromText(message.data?.text || message.data?.transcript || '')
             triggerHotEmber()
             break
+          case 'memory_brain':
+            addMemoryEntry(message.data)
+            break
           case 'memory_answer':
             {
               const answer = message.data?.answer || 'no answer available.'
@@ -9416,7 +9429,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderMemoryEntry(entry) {
         const item = document.createElement('article')
-        const kindClass = ['answer', 'archive'].includes(entry.kind) ? entry.kind : ''
+        const kindClass = ['answer', 'archive', 'brain'].includes(entry.kind) ? entry.kind : ''
         item.className = `memory-item ${kindClass}`.trim()
 
         const meta = document.createElement('span')
@@ -9440,6 +9453,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (entry.kind === 'archive') {
           return `archive · ${time}`
+        }
+        if (entry.kind === 'brain') {
+          return `brain · ${time}`
         }
         return `transcript · ${time}`
       }

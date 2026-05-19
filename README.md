@@ -96,6 +96,8 @@ The board should update in place. Card moves animate, completed work triggers co
 
 Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
 
+Scout also saves speaker-attributed transcripts as meeting memory. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript.
+
 ### Configured interactions
 
 The assistant is configured as a voice-operated Kanban board operator. It can:
@@ -121,6 +123,10 @@ You can update:
 - The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
 - The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`low`, `medium`, or `high`); the default is `medium` for `gpt-realtime-2`.
 - The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `low` eagerness.
+- The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
+- The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
+- Historical backfill for the brain worker with `MEETING_BRAIN_BACKFILL=true`; by default it starts from the latest transcript at app startup and summarizes new transcript windows only.
+- The meeting memory timezone with `MEETING_TIME_ZONE`; the default is `America/Los_Angeles` for relative questions such as "yesterday".
 - The browser UI in `index.html`.
 - The HTTP bind address with the `-addr` flag in `main.go`.
 

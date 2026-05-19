@@ -84,6 +84,30 @@ func TestMeetingMemoryCanonicalizesAndSkipsWeakTranscriptFragments(t *testing.T)
 	}
 }
 
+func TestMeetingMemoryAttributesTranscriptSpeaker(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	entry, appended, err := store.appendAttributedTranscript("event-1", "item-1", "tom", "dominant", "Boot Barn meeting went well.")
+	if err != nil {
+		t.Fatalf("appendAttributedTranscript: %v", err)
+	}
+	if !appended {
+		t.Fatal("appendAttributedTranscript appended=false, want true")
+	}
+	if entry.Text != "Tom: Boot Barn meeting went well." {
+		t.Fatalf("entry text=%q, want speaker-prefixed transcript", entry.Text)
+	}
+	if entry.Metadata["speaker"] != "Tom" {
+		t.Fatalf("speaker metadata=%q, want Tom", entry.Metadata["speaker"])
+	}
+	if entry.Metadata["speakerConfidence"] != "dominant" {
+		t.Fatalf("speaker confidence=%q, want dominant", entry.Metadata["speakerConfidence"])
+	}
+}
+
 func TestMeetingMemoryLoadsLargeEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.jsonl")
 	store, err := newMeetingMemoryStore(path)

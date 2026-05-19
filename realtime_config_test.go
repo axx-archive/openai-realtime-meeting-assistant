@@ -123,6 +123,71 @@ func TestDetectsRealtimeActiveResponseErrors(t *testing.T) {
 	}
 }
 
+func TestRealtimeFunctionCallArgumentsDoneUsesNestedItem(t *testing.T) {
+	item := realtimeFunctionCallFromArgumentsDone(kanbanRealtimeEvent{
+		Type:      "response.function_call_arguments.done",
+		Name:      "answer_memory_question",
+		Arguments: `{"query":"truncated`,
+		CallID:    "call-top-level",
+		Item: &kanbanRealtimeOutputItem{
+			Type:      "function_call",
+			Name:      "answer_memory_question",
+			Arguments: `{"query":"Dog Perfect status"}`,
+			CallID:    "call-nested",
+		},
+	})
+
+	if item.CallID != "call-nested" {
+		t.Fatalf("call_id=%q, want nested call id", item.CallID)
+	}
+	if item.Arguments != `{"query":"Dog Perfect status"}` {
+		t.Fatalf("arguments=%q, want nested item arguments", item.Arguments)
+	}
+}
+
+func TestHandleToolCallWaitsForCompleteArgumentsBeforeDedupe(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	callID := "call-dog-perfect"
+
+	app.handleToolCall(kanbanRealtimeOutputItem{
+		Type:      "function_call",
+		Name:      "create_ticket",
+		CallID:    callID,
+		Arguments: `{"title":"Dog Perfect"`,
+	}, true)
+
+	app.mu.Lock()
+	_, handled := app.handledCalls[callID]
+	app.mu.Unlock()
+	if handled {
+		t.Fatal("incomplete arguments should not mark the call as handled")
+	}
+
+	app.handleToolCall(kanbanRealtimeOutputItem{
+		Type:   "function_call",
+		Name:   "create_ticket",
+		CallID: callID,
+		Arguments: `{
+			"title":"Dog Perfect",
+			"notes":"Waiting on Erick for launch approval.",
+			"owner":"Erick",
+			"tags":["client"],
+			"status":"Blocked"
+		}`,
+	}, false)
+
+	found := false
+	for _, card := range app.snapshotState().Cards {
+		if card.Title == "Dog Perfect" && card.Status == kanbanStatusBlocked {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("complete retry did not create the Dog Perfect card")
+	}
+}
+
 func TestUpdateTicketAppliesRichRealtimeChangesAtomically(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 

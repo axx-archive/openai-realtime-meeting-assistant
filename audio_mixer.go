@@ -30,25 +30,49 @@ type mixedAudioSink interface {
 	WriteMixedPCM([]int16) error
 }
 
+type audioActivityListener interface {
+	NoteAudioActivity(time.Time, []audioActivityLevel)
+}
+
+type audioActivityLevel struct {
+	TrackKey        string
+	ParticipantName string
+	RMS             float64
+	Peak            int16
+}
+
 type audioMixer struct {
-	mu        sync.Mutex
-	sinks     map[string]mixedAudioSink
-	input     chan audioInput
-	stop      chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
+	mu               sync.Mutex
+	sinks            map[string]mixedAudioSink
+	activityListener audioActivityListener
+	input            chan audioInput
+	stop             chan struct{}
+	done             chan struct{}
+	closeOnce        sync.Once
 }
 
 type audioInput struct {
-	trackKey string
-	pcm      []int16
-	remove   bool
+	trackKey        string
+	participantName string
+	pcm             []int16
+	remove          bool
 }
 
 type audioSource struct {
-	buffer      []int16
-	noiseFloor  float64
-	gateRelease int
+	trackKey        string
+	participantName string
+	buffer          []int16
+	noiseFloor      float64
+	gateRelease     int
+}
+
+type audioSourceActivity struct {
+	source          *audioSource
+	trackKey        string
+	participantName string
+	rms             float64
+	peak            int16
+	active          bool
 }
 
 func newAudioMixer() *audioMixer {
@@ -63,7 +87,7 @@ func newAudioMixer() *audioMixer {
 	return mixer
 }
 
-func (mixer *audioMixer) submit(trackKey string, pcm []int16) {
+func (mixer *audioMixer) submit(trackKey string, participantName string, pcm []int16) {
 	if mixer == nil || trackKey == "" || len(pcm) == 0 {
 		return
 	}
@@ -75,7 +99,7 @@ func (mixer *audioMixer) submit(trackKey string, pcm []int16) {
 	}
 
 	select {
-	case mixer.input <- audioInput{trackKey: trackKey, pcm: pcm}:
+	case mixer.input <- audioInput{trackKey: trackKey, participantName: participantName, pcm: pcm}:
 	default:
 		log.Warnf("Dropping decoded audio frame for track=%s", trackKey)
 	}
@@ -112,6 +136,16 @@ func (mixer *audioMixer) setSink(key string, sink mixedAudioSink) {
 		return
 	}
 	mixer.sinks[key] = sink
+}
+
+func (mixer *audioMixer) setActivityListener(listener audioActivityListener) {
+	if mixer == nil {
+		return
+	}
+
+	mixer.mu.Lock()
+	mixer.activityListener = listener
+	mixer.mu.Unlock()
 }
 
 func (mixer *audioMixer) removeSink(key string) {
@@ -154,8 +188,11 @@ func (mixer *audioMixer) run() {
 
 			source := sources[input.trackKey]
 			if source == nil {
-				source = &audioSource{}
+				source = &audioSource{trackKey: input.trackKey}
 				sources[input.trackKey] = source
+			}
+			if input.participantName != "" {
+				source.participantName = input.participantName
 			}
 
 			source.buffer = append(source.buffer, input.pcm...)
@@ -163,11 +200,14 @@ func (mixer *audioMixer) run() {
 				source.buffer = source.buffer[overflow:]
 			}
 		case <-ticker.C:
-			mixedPCM := mixAudioFrame(sources)
+			mixedPCM, activeLevels := mixAudioFrameWithActivity(sources)
 			if len(mixedPCM) == 0 {
 				continue
 			}
 
+			if len(activeLevels) > 0 {
+				mixer.notifyAudioActivity(time.Now().UTC(), activeLevels)
+			}
 			for key, sink := range mixer.snapshotSinks() {
 				if err := sink.WriteMixedPCM(mixedPCM); err != nil {
 					log.Errorf("Failed to write mixed audio sink=%s: %v", key, err)
@@ -189,23 +229,54 @@ func (mixer *audioMixer) snapshotSinks() map[string]mixedAudioSink {
 	return sinks
 }
 
+func (mixer *audioMixer) notifyAudioActivity(at time.Time, levels []audioActivityLevel) {
+	mixer.mu.Lock()
+	listener := mixer.activityListener
+	mixer.mu.Unlock()
+	if listener == nil {
+		return
+	}
+
+	copied := append([]audioActivityLevel(nil), levels...)
+	listener.NoteAudioActivity(at, copied)
+}
+
 func mixAudioFrame(sources map[string]*audioSource) []int16 {
+	mixedPCM, _ := mixAudioFrameWithActivity(sources)
+	return mixedPCM
+}
+
+func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audioActivityLevel) {
 	readySources := make([]*audioSource, 0, len(sources))
-	for _, source := range sources {
+	for trackKey, source := range sources {
 		if len(source.buffer) >= roomAudioMixFrameSize {
+			if source.trackKey == "" {
+				source.trackKey = trackKey
+			}
 			readySources = append(readySources, source)
 		}
 	}
 	if len(readySources) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	mixSources := activeAudioSources(readySources)
+	activeActivities := activeAudioSourceActivities(readySources)
+	mixSources := make([]*audioSource, 0, len(activeActivities))
+	activeLevels := make([]audioActivityLevel, 0, len(activeActivities))
+	for _, activity := range activeActivities {
+		mixSources = append(mixSources, activity.source)
+		activeLevels = append(activeLevels, audioActivityLevel{
+			TrackKey:        activity.trackKey,
+			ParticipantName: activity.participantName,
+			RMS:             activity.rms,
+			Peak:            activity.peak,
+		})
+	}
 	if len(mixSources) == 0 {
 		for _, source := range readySources {
 			source.buffer = source.buffer[roomAudioMixFrameSize:]
 		}
-		return nil
+		return nil, nil
 	}
 
 	mixedPCM := make([]int16, roomAudioMixFrameSize)
@@ -221,14 +292,25 @@ func mixAudioFrame(sources map[string]*audioSource) []int16 {
 		source.buffer = source.buffer[roomAudioMixFrameSize:]
 	}
 
-	return mixedPCM
+	return mixedPCM, activeLevels
 }
 
 func activeAudioSources(sources []*audioSource) []*audioSource {
-	activeSources := make([]*audioSource, 0, len(sources))
+	activities := activeAudioSourceActivities(sources)
+	activeSources := make([]*audioSource, 0, len(activities))
+	for _, activity := range activities {
+		activeSources = append(activeSources, activity.source)
+	}
+
+	return activeSources
+}
+
+func activeAudioSourceActivities(sources []*audioSource) []audioSourceActivity {
+	activeSources := make([]audioSourceActivity, 0, len(sources))
 	for _, source := range sources {
-		if sourceAudioActive(source) {
-			activeSources = append(activeSources, source)
+		activity := sourceAudioActivity(source)
+		if activity.active {
+			activeSources = append(activeSources, activity)
 		}
 	}
 
@@ -236,11 +318,20 @@ func activeAudioSources(sources []*audioSource) []*audioSource {
 }
 
 func sourceAudioActive(source *audioSource) bool {
+	return sourceAudioActivity(source).active
+}
+
+func sourceAudioActivity(source *audioSource) audioSourceActivity {
+	activity := audioSourceActivity{source: source}
 	if source == nil || len(source.buffer) < roomAudioMixFrameSize {
-		return false
+		return activity
 	}
+	activity.trackKey = source.trackKey
+	activity.participantName = source.participantName
 
 	rms, peak := audioFrameLevel(source.buffer[:roomAudioMixFrameSize])
+	activity.rms = rms
+	activity.peak = peak
 	if source.noiseFloor <= 0 {
 		source.noiseFloor = math.Max(roomAudioNoiseSeedRMS, math.Min(rms, roomAudioMinSpeechRMS))
 	}
@@ -250,16 +341,18 @@ func sourceAudioActive(source *audioSource) bool {
 	if active {
 		source.gateRelease = roomAudioGateRelease
 		updateSourceNoiseFloor(source, rms, false)
-		return true
+		activity.active = true
+		return activity
 	}
 
 	updateSourceNoiseFloor(source, rms, true)
 	if source.gateRelease > 0 {
 		source.gateRelease--
-		return true
+		activity.active = true
+		return activity
 	}
 
-	return false
+	return activity
 }
 
 func audioFrameLevel(frame []int16) (float64, int16) {
