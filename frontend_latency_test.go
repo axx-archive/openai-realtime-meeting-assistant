@@ -126,6 +126,17 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 	}
 }
 
+func TestIndexHidesInRoomFooterClock(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	if !strings.Contains(string(rawHTML), "#appShell.is-in-room .room-clock") {
+		t.Fatal("in-room footer status should be hidden so it cannot overlap meeting controls")
+	}
+}
+
 func functionBody(source string, signature string) string {
 	start := strings.Index(source, signature)
 	if start == -1 {
