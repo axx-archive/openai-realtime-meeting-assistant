@@ -137,6 +137,29 @@ func TestIndexHidesInRoomFooterClock(t *testing.T) {
 	}
 }
 
+func TestIndexSupportsDragReorderedVideoFeeds(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"const videoFeedOrderStorageKey = 'bonfire.video.order.v1'",
+		"videoStack.addEventListener('pointerdown', beginVideoTilePointerDrag)",
+		"function applyVideoTileOrder()",
+		"function rememberVideoOrderFromDOM()",
+		"function beginVideoTilePointerDrag(event)",
+		"function handleVideoReorderKey(event)",
+		".video-tile.is-dragging",
+		".video-reorder-handle",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing drag-reordered video support %q", want)
+		}
+	}
+}
+
 func functionBody(source string, signature string) string {
 	start := strings.Index(source, signature)
 	if start == -1 {

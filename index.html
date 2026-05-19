@@ -407,12 +407,35 @@
         background: var(--night-0);
         border: 1px solid var(--line);
         aspect-ratio: 16 / 9;
-        transition: border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
+        cursor: grab;
+        user-select: none;
+        transition: border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), opacity var(--t-base) var(--ease-soft);
+      }
+
+      .video-tile:active {
+        cursor: grabbing;
       }
 
       .video-tile.is-speaking {
         border-color: var(--ember-500);
         box-shadow: var(--glow-ember-md);
+      }
+
+      .video-tile.is-dragging {
+        opacity: 0.94;
+        box-shadow:
+          0 0 0 1px rgba(255, 122, 43, 0.34),
+          0 18px 42px rgba(15, 8, 2, 0.54),
+          0 0 38px rgba(255, 122, 43, 0.18);
+        cursor: grabbing;
+      }
+
+      .video-drag-slot {
+        border-style: dashed;
+        border-color: rgba(255, 122, 43, 0.36);
+        background: rgba(255, 122, 43, 0.08);
+        box-shadow: inset 0 0 0 1px rgba(255, 122, 43, 0.08);
+        cursor: default;
       }
 
       video {
@@ -444,6 +467,52 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .video-tile.has-drag-control .video-label {
+        max-width: calc(100% - 56px);
+      }
+
+      .video-reorder-handle {
+        position: absolute;
+        right: var(--s-2);
+        bottom: var(--s-2);
+        z-index: 5;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-pill);
+        background: rgba(11, 8, 5, 0.66);
+        color: var(--fg-2);
+        cursor: grab;
+        opacity: 0.76;
+        touch-action: none;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), opacity var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      .video-reorder-handle:hover,
+      .video-reorder-handle:focus-visible {
+        background: rgba(255, 235, 200, 0.09);
+        border-color: var(--line);
+        color: var(--fg-0);
+        opacity: 1;
+      }
+
+      .video-reorder-handle:focus-visible {
+        outline: 2px solid var(--ember-500);
+        outline-offset: 2px;
+        box-shadow: var(--glow-ember-sm);
+      }
+
+      .video-reorder-handle:active {
+        cursor: grabbing;
+        transform: scale(0.96);
       }
 
       .tile-avatar {
@@ -4733,6 +4802,17 @@
           max-width: calc(100% - 12px);
         }
 
+        .video-tile.has-drag-control .video-label {
+          max-width: calc(100% - 48px);
+        }
+
+        .video-reorder-handle {
+          right: 6px;
+          bottom: 6px;
+          width: 30px;
+          height: 30px;
+        }
+
         .board-rail {
           padding: var(--s-3);
         }
@@ -6003,7 +6083,11 @@
       const participantMediaStates = new Map()
       const audioMonitors = new Map()
       const pendingRemotePlaybackElements = new Set()
+      const videoFeedOrderStorageKey = 'bonfire.video.order.v1'
+      const videoDragStartThreshold = 6
       const cardSnapshots = new Map()
+      let preferredVideoOrder = loadVideoFeedOrder()
+      let videoDragState = null
       let cardDateOverrides = loadCardDateOverrides()
       let audioContext
       let audioLevelFrame = 0
@@ -6088,6 +6172,9 @@
       stageModeButtons.forEach(button => {
         button.addEventListener('click', () => setStageMode(button.dataset.stageMode || 'gallery'))
       })
+      videoStack.addEventListener('pointerdown', beginVideoTilePointerDrag)
+      videoStack.addEventListener('keydown', handleVideoReorderKey)
+      videoStack.addEventListener('dragstart', event => event.preventDefault())
       pinActiveSpeakerButton.addEventListener('click', () => togglePinnedSpeaker(activeSpeakerDisplayName({ ignorePinned: true })))
       boardDockMute.addEventListener('click', () => muteMicButton.disabled || muteMicButton.click())
       boardDockCamera.addEventListener('click', () => toggleCameraButton.disabled || toggleCameraButton.click())
@@ -6693,6 +6780,353 @@
           button.title = pinnedSpeakerName && name === pinnedSpeakerName ? 'unpin speaker' : 'pin to stage'
           button.setAttribute('aria-label', pinnedSpeakerName && name === pinnedSpeakerName ? `Unpin ${name}` : `Pin ${name || 'speaker'} to stage`)
         }
+      }
+
+      function videoTileParticipantName(tile) {
+        return String(tile?.dataset?.participant || '').trim()
+      }
+
+      function normalizeVideoFeedOrder(names) {
+        const order = []
+        const seen = new Set()
+        for (const name of Array.isArray(names) ? names : []) {
+          const value = String(name || '').trim()
+          const key = value.toLowerCase()
+          if (!value || key === 'the room' || seen.has(key)) {
+            continue
+          }
+          seen.add(key)
+          order.push(value)
+        }
+        return order
+      }
+
+      function loadVideoFeedOrder() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(videoFeedOrderStorageKey) || '[]')
+          return normalizeVideoFeedOrder(parsed)
+        } catch {
+          return []
+        }
+      }
+
+      function saveVideoFeedOrder(order = preferredVideoOrder) {
+        try {
+          localStorage.setItem(videoFeedOrderStorageKey, JSON.stringify(normalizeVideoFeedOrder(order)))
+        } catch {
+          // Browser storage can be disabled; dragging should still work for the session.
+        }
+      }
+
+      function rememberVideoOrderFromDOM() {
+        preferredVideoOrder = normalizeVideoFeedOrder(
+          Array.from(videoStack.querySelectorAll(':scope > .video-tile'))
+            .filter(tile => !tile.classList.contains('video-drag-slot'))
+            .map(videoTileParticipantName)
+        )
+        saveVideoFeedOrder()
+      }
+
+      function renameVideoOrderParticipant(previousName, nextName) {
+        const previousKey = String(previousName || '').trim().toLowerCase()
+        const nextValue = String(nextName || '').trim()
+        if (!previousKey || !nextValue) {
+          return
+        }
+        preferredVideoOrder = normalizeVideoFeedOrder(
+          preferredVideoOrder.map(name => name.toLowerCase() === previousKey ? nextValue : name)
+        )
+        saveVideoFeedOrder()
+      }
+
+      function applyVideoTileOrder() {
+        if (videoDragState?.started || preferredVideoOrder.length === 0) {
+          return
+        }
+        const orderKeys = preferredVideoOrder.map(name => name.toLowerCase())
+        const tiles = Array.from(videoStack.querySelectorAll(':scope > .video-tile'))
+          .filter(tile => !tile.classList.contains('video-drag-slot'))
+        const ordered = tiles.map((tile, index) => {
+          const key = videoTileParticipantName(tile).toLowerCase()
+          const orderIndex = key ? orderKeys.indexOf(key) : -1
+          return {
+            tile,
+            index,
+            orderIndex: orderIndex === -1 ? Number.MAX_SAFE_INTEGER : orderIndex
+          }
+        }).sort((a, b) => (a.orderIndex - b.orderIndex) || (a.index - b.index))
+
+        ordered.forEach(({ tile }) => videoStack.appendChild(tile))
+      }
+
+      function ensureVideoTileReorderControl(tile, name) {
+        if (!tile || tile.classList.contains('video-drag-slot')) {
+          return
+        }
+        tile.classList.add('has-drag-control')
+        tile.setAttribute('draggable', 'false')
+        tile.setAttribute('aria-roledescription', 'draggable video feed')
+        let handle = tile.querySelector('.video-reorder-handle')
+        if (!handle) {
+          handle = document.createElement('button')
+          handle.className = 'video-reorder-handle'
+          handle.type = 'button'
+          handle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>'
+          handle.addEventListener('click', event => event.preventDefault())
+          tile.appendChild(handle)
+        }
+        const labelName = String(name || videoTileParticipantName(tile) || 'video').trim()
+        handle.title = 'drag to reorder'
+        handle.setAttribute('aria-label', labelName === 'video' ? 'Drag video to reorder' : `Drag ${labelName} video to reorder`)
+      }
+
+      function beginVideoTilePointerDrag(event) {
+        const handle = event.target.closest?.('.video-reorder-handle')
+        const tile = event.target.closest?.('.video-tile')
+        if (!tile || tile.classList.contains('video-drag-slot') || !videoStack.contains(tile)) {
+          return
+        }
+        if (event.button !== undefined && event.button !== 0) {
+          return
+        }
+        if (!handle && event.pointerType !== 'mouse') {
+          return
+        }
+        if (!handle && event.target.closest?.('button, a, input, select, textarea, summary, label')) {
+          return
+        }
+        if (!videoTileParticipantName(tile)) {
+          return
+        }
+
+        if (videoDragState) {
+          cancelVideoTilePointerDrag()
+        }
+        event.preventDefault()
+        videoDragState = {
+          tile,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          started: false
+        }
+        document.addEventListener('pointermove', handleVideoTilePointerMove, { passive: false })
+        document.addEventListener('pointerup', finishVideoTilePointerDrag)
+        document.addEventListener('pointercancel', cancelVideoTilePointerDrag)
+      }
+
+      function handleVideoTilePointerMove(event) {
+        if (!videoDragState || event.pointerId !== videoDragState.pointerId) {
+          return
+        }
+        const dx = event.clientX - videoDragState.startX
+        const dy = event.clientY - videoDragState.startY
+        if (!videoDragState.started) {
+          if (Math.hypot(dx, dy) < videoDragStartThreshold) {
+            return
+          }
+          startVideoTileDrag()
+        }
+        event.preventDefault()
+        moveVideoTileDrag(dx, dy, event.clientX, event.clientY)
+      }
+
+      function startVideoTileDrag() {
+        const state = videoDragState
+        if (!state || state.started) {
+          return
+        }
+        const rect = state.tile.getBoundingClientRect()
+        const slot = document.createElement('div')
+        slot.className = 'video-tile hearth-seat video-drag-slot'
+        slot.setAttribute('aria-hidden', 'true')
+        state.originalParent = state.tile.parentNode
+        state.originalNextSibling = state.tile.nextSibling
+        state.slot = slot
+        state.rect = rect
+        state.started = true
+        videoStack.insertBefore(slot, state.tile)
+        Object.assign(state.tile.style, {
+          position: 'fixed',
+          left: `${rect.left}px`,
+          top: `${rect.top}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+          margin: '0',
+          zIndex: '1300',
+          pointerEvents: 'none',
+          transform: 'translate3d(0, 0, 0)',
+          willChange: 'transform'
+        })
+        state.tile.classList.add('is-dragging')
+        videoStack.classList.add('is-reordering')
+        document.body.classList.add('is-reordering-videos')
+        document.body.appendChild(state.tile)
+      }
+
+      function moveVideoTileDrag(dx, dy, x, y) {
+        if (!videoDragState?.started) {
+          return
+        }
+        videoDragState.tile.style.transform = `translate3d(${dx}px, ${dy}px, 0)`
+        moveVideoDropSlot(x, y)
+      }
+
+      function moveVideoDropSlot(x, y) {
+        const state = videoDragState
+        if (!state?.slot) {
+          return
+        }
+        const candidate = videoDropCandidateAt(x, y)
+        if (!candidate) {
+          return
+        }
+        if (!candidate.target) {
+          videoStack.appendChild(state.slot)
+          return
+        }
+        const reference = candidate.after ? candidate.target.nextSibling : candidate.target
+        if (reference !== state.slot) {
+          videoStack.insertBefore(state.slot, reference)
+        }
+      }
+
+      function videoDropCandidateAt(x, y) {
+        const stackRect = videoStack.getBoundingClientRect()
+        const insideStack = x >= stackRect.left - 24
+          && x <= stackRect.right + 24
+          && y >= stackRect.top - 24
+          && y <= stackRect.bottom + 24
+        if (!insideStack) {
+          return null
+        }
+        const element = document.elementFromPoint(x, y)
+        const hoveredTile = element?.closest?.('.video-tile')
+        if (hoveredTile && hoveredTile.parentElement === videoStack && !hoveredTile.classList.contains('video-drag-slot')) {
+          return { target: hoveredTile, after: shouldDropAfterVideoTile(hoveredTile, x, y) }
+        }
+        const tiles = visibleVideoDropTiles()
+        if (tiles.length === 0) {
+          return { target: null, after: true }
+        }
+        let closestTile = tiles[0]
+        let closestDistance = Number.POSITIVE_INFINITY
+        for (const tile of tiles) {
+          const rect = tile.getBoundingClientRect()
+          const distance = Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2))
+          if (distance < closestDistance) {
+            closestDistance = distance
+            closestTile = tile
+          }
+        }
+        return { target: closestTile, after: shouldDropAfterVideoTile(closestTile, x, y) }
+      }
+
+      function visibleVideoDropTiles() {
+        return Array.from(videoStack.querySelectorAll(':scope > .video-tile'))
+          .filter(tile => !tile.classList.contains('video-drag-slot') && tile.getClientRects().length > 0)
+      }
+
+      function shouldDropAfterVideoTile(tile, x, y) {
+        const rect = tile.getBoundingClientRect()
+        const rowHasMultipleTiles = visibleVideoDropTiles().some(candidate => {
+          if (candidate === tile) {
+            return false
+          }
+          const candidateRect = candidate.getBoundingClientRect()
+          return Math.abs(candidateRect.top - rect.top) < Math.min(candidateRect.height, rect.height) / 2
+        })
+        if (rowHasMultipleTiles) {
+          return x > rect.left + rect.width / 2
+        }
+        return y > rect.top + rect.height / 2
+      }
+
+      function finishVideoTilePointerDrag(event) {
+        if (!videoDragState || event.pointerId !== videoDragState.pointerId) {
+          return
+        }
+        if (videoDragState.started) {
+          event.preventDefault()
+        }
+        completeVideoTileDrag(true)
+      }
+
+      function cancelVideoTilePointerDrag(event) {
+        if (event && videoDragState && event.pointerId !== videoDragState.pointerId) {
+          return
+        }
+        completeVideoTileDrag(false)
+      }
+
+      function completeVideoTileDrag(commit) {
+        const state = videoDragState
+        if (!state) {
+          return
+        }
+        document.removeEventListener('pointermove', handleVideoTilePointerMove)
+        document.removeEventListener('pointerup', finishVideoTilePointerDrag)
+        document.removeEventListener('pointercancel', cancelVideoTilePointerDrag)
+        videoDragState = null
+
+        if (state.started) {
+          if (commit && state.slot?.parentNode) {
+            state.slot.replaceWith(state.tile)
+          } else if (state.originalParent) {
+            const reference = state.originalNextSibling?.parentNode === state.originalParent ? state.originalNextSibling : null
+            state.originalParent.insertBefore(state.tile, reference)
+            state.slot?.remove()
+          }
+          state.tile.classList.remove('is-dragging')
+          for (const property of ['position', 'left', 'top', 'width', 'height', 'margin', 'zIndex', 'pointerEvents', 'transform', 'willChange']) {
+            state.tile.style[property] = ''
+          }
+          videoStack.classList.remove('is-reordering')
+          document.body.classList.remove('is-reordering-videos')
+        }
+
+        if (commit && state.started) {
+          rememberVideoOrderFromDOM()
+        }
+      }
+
+      function handleVideoReorderKey(event) {
+        const handle = event.target.closest?.('.video-reorder-handle')
+        if (!handle) {
+          return
+        }
+        const tile = handle.closest('.video-tile')
+        if (!tile || !videoStack.contains(tile)) {
+          return
+        }
+        const tiles = visibleVideoDropTiles()
+        const index = tiles.indexOf(tile)
+        if (index === -1) {
+          return
+        }
+
+        let moved = false
+        if ((event.key === 'ArrowLeft' || event.key === 'ArrowUp') && index > 0) {
+          videoStack.insertBefore(tile, tiles[index - 1])
+          moved = true
+        } else if ((event.key === 'ArrowRight' || event.key === 'ArrowDown') && index < tiles.length - 1) {
+          videoStack.insertBefore(tile, tiles[index + 1].nextSibling)
+          moved = true
+        } else if (event.key === 'Home' && index > 0) {
+          videoStack.insertBefore(tile, tiles[0])
+          moved = true
+        } else if (event.key === 'End' && index < tiles.length - 1) {
+          videoStack.appendChild(tile)
+          moved = true
+        }
+
+        if (!moved) {
+          return
+        }
+        event.preventDefault()
+        rememberVideoOrderFromDOM()
+        updateHearthParticipants()
+        handle.focus()
       }
 
       function toggleBoardDockMenu(force) {
@@ -7852,6 +8286,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             renderScreenStage()
           }
         }
+        renameVideoOrderParticipant(previousName, name)
         applyParticipantMediaStateToTile(tile, name)
       }
 
@@ -7873,6 +8308,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function disposeRemoteTile(tile) {
         if (!tile) {
           return
+        }
+        if (videoDragState?.tile === tile) {
+          cancelVideoTilePointerDrag()
         }
         const video = tile.querySelector('video')
         if (video) {
@@ -8324,9 +8762,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         syncParticipantPlaceholders()
-        for (const tile of videoStack.querySelectorAll('.video-tile')) {
+        applyVideoTileOrder()
+        for (const tile of videoStack.querySelectorAll('.video-tile:not(.video-drag-slot)')) {
           const name = tile.dataset.participant || ''
           tile.classList.toggle('is-active-speaker', Boolean(name && name === speaker))
+          ensureVideoTileReorderControl(tile, name)
           ensurePinButton(tile, name)
           applyParticipantMediaStateToTile(tile, name)
         }
@@ -8468,6 +8908,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const tile = participantPlaceholders.get(name)
         if (!tile) {
           return
+        }
+        if (videoDragState?.tile === tile) {
+          cancelVideoTilePointerDrag()
         }
         tile.remove()
         participantPlaceholders.delete(name)
@@ -10361,6 +10804,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (isLeavingRoom) {
           return
         }
+        cancelVideoTilePointerDrag()
         isLeavingRoom = true
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
