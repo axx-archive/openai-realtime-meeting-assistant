@@ -57,12 +57,12 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 }
 
 func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
-	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "high")
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "xhigh")
 	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "server_vad")
 	t.Setenv("OPENAI_REALTIME_VAD_EAGERNESS", "low")
 
-	if effort := realtimeReasoningEffort(); effort != "high" {
-		t.Fatalf("reasoning effort=%q, want high", effort)
+	if effort := realtimeReasoningEffort(); effort != "xhigh" {
+		t.Fatalf("reasoning effort=%q, want xhigh", effort)
 	}
 	turnDetection := realtimeTurnDetectionConfig()
 	if vadType := turnDetection["type"]; vadType != "server_vad" {
@@ -73,6 +73,14 @@ func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("server_vad interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestRealtimeReasoningEffortAcceptsMinimal(t *testing.T) {
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "minimal")
+
+	if effort := realtimeReasoningEffort(); effort != "minimal" {
+		t.Fatalf("reasoning effort=%q, want minimal", effort)
 	}
 }
 

@@ -3403,18 +3403,22 @@
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        grid-auto-rows: minmax(180px, 1fr);
-        align-items: stretch;
-        justify-content: stretch;
+        grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+        grid-auto-rows: auto;
+        align-content: center;
+        align-items: start;
+        justify-content: center;
         width: 100%;
-        height: 100%;
+        max-height: 100%;
+        overflow: auto;
+        padding-right: 2px;
       }
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
         width: 100%;
-        height: 100%;
-        aspect-ratio: auto;
+        height: auto;
+        min-height: 0;
+        aspect-ratio: 16 / 9;
       }
 
       .hearth-speaker {
@@ -4748,7 +4752,7 @@
 
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          grid-auto-rows: minmax(128px, 1fr);
+          grid-auto-rows: auto;
         }
 
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats:has(.hearth-seat:only-child) {
@@ -4756,11 +4760,11 @@
         }
 
         .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
-          min-height: 128px;
+          min-height: 0;
         }
 
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats:has(.hearth-seat:only-child) .hearth-seat {
-          min-height: 240px;
+          min-height: 0;
         }
 
         .hearth-center {
@@ -6084,6 +6088,8 @@
       let roomStartedAt = 0
       let roomClockTimer = 0
       let connectionRecoveryTimer = 0
+      let signalChain = Promise.resolve()
+      let lastIceRestartRequestAt = 0
       let isLeavingRoom = false
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
@@ -6147,6 +6153,8 @@
       }
       const cameraContentHint = 'motion'
       const screenShareContentHint = 'detail'
+      const connectionRecoveryDelayMs = 20000
+      const iceRestartThrottleMs = 3500
 
       joinButton.addEventListener('click', joinRoom)
       joinAccessButton.addEventListener('click', joinRoom)
@@ -7194,10 +7202,21 @@
             }))
           }
           ws.onmessage = event => {
-            handleSignal(JSON.parse(event.data)).catch(error => {
-              console.warn('Signal handling failed', error)
-              setLog(error.message || String(error))
-            })
+            let message
+            try {
+              message = JSON.parse(event.data)
+            } catch (error) {
+              console.warn('Signal parse failed', error)
+              setLog('could not read room signal')
+              return
+            }
+            signalChain = signalChain
+              .catch(() => {})
+              .then(() => handleSignal(message))
+              .catch(error => {
+                console.warn('Signal handling failed', error)
+                setLog(error.message || String(error))
+              })
           }
           ws.onclose = () => leaveRoom()
           ws.onerror = () => setLog('websocket error')
@@ -7301,9 +7320,23 @@
             setConnectionState('connecting', 'connecting…')
           } else if (state === 'disconnected') {
             setConnectionState('connecting', 'reconnecting…')
+            requestIceRestart('media connection interrupted')
             scheduleConnectionRecovery(sessionPeer)
-          } else if (state === 'failed' || state === 'closed') {
+          } else if (state === 'failed') {
+            setConnectionState('connecting', 'reconnecting…')
+            requestIceRestart('media connection failed')
+            scheduleConnectionRecovery(sessionPeer)
+          } else if (state === 'closed') {
             leaveRoom()
+          }
+        }
+        pc.oniceconnectionstatechange = () => {
+          if (pc !== sessionPeer) {
+            return
+          }
+          if (sessionPeer.iceConnectionState === 'failed') {
+            requestIceRestart('ICE connection failed')
+            scheduleConnectionRecovery(sessionPeer)
           }
         }
 
@@ -7328,10 +7361,31 @@
         clearConnectionRecoveryTimer()
         connectionRecoveryTimer = window.setTimeout(() => {
           connectionRecoveryTimer = 0
-          if (pc === sessionPeer && sessionPeer.connectionState === 'disconnected') {
+          if (pc === sessionPeer && ['disconnected', 'failed'].includes(sessionPeer.connectionState)) {
             leaveRoom()
           }
-        }, 8000)
+        }, connectionRecoveryDelayMs)
+      }
+
+      function requestIceRestart(reason) {
+        if (!pc || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        const now = Date.now()
+        if (now - lastIceRestartRequestAt < iceRestartThrottleMs) {
+          return
+        }
+        lastIceRestartRequestAt = now
+        try {
+          pc.restartIce?.()
+        } catch (error) {
+          console.warn('Could not locally restart ICE', error)
+        }
+        ws.send(JSON.stringify({
+          event: 'restart_ice',
+          data: JSON.stringify({ reason })
+        }))
+        setLog('reconnecting media…')
       }
 
       async function getPreferredUserMedia() {
@@ -7997,13 +8051,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               return
             }
             const offer = JSON.parse(message.data)
+            await waitForStableSignaling()
             await pc.setRemoteDescription(offer)
             await flushQueuedRemoteCandidates()
             await attachLocalTracksToOffer(offer)
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             await configureOutboundSenders()
-            ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
+            if (ws?.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
+            }
             break
           }
           case 'candidate': {
@@ -8017,6 +8074,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'kanban':
             handleKanbanMessage(JSON.parse(message.data))
             break
+        }
+      }
+
+      async function waitForStableSignaling(timeoutMs = 2500) {
+        if (!pc || pc.signalingState === 'stable') {
+          return
+        }
+
+        const startedAt = performance.now()
+        while (pc && pc.signalingState !== 'stable' && performance.now() - startedAt < timeoutMs) {
+          await new Promise(resolve => window.setTimeout(resolve, 50))
+        }
+        if (pc && pc.signalingState !== 'stable') {
+          throw new Error('media signaling is still busy; retrying')
         }
       }
 
@@ -8148,6 +8219,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'session_replaced':
             handleSessionReplaced(String(message.data || 'this browser session was replaced.'))
+            break
+          case 'media_disconnected':
+            setLog(String(message.data || 'media connection ended.'))
+            leaveRoom()
             break
           case 'meeting_archived':
             handleMeetingArchived(message.data)
@@ -8667,6 +8742,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stream = activeScreenShareParticipant === currentParticipantName
           ? screenShareStream
           : remoteStreamsByParticipant.get(activeScreenShareParticipant)
+        if (!stream) {
+          presentationTile.classList.remove('is-screen-sharing')
+          setVideoElementStream(screenStageVideo, null)
+          screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
+          updateSpeakerPictureInPicture()
+          updateStageControls()
+          updateBoardDockControls()
+          return
+        }
         presentationTile.classList.add('is-screen-sharing')
         setVideoElementStream(screenStageVideo, stream)
         screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
@@ -10884,6 +10968,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         stageMode = 'gallery'
         pendingActiveSpeakerName = ''
         pendingActiveSpeakerSince = 0
+        signalChain = Promise.resolve()
+        lastIceRestartRequestAt = 0
         participantsInRoom = []
         currentParticipantName = ''
         canEditBoard = false

@@ -28,6 +28,9 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"setTrackContentHint(track, cameraContentHint)",
 		"setTrackContentHint(screenTrack, screenShareContentHint)",
 		"function scheduleConnectionRecovery(sessionPeer)",
+		"const connectionRecoveryDelayMs = 20000",
+		"function requestIceRestart(reason)",
+		"event: 'restart_ice'",
 		"state === 'disconnected'",
 	} {
 		if !strings.Contains(html, want) {
@@ -61,6 +64,7 @@ func TestIndexDeduplicatesParticipantsAndPrunesStaleMedia(t *testing.T) {
 		"const nextKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))",
 		"removeRemoteParticipantMediaByName(name)",
 		"case 'session_replaced':",
+		"case 'media_disconnected':",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing participant hardening %q", want)
@@ -69,6 +73,27 @@ func TestIndexDeduplicatesParticipantsAndPrunesStaleMedia(t *testing.T) {
 
 	if strings.Contains(html, "['failed', 'closed', 'disconnected'].includes(state)") {
 		t.Fatal("transient disconnected state should not immediately leave the room")
+	}
+}
+
+func TestIndexSerializesRealtimeSignaling(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"let signalChain = Promise.resolve()",
+		"signalChain = signalChain",
+		".then(() => handleSignal(message))",
+		"await waitForStableSignaling()",
+		"function waitForStableSignaling(timeoutMs = 2500)",
+		"if (ws?.readyState === WebSocket.OPEN)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing serialized signaling guard %q", want)
+		}
 	}
 }
 

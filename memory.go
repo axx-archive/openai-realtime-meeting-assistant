@@ -119,6 +119,10 @@ func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string,
 }
 
 func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, itemID string, speaker string, speakerConfidence string, transcript string) (meetingMemoryEntry, bool, error) {
+	return store.appendAttributedTranscriptWithMetadata(eventID, itemID, speaker, speakerConfidence, transcript, nil)
+}
+
+func (store *meetingMemoryStore) appendAttributedTranscriptWithMetadata(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" || !transcriptLooksUseful(transcript) {
 		return meetingMemoryEntry{}, false, nil
@@ -134,6 +138,14 @@ func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, item
 
 	metadata := map[string]string{
 		"itemId": itemID,
+	}
+	for key, value := range extraMetadata {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		metadata[key] = value
 	}
 	if speaker = normalizeTranscriptSpeaker(speaker); speaker != "" {
 		transcript = formatSpeakerTranscript(speaker, transcript)

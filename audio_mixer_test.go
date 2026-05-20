@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestMixAudioFrameDoesNotAttenuateSpeakerWithSilentSource(t *testing.T) {
 	speakerFrame := make([]int16, roomAudioMixFrameSize)
@@ -60,6 +63,27 @@ func TestMixAudioFrameDropsSteadyBackgroundNoise(t *testing.T) {
 	}
 }
 
+func TestAudioMixerEmitsTrailingSilenceAfterSpeech(t *testing.T) {
+	mixer := newAudioMixer()
+	defer mixer.close()
+
+	sink := newRecordingMixedAudioSink()
+	mixer.setSink("test", sink)
+
+	speechFrame := make([]int16, roomAudioMixFrameSize)
+	for index := range speechFrame {
+		speechFrame[index] = 1000
+	}
+	mixer.submit("speaker", "AJ", speechFrame)
+
+	if frame := sink.waitForFrame(t); pcmIsZero(frame) {
+		t.Fatal("first mixed frame was silence, want speech")
+	}
+	if frame := sink.waitForFrame(t); !pcmIsZero(frame) {
+		t.Fatal("mixer did not emit trailing silence after speech")
+	}
+}
+
 func TestSourceAudioActiveLearnsNoiseFloorButKeepsSpeech(t *testing.T) {
 	source := &audioSource{}
 	noiseFrame := make([]int16, roomAudioMixFrameSize)
@@ -79,6 +103,34 @@ func TestSourceAudioActiveLearnsNoiseFloorButKeepsSpeech(t *testing.T) {
 	source.buffer = append(source.buffer[:0], speechFrame...)
 	if !sourceAudioActive(source) {
 		t.Fatal("speech above the learned noise floor should pass")
+	}
+}
+
+type recordingMixedAudioSink struct {
+	frames chan []int16
+}
+
+func newRecordingMixedAudioSink() *recordingMixedAudioSink {
+	return &recordingMixedAudioSink{frames: make(chan []int16, 8)}
+}
+
+func (sink *recordingMixedAudioSink) WriteMixedPCM(pcm []int16) error {
+	select {
+	case sink.frames <- append([]int16(nil), pcm...):
+	default:
+	}
+	return nil
+}
+
+func (sink *recordingMixedAudioSink) waitForFrame(t *testing.T) []int16 {
+	t.Helper()
+
+	select {
+	case frame := <-sink.frames:
+		return frame
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for mixed audio frame")
+		return nil
 	}
 }
 

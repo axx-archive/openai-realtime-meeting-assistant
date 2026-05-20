@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +17,11 @@ const (
 	memoryQuestionRequestTimeout      = 45 * time.Second
 	assistantQueryRequestTimeout      = 25 * time.Second
 	defaultMeetingTimeZone            = "America/Los_Angeles"
+)
+
+var (
+	pastDurationQueryPattern = regexp.MustCompile(`\b(?:last|past)\s+(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\b`)
+	agoDurationQueryPattern  = regexp.MustCompile(`\b(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\s+ago\b`)
 )
 
 func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, bool, error) {
@@ -563,6 +570,10 @@ func relativeQueryTimeRange(query string, now time.Time) (time.Time, time.Time, 
 	localNow := now.In(location)
 	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
 
+	if start, end, ok := relativeDurationQueryTimeRange(normalized, localNow); ok {
+		return start, end, true
+	}
+
 	switch {
 	case strings.Contains(normalized, "yesterday"):
 		start := dayStart.AddDate(0, 0, -1)
@@ -578,6 +589,49 @@ func relativeQueryTimeRange(query string, now time.Time) (time.Time, time.Time, 
 		return thisWeek.UTC(), thisWeek.AddDate(0, 0, 7).UTC(), true
 	default:
 		return time.Time{}, time.Time{}, false
+	}
+}
+
+func relativeDurationQueryTimeRange(normalized string, localNow time.Time) (time.Time, time.Time, bool) {
+	if match := pastDurationQueryPattern.FindStringSubmatch(normalized); len(match) == 3 {
+		if duration, ok := queryDuration(match[1], match[2]); ok {
+			return localNow.Add(-duration).UTC(), localNow.UTC(), true
+		}
+	}
+	if match := agoDurationQueryPattern.FindStringSubmatch(normalized); len(match) == 3 {
+		if duration, ok := queryDuration(match[1], match[2]); ok {
+			padding := duration / 4
+			if padding < 2*time.Minute {
+				padding = 2 * time.Minute
+			}
+			if padding > 15*time.Minute {
+				padding = 15 * time.Minute
+			}
+			start := localNow.Add(-duration - padding)
+			end := localNow.Add(-duration + padding)
+			if end.After(localNow) {
+				end = localNow
+			}
+			return start.UTC(), end.UTC(), true
+		}
+	}
+
+	return time.Time{}, time.Time{}, false
+}
+
+func queryDuration(amount string, unit string) (time.Duration, bool) {
+	value, err := strconv.Atoi(strings.TrimSpace(amount))
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "minute", "minutes", "min", "mins":
+		return time.Duration(value) * time.Minute, true
+	case "hour", "hours", "hr", "hrs":
+		return time.Duration(value) * time.Hour, true
+	default:
+		return 0, false
 	}
 }
 

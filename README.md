@@ -96,7 +96,7 @@ The board should update in place. Card moves animate, completed work triggers co
 
 Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
 
-Scout also saves speaker-attributed transcripts as meeting memory. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript.
+Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-realtime-whisper` transcription-only lane records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript.
 
 ### Configured interactions
 
@@ -120,9 +120,10 @@ You can update:
 - The tools exposed to the model in `kanbanTools` in `kanban.go`.
 - The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
 - The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
+- The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. Set `OPENAI_TRANSCRIPT_MODEL` to change the transcript-only model from `gpt-realtime-whisper`.
 - The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
-- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`low`, `medium`, or `high`); the default is `medium` for `gpt-realtime-2`.
-- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `low` eagerness.
+- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `low` for `gpt-realtime-2`.
+- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `high` eagerness for faster board commands.
 - The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
 - The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
 - Historical backfill for the brain worker with `MEETING_BRAIN_BACKFILL=true`; by default it starts from the latest transcript at app startup and summarizes new transcript windows only.

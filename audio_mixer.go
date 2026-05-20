@@ -21,9 +21,10 @@ const (
 	roomAudioGateRatio    = 3.2
 	roomAudioGateRelease  = 8
 
-	roomAudioMixInterval  = 20 * time.Millisecond
-	roomAudioMixFrameSize = roomAudioSampleRate / 50 * roomAudioChannels
-	audioSourceLimit      = roomAudioMixFrameSize * 50
+	roomAudioMixInterval           = 20 * time.Millisecond
+	roomAudioMixFrameSize          = roomAudioSampleRate / 50 * roomAudioChannels
+	roomAudioTrailingSilenceFrames = 50
+	audioSourceLimit               = roomAudioMixFrameSize * 50
 )
 
 type mixedAudioSink interface {
@@ -176,6 +177,7 @@ func (mixer *audioMixer) run() {
 	defer ticker.Stop()
 
 	sources := map[string]*audioSource{}
+	trailingSilenceFrames := 0
 	for {
 		select {
 		case <-mixer.stop:
@@ -202,7 +204,13 @@ func (mixer *audioMixer) run() {
 		case <-ticker.C:
 			mixedPCM, activeLevels := mixAudioFrameWithActivity(sources)
 			if len(mixedPCM) == 0 {
-				continue
+				if trailingSilenceFrames <= 0 {
+					continue
+				}
+				trailingSilenceFrames--
+				mixedPCM = make([]int16, roomAudioMixFrameSize)
+			} else {
+				trailingSilenceFrames = roomAudioTrailingSilenceFrames
 			}
 
 			if len(activeLevels) > 0 {

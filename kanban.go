@@ -20,9 +20,9 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
-	defaultReasoningEffort    = "medium"
+	defaultReasoningEffort    = "low"
 	defaultRealtimeVADType    = "semantic_vad"
-	defaultVADEagerness       = "low"
+	defaultVADEagerness       = "high"
 	defaultRealtimeVoice      = "marin"
 	defaultKanbanBoardPath    = "data/kanban-board.json"
 	realtimeEventChannelLabel = "oai-events"
@@ -144,9 +144,12 @@ type kanbanBoardApp struct {
 	inputEnc                 *opusEncoder
 	connected                bool
 	forwardedAudioNotice     bool
+	realtimeResponseActive   bool
 	scoutVoiceArmedAt        time.Time
 	scoutVoiceArmedUntil     time.Time
 	scoutSpokenResponse      bool
+	scoutSpokenResponseSent  bool
+	transcriptLane           *meetingTranscriptionLane
 	audioActivity            []participantAudioFrame
 	currentSpeechStartedAt   time.Time
 	currentSpeechStoppedAt   time.Time
@@ -375,11 +378,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.mu.Lock()
 	app.apiKey = apiKey
 	app.mu.Unlock()
+	app.startTranscriptionLane(apiKey)
+	app.startMeetingBrainWorker(apiKey)
 
 	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
 		return err
 	}
-	app.startMeetingBrainWorker(apiKey)
 
 	return nil
 }
@@ -430,9 +434,11 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	app.inputTrack = inputTrack
 	app.inputEnc = inputEnc
 	app.forwardedAudioNotice = false
+	app.realtimeResponseActive = false
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
+	app.scoutSpokenResponseSent = false
 	app.mu.Unlock()
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -467,16 +473,16 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 				app.inputEnc = nil
 				app.connected = false
 				app.forwardedAudioNotice = false
+				app.realtimeResponseActive = false
 				app.scoutVoiceArmedAt = time.Time{}
 				app.scoutVoiceArmedUntil = time.Time{}
 				app.scoutSpokenResponse = false
+				app.scoutSpokenResponseSent = false
 			}
 			app.mu.Unlock()
 			return
 		}
-		if roomMixer != nil {
-			roomMixer.setSink(realtimeMixedAudioSinkKey, app)
-		}
+		app.ensureRoomMixerSink()
 		app.startProactiveRealtimeRestart(peerConnection)
 	}()
 
@@ -498,9 +504,11 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 	app.inputEnc = nil
 	app.connected = false
 	app.forwardedAudioNotice = false
+	app.realtimeResponseActive = false
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
+	app.scoutSpokenResponseSent = false
 	cancelProactiveRestart := app.proactiveReconnectCancel
 	app.proactiveReconnectCancel = nil
 	app.mu.Unlock()
@@ -511,9 +519,7 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 		app.mu.Unlock()
 	}()
 
-	if roomMixer != nil {
-		roomMixer.removeSink(realtimeMixedAudioSinkKey)
-	}
+	app.removeRoomMixerSinkIfIdle()
 	if cancelProactiveRestart != nil {
 		close(cancelProactiveRestart)
 	}
@@ -554,17 +560,24 @@ func (app *kanbanBoardApp) Close() error {
 		app.inputEnc = nil
 		app.connected = false
 		app.forwardedAudioNotice = false
+		app.realtimeResponseActive = false
 		app.scoutVoiceArmedAt = time.Time{}
 		app.scoutVoiceArmedUntil = time.Time{}
 		app.scoutSpokenResponse = false
+		app.scoutSpokenResponseSent = false
 		cancelProactiveRestart := app.proactiveReconnectCancel
 		app.proactiveReconnectCancel = nil
 		brainWorkerCancel := app.brainWorkerCancel
 		brainWorkerDone := app.brainWorkerDone
+		transcriptLane := app.transcriptLane
+		app.transcriptLane = nil
 		app.brainWorkerCancel = nil
 		app.brainWorkerDone = nil
 		app.brainWorkerBaselineID = ""
 		app.mu.Unlock()
+		if transcriptLane != nil {
+			transcriptLane.close()
+		}
 		if cancelProactiveRestart != nil {
 			close(cancelProactiveRestart)
 		}
@@ -667,6 +680,46 @@ func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 		return fmt.Errorf("mixed PCM length %d must be a multiple of %d samples", len(roomPCM), roomAudioMixFrameSize)
 	}
 
+	isSyntheticSilence := pcmIsZero(roomPCM)
+	transcriptQueued := false
+	if !isSyntheticSilence {
+		transcriptQueued = app.enqueueTranscriptionLaneAudio(roomPCM)
+	}
+
+	if isSyntheticSilence && !app.realtimeAudioInputAvailable() {
+		return nil
+	}
+
+	if err := app.writeRealtimeMixedPCM(roomPCM); err != nil {
+		if transcriptQueued {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func pcmIsZero(pcm []int16) bool {
+	if len(pcm) == 0 {
+		return false
+	}
+	for _, sample := range pcm {
+		if sample != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (app *kanbanBoardApp) realtimeAudioInputAvailable() bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.inputTrack != nil && app.inputEnc != nil
+}
+
+func (app *kanbanBoardApp) writeRealtimeMixedPCM(roomPCM []int16) error {
 	app.mu.Lock()
 	inputTrack := app.inputTrack
 	inputEnc := app.inputEnc
@@ -895,7 +948,7 @@ func realtimeModel() string {
 func realtimeReasoningEffort() string {
 	effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_REASONING_EFFORT")))
 	switch effort {
-	case "low", "medium", "high":
+	case "minimal", "low", "medium", "high", "xhigh":
 		return effort
 	default:
 		return defaultReasoningEffort
@@ -1017,6 +1070,7 @@ func (app *kanbanBoardApp) markScoutSpokenResponsePending(toolName string, resul
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = true
+	app.scoutSpokenResponseSent = false
 }
 
 func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool) bool {
@@ -1034,11 +1088,12 @@ func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool) 
 
 func (app *kanbanBoardApp) flushScoutSpokenResponseIfPending() {
 	app.mu.Lock()
-	if !app.scoutSpokenResponse {
+	if !app.scoutSpokenResponse || app.scoutSpokenResponseSent {
 		app.mu.Unlock()
 		return
 	}
 	app.scoutSpokenResponse = false
+	app.scoutSpokenResponseSent = true
 	app.mu.Unlock()
 
 	if err := app.SendEvent(map[string]any{
@@ -1049,9 +1104,44 @@ func (app *kanbanBoardApp) flushScoutSpokenResponseIfPending() {
 			"instructions":      scoutSpokenResponseInstructions(),
 		},
 	}); err != nil {
+		app.mu.Lock()
+		app.scoutSpokenResponse = true
+		app.scoutSpokenResponseSent = false
+		app.mu.Unlock()
 		log.Errorf("Failed to request Scout spoken response: %v", err)
 		broadcastAssistantEvent("error", "could not ask Scout to speak", nil)
 	}
+}
+
+func (app *kanbanBoardApp) retryScoutSpokenResponseAfterActiveResponseError() bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if !app.scoutSpokenResponseSent {
+		return false
+	}
+	app.scoutSpokenResponse = true
+	app.scoutSpokenResponseSent = false
+	return true
+}
+
+func (app *kanbanBoardApp) markScoutSpokenResponseDelivered() {
+	app.mu.Lock()
+	app.scoutSpokenResponseSent = false
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) markRealtimeResponseActive(active bool) {
+	app.mu.Lock()
+	app.realtimeResponseActive = active
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) isRealtimeResponseActive() bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.realtimeResponseActive
 }
 
 func scoutSpokenResponseInstructions() string {
@@ -1067,20 +1157,23 @@ func scoutSpokenResponseInstructions() string {
 
 func (app *kanbanBoardApp) sessionInstructions() string {
 	return strings.Join([]string{
-		"# Role\nYou are a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
+		"# Role and Objective\nYou are Scout, a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
 		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
+		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
+		"# Preambles\nDo not speak preambles for routine board updates. Only speak to the room after a tool result when the clear user turn started with Hey Scout. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
+		"# Entity capture\nPreserve exact names, brands, owners, card titles, dates, and project terms. For high-precision identifiers or ambiguous names, normalize only what is clear. If multiple interpretations are plausible, call do_nothing with one clarification question.",
 		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
-		"# Tool policy\nIf one utterance changes status, notes, owner, and tags for the same existing card, prefer one update_ticket call with all changed fields. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation.",
-		"# Memory policy\nMeeting transcripts are saved as durable memory with speaker labels when Scout can attribute the speaker. A scheduled brain worker also writes durable summaries with transcript references. If the user asks what was said, decided, discussed, remembered, mentioned earlier, how a meeting went, or asks any recall question, call answer_memory_question with the user's full question as the query.",
-		"# No-op policy\nIf the user is wrapping up, handing off, giving filler, or not giving a concrete board operation or recall request, call do_nothing with a short user-visible reason.",
+		"# Tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, and tags for the same existing card, prefer one update_ticket call with all changed fields. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
+		"# Memory\nMeeting transcripts are saved as durable memory with speaker labels when Scout can attribute the speaker. A scheduled brain worker also writes durable summaries with transcript references. If the user asks what was said, decided, discussed, remembered, mentioned earlier, how a meeting went, or asks any recall question, call answer_memory_question with the user's full question as the query.",
+		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete board operation or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nOnly speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
-		"# Response policy\nPrefer tools over text replies. Do not narrate board operations aloud unless the utterance started with Hey Scout; then keep any spoken response to one short sentence.",
+		"# Verbosity\nPrefer tools over text replies. Do not narrate board operations aloud unless the utterance started with Hey Scout; then keep any spoken response to one short sentence. For memory answers, give the headline first and only the most useful details.",
 	}, "\n\n")
 }
 
@@ -1240,7 +1333,11 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 				return
 			}
 			if isRealtimeActiveResponseError(event) {
+				shouldRetrySpeech := app.retryScoutSpokenResponseAfterActiveResponseError()
 				broadcastAssistantEvent("status", "Scout is still finishing the last turn.", map[string]any{"code": event.Error.Code})
+				if shouldRetrySpeech && !app.isRealtimeResponseActive() {
+					app.flushScoutSpokenResponseIfPending()
+				}
 				return
 			}
 			broadcastKanbanEvent("status", event.Error.Message)
@@ -1248,26 +1345,36 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		app.armScoutVoiceResponse(event.Transcript)
-		app.rememberTranscript(event)
+		if !app.transcriptionLaneConnected() {
+			app.rememberTranscript(event, "scout_realtime", app.currentRealtimeModel())
+		}
 	case "conversation.item.input_audio_transcription.delta":
 		if text := canonicalizeBoardText(event.Delta); text != "" {
 			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
 		}
 	case "input_audio_buffer.speech_started":
-		app.noteRealtimeSpeechStarted()
+		if !app.transcriptionLaneConnected() {
+			app.noteRealtimeSpeechStarted()
+		}
 		app.clearScoutVoiceArmForNewSpeech()
 		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
-		app.noteRealtimeSpeechStopped()
+		if !app.transcriptionLaneConnected() {
+			app.noteRealtimeSpeechStopped()
+		}
 		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.committed":
 		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type})
+	case "response.created":
+		app.markRealtimeResponseActive(true)
 	case "response.output_audio_transcript.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
+			app.markScoutSpokenResponseDelivered()
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
 		}
 	case "response.output_text.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Text, event.Transcript)); text != "" {
+			app.markScoutSpokenResponseDelivered()
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
 		}
 	case "response.output_item.done":
@@ -1277,12 +1384,18 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 	case "response.function_call_arguments.done":
 		app.handleToolCall(realtimeFunctionCallFromArgumentsDone(event), true)
 	case "response.done":
+		app.markRealtimeResponseActive(false)
+		hadFunctionCall := false
 		if event.Response != nil {
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {
+					hadFunctionCall = true
 					app.handleToolCall(outputItem, false)
 				}
 			}
+		}
+		if !hadFunctionCall {
+			app.markScoutSpokenResponseDelivered()
 		}
 		app.flushScoutSpokenResponseIfPending()
 	default:
@@ -1368,6 +1481,8 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 	}); err != nil {
 		log.Errorf("Failed to send Kanban function output: %v", err)
 		broadcastAssistantEvent("error", "could not send tool result to OpenAI Realtime", map[string]any{"tool": outputItem.Name})
+	} else {
+		app.flushScoutSpokenResponseIfPending()
 	}
 
 	if !changed {
@@ -1440,9 +1555,17 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	}
 }
 
-func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent) {
+func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source string, model string) {
+	if app == nil || app.memory == nil {
+		log.Errorf("Meeting memory unavailable; transcript was not saved")
+		return
+	}
+
 	speaker, confidence := app.speakerForCompletedTranscript(time.Now().UTC())
-	entry, appended, err := app.memory.appendAttributedTranscript(event.EventID, event.ItemID, speaker, confidence, event.Transcript)
+	entry, appended, err := app.memory.appendAttributedTranscriptWithMetadata(event.EventID, event.ItemID, speaker, confidence, event.Transcript, map[string]string{
+		"source": source,
+		"model":  model,
+	})
 	if err != nil {
 		log.Errorf("Failed to write meeting memory: %v", err)
 		return
@@ -1456,6 +1579,10 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent) {
 }
 
 func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+
 	return app.memory.snapshot(limit)
 }
 
@@ -1463,6 +1590,9 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 	query := canonicalizeBoardText(asString(args["query"]))
 	if query == "" {
 		return nil, false, fmt.Errorf("query is required")
+	}
+	if app == nil || app.memory == nil {
+		return nil, false, fmt.Errorf("meeting memory is unavailable")
 	}
 
 	matches, contextEntries := app.memoryMatchesAndContext(query)

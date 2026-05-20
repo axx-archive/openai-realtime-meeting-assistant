@@ -413,21 +413,50 @@ func nextParticipantSessionID() string {
 
 // signalPeerConnections updates each PeerConnection so that it is getting all the expected media tracks.
 func signalPeerConnections() { // nolint
+	signalPeerConnectionsWithRestart(nil)
+}
+
+func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) {
+	if peerConnection == nil {
+		return
+	}
+
+	signalPeerConnectionsWithRestart(peerConnection)
+}
+
+func schedulePeerConnectionSignal(restartPeer *webrtc.PeerConnection) {
+	go func() {
+		time.Sleep(750 * time.Millisecond)
+		signalPeerConnectionsWithRestart(restartPeer)
+	}()
+}
+
+func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // nolint
 	listLock.Lock()
+	retryLater := false
 	defer func() {
 		listLock.Unlock()
 		dispatchKeyFrame()
+		if retryLater {
+			schedulePeerConnectionSignal(restartPeer)
+		}
 	}()
 
 	attemptSync := func() (tryAgain bool) {
 		for i := range peerConnections {
-			if peerConnections[i].peerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			if peerConnections[i].peerConnection == nil || peerConnections[i].peerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
 				peerConnections = append(peerConnections[:i], peerConnections[i+1:]...)
 
 				return true // We modified the slice, start from the beginning
 			}
 
 			peer := &peerConnections[i]
+			forceSignal := restartPeer != nil && peer.peerConnection == restartPeer
+
+			if peer.peerConnection.SignalingState() != webrtc.SignalingStateStable {
+				retryLater = true
+				continue
+			}
 
 			desiredTrackCount := 0
 			for _, trackLocal := range trackLocals {
@@ -435,9 +464,11 @@ func signalPeerConnections() { // nolint
 					desiredTrackCount++
 				}
 			}
-			if !peer.shouldSignalWithDesiredTrackCount(desiredTrackCount) {
+			if !forceSignal && !peer.shouldSignalWithDesiredTrackCount(desiredTrackCount) {
 				continue
 			}
+
+			needsOffer := forceSignal || peer.peerConnection.LocalDescription() == nil
 
 			// Map senders we already have, so we do not double-send tracks.
 			existingSenders := map[string]bool{}
@@ -454,8 +485,10 @@ func signalPeerConnections() { // nolint
 				trackLocal, ok := trackLocals[trackID]
 				if !ok || !peer.acceptsTrack(trackLocal) {
 					if err := peer.peerConnection.RemoveTrack(sender); err != nil {
+						log.Errorf("Failed to remove stale sender track=%s: %v", trackID, err)
 						return true
 					}
+					needsOffer = true
 				}
 			}
 
@@ -478,13 +511,26 @@ func signalPeerConnections() { // nolint
 					if _, err := peer.peerConnection.AddTransceiverFromTrack(trackLocal, webrtc.RTPTransceiverInit{
 						Direction: webrtc.RTPTransceiverDirectionSendonly,
 					}); err != nil {
+						log.Errorf("Failed to add sender track=%s: %v", trackID, err)
 						return true
 					}
+					needsOffer = true
 				}
 			}
 
-			offer, err := peer.peerConnection.CreateOffer(nil)
+			if !needsOffer {
+				continue
+			}
+
+			var offerOptions *webrtc.OfferOptions
+			if forceSignal {
+				offerOptions = &webrtc.OfferOptions{ICERestart: true}
+			}
+
+			offer, err := peer.peerConnection.CreateOffer(offerOptions)
 			if err != nil {
+				log.Errorf("Failed to create offer: %v", err)
+				retryLater = true
 				return true
 			}
 
@@ -494,6 +540,8 @@ func signalPeerConnections() { // nolint
 			}
 
 			if err = peer.peerConnection.SetLocalDescription(offer); err != nil {
+				log.Errorf("Failed to set local offer: %v", err)
+				retryLater = true
 				return true
 			}
 
@@ -549,6 +597,9 @@ func dispatchKeyFrame() {
 	defer listLock.RUnlock()
 
 	for i := range peerConnections {
+		if peerConnections[i].peerConnection == nil {
+			continue
+		}
 		for _, receiver := range peerConnections[i].peerConnection.GetReceivers() {
 			if receiver.Track() == nil {
 				continue
@@ -578,6 +629,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
 	mediaJoined := false
+	var participantAcceptedState atomic.Bool
+	var mediaJoinedState atomic.Bool
+	var cleanupOnce sync.Once
 	pendingRemoteCandidates := make([]webrtc.ICECandidateInit, 0)
 	participantMu := sync.Mutex{}
 	currentParticipantName := func() string {
@@ -590,18 +644,27 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		participantName = name
 		participantMu.Unlock()
 	}
+	cleanupParticipantSession := func(reason string, closeSocket bool) {
+		cleanupOnce.Do(func() {
+			if participantAcceptedState.Load() {
+				name := currentParticipantName()
+				unregisterParticipantSession(name, participantSessionID)
+				if kanbanApp.forgetParticipantSession(name, participantSessionID) {
+					broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+				}
+			}
+			if closeSocket {
+				if reason != "" {
+					_ = sendKanbanEvent(c, "media_disconnected", reason)
+				}
+				_ = c.Close()
+			}
+		})
+	}
 
 	// When this frame returns close the Websocket
 	defer c.Close() //nolint
-	defer func() {
-		if participantAccepted {
-			name := currentParticipantName()
-			unregisterParticipantSession(name, participantSessionID)
-			if kanbanApp.forgetParticipantSession(name, participantSessionID) {
-				broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
-			}
-		}
-	}()
+	defer cleanupParticipantSession("", false)
 
 	// Create new PeerConnection
 	peerConnection, err := newPeerConnection()
@@ -655,11 +718,18 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 		switch p {
 		case webrtc.PeerConnectionStateFailed:
+			if mediaJoinedState.Load() {
+				cleanupParticipantSession("media connection failed; rejoin the room.", true)
+			}
 			if err := peerConnection.Close(); err != nil {
 				log.Errorf("Failed to close PeerConnection: %v", err)
 			}
 		case webrtc.PeerConnectionStateClosed:
-			signalPeerConnections()
+			if mediaJoinedState.Load() {
+				cleanupParticipantSession("", false)
+			} else {
+				signalPeerConnections()
+			}
 		default:
 		}
 	})
@@ -748,7 +818,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	for {
 		_, raw, err := c.ReadMessage()
 		if err != nil {
-			log.Errorf("Failed to read message: %v", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+				log.Errorf("Failed to read message: %v", err)
+			} else {
+				log.Infof("WebSocket closed: %v", err)
+			}
 
 			return
 		}
@@ -792,6 +866,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			setParticipantName(admittedName)
 			participantAccepted = true
+			participantAcceptedState.Store(true)
 			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name": admittedName,
@@ -831,6 +906,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			mediaJoined = true
+			mediaJoinedState.Store(true)
 			listLock.Lock()
 			peerConnections = append(peerConnections, peerConnectionState{
 				peerConnection:  peerConnection,
@@ -887,6 +963,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 			}
 			pendingRemoteCandidates = pendingRemoteCandidates[:0]
+			signalPeerConnections()
+		case "restart_ice":
+			if !participantAccepted || !mediaJoined {
+				continue
+			}
+			log.Infof("Client requested ICE restart for participant=%s session=%s", currentParticipantName(), participantSessionID)
+			signalPeerConnectionICE(peerConnection)
 		case "assistant_query":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before asking the assistant.")
