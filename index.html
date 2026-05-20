@@ -9675,21 +9675,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function cardDueDate(card) {
-        const override = cardDateOverrides[cardDateKey(card)]
-        return String(override?.dueDate || override?.keyDates?.find(item => item?.label?.toLowerCase() === 'due')?.date || card?.dueDate || card?.due_date || '').trim()
+        const serverDueDate = String(card?.dueDate || card?.due_date || '').trim()
+        if (serverDueDate) {
+          return serverDueDate
+        }
+        const explicitDueDate = explicitCardKeyDates(card).find(item => item.label.toLowerCase() === 'due')?.date
+        if (explicitDueDate) {
+          return String(explicitDueDate).trim()
+        }
+        return String(cardDateOverrides[cardDateKey(card)]?.dueDate || '').trim()
       }
 
-      function cardKeyDates(card) {
-        const overrideDates = cardDateOverrides[cardDateKey(card)]?.keyDates
-        if (Array.isArray(overrideDates) && overrideDates.length > 0) {
-          return overrideDates
-            .map(item => ({
-              label: String(item?.label || '').trim(),
-              date: String(item?.date || '').trim()
-            }))
-            .filter(item => item.label && item.date)
-            .slice(0, 8)
-        }
+      function explicitCardKeyDates(card) {
         const explicitDates = Array.isArray(card?.keyDates)
           ? card.keyDates
           : Array.isArray(card?.key_dates) ? card.key_dates : []
@@ -9701,6 +9698,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           .filter(item => item.label && item.date)
         if (normalized.length > 0) {
           return normalized.slice(0, 8)
+        }
+        const overrideDates = cardDateOverrides[cardDateKey(card)]?.keyDates
+        if (Array.isArray(overrideDates) && overrideDates.length > 0) {
+          return overrideDates
+            .map(item => ({
+              label: String(item?.label || '').trim(),
+              date: String(item?.date || '').trim()
+            }))
+            .filter(item => item.label && item.date)
+            .slice(0, 8)
+        }
+        return []
+      }
+
+      function cardKeyDates(card) {
+        const explicitDates = explicitCardKeyDates(card)
+        if (explicitDates.length > 0) {
+          return explicitDates
         }
 
         const dueDate = cardDueDate(card)
@@ -10330,7 +10345,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const list = document.createElement('div')
         list.className = 'key-date-edit-list'
-        const items = cardKeyDates(card)
+        const items = explicitCardKeyDates(card)
         const rows = items.length ? items : [{ label: 'due', date: cardDueDate(card) || '' }]
         rows.forEach(item => appendKeyDateEditorRow(list, item))
         if (options.addDate || rows.length === 0) {
@@ -10456,9 +10471,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           payload.owner = assignee
         } else if (dueMatch) {
           const dueDate = dueMatch[1].trim().replace(/^["']|["']$/g, '')
-          saveCardDateOverride(card, dueDate, [{ label: 'due', date: dueDate }])
+          const keyDates = [
+            { label: 'due', date: dueDate },
+            ...explicitCardKeyDates(card).filter(item => item.label.toLowerCase() !== 'due')
+          ].slice(0, 8)
+          saveCardDateOverride(card, dueDate, keyDates)
           payload.dueDate = dueDate
-          payload.keyDates = [{ label: 'due', date: dueDate }]
+          payload.keyDates = keyDates
           renderBoard()
         } else if (noteMatch) {
           const note = noteMatch[1].trim()

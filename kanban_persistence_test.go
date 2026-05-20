@@ -12,10 +12,14 @@ func TestKanbanBoardPersistsAcrossAppInstances(t *testing.T) {
 
 	app := newKanbanBoardApp()
 	if _, changed, err := app.createTicket(map[string]any{
-		"title": "Persisted ticket",
-		"notes": "This should survive a restart.",
-		"owner": "AJ",
-		"tags":  []any{"persistence"},
+		"title":    "Persisted ticket",
+		"notes":    "This should survive a restart.",
+		"owner":    "AJ",
+		"tags":     []any{"persistence"},
+		"due_date": "May 24",
+		"key_dates": []any{
+			map[string]any{"label": "PDF to investors", "date": "May 24"},
+		},
 	}); err != nil {
 		t.Fatalf("createTicket: %v", err)
 	} else if !changed {
@@ -28,6 +32,15 @@ func TestKanbanBoardPersistsAcrossAppInstances(t *testing.T) {
 		if card.Title == "Persisted ticket" {
 			if card.Owner != "AJ" {
 				t.Fatalf("persisted owner=%q, want AJ", card.Owner)
+			}
+			if card.DueDate != "May 24" {
+				t.Fatalf("persisted dueDate=%q, want May 24", card.DueDate)
+			}
+			if got, want := card.KeyDates, []kanbanKeyDate{
+				{Label: "PDF to investors", Date: "May 24"},
+				{Label: "due", Date: "May 24"},
+			}; !kanbanKeyDatesEqual(got, want) {
+				t.Fatalf("persisted keyDates=%v, want %v", got, want)
 			}
 			return
 		}

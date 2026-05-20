@@ -23,12 +23,14 @@ type meetingNotes struct {
 }
 
 type meetingProjectStatus struct {
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	Status string   `json:"status"`
-	Owner  string   `json:"owner"`
-	Notes  string   `json:"notes"`
-	Tags   []string `json:"tags,omitempty"`
+	ID       string          `json:"id"`
+	Title    string          `json:"title"`
+	Status   string          `json:"status"`
+	Owner    string          `json:"owner"`
+	Notes    string          `json:"notes"`
+	Tags     []string        `json:"tags,omitempty"`
+	DueDate  string          `json:"dueDate,omitempty"`
+	KeyDates []kanbanKeyDate `json:"keyDates,omitempty"`
 }
 
 type meetingEmailStatus struct {
@@ -73,12 +75,14 @@ func buildMeetingNotes(archiveID string, archivedAt time.Time, archivedBy string
 	projectStatuses := make([]meetingProjectStatus, 0, len(board.Cards))
 	for _, card := range board.Cards {
 		projectStatuses = append(projectStatuses, meetingProjectStatus{
-			ID:     card.ID,
-			Title:  card.Title,
-			Status: string(card.Status),
-			Owner:  card.Owner,
-			Notes:  card.Notes,
-			Tags:   append([]string(nil), card.Tags...),
+			ID:       card.ID,
+			Title:    card.Title,
+			Status:   string(card.Status),
+			Owner:    card.Owner,
+			Notes:    card.Notes,
+			Tags:     append([]string(nil), card.Tags...),
+			DueDate:  card.DueDate,
+			KeyDates: cloneKanbanKeyDates(card.KeyDates),
 		})
 	}
 
@@ -179,6 +183,12 @@ func renderMeetingNotesText(archiveID string, archivedAt time.Time, archivedBy s
 			body.WriteString(fmt.Sprintf("- %s: %s. Owner: %s", project.Title, project.Status, owner))
 			if len(project.Tags) > 0 {
 				body.WriteString(fmt.Sprintf(". Tags: %s", strings.Join(project.Tags, ", ")))
+			}
+			if project.DueDate != "" {
+				body.WriteString(fmt.Sprintf(". Due: %s", project.DueDate))
+			}
+			if len(project.KeyDates) > 0 {
+				body.WriteString(fmt.Sprintf(". Key dates: %s", formatKanbanKeyDates(project.KeyDates)))
 			}
 			body.WriteByte('\n')
 			if strings.TrimSpace(project.Notes) != "" {

@@ -99,7 +99,7 @@ func assistantQueryInstructions() string {
 	return strings.Join([]string{
 		"You are Scout, the Bonfire meeting assistant.",
 		"Answer using the supplied current Kanban board and memory context only.",
-		"Use the current board as source of truth for present card status, owner, notes, and tags.",
+		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates.",
 		"Use memory only for past discussion, decisions, transcript recall, or archived meeting questions.",
 		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
@@ -281,6 +281,11 @@ func boardCardQueryScore(queryTokens map[string]struct{}, queryCompact string, c
 			score += 1
 		}
 	}
+	for _, token := range memoryTokenPattern.FindAllString(strings.ToLower(card.DueDate+" "+formatKanbanKeyDates(card.KeyDates)), -1) {
+		if _, ok := queryTokens[token]; ok {
+			score += 2
+		}
+	}
 
 	return score
 }
@@ -311,7 +316,7 @@ func compactSearchText(value string) string {
 func isCurrentBoardQuery(query string) bool {
 	normalized := strings.ToLower(query)
 	for _, marker := range []string{
-		"current", "status", "owner", "own", "assigned", "blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes", "tags", "now",
+		"current", "status", "owner", "own", "assigned", "blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes", "tags", "date", "due", "deadline", "milestone", "now",
 	} {
 		if strings.Contains(normalized, marker) {
 			return true
@@ -369,6 +374,12 @@ func formatBoardCardAnswer(card kanbanCard) string {
 	}
 	if len(card.Tags) > 0 {
 		parts = append(parts, "Tags: "+strings.Join(card.Tags, ", ")+".")
+	}
+	if dueDate := strings.TrimSpace(card.DueDate); dueDate != "" {
+		parts = append(parts, "Due: "+dueDate+".")
+	}
+	if len(card.KeyDates) > 0 {
+		parts = append(parts, "Key dates: "+formatKanbanKeyDates(card.KeyDates)+".")
 	}
 
 	return strings.Join(parts, " ")

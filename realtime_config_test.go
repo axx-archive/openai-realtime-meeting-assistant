@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,6 +74,24 @@ func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("server_vad interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	rawTools, err := json.Marshal(app.kanbanTools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	toolsJSON := string(rawTools)
+	for _, want := range []string{`"name":"add_key_date"`, `"due_date"`, `"key_dates"`} {
+		if !strings.Contains(toolsJSON, want) {
+			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
+		}
+	}
+	if instructions := app.sessionInstructions(); !strings.Contains(instructions, "add_key_date") || !strings.Contains(instructions, "key dates") {
+		t.Fatalf("session instructions missing key-date guidance: %s", instructions)
 	}
 }
 
