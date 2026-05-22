@@ -131,6 +131,76 @@ func TestUpdateTicketCanAddDueDateAndKeyDates(t *testing.T) {
 	}
 }
 
+func TestRemoveKeyDatesToolClearsCardDates(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	card := app.snapshotState().Cards[0]
+
+	if _, changed, err := app.updateTicket(map[string]any{
+		"card_id":  card.ID,
+		"due_date": "May 24",
+		"key_dates": []any{
+			map[string]any{"label": "PDF to investors", "date": "May 24"},
+		},
+	}); err != nil {
+		t.Fatalf("updateTicket key dates: %v", err)
+	} else if !changed {
+		t.Fatal("updateTicket changed=false, want true")
+	}
+
+	if _, changed, err := app.applyToolCallArgs("remove_key_dates", map[string]any{
+		"card_id":    card.ID,
+		"remove_all": true,
+	}); err != nil {
+		t.Fatalf("remove_key_dates: %v", err)
+	} else if !changed {
+		t.Fatal("remove_key_dates changed=false, want true")
+	}
+
+	updated, ok := findSnapshotCard(app.snapshotState().Cards, card.ID)
+	if !ok {
+		t.Fatalf("updated card %q not found", card.ID)
+	}
+	if updated.DueDate != "" {
+		t.Fatalf("dueDate=%q, want cleared", updated.DueDate)
+	}
+	if len(updated.KeyDates) != 0 {
+		t.Fatalf("keyDates=%v, want cleared", updated.KeyDates)
+	}
+}
+
+func TestUpdateTicketCanReplaceKeyDatesWithEmptySet(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	card := app.snapshotState().Cards[0]
+
+	if _, changed, err := app.addKeyDate(map[string]any{
+		"card_id": card.ID,
+		"label":   "review",
+		"date":    "May 24",
+	}); err != nil {
+		t.Fatalf("addKeyDate: %v", err)
+	} else if !changed {
+		t.Fatal("addKeyDate changed=false, want true")
+	}
+
+	if _, changed, err := app.updateTicket(map[string]any{
+		"card_id":           card.ID,
+		"key_dates":         []any{},
+		"replace_key_dates": true,
+	}); err != nil {
+		t.Fatalf("updateTicket replace key dates: %v", err)
+	} else if !changed {
+		t.Fatal("updateTicket changed=false, want true")
+	}
+
+	updated, ok := findSnapshotCard(app.snapshotState().Cards, card.ID)
+	if !ok {
+		t.Fatalf("updated card %q not found", card.ID)
+	}
+	if len(updated.KeyDates) != 0 {
+		t.Fatalf("keyDates=%v, want cleared", updated.KeyDates)
+	}
+}
+
 func TestManualUpdatePreservesDatesWhenDateFieldsAreOmitted(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	card := app.snapshotState().Cards[0]

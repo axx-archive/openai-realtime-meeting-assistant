@@ -58,6 +58,7 @@
         --success:    #10B981;
         --success-bg: #ECFDF5;
         --success-fg: #047857;
+        --speaker-accent: #34D399;
         --warning:    #D97706;
         --warning-bg: #FFFBEB;
         --warning-fg: #B45309;
@@ -106,6 +107,7 @@
 
         --glow-ember-sm: 0 0 0 1px rgba(255, 122, 43, 0.42), 0 0 18px rgba(255, 122, 43, 0.20);
         --glow-ember-md: 0 0 0 1px rgba(255, 122, 43, 0.52), 0 0 30px rgba(255, 122, 43, 0.28), 0 0 70px rgba(255, 122, 43, 0.12);
+        --glow-speaker-md: 0 0 0 1px rgba(52, 211, 153, 0.72), 0 0 28px rgba(52, 211, 153, 0.26), 0 0 64px rgba(16, 185, 129, 0.12);
 
         /* ---------- Motion ---------- */
         --ease-out:  cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -419,6 +421,11 @@
       .video-tile.is-speaking {
         border-color: var(--ember-500);
         box-shadow: var(--glow-ember-md);
+      }
+
+      .video-tile.is-active-speaker {
+        border-color: var(--speaker-accent);
+        box-shadow: var(--glow-speaker-md);
       }
 
       .video-tile.is-dragging {
@@ -1115,6 +1122,11 @@
         border-color: rgba(255, 122, 43, 0.24);
       }
 
+      .memory-item.board_update {
+        background: rgba(16, 185, 129, 0.10);
+        border-color: rgba(16, 185, 129, 0.30);
+      }
+
       .memory-item span:last-child {
         white-space: pre-wrap;
       }
@@ -1131,6 +1143,7 @@
       .memory-item.answer .memory-meta { color: var(--ember-300); }
       .memory-item.archive .memory-meta { color: var(--success-fg); }
       .memory-item.brain .memory-meta { color: var(--ember-300); }
+      .memory-item.board_update .memory-meta { color: var(--success-fg); }
 
       /* ---------- Assistant panel ---------- */
       .assistant-panel {
@@ -1323,6 +1336,20 @@
         border-radius: 0;
         background: transparent;
         box-shadow: none;
+      }
+
+      #appShell.is-in-room:not(.is-board-expanded) .workspace {
+        padding-bottom: 104px;
+      }
+
+      #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
+        position: fixed;
+        right: max(var(--s-3), env(safe-area-inset-right));
+        bottom: max(var(--s-3), env(safe-area-inset-bottom));
+        left: max(var(--s-3), env(safe-area-inset-left));
+        width: fit-content;
+        max-width: calc(100vw - 24px);
+        margin: 0 auto;
       }
 
       .log {
@@ -3429,14 +3456,15 @@
         display: grid;
         place-items: center;
         overflow: visible;
-        border: 1px solid rgba(255, 122, 43, 0.35);
+        border: 1px solid rgba(52, 211, 153, 0.72);
         border-radius: var(--r-lg);
         background:
           radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%),
           var(--night-0);
         box-shadow:
-          0 0 0 6px rgba(255, 122, 43, 0.055),
-          0 0 90px rgba(255, 122, 43, 0.16),
+          0 0 0 1px rgba(52, 211, 153, 0.30),
+          0 0 0 6px rgba(52, 211, 153, 0.07),
+          0 0 88px rgba(52, 211, 153, 0.14),
           0 34px 70px rgba(15, 8, 2, 0.58);
       }
 
@@ -3517,8 +3545,8 @@
         width: 6px;
         height: 6px;
         border-radius: 999px;
-        background: var(--ember-500);
-        box-shadow: 0 0 6px var(--ember-500);
+        background: var(--speaker-accent);
+        box-shadow: 0 0 6px var(--speaker-accent);
         animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
       }
 
@@ -3559,8 +3587,21 @@
         display: none;
       }
 
+      .hearth-stage[data-stage-mode="gallery"] .hearth-seat.is-active-speaker,
+      .hearth-seat.is-active-speaker {
+        border-color: rgba(52, 211, 153, 0.82);
+        box-shadow:
+          0 0 0 1px rgba(52, 211, 153, 0.38),
+          0 0 26px rgba(52, 211, 153, 0.18),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      }
+
       .hearth-seat.is-local {
         border-color: rgba(255, 255, 255, 0.18);
+      }
+
+      .hearth-seat.is-local.is-active-speaker {
+        border-color: rgba(52, 211, 153, 0.82);
       }
 
       .hearth-seat.is-placeholder {
@@ -4009,8 +4050,8 @@
       .board-huddle__tile.is-speaker .board-huddle__media {
         width: 50px;
         height: 50px;
-        border-color: var(--ember-500);
-        box-shadow: var(--glow-ember-md);
+        border-color: var(--speaker-accent);
+        box-shadow: var(--glow-speaker-md);
       }
 
       .board-huddle__media video {
@@ -4038,7 +4079,7 @@
       }
 
       .board-huddle__tile.is-speaker .board-huddle__label {
-        color: var(--ember-700);
+        color: var(--success-fg);
         font-weight: 500;
       }
 
@@ -4163,8 +4204,8 @@
 
       .board-video-tile.is-speaker {
         width: 96px;
-        border-color: rgba(255, 122, 43, 0.58);
-        box-shadow: 0 0 0 1px rgba(255, 122, 43, 0.55), 0 0 22px rgba(255, 122, 43, 0.22);
+        border-color: rgba(52, 211, 153, 0.70);
+        box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.55), 0 0 22px rgba(52, 211, 153, 0.20);
       }
 
       .board-video-tile:hover,
@@ -4178,6 +4219,7 @@
       .board-video-tile.is-speaker:hover,
       .board-video-tile.is-speaker:focus-visible {
         width: 160px;
+        border-color: rgba(52, 211, 153, 0.82);
       }
 
       .board-video-tile video,
@@ -5954,7 +5996,7 @@
           <section class="voice-profile" aria-label="Voice focus profile">
             <div>
               <div class="voice-profile__label">voice profile</div>
-              <p>speak normally for a few seconds. the profile stays in this browser.</p>
+              <p>speak normally for a few seconds. you are muted to the room while this runs, and the profile stays in this browser.</p>
             </div>
             <div class="voice-profile__meta">
               <span id="voiceProfileState">adaptive profile</span>
@@ -6091,9 +6133,13 @@
       let signalChain = Promise.resolve()
       let lastIceRestartRequestAt = 0
       let isLeavingRoom = false
+      let clientConfigPromise = null
+      let lastParticipantTrackRefreshAt = 0
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
+      const remoteVideoTracksByParticipant = new Map()
       const remoteLabelsByStream = new Map()
+      const remoteLabelConflictsByStream = new Set()
       const remoteLabelsByTrack = new Map()
       const participantPlaceholders = new Map()
       const participantMediaStates = new Map()
@@ -6114,8 +6160,10 @@
       let voiceTrainingFrame = 0
       let voiceTrainingCleanup = null
       let voiceTrainingSamples = []
+      let voiceTrainingPrivacyMute = false
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
+      const safariBrowser = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
         standard: 'standard cleanup',
@@ -6135,10 +6183,14 @@
           facingMode: 'user'
         },
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+          voiceIsolation: { ideal: true },
+          suppressLocalAudioPlayback: { ideal: true },
           sampleRate: { ideal: 48000 },
+          sampleSize: { ideal: 16 },
+          latency: { ideal: 0.02 },
           channelCount: { ideal: 1, max: 1 }
         }
       }
@@ -6328,6 +6380,32 @@
         return audioSettings.mode === 'voice-focus'
       }
 
+      function effectiveMicMuted() {
+        return Boolean(isMicMuted || voiceTrainingPrivacyMute)
+      }
+
+      function syncLocalAudioMuteState() {
+        const outboundTrack = localAudioTrack()
+        const mutedToRoom = effectiveMicMuted()
+        if (outboundTrack) {
+          outboundTrack.enabled = !mutedToRoom
+        }
+        if (localAudioSourceTrack && localAudioSourceTrack !== outboundTrack) {
+          localAudioSourceTrack.enabled = voiceTrainingPrivacyMute || !isMicMuted
+        }
+      }
+
+      function setVoiceTrainingPrivacyMute(muted) {
+        const nextMuted = Boolean(muted)
+        if (voiceTrainingPrivacyMute === nextMuted) {
+          return
+        }
+        voiceTrainingPrivacyMute = nextMuted
+        syncLocalAudioMuteState()
+        updateMuteButton()
+        publishParticipantMediaState()
+      }
+
       function audioModeLabel() {
         return audioModeLabels[audioSettings.mode] || audioModeLabels['voice-focus']
       }
@@ -6417,7 +6495,7 @@
       }
 
       async function trainVoiceFocus() {
-        if (!localAudioSourceTrack || voiceTrainingFrame) {
+        if (!localStream || voiceTrainingFrame) {
           return
         }
         const context = ensureAudioContext()
@@ -6426,6 +6504,7 @@
           return
         }
 
+        setVoiceTrainingPrivacyMute(true)
         audioSettings = {
           ...audioSettings,
           mode: 'voice-focus'
@@ -6433,7 +6512,25 @@
         saveAudioSettings()
         renderAudioSettings()
 
-        const stream = new MediaStream([localAudioSourceTrack])
+        try {
+          await applyAudioSettingsToLiveMicrophone({ announce: false })
+        } catch (error) {
+          setVoiceTrainingPrivacyMute(false)
+          console.warn('Could not prepare private voice focus training', error)
+          setLog('could not start voice focus training')
+          renderAudioSettings()
+          return
+        }
+
+        const trainingTrack = localAudioSourceTrack || localAudioTrack()
+        if (!trainingTrack) {
+          setVoiceTrainingPrivacyMute(false)
+          setLog('microphone is unavailable for voice focus')
+          renderAudioSettings()
+          return
+        }
+
+        const stream = new MediaStream([trainingTrack])
         const source = context.createMediaStreamSource(stream)
         const analyser = context.createAnalyser()
         analyser.fftSize = 1024
@@ -6482,9 +6579,10 @@
         const samples = voiceTrainingSamples
           .filter(sample => Number.isFinite(sample))
           .sort((a, b) => a - b)
-        cancelVoiceFocusTraining({ keepSamples: true })
+        cancelVoiceFocusTraining({ keepSamples: true, keepPrivacyMute: true })
 
         if (samples.length < 8) {
+          setVoiceTrainingPrivacyMute(false)
           setLog('voice focus needs more microphone signal')
           renderAudioSettings()
           return
@@ -6508,7 +6606,11 @@
         }
         saveAudioSettings()
         renderAudioSettings()
-        await applyAudioSettingsToLiveMicrophone({ announce: false })
+        try {
+          await applyAudioSettingsToLiveMicrophone({ announce: false })
+        } finally {
+          setVoiceTrainingPrivacyMute(false)
+        }
         setLog('voice focus trained')
       }
 
@@ -6520,6 +6622,9 @@
         voiceTrainingCleanup?.()
         if (!options.keepSamples) {
           voiceTrainingSamples = []
+        }
+        if (!options.keepPrivacyMute) {
+          setVoiceTrainingPrivacyMute(false)
         }
         renderAudioSettings()
       }
@@ -6605,7 +6710,11 @@
             return
           }
           const payload = await response.json()
-          participantPreview = applyRoomSnapshot(payload)
+          const names = applyRoomSnapshot(payload)
+          participantPreview = names
+          if (appShell.classList.contains('is-in-room')) {
+            reconcileParticipantsInRoom(names, { announce: false })
+          }
           updateParticipantPreviewText()
         } catch {
           // The room can still be joined if the preview endpoint is unavailable.
@@ -6669,7 +6778,7 @@
 
       function localParticipantMediaState() {
         return {
-          micMuted: Boolean(isMicMuted),
+          micMuted: effectiveMicMuted(),
           cameraOff: Boolean(isCameraOff),
           screenSharing: Boolean(screenShareStream),
           updatedAt: new Date().toISOString()
@@ -7249,6 +7358,9 @@
         if (Number.isFinite(maxBitrate)) {
           encoding.maxBitrate = maxBitrate
         }
+        if (track.kind === 'audio' && 'dtx' in encoding) {
+          encoding.dtx = 'enabled'
+        }
         const maxFramerate = isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)
           ? limits.screenShareMaxFramerate
           : limits.maxFramerate
@@ -7277,6 +7389,24 @@
           .map(sender => configureOutboundSender(sender, sender.track)))
       }
 
+      async function loadClientConfig() {
+        if (!clientConfigPromise) {
+          clientConfigPromise = fetch('/client-config', { cache: 'no-store' })
+            .then(response => response.ok ? response.json() : {})
+            .catch(error => {
+              console.warn('Could not load browser media config', error)
+              return {}
+            })
+        }
+        return clientConfigPromise
+      }
+
+      async function loadRTCConfiguration() {
+        const config = await loadClientConfig()
+        const rtcConfiguration = config?.rtcConfiguration
+        return rtcConfiguration && typeof rtcConfiguration === 'object' ? rtcConfiguration : {}
+      }
+
       async function beginMediaSession() {
         if (!ws || ws.readyState !== WebSocket.OPEN || pc) {
           return
@@ -7296,7 +7426,8 @@
         await refreshAudioInputDevices()
         updateHearthParticipants()
 
-        pc = new RTCPeerConnection()
+        const rtcConfiguration = await loadRTCConfiguration()
+        pc = new RTCPeerConnection(rtcConfiguration)
         const sessionPeer = pc
         pc.ontrack = addRemoteTrack
         pc.onicecandidate = event => {
@@ -7422,9 +7553,11 @@
       function audioConstraintsForDevice(deviceId) {
         const audioConstraints = {
           ...mediaConstraints.audio,
-          echoCancellation: audioProcessingEnabled(),
-          noiseSuppression: audioProcessingEnabled(),
-          autoGainControl: audioProcessingEnabled()
+          echoCancellation: { ideal: audioProcessingEnabled() },
+          noiseSuppression: { ideal: audioProcessingEnabled() },
+          autoGainControl: { ideal: audioProcessingEnabled() },
+          voiceIsolation: { ideal: voiceFocusEnabled() },
+          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }
         }
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
@@ -7445,7 +7578,7 @@
           return { track: null, processor: null }
         }
 
-        sourceTrack.enabled = !isMicMuted
+        sourceTrack.enabled = voiceTrainingPrivacyMute || !isMicMuted
         setTrackContentHint(sourceTrack, 'speech')
 
         if (!voiceFocusEnabled()) {
@@ -7454,11 +7587,14 @@
 
         const context = ensureAudioContext()
         if (!context?.createMediaStreamDestination) {
-          return { track: sourceTrack, processor: null }
+          return voiceTrainingPrivacyMute
+            ? createMutedOutboundAudioClone(sourceTrack)
+            : { track: sourceTrack, processor: null }
         }
 
         let source
         let highpass
+        let lowpass
         let compressor
         let voiceFocusNode
         let destination
@@ -7467,15 +7603,20 @@
           source = context.createMediaStreamSource(sourceStream)
           highpass = context.createBiquadFilter()
           highpass.type = 'highpass'
-          highpass.frequency.value = 95
-          highpass.Q.value = 0.72
+          highpass.frequency.value = 120
+          highpass.Q.value = 0.8
+
+          lowpass = context.createBiquadFilter()
+          lowpass.type = 'lowpass'
+          lowpass.frequency.value = 7600
+          lowpass.Q.value = 0.5
 
           compressor = context.createDynamicsCompressor()
-          compressor.threshold.value = -34
-          compressor.knee.value = 18
-          compressor.ratio.value = 3
-          compressor.attack.value = 0.006
-          compressor.release.value = 0.16
+          compressor.threshold.value = -38
+          compressor.knee.value = 20
+          compressor.ratio.value = 4
+          compressor.attack.value = 0.004
+          compressor.release.value = 0.18
 
           destination = context.createMediaStreamDestination()
           source.connect(highpass)
@@ -7485,13 +7626,14 @@
             voiceFocusNode = new AudioWorkletNode(context, voiceFocusProcessorName)
             configureVoiceFocusNode(voiceFocusNode)
             compressor.connect(voiceFocusNode)
-            voiceFocusNode.connect(destination)
+            voiceFocusNode.connect(lowpass)
           } else {
-            compressor.connect(destination)
+            compressor.connect(lowpass)
           }
+          lowpass.connect(destination)
 
           const outputTrack = destination.stream.getAudioTracks()[0]
-          outputTrack.enabled = !isMicMuted
+          outputTrack.enabled = !effectiveMicMuted()
           setTrackContentHint(outputTrack, 'speech')
           return {
             track: outputTrack,
@@ -7500,6 +7642,7 @@
               outputTrack,
               source,
               highpass,
+              lowpass,
               compressor,
               voiceFocusNode,
               destination
@@ -7507,8 +7650,23 @@
           }
         } catch (error) {
           console.warn('Voice focus chain unavailable; using browser microphone processing', error)
-          cleanupAudioProcessor({ source, highpass, compressor, voiceFocusNode, destination })
-          return { track: sourceTrack, processor: null }
+          cleanupAudioProcessor({ source, highpass, lowpass, compressor, voiceFocusNode, destination })
+          return voiceTrainingPrivacyMute
+            ? createMutedOutboundAudioClone(sourceTrack)
+            : { track: sourceTrack, processor: null }
+        }
+      }
+
+      function createMutedOutboundAudioClone(sourceTrack) {
+        const outputTrack = sourceTrack.clone()
+        outputTrack.enabled = false
+        setTrackContentHint(outputTrack, 'speech')
+        return {
+          track: outputTrack,
+          processor: {
+            sourceTrack,
+            outputTrack
+          }
         }
       }
 
@@ -7523,16 +7681,18 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     super()
     this.noiseFloor = 0.012
     this.speechFloor = 0.075
-    this.strength = 0.82
+    this.strength = 0.94
+    this.floorGain = 0.035
     this.gain = 1
-    this.releaseFrames = 0
+    this.holdFrames = 0
     this.calibrated = false
     this.port.onmessage = event => {
       const data = event.data || {}
       if (data.type !== 'configure') return
       this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
       this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
-      this.strength = Math.max(0.25, Math.min(0.94, Number(data.strength) || this.strength))
+      this.strength = Math.max(0.25, Math.min(0.98, Number(data.strength) || this.strength))
+      this.floorGain = Math.max(0.015, Math.min(0.16, Number(data.floorGain) || this.floorGain))
       this.calibrated = Boolean(data.calibrated)
     }
   }
@@ -7551,44 +7711,57 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
 
     let sum = 0
     let peak = 0
+    let crossings = 0
+    let previous = reference[0] || 0
     for (let index = 0; index < reference.length; index++) {
       const sample = reference[index]
       const amplitude = Math.abs(sample)
       peak = Math.max(peak, amplitude)
       sum += sample * sample
+      if (index > 0 && ((sample >= 0 && previous < 0) || (sample < 0 && previous >= 0))) {
+        crossings++
+      }
+      previous = sample
     }
 
     const rms = Math.sqrt(sum / Math.max(1, reference.length))
-    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.6 : 3.1), this.speechFloor * (this.calibrated ? 0.32 : 0.22), 0.012)
-    const closeAt = threshold * 0.58
-    const open = rms >= threshold || (peak >= threshold * 1.8 && rms >= closeAt)
+    const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
+    const crest = peak / Math.max(rms, 0.0001)
+    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.2 : 2.8), this.speechFloor * (this.calibrated ? 0.26 : 0.2), 0.010)
+    const closeAt = threshold * 0.46
+    const transient = crest > 9 && rms < threshold * 1.2
+    const tonalNoise = zeroCrossingRate > 0.34 && rms < threshold * 1.4
+    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.1 && rms >= closeAt))
     if (open) {
-      this.releaseFrames = 14
-    } else if (this.releaseFrames > 0) {
-      this.releaseFrames--
+      this.holdFrames = this.calibrated ? 58 : 44
+    } else if (this.holdFrames > 0) {
+      this.holdFrames--
     }
 
     if (!open && rms < this.noiseFloor * 1.8) {
-      this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.992 + rms * 0.008)
+      this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.986 + rms * 0.014)
     }
 
     let targetGain = 1
-    if (!open && this.releaseFrames <= 0) {
+    if (!open && this.holdFrames <= 0) {
       if (rms <= closeAt) {
-        targetGain = 1 - this.strength
+        targetGain = this.floorGain
       } else {
         const blend = (rms - closeAt) / Math.max(0.0001, threshold - closeAt)
-        targetGain = (1 - this.strength) + blend * this.strength
+        targetGain = this.floorGain + blend * (1 - this.floorGain)
       }
     }
-    const coefficient = targetGain > this.gain ? 0.28 : 0.055
+    const coefficient = targetGain > this.gain ? 0.48 : 0.032
     this.gain += (targetGain - this.gain) * coefficient
 
+    const noiseBias = Math.min(this.noiseFloor * 0.72, 0.018) * (1 - this.gain)
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]
       for (let index = 0; index < target.length; index++) {
-        target[index] = (source[index] || 0) * this.gain
+        const sample = source[index] || 0
+        const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
+        target[index] = denoised * this.gain
       }
     }
     return true
@@ -7621,7 +7794,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           type: 'configure',
           noiseFloor: profile.noiseFloor,
           speechFloor: profile.speechFloor,
-          strength: 0.82,
+          strength: 0.94,
+          floorGain: 0.035,
           calibrated: Boolean(profile.trainedAt)
         })
       }
@@ -7630,7 +7804,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!processor) {
           return
         }
-        for (const node of [processor.source, processor.highpass, processor.compressor, processor.voiceFocusNode]) {
+        for (const node of [processor.source, processor.highpass, processor.lowpass, processor.compressor, processor.voiceFocusNode]) {
           try {
             node?.disconnect()
           } catch {
@@ -7666,12 +7840,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!track) {
           return
         }
-        track.enabled = !isMicMuted
         attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
         track.addEventListener('ended', handleLocalAudioEnded, { once: true })
         if (localAudioSourceTrack && localAudioSourceTrack !== track) {
           localAudioSourceTrack.addEventListener('ended', handleLocalAudioEnded, { once: true })
         }
+        syncLocalAudioMuteState()
       }
 
       function wireLocalVideoTrack(track) {
@@ -7697,13 +7871,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function setLocalMute(muted, options = {}) {
         isMicMuted = Boolean(muted)
-        const track = localAudioTrack()
-        if (track) {
-          track.enabled = !isMicMuted
-        }
-        if (localAudioSourceTrack && localAudioSourceTrack !== track) {
-          localAudioSourceTrack.enabled = !isMicMuted
-        }
+        syncLocalAudioMuteState()
         updateMuteButton()
         if (options.announce) {
           setLog(isMicMuted ? 'microphone muted' : 'microphone live')
@@ -7717,7 +7885,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const label = muteMicButton.querySelector('.mute-label')
-        const muted = Boolean(isMicMuted)
+        const muted = effectiveMicMuted()
         muteMicButton.disabled = !localStream
         muteMicButton.classList.toggle('is-muted', muted)
         muteMicButton.setAttribute('aria-pressed', muted ? 'true' : 'false')
@@ -7755,7 +7923,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const elapsed = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
         const seats = `${Math.max(occupiedSeats, participantsInRoom.length)}/${roomCapacity}`
         const media = localStream
-          ? `${isMicMuted ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'} · ${audioModeLabel()}`
+          ? `${effectiveMicMuted() ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'} · ${audioModeLabel()}`
           : 'waiting room'
         if (roomClock) {
           roomClock.textContent = `${elapsed} · ${seats} · ${media}`
@@ -7908,7 +8076,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const previousProcessor = localAudioProcessor
         const nextAudio = await createOutboundAudioForSource(nextTrack)
         const outboundTrack = nextAudio.track || nextTrack
-        outboundTrack.enabled = !isMicMuted
+        outboundTrack.enabled = !effectiveMicMuted()
 
         const audioSender = pc?.getSenders().find(sender => sender.track?.kind === 'audio')
         try {
@@ -7931,6 +8099,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         localAudioSourceTrack = nextTrack
         localAudioProcessor = nextAudio.processor
+        syncLocalAudioMuteState()
 
         detachAudioMonitor('local')
         isReplacingLocalAudio = true
@@ -8182,6 +8351,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'memory_brain':
             addMemoryEntry(message.data)
             break
+          case 'memory_board_update':
+            addMemoryEntry(message.data)
+            break
           case 'memory_answer':
             {
               const answer = message.data?.answer || 'no answer available.'
@@ -8207,6 +8379,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'participant_joined':
             handleParticipantJoined(message.data)
+            break
+          case 'participant_left':
+            handleParticipantLeft(message.data)
             break
           case 'participant_track':
             handleParticipantTrack(message.data)
@@ -8285,9 +8460,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleParticipants(participants) {
+        reconcileParticipantsInRoom(applyRoomSnapshot(participants), { announce: true })
+      }
+
+      function reconcileParticipantsInRoom(nextParticipants, options = {}) {
         const previousParticipants = participantsInRoom
         const previousNames = previousParticipants.join(', ')
-        participantsInRoom = applyRoomSnapshot(participants)
+        participantsInRoom = normalizeParticipantList(nextParticipants)
         participantPreview = participantsInRoom
         const names = participantsInRoom.join(', ')
         const nextKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))
@@ -8297,7 +8476,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             participantMediaStates.delete(name)
           }
         }
-        if (names && names !== previousNames) {
+        pruneRemoteMediaOutsideRoom()
+        if (options.announce !== false && names && names !== previousNames) {
           setLog(`in room · ${names}`)
         }
         updateParticipantPreviewText()
@@ -8317,39 +8497,325 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateHearthParticipants()
       }
 
+      function handleParticipantLeft(participant) {
+        const name = participant?.name || ''
+        if (!name) {
+          return
+        }
+        removeRemoteParticipantMediaByName(name)
+        participantMediaStates.delete(name)
+        participantsInRoom = normalizeParticipantList(participantsInRoom.filter(participantName => participantName.toLowerCase() !== name.toLowerCase()))
+        participantPreview = participantsInRoom
+        pruneRemoteMediaOutsideRoom()
+        updateParticipantPreviewText()
+        updateHearthParticipants()
+      }
+
+      function normalizeRemoteTrackKeys(keys) {
+        const normalized = []
+        const seen = new Set()
+        for (const key of keys || []) {
+          const cleanKey = String(key || '').trim()
+          if (!cleanKey || seen.has(cleanKey)) {
+            continue
+          }
+          seen.add(cleanKey)
+          normalized.push(cleanKey)
+        }
+        return normalized
+      }
+
+      function reliableRemoteStreamId(streamId) {
+        const value = String(streamId || '').trim()
+        if (!value) {
+          return ''
+        }
+        const lowerValue = value.toLowerCase()
+        if (lowerValue === '-' || lowerValue === 'stream' || lowerValue === 'default') {
+          return ''
+        }
+        return value
+      }
+
+      function rememberRemoteStreamLabel(streamId, name) {
+        const key = reliableRemoteStreamId(streamId)
+        if (!key || !name || remoteLabelConflictsByStream.has(key)) {
+          return
+        }
+        const existingName = remoteLabelsByStream.get(key)
+        if (existingName && existingName.toLowerCase() !== String(name).trim().toLowerCase()) {
+          remoteLabelsByStream.delete(key)
+          remoteLabelConflictsByStream.add(key)
+          return
+        }
+        remoteLabelsByStream.set(key, name)
+      }
+
+      function remoteStreamLabel(streamId) {
+        const key = reliableRemoteStreamId(streamId)
+        if (!key || remoteLabelConflictsByStream.has(key)) {
+          return ''
+        }
+        return remoteLabelsByStream.get(key) || ''
+      }
+
+      function reliableRemoteStreamIdForEvent(event) {
+        return reliableRemoteStreamId(event.streams?.[0]?.id)
+      }
+
+      function remoteTrackKeysForEvent(event) {
+        return normalizeRemoteTrackKeys([
+          remoteTrackKey(event),
+          remoteSDPTrackIdForMid(event.transceiver?.mid),
+          event.track?.id,
+          reliableRemoteStreamIdForEvent(event)
+        ])
+      }
+
+      function remoteTrackIdentityKeysForEvent(event) {
+        return normalizeRemoteTrackKeys([
+          remoteSDPTrackIdForMid(event.transceiver?.mid),
+          event.track?.id
+        ])
+      }
+
+      function remoteKeysForTile(tile) {
+        if (!tile) {
+          return []
+        }
+        let storedKeys = []
+        try {
+          storedKeys = JSON.parse(tile.dataset.remoteKeys || '[]')
+        } catch {
+          storedKeys = []
+        }
+        return normalizeRemoteTrackKeys([tile.dataset.remoteKey, ...storedKeys])
+      }
+
+      function rememberRemoteTileKeys(tile, keys) {
+        const normalized = normalizeRemoteTrackKeys(keys)
+        tile.dataset.remoteKey = normalized[0] || ''
+        tile.dataset.remoteKeys = JSON.stringify(normalized)
+        for (const key of normalized) {
+          remoteElements.set(key, tile)
+        }
+      }
+
+      function remoteTileForKeys(keys) {
+        for (const key of normalizeRemoteTrackKeys(keys)) {
+          const tile = remoteElements.get(key)
+          if (tile) {
+            return tile
+          }
+        }
+        return null
+      }
+
+      function forgetRemoteTile(tile) {
+        let removed = false
+        for (const [key, candidate] of Array.from(remoteElements.entries())) {
+          if (candidate !== tile) {
+            continue
+          }
+          remoteElements.delete(key)
+          removed = true
+        }
+        return removed
+      }
+
+      function remoteTiles() {
+        const tiles = new Set(remoteElements.values())
+        for (const tile of videoStack.querySelectorAll(':scope > .video-tile:not(.is-local):not(.video-drag-slot)')) {
+          tiles.add(tile)
+        }
+        return Array.from(tiles)
+      }
+
+      function relabelRemoteTileByKeys(keys, name) {
+        const tile = remoteTileForKeys(keys)
+        if (!tile || !name) {
+          return false
+        }
+        rememberRemoteTileKeys(tile, [...remoteKeysForTile(tile), ...keys])
+        const primaryKey = remoteKeysForTile(tile)[0]
+        if (!primaryKey) {
+          return false
+        }
+        relabelRemoteTile(primaryKey, name)
+        return true
+      }
+
+      function remoteTileHasLiveVideo(tile) {
+        const video = tile?.querySelector?.('video')
+        const stream = video?.srcObject
+        return Boolean(stream?.getVideoTracks?.().some(track => liveTrack(track)))
+      }
+
+      function pruneDeadRemoteVideoTiles() {
+        let removed = false
+        for (const tile of remoteTiles()) {
+          if (remoteTileHasLiveVideo(tile)) {
+            continue
+          }
+          disposeRemoteTile(tile)
+          forgetRemoteTile(tile)
+          removed = true
+        }
+        if (removed) {
+          updateHearthParticipants()
+        }
+        return removed
+      }
+
+      function remoteTileHasRenderedVideo(tile) {
+        const video = tile?.querySelector?.('video')
+        return Boolean(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)
+      }
+
+      function requestParticipantTrackRefresh(reason = '') {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        const now = performance.now()
+        if (now - lastParticipantTrackRefreshAt < 900) {
+          return
+        }
+        lastParticipantTrackRefreshAt = now
+        ws.send(JSON.stringify({
+          event: 'request_participant_tracks',
+          data: JSON.stringify({ reason })
+        }))
+      }
+
+      function pruneStaleUnidentifiedRemoteVideoTiles() {
+        let removed = false
+        const now = performance.now()
+        for (const tile of remoteTiles()) {
+          if (tile.dataset.participant !== 'participant') {
+            continue
+          }
+          const createdAt = Number(tile.dataset.createdAt || 0)
+          if (createdAt && now - createdAt < 3500) {
+            continue
+          }
+          if (remoteTileHasRenderedVideo(tile)) {
+            continue
+          }
+          disposeRemoteTile(tile)
+          forgetRemoteTile(tile)
+          removed = true
+        }
+        if (removed) {
+          updateHearthParticipants()
+        }
+        return removed
+      }
+
+      function scheduleUnidentifiedRemoteTileRepair(tile) {
+        if (!tile || tile.dataset.participant !== 'participant') {
+          return
+        }
+        window.setTimeout(() => {
+          if (tile.isConnected && tile.dataset.participant === 'participant') {
+            requestParticipantTrackRefresh('unlabeled remote video')
+          }
+        }, 700)
+        window.setTimeout(() => {
+          if (tile.isConnected && tile.dataset.participant === 'participant') {
+            pruneStaleUnidentifiedRemoteVideoTiles()
+          }
+        }, 3800)
+      }
+
+      function repairMissingRemoteVideoTiles(reason = '') {
+        if (!pc?.getTransceivers) {
+          return false
+        }
+        let repaired = false
+        for (const transceiver of pc.getTransceivers()) {
+          const track = transceiver.receiver?.track
+          if (!track || track.kind !== 'video' || !liveTrack(track)) {
+            continue
+          }
+          const keys = normalizeRemoteTrackKeys([
+            remoteSDPTrackIdForMid(transceiver.mid),
+            track.id
+          ])
+          if (remoteTileForKeys(keys)) {
+            continue
+          }
+          const participantName = keys
+            .map(key => remoteLabelsByTrack.get(key))
+            .find(Boolean)
+          if (!participantName || participantName === 'participant' || isCurrentParticipantName(participantName)) {
+            continue
+          }
+          const stream = new MediaStream([track])
+          removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: keys })
+          repaired = createRemoteVideoTile(keys, stream, participantName, track) || repaired
+        }
+        if (repaired && reason) {
+          console.info('Repaired missing remote video tile', reason)
+        }
+        return repaired
+      }
+
+      function remoteVideoElementForParticipant(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return null
+        }
+        for (const tile of remoteTiles()) {
+          const tileName = String(tile.dataset.participant || '').trim()
+          if (tileName.toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          const video = tile.querySelector('video')
+          if (video) {
+            return video
+          }
+        }
+        return null
+      }
+
       function handleParticipantTrack(track) {
         const name = track?.name || 'participant'
         const trackId = track?.trackId || ''
-        const streamId = track?.streamId || ''
+        const sourceTrackId = track?.sourceTrackId || ''
+        const streamId = reliableRemoteStreamId(track?.streamId)
+        const keys = normalizeRemoteTrackKeys([trackId, sourceTrackId, streamId])
+        const trackKeys = normalizeRemoteTrackKeys([trackId, sourceTrackId])
         if (trackId) {
           remoteLabelsByTrack.set(trackId, name)
-          renameAudioMonitor(trackId, name)
         }
-        if (streamId) {
-          remoteLabelsByStream.set(streamId, name)
-          renameAudioMonitor(streamId, name)
+        if (sourceTrackId) {
+          remoteLabelsByTrack.set(sourceTrackId, name)
         }
+        rememberRemoteStreamLabel(streamId, name)
+        renameAudioMonitorByKeys(keys, name)
         if (isCurrentParticipantName(name)) {
-          removeRemoteParticipantTrack(trackId, name)
-          if (streamId !== trackId) {
-            removeRemoteParticipantTrack(streamId, name)
+          for (const key of keys) {
+            removeRemoteParticipantTrack(key, name)
           }
           removeRemoteSelfTracks()
           return
         }
         if (track?.kind === 'video' && name !== 'participant') {
-          removeRemoteParticipantVideoTracksByName(name, { exceptKeys: [trackId, streamId] })
+          removeRemoteParticipantVideoTracksByName(name, { exceptKeys: trackKeys.length ? trackKeys : keys })
         }
-        if (trackId) {
-          relabelRemoteTile(trackId, name)
+        if (!relabelRemoteTileByKeys(keys, name)) {
+          for (const key of keys) {
+            relabelRemoteTile(key, name)
+          }
         }
-        if (streamId) {
-          relabelRemoteTile(streamId, name)
-        }
-        if (trackId || streamId) {
+        if (keys.length > 0) {
           removeParticipantPlaceholder(name)
           updateHearthParticipants()
         }
+        pruneDeadRemoteVideoTiles()
+        pruneStaleUnidentifiedRemoteVideoTiles()
+        repairMissingRemoteVideoTiles('participant track metadata')
+        window.setTimeout(() => repairMissingRemoteVideoTiles('delayed participant track metadata'), 350)
       }
 
       function relabelRemoteTile(key, name) {
@@ -8367,14 +8833,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const video = tile.querySelector('video')
         if (previousName && previousName !== 'participant' && previousName !== name) {
           remoteStreamsByParticipant.delete(previousName)
+          remoteVideoTracksByParticipant.delete(previousName)
         }
         if (video?.srcObject) {
+          const videoTrack = video.srcObject.getVideoTracks?.().find(liveTrack)
+          if (videoTrack) {
+            remoteVideoTracksByParticipant.set(name, videoTrack)
+          }
           remoteStreamsByParticipant.set(name, video.srcObject)
           if (activeScreenShareParticipant === name) {
             renderScreenStage()
           }
         }
         renameVideoOrderParticipant(previousName, name)
+        promoteParticipantAudioToVideo(name)
         applyParticipantMediaStateToTile(tile, name)
       }
 
@@ -8382,10 +8854,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const tile = key ? remoteElements.get(key) : null
         if (tile) {
           disposeRemoteTile(tile)
-          remoteElements.delete(key)
+          forgetRemoteTile(tile)
         }
         if (name) {
           remoteStreamsByParticipant.delete(name)
+          remoteVideoTracksByParticipant.delete(name)
         }
         if (key) {
           detachAudioMonitor(key)
@@ -8402,6 +8875,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const video = tile.querySelector('video')
         if (video) {
+          demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)
           pendingRemotePlaybackElements.delete(video)
           video.pause?.()
           video.srcObject = null
@@ -8417,19 +8891,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const exceptKeys = new Set((options.exceptKeys || []).filter(Boolean))
         let removed = false
 
-        for (const [key, tile] of Array.from(remoteElements.entries())) {
+        for (const tile of remoteTiles()) {
+          const tileKeys = remoteKeysForTile(tile)
           const tileName = String(tile.dataset.participant || '').trim()
-          if (exceptKeys.has(key) || !tileName || tileName === 'participant' || tileName.toLowerCase() !== participantName.toLowerCase()) {
+          if (tileKeys.some(key => exceptKeys.has(key)) || !tileName || tileName === 'participant' || tileName.toLowerCase() !== participantName.toLowerCase()) {
             continue
           }
           disposeRemoteTile(tile)
-          remoteElements.delete(key)
+          forgetRemoteTile(tile)
           removed = true
         }
 
         for (const streamName of Array.from(remoteStreamsByParticipant.keys())) {
           if (streamName.toLowerCase() === participantName.toLowerCase()) {
             remoteStreamsByParticipant.delete(streamName)
+            remoteVideoTracksByParticipant.delete(streamName)
             removed = true
           }
         }
@@ -8465,19 +8941,54 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return removed
       }
 
+      function pruneRemoteMediaOutsideRoom() {
+        const activeKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))
+        const localName = String(currentParticipantName || '').trim()
+        if (localName) {
+          activeKeys.add(localName.toLowerCase())
+        }
+        const staleNames = new Set()
+        for (const tile of remoteTiles()) {
+          const tileName = String(tile.dataset.participant || '').trim()
+          if (!tileName || tileName === 'participant' || activeKeys.has(tileName.toLowerCase())) {
+            continue
+          }
+          staleNames.add(tileName)
+        }
+        for (const monitor of audioMonitors.values()) {
+          const monitorName = String(monitor.name || '').trim()
+          if (!monitorName || monitorName === 'participant' || activeKeys.has(monitorName.toLowerCase())) {
+            continue
+          }
+          staleNames.add(monitorName)
+        }
+
+        let removed = false
+        for (const name of staleNames) {
+          removed = removeRemoteParticipantMediaByName(name) || removed
+          participantMediaStates.delete(name)
+        }
+        if (removed) {
+          updateHearthParticipants()
+        }
+        return removed
+      }
+
       function removeRemoteSelfTracks() {
         const localName = currentParticipantName
         if (!localName) {
           return
         }
         let removed = false
-        for (const [key, tile] of Array.from(remoteElements.entries())) {
+        for (const tile of remoteTiles()) {
           if (!isCurrentParticipantName(tile.dataset.participant)) {
             continue
           }
           tile.remove()
-          remoteElements.delete(key)
-          detachAudioMonitor(key)
+          for (const key of remoteKeysForTile(tile)) {
+            detachAudioMonitor(key)
+          }
+          forgetRemoteTile(tile)
           removed = true
         }
         for (const [key, monitor] of Array.from(audioMonitors.entries())) {
@@ -8487,6 +8998,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         if (remoteStreamsByParticipant.delete(localName)) {
+          removed = true
+        }
+        if (remoteVideoTracksByParticipant.delete(localName)) {
           removed = true
         }
         if (removed) {
@@ -8776,13 +9290,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return ['the room']
       }
 
+      function participantDisplayNameInRoom(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return ''
+        }
+        return participantNamesForRoom().find(candidate => candidate.toLowerCase() === participantName.toLowerCase()) || ''
+      }
+
       function setActiveSpeakerFromText(text) {
         const value = String(text || '').trim()
         const explicit = value.match(/^([A-Z][A-Za-z]+)\s*:/)
         const candidate = explicit?.[1]
-        const knownNames = participantNamesForRoom()
-        if (candidate && knownNames.some(name => name.toLowerCase() === candidate.toLowerCase())) {
-          activeSpeakerName = knownNames.find(name => name.toLowerCase() === candidate.toLowerCase()) || candidate
+        const speakerName = participantDisplayNameInRoom(candidate)
+        if (speakerName) {
+          activeSpeakerName = speakerName
           pendingActiveSpeakerName = ''
           pendingActiveSpeakerSince = 0
         }
@@ -9088,9 +9610,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!boardDockMute) {
           return
         }
+        const muted = effectiveMicMuted()
         boardDockMute.disabled = muteMicButton.disabled
-        boardDockMute.setAttribute('aria-pressed', isMicMuted ? 'true' : 'false')
-        boardDockMute.title = isMicMuted ? 'unmute microphone' : 'mute microphone'
+        boardDockMute.setAttribute('aria-pressed', muted ? 'true' : 'false')
+        boardDockMute.title = muted ? 'unmute microphone' : 'mute microphone'
         boardDockCamera.disabled = toggleCameraButton.disabled
         boardDockCamera.setAttribute('aria-pressed', isCameraOff ? 'true' : 'false')
         boardDockCamera.title = isCameraOff ? 'start video' : 'turn camera off'
@@ -9154,7 +9677,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return track && track.readyState !== 'ended'
       }
 
-      function syncedRemotePlaybackStream(stream, audioTrack) {
+      function remoteVideoStreamForTrack(stream, videoTrack) {
+        if (liveTrack(videoTrack) && videoTrack.kind === 'video') {
+          return new MediaStream([videoTrack])
+        }
+        const tracks = (stream?.getVideoTracks?.() || []).filter(liveTrack)
+        return new MediaStream(tracks)
+      }
+
+      function syncedRemotePlaybackStream(stream, audioTrack, preferredVideoTrack) {
         const tracks = []
         const seen = new Set()
         const addTrack = track => {
@@ -9164,6 +9695,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           seen.add(track.id)
           tracks.push(track)
         }
+        addTrack(preferredVideoTrack)
         for (const track of stream?.getVideoTracks?.() || []) {
           addTrack(track)
         }
@@ -9205,6 +9737,56 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         configureRemotePlaybackElement(video, stream, name, { muted: true })
       }
 
+      function shouldUseSyncedRemoteAudioPlayback() {
+        return !safariBrowser
+      }
+
+      function promoteAudioMonitorToVideo(key, monitor, name) {
+        const participantName = String(name || monitor?.name || '').trim()
+        if (!shouldUseSyncedRemoteAudioPlayback()) {
+          return false
+        }
+        if (!monitor || !participantName || participantName === 'participant' || !liveTrack(monitor.track)) {
+          return false
+        }
+        const video = remoteVideoElementForParticipant(participantName)
+        if (!video || monitor.audio === video) {
+          return false
+        }
+        if (monitor.audio) {
+          if (monitor.ownsAudioElement) {
+            removeOwnedAudioElement(monitor.audio)
+          } else {
+            pendingRemotePlaybackElements.delete(monitor.audio)
+            monitor.audio.muted = true
+            monitor.audio.defaultMuted = true
+            monitor.audio.volume = 0
+            monitor.audio.dataset.remotePlayback = 'muted'
+          }
+        }
+        const playbackStream = syncedRemotePlaybackStream(video.srcObject || monitor.stream, monitor.track, remoteVideoTracksByParticipant.get(participantName))
+        configureRemotePlaybackElement(video, playbackStream, participantName, { muted: false })
+        monitor.audio = video
+        monitor.ownsAudioElement = false
+        remoteStreamsByParticipant.set(participantName, video.srcObject || playbackStream)
+        return true
+      }
+
+      function promoteParticipantAudioToVideo(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+        let promoted = false
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          if (String(monitor.name || '').trim().toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          promoted = promoteAudioMonitorToVideo(key, monitor, participantName) || promoted
+        }
+        return promoted
+      }
+
       function demoteRemotePlaybackFromVideo(key, name) {
         const monitor = audioMonitors.get(key)
         if (!monitor || monitor.ownsAudioElement || !liveTrack(monitor.track)) {
@@ -9213,6 +9795,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         pendingRemotePlaybackElements.delete(monitor.audio)
         monitor.audio = createRemoteAudioElement(new MediaStream([monitor.track]), name || monitor.name)
         monitor.ownsAudioElement = true
+      }
+
+      function demoteRemotePlaybackElementFromVideo(video, name) {
+        if (!video) {
+          return
+        }
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          if (monitor.audio !== video) {
+            continue
+          }
+          demoteRemotePlaybackFromVideo(key, name)
+        }
       }
 
       function attachAudioMonitor(key, name, track, options = {}) {
@@ -9225,8 +9819,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         let audio = null
         let ownsAudioElement = false
         if (options.play) {
-          if (options.playbackElement) {
-            const playbackStream = syncedRemotePlaybackStream(options.playbackStream || stream, track)
+          if (options.playbackElement && shouldUseSyncedRemoteAudioPlayback()) {
+            const playbackStream = syncedRemotePlaybackStream(options.playbackStream || stream, track, remoteVideoTracksByParticipant.get(name))
             configureRemotePlaybackElement(options.playbackElement, playbackStream, name, { muted: false })
             audio = options.playbackElement
           } else {
@@ -9272,16 +9866,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renameAudioMonitor(key, name) {
         const monitor = audioMonitors.get(key)
         if (!monitor || !name) {
-          return
+          return false
         }
         if (isCurrentParticipantName(name)) {
           detachAudioMonitor(key)
-          return
+          return true
         }
         monitor.name = name
         if (monitor.audio) {
           monitor.audio.dataset.participant = name
         }
+        promoteAudioMonitorToVideo(key, monitor, name)
+        return true
+      }
+
+      function renameAudioMonitorByKeys(keys, name) {
+        let renamed = false
+        for (const key of normalizeRemoteTrackKeys(keys)) {
+          renamed = renameAudioMonitor(key, name) || renamed
+        }
+        return renamed
       }
 
       function detachAudioMonitor(key) {
@@ -9329,7 +9933,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           let loudestLevel = 0
           let hasLiveAnalyser = false
           for (const monitor of audioMonitors.values()) {
-            if (!monitor.setsActiveSpeaker || !monitor.analyser) {
+            if (!monitor.setsActiveSpeaker || !monitor.analyser || !liveTrack(monitor.track)) {
               continue
             }
             hasLiveAnalyser = true
@@ -9345,13 +9949,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               loudestName = monitor.name
             }
           }
-          if (loudestName && loudestLevel > 0.045 && loudestName !== activeSpeakerName) {
+          const visibleSpeakerName = participantDisplayNameInRoom(loudestName)
+          if (visibleSpeakerName && loudestLevel > 0.045 && visibleSpeakerName !== activeSpeakerName) {
             const now = performance.now()
-            if (pendingActiveSpeakerName !== loudestName) {
-              pendingActiveSpeakerName = loudestName
+            if (pendingActiveSpeakerName !== visibleSpeakerName) {
+              pendingActiveSpeakerName = visibleSpeakerName
               pendingActiveSpeakerSince = now
             } else if (now - pendingActiveSpeakerSince >= 700) {
-              activeSpeakerName = loudestName
+              activeSpeakerName = visibleSpeakerName
               pendingActiveSpeakerName = ''
               pendingActiveSpeakerSince = 0
               updateHearthParticipants()
@@ -9366,70 +9971,75 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function addRemoteAudioTrack(event) {
-        const key = remoteTrackKey(event)
+        const keys = remoteTrackKeysForEvent(event)
+        const key = keys[0] || remoteTrackKey(event)
         const name = participantNameForRemoteTrack(event)
         if (isCurrentParticipantName(name)) {
-          detachAudioMonitor(key)
+          for (const remoteKey of keys) {
+            detachAudioMonitor(remoteKey)
+          }
           return
         }
         const stream = event.streams[0] || new MediaStream([event.track])
-        attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream })
+        const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null
+        attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })
       }
 
-      function addRemoteTrack(event) {
-        if (event.track.kind === 'audio') {
-          addRemoteAudioTrack(event)
-          return
+      function createRemoteVideoTile(keys, stream, participantName, track) {
+        const normalizedKeys = normalizeRemoteTrackKeys(keys)
+        const key = normalizedKeys[0] || track?.id || ''
+        if (remoteTileForKeys(normalizedKeys)) {
+          return false
         }
-
-        const key = remoteTrackKey(event)
-        const stream = event.streams[0] || new MediaStream([event.track])
-        const participantName = participantNameForRemoteTrack(event)
-        if (isCurrentParticipantName(participantName)) {
-          removeRemoteParticipantTrack(key, participantName)
-          return
-        }
-        if (participantName !== 'participant') {
-          removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: [key] })
-        }
-        if (remoteElements.has(key)) {
-          return
-        }
+        const videoStream = remoteVideoStreamForTrack(stream, track)
 
         const tile = document.createElement('div')
         tile.className = 'video-tile hearth-seat'
 
         const video = document.createElement('video')
-        promoteRemotePlaybackToVideo(key, video, stream, participantName)
+        promoteRemotePlaybackToVideo(key, video, videoStream, participantName)
 
         const label = document.createElement('span')
         label.className = 'video-label'
         label.textContent = participantName
         tile.dataset.participant = participantName
-        tile.dataset.remoteKey = key
+        tile.dataset.createdAt = String(performance.now())
 
         const avatar = document.createElement('span')
         avatar.className = 'tile-avatar'
         tile.append(video, avatar, renderMediaFlags(), label)
         videoStack.appendChild(tile)
         playRemoteMedia(video)
-        remoteElements.set(key, tile)
+        rememberRemoteTileKeys(tile, normalizedKeys)
         if (participantName !== 'participant') {
-          remoteStreamsByParticipant.set(participantName, video.srcObject || stream)
+          if (liveTrack(track) && track.kind === 'video') {
+            remoteVideoTracksByParticipant.set(participantName, track)
+          }
+          remoteStreamsByParticipant.set(participantName, video.srcObject || videoStream)
           removeParticipantPlaceholder(participantName)
+          promoteParticipantAudioToVideo(participantName)
+        } else {
+          requestParticipantTrackRefresh('unlabeled remote video')
+          scheduleUnidentifiedRemoteTileRepair(tile)
         }
         if (activeScreenShareParticipant === participantName) {
           renderScreenStage()
         }
         applyParticipantMediaStateToTile(tile, participantName)
+        pruneDeadRemoteVideoTiles()
+        pruneStaleUnidentifiedRemoteVideoTiles()
         updateHearthParticipants()
 
         const removeRemoteTile = () => {
-          demoteRemotePlaybackFromVideo(key, participantName)
+          const currentTileName = String(tile.dataset.participant || participantName || '').trim()
+          for (const remoteKey of remoteKeysForTile(tile)) {
+            demoteRemotePlaybackFromVideo(remoteKey, currentTileName)
+          }
           disposeRemoteTile(tile)
-          remoteElements.delete(key)
-          if (participantName !== 'participant') {
-            remoteStreamsByParticipant.delete(participantName)
+          forgetRemoteTile(tile)
+          if (currentTileName && currentTileName !== 'participant') {
+            remoteStreamsByParticipant.delete(currentTileName)
+            remoteVideoTracksByParticipant.delete(currentTileName)
           }
           updateHearthParticipants()
         }
@@ -9438,7 +10048,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             removeRemoteTile()
           }
         }
-        event.track.addEventListener('ended', removeRemoteTile, { once: true })
+        track?.addEventListener?.('ended', removeRemoteTile, { once: true })
+        return true
+      }
+
+      function addRemoteTrack(event) {
+        if (event.track.kind === 'audio') {
+          addRemoteAudioTrack(event)
+          return
+        }
+
+        const keys = remoteTrackKeysForEvent(event)
+        const identityKeys = remoteTrackIdentityKeysForEvent(event)
+        const stream = event.streams[0] || new MediaStream([event.track])
+        const participantName = participantNameForRemoteTrack(event)
+        if (isCurrentParticipantName(participantName)) {
+          for (const remoteKey of keys) {
+            removeRemoteParticipantTrack(remoteKey, participantName)
+          }
+          return
+        }
+        if (participantName !== 'participant') {
+          removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: identityKeys.length ? identityKeys : keys })
+        }
+        if (remoteTileForKeys(identityKeys.length ? identityKeys : keys)) {
+          return
+        }
+
+        createRemoteVideoTile(keys, stream, participantName, event.track)
       }
 
       function setTrackContentHint(track, hint) {
@@ -9453,13 +10090,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function remoteTrackKey(event) {
-        return remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id || event.streams[0]?.id
+        return remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id || reliableRemoteStreamIdForEvent(event)
       }
 
       function participantNameForRemoteTrack(event) {
         const streamId = event.streams[0]?.id || ''
         const sdpTrackId = remoteSDPTrackIdForMid(event.transceiver?.mid)
-        return remoteLabelsByStream.get(streamId)
+        const trackName = remoteTrackKeysForEvent(event)
+          .map(key => remoteLabelsByTrack.get(key))
+          .find(Boolean)
+        return remoteStreamLabel(streamId)
+          || trackName
           || remoteLabelsByTrack.get(event.track.id)
           || remoteLabelsByTrack.get(sdpTrackId)
           || inferredRemoteParticipantName()
@@ -9513,7 +10154,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderMemoryEntry(entry) {
         const item = document.createElement('article')
-        const kindClass = ['answer', 'archive', 'brain'].includes(entry.kind) ? entry.kind : ''
+        const kindClass = ['answer', 'archive', 'brain', 'board_update'].includes(entry.kind) ? entry.kind : ''
         item.className = `memory-item ${kindClass}`.trim()
 
         const meta = document.createElement('span')
@@ -9540,6 +10181,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (entry.kind === 'brain') {
           return `brain · ${time}`
+        }
+        if (entry.kind === 'board_update') {
+          return `board · ${time}`
         }
         return `transcript · ${time}`
       }
@@ -10971,10 +11615,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         localVideo.closest('.video-tile')?.classList.remove('is-muted', 'is-camera-off', 'is-sharing-screen')
         clearAudioMonitors()
 
-        remoteElements.forEach(tile => disposeRemoteTile(tile))
+        remoteTiles().forEach(tile => disposeRemoteTile(tile))
         remoteElements.clear()
         remoteStreamsByParticipant.clear()
+        remoteVideoTracksByParticipant.clear()
         remoteLabelsByStream.clear()
+        remoteLabelConflictsByStream.clear()
         remoteLabelsByTrack.clear()
         pendingRemotePlaybackElements.clear()
         queuedRemoteCandidates = []

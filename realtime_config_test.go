@@ -46,11 +46,11 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 		t.Fatalf("transcription prompt missing domain vocabulary: %v", transcription["prompt"])
 	}
 	turnDetection := input["turn_detection"].(map[string]any)
-	if vadType := turnDetection["type"]; vadType != "semantic_vad" {
-		t.Fatalf("turn_detection.type=%v, want semantic_vad", vadType)
+	if vadType := turnDetection["type"]; vadType != "server_vad" {
+		t.Fatalf("turn_detection.type=%v, want server_vad", vadType)
 	}
-	if eagerness := turnDetection["eagerness"]; eagerness != defaultVADEagerness {
-		t.Fatalf("turn_detection.eagerness=%v, want %s", eagerness, defaultVADEagerness)
+	if silence := turnDetection["silence_duration_ms"]; silence != 300 {
+		t.Fatalf("turn_detection.silence_duration_ms=%v, want 300", silence)
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("turn_detection.interrupt_response=%v, want true", interrupt)
@@ -59,21 +59,46 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 
 func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "xhigh")
-	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "server_vad")
+	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "semantic_vad")
 	t.Setenv("OPENAI_REALTIME_VAD_EAGERNESS", "low")
 
 	if effort := realtimeReasoningEffort(); effort != "xhigh" {
 		t.Fatalf("reasoning effort=%q, want xhigh", effort)
 	}
 	turnDetection := realtimeTurnDetectionConfig()
-	if vadType := turnDetection["type"]; vadType != "server_vad" {
-		t.Fatalf("turn_detection.type=%v, want server_vad", vadType)
+	if vadType := turnDetection["type"]; vadType != "semantic_vad" {
+		t.Fatalf("turn_detection.type=%v, want semantic_vad", vadType)
 	}
-	if _, ok := turnDetection["eagerness"]; ok {
-		t.Fatal("server_vad config should not include semantic eagerness")
+	if eagerness := turnDetection["eagerness"]; eagerness != "low" {
+		t.Fatalf("turn_detection.eagerness=%v, want low", eagerness)
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
-		t.Fatalf("server_vad interrupt_response=%v, want true", interrupt)
+		t.Fatalf("turn_detection.interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestBrowserRTCConfigurationSupportsTurnFallback(t *testing.T) {
+	t.Setenv("MEETING_STUN_URLS", "stun:stun.example.com:3478")
+	t.Setenv("MEETING_TURN_URLS", "turn:turn.example.com:3478,turns:turn.example.com:5349")
+	t.Setenv("MEETING_TURN_USERNAME", "meeting")
+	t.Setenv("MEETING_TURN_CREDENTIAL", "secret")
+
+	config := browserRTCConfigurationFromEnv()
+	servers, ok := config["iceServers"].([]map[string]any)
+	if !ok {
+		t.Fatalf("iceServers missing from config: %#v", config)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("iceServers len=%d, want 2", len(servers))
+	}
+	if got := servers[0]["urls"].([]string); !sameStringSlice(got, []string{"stun:stun.example.com:3478"}) {
+		t.Fatalf("stun urls=%v", got)
+	}
+	if got := servers[1]["urls"].([]string); !sameStringSlice(got, []string{"turn:turn.example.com:3478", "turns:turn.example.com:5349"}) {
+		t.Fatalf("turn urls=%v", got)
+	}
+	if servers[1]["username"] != "meeting" || servers[1]["credential"] != "secret" {
+		t.Fatalf("turn credentials missing: %#v", servers[1])
 	}
 }
 
@@ -85,12 +110,12 @@ func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"add_key_date"`, `"due_date"`, `"key_dates"`} {
+	for _, want := range []string{`"name":"add_key_date"`, `"name":"remove_key_dates"`, `"replace_key_dates"`, `"due_date"`, `"key_dates"`} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
-	if instructions := app.sessionInstructions(); !strings.Contains(instructions, "add_key_date") || !strings.Contains(instructions, "key dates") {
+	if instructions := app.sessionInstructions(); !strings.Contains(instructions, "add_key_date") || !strings.Contains(instructions, "remove_key_dates") || !strings.Contains(instructions, "key dates") {
 		t.Fatalf("session instructions missing key-date guidance: %s", instructions)
 	}
 }
@@ -147,6 +172,26 @@ func TestDetectsRealtimeActiveResponseErrors(t *testing.T) {
 	}
 	if !isRealtimeActiveResponseError(event) {
 		t.Fatal("active response error was not detected")
+	}
+}
+
+func TestScoutSpokenResponseWaitsForActiveRealtimeResponseToFinish(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.scoutSpokenResponse = true
+	app.scoutSpokenResponseSent = false
+	app.realtimeResponseActive = true
+	app.mu.Unlock()
+
+	app.flushScoutSpokenResponseIfPending()
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if !app.scoutSpokenResponse {
+		t.Fatal("pending spoken response should remain queued while a realtime response is active")
+	}
+	if app.scoutSpokenResponseSent {
+		t.Fatal("spoken response should not be marked sent while a realtime response is active")
 	}
 }
 

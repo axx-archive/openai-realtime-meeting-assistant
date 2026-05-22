@@ -68,6 +68,28 @@ func TestRoomPCMForTranscriptionDownsamplesToPCM24k(t *testing.T) {
 	}
 }
 
+func TestTranscriptionLaneCommitPaddingSamples(t *testing.T) {
+	oneMixerFrame := roomPCMForTranscription(make([]int16, roomAudioMixFrameSize))
+	frameSamples := transcriptionLaneAudioSamples(oneMixerFrame)
+	if frameSamples != transcriptionLaneInputSampleRate/50 {
+		t.Fatalf("frame samples=%d, want %d", frameSamples, transcriptionLaneInputSampleRate/50)
+	}
+
+	paddingSamples := transcriptionLaneCommitPaddingSamples(frameSamples)
+	if got, want := frameSamples+paddingSamples, transcriptionLaneMinCommitSamples; got != want {
+		t.Fatalf("padded samples=%d, want %d", got, want)
+	}
+
+	duration := time.Duration(frameSamples+paddingSamples) * time.Second / transcriptionLaneInputSampleRate
+	if duration != 100*time.Millisecond {
+		t.Fatalf("padded duration=%s, want 100ms", duration)
+	}
+
+	if padding := transcriptionLaneCommitPaddingSamples(transcriptionLaneMinCommitSamples); padding != 0 {
+		t.Fatalf("padding at minimum=%d, want 0", padding)
+	}
+}
+
 func TestSyntheticSilenceBypassesTranscriptLane(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	lane := &meetingTranscriptionLane{input: make(chan []int16, 1)}

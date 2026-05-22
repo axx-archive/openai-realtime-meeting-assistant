@@ -19,14 +19,19 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"screenShareMaxBitrate: 1600000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",
-		"function syncedRemotePlaybackStream(stream, audioTrack)",
+		"function remoteVideoStreamForTrack(stream, videoTrack)",
+		"function syncedRemotePlaybackStream(stream, audioTrack, preferredVideoTrack)",
 		"function promoteRemotePlaybackToVideo(key, video, stream, name)",
 		"function demoteRemotePlaybackFromVideo(key, name)",
 		"function disposeRemoteTile(tile)",
-		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream })",
+		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })",
 		"video.dataset.remotePlayback !== 'synced'",
 		"setTrackContentHint(track, cameraContentHint)",
 		"setTrackContentHint(screenTrack, screenShareContentHint)",
+		"function loadRTCConfiguration()",
+		"fetch('/client-config', { cache: 'no-store' })",
+		"pc = new RTCPeerConnection(rtcConfiguration)",
+		"const safariBrowser = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)",
 		"function scheduleConnectionRecovery(sessionPeer)",
 		"const connectionRecoveryDelayMs = 20000",
 		"function requestIceRestart(reason)",
@@ -63,6 +68,12 @@ func TestIndexDeduplicatesParticipantsAndPrunesStaleMedia(t *testing.T) {
 		"activeScreenShareParticipant && !participantMediaState(activeScreenShareParticipant).screenSharing",
 		"const nextKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))",
 		"removeRemoteParticipantMediaByName(name)",
+		"case 'participant_left':",
+		"function handleParticipantLeft(participant)",
+		"function reconcileParticipantsInRoom(nextParticipants, options = {})",
+		"function pruneRemoteMediaOutsideRoom()",
+		"reconcileParticipantsInRoom(names, { announce: false })",
+		"videoStack.querySelectorAll(':scope > .video-tile:not(.is-local):not(.video-drag-slot)')",
 		"case 'session_replaced':",
 		"case 'media_disconnected':",
 	} {
@@ -104,7 +115,7 @@ func TestIndexKeepsRemoteAudioTracksIndependent(t *testing.T) {
 	}
 
 	html := string(rawHTML)
-	if !strings.Contains(html, "return remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id || event.streams[0]?.id") {
+	if !strings.Contains(html, "return remoteSDPTrackIdForMid(event.transceiver?.mid) || event.track.id || reliableRemoteStreamIdForEvent(event)") {
 		t.Fatal("remoteTrackKey should prefer per-track identifiers before stream ids")
 	}
 
@@ -141,12 +152,49 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"ensureVoiceFocusWorklet(context)",
 		"new AudioWorkletNode(context, voiceFocusProcessorName)",
 		"highpass.type = 'highpass'",
-		"compressor.threshold.value = -34",
+		"lowpass.type = 'lowpass'",
+		"compressor.threshold.value = -38",
+		"this.floorGain = 0.035",
+		"const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)",
+		"strength: 0.94",
+		"voiceIsolation: { ideal: voiceFocusEnabled() }",
+		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
 		"function trainVoiceFocus()",
 		"localAudioSourceTrack?.getSettings?.().deviceId",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing voice focus noise reduction %q", want)
+		}
+	}
+}
+
+func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
+		"window.localStorage?.getItem(audioSettingsStorageKey)",
+		"window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify(audioSettings))",
+		"let voiceTrainingPrivacyMute = false",
+		"function effectiveMicMuted()",
+		"return Boolean(isMicMuted || voiceTrainingPrivacyMute)",
+		"function setVoiceTrainingPrivacyMute(muted)",
+		"setVoiceTrainingPrivacyMute(true)",
+		"await applyAudioSettingsToLiveMicrophone({ announce: false })",
+		"cancelVoiceFocusTraining({ keepSamples: true, keepPrivacyMute: true })",
+		"setVoiceTrainingPrivacyMute(false)",
+		"sourceTrack.enabled = voiceTrainingPrivacyMute || !isMicMuted",
+		"outputTrack.enabled = !effectiveMicMuted()",
+		"function createMutedOutboundAudioClone(sourceTrack)",
+		"micMuted: effectiveMicMuted()",
+		"you are muted to the room while this runs",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing private persistent voice focus setup %q", want)
 		}
 	}
 }
@@ -181,6 +229,119 @@ func TestIndexSupportsDragReorderedVideoFeeds(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing drag-reordered video support %q", want)
+		}
+	}
+}
+
+func TestIndexLocksControlsAndUsesGreenSpeakerAccent(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"--speaker-accent: #34D399",
+		"--glow-speaker-md:",
+		"#appShell.is-in-room:not(.is-board-expanded) .meeting-bar",
+		"position: fixed;",
+		"width: fit-content;",
+		".video-tile.is-active-speaker",
+		".hearth-stage[data-stage-mode=\"gallery\"] .hearth-seat.is-active-speaker",
+		".board-video-tile.is-speaker",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing locked controls or green speaker accent %q", want)
+		}
+	}
+}
+
+func TestIndexUsesRemoteTrackAliasesForRelabelingAndDedupe(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function normalizeRemoteTrackKeys(keys)",
+		"function reliableRemoteStreamId(streamId)",
+		"function rememberRemoteStreamLabel(streamId, name)",
+		"function remoteStreamLabel(streamId)",
+		"remoteLabelConflictsByStream.add(key)",
+		"function remoteTrackKeysForEvent(event)",
+		"function remoteTrackIdentityKeysForEvent(event)",
+		"function rememberRemoteTileKeys(tile, keys)",
+		"function remoteTileForKeys(keys)",
+		"function forgetRemoteTile(tile)",
+		"function relabelRemoteTileByKeys(keys, name)",
+		"function repairMissingRemoteVideoTiles(reason = '')",
+		"createRemoteVideoTile(keys, stream, participantName, track)",
+		"rememberRemoteTileKeys(tile, [...remoteKeysForTile(tile), ...keys])",
+		"const sourceTrackId = track?.sourceTrackId || ''",
+		"remoteLabelsByTrack.set(sourceTrackId, name)",
+		"renameAudioMonitorByKeys(keys, name)",
+		"removeRemoteParticipantVideoTracksByName(name, { exceptKeys: trackKeys.length ? trackKeys : keys })",
+		"if (!relabelRemoteTileByKeys(keys, name))",
+		"const identityKeys = remoteTrackIdentityKeysForEvent(event)",
+		"removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: identityKeys.length ? identityKeys : keys })",
+		"if (remoteTileForKeys(identityKeys.length ? identityKeys : keys))",
+		"rememberRemoteTileKeys(tile, keys)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing remote track alias hardening %q", want)
+		}
+	}
+}
+
+func TestIndexPrunesDeadRemoteVideoTiles(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function remoteTileHasLiveVideo(tile)",
+		"function pruneDeadRemoteVideoTiles()",
+		"function pruneStaleUnidentifiedRemoteVideoTiles()",
+		"function requestParticipantTrackRefresh(reason = '')",
+		"event: 'request_participant_tracks'",
+		"function scheduleUnidentifiedRemoteTileRepair(tile)",
+		"if (remoteTileHasLiveVideo(tile))",
+		"disposeRemoteTile(tile)",
+		"forgetRemoteTile(tile)",
+		"pruneDeadRemoteVideoTiles()",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing dead remote video pruning %q", want)
+		}
+	}
+}
+
+func TestIndexPromotesRemoteAudioIntoVideoForSync(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function remoteVideoElementForParticipant(name)",
+		"function promoteAudioMonitorToVideo(key, monitor, name)",
+		"function promoteParticipantAudioToVideo(name)",
+		"function demoteRemotePlaybackElementFromVideo(video, name)",
+		"function shouldUseSyncedRemoteAudioPlayback()",
+		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",
+		"const playbackStream = syncedRemotePlaybackStream(video.srcObject || monitor.stream, monitor.track, remoteVideoTracksByParticipant.get(participantName))",
+		"remoteVideoTracksByParticipant.set(participantName, track)",
+		"configureRemotePlaybackElement(video, playbackStream, participantName, { muted: false })",
+		"const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null",
+		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })",
+		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing remote audio/video sync hardening %q", want)
 		}
 	}
 }

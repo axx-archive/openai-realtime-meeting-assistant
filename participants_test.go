@@ -133,6 +133,7 @@ func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testin
 	previousActiveParticipantConnections := activeParticipantConnections
 	previousTrackParticipants := trackParticipants
 	previousTrackParticipantSessions := trackParticipantSessions
+	previousTrackSourceIDs := trackSourceIDs
 	activeParticipantConnections = map[string]peerConnectionState{
 		"AJ": {participantName: "AJ", sessionID: "old"},
 	}
@@ -149,6 +150,10 @@ func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testin
 		ajTrack.ID():  "old",
 		timTrack.ID(): "tim",
 	}
+	trackSourceIDs = map[string]string{
+		ajTrack.ID():  "aj-source",
+		timTrack.ID(): "tim-source",
+	}
 	listLock.Unlock()
 	defer func() {
 		listLock.Lock()
@@ -157,6 +162,7 @@ func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testin
 		trackLocals = previousTrackLocals
 		trackParticipants = previousTrackParticipants
 		trackParticipantSessions = previousTrackParticipantSessions
+		trackSourceIDs = previousTrackSourceIDs
 		listLock.Unlock()
 	}()
 
@@ -175,6 +181,99 @@ func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testin
 	}
 	if _, ok := trackLocals[timTrack.ID()]; !ok {
 		t.Fatal("Tim track was removed during AJ replacement")
+	}
+	if _, ok := trackSourceIDs[ajTrack.ID()]; ok {
+		t.Fatal("AJ track source remained after replacement")
+	}
+}
+
+func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
+	videoCodec := webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}
+	audioCodec := webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}
+	ajTrack, err := webrtc.NewTrackLocalStaticRTP(videoCodec, "aj-video", "aj-stream")
+	if err != nil {
+		t.Fatalf("create AJ track: %v", err)
+	}
+	timTrack, err := webrtc.NewTrackLocalStaticRTP(audioCodec, "tim-audio", "tim-stream")
+	if err != nil {
+		t.Fatalf("create Tim track: %v", err)
+	}
+
+	listLock.Lock()
+	previousTrackLocals := trackLocals
+	previousTrackParticipants := trackParticipants
+	previousTrackParticipantSessions := trackParticipantSessions
+	previousTrackSourceIDs := trackSourceIDs
+	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{
+		ajTrack.ID():  ajTrack,
+		timTrack.ID(): timTrack,
+	}
+	trackParticipants = map[string]string{
+		ajTrack.ID():  "AJ",
+		timTrack.ID(): "Tim",
+	}
+	trackParticipantSessions = map[string]string{
+		ajTrack.ID():  "aj-session",
+		timTrack.ID(): "tim-session",
+	}
+	trackSourceIDs = map[string]string{
+		ajTrack.ID():  "aj-camera-source",
+		timTrack.ID(): "tim-mic-source",
+	}
+	listLock.Unlock()
+	defer func() {
+		listLock.Lock()
+		trackLocals = previousTrackLocals
+		trackParticipants = previousTrackParticipants
+		trackParticipantSessions = previousTrackParticipantSessions
+		trackSourceIDs = previousTrackSourceIDs
+		listLock.Unlock()
+	}()
+
+	snapshots := participantTrackSnapshots("AJ")
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshots=%v, want only Tim's remote track for AJ", snapshots)
+	}
+	snapshot := snapshots[0]
+	if snapshot.Name != "Tim" {
+		t.Fatalf("snapshot name=%q, want Tim", snapshot.Name)
+	}
+	if snapshot.Kind != "audio" {
+		t.Fatalf("snapshot kind=%q, want audio", snapshot.Kind)
+	}
+	if snapshot.TrackID != timTrack.ID() {
+		t.Fatalf("snapshot trackID=%q, want %q", snapshot.TrackID, timTrack.ID())
+	}
+	if snapshot.SourceTrackID != "tim-mic-source" {
+		t.Fatalf("snapshot sourceTrackID=%q, want tim-mic-source", snapshot.SourceTrackID)
+	}
+	if snapshot.StreamID != "tim-stream" {
+		t.Fatalf("snapshot streamID=%q, want tim-stream", snapshot.StreamID)
+	}
+}
+
+func TestRoomPeerConnectionOffersStableVP8VideoCodec(t *testing.T) {
+	peerConnection, err := newPeerConnection()
+	if err != nil {
+		t.Fatalf("create peer connection: %v", err)
+	}
+	defer peerConnection.Close()
+
+	if _, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionSendonly,
+	}); err != nil {
+		t.Fatalf("add video transceiver: %v", err)
+	}
+
+	offer, err := peerConnection.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	if !strings.Contains(offer.SDP, "VP8/90000") {
+		t.Fatalf("offer SDP missing VP8 codec:\n%s", offer.SDP)
+	}
+	if strings.Contains(offer.SDP, "H264") {
+		t.Fatalf("offer SDP includes H264 codecs that can collide across bundled tracks:\n%s", offer.SDP)
 	}
 }
 

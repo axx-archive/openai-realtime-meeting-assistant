@@ -96,7 +96,7 @@ The board should update in place. Card moves animate, completed work triggers co
 
 Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
 
-Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-realtime-whisper` transcription-only lane records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript.
+Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-realtime-whisper` transcription-only lane records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript. A second board worker analyzes those brain summaries, applies grounded card updates through the same Kanban tool path as live Scout, and writes durable `board_update` artifacts so conversations compound into auditable board state instead of disappearing after the call.
 
 ### Configured interactions
 
@@ -122,11 +122,14 @@ You can update:
 - The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
 - The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. Set `OPENAI_TRANSCRIPT_MODEL` to change the transcript-only model from `gpt-realtime-whisper`.
 - The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
-- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `low` for `gpt-realtime-2`.
-- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`semantic_vad` or `server_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto`); the default is `semantic_vad` with `high` eagerness for faster board commands.
+- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `minimal` for lower-latency board commands on `gpt-realtime-2`.
+- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`server_vad` or `semantic_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto` for semantic VAD); the default is `server_vad` with a 300 ms silence window for faster turn endings.
 - The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
 - The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
 - Historical backfill for the brain worker with `MEETING_BRAIN_BACKFILL=true`; by default it starts from the latest transcript at app startup and summarizes new transcript windows only.
+- The summary-to-board worker model by setting `OPENAI_BOARD_MODEL`; otherwise it uses the meeting brain model.
+- The summary-to-board worker interval with `MEETING_BOARD_INTERVAL`; the default is `2m`. Set `MEETING_BOARD_DISABLED=true` to disable it. It processes new `brain` summaries into card create/update/move/tag/date operations and records a `board_update` memory artifact for every reviewed window.
+- Historical backfill for the summary-to-board worker with `MEETING_BOARD_BACKFILL=true`; by default it starts from the latest brain summary at app startup and updates the board from new summaries only.
 - The meeting memory timezone with `MEETING_TIME_ZONE`; the default is `America/Los_Angeles` for relative questions such as "yesterday".
 - The browser UI in `index.html`.
 - The HTTP bind address with the `-addr` flag in `main.go`.
@@ -136,6 +139,7 @@ You can update:
 - Set `MEETING_ROOM_PASSWORD` to change the room passcode. If unset, the demo passcode is used.
 - Set `MEETING_ROOM_MAX_PARTICIPANTS` to change the room capacity. The default is `10`.
 - Set `MEETING_ALLOWED_ORIGINS` to a comma-separated list of allowed browser origins for WebSocket access. If unset, same-host origins are allowed.
+- For more reliable media on restrictive networks, configure browser ICE servers with `MEETING_STUN_URLS`, `MEETING_TURN_URLS`, `MEETING_TURN_USERNAME`, and `MEETING_TURN_CREDENTIAL`. You can also provide a full JSON array with `MEETING_ICE_SERVERS_JSON`.
 - Meeting notes are generated when **Send notes** archives the meeting. The notes include detected decisions and the latest status for every active board card.
 - Participant email addresses use the Shareability convention: `name@shareability.com`, except Erick maps to `e@shareability.com`.
 - To email notes automatically, configure SMTP:

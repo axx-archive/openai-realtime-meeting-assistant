@@ -20,8 +20,8 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
-	defaultReasoningEffort    = "low"
-	defaultRealtimeVADType    = "semantic_vad"
+	defaultReasoningEffort    = "minimal"
+	defaultRealtimeVADType    = "server_vad"
 	defaultVADEagerness       = "high"
 	defaultRealtimeVoice      = "marin"
 	defaultKanbanBoardPath    = "data/kanban-board.json"
@@ -166,6 +166,9 @@ type kanbanBoardApp struct {
 	brainWorkerCancel        chan struct{}
 	brainWorkerDone          chan struct{}
 	brainWorkerBaselineID    string
+	boardWorkerCancel        chan struct{}
+	boardWorkerDone          chan struct{}
+	boardWorkerBaselineID    string
 	closeOnce                sync.Once
 }
 
@@ -394,6 +397,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.mu.Unlock()
 	app.startTranscriptionLane(apiKey)
 	app.startMeetingBrainWorker(apiKey)
+	app.startMeetingBoardWorker(apiKey)
 
 	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
 		return err
@@ -583,11 +587,16 @@ func (app *kanbanBoardApp) Close() error {
 		app.proactiveReconnectCancel = nil
 		brainWorkerCancel := app.brainWorkerCancel
 		brainWorkerDone := app.brainWorkerDone
+		boardWorkerCancel := app.boardWorkerCancel
+		boardWorkerDone := app.boardWorkerDone
 		transcriptLane := app.transcriptLane
 		app.transcriptLane = nil
 		app.brainWorkerCancel = nil
 		app.brainWorkerDone = nil
 		app.brainWorkerBaselineID = ""
+		app.boardWorkerCancel = nil
+		app.boardWorkerDone = nil
+		app.boardWorkerBaselineID = ""
 		app.mu.Unlock()
 		if transcriptLane != nil {
 			transcriptLane.close()
@@ -599,6 +608,12 @@ func (app *kanbanBoardApp) Close() error {
 			close(brainWorkerCancel)
 			if brainWorkerDone != nil {
 				<-brainWorkerDone
+			}
+		}
+		if boardWorkerCancel != nil {
+			close(boardWorkerCancel)
+			if boardWorkerDone != nil {
+				<-boardWorkerDone
 			}
 		}
 		if peerConnection != nil {
@@ -792,19 +807,14 @@ func (app *kanbanBoardApp) forwardRealtimeOutputTrack(t *webrtc.TrackRemote) {
 		"streamId":      t.StreamID(),
 		"payloadType":   t.PayloadType(),
 	})
-	broadcastKanbanEvent("participant_track", map[string]any{
-		"name":          scoutParticipantName,
-		"kind":          t.Kind().String(),
-		"trackId":       forwardedTrackID,
-		"sourceTrackId": t.ID(),
-		"streamId":      t.StreamID(),
-	})
 
 	trackLocal, err := addTrack(t, scoutParticipantName, "scout")
 	if err != nil {
 		log.Errorf("Failed to create local track for Scout voice=%s: %v", t.ID(), err)
 		return
 	}
+	broadcastKanbanEvent("participant_track", participantTrackPayload(scoutParticipantName, t))
+	signalPeerConnections()
 	defer removeTrack(trackLocal)
 
 	for {
@@ -988,13 +998,15 @@ func realtimeTurnDetectionConfig() map[string]any {
 			"create_response":     true,
 			"interrupt_response":  true,
 		}
-	case "semantic_vad", "":
+	case "semantic_vad":
 		return map[string]any{
 			"type":               "semantic_vad",
 			"eagerness":          realtimeVADEagerness(),
 			"create_response":    true,
 			"interrupt_response": true,
 		}
+	case "":
+		return realtimeTurnDetectionConfigWithDefaults()
 	default:
 		return realtimeTurnDetectionConfigWithDefaults()
 	}
@@ -1002,10 +1014,12 @@ func realtimeTurnDetectionConfig() map[string]any {
 
 func realtimeTurnDetectionConfigWithDefaults() map[string]any {
 	return map[string]any{
-		"type":               defaultRealtimeVADType,
-		"eagerness":          realtimeVADEagerness(),
-		"create_response":    true,
-		"interrupt_response": true,
+		"type":                defaultRealtimeVADType,
+		"threshold":           0.5,
+		"prefix_padding_ms":   300,
+		"silence_duration_ms": 300,
+		"create_response":     true,
+		"interrupt_response":  true,
 	}
 }
 
@@ -1106,6 +1120,10 @@ func (app *kanbanBoardApp) flushScoutSpokenResponseIfPending() {
 		app.mu.Unlock()
 		return
 	}
+	if app.realtimeResponseActive {
+		app.mu.Unlock()
+		return
+	}
 	app.scoutSpokenResponse = false
 	app.scoutSpokenResponseSent = true
 	app.mu.Unlock()
@@ -1176,14 +1194,14 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
 		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
-		"# Preambles\nDo not speak preambles for routine board updates. Only speak to the room after a tool result when the clear user turn started with Hey Scout. Otherwise stay silent and use tools.",
+		"# Preambles\nDo not speak preambles for routine board updates. If a Hey Scout request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the clear user turn started with Hey Scout. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
 		"# Entity capture\nPreserve exact names, brands, owners, card titles, dates, and project terms. For high-precision identifiers or ambiguous names, normalize only what is clear. If multiple interpretations are plausible, call do_nothing with one clarification question.",
 		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
-		"# Tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
+		"# Tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# Memory\nMeeting transcripts are saved as durable memory with speaker labels when Scout can attribute the speaker. A scheduled brain worker also writes durable summaries with transcript references. If the user asks what was said, decided, discussed, remembered, mentioned earlier, how a meeting went, or asks any recall question, call answer_memory_question with the user's full question as the query.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete board operation or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nOnly speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -1232,7 +1250,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 	}
 	keyDatesProperty := map[string]any{
 		"type":        "array",
-		"description": "Key dates or milestones to add or update on the card. Preserve useful existing dates unless the user asks to replace them.",
+		"description": "Key dates or milestones to add or update on the card. Preserve useful existing dates unless replace_key_dates is true. Use an empty array with replace_key_dates=true to clear all key dates.",
 		"items":       keyDateProperty,
 	}
 	ownerProperty := map[string]any{
@@ -1306,6 +1324,21 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "remove_key_dates",
+			"description": "Remove one or more key dates, milestones, due dates, or deadlines from an existing Kanban ticket/card.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"card_id":    map[string]any{"type": "string", "description": "Existing board card id."},
+					"labels":     map[string]any{"type": "array", "description": "Specific key date labels to remove, such as due, investor PDF, launch, review, or kickoff. Omit or leave empty when remove_all is true.", "items": map[string]any{"type": "string"}},
+					"remove_all": map[string]any{"type": "boolean", "description": "Set true to remove every key date from the card when the user asks to clear, erase, or remove key dates without naming labels."},
+				},
+				"required":             []string{"card_id"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "update_ticket",
 			"description": "Update one existing Kanban ticket/card atomically. Prefer this when one utterance changes status, owner, notes, title, tags, due date, or key dates for the same card.",
 			"parameters": map[string]any{
@@ -1319,6 +1352,10 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"status":    statusProperty,
 					"due_date":  dueDateProperty,
 					"key_dates": keyDatesProperty,
+					"replace_key_dates": map[string]any{
+						"type":        "boolean",
+						"description": "Set true only when the user asks to replace the whole key-date set or gives the exact key dates to keep. With key_dates=[], this clears all key dates.",
+					},
 				},
 				"required":             []string{"card_id"},
 				"additionalProperties": false,
@@ -1589,6 +1626,8 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.addTags(args)
 	case "add_key_date":
 		return app.addKeyDate(args)
+	case "remove_key_dates":
+		return app.removeKeyDates(args)
 	case "update_ticket":
 		return app.updateTicket(args)
 	case "delete_ticket":
@@ -1855,6 +1894,55 @@ func (app *kanbanBoardApp) addKeyDate(args map[string]any) (map[string]any, bool
 	}, true, nil
 }
 
+func (app *kanbanBoardApp) removeKeyDates(args map[string]any) (map[string]any, bool, error) {
+	cardID := asString(args["card_id"])
+	if cardID == "" {
+		return nil, false, fmt.Errorf("card_id is required")
+	}
+
+	labels := normalizeKeyDateLabels(asStringSlice(args["labels"]))
+	removeAll := asBool(args["remove_all"]) || asBool(args["removeAll"]) || len(labels) == 0
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	card, ok := app.findCardLocked(cardID)
+	if !ok {
+		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
+	}
+
+	nextKeyDates := filterKanbanKeyDates(card.KeyDates, labels, removeAll)
+	nextDueDate := card.DueDate
+	if removeAll || keyDateLabelsIncludeDue(labels) {
+		nextDueDate = dueDateFromKeyDates(nextKeyDates)
+	}
+	if kanbanKeyDatesEqual(card.KeyDates, nextKeyDates) && card.DueDate == nextDueDate {
+		return map[string]any{
+			"ok":         true,
+			"removed":    false,
+			"card_id":    cardID,
+			"remove_all": removeAll,
+			"labels":     labels,
+			"card":       cloneKanbanCard(*card),
+		}, false, nil
+	}
+
+	card.KeyDates = nextKeyDates
+	card.DueDate = nextDueDate
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
+
+	return map[string]any{
+		"ok":         true,
+		"removed":    true,
+		"card_id":    cardID,
+		"remove_all": removeAll,
+		"labels":     labels,
+		"card":       cloneKanbanCard(*card),
+	}, true, nil
+}
+
 func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bool, error) {
 	cardID := asString(args["card_id"])
 	if cardID == "" {
@@ -1867,6 +1955,10 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
 	dueDate, hasDueDate := dueDateFromArgs(args)
 	keyDates, hasKeyDates := keyDatesFromArgs(args)
+	replaceKeyDates := asBool(args["replace_key_dates"]) || asBool(args["replaceKeyDates"])
+	if replaceKeyDates && !hasKeyDates {
+		hasKeyDates = true
+	}
 	var status kanbanStatus
 	if rawStatus, ok := args["status"]; ok && asString(rawStatus) != "" {
 		parsedStatus, err := parseKanbanStatus(rawStatus)
@@ -1907,13 +1999,24 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 			changed = true
 		}
 	}
-	if hasKeyDates && len(keyDates) > 0 {
-		nextKeyDates := mergeKanbanKeyDates(card.KeyDates, keyDates...)
+	if hasKeyDates {
+		nextKeyDates := card.KeyDates
+		if replaceKeyDates {
+			nextKeyDates = keyDates
+		} else if len(keyDates) > 0 {
+			nextKeyDates = mergeKanbanKeyDates(card.KeyDates, keyDates...)
+		}
 		if !kanbanKeyDatesEqual(card.KeyDates, nextKeyDates) {
 			card.KeyDates = nextKeyDates
 			changed = true
 		}
-		if keyDatesDueDate := dueDateFromKeyDates(keyDates); keyDatesDueDate != "" && card.DueDate != keyDatesDueDate {
+		if replaceKeyDates {
+			keyDatesDueDate := dueDateFromKeyDates(nextKeyDates)
+			if card.DueDate != keyDatesDueDate {
+				card.DueDate = keyDatesDueDate
+				changed = true
+			}
+		} else if keyDatesDueDate := dueDateFromKeyDates(keyDates); keyDatesDueDate != "" && card.DueDate != keyDatesDueDate {
 			card.DueDate = keyDatesDueDate
 			changed = true
 		}
@@ -2468,6 +2571,11 @@ func asString(value any) string {
 	return strings.TrimSpace(candidate)
 }
 
+func asBool(value any) bool {
+	candidate, ok := value.(bool)
+	return ok && candidate
+}
+
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -2575,8 +2683,61 @@ func normalizeKanbanKeyDate(label string, date string) (kanbanKeyDate, bool) {
 	return kanbanKeyDate{Label: label, Date: date}, true
 }
 
+func normalizeKeyDateLabels(labels []string) []string {
+	normalizedLabels := make([]string, 0, len(labels))
+	seenLabels := map[string]struct{}{}
+	for _, label := range labels {
+		normalizedLabel := normalizeKeyDateLabel(label)
+		if normalizedLabel == "" {
+			continue
+		}
+		if _, exists := seenLabels[normalizedLabel]; exists {
+			continue
+		}
+		seenLabels[normalizedLabel] = struct{}{}
+		normalizedLabels = append(normalizedLabels, normalizedLabel)
+	}
+
+	return normalizedLabels
+}
+
+func normalizeKeyDateLabel(label string) string {
+	normalizedLabel := strings.ToLower(normalizeKeyDateText(label))
+	if normalizedLabel == "deadline" {
+		return "due"
+	}
+
+	return normalizedLabel
+}
+
 func normalizeKeyDateText(value string) string {
 	return strings.Trim(canonicalizeBoardText(value), "\"'")
+}
+
+func filterKanbanKeyDates(existing []kanbanKeyDate, labels []string, removeAll bool) []kanbanKeyDate {
+	if removeAll {
+		return nil
+	}
+
+	removeLabels := map[string]struct{}{}
+	for _, label := range labels {
+		if normalizedLabel := normalizeKeyDateLabel(label); normalizedLabel != "" {
+			removeLabels[normalizedLabel] = struct{}{}
+		}
+	}
+	if len(removeLabels) == 0 {
+		return cloneKanbanKeyDates(existing)
+	}
+
+	filtered := make([]kanbanKeyDate, 0, len(existing))
+	for _, keyDate := range existing {
+		if _, remove := removeLabels[normalizeKeyDateLabel(keyDate.Label)]; remove {
+			continue
+		}
+		filtered = append(filtered, keyDate)
+	}
+
+	return normalizeKanbanKeyDates(filtered)
 }
 
 func mergeKanbanKeyDates(existing []kanbanKeyDate, additions ...kanbanKeyDate) []kanbanKeyDate {
@@ -2639,6 +2800,16 @@ func dueDateFromKeyDates(dates []kanbanKeyDate) string {
 
 func keyDateIsDue(date kanbanKeyDate) bool {
 	return strings.EqualFold(strings.TrimSpace(date.Label), "due")
+}
+
+func keyDateLabelsIncludeDue(labels []string) bool {
+	for _, label := range labels {
+		if normalizeKeyDateLabel(label) == "due" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func formatKanbanKeyDates(dates []kanbanKeyDate) string {

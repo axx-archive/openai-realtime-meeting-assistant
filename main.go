@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/interceptor"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -35,6 +37,7 @@ var (
 	trackLocals                  map[string]*webrtc.TrackLocalStaticRTP
 	trackParticipants            map[string]string
 	trackParticipantSessions     map[string]string
+	trackSourceIDs               map[string]string
 	participantSessionSeq        atomic.Uint64
 
 	log = logging.NewDefaultLoggerFactory().NewLogger("openai-realtime-meeting-assistant")
@@ -56,6 +59,14 @@ type peerConnectionState struct {
 	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
 	shouldSignal    func(desiredTrackCount int) bool
 	signal          func(gatherComplete <-chan struct{}) error
+}
+
+type participantTrackSnapshot struct {
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	TrackID       string `json:"trackId"`
+	SourceTrackID string `json:"sourceTrackId,omitempty"`
+	StreamID      string `json:"streamId,omitempty"`
 }
 
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
@@ -85,6 +96,7 @@ func main() {
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
 	trackParticipantSessions = map[string]string{}
+	trackSourceIDs = map[string]string{}
 	activeParticipantConnections = map[string]peerConnectionState{}
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
@@ -107,6 +119,7 @@ func main() {
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
+	http.HandleFunc("/client-config", clientConfigHandler)
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +180,21 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"rtcConfiguration": browserRTCConfigurationFromEnv(),
+	}); err != nil {
+		log.Errorf("Failed to encode client config: %v", err)
+	}
+}
+
 func newPeerConnection() (*webrtc.PeerConnection, error) {
 	settingEngine := webrtc.SettingEngine{}
 	if nat1To1IP := os.Getenv("PION_NAT1TO1_IP"); nat1To1IP != "" {
@@ -176,7 +204,48 @@ func newPeerConnection() (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 
-	return webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine)).NewPeerConnection(webrtc.Configuration{})
+	mediaEngine, registry, err := stableRoomMediaEngine()
+	if err != nil {
+		return nil, err
+	}
+
+	return webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(registry),
+		webrtc.WithSettingEngine(settingEngine),
+	).NewPeerConnection(webrtc.Configuration{})
+}
+
+func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error) {
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeOpus,
+			ClockRate:   48000,
+			Channels:    2,
+			SDPFmtpLine: "minptime=10;useinbandfec=1",
+		},
+		PayloadType: 111,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, nil, fmt.Errorf("register opus codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:     webrtc.MimeTypeVP8,
+			ClockRate:    90000,
+			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
+		},
+		PayloadType: 96,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
+	}
+
+	registry := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, registry); err != nil {
+		return nil, nil, fmt.Errorf("register default interceptors: %w", err)
+	}
+
+	return mediaEngine, registry, nil
 }
 
 func configureEphemeralUDPPortRange(settingEngine *webrtc.SettingEngine) error {
@@ -226,7 +295,7 @@ func websocketOriginAllowed(r *http.Request) bool {
 	return strings.EqualFold(parsedOrigin.Host, r.Host)
 }
 
-// Add to list of tracks and fire renegotation for all PeerConnections.
+// Add to list of tracks. Callers publish track metadata before renegotiating.
 func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
@@ -244,13 +313,26 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	if trackParticipantSessions == nil {
 		trackParticipantSessions = map[string]string{}
 	}
+	if trackSourceIDs == nil {
+		trackSourceIDs = map[string]string{}
+	}
 	trackLocals[trackLocal.ID()] = trackLocal
 	trackParticipants[trackLocal.ID()] = canonicalParticipantName(participantName)
 	trackParticipantSessions[trackLocal.ID()] = sessionID
+	trackSourceIDs[trackLocal.ID()] = t.ID()
 	listLock.Unlock()
-	signalPeerConnections()
 
 	return trackLocal, nil
+}
+
+func participantTrackPayload(name string, t *webrtc.TrackRemote) map[string]any {
+	return map[string]any{
+		"name":          canonicalParticipantName(name),
+		"kind":          t.Kind().String(),
+		"trackId":       forwardedRemoteTrackID(t),
+		"sourceTrackId": t.ID(),
+		"streamId":      t.StreamID(),
+	}
 }
 
 func forwardedRemoteTrackID(t *webrtc.TrackRemote) string {
@@ -291,6 +373,7 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackLocals, t.ID())
 	delete(trackParticipants, t.ID())
 	delete(trackParticipantSessions, t.ID())
+	delete(trackSourceIDs, t.ID())
 }
 
 func removeParticipantTracksLocked(name string, sessionID string) bool {
@@ -305,10 +388,116 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackLocals, trackID)
 		delete(trackParticipants, trackID)
 		delete(trackParticipantSessions, trackID)
+		delete(trackSourceIDs, trackID)
 		removedTracks = true
 	}
 
 	return removedTracks
+}
+
+func participantTrackSnapshots(excludeParticipant string) []participantTrackSnapshot {
+	listLock.RLock()
+	defer listLock.RUnlock()
+
+	return participantTrackSnapshotsLocked(excludeParticipant)
+}
+
+func participantTrackSnapshotsLocked(excludeParticipant string) []participantTrackSnapshot {
+	snapshots := make([]participantTrackSnapshot, 0, len(trackLocals))
+	for trackID, trackLocal := range trackLocals {
+		if trackLocal == nil {
+			continue
+		}
+		name := canonicalParticipantName(trackParticipants[trackID])
+		if sameParticipantName(name, excludeParticipant) {
+			continue
+		}
+		snapshots = append(snapshots, participantTrackSnapshot{
+			Name:          name,
+			Kind:          trackLocal.Kind().String(),
+			TrackID:       trackID,
+			SourceTrackID: trackSourceIDs[trackID],
+			StreamID:      trackLocal.StreamID(),
+		})
+	}
+	sort.Slice(snapshots, func(i, j int) bool {
+		if snapshots[i].Name != snapshots[j].Name {
+			return snapshots[i].Name < snapshots[j].Name
+		}
+		if snapshots[i].Kind != snapshots[j].Kind {
+			return snapshots[i].Kind < snapshots[j].Kind
+		}
+		return snapshots[i].TrackID < snapshots[j].TrackID
+	})
+
+	return snapshots
+}
+
+func sendParticipantTrackSnapshot(websocket *threadSafeWriter, snapshot participantTrackSnapshot) {
+	if err := sendKanbanEvent(websocket, "participant_track", snapshot); err != nil {
+		log.Errorf("Failed to replay participant track metadata: %v", err)
+	}
+}
+
+func sendParticipantTrackSnapshots(websocket *threadSafeWriter, excludeParticipant string) {
+	for _, snapshot := range participantTrackSnapshots(excludeParticipant) {
+		sendParticipantTrackSnapshot(websocket, snapshot)
+	}
+}
+
+func browserRTCConfigurationFromEnv() map[string]any {
+	iceServers := make([]map[string]any, 0)
+	for _, urls := range [][]string{
+		splitEnvList("MEETING_STUN_URLS"),
+		splitEnvList("MEETING_TURN_URLS"),
+	} {
+		if len(urls) == 0 {
+			continue
+		}
+		server := map[string]any{"urls": urls}
+		if strings.HasPrefix(strings.ToLower(urls[0]), "turn:") || strings.HasPrefix(strings.ToLower(urls[0]), "turns:") {
+			if username := strings.TrimSpace(os.Getenv("MEETING_TURN_USERNAME")); username != "" {
+				server["username"] = username
+			}
+			if credential := strings.TrimSpace(os.Getenv("MEETING_TURN_CREDENTIAL")); credential != "" {
+				server["credential"] = credential
+			}
+		}
+		iceServers = append(iceServers, server)
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("MEETING_ICE_SERVERS_JSON")); raw != "" {
+		var configured []map[string]any
+		if err := json.Unmarshal([]byte(raw), &configured); err != nil {
+			log.Errorf("Failed to parse MEETING_ICE_SERVERS_JSON: %v", err)
+		} else {
+			iceServers = append(iceServers, configured...)
+		}
+	}
+
+	if len(iceServers) == 0 {
+		return map[string]any{}
+	}
+
+	return map[string]any{"iceServers": iceServers}
+}
+
+func splitEnvList(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+
+	values := make([]string, 0)
+	for _, value := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\t' || r == ' '
+	}) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter) {
@@ -545,6 +734,12 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				return true
 			}
 
+			if peer.websocket != nil {
+				for _, snapshot := range participantTrackSnapshotsLocked(peer.participantName) {
+					sendParticipantTrackSnapshot(peer.websocket, snapshot)
+				}
+			}
+
 			if peer.signal != nil {
 				if err = peer.signal(gatherComplete); err != nil {
 					log.Errorf("Failed to signal peer: %v", err)
@@ -650,6 +845,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				name := currentParticipantName()
 				unregisterParticipantSession(name, participantSessionID)
 				if kanbanApp.forgetParticipantSession(name, participantSessionID) {
+					broadcastKanbanEvent("participant_left", map[string]any{
+						"name": name,
+					})
 					broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 				}
 			}
@@ -746,13 +944,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			"streamId":      t.StreamID(),
 			"payloadType":   t.PayloadType(),
 		})
-		broadcastKanbanEvent("participant_track", map[string]any{
-			"name":          trackParticipantName,
-			"kind":          t.Kind().String(),
-			"trackId":       forwardedTrackID,
-			"sourceTrackId": t.ID(),
-			"streamId":      t.StreamID(),
-		})
 
 		// Create a track to fan out our incoming media to all browser peers.
 		trackLocal, err := addTrack(t, trackParticipantName, trackParticipantSessionID)
@@ -760,6 +951,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
 			return
 		}
+		broadcastKanbanEvent("participant_track", participantTrackPayload(trackParticipantName, t))
+		signalPeerConnections()
 		defer removeTrack(trackLocal)
 
 		audioDecoder, audioChannels, err := newRoomAudioDecoder(t)
@@ -921,8 +1114,15 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 				log.Errorf("Failed to send undo state after media join: %v", err)
 			}
+			sendParticipantTrackSnapshots(c, currentParticipantName())
 			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 			signalPeerConnections()
+		case "request_participant_tracks":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before requesting media labels.")
+				continue
+			}
+			sendParticipantTrackSnapshots(c, currentParticipantName())
 		case "candidate":
 			candidate := webrtc.ICECandidateInit{}
 			if err := json.Unmarshal([]byte(message.Data), &candidate); err != nil {

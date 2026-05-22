@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	meetingMemoryKindTranscript = "transcript"
-	meetingMemoryKindBrain      = "brain"
-	meetingMemoryKindArchive    = "archive"
-	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
+	meetingMemoryKindTranscript  = "transcript"
+	meetingMemoryKindBrain       = "brain"
+	meetingMemoryKindBoardUpdate = "board_update"
+	meetingMemoryKindArchive     = "archive"
+	defaultMeetingMemoryPath     = "data/meeting-memory.jsonl"
 )
 
 var memoryTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
@@ -160,6 +161,10 @@ func (store *meetingMemoryStore) appendAttributedTranscriptWithMetadata(eventID 
 
 func (store *meetingMemoryStore) appendBrainWriteUp(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindBrain, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendBoardUpdate(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindBoardUpdate, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) appendArchive(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -355,7 +360,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate {
 		return normalizeMemoryText(value)
 	}
 

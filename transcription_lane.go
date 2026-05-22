@@ -16,14 +16,16 @@ import (
 )
 
 const (
-	realtimeWebSocketURL              = "wss://api.openai.com/v1/realtime"
-	defaultTranscriptionLaneModel     = "gpt-realtime-whisper"
-	transcriptionLaneInputSampleRate  = 24000
-	transcriptionLaneQueueSize        = 256
-	transcriptionLaneWriteTimeout     = 5 * time.Second
-	transcriptionLaneCommitSilence    = 800 * time.Millisecond
-	transcriptionLaneReconnectInitial = 1 * time.Second
-	transcriptionLaneReconnectMax     = 30 * time.Second
+	realtimeWebSocketURL               = "wss://api.openai.com/v1/realtime"
+	defaultTranscriptionLaneModel      = "gpt-realtime-whisper"
+	transcriptionLaneInputSampleRate   = 24000
+	transcriptionLaneQueueSize         = 256
+	transcriptionLaneWriteTimeout      = 5 * time.Second
+	transcriptionLaneCommitSilence     = 800 * time.Millisecond
+	transcriptionLanePCMBytesPerSample = 2
+	transcriptionLaneMinCommitSamples  = transcriptionLaneInputSampleRate / 10
+	transcriptionLaneReconnectInitial  = 1 * time.Second
+	transcriptionLaneReconnectMax      = 30 * time.Second
 )
 
 type meetingTranscriptionLane struct {
@@ -220,13 +222,14 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	stopTranscriptionTimer(commitTimer)
 	defer commitTimer.Stop()
 	pendingAudio := false
+	pendingAudioSamples := 0
 
 	for {
 		select {
 		case <-lane.stop:
 			if pendingAudio {
 				lane.app.noteRealtimeSpeechStopped()
-				_ = lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit"})
+				_ = lane.commitPendingTranscriptionAudio(conn, pendingAudioSamples)
 			}
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
 			return nil
@@ -242,6 +245,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			}
 			if !pendingAudio {
 				pendingAudio = true
+				pendingAudioSamples = 0
 				lane.app.noteRealtimeSpeechStarted()
 			}
 			if err := lane.writeJSON(conn, map[string]any{
@@ -250,18 +254,37 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			}); err != nil {
 				return fmt.Errorf("write transcription audio: %w", err)
 			}
+			pendingAudioSamples += transcriptionLaneAudioSamples(audio)
 			resetTranscriptionTimer(commitTimer)
 		case <-commitTimer.C:
 			if !pendingAudio {
 				continue
 			}
 			pendingAudio = false
+			samples := pendingAudioSamples
+			pendingAudioSamples = 0
 			lane.app.noteRealtimeSpeechStopped()
-			if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
-				return fmt.Errorf("commit transcription audio: %w", err)
+			if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
+				return err
 			}
 		}
 	}
+}
+
+func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *websocket.Conn, pendingSamples int) error {
+	if paddingSamples := transcriptionLaneCommitPaddingSamples(pendingSamples); paddingSamples > 0 {
+		if err := lane.writeJSON(conn, map[string]any{
+			"type":  "input_audio_buffer.append",
+			"audio": base64.StdEncoding.EncodeToString(make([]byte, paddingSamples*transcriptionLanePCMBytesPerSample)),
+		}); err != nil {
+			return fmt.Errorf("pad transcription audio: %w", err)
+		}
+	}
+
+	if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
+		return fmt.Errorf("commit transcription audio: %w", err)
+	}
+	return nil
 }
 
 func (lane *meetingTranscriptionLane) writeJSON(conn *websocket.Conn, payload map[string]any) error {
@@ -290,6 +313,17 @@ func stopTranscriptionTimer(timer *time.Timer) {
 		default:
 		}
 	}
+}
+
+func transcriptionLaneAudioSamples(audio []byte) int {
+	return len(audio) / transcriptionLanePCMBytesPerSample
+}
+
+func transcriptionLaneCommitPaddingSamples(pendingSamples int) int {
+	if pendingSamples >= transcriptionLaneMinCommitSamples {
+		return 0
+	}
+	return transcriptionLaneMinCommitSamples - pendingSamples
 }
 
 func (lane *meetingTranscriptionLane) stopping() bool {
