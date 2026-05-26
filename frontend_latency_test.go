@@ -14,8 +14,11 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		"width: { ideal: 854, max: 960 }",
-		"maxBitrate: 900000",
+		"width: { ideal: 640, max: 854 }",
+		"maxBitrate: 550000",
+		"constrainedMaxBitrate: 360000",
+		"function startMediaQualityMonitor(sessionPeer)",
+		"function constrainCameraForLag(reason)",
 		"screenShareMaxBitrate: 1600000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",
@@ -37,6 +40,7 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function requestIceRestart(reason)",
 		"event: 'restart_ice'",
 		"state === 'disconnected'",
+		"return false",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing stable synchronized media setting %q", want)
@@ -154,9 +158,11 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"highpass.type = 'highpass'",
 		"lowpass.type = 'lowpass'",
 		"compressor.threshold.value = -38",
-		"this.floorGain = 0.035",
+		"this.floorGain = 0.012",
+		"function createVoiceFocusScriptProcessor(context)",
+		"const gain = voiceFocusFrameGain(state, input)",
 		"const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)",
-		"strength: 0.94",
+		"strength: 0.98",
 		"voiceIsolation: { ideal: voiceFocusEnabled() }",
 		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
 		"function trainVoiceFocus()",
@@ -319,7 +325,7 @@ func TestIndexPrunesDeadRemoteVideoTiles(t *testing.T) {
 	}
 }
 
-func TestIndexPromotesRemoteAudioIntoVideoForSync(t *testing.T) {
+func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -332,16 +338,16 @@ func TestIndexPromotesRemoteAudioIntoVideoForSync(t *testing.T) {
 		"function promoteParticipantAudioToVideo(name)",
 		"function demoteRemotePlaybackElementFromVideo(video, name)",
 		"function shouldUseSyncedRemoteAudioPlayback()",
+		"return false",
 		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",
-		"const playbackStream = syncedRemotePlaybackStream(video.srcObject || monitor.stream, monitor.track, remoteVideoTracksByParticipant.get(participantName))",
+		"audio = createRemoteAudioElement(stream, name)",
 		"remoteVideoTracksByParticipant.set(participantName, track)",
-		"configureRemotePlaybackElement(video, playbackStream, participantName, { muted: false })",
 		"const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null",
 		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })",
 		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing remote audio/video sync hardening %q", want)
+			t.Fatalf("index.html missing low-latency remote audio hardening %q", want)
 		}
 	}
 }

@@ -252,7 +252,7 @@ func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
 	}
 }
 
-func TestRoomPeerConnectionOffersStableVP8VideoCodec(t *testing.T) {
+func TestRoomPeerConnectionOffersStableSafariCompatibleVideoCodecs(t *testing.T) {
 	peerConnection, err := newPeerConnection()
 	if err != nil {
 		t.Fatalf("create peer connection: %v", err)
@@ -272,8 +272,11 @@ func TestRoomPeerConnectionOffersStableVP8VideoCodec(t *testing.T) {
 	if !strings.Contains(offer.SDP, "VP8/90000") {
 		t.Fatalf("offer SDP missing VP8 codec:\n%s", offer.SDP)
 	}
-	if strings.Contains(offer.SDP, "H264") {
-		t.Fatalf("offer SDP includes H264 codecs that can collide across bundled tracks:\n%s", offer.SDP)
+	if !strings.Contains(offer.SDP, "H264/90000") {
+		t.Fatalf("offer SDP missing Safari-compatible H264 codec:\n%s", offer.SDP)
+	}
+	if !strings.Contains(offer.SDP, "profile-level-id=42e01f") {
+		t.Fatalf("offer SDP missing constrained baseline H264 fmtp:\n%s", offer.SDP)
 	}
 }
 

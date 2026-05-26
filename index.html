@@ -6161,6 +6161,9 @@
       let voiceTrainingCleanup = null
       let voiceTrainingSamples = []
       let voiceTrainingPrivacyMute = false
+      let mediaQualityMonitorTimer = 0
+      let mediaQualityConstrained = false
+      let previousMediaQualityStats = null
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const safariBrowser = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
@@ -6177,9 +6180,9 @@
       let audioSettings = loadAudioSettings()
       const mediaConstraints = {
         video: {
-          width: { ideal: 854, max: 960 },
-          height: { ideal: 480, max: 540 },
-          frameRate: { ideal: 24, max: 24 },
+          width: { ideal: 640, max: 854 },
+          height: { ideal: 360, max: 480 },
+          frameRate: { ideal: 20, max: 20 },
           facingMode: 'user'
         },
         audio: {
@@ -6190,15 +6193,21 @@
           suppressLocalAudioPlayback: { ideal: true },
           sampleRate: { ideal: 48000 },
           sampleSize: { ideal: 16 },
-          latency: { ideal: 0.02 },
-          channelCount: { ideal: 1, max: 1 }
+          latency: { ideal: 0.01, max: 0.03 },
+          channelCount: { ideal: 1, max: 1 },
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true
         }
       }
       const outboundMediaLimits = {
         audio: { maxBitrate: 48000 },
         video: {
-          maxBitrate: 900000,
-          maxFramerate: 24,
+          maxBitrate: 550000,
+          maxFramerate: 20,
+          constrainedMaxBitrate: 360000,
+          constrainedMaxFramerate: 15,
           screenShareMaxBitrate: 1600000,
           screenShareMaxFramerate: 15
         }
@@ -7354,6 +7363,8 @@
         const encoding = parameters.encodings[0]
         const maxBitrate = isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)
           ? limits.screenShareMaxBitrate
+          : track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxBitrate)
+            ? limits.constrainedMaxBitrate
           : limits.maxBitrate
         if (Number.isFinite(maxBitrate)) {
           encoding.maxBitrate = maxBitrate
@@ -7363,6 +7374,8 @@
         }
         const maxFramerate = isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)
           ? limits.screenShareMaxFramerate
+          : track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxFramerate)
+            ? limits.constrainedMaxFramerate
           : limits.maxFramerate
         if (track.kind === 'video' && Number.isFinite(maxFramerate)) {
           encoding.maxFramerate = maxFramerate
@@ -7479,6 +7492,7 @@
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
         publishParticipantMediaState()
         startRoomClock()
+        startMediaQualityMonitor(sessionPeer)
       }
 
       function clearConnectionRecoveryTimer() {
@@ -7517,6 +7531,106 @@
           data: JSON.stringify({ reason })
         }))
         setLog('reconnecting media…')
+      }
+
+      function stopMediaQualityMonitor() {
+        if (mediaQualityMonitorTimer) {
+          window.clearInterval(mediaQualityMonitorTimer)
+          mediaQualityMonitorTimer = 0
+        }
+        previousMediaQualityStats = null
+        mediaQualityConstrained = false
+      }
+
+      function startMediaQualityMonitor(sessionPeer) {
+        stopMediaQualityMonitor()
+        if (!sessionPeer?.getStats) {
+          return
+        }
+        mediaQualityMonitorTimer = window.setInterval(async () => {
+          if (pc !== sessionPeer || sessionPeer.connectionState === 'closed') {
+            stopMediaQualityMonitor()
+            return
+          }
+          try {
+            const report = await sessionPeer.getStats()
+            const snapshot = summarizeMediaQualityStats(report)
+            if (mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)) {
+              await constrainCameraForLag('media stats')
+            }
+            previousMediaQualityStats = snapshot
+          } catch (error) {
+            console.warn('Could not read media quality stats', error)
+          }
+        }, 4000)
+      }
+
+      function summarizeMediaQualityStats(report) {
+        const snapshot = {
+          at: performance.now(),
+          inboundVideoJitter: 0,
+          inboundVideoDrops: 0,
+          inboundVideoDecoded: 0,
+          outboundRtt: 0
+        }
+        report.forEach(stat => {
+          if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
+            snapshot.inboundVideoJitter = Math.max(snapshot.inboundVideoJitter, Number(stat.jitter) || 0)
+            snapshot.inboundVideoDrops += Number(stat.framesDropped) || 0
+            snapshot.inboundVideoDecoded += Number(stat.framesDecoded) || 0
+          } else if (stat.type === 'candidate-pair' && (stat.nominated || stat.state === 'succeeded')) {
+            snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(stat.currentRoundTripTime) || 0)
+          }
+        })
+        return snapshot
+      }
+
+      function mediaQualityLooksLaggy(snapshot, previous) {
+        if (!snapshot) {
+          return false
+        }
+        if (snapshot.outboundRtt > 0.45 || snapshot.inboundVideoJitter > 0.28) {
+          return true
+        }
+        if (!previous) {
+          return false
+        }
+        const decodedDelta = snapshot.inboundVideoDecoded - previous.inboundVideoDecoded
+        const dropDelta = snapshot.inboundVideoDrops - previous.inboundVideoDrops
+        return decodedDelta > 20 && dropDelta / Math.max(1, decodedDelta + dropDelta) > 0.14
+      }
+
+      async function constrainCameraForLag(reason) {
+        if (mediaQualityConstrained || !pc) {
+          return
+        }
+        const limits = outboundMediaLimits.video
+        const sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video' && candidate.track === localVideoTrack())
+        if (!sender?.track) {
+          return
+        }
+        mediaQualityConstrained = true
+        const parameters = sender.getParameters?.()
+        if (parameters?.encodings?.length) {
+          const encoding = parameters.encodings[0]
+          encoding.maxBitrate = limits.constrainedMaxBitrate
+          encoding.maxFramerate = limits.constrainedMaxFramerate
+          try {
+            await sender.setParameters(parameters)
+          } catch (error) {
+            console.warn('Could not constrain camera sender after lag detection', error)
+          }
+        }
+        try {
+          await sender.track.applyConstraints?.({
+            width: { max: 640 },
+            height: { max: 360 },
+            frameRate: { max: limits.constrainedMaxFramerate }
+          })
+        } catch (error) {
+          console.warn('Could not constrain camera capture after lag detection', error)
+        }
+        console.info('Reduced camera bandwidth to protect room latency', reason)
       }
 
       async function getPreferredUserMedia() {
@@ -7597,6 +7711,7 @@
         let lowpass
         let compressor
         let voiceFocusNode
+        let voiceFocusScriptNode
         let destination
         try {
           const sourceStream = new MediaStream([sourceTrack])
@@ -7627,6 +7742,10 @@
             configureVoiceFocusNode(voiceFocusNode)
             compressor.connect(voiceFocusNode)
             voiceFocusNode.connect(lowpass)
+          } else if (context.createScriptProcessor) {
+            voiceFocusScriptNode = createVoiceFocusScriptProcessor(context)
+            compressor.connect(voiceFocusScriptNode)
+            voiceFocusScriptNode.connect(lowpass)
           } else {
             compressor.connect(lowpass)
           }
@@ -7645,12 +7764,13 @@
               lowpass,
               compressor,
               voiceFocusNode,
+              voiceFocusScriptNode,
               destination
             }
           }
         } catch (error) {
           console.warn('Voice focus chain unavailable; using browser microphone processing', error)
-          cleanupAudioProcessor({ source, highpass, lowpass, compressor, voiceFocusNode, destination })
+          cleanupAudioProcessor({ source, highpass, lowpass, compressor, voiceFocusNode, voiceFocusScriptNode, destination })
           return voiceTrainingPrivacyMute
             ? createMutedOutboundAudioClone(sourceTrack)
             : { track: sourceTrack, processor: null }
@@ -7670,6 +7790,96 @@
         }
       }
 
+      function voiceFocusConfig() {
+        const profile = audioSettings.profile || defaultVoiceProfile
+        return {
+          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+          strength: 0.98,
+          floorGain: 0.012,
+          calibrated: Boolean(profile.trainedAt)
+        }
+      }
+
+      function createVoiceFocusState(config = voiceFocusConfig()) {
+        return {
+          noiseFloor: config.noiseFloor,
+          speechFloor: config.speechFloor,
+          strength: config.strength,
+          floorGain: config.floorGain,
+          calibrated: config.calibrated,
+          gain: 1,
+          holdFrames: 0
+        }
+      }
+
+      function voiceFocusFrameGain(state, reference) {
+        if (!state || !reference?.length) {
+          return 1
+        }
+        let sum = 0
+        let peak = 0
+        let crossings = 0
+        let previous = reference[0] || 0
+        for (let index = 0; index < reference.length; index++) {
+          const sample = reference[index] || 0
+          const amplitude = Math.abs(sample)
+          peak = Math.max(peak, amplitude)
+          sum += sample * sample
+          if (index > 0 && ((sample >= 0 && previous < 0) || (sample < 0 && previous >= 0))) {
+            crossings++
+          }
+          previous = sample
+        }
+
+        const rms = Math.sqrt(sum / Math.max(1, reference.length))
+        const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
+        const crest = peak / Math.max(rms, 0.0001)
+        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.05 : 2.55), state.speechFloor * (state.calibrated ? 0.22 : 0.18), 0.008)
+        const closeAt = threshold * 0.38
+        const transient = crest > 8.5 && rms < threshold * 1.25
+        const tonalNoise = zeroCrossingRate > 0.36 && rms < threshold * 1.55
+        const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 1.9 && rms >= closeAt))
+        if (open) {
+          state.holdFrames = state.calibrated ? 42 : 34
+        } else if (state.holdFrames > 0) {
+          state.holdFrames--
+        }
+        if (!open && rms < state.noiseFloor * 1.7) {
+          state.noiseFloor = Math.max(0.004, state.noiseFloor * 0.988 + rms * 0.012)
+        }
+
+        let targetGain = 1
+        if (!open && state.holdFrames <= 0) {
+          if (rms <= closeAt) {
+            targetGain = state.floorGain
+          } else {
+            const blend = (rms - closeAt) / Math.max(0.0001, threshold - closeAt)
+            targetGain = state.floorGain + blend * (1 - state.floorGain) * (1 - state.strength * 0.28)
+          }
+        }
+        const coefficient = targetGain > state.gain ? 0.58 : 0.045
+        state.gain += (targetGain - state.gain) * coefficient
+        return state.gain
+      }
+
+      function createVoiceFocusScriptProcessor(context) {
+        const node = context.createScriptProcessor(512, 1, 1)
+        const state = createVoiceFocusState()
+        node.onaudioprocess = event => {
+          const input = event.inputBuffer.getChannelData(0)
+          const output = event.outputBuffer.getChannelData(0)
+          const gain = voiceFocusFrameGain(state, input)
+          const noiseBias = Math.min(state.noiseFloor * 0.82, 0.022) * (1 - gain) * state.strength
+          for (let index = 0; index < output.length; index++) {
+            const sample = input[index] || 0
+            const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
+            output[index] = denoised * gain
+          }
+        }
+        return node
+      }
+
       async function ensureVoiceFocusWorklet(context) {
         if (!context?.audioWorklet || !window.AudioWorkletNode) {
           return false
@@ -7681,8 +7891,8 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     super()
     this.noiseFloor = 0.012
     this.speechFloor = 0.075
-    this.strength = 0.94
-    this.floorGain = 0.035
+    this.strength = 0.98
+    this.floorGain = 0.012
     this.gain = 1
     this.holdFrames = 0
     this.calibrated = false
@@ -7691,8 +7901,8 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
       if (data.type !== 'configure') return
       this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
       this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
-      this.strength = Math.max(0.25, Math.min(0.98, Number(data.strength) || this.strength))
-      this.floorGain = Math.max(0.015, Math.min(0.16, Number(data.floorGain) || this.floorGain))
+      this.strength = Math.max(0.25, Math.min(0.995, Number(data.strength) || this.strength))
+      this.floorGain = Math.max(0.006, Math.min(0.16, Number(data.floorGain) || this.floorGain))
       this.calibrated = Boolean(data.calibrated)
     }
   }
@@ -7727,19 +7937,19 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const rms = Math.sqrt(sum / Math.max(1, reference.length))
     const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
     const crest = peak / Math.max(rms, 0.0001)
-    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.2 : 2.8), this.speechFloor * (this.calibrated ? 0.26 : 0.2), 0.010)
-    const closeAt = threshold * 0.46
-    const transient = crest > 9 && rms < threshold * 1.2
-    const tonalNoise = zeroCrossingRate > 0.34 && rms < threshold * 1.4
-    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.1 && rms >= closeAt))
+    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.05 : 2.55), this.speechFloor * (this.calibrated ? 0.22 : 0.18), 0.008)
+    const closeAt = threshold * 0.38
+    const transient = crest > 8.5 && rms < threshold * 1.25
+    const tonalNoise = zeroCrossingRate > 0.36 && rms < threshold * 1.55
+    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 1.9 && rms >= closeAt))
     if (open) {
-      this.holdFrames = this.calibrated ? 58 : 44
+      this.holdFrames = this.calibrated ? 42 : 34
     } else if (this.holdFrames > 0) {
       this.holdFrames--
     }
 
-    if (!open && rms < this.noiseFloor * 1.8) {
-      this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.986 + rms * 0.014)
+    if (!open && rms < this.noiseFloor * 1.7) {
+      this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.988 + rms * 0.012)
     }
 
     let targetGain = 1
@@ -7748,13 +7958,13 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
         targetGain = this.floorGain
       } else {
         const blend = (rms - closeAt) / Math.max(0.0001, threshold - closeAt)
-        targetGain = this.floorGain + blend * (1 - this.floorGain)
+        targetGain = this.floorGain + blend * (1 - this.floorGain) * (1 - this.strength * 0.28)
       }
     }
-    const coefficient = targetGain > this.gain ? 0.48 : 0.032
+    const coefficient = targetGain > this.gain ? 0.58 : 0.045
     this.gain += (targetGain - this.gain) * coefficient
 
-    const noiseBias = Math.min(this.noiseFloor * 0.72, 0.018) * (1 - this.gain)
+    const noiseBias = Math.min(this.noiseFloor * 0.82, 0.022) * (1 - this.gain) * this.strength
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]
@@ -7789,14 +7999,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function configureVoiceFocusNode(node) {
-        const profile = audioSettings.profile || defaultVoiceProfile
+        const config = voiceFocusConfig()
         node?.port?.postMessage?.({
           type: 'configure',
-          noiseFloor: profile.noiseFloor,
-          speechFloor: profile.speechFloor,
-          strength: 0.94,
-          floorGain: 0.035,
-          calibrated: Boolean(profile.trainedAt)
+          noiseFloor: config.noiseFloor,
+          speechFloor: config.speechFloor,
+          strength: config.strength,
+          floorGain: config.floorGain,
+          calibrated: config.calibrated
         })
       }
 
@@ -7804,12 +8014,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!processor) {
           return
         }
-        for (const node of [processor.source, processor.highpass, processor.lowpass, processor.compressor, processor.voiceFocusNode]) {
+        for (const node of [processor.source, processor.highpass, processor.lowpass, processor.compressor, processor.voiceFocusNode, processor.voiceFocusScriptNode]) {
           try {
             node?.disconnect()
           } catch {
             // Already disconnected.
           }
+        }
+        if (processor.voiceFocusScriptNode) {
+          processor.voiceFocusScriptNode.onaudioprocess = null
         }
         try {
           processor.voiceFocusNode?.port?.close?.()
@@ -9629,7 +9842,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!AudioContextClass) {
             return null
           }
-          audioContext = new AudioContextClass()
+          try {
+            audioContext = new AudioContextClass({ latencyHint: 'interactive', sampleRate: 48000 })
+          } catch {
+            audioContext = new AudioContextClass()
+          }
         }
         if (audioContext.state === 'suspended') {
           audioContext.resume().catch(() => {})
@@ -9738,7 +9955,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function shouldUseSyncedRemoteAudioPlayback() {
-        return !safariBrowser
+        return false
       }
 
       function promoteAudioMonitorToVideo(key, monitor, name) {
@@ -11571,6 +11788,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         isLeavingRoom = true
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
+        stopMediaQualityMonitor()
         leaveButton.disabled = true
         micSelect.disabled = true
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
