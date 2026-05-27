@@ -158,11 +158,13 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"highpass.type = 'highpass'",
 		"lowpass.type = 'lowpass'",
 		"compressor.threshold.value = -40",
-		"this.floorGain = 0.004",
+		"this.floorGain = 0.0015",
 		"function createVoiceFocusScriptProcessor(context)",
 		"const gain = voiceFocusFrameGain(state, input)",
 		"const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)",
-		"strength: 0.995",
+		"strength: 0.998",
+		"const hissNoise = zeroCrossingRate > 0.3",
+		"const rumbleNoise = zeroCrossingRate < 0.018",
 		"voiceIsolation: { ideal: voiceFocusEnabled() }",
 		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
 		"function trainVoiceFocus()",
@@ -182,6 +184,11 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
+		"async function getInitialUserMedia()",
+		"async function getAudioStreamWithFallback(deviceId)",
+		"function relaxedAudioConstraintsForDevice(deviceId)",
+		"function minimalAudioConstraintsForDevice(deviceId)",
+		"Media capture recovered with ${attempt.label}",
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
 		"const audioSettingsSchemaVersion = 2",
 		"window.localStorage?.getItem(audioSettingsStorageKey)",

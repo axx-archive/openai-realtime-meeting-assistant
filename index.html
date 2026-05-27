@@ -6180,6 +6180,12 @@
         speechFloor: 0.075,
         trainedAt: ''
       }
+      const relaxedVideoConstraints = {
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        frameRate: { ideal: 20 },
+        facingMode: 'user'
+      }
       let audioSettings = loadAudioSettings()
       const mediaConstraints = {
         video: {
@@ -7440,6 +7446,8 @@
         isCameraOff = false
         const captureStream = await getPreferredUserMedia()
         localStream = await createLocalMediaStream(captureStream)
+        isMicMuted = localStream.getAudioTracks().length === 0
+        isCameraOff = localStream.getVideoTracks().length === 0
         localVideo.srcObject = localStream
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
@@ -7785,7 +7793,7 @@
       }
 
       async function getPreferredUserMedia() {
-        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints)
+        const stream = await getInitialUserMedia()
         const preferredAudioDeviceId = await preferredAudioInputDeviceId(stream)
         if (!preferredAudioDeviceId) {
           return stream
@@ -7797,10 +7805,7 @@
         }
 
         try {
-          const audioStream = await navigator.mediaDevices.getUserMedia({
-            video: false,
-            audio: audioConstraintsForDevice(preferredAudioDeviceId)
-          })
+          const audioStream = await getAudioStreamWithFallback(preferredAudioDeviceId)
           const preferredAudioTrack = audioStream.getAudioTracks()[0]
           if (!preferredAudioTrack) {
             return stream
@@ -7815,6 +7820,90 @@
         }
       }
 
+      async function getInitialUserMedia() {
+        const attempts = [
+          {
+            label: 'preferred camera and microphone',
+            constraints: mediaConstraints
+          },
+          {
+            label: 'relaxed microphone processing',
+            constraints: {
+              video: mediaConstraints.video,
+              audio: relaxedAudioConstraintsForDevice('')
+            }
+          },
+          {
+            label: 'relaxed camera and microphone',
+            constraints: {
+              video: relaxedVideoConstraints,
+              audio: relaxedAudioConstraintsForDevice('')
+            }
+          },
+          {
+            label: 'browser default camera and microphone',
+            constraints: { video: true, audio: true }
+          },
+          {
+            label: 'microphone only',
+            constraints: {
+              video: false,
+              audio: relaxedAudioConstraintsForDevice('')
+            }
+          },
+          {
+            label: 'camera only',
+            constraints: { video: true, audio: false }
+          }
+        ]
+        return getUserMediaFromAttempts(attempts)
+      }
+
+      async function getAudioStreamWithFallback(deviceId) {
+        const attempts = [
+          {
+            label: 'preferred microphone',
+            constraints: {
+              video: false,
+              audio: audioConstraintsForDevice(deviceId)
+            }
+          },
+          {
+            label: 'relaxed microphone',
+            constraints: {
+              video: false,
+              audio: relaxedAudioConstraintsForDevice(deviceId)
+            }
+          },
+          {
+            label: 'browser default microphone',
+            constraints: {
+              video: false,
+              audio: minimalAudioConstraintsForDevice(deviceId)
+            }
+          }
+        ]
+        return getUserMediaFromAttempts(attempts)
+      }
+
+      async function getUserMediaFromAttempts(attempts) {
+        let lastError
+        for (const attempt of attempts) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia(attempt.constraints)
+            if (lastError) {
+              console.info(`Media capture recovered with ${attempt.label}`)
+              setLog(`using ${attempt.label}`)
+            }
+            return stream
+          } catch (error) {
+            lastError = error
+            console.warn(`Media capture failed with ${attempt.label}`, error)
+          }
+        }
+        throw lastError || new Error('camera and microphone are unavailable')
+      }
+
       function audioConstraintsForDevice(deviceId) {
         const audioConstraints = {
           ...mediaConstraints.audio,
@@ -7827,6 +7916,23 @@
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
           : audioConstraints
+      }
+
+      function relaxedAudioConstraintsForDevice(deviceId) {
+        const audioConstraints = {
+          echoCancellation: { ideal: audioProcessingEnabled() },
+          noiseSuppression: { ideal: audioProcessingEnabled() },
+          autoGainControl: { ideal: audioProcessingEnabled() },
+          voiceIsolation: { ideal: voiceFocusEnabled() },
+          channelCount: { ideal: 1 }
+        }
+        return deviceId
+          ? { ...audioConstraints, deviceId: { exact: deviceId } }
+          : audioConstraints
+      }
+
+      function minimalAudioConstraintsForDevice(deviceId) {
+        return deviceId ? { deviceId: { exact: deviceId } } : true
       }
 
       async function createLocalMediaStream(captureStream) {
@@ -7946,8 +8052,8 @@
         return {
 	          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
 	          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
-	          strength: 0.995,
-	          floorGain: 0.004,
+	          strength: 0.998,
+	          floorGain: 0.0015,
 	          calibrated: Boolean(profile.trainedAt)
         }
       }
@@ -7986,13 +8092,14 @@
         const rms = Math.sqrt(sum / Math.max(1, reference.length))
         const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
         const crest = peak / Math.max(rms, 0.0001)
-	        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.65 : 3.05), state.speechFloor * (state.calibrated ? 0.3 : 0.24), 0.011)
-	        const closeAt = threshold * 0.55
-	        const transient = crest > 7.5 && rms < threshold * 1.45
-	        const tonalNoise = zeroCrossingRate > 0.32 && rms < threshold * 1.75
-	        const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.25 && rms >= closeAt))
+	        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.9 : 3.25), state.speechFloor * (state.calibrated ? 0.34 : 0.28), 0.012)
+	        const closeAt = threshold * 0.64
+	        const transient = crest > 7.5 && rms < threshold * 1.55
+	        const hissNoise = zeroCrossingRate > 0.3 && rms < threshold * 2.05
+	        const rumbleNoise = zeroCrossingRate < 0.018 && rms < threshold * 1.55
+	        const open = !transient && !hissNoise && !rumbleNoise && (rms >= threshold || (peak >= threshold * 2.4 && rms >= closeAt))
 	        if (open) {
-	          state.holdFrames = state.calibrated ? 28 : 24
+	          state.holdFrames = state.calibrated ? 18 : 14
         } else if (state.holdFrames > 0) {
           state.holdFrames--
         }
@@ -8009,7 +8116,7 @@
             targetGain = state.floorGain + blend * (1 - state.floorGain) * (1 - state.strength * 0.28)
           }
         }
-	        const coefficient = targetGain > state.gain ? 0.68 : 0.085
+	        const coefficient = targetGain > state.gain ? 0.72 : 0.18
         state.gain += (targetGain - state.gain) * coefficient
         return state.gain
       }
@@ -8021,7 +8128,8 @@
           const input = event.inputBuffer.getChannelData(0)
           const output = event.outputBuffer.getChannelData(0)
           const gain = voiceFocusFrameGain(state, input)
-	          const noiseBias = Math.min(state.noiseFloor * 1.1, 0.028) * (1 - gain) * state.strength
+	          const closedBlend = Math.max(0, 1 - gain)
+	          const noiseBias = Math.min(state.noiseFloor * (0.25 + closedBlend * 2.35), closedBlend > 0.5 ? 0.052 : 0.008) * state.strength
           for (let index = 0; index < output.length; index++) {
             const sample = input[index] || 0
             const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
@@ -8042,8 +8150,8 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     super()
 	    this.noiseFloor = 0.012
 	    this.speechFloor = 0.075
-	    this.strength = 0.995
-	    this.floorGain = 0.004
+	    this.strength = 0.998
+	    this.floorGain = 0.0015
     this.gain = 1
     this.holdFrames = 0
     this.calibrated = false
@@ -8053,7 +8161,7 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
       this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
       this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
 	      this.strength = Math.max(0.25, Math.min(0.999, Number(data.strength) || this.strength))
-	      this.floorGain = Math.max(0.002, Math.min(0.16, Number(data.floorGain) || this.floorGain))
+	      this.floorGain = Math.max(0.001, Math.min(0.16, Number(data.floorGain) || this.floorGain))
       this.calibrated = Boolean(data.calibrated)
     }
   }
@@ -8088,13 +8196,14 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const rms = Math.sqrt(sum / Math.max(1, reference.length))
     const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
     const crest = peak / Math.max(rms, 0.0001)
-	    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.65 : 3.05), this.speechFloor * (this.calibrated ? 0.3 : 0.24), 0.011)
-	    const closeAt = threshold * 0.55
-	    const transient = crest > 7.5 && rms < threshold * 1.45
-	    const tonalNoise = zeroCrossingRate > 0.32 && rms < threshold * 1.75
-	    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.25 && rms >= closeAt))
+	    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.9 : 3.25), this.speechFloor * (this.calibrated ? 0.34 : 0.28), 0.012)
+	    const closeAt = threshold * 0.64
+	    const transient = crest > 7.5 && rms < threshold * 1.55
+	    const hissNoise = zeroCrossingRate > 0.3 && rms < threshold * 2.05
+	    const rumbleNoise = zeroCrossingRate < 0.018 && rms < threshold * 1.55
+	    const open = !transient && !hissNoise && !rumbleNoise && (rms >= threshold || (peak >= threshold * 2.4 && rms >= closeAt))
 	    if (open) {
-	      this.holdFrames = this.calibrated ? 28 : 24
+	      this.holdFrames = this.calibrated ? 18 : 14
     } else if (this.holdFrames > 0) {
       this.holdFrames--
     }
@@ -8112,10 +8221,11 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
         targetGain = this.floorGain + blend * (1 - this.floorGain) * (1 - this.strength * 0.28)
       }
     }
-	    const coefficient = targetGain > this.gain ? 0.68 : 0.085
+	    const coefficient = targetGain > this.gain ? 0.72 : 0.18
     this.gain += (targetGain - this.gain) * coefficient
 
-	    const noiseBias = Math.min(this.noiseFloor * 1.1, 0.028) * (1 - this.gain) * this.strength
+	    const closedBlend = Math.max(0, 1 - this.gain)
+	    const noiseBias = Math.min(this.noiseFloor * (0.25 + closedBlend * 2.35), closedBlend > 0.5 ? 0.052 : 0.008) * this.strength
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]
@@ -8250,7 +8360,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const label = muteMicButton.querySelector('.mute-label')
         const muted = effectiveMicMuted()
-        muteMicButton.disabled = !localStream
+        muteMicButton.disabled = !localStream || !localAudioTrack()
         muteMicButton.classList.toggle('is-muted', muted)
         muteMicButton.setAttribute('aria-pressed', muted ? 'true' : 'false')
         muteMicButton.setAttribute('aria-label', muted ? 'Unmute microphone' : 'Mute microphone')
@@ -8344,7 +8454,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const label = toggleCameraButton.querySelector('.camera-label')
         const cameraOff = Boolean(isCameraOff)
-        toggleCameraButton.disabled = !localStream
+        toggleCameraButton.disabled = !localStream || !localVideoTrack()
         toggleCameraButton.classList.toggle('is-off', cameraOff)
         toggleCameraButton.setAttribute('aria-pressed', cameraOff ? 'true' : 'false')
         toggleCameraButton.setAttribute('aria-label', cameraOff ? 'Turn camera on' : 'Turn camera off')
