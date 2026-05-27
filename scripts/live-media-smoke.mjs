@@ -317,6 +317,7 @@ async function snapshotPage(page) {
           ? Array.from(audioMonitors.values()).filter(monitor => monitor.playbackGain).length
           : -1,
         participantsInRoom: typeof participantsInRoom !== 'undefined' ? participantsInRoom.slice() : [],
+        usesCrowdedVideoLimits: typeof useCrowdedVideoLimits === 'function' ? useCrowdedVideoLimits() : null,
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
@@ -387,6 +388,12 @@ function validateSnapshots(snapshots, expectedClientCount) {
     }
     if (snapshot.remoteAudioPlaybackBlocked || snapshot.audiblePendingRemotePlayback > 0) {
       failures.push(`${snapshot.name} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
+    }
+    if (expectedClientCount >= 5 && snapshot.usesCrowdedVideoLimits !== true) {
+      failures.push(`${snapshot.name} is not using crowded media limits`)
+    }
+    if (expectedClientCount >= 5 && snapshot.playbackGainMonitors > 0) {
+      failures.push(`${snapshot.name} still has ${snapshot.playbackGainMonitors} WebAudio playback monitors in a crowded room`)
     }
     if (!snapshot.remoteHealth) {
       failures.push(`${snapshot.name} has no remote media health snapshot`)

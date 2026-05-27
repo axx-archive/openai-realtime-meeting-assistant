@@ -6145,6 +6145,7 @@
       const participantMediaStates = new Map()
       const audioMonitors = new Map()
       const pendingRemotePlaybackElements = new Set()
+      const audioLevelSampleIntervalMs = 80
       const videoFeedOrderStorageKey = 'bonfire.video.order.v1'
       const videoDragStartThreshold = 6
       const cardSnapshots = new Map()
@@ -6153,6 +6154,7 @@
       let cardDateOverrides = loadCardDateOverrides()
       let audioContext
       let audioLevelFrame = 0
+      let lastAudioLevelSampleAt = 0
       let queuedRemoteCandidates = []
       let localAudioSourceTrack
       let localAudioProcessor
@@ -9224,6 +9226,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         pruneRemoteMediaOutsideRoom()
         pruneStaleUnidentifiedAudioMonitors('participant roster changed')
+        retuneRemoteAudioPlaybackForRoomLoad()
         configureOutboundSenders().catch(error => {
           console.warn('Could not retune outbound media after roster change', error)
         })
@@ -9243,6 +9246,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         })
         participantsInRoom = normalizeParticipantList([...participantsInRoom, name])
         participantPreview = participantsInRoom
+        retuneRemoteAudioPlaybackForRoomLoad()
         updateParticipantPreviewText()
         updateHearthParticipants()
       }
@@ -10852,7 +10856,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function shouldUseElementRemoteAudioPlayback() {
-        return safariBrowser
+        return safariBrowser || useCrowdedVideoLimits()
+      }
+
+      function retuneRemoteAudioPlaybackForRoomLoad() {
+        if (!shouldUseElementRemoteAudioPlayback()) {
+          return false
+        }
+        let retuned = false
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          if (!monitor?.playbackGain || !liveTrack(monitor.track)) {
+            continue
+          }
+          try {
+            monitor.playbackGain.disconnect()
+          } catch {
+            // Already disconnected.
+          }
+          monitor.playbackGain = undefined
+          if (!monitor.audio) {
+            monitor.audio = createRemoteAudioElement(monitor.stream || new MediaStream([monitor.track]), monitor.name)
+            monitor.ownsAudioElement = true
+          }
+          audioMonitors.set(key, monitor)
+          retuned = true
+        }
+        return retuned
       }
 
       function promoteAudioMonitorToVideo(key, monitor, name) {
@@ -11052,6 +11081,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           cancelAnimationFrame(audioLevelFrame)
           audioLevelFrame = 0
         }
+        lastAudioLevelSampleAt = 0
       }
 
       function startAudioLevelLoop() {
@@ -11059,6 +11089,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const tick = () => {
+          const now = performance.now()
+          if (lastAudioLevelSampleAt && now - lastAudioLevelSampleAt < audioLevelSampleIntervalMs) {
+            audioLevelFrame = requestAnimationFrame(tick)
+            return
+          }
+          lastAudioLevelSampleAt = now
           let loudestName = ''
           let loudestLevel = 0
           let hasLiveAnalyser = false
@@ -11081,7 +11117,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const visibleSpeakerName = participantDisplayNameInRoom(loudestName)
           if (visibleSpeakerName && loudestLevel > 0.045 && visibleSpeakerName !== activeSpeakerName) {
-            const now = performance.now()
             if (pendingActiveSpeakerName !== visibleSpeakerName) {
               pendingActiveSpeakerName = visibleSpeakerName
               pendingActiveSpeakerSince = now

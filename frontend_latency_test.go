@@ -395,6 +395,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function scheduleUnidentifiedAudioMonitorRepair(key)",
 		"function shouldUseSyncedRemoteAudioPlayback()",
 		"function shouldUseElementRemoteAudioPlayback()",
+		"return safariBrowser || useCrowdedVideoLimits()",
+		"function retuneRemoteAudioPlaybackForRoomLoad()",
 		"function shouldRenderBoardDockVideo()",
 		"return !useCrowdedVideoLimits()",
 		"const useWebAudioPlayback = options.play && context.createGain && context.destination && !shouldUseElementRemoteAudioPlayback()",
@@ -409,6 +411,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function remotePlaybackNeedsGesture(element)",
 		"function remotePlaybackPendingCount(options = {})",
 		"function roomAudioPlaybackBlocked()",
+		"const audioLevelSampleIntervalMs = 80",
+		"lastAudioLevelSampleAt = now",
 		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
 	} {
 		if !strings.Contains(html, want) {
