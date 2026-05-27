@@ -56,6 +56,9 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function requestIceRestart(reason)",
 		"event: 'restart_ice'",
 		"state === 'disconnected'",
+		"function applyBrowserVideoCodecPreference(transceiver)",
+		"RTCRtpSender.getCapabilities?.('video')",
+		"transceiver.setCodecPreferences([...preferred, ...rest])",
 		"return false",
 	} {
 		if !strings.Contains(html, want) {

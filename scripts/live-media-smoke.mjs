@@ -10,6 +10,7 @@ const defaults = {
   password: process.env.ROOM_PASSWORD || 'B0NFIRE!',
   participants: ['Guest 1', 'Guest 2'],
   rejoin: '',
+  separateBrowsers: false,
   timeoutMs: 45000,
   url: 'https://thebonfire.xyz'
 }
@@ -21,40 +22,22 @@ const config = {
   participants: options.participants || defaults.participants
 }
 
-const userDataDir = await mkdtemp(join(tmpdir(), 'meetingassist-live-smoke-'))
-const debugPort = await findDebugPort()
 const pages = []
-const chrome = spawn(config.chromePath, [
-  '--headless=new',
-  `--remote-debugging-port=${debugPort}`,
-  `--user-data-dir=${userDataDir}`,
-  '--use-fake-device-for-media-stream',
-  '--use-fake-ui-for-media-stream',
-  '--autoplay-policy=no-user-gesture-required',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-features=MediaRouter',
-  'about:blank'
-], { stdio: ['ignore', 'ignore', 'pipe'] })
-
-chrome.stderr.on('data', data => {
-  for (const line of String(data).split('\n')) {
-    if (line.includes('DevTools listening') || line.includes('ERROR')) {
-      console.error(line)
-    }
-  }
-})
+const browsers = []
+let sharedBrowser = null
 
 let shuttingDown = false
 process.on('SIGINT', () => finish(130))
 process.on('SIGTERM', () => finish(143))
 
 try {
-  const version = await waitForChrome()
-  log('chrome', version.Browser)
+  if (!config.separateBrowsers) {
+    sharedBrowser = await createBrowser('shared')
+  }
 
   for (const name of config.participants) {
-    pages.push(await openPage(name))
+    const browser = config.separateBrowsers ? await createBrowser(name) : sharedBrowser
+    pages.push(await openPage(name, browser))
   }
 
   for (const page of pages) {
@@ -96,8 +79,10 @@ try {
     }
   }
   try {
-    const targets = await fetchJSON(`http://127.0.0.1:${debugPort}/json/list`)
-    log('open-targets', JSON.stringify(targets.map(target => ({ id: target.id, url: target.url, title: target.title }))))
+    for (const browser of browsers) {
+      const targets = await fetchJSON(`http://127.0.0.1:${browser.debugPort}/json/list`)
+      log('open-targets', browser.label, JSON.stringify(targets.map(target => ({ id: target.id, url: target.url, title: target.title }))))
+    }
   } catch {
     // DevTools may already be down.
   }
@@ -125,6 +110,8 @@ function parseArgs(args) {
     } else if (arg === '--chrome' && next) {
       parsed.chromePath = next
       index++
+    } else if (arg === '--separate-browsers') {
+      parsed.separateBrowsers = true
     } else if (arg === '--timeout-ms' && next) {
       parsed.timeoutMs = Number(next) || defaults.timeoutMs
       index++
@@ -151,10 +138,39 @@ async function findDebugPort() {
   throw new Error('could not reserve a Chrome debugging port')
 }
 
-async function waitForChrome() {
+async function createBrowser(label) {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'meetingassist-live-smoke-'))
+  const debugPort = await findDebugPort()
+  const chrome = spawn(config.chromePath, [
+    '--headless=new',
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=${userDataDir}`,
+    '--use-fake-device-for-media-stream',
+    '--use-fake-ui-for-media-stream',
+    '--autoplay-policy=no-user-gesture-required',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=MediaRouter',
+    'about:blank'
+  ], { stdio: ['ignore', 'ignore', 'pipe'] })
+  chrome.stderr.on('data', data => {
+    for (const line of String(data).split('\n')) {
+      if (line.includes('DevTools listening') || line.includes('ERROR')) {
+        console.error(line)
+      }
+    }
+  })
+  const browser = { chrome, debugPort, userDataDir, label, closed: false }
+  browsers.push(browser)
+  const version = await waitForChrome(browser)
+  log('chrome', label, version.Browser)
+  return browser
+}
+
+async function waitForChrome(browser) {
   for (let attempt = 0; attempt < 120; attempt++) {
     try {
-      return await fetchJSON(`http://127.0.0.1:${debugPort}/json/version`)
+      return await fetchJSON(`http://127.0.0.1:${browser.debugPort}/json/version`)
     } catch {
       await sleep(250)
     }
@@ -162,13 +178,13 @@ async function waitForChrome() {
   throw new Error('Chrome did not expose DevTools')
 }
 
-async function openPage(name) {
-  const target = await fetchJSON(`http://127.0.0.1:${debugPort}/json/new?about:blank`, { method: 'PUT' })
+async function openPage(name, browser) {
+  const target = await fetchJSON(`http://127.0.0.1:${browser.debugPort}/json/new?about:blank`, { method: 'PUT' })
   const client = connectCDP(target.webSocketDebuggerUrl)
   await client.opened
   await client.send('Runtime.enable')
   await client.send('Page.enable')
-  const page = { name, client, events: [] }
+  const page = { name, client, events: [], browser }
   client.on('Runtime.consoleAPICalled', event => {
     page.events.push({
       type: 'console',
@@ -223,8 +239,13 @@ async function joinRoom(page) {
 
 async function waitForRoomMedia(page, expectedClientCount) {
   await waitFor(page, `${page.name} remote media`, `
-    (() => typeof remoteElements !== 'undefined' && remoteElements.size >= ${expectedClientCount - 1}
-      && typeof audioMonitors !== 'undefined' && audioMonitors.size >= ${expectedClientCount - 1})()
+    (() => {
+      const remoteAudioCount = typeof remoteAudioMonitors === 'function'
+        ? remoteAudioMonitors().length
+        : (typeof audioMonitors !== 'undefined' ? audioMonitors.size : 0)
+      return typeof remoteElements !== 'undefined' && remoteElements.size >= ${expectedClientCount - 1}
+        && remoteAudioCount >= ${expectedClientCount - 1}
+    })()
   `)
   await waitFor(page, `${page.name} participant labels`, `
     (() => {
@@ -250,10 +271,14 @@ async function rejoinParticipant(name) {
   log('rejoin-start', name)
   await evaluate(oldPage, 'leaveRoom?.(); true').catch(() => {})
   oldPage.client.close()
+  if (config.separateBrowsers) {
+    await closeBrowser(oldPage.browser)
+  }
   pages.splice(pageIndex, 1)
   await sleep(2200)
 
-  const newPage = await openPage(name)
+  const browser = config.separateBrowsers ? await createBrowser(name) : (oldPage.browser || sharedBrowser)
+  const newPage = await openPage(name, browser)
   pages.splice(pageIndex, 0, newPage)
   await joinRoom(newPage)
   log('rejoin-complete', name)
@@ -633,9 +658,17 @@ async function finish(code) {
     return
   }
   shuttingDown = true
-  if (!chrome.killed) {
-    chrome.kill('SIGTERM')
-  }
-  await rm(userDataDir, { recursive: true, force: true }).catch(() => {})
+  await Promise.all(browsers.map(closeBrowser))
   process.exit(code)
+}
+
+async function closeBrowser(browser) {
+  if (!browser || browser.closed) {
+    return
+  }
+  browser.closed = true
+  if (!browser.chrome.killed) {
+    browser.chrome.kill('SIGTERM')
+  }
+  await rm(browser.userDataDir, { recursive: true, force: true }).catch(() => {})
 }

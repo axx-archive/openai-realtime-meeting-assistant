@@ -9038,6 +9038,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!section || section.direction !== 'recvonly') {
             continue
           }
+          if (section.kind === 'video') {
+            applyBrowserVideoCodecPreference(transceiver)
+          }
 
           const track = localTracks.find(candidate => candidate.kind === section.kind)
           if (!track || transceiver.sender.track === track) {
@@ -9047,6 +9050,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           await transceiver.sender.replaceTrack(track)
           transceiver.direction = 'sendonly'
           await configureOutboundSender(transceiver.sender, track)
+        }
+      }
+
+      function applyBrowserVideoCodecPreference(transceiver) {
+        if (safariBrowser || !transceiver?.setCodecPreferences) {
+          return false
+        }
+        const capabilities = RTCRtpSender.getCapabilities?.('video') || RTCRtpReceiver.getCapabilities?.('video')
+        const codecs = capabilities?.codecs || []
+        const preferred = codecs.filter(codec => /^video\/vp8$/i.test(codec.mimeType || ''))
+        if (!preferred.length) {
+          return false
+        }
+        const rest = codecs.filter(codec => !preferred.includes(codec))
+        try {
+          transceiver.setCodecPreferences([...preferred, ...rest])
+          return true
+        } catch (error) {
+          console.warn('Could not prefer VP8 video codec', error)
+          return false
         }
       }
 
