@@ -582,12 +582,42 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	)
 }
 
+func logBrowserMediaErrorReport(rawData string, participantName string, sessionID string) {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(rawData), &payload); err != nil {
+		log.Errorf("Failed to unmarshal browser media error report: %v", err)
+		return
+	}
+
+	browser := mapFromPayload(payload, "browser")
+	audio := mapFromPayload(payload, "audio")
+	errPayload := mapFromPayload(payload, "error")
+	fmt.Printf(
+		"Browser media error participant=%q session=%s safari=%v stage=%s audioMode=%s processor=%s errorName=%s constraint=%s attempts=%d message=%q\n",
+		participantName,
+		sessionID,
+		boolFromPayload(browser, "safari"),
+		stringFromPayload(payload, "stage"),
+		stringFromPayload(audio, "mode"),
+		stringFromPayload(audio, "processor"),
+		stringFromPayload(errPayload, "name"),
+		stringFromPayload(errPayload, "constraint"),
+		arrayLenFromPayload(errPayload, "attempts"),
+		stringFromPayload(errPayload, "message"),
+	)
+}
+
 func mapFromPayload(payload map[string]any, key string) map[string]any {
 	value, _ := payload[key].(map[string]any)
 	if value == nil {
 		return map[string]any{}
 	}
 	return value
+}
+
+func arrayLenFromPayload(payload map[string]any, key string) int {
+	value, _ := payload[key].([]any)
+	return len(value)
 }
 
 func stringFromPayload(payload map[string]any, key string) string {
@@ -1408,6 +1438,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			logBrowserMediaQualityReport(message.Data, currentParticipantName(), participantSessionID)
+		case "media_error":
+			if !participantAccepted {
+				continue
+			}
+			logBrowserMediaErrorReport(message.Data, currentParticipantName(), participantSessionID)
 		case "screen_share_started":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")

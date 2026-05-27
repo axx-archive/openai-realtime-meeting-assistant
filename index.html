@@ -7688,6 +7688,40 @@
         return 'browser'
       }
 
+      function reportClientMediaError(stage, error) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        const payload = {
+          stage,
+          browser: {
+            userAgent: String(navigator.userAgent || '').slice(0, 180),
+            platform: navigator.platform || '',
+            safari: safariBrowser,
+            supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.() || {}
+          },
+          audio: {
+            mode: audioSettings.mode,
+            voiceFocus: voiceFocusEnabled(),
+            processor: voiceFocusProcessorType()
+          },
+          error: {
+            name: error?.name || '',
+            message: error?.message || String(error || ''),
+            constraint: error?.constraint || '',
+            attempts: Array.isArray(error?.mediaAttempts) ? error.mediaAttempts.slice(-8) : []
+          }
+        }
+        try {
+          ws.send(JSON.stringify({
+            event: 'media_error',
+            data: JSON.stringify(payload)
+          }))
+        } catch (sendError) {
+          console.warn('Could not report media error', sendError)
+        }
+      }
+
       function sendMediaQualityReport(snapshot, previous, laggy = false) {
         if (!ws || ws.readyState !== WebSocket.OPEN || !currentParticipantName || !snapshot) {
           return
@@ -7888,6 +7922,7 @@
 
       async function getUserMediaFromAttempts(attempts) {
         let lastError
+        const failures = []
         for (const attempt of attempts) {
           try {
             const stream = await navigator.mediaDevices.getUserMedia(attempt.constraints)
@@ -7898,8 +7933,17 @@
             return stream
           } catch (error) {
             lastError = error
+            failures.push({
+              label: attempt.label,
+              name: error?.name || '',
+              message: error?.message || String(error || ''),
+              constraint: error?.constraint || ''
+            })
             console.warn(`Media capture failed with ${attempt.label}`, error)
           }
+        }
+        if (lastError && failures.length) {
+          lastError.mediaAttempts = failures
         }
         throw lastError || new Error('camera and microphone are unavailable')
       }
@@ -9520,6 +9564,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setLog(`${name} is in the room`)
         } catch (error) {
           const message = error.message || String(error)
+          reportClientMediaError('begin_media_session', error)
           accessHint.textContent = message
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
