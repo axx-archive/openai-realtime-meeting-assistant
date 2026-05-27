@@ -6230,10 +6230,14 @@
           groupMaxFramerate: 12,
           groupMaxWidth: 480,
           groupMaxHeight: 270,
-          constrainedMaxBitrate: 160000,
-          constrainedMaxFramerate: 10,
-          constrainedMaxWidth: 424,
-          constrainedMaxHeight: 240,
+          crowdedMaxBitrate: 145000,
+          crowdedMaxFramerate: 8,
+          crowdedMaxWidth: 360,
+          crowdedMaxHeight: 204,
+          constrainedMaxBitrate: 110000,
+          constrainedMaxFramerate: 7,
+          constrainedMaxWidth: 320,
+          constrainedMaxHeight: 180,
           screenShareMaxBitrate: 1600000,
           screenShareMaxFramerate: 15
         }
@@ -7430,12 +7434,19 @@
         return currentRoomParticipantCount() >= 4
       }
 
+      function useCrowdedVideoLimits() {
+        return currentRoomParticipantCount() >= 7
+      }
+
       function outboundMaxBitrateForTrack(track, limits, isScreenShare) {
         if (isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)) {
           return limits.screenShareMaxBitrate
         }
         if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxBitrate)) {
           return limits.constrainedMaxBitrate
+        }
+        if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxBitrate)) {
+          return limits.crowdedMaxBitrate
         }
         if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxBitrate)) {
           return limits.groupMaxBitrate
@@ -7449,6 +7460,9 @@
         }
         if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxFramerate)) {
           return limits.constrainedMaxFramerate
+        }
+        if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxFramerate)) {
+          return limits.crowdedMaxFramerate
         }
         if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxFramerate)) {
           return limits.groupMaxFramerate
@@ -7478,6 +7492,12 @@
               height: { max: limits.constrainedMaxHeight },
               frameRate: { max: limits.constrainedMaxFramerate }
             }
+          : useCrowdedVideoLimits()
+            ? {
+                width: { max: limits.crowdedMaxWidth },
+                height: { max: limits.crowdedMaxHeight },
+                frameRate: { max: limits.crowdedMaxFramerate }
+              }
           : useGroupVideoLimits()
             ? {
                 width: { max: limits.groupMaxWidth },
@@ -7680,6 +7700,8 @@
           inboundAudioLost: 0,
           inboundAudioPacketsReceived: 0,
           inboundVideoJitter: 0,
+          inboundVideoLost: 0,
+          inboundVideoPacketsReceived: 0,
           inboundVideoDrops: 0,
           inboundVideoDecoded: 0,
           outboundRtt: 0,
@@ -7695,6 +7717,8 @@
             snapshot.inboundAudioPacketsReceived += Number(stat.packetsReceived) || 0
           } else if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
             snapshot.inboundVideoJitter = Math.max(snapshot.inboundVideoJitter, Number(stat.jitter) || 0)
+            snapshot.inboundVideoLost += Number(stat.packetsLost) || 0
+            snapshot.inboundVideoPacketsReceived += Number(stat.packetsReceived) || 0
             snapshot.inboundVideoDrops += Number(stat.framesDropped) || 0
             snapshot.inboundVideoDecoded += Number(stat.framesDecoded) || 0
           } else if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
@@ -7890,6 +7914,10 @@
           outboundAudioPacketsSent: snapshot.outboundAudioPacketsSent - previous.outboundAudioPacketsSent,
           outboundVideoBytesSent: snapshot.outboundVideoBytesSent - previous.outboundVideoBytesSent,
           outboundVideoFramesSent: snapshot.outboundVideoFramesSent - previous.outboundVideoFramesSent,
+          inboundAudioPacketsLost: snapshot.inboundAudioLost - previous.inboundAudioLost,
+          inboundAudioPacketsReceived: snapshot.inboundAudioPacketsReceived - previous.inboundAudioPacketsReceived,
+          inboundVideoPacketsLost: snapshot.inboundVideoLost - previous.inboundVideoLost,
+          inboundVideoPacketsReceived: snapshot.inboundVideoPacketsReceived - previous.inboundVideoPacketsReceived,
           inboundVideoDecoded: snapshot.inboundVideoDecoded - previous.inboundVideoDecoded,
           inboundVideoDrops: snapshot.inboundVideoDrops - previous.inboundVideoDrops,
           elapsedMs: snapshot.at - previous.at
@@ -7908,7 +7936,13 @@
         }
         const decodedDelta = snapshot.inboundVideoDecoded - previous.inboundVideoDecoded
         const dropDelta = snapshot.inboundVideoDrops - previous.inboundVideoDrops
-        return decodedDelta > 20 && dropDelta / Math.max(1, decodedDelta + dropDelta) > 0.14
+        const videoLostDelta = Math.max(0, snapshot.inboundVideoLost - previous.inboundVideoLost)
+        const videoReceivedDelta = Math.max(0, snapshot.inboundVideoPacketsReceived - previous.inboundVideoPacketsReceived)
+        const audioLostDelta = Math.max(0, snapshot.inboundAudioLost - previous.inboundAudioLost)
+        const audioReceivedDelta = Math.max(0, snapshot.inboundAudioPacketsReceived - previous.inboundAudioPacketsReceived)
+        return (decodedDelta > 20 && dropDelta / Math.max(1, decodedDelta + dropDelta) > 0.14)
+          || (videoReceivedDelta > 80 && videoLostDelta / Math.max(1, videoReceivedDelta + videoLostDelta) > 0.08)
+          || (audioReceivedDelta > 120 && audioLostDelta / Math.max(1, audioReceivedDelta + audioLostDelta) > 0.08)
       }
 
       async function constrainCameraForLag(reason) {
@@ -10624,7 +10658,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const stream = participantStream(name)
         const state = participantMediaState(name)
-        if (stream && !state.cameraOff) {
+        if (stream && !state.cameraOff && shouldRenderBoardDockVideo()) {
           const video = document.createElement('video')
           video.autoplay = true
           video.muted = true
@@ -10641,6 +10675,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         label.textContent = name === currentParticipantName ? 'you' : name.toLowerCase()
         tile.appendChild(label)
         return tile
+      }
+
+      function shouldRenderBoardDockVideo() {
+        return !useCrowdedVideoLimits()
       }
 
       function updateBoardDockControls() {

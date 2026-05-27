@@ -19,9 +19,12 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"maxBitrate: 480000",
 		"groupMaxBitrate: 220000",
 		"groupMaxWidth: 480",
-		"constrainedMaxBitrate: 160000",
-		"constrainedMaxWidth: 424",
+		"crowdedMaxBitrate: 145000",
+		"crowdedMaxWidth: 360",
+		"constrainedMaxBitrate: 110000",
+		"constrainedMaxWidth: 320",
 		"function useGroupVideoLimits()",
+		"function useCrowdedVideoLimits()",
 		"function retuneLocalCameraCapture()",
 		"configureOutboundSenders().catch(error => {",
 		"function startMediaQualityMonitor(sessionPeer)",
@@ -391,6 +394,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function scheduleUnidentifiedAudioMonitorRepair(key)",
 		"function shouldUseSyncedRemoteAudioPlayback()",
 		"function shouldUseElementRemoteAudioPlayback()",
+		"function shouldRenderBoardDockVideo()",
+		"return !useCrowdedVideoLimits()",
 		"const useWebAudioPlayback = options.play && context.createGain && context.destination && !shouldUseElementRemoteAudioPlayback()",
 		"return false",
 		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",
@@ -435,6 +440,9 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 		"function mediaQualityDelta(snapshot, previous)",
 		"outboundAudioPacketsSent: snapshot.outboundAudioPacketsSent - previous.outboundAudioPacketsSent",
 		"outboundVideoFramesSent: snapshot.outboundVideoFramesSent - previous.outboundVideoFramesSent",
+		"inboundVideoPacketsLost: snapshot.inboundVideoLost - previous.inboundVideoLost",
+		"inboundAudioPacketsLost: snapshot.inboundAudioLost - previous.inboundAudioLost",
+		"videoLostDelta / Math.max(1, videoReceivedDelta + videoLostDelta) > 0.08",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing browser media quality diagnostics %q", want)

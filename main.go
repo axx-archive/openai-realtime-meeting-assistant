@@ -568,7 +568,7 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	voiceFocusMetrics := mapFromPayload(audio, "voiceFocusMetrics")
 	videoSettings := mapFromPayload(video, "settings")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
@@ -592,6 +592,8 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 		secondsToMillis(floatFromPayload(stats, "outboundRtt")),
 		secondsToMillis(floatFromPayload(stats, "inboundVideoJitter")),
 		secondsToMillis(floatFromPayload(stats, "inboundAudioJitter")),
+		packetLossPercentFromDelta(deltas, "inboundVideoPacketsLost", "inboundVideoPacketsReceived"),
+		packetLossPercentFromDelta(deltas, "inboundAudioPacketsLost", "inboundAudioPacketsReceived"),
 		stringFromPayload(candidatePair, "localCandidateType"),
 		stringFromPayload(candidatePair, "remoteCandidateType"),
 		stringFromPayload(candidatePair, "protocol"),
@@ -680,6 +682,16 @@ func kbpsFromDelta(byteDelta float64, elapsedMs float64) float64 {
 		return 0
 	}
 	return byteDelta * 8 / elapsedMs
+}
+
+func packetLossPercentFromDelta(payload map[string]any, lostKey string, receivedKey string) float64 {
+	lost := floatFromPayload(payload, lostKey)
+	received := floatFromPayload(payload, receivedKey)
+	total := lost + received
+	if total <= 0 {
+		return 0
+	}
+	return lost / total * 100
 }
 
 func secondsToMillis(seconds float64) float64 {
