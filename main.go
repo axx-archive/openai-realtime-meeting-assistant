@@ -562,8 +562,8 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	video := mapFromPayload(payload, "video")
 	stats := mapFromPayload(payload, "stats")
 	candidatePair := mapFromPayload(stats, "candidatePair")
-	log.Infof(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s",
+	fmt.Printf(
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
