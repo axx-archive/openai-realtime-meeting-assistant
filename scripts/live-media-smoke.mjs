@@ -481,6 +481,12 @@ function connectCDP(wsURL) {
   let id = 0
   const pending = new Map()
   const listeners = new Map()
+  const rejectPending = error => {
+    for (const { reject } of pending.values()) {
+      reject(error)
+    }
+    pending.clear()
+  }
   ws.addEventListener('message', event => {
     const message = JSON.parse(event.data)
     if (message.method && listeners.has(message.method)) {
@@ -498,6 +504,12 @@ function connectCDP(wsURL) {
     } else {
       resolve(message.result || {})
     }
+  })
+  ws.addEventListener('close', () => {
+    rejectPending(new Error('CDP socket closed'))
+  })
+  ws.addEventListener('error', () => {
+    rejectPending(new Error('CDP socket error'))
   })
   return {
     opened: new Promise((resolve, reject) => {
