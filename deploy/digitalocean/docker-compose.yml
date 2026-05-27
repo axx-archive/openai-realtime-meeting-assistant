@@ -17,7 +17,6 @@ services:
       - -n
       - --log-file=stdout
       - --fingerprint
-      - --lt-cred-mech
       - --use-auth-secret
       - --static-auth-secret=${MEETING_TURN_SECRET:-meetingassist-dev-turn-secret}
       - --realm=${MEETING_TURN_REALM:-thebonfire.xyz}
