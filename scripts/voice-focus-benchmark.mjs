@@ -39,7 +39,7 @@ const requiredInlineSnippets = [
   'speechConfidence: 0',
   'const forcedNoise = transient || hissNoise || rumbleNoise',
   'const speechNoiseBlend = Math.max(isolationBlend',
-  'const biasMultiplier = 0.65 + speechNoiseBlend * 3.9',
+  'const biasMultiplier = 0.65 + speechNoiseBlend * 4.6',
   'state.noiseBias = Math.min(state.noiseFloor * biasMultiplier'
 ]
 
@@ -50,7 +50,7 @@ const results = [
   benchmarkTransientSuppression(),
   benchmarkSpeechRecovery(),
   benchmarkNoisySpeechRecovery(),
-  benchmarkConcurrentNoiseReduction('speech over fan', makeFanFrame, { maxResidualRatio: 1.02, minSpeechRatio: 0.72 }),
+  benchmarkConcurrentNoiseReduction('speech over fan', makeFanFrame, { maxResidualRatio: 0.95, minSpeechRatio: 0.72 }),
   benchmarkPostSpeechSuppression('post-speech fan', makeFanFrame, { maxRatio: 0.12, maxGain: 0.45 }),
   benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 })
 ]

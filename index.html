@@ -8297,9 +8297,9 @@
         state.gain += (targetGain - state.gain) * coefficient
         const closedBlend = Math.max(0, 1 - state.gain)
         const isolationBlend = Math.max(closedBlend, 1 - state.speechConfidence)
-        const biasCap = state.speechConfidence > 0.72 ? 0.012 : (state.gain > 0.55 ? 0.024 : 0.072)
-        const speechNoiseBlend = Math.max(isolationBlend, state.speechConfidence > 0.72 ? 0.45 : 0)
-        const biasMultiplier = 0.65 + speechNoiseBlend * 3.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+        const biasCap = state.speechConfidence > 0.72 ? 0.016 : (state.gain > 0.55 ? 0.024 : 0.072)
+        const speechNoiseBlend = Math.max(isolationBlend, state.speechConfidence > 0.72 ? 0.6 : 0)
+        const biasMultiplier = 0.65 + speechNoiseBlend * 4.6 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
         state.noiseBias = Math.min(state.noiseFloor * biasMultiplier, biasCap) * state.strength
         return state.gain
       }
@@ -8435,9 +8435,9 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
 
     const closedBlend = Math.max(0, 1 - this.gain)
     const isolationBlend = Math.max(closedBlend, 1 - this.speechConfidence)
-    const biasCap = this.speechConfidence > 0.72 ? 0.012 : (this.gain > 0.55 ? 0.024 : 0.072)
-    const speechNoiseBlend = Math.max(isolationBlend, this.speechConfidence > 0.72 ? 0.45 : 0)
-    const biasMultiplier = 0.65 + speechNoiseBlend * 3.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+    const biasCap = this.speechConfidence > 0.72 ? 0.016 : (this.gain > 0.55 ? 0.024 : 0.072)
+    const speechNoiseBlend = Math.max(isolationBlend, this.speechConfidence > 0.72 ? 0.6 : 0)
+    const biasMultiplier = 0.65 + speechNoiseBlend * 4.6 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
     this.noiseBias = Math.min(this.noiseFloor * biasMultiplier, biasCap) * this.strength
     let outputSum = 0
     let outputCount = 0
