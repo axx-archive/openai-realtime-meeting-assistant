@@ -562,9 +562,12 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	video := mapFromPayload(payload, "video")
 	remote := mapFromPayload(payload, "remote")
 	stats := mapFromPayload(payload, "stats")
+	deltas := mapFromPayload(payload, "deltas")
 	candidatePair := mapFromPayload(stats, "candidatePair")
+	audioOutput := mapFromPayload(audio, "outputSettings")
+	videoSettings := mapFromPayload(video, "settings")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
@@ -573,6 +576,14 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 		stringFromPayload(audio, "mode"),
 		boolFromPayload(audio, "voiceFocus"),
 		stringFromPayload(audio, "processor"),
+		stringFromPayload(audioOutput, "readyState"),
+		boolFromPayload(audioOutput, "enabled"),
+		stringFromPayload(videoSettings, "readyState"),
+		boolFromPayload(videoSettings, "enabled"),
+		kbpsFromDelta(floatFromPayload(deltas, "outboundAudioBytesSent"), floatFromPayload(deltas, "elapsedMs")),
+		kbpsFromDelta(floatFromPayload(deltas, "outboundVideoBytesSent"), floatFromPayload(deltas, "elapsedMs")),
+		int(floatFromPayload(deltas, "outboundAudioPacketsSent")),
+		int(floatFromPayload(deltas, "outboundVideoFramesSent")),
 		secondsToMillis(floatFromPayload(stats, "outboundRtt")),
 		secondsToMillis(floatFromPayload(stats, "inboundVideoJitter")),
 		secondsToMillis(floatFromPayload(stats, "inboundAudioJitter")),
@@ -657,6 +668,13 @@ func floatFromPayload(payload map[string]any, key string) float64 {
 	default:
 		return 0
 	}
+}
+
+func kbpsFromDelta(byteDelta float64, elapsedMs float64) float64 {
+	if byteDelta <= 0 || elapsedMs <= 0 {
+		return 0
+	}
+	return byteDelta * 8 / elapsedMs
 }
 
 func secondsToMillis(seconds float64) float64 {

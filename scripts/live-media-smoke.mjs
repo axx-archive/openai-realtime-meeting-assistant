@@ -279,6 +279,7 @@ async function snapshotPage(page) {
             framesDecoded: Number(stat.framesDecoded) || 0,
             framesDropped: Number(stat.framesDropped) || 0,
             framesEncoded: Number(stat.framesEncoded) || 0,
+            framesSent: Number(stat.framesSent) || 0,
             bytesSent: Number(stat.bytesSent) || 0,
             candidateType: stat.candidateType || '',
             protocol: stat.protocol || '',
@@ -365,6 +366,18 @@ function validateSnapshots(snapshots, expectedClientCount) {
     }
     if (!localVideo || localVideo.readyState !== 'live' || !localVideo.enabled) {
       failures.push(`${snapshot.name} local video is not live/enabled`)
+    }
+    const outboundAudioBytes = snapshot.stats
+      .filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'audio')
+      .reduce((total, stat) => total + stat.bytesSent, 0)
+    const outboundVideoFrames = snapshot.stats
+      .filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'video')
+      .reduce((total, stat) => total + Math.max(stat.framesSent || 0, stat.framesEncoded || 0), 0)
+    if (localAudio?.readyState === 'live' && localAudio.enabled && outboundAudioBytes <= 0) {
+      failures.push(`${snapshot.name} has a live microphone but sent no outbound audio bytes`)
+    }
+    if (localVideo?.readyState === 'live' && localVideo.enabled && outboundVideoFrames <= 0) {
+      failures.push(`${snapshot.name} has a live camera but sent no outbound video frames`)
     }
     if (snapshot.remoteElements < expectedClientCount - 1) {
       failures.push(`${snapshot.name} sees ${snapshot.remoteElements} remote media elements`)

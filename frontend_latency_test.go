@@ -418,6 +418,8 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 		"voiceFocus: voiceFocusEnabled()",
 		"summarizeCandidatePair(selectedCandidatePair, report)",
 		"function mediaQualityDelta(snapshot, previous)",
+		"outboundAudioPacketsSent: snapshot.outboundAudioPacketsSent - previous.outboundAudioPacketsSent",
+		"outboundVideoFramesSent: snapshot.outboundVideoFramesSent - previous.outboundVideoFramesSent",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing browser media quality diagnostics %q", want)

@@ -7805,7 +7805,9 @@
         }
         return {
           outboundAudioBytesSent: snapshot.outboundAudioBytesSent - previous.outboundAudioBytesSent,
+          outboundAudioPacketsSent: snapshot.outboundAudioPacketsSent - previous.outboundAudioPacketsSent,
           outboundVideoBytesSent: snapshot.outboundVideoBytesSent - previous.outboundVideoBytesSent,
+          outboundVideoFramesSent: snapshot.outboundVideoFramesSent - previous.outboundVideoFramesSent,
           inboundVideoDecoded: snapshot.inboundVideoDecoded - previous.inboundVideoDecoded,
           inboundVideoDrops: snapshot.inboundVideoDrops - previous.inboundVideoDrops,
           elapsedMs: snapshot.at - previous.at
