@@ -181,7 +181,9 @@ async function openPage(name) {
 
 async function joinRoom(page) {
   await waitFor(page, `${page.name} form`, `
-    Boolean(document.getElementById('participantName')
+    Boolean(document.readyState !== 'loading'
+      && typeof joinRoom === 'function'
+      && document.getElementById('participantName')
       && document.getElementById('roomPassword')
       && document.getElementById('joinAccess'))
   `)
