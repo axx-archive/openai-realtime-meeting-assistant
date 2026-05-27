@@ -6,8 +6,8 @@ Caddy terminates HTTPS/WSS, and Docker publishes a small UDP range for WebRTC me
 ## Droplet requirements
 
 - Ubuntu 24.04 LTS or 22.04 LTS.
-- TCP ports 80 and 443 open.
-- UDP ports 40000-40100 open.
+- TCP ports 80, 443, and 3478 open.
+- UDP ports 3478, 40000-40100, and 49160-49200 open.
 - A public IPv4 address.
 - A DNS host that points at the Droplet. For a quick demo, use `PUBLIC_IP.nip.io`.
 - Enough sustained outbound bandwidth for the room size. The default 10-seat video room needs roughly 110 Mbps egress before protocol overhead, so leave comfortable headroom.
@@ -46,11 +46,11 @@ MEETING_BRAIN_BACKFILL=false
 MEETING_TIME_ZONE=America/Los_Angeles
 PION_NAT1TO1_IP=<droplet-public-ip>
 PION_UDP_PORT_RANGE=40000-40100
-# Optional TURN fallback for restrictive networks:
-# MEETING_STUN_URLS=stun:stun.l.google.com:19302
-# MEETING_TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
-# MEETING_TURN_USERNAME=meetingassist
-# MEETING_TURN_CREDENTIAL=<turn-secret>
+# TURN relay fallback for restrictive networks:
+MEETING_STUN_URLS=stun:stun.l.google.com:19302
+MEETING_TURN_URLS=turn:<domain>:3478?transport=udp,turn:<domain>:3478?transport=tcp
+MEETING_TURN_SECRET=<openssl-rand-hex-32>
+MEETING_TURN_REALM=<domain>
 MEETING_HOST=<droplet-public-ip>.nip.io
 ```
 

@@ -278,6 +278,21 @@ func TestRoomPeerConnectionOffersStableSafariCompatibleVideoCodecs(t *testing.T)
 	if !strings.Contains(offer.SDP, "profile-level-id=42e01f") {
 		t.Fatalf("offer SDP missing constrained baseline H264 fmtp:\n%s", offer.SDP)
 	}
+	videoLine := ""
+	for _, line := range strings.Split(offer.SDP, "\n") {
+		if strings.HasPrefix(line, "m=video ") {
+			videoLine = line
+			break
+		}
+	}
+	if videoLine == "" {
+		t.Fatalf("offer SDP missing video m-line:\n%s", offer.SDP)
+	}
+	h264Index := strings.Index(videoLine, " 102")
+	vp8Index := strings.Index(videoLine, " 96")
+	if h264Index == -1 || vp8Index == -1 || h264Index > vp8Index {
+		t.Fatalf("offer SDP should prefer constrained-baseline H264 before VP8 for Safari; video m-line=%q", videoLine)
+	}
 }
 
 func TestRoomSnapshotIncludesParticipantMediaState(t *testing.T) {

@@ -102,6 +102,33 @@ func TestBrowserRTCConfigurationSupportsTurnFallback(t *testing.T) {
 	}
 }
 
+func TestBrowserRTCConfigurationSupportsEphemeralTurnCredentials(t *testing.T) {
+	t.Setenv("MEETING_STUN_URLS", "")
+	t.Setenv("MEETING_DISABLE_DEFAULT_STUN", "true")
+	t.Setenv("MEETING_TURN_URLS", "turn:thebonfire.xyz:3478?transport=udp,turn:thebonfire.xyz:3478?transport=tcp")
+	t.Setenv("MEETING_TURN_USERNAME", "")
+	t.Setenv("MEETING_TURN_CREDENTIAL", "")
+	t.Setenv("MEETING_TURN_SECRET", "shared-secret-for-tests")
+	t.Setenv("MEETING_TURN_TTL_SECONDS", "3600")
+
+	config := browserRTCConfigurationFromEnv()
+	servers, ok := config["iceServers"].([]map[string]any)
+	if !ok {
+		t.Fatalf("iceServers missing from config: %#v", config)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("iceServers len=%d, want 1", len(servers))
+	}
+	username, _ := servers[0]["username"].(string)
+	credential, _ := servers[0]["credential"].(string)
+	if !strings.Contains(username, ":bonfire") || credential == "" {
+		t.Fatalf("ephemeral turn credentials missing: %#v", servers[0])
+	}
+	if servers[0]["credentialType"] != "password" {
+		t.Fatalf("turn credentialType=%v, want password", servers[0]["credentialType"])
+	}
+}
+
 func TestBrowserRTCConfigurationDefaultsToPublicStun(t *testing.T) {
 	t.Setenv("MEETING_STUN_URLS", "")
 	t.Setenv("MEETING_TURN_URLS", "")

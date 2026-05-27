@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -231,16 +234,6 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 	}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:     webrtc.MimeTypeVP8,
-			ClockRate:    90000,
-			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
-		},
-		PayloadType: 96,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
-	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     webrtc.MimeTypeH264,
 			ClockRate:    90000,
 			SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
@@ -249,6 +242,16 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 		PayloadType: 102,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, nil, fmt.Errorf("register h264 codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:     webrtc.MimeTypeVP8,
+			ClockRate:    90000,
+			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
+		},
+		PayloadType: 96,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
 	}
 
 	registry := &interceptor.Registry{}
@@ -462,6 +465,7 @@ func browserRTCConfigurationFromEnv() map[string]any {
 	if len(stunURLs) == 0 && !boolEnv("MEETING_DISABLE_DEFAULT_STUN") {
 		stunURLs = []string{"stun:stun.l.google.com:19302"}
 	}
+	turnUsername, turnCredential := turnCredentialsFromEnv()
 	for _, urls := range [][]string{
 		stunURLs,
 		splitEnvList("MEETING_TURN_URLS"),
@@ -471,11 +475,12 @@ func browserRTCConfigurationFromEnv() map[string]any {
 		}
 		server := map[string]any{"urls": urls}
 		if strings.HasPrefix(strings.ToLower(urls[0]), "turn:") || strings.HasPrefix(strings.ToLower(urls[0]), "turns:") {
-			if username := strings.TrimSpace(os.Getenv("MEETING_TURN_USERNAME")); username != "" {
-				server["username"] = username
+			if turnUsername != "" {
+				server["username"] = turnUsername
 			}
-			if credential := strings.TrimSpace(os.Getenv("MEETING_TURN_CREDENTIAL")); credential != "" {
-				server["credential"] = credential
+			if turnCredential != "" {
+				server["credential"] = turnCredential
+				server["credentialType"] = "password"
 			}
 		}
 		iceServers = append(iceServers, server)
@@ -497,6 +502,36 @@ func browserRTCConfigurationFromEnv() map[string]any {
 	return map[string]any{"iceServers": iceServers}
 }
 
+func turnCredentialsFromEnv() (string, string) {
+	username := strings.TrimSpace(os.Getenv("MEETING_TURN_USERNAME"))
+	credential := strings.TrimSpace(os.Getenv("MEETING_TURN_CREDENTIAL"))
+	if username != "" && credential != "" {
+		return username, credential
+	}
+
+	secret := strings.TrimSpace(os.Getenv("MEETING_TURN_SECRET"))
+	if secret == "" {
+		return username, credential
+	}
+
+	ttlSeconds := int64(12 * 60 * 60)
+	if rawTTL := strings.TrimSpace(os.Getenv("MEETING_TURN_TTL_SECONDS")); rawTTL != "" {
+		if parsedTTL, err := strconv.ParseInt(rawTTL, 10, 64); err == nil && parsedTTL >= 300 && parsedTTL <= 7*24*60*60 {
+			ttlSeconds = parsedTTL
+		}
+	}
+	userPrefix := strings.TrimSpace(os.Getenv("MEETING_TURN_USER_PREFIX"))
+	if userPrefix == "" {
+		userPrefix = "bonfire"
+	}
+	expiresAt := time.Now().UTC().Add(time.Duration(ttlSeconds) * time.Second).Unix()
+	username = fmt.Sprintf("%d:%s", expiresAt, userPrefix)
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write([]byte(username))
+	credential = base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	return username, credential
+}
+
 func splitEnvList(name string) []string {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
@@ -513,6 +548,78 @@ func splitEnvList(name string) []string {
 		}
 	}
 	return values
+}
+
+func logBrowserMediaQualityReport(rawData string, participantName string, sessionID string) {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(rawData), &payload); err != nil {
+		log.Errorf("Failed to unmarshal browser media quality report: %v", err)
+		return
+	}
+
+	browser := mapFromPayload(payload, "browser")
+	audio := mapFromPayload(payload, "audio")
+	video := mapFromPayload(payload, "video")
+	stats := mapFromPayload(payload, "stats")
+	candidatePair := mapFromPayload(stats, "candidatePair")
+	log.Infof(
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s",
+		participantName,
+		sessionID,
+		boolFromPayload(browser, "safari"),
+		boolFromPayload(payload, "laggy"),
+		boolFromPayload(video, "constrained"),
+		stringFromPayload(audio, "mode"),
+		boolFromPayload(audio, "voiceFocus"),
+		stringFromPayload(audio, "processor"),
+		secondsToMillis(floatFromPayload(stats, "outboundRtt")),
+		secondsToMillis(floatFromPayload(stats, "inboundVideoJitter")),
+		secondsToMillis(floatFromPayload(stats, "inboundAudioJitter")),
+		stringFromPayload(candidatePair, "localCandidateType"),
+		stringFromPayload(candidatePair, "remoteCandidateType"),
+		stringFromPayload(candidatePair, "protocol"),
+		stringFromPayload(candidatePair, "networkType"),
+	)
+}
+
+func mapFromPayload(payload map[string]any, key string) map[string]any {
+	value, _ := payload[key].(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func stringFromPayload(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func boolFromPayload(payload map[string]any, key string) bool {
+	value, _ := payload[key].(bool)
+	return value
+}
+
+func floatFromPayload(payload map[string]any, key string) float64 {
+	switch value := payload[key].(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	case json.Number:
+		number, _ := value.Float64()
+		return number
+	default:
+		return 0
+	}
+}
+
+func secondsToMillis(seconds float64) float64 {
+	return seconds * 1000
 }
 
 func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter) {
@@ -1296,6 +1403,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			broadcastKanbanEvent("participants", snapshot)
+		case "media_quality":
+			if !participantAccepted {
+				continue
+			}
+			logBrowserMediaQualityReport(message.Data, currentParticipantName(), participantSessionID)
 		case "screen_share_started":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")

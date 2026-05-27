@@ -6164,6 +6164,8 @@
       let mediaQualityMonitorTimer = 0
       let mediaQualityConstrained = false
       let previousMediaQualityStats = null
+      let lastMediaQualityReportAt = 0
+      const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const audioSettingsSchemaVersion = 2
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
@@ -7548,6 +7550,7 @@
         }
         previousMediaQualityStats = null
         mediaQualityConstrained = false
+        lastMediaQualityReportAt = 0
       }
 
       function startMediaQualityMonitor(sessionPeer) {
@@ -7563,7 +7566,9 @@
           try {
             const report = await sessionPeer.getStats()
             const snapshot = summarizeMediaQualityStats(report)
-            if (mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)) {
+            const laggy = mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)
+            sendMediaQualityReport(snapshot, previousMediaQualityStats, laggy)
+            if (laggy) {
               await constrainCameraForLag('media stats')
             }
             previousMediaQualityStats = snapshot
@@ -7576,21 +7581,159 @@
       function summarizeMediaQualityStats(report) {
         const snapshot = {
           at: performance.now(),
+          outboundAudioBytesSent: 0,
+          outboundAudioPacketsSent: 0,
+          outboundVideoBytesSent: 0,
+          outboundVideoFramesEncoded: 0,
+          outboundVideoFramesSent: 0,
+          inboundAudioJitter: 0,
+          inboundAudioLost: 0,
+          inboundAudioPacketsReceived: 0,
           inboundVideoJitter: 0,
           inboundVideoDrops: 0,
           inboundVideoDecoded: 0,
-          outboundRtt: 0
+          outboundRtt: 0,
+          candidatePair: {}
         }
+        let selectedCandidatePair = null
         report.forEach(stat => {
-          if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
+          if (stat.type === 'transport' && stat.selectedCandidatePairId && typeof report.get === 'function') {
+            selectedCandidatePair = report.get(stat.selectedCandidatePairId) || selectedCandidatePair
+          } else if (stat.type === 'inbound-rtp' && stat.kind === 'audio') {
+            snapshot.inboundAudioJitter = Math.max(snapshot.inboundAudioJitter, Number(stat.jitter) || 0)
+            snapshot.inboundAudioLost += Number(stat.packetsLost) || 0
+            snapshot.inboundAudioPacketsReceived += Number(stat.packetsReceived) || 0
+          } else if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
             snapshot.inboundVideoJitter = Math.max(snapshot.inboundVideoJitter, Number(stat.jitter) || 0)
             snapshot.inboundVideoDrops += Number(stat.framesDropped) || 0
             snapshot.inboundVideoDecoded += Number(stat.framesDecoded) || 0
+          } else if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
+            snapshot.outboundAudioBytesSent += Number(stat.bytesSent) || 0
+            snapshot.outboundAudioPacketsSent += Number(stat.packetsSent) || 0
+          } else if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
+            snapshot.outboundVideoBytesSent += Number(stat.bytesSent) || 0
+            snapshot.outboundVideoFramesEncoded += Number(stat.framesEncoded) || 0
+            snapshot.outboundVideoFramesSent += Number(stat.framesSent) || 0
           } else if (stat.type === 'candidate-pair' && (stat.nominated || stat.state === 'succeeded')) {
+            selectedCandidatePair = selectedCandidatePair || stat
             snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(stat.currentRoundTripTime) || 0)
           }
         })
+        if (selectedCandidatePair) {
+          snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(selectedCandidatePair.currentRoundTripTime) || 0)
+        }
+        snapshot.candidatePair = summarizeCandidatePair(selectedCandidatePair, report)
         return snapshot
+      }
+
+      function summarizeCandidatePair(candidatePair, report) {
+        if (!candidatePair) {
+          return {}
+        }
+        const localCandidate = typeof report?.get === 'function' && candidatePair.localCandidateId
+          ? report.get(candidatePair.localCandidateId)
+          : null
+        const remoteCandidate = typeof report?.get === 'function' && candidatePair.remoteCandidateId
+          ? report.get(candidatePair.remoteCandidateId)
+          : null
+        return {
+          protocol: String(candidatePair.protocol || localCandidate?.protocol || ''),
+          networkType: String(localCandidate?.networkType || ''),
+          localCandidateType: String(localCandidate?.candidateType || ''),
+          remoteCandidateType: String(remoteCandidate?.candidateType || ''),
+          availableOutgoingBitrate: Number(candidatePair.availableOutgoingBitrate) || 0,
+          currentRoundTripTime: Number(candidatePair.currentRoundTripTime) || 0
+        }
+      }
+
+      function trackSettingsSnapshot(track, keys) {
+        const settings = track?.getSettings?.() || {}
+        return keys.reduce((snapshot, key) => {
+          const value = settings[key]
+          if (value === undefined || key === 'deviceId' || key === 'groupId') {
+            return snapshot
+          }
+          snapshot[key] = value
+          return snapshot
+        }, {
+          enabled: Boolean(track?.enabled),
+          readyState: track?.readyState || ''
+        })
+      }
+
+      function voiceFocusProcessorType() {
+        if (!voiceFocusEnabled()) {
+          return 'disabled'
+        }
+        if (localAudioProcessor?.voiceFocusNode) {
+          return 'worklet'
+        }
+        if (localAudioProcessor?.voiceFocusScriptNode) {
+          return 'script'
+        }
+        if (localAudioProcessor?.destination) {
+          return 'webaudio'
+        }
+        if (localAudioProcessor?.outputTrack && localAudioProcessor.outputTrack !== localAudioProcessor.sourceTrack) {
+          return 'muted-clone'
+        }
+        return 'browser'
+      }
+
+      function sendMediaQualityReport(snapshot, previous, laggy = false) {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !currentParticipantName || !snapshot) {
+          return
+        }
+        const now = Date.now()
+        if (!laggy && lastMediaQualityReportAt && now - lastMediaQualityReportAt < mediaQualityReportIntervalMs) {
+          return
+        }
+        lastMediaQualityReportAt = now
+        const payload = {
+          sentAt: new Date().toISOString(),
+          laggy: Boolean(laggy),
+          browser: {
+            safari: safariBrowser,
+            userAgent: String(navigator.userAgent || '').slice(0, 180),
+            visibilityState: document.visibilityState || '',
+            audioContextState: audioContext?.state || ''
+          },
+          audio: {
+            mode: audioSettings.mode,
+            voiceFocus: voiceFocusEnabled(),
+            processing: audioProcessingEnabled(),
+            processor: voiceFocusProcessorType(),
+            sourceSettings: trackSettingsSnapshot(localAudioSourceTrack || localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency']),
+            outputSettings: trackSettingsSnapshot(localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency'])
+          },
+          video: {
+            constrained: mediaQualityConstrained,
+            settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode'])
+          },
+          stats: snapshot,
+          deltas: mediaQualityDelta(snapshot, previous)
+        }
+        try {
+          ws.send(JSON.stringify({
+            event: 'media_quality',
+            data: JSON.stringify(payload)
+          }))
+        } catch (error) {
+          console.warn('Could not publish media quality report', error)
+        }
+      }
+
+      function mediaQualityDelta(snapshot, previous) {
+        if (!snapshot || !previous) {
+          return {}
+        }
+        return {
+          outboundAudioBytesSent: snapshot.outboundAudioBytesSent - previous.outboundAudioBytesSent,
+          outboundVideoBytesSent: snapshot.outboundVideoBytesSent - previous.outboundVideoBytesSent,
+          inboundVideoDecoded: snapshot.inboundVideoDecoded - previous.inboundVideoDecoded,
+          inboundVideoDrops: snapshot.inboundVideoDrops - previous.inboundVideoDrops,
+          elapsedMs: snapshot.at - previous.at
+        }
       }
 
       function mediaQualityLooksLaggy(snapshot, previous) {
@@ -7724,18 +7867,18 @@
         try {
           const sourceStream = new MediaStream([sourceTrack])
           source = context.createMediaStreamSource(sourceStream)
-          highpass = context.createBiquadFilter()
-          highpass.type = 'highpass'
-          highpass.frequency.value = 120
-          highpass.Q.value = 0.8
+	          highpass = context.createBiquadFilter()
+	          highpass.type = 'highpass'
+	          highpass.frequency.value = 155
+	          highpass.Q.value = 0.8
 
-          lowpass = context.createBiquadFilter()
-          lowpass.type = 'lowpass'
-          lowpass.frequency.value = 7600
-          lowpass.Q.value = 0.5
+	          lowpass = context.createBiquadFilter()
+	          lowpass.type = 'lowpass'
+	          lowpass.frequency.value = 6800
+	          lowpass.Q.value = 0.5
 
-          compressor = context.createDynamicsCompressor()
-          compressor.threshold.value = -38
+	          compressor = context.createDynamicsCompressor()
+	          compressor.threshold.value = -40
           compressor.knee.value = 20
           compressor.ratio.value = 4
           compressor.attack.value = 0.004
@@ -7801,11 +7944,11 @@
       function voiceFocusConfig() {
         const profile = audioSettings.profile || defaultVoiceProfile
         return {
-          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
-          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
-          strength: 0.98,
-          floorGain: 0.012,
-          calibrated: Boolean(profile.trainedAt)
+	          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+	          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+	          strength: 0.995,
+	          floorGain: 0.004,
+	          calibrated: Boolean(profile.trainedAt)
         }
       }
 
@@ -7843,13 +7986,13 @@
         const rms = Math.sqrt(sum / Math.max(1, reference.length))
         const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
         const crest = peak / Math.max(rms, 0.0001)
-        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.05 : 2.55), state.speechFloor * (state.calibrated ? 0.22 : 0.18), 0.008)
-        const closeAt = threshold * 0.38
-        const transient = crest > 8.5 && rms < threshold * 1.25
-        const tonalNoise = zeroCrossingRate > 0.36 && rms < threshold * 1.55
-        const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 1.9 && rms >= closeAt))
-        if (open) {
-          state.holdFrames = state.calibrated ? 42 : 34
+	        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.65 : 3.05), state.speechFloor * (state.calibrated ? 0.3 : 0.24), 0.011)
+	        const closeAt = threshold * 0.55
+	        const transient = crest > 7.5 && rms < threshold * 1.45
+	        const tonalNoise = zeroCrossingRate > 0.32 && rms < threshold * 1.75
+	        const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.25 && rms >= closeAt))
+	        if (open) {
+	          state.holdFrames = state.calibrated ? 28 : 24
         } else if (state.holdFrames > 0) {
           state.holdFrames--
         }
@@ -7866,7 +8009,7 @@
             targetGain = state.floorGain + blend * (1 - state.floorGain) * (1 - state.strength * 0.28)
           }
         }
-        const coefficient = targetGain > state.gain ? 0.58 : 0.045
+	        const coefficient = targetGain > state.gain ? 0.68 : 0.085
         state.gain += (targetGain - state.gain) * coefficient
         return state.gain
       }
@@ -7878,7 +8021,7 @@
           const input = event.inputBuffer.getChannelData(0)
           const output = event.outputBuffer.getChannelData(0)
           const gain = voiceFocusFrameGain(state, input)
-          const noiseBias = Math.min(state.noiseFloor * 0.82, 0.022) * (1 - gain) * state.strength
+	          const noiseBias = Math.min(state.noiseFloor * 1.1, 0.028) * (1 - gain) * state.strength
           for (let index = 0; index < output.length; index++) {
             const sample = input[index] || 0
             const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
@@ -7897,10 +8040,10 @@
 class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
   constructor() {
     super()
-    this.noiseFloor = 0.012
-    this.speechFloor = 0.075
-    this.strength = 0.98
-    this.floorGain = 0.012
+	    this.noiseFloor = 0.012
+	    this.speechFloor = 0.075
+	    this.strength = 0.995
+	    this.floorGain = 0.004
     this.gain = 1
     this.holdFrames = 0
     this.calibrated = false
@@ -7909,8 +8052,8 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
       if (data.type !== 'configure') return
       this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
       this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
-      this.strength = Math.max(0.25, Math.min(0.995, Number(data.strength) || this.strength))
-      this.floorGain = Math.max(0.006, Math.min(0.16, Number(data.floorGain) || this.floorGain))
+	      this.strength = Math.max(0.25, Math.min(0.999, Number(data.strength) || this.strength))
+	      this.floorGain = Math.max(0.002, Math.min(0.16, Number(data.floorGain) || this.floorGain))
       this.calibrated = Boolean(data.calibrated)
     }
   }
@@ -7945,13 +8088,13 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const rms = Math.sqrt(sum / Math.max(1, reference.length))
     const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
     const crest = peak / Math.max(rms, 0.0001)
-    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.05 : 2.55), this.speechFloor * (this.calibrated ? 0.22 : 0.18), 0.008)
-    const closeAt = threshold * 0.38
-    const transient = crest > 8.5 && rms < threshold * 1.25
-    const tonalNoise = zeroCrossingRate > 0.36 && rms < threshold * 1.55
-    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 1.9 && rms >= closeAt))
-    if (open) {
-      this.holdFrames = this.calibrated ? 42 : 34
+	    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.65 : 3.05), this.speechFloor * (this.calibrated ? 0.3 : 0.24), 0.011)
+	    const closeAt = threshold * 0.55
+	    const transient = crest > 7.5 && rms < threshold * 1.45
+	    const tonalNoise = zeroCrossingRate > 0.32 && rms < threshold * 1.75
+	    const open = !transient && !tonalNoise && (rms >= threshold || (peak >= threshold * 2.25 && rms >= closeAt))
+	    if (open) {
+	      this.holdFrames = this.calibrated ? 28 : 24
     } else if (this.holdFrames > 0) {
       this.holdFrames--
     }
@@ -7969,10 +8112,10 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
         targetGain = this.floorGain + blend * (1 - this.floorGain) * (1 - this.strength * 0.28)
       }
     }
-    const coefficient = targetGain > this.gain ? 0.58 : 0.045
+	    const coefficient = targetGain > this.gain ? 0.68 : 0.085
     this.gain += (targetGain - this.gain) * coefficient
 
-    const noiseBias = Math.min(this.noiseFloor * 0.82, 0.022) * (1 - this.gain) * this.strength
+	    const noiseBias = Math.min(this.noiseFloor * 1.1, 0.028) * (1 - this.gain) * this.strength
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]

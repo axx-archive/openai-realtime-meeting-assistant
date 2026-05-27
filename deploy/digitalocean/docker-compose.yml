@@ -11,6 +11,29 @@ services:
       - "40000-40100:40000-40100/udp"
     restart: unless-stopped
 
+  coturn:
+    image: coturn/coturn:4.6
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${MEETING_TURN_SECRET:-meetingassist-dev-turn-secret}
+      - --realm=${MEETING_TURN_REALM:-thebonfire.xyz}
+      - --external-ip=${PION_NAT1TO1_IP:-146.190.171.224}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --no-cli
+      - --no-loopback-peers
+      - --no-multicast-peers
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     depends_on:

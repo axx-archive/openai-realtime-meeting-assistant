@@ -157,12 +157,12 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"new AudioWorkletNode(context, voiceFocusProcessorName)",
 		"highpass.type = 'highpass'",
 		"lowpass.type = 'lowpass'",
-		"compressor.threshold.value = -38",
-		"this.floorGain = 0.012",
+		"compressor.threshold.value = -40",
+		"this.floorGain = 0.004",
 		"function createVoiceFocusScriptProcessor(context)",
 		"const gain = voiceFocusFrameGain(state, input)",
 		"const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)",
-		"strength: 0.98",
+		"strength: 0.995",
 		"voiceIsolation: { ideal: voiceFocusEnabled() }",
 		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
 		"function trainVoiceFocus()",
@@ -349,6 +349,30 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing low-latency remote audio hardening %q", want)
+		}
+	}
+}
+
+func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"const mediaQualityReportIntervalMs = 12000",
+		"function sendMediaQualityReport(snapshot, previous, laggy = false)",
+		"event: 'media_quality'",
+		"function trackSettingsSnapshot(track, keys)",
+		"function voiceFocusProcessorType()",
+		"sourceSettings: trackSettingsSnapshot(localAudioSourceTrack || localAudioTrack()",
+		"voiceFocus: voiceFocusEnabled()",
+		"summarizeCandidatePair(selectedCandidatePair, report)",
+		"function mediaQualityDelta(snapshot, previous)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing browser media quality diagnostics %q", want)
 		}
 	}
 }
