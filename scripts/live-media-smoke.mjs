@@ -193,8 +193,10 @@ async function joinRoom(page) {
       participant.dispatchEvent(new Event('change', { bubbles: true }))
       password.value = ${JSON.stringify(config.password)}
       password.dispatchEvent(new Event('input', { bubbles: true }))
-      document.getElementById('joinAccess').click()
-      return true
+      if (typeof joinRoom !== 'function') {
+        throw new Error('joinRoom is unavailable')
+      }
+      return joinRoom()
     })()
   `)
   await waitFor(page, `${page.name} local media`, `
