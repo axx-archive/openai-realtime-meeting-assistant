@@ -6230,14 +6230,14 @@
           groupMaxFramerate: 12,
           groupMaxWidth: 480,
           groupMaxHeight: 270,
-          crowdedMaxBitrate: 145000,
-          crowdedMaxFramerate: 8,
-          crowdedMaxWidth: 360,
-          crowdedMaxHeight: 204,
-          constrainedMaxBitrate: 110000,
-          constrainedMaxFramerate: 7,
-          constrainedMaxWidth: 320,
-          constrainedMaxHeight: 180,
+          crowdedMaxBitrate: 110000,
+          crowdedMaxFramerate: 7,
+          crowdedMaxWidth: 320,
+          crowdedMaxHeight: 180,
+          constrainedMaxBitrate: 70000,
+          constrainedMaxFramerate: 5,
+          constrainedMaxWidth: 256,
+          constrainedMaxHeight: 144,
           screenShareMaxBitrate: 1600000,
           screenShareMaxFramerate: 15
         }
@@ -7435,7 +7435,7 @@
       }
 
       function useCrowdedVideoLimits() {
-        return currentRoomParticipantCount() >= 7
+        return currentRoomParticipantCount() >= 5
       }
 
       function outboundMaxBitrateForTrack(track, limits, isScreenShare) {
