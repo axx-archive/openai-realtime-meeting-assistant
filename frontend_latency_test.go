@@ -369,6 +369,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"remoteVideoTracksByParticipant.set(participantName, track)",
 		"const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null",
 		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })",
+		"playbackGain.connect(context.destination)",
+		"monitor.playbackGain?.disconnect()",
 		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
 	} {
 		if !strings.Contains(html, want) {

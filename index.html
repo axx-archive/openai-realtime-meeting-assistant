@@ -10312,7 +10312,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function demoteRemotePlaybackFromVideo(key, name) {
         const monitor = audioMonitors.get(key)
-        if (!monitor || monitor.ownsAudioElement || !liveTrack(monitor.track)) {
+        if (!monitor || monitor.ownsAudioElement || monitor.playbackGain || !liveTrack(monitor.track)) {
           return
         }
         pendingRemotePlaybackElements.delete(monitor.audio)
@@ -10341,7 +10341,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stream = new MediaStream([track])
         let audio = null
         let ownsAudioElement = false
-        if (options.play) {
+        const context = ensureAudioContext()
+        let source
+        let analyser
+        let playbackGain
+        let data = new Uint8Array(0)
+        if (context) {
+          try {
+            source = context.createMediaStreamSource(stream)
+            analyser = context.createAnalyser()
+            analyser.fftSize = 512
+            analyser.smoothingTimeConstant = 0.75
+            source.connect(analyser)
+            if (options.play && context.createGain && context.destination) {
+              playbackGain = context.createGain()
+              playbackGain.gain.value = 1
+              source.connect(playbackGain)
+              playbackGain.connect(context.destination)
+            }
+            data = new Uint8Array(analyser.fftSize)
+          } catch {
+            source = undefined
+            analyser = undefined
+            playbackGain = undefined
+          }
+        }
+        if (options.play && !playbackGain) {
           if (options.playbackElement && shouldUseSyncedRemoteAudioPlayback()) {
             const playbackStream = syncedRemotePlaybackStream(options.playbackStream || stream, track, remoteVideoTracksByParticipant.get(name))
             configureRemotePlaybackElement(options.playbackElement, playbackStream, name, { muted: false })
@@ -10351,23 +10376,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ownsAudioElement = true
           }
         }
-        const context = ensureAudioContext()
-        let source
-        let analyser
-        let data = new Uint8Array(0)
-        if (context) {
-          try {
-            source = context.createMediaStreamSource(stream)
-            analyser = context.createAnalyser()
-            analyser.fftSize = 512
-            analyser.smoothingTimeConstant = 0.75
-            source.connect(analyser)
-            data = new Uint8Array(analyser.fftSize)
-          } catch {
-            source = undefined
-            analyser = undefined
-          }
-        }
 
         audioMonitors.set(key, {
           name: name || 'participant',
@@ -10375,6 +10383,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           analyser,
           data,
           source,
+          playbackGain,
           audio,
           ownsAudioElement,
           setsActiveSpeaker: options.setsActiveSpeaker !== false && Boolean(analyser),
@@ -10431,6 +10440,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         try {
           monitor.source?.disconnect()
+        } catch {
+          // Already disconnected.
+        }
+        try {
+          monitor.playbackGain?.disconnect()
         } catch {
           // Already disconnected.
         }

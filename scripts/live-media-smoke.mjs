@@ -9,6 +9,7 @@ const defaults = {
   chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   password: process.env.ROOM_PASSWORD || 'B0NFIRE!',
   participants: ['Guest 1', 'Guest 2'],
+  rejoin: '',
   timeoutMs: 45000,
   url: 'https://thebonfire.xyz'
 }
@@ -61,10 +62,14 @@ try {
   }
 
   for (const page of pages) {
-    await waitFor(page, `${page.name} remote media`, `
-      (() => typeof remoteElements !== 'undefined' && remoteElements.size >= ${pages.length - 1}
-        && typeof audioMonitors !== 'undefined' && audioMonitors.size >= ${pages.length - 1})()
-    `)
+    await waitForRoomMedia(page, pages.length)
+  }
+
+  if (config.rejoin) {
+    await rejoinParticipant(config.rejoin)
+    for (const page of pages) {
+      await waitForRoomMedia(page, pages.length)
+    }
   }
 
   await sleep(14000)
@@ -113,6 +118,9 @@ function parseArgs(args) {
       index++
     } else if (arg === '--participants' && next) {
       parsed.participants = next.split(',').map(value => value.trim()).filter(Boolean)
+      index++
+    } else if (arg === '--rejoin' && next) {
+      parsed.rejoin = next.trim()
       index++
     } else if (arg === '--chrome' && next) {
       parsed.chromePath = next
@@ -215,6 +223,44 @@ async function joinRoom(page) {
   `)
 }
 
+async function waitForRoomMedia(page, expectedClientCount) {
+  await waitFor(page, `${page.name} remote media`, `
+    (() => typeof remoteElements !== 'undefined' && remoteElements.size >= ${expectedClientCount - 1}
+      && typeof audioMonitors !== 'undefined' && audioMonitors.size >= ${expectedClientCount - 1})()
+  `)
+  await waitFor(page, `${page.name} participant labels`, `
+    (() => {
+      const expected = ${JSON.stringify(config.participants)}
+      const participants = typeof participantsInRoom !== 'undefined' ? participantsInRoom : []
+      const labels = Array.from(document.querySelectorAll('.video-tile'))
+        .map(tile => tile.dataset.participant || '')
+        .filter(Boolean)
+      return expected.every(name => participants.includes(name))
+        && expected.every(name => labels.filter(label => label === name).length === 1)
+        && !labels.includes('participant')
+    })()
+  `)
+}
+
+async function rejoinParticipant(name) {
+  const pageIndex = pages.findIndex(page => page.name === name)
+  if (pageIndex === -1) {
+    throw new Error(`cannot rejoin unknown participant ${name}`)
+  }
+
+  const oldPage = pages[pageIndex]
+  log('rejoin-start', name)
+  await evaluate(oldPage, 'leaveRoom?.(); true').catch(() => {})
+  oldPage.client.close()
+  pages.splice(pageIndex, 1)
+  await sleep(2200)
+
+  const newPage = await openPage(name)
+  pages.splice(pageIndex, 0, newPage)
+  await joinRoom(newPage)
+  log('rejoin-complete', name)
+}
+
 async function snapshotPage(page) {
   return evaluate(page, `
     (async () => {
@@ -252,6 +298,7 @@ async function snapshotPage(page) {
           : [],
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
         audioMonitors: typeof audioMonitors !== 'undefined' ? audioMonitors.size : -1,
+        pendingRemotePlayback: typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1,
         participantsInRoom: typeof participantsInRoom !== 'undefined' ? participantsInRoom.slice() : [],
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
@@ -289,6 +336,7 @@ async function basicPageState(page) {
 
 function validateSnapshots(snapshots, expectedClientCount) {
   const failures = []
+  const expectedNames = config.participants
   for (const snapshot of snapshots) {
     const localAudio = snapshot.localTracks.find(track => track.kind === 'audio')
     const localVideo = snapshot.localTracks.find(track => track.kind === 'video')
@@ -307,11 +355,42 @@ function validateSnapshots(snapshots, expectedClientCount) {
     if (snapshot.audioMonitors < expectedClientCount - 1) {
       failures.push(`${snapshot.name} has ${snapshot.audioMonitors} remote audio monitors`)
     }
+    if (snapshot.pendingRemotePlayback > 0) {
+      failures.push(`${snapshot.name} has ${snapshot.pendingRemotePlayback} pending remote playback elements`)
+    }
     if (snapshot.audioMode !== 'voice-focus') {
       failures.push(`${snapshot.name} audio mode is ${snapshot.audioMode}`)
     }
     if (!['worklet', 'script', 'webaudio'].includes(snapshot.voiceProcessor)) {
       failures.push(`${snapshot.name} voice processor is ${snapshot.voiceProcessor}`)
+    }
+    for (const name of expectedNames) {
+      if (!snapshot.participantsInRoom.includes(name)) {
+        failures.push(`${snapshot.name} participant list is missing ${name}`)
+      }
+      const tileCount = snapshot.tiles.filter(tile => tile.participant === name).length
+      if (tileCount !== 1) {
+        failures.push(`${snapshot.name} sees ${tileCount} tiles for ${name}`)
+      }
+    }
+    const placeholderTiles = snapshot.tiles.filter(tile => tile.participant === 'participant').length
+    if (placeholderTiles > 0) {
+      failures.push(`${snapshot.name} still has ${placeholderTiles} unlabeled participant tiles`)
+    }
+    const inboundVideoDecoded = snapshot.stats
+      .filter(stat => stat.type === 'inbound-rtp' && stat.kind === 'video')
+      .reduce((total, stat) => total + stat.framesDecoded, 0)
+    if (expectedClientCount > 1 && inboundVideoDecoded <= 0) {
+      failures.push(`${snapshot.name} has no decoded remote video frames`)
+    }
+    const candidateRtt = snapshot.stats
+      .filter(stat => stat.type === 'candidate-pair' && stat.nominated)
+      .reduce((max, stat) => Math.max(max, stat.currentRoundTripTime), 0)
+    if (candidateRtt > 0.35) {
+      failures.push(`${snapshot.name} candidate RTT is ${(candidateRtt * 1000).toFixed(0)}ms`)
+    }
+    if (snapshot.mediaQualityConstrained) {
+      failures.push(`${snapshot.name} media quality was constrained for lag`)
     }
   }
   return failures
