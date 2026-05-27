@@ -139,7 +139,7 @@ func TestIndexKeepsRemoteAudioTracksIndependent(t *testing.T) {
 	if mediaCleanup == "" {
 		t.Fatal("missing remote participant media cleanup helper")
 	}
-	if !strings.Contains(mediaCleanup, "audioMonitors") || !strings.Contains(mediaCleanup, "detachAudioMonitor") {
+	if !strings.Contains(mediaCleanup, "removeRemoteParticipantAudioTracksByName(participantName)") {
 		t.Fatal("rejoin media cleanup should remove stale same-name audio monitors")
 	}
 }
@@ -362,6 +362,7 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function promoteAudioMonitorToVideo(key, monitor, name)",
 		"function promoteParticipantAudioToVideo(name)",
 		"function demoteRemotePlaybackElementFromVideo(video, name)",
+		"function removeRemoteParticipantAudioTracksByName(name, options = {})",
 		"function shouldUseSyncedRemoteAudioPlayback()",
 		"return false",
 		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",

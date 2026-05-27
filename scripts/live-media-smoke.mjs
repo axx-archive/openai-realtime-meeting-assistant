@@ -296,6 +296,9 @@ async function snapshotPage(page) {
           : [],
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
         audioMonitors: typeof audioMonitors !== 'undefined' ? audioMonitors.size : -1,
+        audioMonitorNames: typeof audioMonitors !== 'undefined'
+          ? Array.from(audioMonitors.values()).map(monitor => monitor.name || '')
+          : [],
         pendingRemotePlayback: typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1,
         audiblePendingRemotePlayback: typeof remotePlaybackPendingCount === 'function'
           ? remotePlaybackPendingCount({ audibleOnly: true })
@@ -361,8 +364,8 @@ function validateSnapshots(snapshots, expectedClientCount) {
     if (snapshot.remoteElements < expectedClientCount - 1) {
       failures.push(`${snapshot.name} sees ${snapshot.remoteElements} remote media elements`)
     }
-    if (snapshot.audioMonitors < expectedClientCount - 1) {
-      failures.push(`${snapshot.name} has ${snapshot.audioMonitors} remote audio monitors`)
+    if (snapshot.audioMonitors !== expectedClientCount - 1) {
+      failures.push(`${snapshot.name} has ${snapshot.audioMonitors} remote audio monitors, expected ${expectedClientCount - 1}`)
     }
     if (snapshot.remoteAudioPlaybackBlocked || snapshot.audiblePendingRemotePlayback > 0) {
       failures.push(`${snapshot.name} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
@@ -380,6 +383,12 @@ function validateSnapshots(snapshots, expectedClientCount) {
       const tileCount = snapshot.tiles.filter(tile => tile.participant === name).length
       if (tileCount !== 1) {
         failures.push(`${snapshot.name} sees ${tileCount} tiles for ${name}`)
+      }
+      if (name !== snapshot.name) {
+        const audioMonitorCount = snapshot.audioMonitorNames.filter(monitorName => monitorName === name).length
+        if (audioMonitorCount !== 1) {
+          failures.push(`${snapshot.name} has ${audioMonitorCount} audio monitors for ${name}`)
+        }
       }
     }
     const placeholderTiles = snapshot.tiles.filter(tile => tile.participant === 'participant').length

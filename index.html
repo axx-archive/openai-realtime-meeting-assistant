@@ -9318,8 +9318,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           removeRemoteSelfTracks()
           return
         }
-        if (track?.kind === 'video' && name !== 'participant') {
-          removeRemoteParticipantVideoTracksByName(name, { exceptKeys: trackKeys.length ? trackKeys : keys })
+        if (name !== 'participant') {
+          if (track?.kind === 'video') {
+            removeRemoteParticipantVideoTracksByName(name, { exceptKeys: trackKeys.length ? trackKeys : keys })
+          } else if (track?.kind === 'audio') {
+            removeRemoteParticipantAudioTracksByName(name, { exceptKeys: trackKeys.length ? trackKeys : keys })
+          }
         }
         if (!relabelRemoteTileByKeys(keys, name)) {
           for (const key of keys) {
@@ -9437,6 +9441,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return removed
       }
 
+      function removeRemoteParticipantAudioTracksByName(name, options = {}) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+        const exceptKeys = new Set(normalizeRemoteTrackKeys(options.exceptKeys || []))
+        let removed = false
+
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          const monitorName = String(monitor.name || '').trim()
+          if (exceptKeys.has(key) || !monitorName || monitorName === 'participant' || monitorName.toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          detachAudioMonitor(key)
+          removed = true
+        }
+
+        return removed
+      }
+
       function removeRemoteParticipantMediaByName(name) {
         const participantName = String(name || '').trim()
         if (!participantName || participantName === 'participant') {
@@ -9444,14 +9468,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         let removed = removeRemoteParticipantVideoTracksByName(participantName)
-        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
-          const monitorName = String(monitor.name || '').trim()
-          if (!monitorName || monitorName.toLowerCase() !== participantName.toLowerCase()) {
-            continue
-          }
-          detachAudioMonitor(key)
-          removed = true
-        }
+        removed = removeRemoteParticipantAudioTracksByName(participantName) || removed
 
         if (removed) {
           updateHearthParticipants()
@@ -10546,6 +10563,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             detachAudioMonitor(remoteKey)
           }
           return
+        }
+        if (name !== 'participant') {
+          removeRemoteParticipantAudioTracksByName(name, { exceptKeys: keys })
         }
         const stream = event.streams[0] || new MediaStream([event.track])
         const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null
