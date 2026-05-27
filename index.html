@@ -10346,7 +10346,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function setVideoElementStream(video, stream, { hidden = false, local = false } = {}) {
-        const nextStream = stream || null
+        const nextStream = videoPlaybackStreamForElement(video, stream || null)
         if (video.srcObject !== nextStream) {
           video.srcObject = nextStream
           if (nextStream) {
@@ -10355,6 +10355,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         video.hidden = hidden || !nextStream
         video.classList.toggle('is-local', local)
+      }
+
+      function mediaStreamTrackSignature(stream) {
+        return (stream?.getTracks?.() || [])
+          .filter(liveTrack)
+          .map(track => `${track.kind}:${track.id}`)
+          .sort()
+          .join('|')
+      }
+
+      function videoPlaybackStreamForElement(video, stream) {
+        if (!stream) {
+          delete video.dataset.sourceStreamSignature
+          return null
+        }
+        const tagName = String(video?.tagName || '').toLowerCase()
+        if (!safariBrowser || tagName !== 'video') {
+          delete video.dataset.sourceStreamSignature
+          return stream
+        }
+        const signature = mediaStreamTrackSignature(stream)
+        if (!signature) {
+          delete video.dataset.sourceStreamSignature
+          return null
+        }
+        if (video.dataset.sourceStreamSignature === signature && video.srcObject) {
+          return video.srcObject
+        }
+        video.dataset.sourceStreamSignature = signature
+        return new MediaStream(stream.getTracks().filter(liveTrack))
       }
 
       function updateHearthParticipants() {
@@ -10750,6 +10780,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!element) {
           return
         }
+        const nextStream = videoPlaybackStreamForElement(element, stream)
         element.autoplay = true
         element.playsInline = true
         element.muted = muted
@@ -10757,8 +10788,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         element.volume = muted ? 0 : 1
         element.dataset.participant = name || 'participant'
         element.dataset.remotePlayback = muted ? 'muted' : 'synced'
-        if (element.srcObject !== stream) {
-          element.srcObject = stream
+        if (element.srcObject !== nextStream) {
+          element.srcObject = nextStream
         }
         playRemoteMedia(element)
       }
@@ -10779,6 +10810,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function shouldUseSyncedRemoteAudioPlayback() {
         return false
+      }
+
+      function shouldUseElementRemoteAudioPlayback() {
+        return safariBrowser
       }
 
       function promoteAudioMonitorToVideo(key, monitor, name) {
@@ -10870,7 +10905,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             analyser.fftSize = 512
             analyser.smoothingTimeConstant = 0.75
             source.connect(analyser)
-            if (options.play && context.createGain && context.destination) {
+            const useWebAudioPlayback = options.play && context.createGain && context.destination && !shouldUseElementRemoteAudioPlayback()
+            if (useWebAudioPlayback) {
               playbackGain = context.createGain()
               playbackGain.gain.value = 1
               source.connect(playbackGain)
