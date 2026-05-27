@@ -363,6 +363,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function promoteParticipantAudioToVideo(name)",
 		"function demoteRemotePlaybackElementFromVideo(video, name)",
 		"function removeRemoteParticipantAudioTracksByName(name, options = {})",
+		"function pruneStaleUnidentifiedAudioMonitors(reason = '')",
+		"function scheduleUnidentifiedAudioMonitorRepair(key)",
 		"function shouldUseSyncedRemoteAudioPlayback()",
 		"return false",
 		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",

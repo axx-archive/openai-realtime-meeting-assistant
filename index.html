@@ -8995,6 +8995,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         pruneRemoteMediaOutsideRoom()
+        pruneStaleUnidentifiedAudioMonitors('participant roster changed')
         if (options.announce !== false && names && names !== previousNames) {
           setLog(`in room · ${names}`)
         }
@@ -9229,6 +9230,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return removed
       }
 
+      function pruneStaleUnidentifiedAudioMonitors(reason = '') {
+        const expectedNames = participantsInRoom.filter(name => name && !isCurrentParticipantName(name))
+        if (expectedNames.length === 0) {
+          return false
+        }
+
+        const namedMonitorCounts = new Map()
+        for (const monitor of audioMonitors.values()) {
+          const monitorName = String(monitor.name || '').trim()
+          if (!monitorName || monitorName === 'participant') {
+            continue
+          }
+          const key = monitorName.toLowerCase()
+          namedMonitorCounts.set(key, (namedMonitorCounts.get(key) || 0) + 1)
+        }
+
+        const hasNamedAudioForEveryParticipant = expectedNames.every(name => (namedMonitorCounts.get(name.toLowerCase()) || 0) > 0)
+        if (!hasNamedAudioForEveryParticipant) {
+          requestParticipantTrackRefresh(reason || 'unlabeled remote audio')
+          return false
+        }
+
+        let removed = false
+        const now = performance.now()
+        for (const [key, monitor] of Array.from(audioMonitors.entries())) {
+          if (String(monitor.name || '').trim() !== 'participant') {
+            continue
+          }
+          const createdAt = Number(monitor.createdAt || 0)
+          if (createdAt && now - createdAt < 3500) {
+            continue
+          }
+          detachAudioMonitor(key)
+          removed = true
+        }
+        if (removed) {
+          updateHearthParticipants()
+        }
+        return removed
+      }
+
       function scheduleUnidentifiedRemoteTileRepair(tile) {
         if (!tile || tile.dataset.participant !== 'participant') {
           return
@@ -9241,6 +9283,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         window.setTimeout(() => {
           if (tile.isConnected && tile.dataset.participant === 'participant') {
             pruneStaleUnidentifiedRemoteVideoTiles()
+          }
+        }, 3800)
+      }
+
+      function scheduleUnidentifiedAudioMonitorRepair(key) {
+        requestParticipantTrackRefresh('unlabeled remote audio')
+        window.setTimeout(() => {
+          if (audioMonitors.has(key)) {
+            pruneStaleUnidentifiedAudioMonitors('delayed unlabeled remote audio')
           }
         }, 3800)
       }
@@ -9336,6 +9387,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         pruneDeadRemoteVideoTiles()
         pruneStaleUnidentifiedRemoteVideoTiles()
+        pruneStaleUnidentifiedAudioMonitors('participant track metadata')
         repairMissingRemoteVideoTiles('participant track metadata')
         window.setTimeout(() => repairMissingRemoteVideoTiles('delayed participant track metadata'), 350)
       }
@@ -10434,7 +10486,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           audio,
           ownsAudioElement,
           setsActiveSpeaker: options.setsActiveSpeaker !== false && Boolean(analyser),
-          stream
+          stream,
+          createdAt: performance.now()
         })
         track.addEventListener('ended', () => detachAudioMonitor(key), { once: true })
         if (analyser) {
@@ -10570,6 +10623,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stream = event.streams[0] || new MediaStream([event.track])
         const playbackElement = shouldUseSyncedRemoteAudioPlayback() ? remoteVideoElementForParticipant(name) : null
         attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })
+        if (name === 'participant') {
+          scheduleUnidentifiedAudioMonitorRepair(key)
+        } else {
+          pruneStaleUnidentifiedAudioMonitors('remote audio track')
+        }
       }
 
       function createRemoteVideoTile(keys, stream, participantName, track) {
