@@ -2963,7 +2963,9 @@ func broadcastKanbanEvent(event string, data any) {
 			Event: "kanban",
 			Data:  string(raw),
 		}); err != nil {
-			log.Errorf("Failed to send Kanban event: %v", err)
+			if !websocketClosedError(err) {
+				log.Errorf("Failed to send Kanban event: %v", err)
+			}
 		}
 	}
 }

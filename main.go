@@ -852,6 +852,9 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 					if _, err := peer.peerConnection.AddTransceiverFromTrack(trackLocal, webrtc.RTPTransceiverInit{
 						Direction: webrtc.RTPTransceiverDirectionSendonly,
 					}); err != nil {
+						if peerConnectionClosedError(err) {
+							return true
+						}
 						log.Errorf("Failed to add sender track=%s: %v", trackID, err)
 						return true
 					}
@@ -971,7 +974,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		return
 	}
 
-	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
+	c := &threadSafeWriter{Conn: unsafeConn} // nolint
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
@@ -1523,6 +1526,7 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 type threadSafeWriter struct {
 	*websocket.Conn
 	sync.Mutex
+	closed bool
 }
 
 func (t *threadSafeWriter) Close() error {
@@ -1532,6 +1536,10 @@ func (t *threadSafeWriter) Close() error {
 
 	t.Lock()
 	defer t.Unlock()
+	if t.closed {
+		return nil
+	}
+	t.closed = true
 
 	return t.Conn.Close()
 }
@@ -1543,6 +1551,32 @@ func (t *threadSafeWriter) WriteJSON(v any) error {
 
 	t.Lock()
 	defer t.Unlock()
+	if t.closed {
+		return fmt.Errorf("websocket is closed")
+	}
 
 	return t.Conn.WriteJSON(v)
+}
+
+func peerConnectionClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "connection closed") ||
+		strings.Contains(message, "peerconnection is closed") ||
+		strings.Contains(message, "invalidstateerror")
+}
+
+func websocketClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "websocket is closed") ||
+		strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "use of closed network connection") ||
+		strings.Contains(message, "close sent")
 }
