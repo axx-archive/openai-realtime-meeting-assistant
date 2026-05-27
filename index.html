@@ -7607,10 +7607,11 @@
             const report = await sessionPeer.getStats()
             const snapshot = summarizeMediaQualityStats(report)
             const laggy = mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)
-            sendMediaQualityReport(snapshot, previousMediaQualityStats, laggy)
             if (laggy) {
               await constrainCameraForLag('media stats')
             }
+            const remoteHealth = repairRemoteMediaHealth('media quality monitor')
+            sendMediaQualityReport(snapshot, previousMediaQualityStats, laggy, remoteHealth)
             previousMediaQualityStats = snapshot
           } catch (error) {
             console.warn('Could not read media quality stats', error)
@@ -7754,7 +7755,7 @@
         }
       }
 
-      function sendMediaQualityReport(snapshot, previous, laggy = false) {
+      function sendMediaQualityReport(snapshot, previous, laggy = false, remoteHealth = remoteMediaHealthSnapshot()) {
         if (!ws || ws.readyState !== WebSocket.OPEN || !currentParticipantName || !snapshot) {
           return
         }
@@ -7784,6 +7785,7 @@
             constrained: mediaQualityConstrained,
             settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode'])
           },
+          remote: remoteHealth,
           stats: snapshot,
           deltas: mediaQualityDelta(snapshot, previous)
         }
@@ -9341,6 +9343,227 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           updateHearthParticipants()
         }
         return removed
+      }
+
+      function expectedRemoteParticipantNames() {
+        return participantsInRoom.filter(name => name && !isCurrentParticipantName(name))
+      }
+
+      function remoteTileName(tile) {
+        return String(tile?.dataset?.participant || '').trim()
+      }
+
+      function remoteAudioMonitorName(monitor) {
+        return String(monitor?.name || '').trim()
+      }
+
+      function remoteTilePreferenceScore(tile) {
+        const createdAt = Number(tile?.dataset?.createdAt || 0)
+        return (remoteTileHasRenderedVideo(tile) ? 100 : 0)
+          + (remoteTileHasLiveVideo(tile) ? 20 : 0)
+          + Math.min(10, Math.max(0, createdAt / 100000))
+      }
+
+      function pruneDuplicateRemoteVideoTilesByName(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+        const lowerName = participantName.toLowerCase()
+        const matches = remoteTiles()
+          .filter(tile => remoteTileName(tile).toLowerCase() === lowerName)
+          .sort((left, right) => remoteTilePreferenceScore(right) - remoteTilePreferenceScore(left))
+        if (matches.length <= 1) {
+          return false
+        }
+
+        const keep = matches[0]
+        for (const tile of matches.slice(1)) {
+          disposeRemoteTile(tile)
+          forgetRemoteTile(tile)
+        }
+        const video = keep.querySelector('video')
+        const videoTrack = video?.srcObject?.getVideoTracks?.().find(liveTrack)
+        if (videoTrack) {
+          remoteVideoTracksByParticipant.set(participantName, videoTrack)
+          remoteStreamsByParticipant.set(participantName, video.srcObject)
+        }
+        updateHearthParticipants()
+        return true
+      }
+
+      function audioMonitorPreferenceScore(monitor) {
+        return (liveTrack(monitor?.track) ? 100 : 0)
+          + (monitor?.playbackGain || monitor?.audio ? 20 : 0)
+          + Math.min(10, Math.max(0, Number(monitor?.createdAt || 0) / 100000))
+      }
+
+      function pruneDuplicateAudioMonitorsByName(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'participant') {
+          return false
+        }
+        const lowerName = participantName.toLowerCase()
+        const matches = Array.from(audioMonitors.entries())
+          .filter(([, monitor]) => remoteAudioMonitorName(monitor).toLowerCase() === lowerName)
+          .sort((left, right) => audioMonitorPreferenceScore(right[1]) - audioMonitorPreferenceScore(left[1]))
+        if (matches.length <= 1) {
+          return false
+        }
+
+        for (const [key] of matches.slice(1)) {
+          detachAudioMonitor(key)
+        }
+        updateHearthParticipants()
+        return true
+      }
+
+      function remoteVideoTileCountsByName() {
+        const counts = new Map()
+        for (const tile of remoteTiles()) {
+          const name = remoteTileName(tile)
+          if (!name || name === 'participant') {
+            continue
+          }
+          counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1)
+        }
+        return counts
+      }
+
+      function remoteAudioMonitorCountsByName() {
+        const counts = new Map()
+        for (const monitor of audioMonitors.values()) {
+          const name = remoteAudioMonitorName(monitor)
+          if (!name || name === 'participant') {
+            continue
+          }
+          counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1)
+        }
+        return counts
+      }
+
+      function refreshStalledRemoteVideoTiles(reason = '') {
+        let refreshed = false
+        const now = performance.now()
+        for (const tile of remoteTiles()) {
+          const participantName = remoteTileName(tile)
+          if (!participantName || participantName === 'participant') {
+            continue
+          }
+          const createdAt = Number(tile.dataset.createdAt || 0)
+          if (createdAt && now - createdAt < 3500) {
+            continue
+          }
+          if (remoteTileHasRenderedVideo(tile)) {
+            continue
+          }
+          const video = tile.querySelector('video')
+          const videoTrack = video?.srcObject?.getVideoTracks?.().find(liveTrack) || remoteVideoTracksByParticipant.get(participantName)
+          if (!liveTrack(videoTrack)) {
+            continue
+          }
+          const stream = remoteVideoStreamForTrack(video?.srcObject || new MediaStream([videoTrack]), videoTrack)
+          configureRemotePlaybackElement(video, stream, participantName, { muted: true })
+          remoteStreamsByParticipant.set(participantName, stream)
+          remoteVideoTracksByParticipant.set(participantName, videoTrack)
+          refreshed = true
+        }
+        if (refreshed && reason) {
+          console.info('Refreshed stalled remote video playback', reason)
+        }
+        return refreshed
+      }
+
+      function repairMissingRemoteAudioMonitors(reason = '') {
+        if (!pc?.getTransceivers) {
+          return false
+        }
+        let repaired = false
+        for (const transceiver of pc.getTransceivers()) {
+          const track = transceiver.receiver?.track
+          if (!track || track.kind !== 'audio' || !liveTrack(track)) {
+            continue
+          }
+          const keys = normalizeRemoteTrackKeys([
+            remoteSDPTrackIdForMid(transceiver.mid),
+            track.id
+          ])
+          if (keys.some(key => audioMonitors.has(key))) {
+            continue
+          }
+          const participantName = keys
+            .map(key => remoteLabelsByTrack.get(key))
+            .find(Boolean)
+          if (!participantName || participantName === 'participant' || isCurrentParticipantName(participantName)) {
+            continue
+          }
+          const audioCounts = remoteAudioMonitorCountsByName()
+          if ((audioCounts.get(participantName.toLowerCase()) || 0) > 0) {
+            continue
+          }
+          attachAudioMonitor(keys[0] || track.id, participantName, track, { play: true })
+          repaired = true
+        }
+        if (repaired && reason) {
+          console.info('Repaired missing remote audio monitor', reason)
+        }
+        return repaired
+      }
+
+      function remoteMediaHealthSnapshot() {
+        const expectedNames = expectedRemoteParticipantNames()
+        const videoCounts = remoteVideoTileCountsByName()
+        const audioCounts = remoteAudioMonitorCountsByName()
+        const placeholderVideoTiles = remoteTiles().filter(tile => remoteTileName(tile) === 'participant').length
+        const placeholderAudioMonitors = Array.from(audioMonitors.values()).filter(monitor => remoteAudioMonitorName(monitor) === 'participant').length
+        const now = performance.now()
+        const stalledVideoNames = expectedNames.filter(name => {
+          const lowerName = name.toLowerCase()
+          return remoteTiles().some(tile => {
+            const createdAt = Number(tile.dataset.createdAt || 0)
+            return remoteTileName(tile).toLowerCase() === lowerName
+              && (!createdAt || now - createdAt >= 3500)
+              && remoteTileHasLiveVideo(tile)
+              && !remoteTileHasRenderedVideo(tile)
+          })
+        })
+
+        return {
+          expectedRemoteParticipants: expectedNames.length,
+          remoteVideoTiles: remoteTiles().length,
+          remoteAudioMonitors: audioMonitors.size,
+          placeholderVideoTiles,
+          placeholderAudioMonitors,
+          pendingRemotePlayback: remotePlaybackPendingCount(),
+          audiblePendingRemotePlayback: remotePlaybackPendingCount({ audibleOnly: true }),
+          audioContextState: audioContext?.state || '',
+          missingVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) === 0),
+          duplicateVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) > 1),
+          missingAudioNames: expectedNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) === 0),
+          duplicateAudioNames: expectedNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) > 1),
+          stalledVideoNames
+        }
+      }
+
+      function repairRemoteMediaHealth(reason = '') {
+        let repaired = false
+        for (const name of expectedRemoteParticipantNames()) {
+          repaired = pruneDuplicateRemoteVideoTilesByName(name) || repaired
+          repaired = pruneDuplicateAudioMonitorsByName(name) || repaired
+        }
+        repaired = pruneDeadRemoteVideoTiles() || repaired
+        repaired = pruneStaleUnidentifiedRemoteVideoTiles() || repaired
+        repaired = pruneStaleUnidentifiedAudioMonitors(reason || 'remote media health') || repaired
+        repaired = refreshStalledRemoteVideoTiles(reason) || repaired
+        repaired = repairMissingRemoteVideoTiles(reason) || repaired
+        repaired = repairMissingRemoteAudioMonitors(reason) || repaired
+
+        const health = remoteMediaHealthSnapshot()
+        if (health.missingVideoNames.length || health.missingAudioNames.length || health.placeholderVideoTiles || health.placeholderAudioMonitors) {
+          requestParticipantTrackRefresh(reason || 'remote media health')
+        }
+        health.repaired = repaired
+        return health
       }
 
       function scheduleUnidentifiedRemoteTileRepair(tile) {

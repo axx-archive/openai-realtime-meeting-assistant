@@ -342,6 +342,12 @@ func TestIndexPrunesDeadRemoteVideoTiles(t *testing.T) {
 		"function remoteTileHasLiveVideo(tile)",
 		"function pruneDeadRemoteVideoTiles()",
 		"function pruneStaleUnidentifiedRemoteVideoTiles()",
+		"function remoteMediaHealthSnapshot()",
+		"function repairRemoteMediaHealth(reason = '')",
+		"function refreshStalledRemoteVideoTiles(reason = '')",
+		"function repairMissingRemoteAudioMonitors(reason = '')",
+		"function pruneDuplicateRemoteVideoTilesByName(name)",
+		"function pruneDuplicateAudioMonitorsByName(name)",
 		"function requestParticipantTrackRefresh(reason = '')",
 		"event: 'request_participant_tracks'",
 		"function scheduleUnidentifiedRemoteTileRepair(tile)",
@@ -400,8 +406,9 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		"const mediaQualityReportIntervalMs = 12000",
-		"function sendMediaQualityReport(snapshot, previous, laggy = false)",
+		"function sendMediaQualityReport(snapshot, previous, laggy = false, remoteHealth = remoteMediaHealthSnapshot())",
 		"event: 'media_quality'",
+		"remote: remoteHealth",
 		"function reportClientMediaError(stage, error)",
 		"event: 'media_error'",
 		"lastError.mediaAttempts = failures",

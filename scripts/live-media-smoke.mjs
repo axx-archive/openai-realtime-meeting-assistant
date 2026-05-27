@@ -319,6 +319,7 @@ async function snapshotPage(page) {
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
+        remoteHealth: typeof remoteMediaHealthSnapshot === 'function' ? remoteMediaHealthSnapshot() : null,
         tiles: Array.from(document.querySelectorAll('.video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           classes: tile.className,
@@ -373,6 +374,27 @@ function validateSnapshots(snapshots, expectedClientCount) {
     }
     if (snapshot.remoteAudioPlaybackBlocked || snapshot.audiblePendingRemotePlayback > 0) {
       failures.push(`${snapshot.name} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
+    }
+    if (!snapshot.remoteHealth) {
+      failures.push(`${snapshot.name} has no remote media health snapshot`)
+    } else {
+      for (const [key, names] of Object.entries({
+        missingVideoNames: snapshot.remoteHealth.missingVideoNames || [],
+        missingAudioNames: snapshot.remoteHealth.missingAudioNames || [],
+        duplicateVideoNames: snapshot.remoteHealth.duplicateVideoNames || [],
+        duplicateAudioNames: snapshot.remoteHealth.duplicateAudioNames || [],
+        stalledVideoNames: snapshot.remoteHealth.stalledVideoNames || []
+      })) {
+        if (names.length > 0) {
+          failures.push(`${snapshot.name} remote health ${key}=${names.join(',')}`)
+        }
+      }
+      if (snapshot.remoteHealth.placeholderVideoTiles > 0 || snapshot.remoteHealth.placeholderAudioMonitors > 0) {
+        failures.push(`${snapshot.name} remote health placeholders video=${snapshot.remoteHealth.placeholderVideoTiles} audio=${snapshot.remoteHealth.placeholderAudioMonitors}`)
+      }
+      if (snapshot.remoteHealth.audiblePendingRemotePlayback > 0) {
+        failures.push(`${snapshot.name} remote health has pending audible playback ${snapshot.remoteHealth.audiblePendingRemotePlayback}`)
+      }
     }
     if (snapshot.audioMode !== 'voice-focus') {
       failures.push(`${snapshot.name} audio mode is ${snapshot.audioMode}`)

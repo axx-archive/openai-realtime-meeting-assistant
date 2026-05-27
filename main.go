@@ -560,10 +560,11 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	browser := mapFromPayload(payload, "browser")
 	audio := mapFromPayload(payload, "audio")
 	video := mapFromPayload(payload, "video")
+	remote := mapFromPayload(payload, "remote")
 	stats := mapFromPayload(payload, "stats")
 	candidatePair := mapFromPayload(stats, "candidatePair")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s\n",
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
@@ -579,6 +580,16 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 		stringFromPayload(candidatePair, "remoteCandidateType"),
 		stringFromPayload(candidatePair, "protocol"),
 		stringFromPayload(candidatePair, "networkType"),
+		int(floatFromPayload(remote, "remoteVideoTiles")),
+		int(floatFromPayload(remote, "remoteAudioMonitors")),
+		arrayLenFromPayload(remote, "missingVideoNames"),
+		arrayLenFromPayload(remote, "missingAudioNames"),
+		arrayLenFromPayload(remote, "duplicateVideoNames"),
+		arrayLenFromPayload(remote, "duplicateAudioNames"),
+		int(floatFromPayload(remote, "placeholderVideoTiles")),
+		int(floatFromPayload(remote, "placeholderAudioMonitors")),
+		arrayLenFromPayload(remote, "stalledVideoNames"),
+		int(floatFromPayload(remote, "audiblePendingRemotePlayback")),
 	)
 }
 
