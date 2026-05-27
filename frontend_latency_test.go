@@ -183,8 +183,9 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
+		"const audioSettingsSchemaVersion = 2",
 		"window.localStorage?.getItem(audioSettingsStorageKey)",
-		"window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify(audioSettings))",
+		"version: audioSettingsSchemaVersion",
 		"let voiceTrainingPrivacyMute = false",
 		"function effectiveMicMuted()",
 		"return Boolean(isMicMuted || voiceTrainingPrivacyMute)",

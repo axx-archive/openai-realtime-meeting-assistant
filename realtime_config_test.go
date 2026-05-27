@@ -102,6 +102,25 @@ func TestBrowserRTCConfigurationSupportsTurnFallback(t *testing.T) {
 	}
 }
 
+func TestBrowserRTCConfigurationDefaultsToPublicStun(t *testing.T) {
+	t.Setenv("MEETING_STUN_URLS", "")
+	t.Setenv("MEETING_TURN_URLS", "")
+	t.Setenv("MEETING_ICE_SERVERS_JSON", "")
+	t.Setenv("MEETING_DISABLE_DEFAULT_STUN", "")
+
+	config := browserRTCConfigurationFromEnv()
+	servers, ok := config["iceServers"].([]map[string]any)
+	if !ok {
+		t.Fatalf("iceServers missing from config: %#v", config)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("iceServers len=%d, want default stun only", len(servers))
+	}
+	if got := servers[0]["urls"].([]string); !sameStringSlice(got, []string{"stun:stun.l.google.com:19302"}) {
+		t.Fatalf("default stun urls=%v", got)
+	}
+}
+
 func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 

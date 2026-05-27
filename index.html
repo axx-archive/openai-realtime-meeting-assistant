@@ -6165,6 +6165,7 @@
       let mediaQualityConstrained = false
       let previousMediaQualityStats = null
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
+      const audioSettingsSchemaVersion = 2
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const safariBrowser = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
       const audioModeLabels = {
@@ -6347,11 +6348,15 @@
       function loadAudioSettings() {
         const defaults = {
           mode: 'voice-focus',
+          version: audioSettingsSchemaVersion,
           profile: { ...defaultVoiceProfile }
         }
         try {
           const saved = JSON.parse(window.localStorage?.getItem(audioSettingsStorageKey) || '{}')
-          const mode = Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode) ? saved.mode : defaults.mode
+          const savedVersion = Number(saved?.version) || 0
+          const mode = savedVersion >= audioSettingsSchemaVersion && Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode)
+            ? saved.mode
+            : defaults.mode
           const profile = saved?.profile && typeof saved.profile === 'object'
             ? {
                 noiseFloor: clampNumber(saved.profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
@@ -6359,7 +6364,7 @@
                 trainedAt: String(saved.profile.trainedAt || '')
               }
             : { ...defaultVoiceProfile }
-          return { mode, profile }
+          return { mode, version: audioSettingsSchemaVersion, profile }
         } catch {
           return defaults
         }
@@ -6367,7 +6372,10 @@
 
       function saveAudioSettings() {
         try {
-          window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify(audioSettings))
+          window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify({
+            ...audioSettings,
+            version: audioSettingsSchemaVersion
+          }))
         } catch {
           // Audio still works if local storage is unavailable.
         }

@@ -458,8 +458,12 @@ func sendParticipantTrackSnapshots(websocket *threadSafeWriter, excludeParticipa
 
 func browserRTCConfigurationFromEnv() map[string]any {
 	iceServers := make([]map[string]any, 0)
+	stunURLs := splitEnvList("MEETING_STUN_URLS")
+	if len(stunURLs) == 0 && !boolEnv("MEETING_DISABLE_DEFAULT_STUN") {
+		stunURLs = []string{"stun:stun.l.google.com:19302"}
+	}
 	for _, urls := range [][]string{
-		splitEnvList("MEETING_STUN_URLS"),
+		stunURLs,
 		splitEnvList("MEETING_TURN_URLS"),
 	} {
 		if len(urls) == 0 {
