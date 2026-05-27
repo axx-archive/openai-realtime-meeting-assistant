@@ -6156,6 +6156,15 @@
       let queuedRemoteCandidates = []
       let localAudioSourceTrack
       let localAudioProcessor
+      let voiceFocusDiagnostics = {
+        updatedAt: 0,
+        inputRms: 0,
+        outputRms: 0,
+        gain: 1,
+        noiseBias: 0,
+        speechConfidence: 0,
+        suppressionDb: 0
+      }
       let voiceFocusWorkletPromise
       let voiceTrainingFrame = 0
       let voiceTrainingCleanup = null
@@ -7756,6 +7765,38 @@
         return 'browser'
       }
 
+      function updateVoiceFocusDiagnostics(metrics = {}) {
+        const inputRms = Math.max(0, Number(metrics.inputRms) || 0)
+        const outputRms = Math.max(0, Number(metrics.outputRms) || 0)
+        const suppressionDb = inputRms > 0 && outputRms > 0
+          ? Math.max(0, 20 * Math.log10(inputRms / outputRms))
+          : (inputRms > 0 ? 80 : 0)
+        voiceFocusDiagnostics = {
+          updatedAt: performance.now(),
+          inputRms,
+          outputRms,
+          gain: clampNumber(metrics.gain, 0, 1.25, voiceFocusDiagnostics.gain),
+          noiseBias: clampNumber(metrics.noiseBias, 0, 0.2, voiceFocusDiagnostics.noiseBias),
+          speechConfidence: clampNumber(metrics.speechConfidence, 0, 1, voiceFocusDiagnostics.speechConfidence),
+          suppressionDb
+        }
+      }
+
+      function voiceFocusDiagnosticsSnapshot() {
+        if (!voiceFocusEnabled() || !voiceFocusDiagnostics.updatedAt) {
+          return {}
+        }
+        return {
+          ageMs: Math.round(Math.max(0, performance.now() - voiceFocusDiagnostics.updatedAt)),
+          inputRms: Number(voiceFocusDiagnostics.inputRms.toFixed(5)),
+          outputRms: Number(voiceFocusDiagnostics.outputRms.toFixed(5)),
+          gain: Number(voiceFocusDiagnostics.gain.toFixed(4)),
+          noiseBias: Number(voiceFocusDiagnostics.noiseBias.toFixed(5)),
+          speechConfidence: Number(voiceFocusDiagnostics.speechConfidence.toFixed(3)),
+          suppressionDb: Number(voiceFocusDiagnostics.suppressionDb.toFixed(1))
+        }
+      }
+
       function reportClientMediaError(stage, error) {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           return
@@ -7813,6 +7854,7 @@
             voiceFocus: voiceFocusEnabled(),
             processing: audioProcessingEnabled(),
             processor: voiceFocusProcessorType(),
+            voiceFocusMetrics: voiceFocusDiagnosticsSnapshot(),
             sourceSettings: trackSettingsSnapshot(localAudioSourceTrack || localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency']),
             outputSettings: trackSettingsSnapshot(localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency'])
           },
@@ -8251,7 +8293,8 @@
         const closedBlend = Math.max(0, 1 - state.gain)
         const isolationBlend = Math.max(closedBlend, 1 - state.speechConfidence)
         const biasCap = state.speechConfidence > 0.72 ? 0.012 : (state.gain > 0.55 ? 0.024 : 0.072)
-        const biasMultiplier = 0.45 + isolationBlend * 2.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+        const speechNoiseBlend = Math.max(isolationBlend, state.speechConfidence > 0.72 ? 0.45 : 0)
+        const biasMultiplier = 0.65 + speechNoiseBlend * 3.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
         state.noiseBias = Math.min(state.noiseFloor * biasMultiplier, biasCap) * state.strength
         return state.gain
       }
@@ -8259,6 +8302,7 @@
       function createVoiceFocusScriptProcessor(context) {
         const node = context.createScriptProcessor(512, 1, 1)
         const state = createVoiceFocusState()
+        let metricsFrames = 0
         node.onaudioprocess = event => {
           const input = event.inputBuffer.getChannelData(0)
           const output = event.outputBuffer.getChannelData(0)
@@ -8268,6 +8312,16 @@
             const sample = input[index] || 0
             const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
             output[index] = denoised * gain
+          }
+          metricsFrames++
+          if (metricsFrames % 24 === 0) {
+            updateVoiceFocusDiagnostics({
+              inputRms: rmsFromFloatSamples(input),
+              outputRms: rmsFromFloatSamples(output),
+              gain,
+              noiseBias,
+              speechConfidence: state.speechConfidence
+            })
           }
         }
         return node
@@ -8290,6 +8344,7 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     this.holdFrames = 0
     this.speechConfidence = 0
     this.noiseBias = 0
+    this.metricsFrames = 0
     this.calibrated = false
     this.port.onmessage = event => {
       const data = event.data || {}
@@ -8376,16 +8431,35 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const closedBlend = Math.max(0, 1 - this.gain)
     const isolationBlend = Math.max(closedBlend, 1 - this.speechConfidence)
     const biasCap = this.speechConfidence > 0.72 ? 0.012 : (this.gain > 0.55 ? 0.024 : 0.072)
-    const biasMultiplier = 0.45 + isolationBlend * 2.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+    const speechNoiseBlend = Math.max(isolationBlend, this.speechConfidence > 0.72 ? 0.45 : 0)
+    const biasMultiplier = 0.65 + speechNoiseBlend * 3.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
     this.noiseBias = Math.min(this.noiseFloor * biasMultiplier, biasCap) * this.strength
+    let outputSum = 0
+    let outputCount = 0
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]
       for (let index = 0; index < target.length; index++) {
         const sample = source[index] || 0
         const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - this.noiseBias)
-        target[index] = denoised * this.gain
+        const outputSample = denoised * this.gain
+        target[index] = outputSample
+        if (channel === 0) {
+          outputSum += outputSample * outputSample
+          outputCount++
+        }
       }
+    }
+    this.metricsFrames++
+    if (this.metricsFrames % 48 === 0) {
+      this.port.postMessage({
+        type: 'metrics',
+        inputRms: rms,
+        outputRms: Math.sqrt(outputSum / Math.max(1, outputCount)),
+        gain: this.gain,
+        noiseBias: this.noiseBias,
+        speechConfidence: this.speechConfidence
+      })
     }
     return true
   }
@@ -8413,6 +8487,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function configureVoiceFocusNode(node) {
         const config = voiceFocusConfig()
+        if (node?.port) {
+          node.port.onmessage = event => {
+            if (event.data?.type === 'metrics') {
+              updateVoiceFocusDiagnostics(event.data)
+            }
+          }
+        }
         node?.port?.postMessage?.({
           type: 'configure',
           noiseFloor: config.noiseFloor,

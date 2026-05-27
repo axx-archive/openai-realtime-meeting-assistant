@@ -565,9 +565,10 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	deltas := mapFromPayload(payload, "deltas")
 	candidatePair := mapFromPayload(stats, "candidatePair")
 	audioOutput := mapFromPayload(audio, "outputSettings")
+	voiceFocusMetrics := mapFromPayload(audio, "voiceFocusMetrics")
 	videoSettings := mapFromPayload(video, "settings")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
@@ -576,6 +577,10 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 		stringFromPayload(audio, "mode"),
 		boolFromPayload(audio, "voiceFocus"),
 		stringFromPayload(audio, "processor"),
+		floatFromPayload(voiceFocusMetrics, "gain"),
+		floatFromPayload(voiceFocusMetrics, "suppressionDb"),
+		floatFromPayload(voiceFocusMetrics, "noiseBias"),
+		floatFromPayload(voiceFocusMetrics, "speechConfidence"),
 		stringFromPayload(audioOutput, "readyState"),
 		boolFromPayload(audioOutput, "enabled"),
 		stringFromPayload(videoSettings, "readyState"),

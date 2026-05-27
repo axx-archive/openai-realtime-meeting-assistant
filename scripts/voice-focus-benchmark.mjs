@@ -38,7 +38,8 @@ const requiredInlineSnippets = [
   'strength: 0.998',
   'speechConfidence: 0',
   'const forcedNoise = transient || hissNoise || rumbleNoise',
-  'const biasMultiplier = 0.45 + isolationBlend * 2.9',
+  'const speechNoiseBlend = Math.max(isolationBlend',
+  'const biasMultiplier = 0.65 + speechNoiseBlend * 3.9',
   'state.noiseBias = Math.min(state.noiseFloor * biasMultiplier'
 ]
 
@@ -49,6 +50,7 @@ const results = [
   benchmarkTransientSuppression(),
   benchmarkSpeechRecovery(),
   benchmarkNoisySpeechRecovery(),
+  benchmarkConcurrentNoiseReduction('speech over fan', makeFanFrame, { maxResidualRatio: 1.02, minSpeechRatio: 0.72 }),
   benchmarkPostSpeechSuppression('post-speech fan', makeFanFrame, { maxRatio: 0.12, maxGain: 0.45 }),
   benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 })
 ]
@@ -207,6 +209,53 @@ function benchmarkNoisySpeechRecovery() {
     averageBias,
     inputRms: average(settled.map(frame => frame.inputRms)),
     outputRms: average(settled.map(frame => frame.outputRms)),
+    failures
+  }
+}
+
+function benchmarkConcurrentNoiseReduction(name, noiseFactory, limits) {
+  const cleanState = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  const noisyState = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  for (let frameIndex = 0; frameIndex < 80; frameIndex++) {
+    processFrame(cleanState, noiseFactory(frameIndex))
+    processFrame(noisyState, noiseFactory(frameIndex))
+  }
+
+  const frames = []
+  for (let frameIndex = 0; frameIndex < 28; frameIndex++) {
+    const speech = makeSpeechFrame(frameIndex)
+    const noise = noiseFactory(frameIndex + 80)
+    const clean = processFrame(cleanState, speech)
+    const noisy = processFrame(noisyState, mixFrames(speech, noise))
+    const residual = noisy.output.map((sample, index) => sample - (clean.output[index] || 0))
+    frames.push({
+      residualRms: rms(residual),
+      noiseRms: rms(noise),
+      speechRms: rms(speech),
+      cleanOutputRms: clean.outputRms,
+      noisyOutputRms: noisy.outputRms,
+      noiseBias: noisy.noiseBias
+    })
+  }
+
+  const settled = frames.slice(-12)
+  const residualRatio = average(settled.map(frame => frame.residualRms / Math.max(frame.noiseRms, 0.000001)))
+  const cleanSpeechRatio = average(settled.map(frame => frame.cleanOutputRms / Math.max(frame.speechRms, 0.000001)))
+  const averageBias = average(settled.map(frame => frame.noiseBias))
+  const failures = []
+  if (residualRatio > limits.maxResidualRatio) {
+    failures.push(`${name} residual ratio ${residualRatio.toFixed(4)} exceeded ${limits.maxResidualRatio}`)
+  }
+  if (cleanSpeechRatio < limits.minSpeechRatio) {
+    failures.push(`${name} clean speech ratio ${cleanSpeechRatio.toFixed(4)} below ${limits.minSpeechRatio}`)
+  }
+  return {
+    name,
+    residualRatio,
+    cleanSpeechRatio,
+    averageBias,
+    residualRms: average(settled.map(frame => frame.residualRms)),
+    noiseRms: average(settled.map(frame => frame.noiseRms)),
     failures
   }
 }
