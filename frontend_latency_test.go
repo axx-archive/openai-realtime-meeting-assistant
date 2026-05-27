@@ -16,8 +16,11 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		"width: { ideal: 640, max: 854 }",
-		"maxBitrate: 550000",
-		"constrainedMaxBitrate: 360000",
+		"maxBitrate: 480000",
+		"groupMaxBitrate: 320000",
+		"constrainedMaxBitrate: 220000",
+		"function useGroupVideoLimits()",
+		"configureOutboundSenders().catch(error => {",
 		"function startMediaQualityMonitor(sessionPeer)",
 		"function constrainCameraForLag(reason)",
 		"screenShareMaxBitrate: 1600000",

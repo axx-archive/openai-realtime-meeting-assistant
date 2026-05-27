@@ -6211,12 +6211,14 @@
         }
       }
       const outboundMediaLimits = {
-        audio: { maxBitrate: 48000 },
+        audio: { maxBitrate: 32000 },
         video: {
-          maxBitrate: 550000,
-          maxFramerate: 20,
-          constrainedMaxBitrate: 360000,
-          constrainedMaxFramerate: 15,
+          maxBitrate: 480000,
+          maxFramerate: 18,
+          groupMaxBitrate: 320000,
+          groupMaxFramerate: 15,
+          constrainedMaxBitrate: 220000,
+          constrainedMaxFramerate: 12,
           screenShareMaxBitrate: 1600000,
           screenShareMaxFramerate: 15
         }
@@ -7377,22 +7379,14 @@
 
         const isScreenShare = track.kind === 'video' && track.contentHint === screenShareContentHint
         const encoding = parameters.encodings[0]
-        const maxBitrate = isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)
-          ? limits.screenShareMaxBitrate
-          : track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxBitrate)
-            ? limits.constrainedMaxBitrate
-          : limits.maxBitrate
+        const maxBitrate = outboundMaxBitrateForTrack(track, limits, isScreenShare)
         if (Number.isFinite(maxBitrate)) {
           encoding.maxBitrate = maxBitrate
         }
         if (track.kind === 'audio' && 'dtx' in encoding) {
           encoding.dtx = 'enabled'
         }
-        const maxFramerate = isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)
-          ? limits.screenShareMaxFramerate
-          : track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxFramerate)
-            ? limits.constrainedMaxFramerate
-          : limits.maxFramerate
+        const maxFramerate = outboundMaxFramerateForTrack(track, limits, isScreenShare)
         if (track.kind === 'video' && Number.isFinite(maxFramerate)) {
           encoding.maxFramerate = maxFramerate
           if ('degradationPreference' in parameters) {
@@ -7407,6 +7401,44 @@
         } catch (error) {
           console.warn('Could not apply outbound media limits', error)
         }
+      }
+
+      function currentRoomParticipantCount() {
+        const visibleNames = new Set(participantsInRoom.map(name => String(name || '').trim().toLowerCase()).filter(Boolean))
+        if (currentParticipantName) {
+          visibleNames.add(currentParticipantName.toLowerCase())
+        }
+        return visibleNames.size
+      }
+
+      function useGroupVideoLimits() {
+        return currentRoomParticipantCount() >= 4
+      }
+
+      function outboundMaxBitrateForTrack(track, limits, isScreenShare) {
+        if (isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)) {
+          return limits.screenShareMaxBitrate
+        }
+        if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxBitrate)) {
+          return limits.constrainedMaxBitrate
+        }
+        if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxBitrate)) {
+          return limits.groupMaxBitrate
+        }
+        return limits.maxBitrate
+      }
+
+      function outboundMaxFramerateForTrack(track, limits, isScreenShare) {
+        if (isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)) {
+          return limits.screenShareMaxFramerate
+        }
+        if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxFramerate)) {
+          return limits.constrainedMaxFramerate
+        }
+        if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxFramerate)) {
+          return limits.groupMaxFramerate
+        }
+        return limits.maxFramerate
       }
 
       async function configureOutboundSenders() {
@@ -8996,6 +9028,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         pruneRemoteMediaOutsideRoom()
         pruneStaleUnidentifiedAudioMonitors('participant roster changed')
+        configureOutboundSenders().catch(error => {
+          console.warn('Could not retune outbound media after roster change', error)
+        })
         if (options.announce !== false && names && names !== previousNames) {
           setLog(`in room · ${names}`)
         }
