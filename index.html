@@ -6215,10 +6215,14 @@
         video: {
           maxBitrate: 480000,
           maxFramerate: 18,
-          groupMaxBitrate: 320000,
-          groupMaxFramerate: 15,
-          constrainedMaxBitrate: 220000,
-          constrainedMaxFramerate: 12,
+          groupMaxBitrate: 220000,
+          groupMaxFramerate: 12,
+          groupMaxWidth: 480,
+          groupMaxHeight: 270,
+          constrainedMaxBitrate: 160000,
+          constrainedMaxFramerate: 10,
+          constrainedMaxWidth: 424,
+          constrainedMaxHeight: 240,
           screenShareMaxBitrate: 1600000,
           screenShareMaxFramerate: 15
         }
@@ -7445,9 +7449,40 @@
         if (!pc) {
           return
         }
+        await retuneLocalCameraCapture()
         await Promise.all(pc.getSenders()
           .filter(sender => sender.track)
           .map(sender => configureOutboundSender(sender, sender.track)))
+      }
+
+      async function retuneLocalCameraCapture() {
+        const track = localVideoTrack()
+        if (!track?.applyConstraints || !liveTrack(track)) {
+          return
+        }
+        const limits = outboundMediaLimits.video
+        const constraints = mediaQualityConstrained
+          ? {
+              width: { max: limits.constrainedMaxWidth },
+              height: { max: limits.constrainedMaxHeight },
+              frameRate: { max: limits.constrainedMaxFramerate }
+            }
+          : useGroupVideoLimits()
+            ? {
+                width: { max: limits.groupMaxWidth },
+                height: { max: limits.groupMaxHeight },
+                frameRate: { max: limits.groupMaxFramerate }
+              }
+            : {
+                width: { max: 854 },
+                height: { max: 480 },
+                frameRate: { max: limits.maxFramerate }
+              }
+        try {
+          await track.applyConstraints(constraints)
+        } catch (error) {
+          console.warn('Could not retune camera capture for room size', error)
+        }
       }
 
       async function loadClientConfig() {
@@ -7852,8 +7887,8 @@
         }
         try {
           await sender.track.applyConstraints?.({
-            width: { max: 640 },
-            height: { max: 360 },
+            width: { max: limits.constrainedMaxWidth },
+            height: { max: limits.constrainedMaxHeight },
             frameRate: { max: limits.constrainedMaxFramerate }
           })
         } catch (error) {
