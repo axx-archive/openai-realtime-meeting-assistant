@@ -9580,11 +9580,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!liveTrack(videoTrack)) {
             continue
           }
+          const keys = remoteKeysForTile(tile)
           const stream = remoteVideoStreamForTrack(video?.srcObject || new MediaStream([videoTrack]), videoTrack)
-          configureRemotePlaybackElement(video, stream, participantName, { muted: true })
-          remoteStreamsByParticipant.set(participantName, stream)
-          remoteVideoTracksByParticipant.set(participantName, videoTrack)
-          refreshed = true
+          disposeRemoteTile(tile)
+          forgetRemoteTile(tile)
+          refreshed = createRemoteVideoTile(keys, stream, participantName, videoTrack) || refreshed
+          requestParticipantTrackRefresh(reason || 'stalled remote video')
         }
         if (refreshed && reason) {
           console.info('Refreshed stalled remote video playback', reason)

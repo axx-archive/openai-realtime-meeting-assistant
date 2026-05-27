@@ -351,6 +351,7 @@ func TestIndexPrunesDeadRemoteVideoTiles(t *testing.T) {
 		"function remoteMediaHealthSnapshot()",
 		"function repairRemoteMediaHealth(reason = '')",
 		"function refreshStalledRemoteVideoTiles(reason = '')",
+		"createRemoteVideoTile(keys, stream, participantName, videoTrack)",
 		"function repairMissingRemoteAudioMonitors(reason = '')",
 		"function pruneDuplicateRemoteVideoTilesByName(name)",
 		"function pruneDuplicateAudioMonitorsByName(name)",
