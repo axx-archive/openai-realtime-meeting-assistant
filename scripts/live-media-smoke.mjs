@@ -264,10 +264,14 @@ async function snapshotPage(page) {
     (async () => {
       const stats = typeof pc !== 'undefined' && pc
         ? Array.from((await pc.getStats()).values()).map(stat => ({
+            id: stat.id || '',
             type: stat.type,
             kind: stat.kind || '',
             state: stat.state || '',
             nominated: Boolean(stat.nominated),
+            selectedCandidatePairId: stat.selectedCandidatePairId || '',
+            localCandidateId: stat.localCandidateId || '',
+            remoteCandidateId: stat.remoteCandidateId || '',
             currentRoundTripTime: Number(stat.currentRoundTripTime) || 0,
             jitter: Number(stat.jitter) || 0,
             packetsLost: Number(stat.packetsLost) || 0,
@@ -401,9 +405,7 @@ function validateSnapshots(snapshots, expectedClientCount) {
     if (expectedClientCount > 1 && inboundVideoDecoded <= 0) {
       failures.push(`${snapshot.name} has no decoded remote video frames`)
     }
-    const candidateRtt = snapshot.stats
-      .filter(stat => stat.type === 'candidate-pair' && stat.nominated)
-      .reduce((max, stat) => Math.max(max, stat.currentRoundTripTime), 0)
+    const candidateRtt = selectedCandidateRtt(snapshot.stats)
     if (candidateRtt > 0.35) {
       failures.push(`${snapshot.name} candidate RTT is ${(candidateRtt * 1000).toFixed(0)}ms`)
     }
@@ -412,6 +414,24 @@ function validateSnapshots(snapshots, expectedClientCount) {
     }
   }
   return failures
+}
+
+function selectedCandidateRtt(stats) {
+  const statsById = new Map(stats.map(stat => [stat.id, stat]))
+  const selectedPairIds = stats
+    .filter(stat => stat.type === 'transport' && stat.selectedCandidatePairId)
+    .map(stat => stat.selectedCandidatePairId)
+  const selectedPairs = selectedPairIds
+    .map(id => statsById.get(id))
+    .filter(Boolean)
+  if (selectedPairs.length > 0) {
+    return selectedPairs.reduce((max, stat) => Math.max(max, stat.currentRoundTripTime), 0)
+  }
+
+  const nominatedPairs = stats
+    .filter(stat => stat.type === 'candidate-pair' && stat.nominated && stat.state === 'succeeded')
+    .sort((left, right) => right.packetsReceived - left.packetsReceived)
+  return nominatedPairs[0]?.currentRoundTripTime || 0
 }
 
 async function closePages(pages) {
