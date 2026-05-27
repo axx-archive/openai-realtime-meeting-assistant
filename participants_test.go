@@ -295,6 +295,51 @@ func TestRoomPeerConnectionOffersStableSafariCompatibleVideoCodecs(t *testing.T)
 	}
 }
 
+func TestForwardedTrackOfferUsesSourceCodecPreference(t *testing.T) {
+	peerConnection, err := newPeerConnection()
+	if err != nil {
+		t.Fatalf("create peer connection: %v", err)
+	}
+	defer peerConnection.Close()
+
+	track, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{
+		MimeType:     webrtc.MimeTypeVP8,
+		ClockRate:    90000,
+		RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
+	}, "guest-video", "guest-stream")
+	if err != nil {
+		t.Fatalf("create forwarded track: %v", err)
+	}
+
+	transceiver, err := peerConnection.AddTransceiverFromTrack(track, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionSendonly,
+	})
+	if err != nil {
+		t.Fatalf("add forwarded track: %v", err)
+	}
+	if err := preferSourceTrackCodec(transceiver, track); err != nil {
+		t.Fatalf("prefer source codec: %v", err)
+	}
+
+	offer, err := peerConnection.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	videoLine := ""
+	for _, line := range strings.Split(offer.SDP, "\n") {
+		if strings.HasPrefix(line, "m=video ") {
+			videoLine = line
+			break
+		}
+	}
+	if !strings.Contains(offer.SDP, "VP8/90000") {
+		t.Fatalf("offer SDP missing VP8 codec:\n%s", offer.SDP)
+	}
+	if strings.Contains(videoLine, " 102") {
+		t.Fatalf("forwarded VP8 track offer should not advertise H264 before binding; video m-line=%q", videoLine)
+	}
+}
+
 func TestRoomSnapshotIncludesParticipantMediaState(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 

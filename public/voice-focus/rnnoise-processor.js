@@ -263,7 +263,7 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
       ? 1
       : (frameVoice < 0.24 ? this.floorGain : 0.32)
     this.rnnoiseGate += (targetGate - this.rnnoiseGate) * (targetGate > this.rnnoiseGate ? 0.44 : 0.3)
-    this.noiseBias = Math.min(this.noiseFloor * (this.rnnoiseSpeech > 0.55 ? 0.42 : 0.72), this.rnnoiseSpeech > 0.55 ? 0.0065 : 0.014) * this.strength
+    this.noiseBias = Math.min(this.noiseFloor * (this.rnnoiseSpeech > 0.55 ? 0.55 : 0.82), this.rnnoiseSpeech > 0.55 ? 0.0085 : 0.016) * this.strength
 
     const outputOffset = this.outputPtr >> 2
     for (let index = 0; index < this.frameSize; index++) {

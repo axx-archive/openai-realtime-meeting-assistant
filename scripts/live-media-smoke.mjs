@@ -303,9 +303,18 @@ async function snapshotPage(page) {
             packetsReceived: Number(stat.packetsReceived) || 0,
             framesDecoded: Number(stat.framesDecoded) || 0,
             framesDropped: Number(stat.framesDropped) || 0,
+            keyFramesDecoded: Number(stat.keyFramesDecoded) || 0,
             framesEncoded: Number(stat.framesEncoded) || 0,
             framesSent: Number(stat.framesSent) || 0,
+            keyFramesEncoded: Number(stat.keyFramesEncoded) || 0,
+            frameWidth: Number(stat.frameWidth) || 0,
+            frameHeight: Number(stat.frameHeight) || 0,
+            bytesReceived: Number(stat.bytesReceived) || 0,
             bytesSent: Number(stat.bytesSent) || 0,
+            codecId: stat.codecId || '',
+            mimeType: stat.mimeType || '',
+            payloadType: Number(stat.payloadType) || 0,
+            sdpFmtpLine: stat.sdpFmtpLine || '',
             candidateType: stat.candidateType || '',
             protocol: stat.protocol || '',
             networkType: stat.networkType || ''
@@ -354,6 +363,13 @@ async function snapshotPage(page) {
           participant: tile.dataset.participant || '',
           classes: tile.className,
           videos: tile.querySelectorAll('video').length,
+          renderedVideos: Array.from(tile.querySelectorAll('video')).filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0).length,
+          decodedFrames: Array.from(tile.querySelectorAll('video')).reduce((total, video) => {
+            if (typeof video.getVideoPlaybackQuality === 'function') {
+              return total + (Number(video.getVideoPlaybackQuality().totalVideoFrames) || 0)
+            }
+            return total + (Number(video.webkitDecodedFrameCount) || 0)
+          }, 0),
           text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 120)
         })),
         stats
@@ -472,7 +488,10 @@ function validateSnapshots(snapshots, expectedClientCount) {
     const inboundVideoDecoded = snapshot.stats
       .filter(stat => stat.type === 'inbound-rtp' && stat.kind === 'video')
       .reduce((total, stat) => total + stat.framesDecoded, 0)
-    if (expectedClientCount > 1 && inboundVideoDecoded <= 0) {
+    const renderedRemoteVideos = snapshot.tiles
+      .filter(tile => tile.participant && tile.participant !== snapshot.name)
+      .reduce((total, tile) => total + Math.max(tile.renderedVideos || 0, tile.decodedFrames > 0 ? 1 : 0), 0)
+    if (expectedClientCount > 1 && inboundVideoDecoded <= 0 && renderedRemoteVideos <= 0) {
       failures.push(`${snapshot.name} has no decoded remote video frames`)
     }
     const candidateRtt = selectedCandidateRtt(snapshot.stats)

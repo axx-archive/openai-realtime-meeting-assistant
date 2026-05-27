@@ -928,10 +928,15 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				}
 
 				if _, ok := existingSenders[trackID]; !ok {
-					if _, err := peer.peerConnection.AddTransceiverFromTrack(trackLocal, webrtc.RTPTransceiverInit{
+					transceiver, err := peer.peerConnection.AddTransceiverFromTrack(trackLocal, webrtc.RTPTransceiverInit{
 						Direction: webrtc.RTPTransceiverDirectionSendonly,
-					}); err != nil {
+					})
+					if err != nil {
 						log.Errorf("Failed to add sender track=%s: %v", trackID, err)
+						return true
+					}
+					if err := preferSourceTrackCodec(transceiver, trackLocal); err != nil {
+						log.Errorf("Failed to prefer source codec for sender track=%s: %v", trackID, err)
 						return true
 					}
 					needsOffer = true
@@ -1015,6 +1020,20 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			break
 		}
 	}
+}
+
+func preferSourceTrackCodec(transceiver *webrtc.RTPTransceiver, trackLocal *webrtc.TrackLocalStaticRTP) error {
+	if transceiver == nil || trackLocal == nil {
+		return nil
+	}
+	codec := trackLocal.Codec()
+	if strings.TrimSpace(codec.MimeType) == "" {
+		return nil
+	}
+
+	return transceiver.SetCodecPreferences([]webrtc.RTPCodecParameters{{
+		RTPCodecCapability: codec,
+	}})
 }
 
 // dispatchKeyFrame sends a keyframe to all PeerConnections, used everytime a new user joins the call.

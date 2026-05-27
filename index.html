@@ -6181,7 +6181,7 @@
       let lastMediaQualityReportAt = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
-      const audioSettingsSchemaVersion = 3
+      const audioSettingsSchemaVersion = 4
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
       const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
@@ -9198,11 +9198,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const localTracks = localStream.getTracks()
         for (const transceiver of pc.getTransceivers()) {
           const section = sections.get(transceiver.mid)
-          if (!section || section.direction !== 'recvonly') {
+          if (!section) {
             continue
           }
           if (section.kind === 'video') {
             applyBrowserVideoCodecPreference(transceiver)
+          }
+          if (section.direction !== 'recvonly') {
+            continue
           }
 
           const track = localTracks.find(candidate => candidate.kind === section.kind)
@@ -9217,12 +9220,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function applyBrowserVideoCodecPreference(transceiver) {
-        if (safariBrowser || !transceiver?.setCodecPreferences) {
+        if (!transceiver?.setCodecPreferences) {
           return false
         }
         const capabilities = RTCRtpSender.getCapabilities?.('video') || RTCRtpReceiver.getCapabilities?.('video')
         const codecs = capabilities?.codecs || []
-        const preferred = codecs.filter(codec => /^video\/vp8$/i.test(codec.mimeType || ''))
+        const h264 = codecs.filter(codec => {
+          if (!/^video\/h264$/i.test(codec.mimeType || '')) {
+            return false
+          }
+          const fmtp = String(codec.sdpFmtpLine || '')
+          return !fmtp || /packetization-mode=1/i.test(fmtp)
+        })
+        const vp8 = codecs.filter(codec => /^video\/vp8$/i.test(codec.mimeType || ''))
+        const preferred = h264.length ? h264 : vp8
         if (!preferred.length) {
           return false
         }
@@ -9875,7 +9886,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const createdAt = Number(tile.dataset.createdAt || 0)
             return remoteTileName(tile).toLowerCase() === lowerName
               && (!createdAt || now - createdAt >= 3500)
-              && remoteTileHasLiveVideo(tile)
+              && (remoteTileHasLiveVideo(tile) || tile.querySelector('video'))
               && !remoteTileHasRenderedVideo(tile)
           })
         })

@@ -388,7 +388,7 @@ async function createRNNoiseProcessor(wasmPath) {
         ? 1
         : (frameVoice < 0.24 ? state.floorGain : 0.32)
       state.rnnoiseGate += (targetGate - state.rnnoiseGate) * (targetGate > state.rnnoiseGate ? 0.44 : 0.3)
-      state.noiseBias = Math.min(state.noiseFloor * (state.rnnoiseSpeech > 0.55 ? 0.42 : 0.72), state.rnnoiseSpeech > 0.55 ? 0.0065 : 0.014) * state.strength
+      state.noiseBias = Math.min(state.noiseFloor * (state.rnnoiseSpeech > 0.55 ? 0.55 : 0.82), state.rnnoiseSpeech > 0.55 ? 0.0085 : 0.016) * state.strength
       const output = new Array(frameSize)
       for (let index = 0; index < frameSize; index++) {
         const rnnoiseSample = clampBenchmark(heapF32[(outputPtr >> 2) + index] / 32767, -1, 1)

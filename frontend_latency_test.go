@@ -58,6 +58,8 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"state === 'disconnected'",
 		"function applyBrowserVideoCodecPreference(transceiver)",
 		"RTCRtpSender.getCapabilities?.('video')",
+		"const h264 = codecs.filter",
+		"const preferred = h264.length ? h264 : vp8",
 		"transceiver.setCodecPreferences([...preferred, ...rest])",
 		"return false",
 	} {
@@ -264,7 +266,7 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 		"function minimalAudioConstraintsForDevice(deviceId)",
 		"Media capture recovered with ${attempt.label}",
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
-		"const audioSettingsSchemaVersion = 3",
+		"const audioSettingsSchemaVersion = 4",
 		"window.localStorage?.getItem(audioSettingsStorageKey)",
 		"version: audioSettingsSchemaVersion",
 		"let voiceTrainingPrivacyMute = false",
