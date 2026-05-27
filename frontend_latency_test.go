@@ -228,7 +228,7 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 		"function minimalAudioConstraintsForDevice(deviceId)",
 		"Media capture recovered with ${attempt.label}",
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
-		"const audioSettingsSchemaVersion = 2",
+		"const audioSettingsSchemaVersion = 3",
 		"window.localStorage?.getItem(audioSettingsStorageKey)",
 		"version: audioSettingsSchemaVersion",
 		"let voiceTrainingPrivacyMute = false",
