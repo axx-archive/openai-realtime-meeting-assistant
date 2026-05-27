@@ -127,6 +127,7 @@ func main() {
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
+	http.HandleFunc("/public/", publicAssetHandler)
 
 	// index.html handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +201,17 @@ func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		log.Errorf("Failed to encode client config: %v", err)
 	}
+}
+
+func publicAssetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.StripPrefix("/public/", http.FileServer(http.Dir("public"))).ServeHTTP(w, r)
 }
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {

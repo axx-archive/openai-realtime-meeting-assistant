@@ -447,7 +447,7 @@ function validateSnapshots(snapshots, expectedClientCount) {
     if (snapshot.audioMode !== 'voice-focus') {
       failures.push(`${snapshot.name} audio mode is ${snapshot.audioMode}`)
     }
-    if (!['worklet', 'script', 'webaudio'].includes(snapshot.voiceProcessor)) {
+    if (!['rnnoise-wasm', 'rnnoise-loading', 'worklet', 'script', 'webaudio'].includes(snapshot.voiceProcessor)) {
       failures.push(`${snapshot.name} voice processor is ${snapshot.voiceProcessor}`)
     }
     for (const name of expectedNames) {

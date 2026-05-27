@@ -172,6 +172,11 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 	for _, want := range []string{
 		"voice-focus",
 		"function createOutboundAudioForSource(sourceTrack)",
+		"voiceFocusRNNoiseProcessorName",
+		"voiceFocusRNNoiseWasmPath = '/public/voice-focus/rnnoise.wasm'",
+		"function voiceFocusRNNoiseProcessorOptions(context)",
+		"new AudioWorkletNode(context, voiceFocusRNNoiseProcessorName",
+		"processor: data.processor || 'rnnoise-wasm'",
 		"ensureVoiceFocusWorklet(context)",
 		"new AudioWorkletNode(context, voiceFocusProcessorName)",
 		"highpass.type = 'highpass'",
@@ -193,11 +198,39 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"const blend = Math.min(1, Math.max(0, (rms - closeAt)",
 		"voiceIsolation: { ideal: voiceFocusEnabled() }",
 		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
+		"googNoiseSuppression2: audioProcessingEnabled()",
 		"function trainVoiceFocus()",
 		"localAudioSourceTrack?.getSettings?.().deviceId",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing voice focus noise reduction %q", want)
+		}
+	}
+}
+
+func TestVoiceFocusRNNoiseAssetsAreBundled(t *testing.T) {
+	for _, path := range []string{
+		"public/voice-focus/rnnoise-processor.js",
+		"public/voice-focus/rnnoise.wasm",
+		"public/voice-focus/RNNOISE_WASM_COPYING.txt",
+	} {
+		if info, err := os.Stat(path); err != nil {
+			t.Fatalf("missing RNNoise voice focus asset %s: %v", path, err)
+		} else if info.Size() == 0 {
+			t.Fatalf("RNNoise voice focus asset %s is empty", path)
+		}
+	}
+
+	rawMain, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	for _, want := range []string{
+		`http.HandleFunc("/public/", publicAssetHandler)`,
+		`http.StripPrefix("/public/", http.FileServer(http.Dir("public")))`,
+	} {
+		if !strings.Contains(string(rawMain), want) {
+			t.Fatalf("main.go missing RNNoise asset serving %q", want)
 		}
 	}
 }

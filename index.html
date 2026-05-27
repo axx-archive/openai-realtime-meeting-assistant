@@ -6168,6 +6168,8 @@
         suppressionDb: 0
       }
       let voiceFocusWorkletPromise
+      let voiceFocusRNNoiseWorkletPromise
+      let voiceFocusRNNoiseWasmPromise
       let voiceTrainingFrame = 0
       let voiceTrainingCleanup = null
       let voiceTrainingSamples = []
@@ -6181,6 +6183,9 @@
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const audioSettingsSchemaVersion = 3
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
+      const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
+      const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
+      const voiceFocusRNNoiseWasmPath = '/public/voice-focus/rnnoise.wasm'
       const forcedSafariMediaPath = new URLSearchParams(window.location.search).get('forceSafariMedia') === '1'
       const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
       const audioModeLabels = {
@@ -6218,8 +6223,12 @@
           latency: { ideal: 0.01, max: 0.03 },
           channelCount: { ideal: 1, max: 1 },
           googEchoCancellation: true,
+          googEchoCancellation2: true,
           googAutoGainControl: true,
+          googAutoGainControl2: true,
           googNoiseSuppression: true,
+          googNoiseSuppression2: true,
+          googTypingNoiseDetection: true,
           googHighpassFilter: true
         }
       }
@@ -7781,6 +7790,9 @@
         if (!voiceFocusEnabled()) {
           return 'disabled'
         }
+        if (localAudioProcessor?.rnnoiseNode) {
+          return localAudioProcessor.rnnoiseReady ? 'rnnoise-wasm' : (localAudioProcessor.rnnoiseError ? 'rnnoise-fallback' : 'rnnoise-loading')
+        }
         if (localAudioProcessor?.voiceFocusNode) {
           return 'worklet'
         }
@@ -8109,7 +8121,15 @@
           noiseSuppression: { ideal: audioProcessingEnabled() },
           autoGainControl: { ideal: audioProcessingEnabled() },
           voiceIsolation: { ideal: voiceFocusEnabled() },
-          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }
+          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() },
+          googEchoCancellation: audioProcessingEnabled(),
+          googEchoCancellation2: audioProcessingEnabled(),
+          googAutoGainControl: audioProcessingEnabled(),
+          googAutoGainControl2: audioProcessingEnabled(),
+          googNoiseSuppression: audioProcessingEnabled(),
+          googNoiseSuppression2: audioProcessingEnabled(),
+          googTypingNoiseDetection: audioProcessingEnabled(),
+          googHighpassFilter: audioProcessingEnabled()
         }
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
@@ -8122,7 +8142,18 @@
           noiseSuppression: { ideal: audioProcessingEnabled() },
           autoGainControl: { ideal: audioProcessingEnabled() },
           voiceIsolation: { ideal: voiceFocusEnabled() },
-          channelCount: { ideal: 1 }
+          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() },
+          channelCount: { ideal: 1 },
+          sampleRate: { ideal: 48000 },
+          sampleSize: { ideal: 16 },
+          googEchoCancellation: audioProcessingEnabled(),
+          googEchoCancellation2: audioProcessingEnabled(),
+          googAutoGainControl: audioProcessingEnabled(),
+          googAutoGainControl2: audioProcessingEnabled(),
+          googNoiseSuppression: audioProcessingEnabled(),
+          googNoiseSuppression2: audioProcessingEnabled(),
+          googTypingNoiseDetection: audioProcessingEnabled(),
+          googHighpassFilter: audioProcessingEnabled()
         }
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
@@ -8165,6 +8196,7 @@
         let highpass
         let lowpass
         let compressor
+        let rnnoiseNode
         let voiceFocusNode
         let voiceFocusScriptNode
         let destination
@@ -8192,7 +8224,22 @@
           source.connect(highpass)
           highpass.connect(compressor)
 
-          if (await ensureVoiceFocusWorklet(context)) {
+          const rnnoiseOptions = await voiceFocusRNNoiseProcessorOptions(context)
+          if (rnnoiseOptions) {
+            try {
+              rnnoiseNode = new AudioWorkletNode(context, voiceFocusRNNoiseProcessorName, rnnoiseOptions)
+              configureVoiceFocusRNNoiseNode(rnnoiseNode)
+              compressor.connect(rnnoiseNode)
+              rnnoiseNode.connect(lowpass)
+            } catch (error) {
+              rnnoiseNode = null
+              console.warn('RNNoise voice focus unavailable; using adaptive voice focus', error)
+            }
+          }
+
+          if (rnnoiseNode) {
+            // RNNoise is already connected above.
+          } else if (await ensureVoiceFocusWorklet(context)) {
             voiceFocusNode = new AudioWorkletNode(context, voiceFocusProcessorName)
             configureVoiceFocusNode(voiceFocusNode)
             compressor.connect(voiceFocusNode)
@@ -8218,6 +8265,9 @@
               highpass,
               lowpass,
               compressor,
+              rnnoiseNode,
+              rnnoiseReady: Boolean(rnnoiseNode?.bonfireReady),
+              rnnoiseError: rnnoiseNode?.bonfireError || '',
               voiceFocusNode,
               voiceFocusScriptNode,
               destination
@@ -8225,7 +8275,7 @@
           }
         } catch (error) {
           console.warn('Voice focus chain unavailable; using browser microphone processing', error)
-          cleanupAudioProcessor({ source, highpass, lowpass, compressor, voiceFocusNode, voiceFocusScriptNode, destination })
+          cleanupAudioProcessor({ source, highpass, lowpass, compressor, rnnoiseNode, voiceFocusNode, voiceFocusScriptNode, destination })
           return voiceTrainingPrivacyMute
             ? createMutedOutboundAudioClone(sourceTrack)
             : { track: sourceTrack, processor: null }
@@ -8333,7 +8383,7 @@
         state.gain += (targetGain - state.gain) * coefficient
         const closedBlend = Math.max(0, 1 - state.gain)
         const isolationBlend = Math.max(closedBlend, 1 - state.speechConfidence)
-        const biasCap = state.speechConfidence > 0.72 ? 0.016 : (state.gain > 0.55 ? 0.024 : 0.072)
+        const biasCap = state.speechConfidence > 0.72 ? 0.017 : (state.gain > 0.55 ? 0.024 : 0.072)
         const speechNoiseBlend = Math.max(isolationBlend, state.speechConfidence > 0.72 ? 0.6 : 0)
         const biasMultiplier = 0.65 + speechNoiseBlend * 4.6 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
         state.noiseBias = Math.min(state.noiseFloor * biasMultiplier, biasCap) * state.strength
@@ -8366,6 +8416,109 @@
           }
         }
         return node
+      }
+
+      async function voiceFocusRNNoiseProcessorOptions(context) {
+        if (!context?.audioWorklet || !window.AudioWorkletNode || !window.WebAssembly || !window.fetch) {
+          return null
+        }
+        try {
+          const wasm = await loadVoiceFocusRNNoiseWasm()
+          if (!voiceFocusRNNoiseWorkletPromise) {
+            voiceFocusRNNoiseWorkletPromise = context.audioWorklet.addModule(voiceFocusRNNoiseWorkletPath)
+              .catch(error => {
+                voiceFocusRNNoiseWorkletPromise = undefined
+                throw error
+              })
+          }
+          await voiceFocusRNNoiseWorkletPromise
+          return {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            channelCount: 1,
+            channelCountMode: 'explicit',
+            channelInterpretation: 'speakers',
+            outputChannelCount: [1],
+            processorOptions: {
+              wasmModule: wasm.module,
+              wasmBytes: wasm.bytes,
+              sampleRate: context.sampleRate
+            }
+          }
+        } catch (error) {
+          console.warn('Could not prepare RNNoise voice focus', error)
+          return null
+        }
+      }
+
+      async function loadVoiceFocusRNNoiseWasm() {
+        if (!voiceFocusRNNoiseWasmPromise) {
+          voiceFocusRNNoiseWasmPromise = fetch(voiceFocusRNNoiseWasmPath, { cache: 'no-store' })
+            .then(async response => {
+              if (!response.ok) {
+                throw new Error(`RNNoise WASM returned ${response.status}`)
+              }
+              const bytes = await response.arrayBuffer()
+              const module = await WebAssembly.compile(bytes)
+              return { bytes, module }
+            })
+            .catch(error => {
+              voiceFocusRNNoiseWasmPromise = undefined
+              throw error
+            })
+        }
+        return voiceFocusRNNoiseWasmPromise
+      }
+
+      function configureVoiceFocusRNNoiseNode(node) {
+        const config = voiceFocusConfig()
+        node.bonfireReady = false
+        node.bonfireError = ''
+        if (node?.port) {
+          node.port.onmessage = event => {
+            const data = event.data || {}
+            if (data.type === 'ready') {
+              node.bonfireReady = true
+              node.bonfireError = ''
+              if (localAudioProcessor?.rnnoiseNode === node) {
+                localAudioProcessor.rnnoiseReady = true
+                localAudioProcessor.rnnoiseError = ''
+              }
+              updateVoiceFocusDiagnostics({
+                gain: 1,
+                noiseBias: 0,
+                speechConfidence: 1,
+                processor: data.processor || 'rnnoise-wasm'
+              })
+              return
+            }
+            if (data.type === 'error') {
+              node.bonfireReady = false
+              node.bonfireError = data.message || 'rnnoise unavailable'
+              if (localAudioProcessor?.rnnoiseNode === node) {
+                localAudioProcessor.rnnoiseReady = false
+                localAudioProcessor.rnnoiseError = node.bonfireError
+              }
+              console.warn('RNNoise voice focus fell back', node.bonfireError)
+              return
+            }
+            if (data.type === 'metrics') {
+              if (localAudioProcessor?.rnnoiseNode === node) {
+                localAudioProcessor.rnnoiseReady = data.processor === 'rnnoise-wasm'
+                localAudioProcessor.rnnoiseError = data.processor === 'rnnoise-wasm' ? '' : localAudioProcessor.rnnoiseError
+              }
+              updateVoiceFocusDiagnostics(data)
+            }
+          }
+        }
+        node?.port?.postMessage?.({
+          type: 'configure',
+          noiseFloor: config.noiseFloor,
+          speechFloor: config.speechFloor,
+          strength: config.strength,
+          floorGain: config.floorGain,
+          calibrated: config.calibrated
+        })
       }
 
       async function ensureVoiceFocusWorklet(context) {
@@ -8471,7 +8624,7 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
 
     const closedBlend = Math.max(0, 1 - this.gain)
     const isolationBlend = Math.max(closedBlend, 1 - this.speechConfidence)
-    const biasCap = this.speechConfidence > 0.72 ? 0.016 : (this.gain > 0.55 ? 0.024 : 0.072)
+    const biasCap = this.speechConfidence > 0.72 ? 0.017 : (this.gain > 0.55 ? 0.024 : 0.072)
     const speechNoiseBlend = Math.max(isolationBlend, this.speechConfidence > 0.72 ? 0.6 : 0)
     const biasMultiplier = 0.65 + speechNoiseBlend * 4.6 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
     this.noiseBias = Math.min(this.noiseFloor * biasMultiplier, biasCap) * this.strength
@@ -8549,7 +8702,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!processor) {
           return
         }
-        for (const node of [processor.source, processor.highpass, processor.lowpass, processor.compressor, processor.voiceFocusNode, processor.voiceFocusScriptNode]) {
+        for (const node of [processor.source, processor.highpass, processor.lowpass, processor.compressor, processor.rnnoiseNode, processor.voiceFocusNode, processor.voiceFocusScriptNode]) {
           try {
             node?.disconnect()
           } catch {
@@ -8560,7 +8713,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           processor.voiceFocusScriptNode.onaudioprocess = null
         }
         try {
+          processor.rnnoiseNode?.port?.postMessage?.({ type: 'destroy' })
+        } catch {
+          // The processor may already be gone.
+        }
+        try {
           processor.voiceFocusNode?.port?.close?.()
+        } catch {
+          // Some browsers do not expose a close method here.
+        }
+        try {
+          processor.rnnoiseNode?.port?.close?.()
         } catch {
           // Some browsers do not expose a close method here.
         }

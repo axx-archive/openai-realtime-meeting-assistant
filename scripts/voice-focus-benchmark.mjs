@@ -37,6 +37,9 @@ const requiredInlineSnippets = [
   'floorGain: 0.0015',
   'strength: 0.998',
   'speechConfidence: 0',
+  'voiceFocusRNNoiseProcessorName',
+  'voiceFocusRNNoiseWasmPath',
+  'processor: data.processor || \'rnnoise-wasm\'',
   'const forcedNoise = transient || hissNoise || rumbleNoise',
   'const speechNoiseBlend = Math.max(isolationBlend',
   'const biasMultiplier = 0.65 + speechNoiseBlend * 4.6',
@@ -44,6 +47,7 @@ const requiredInlineSnippets = [
 ]
 
 const snippetFailures = requiredInlineSnippets.filter(snippet => !html.includes(snippet))
+const rnnoiseResults = await benchmarkRNNoiseWasm()
 const results = [
   benchmarkNoiseSuppression('steady fan', makeFanFrame, { maxRatio: 0.035, maxGain: 0.025 }),
   benchmarkNoiseSuppression('broadband hiss', makeHissFrame, { maxRatio: 0.055, maxGain: 0.03 }),
@@ -52,7 +56,8 @@ const results = [
   benchmarkNoisySpeechRecovery(),
   benchmarkConcurrentNoiseReduction('speech over fan', makeFanFrame, { maxResidualRatio: 0.95, minSpeechRatio: 0.72 }),
   benchmarkPostSpeechSuppression('post-speech fan', makeFanFrame, { maxRatio: 0.12, maxGain: 0.45 }),
-  benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 })
+  benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 }),
+  ...rnnoiseResults
 ]
 
 const failures = [
@@ -303,6 +308,254 @@ function processFrame(state, input) {
     noiseBias,
     output
   }
+}
+
+async function benchmarkRNNoiseWasm() {
+  const wasmPath = join(rootDir, 'public/voice-focus/rnnoise.wasm')
+  const concurrent = await benchmarkRNNoiseConcurrentNoise(wasmPath)
+  const fan = await benchmarkRNNoiseNoiseOnly(wasmPath, 'rnnoise fan-only gate', rnnoiseFanSample, { maxRatio: 0.18 })
+  const keyboard = await benchmarkRNNoiseNoiseOnly(wasmPath, 'rnnoise keyboard-only gate', rnnoiseKeyboardSample, { maxRatio: 0.2 })
+  return [concurrent, fan, keyboard]
+}
+
+async function createRNNoiseProcessor(wasmPath) {
+  let memory
+  let heapU8
+  let heapF32
+  const refreshHeap = () => {
+    heapU8 = new Uint8Array(memory.buffer)
+    heapF32 = new Float32Array(memory.buffer)
+  }
+  const imports = {
+    a: {
+      b: (destination, source, bytes) => {
+        heapU8.copyWithin(destination >>> 0, source >>> 0, (source + bytes) >>> 0)
+      },
+      a: requestedSize => {
+        try {
+          const pages = Math.ceil((requestedSize - memory.buffer.byteLength) / 65536)
+          if (pages > 0) {
+            memory.grow(pages)
+            refreshHeap()
+          }
+          return 1
+        } catch {
+          return 0
+        }
+      }
+    }
+  }
+  const { instance } = await WebAssembly.instantiate(readFileSync(wasmPath), imports)
+  const exports = instance.exports
+  memory = exports.c
+  refreshHeap()
+  exports.d?.()
+  const frameSize = Number(exports.f?.()) || 480
+  const statePtr = exports.h(0)
+  const inputPtr = exports.l(frameSize * 4)
+  const outputPtr = exports.l(frameSize * 4)
+  const state = {
+    rnnoiseSpeech: 0,
+    rnnoiseHoldFrames: 0,
+    rnnoiseGate: 1,
+    noiseBias: 0,
+    noiseFloor: 0.012,
+    strength: 0.998,
+    floorGain: 0.0015
+  }
+
+  return {
+    frameSize,
+    process(input) {
+      for (let index = 0; index < frameSize; index++) {
+        heapF32[(inputPtr >> 2) + index] = clampBenchmark(input[index] || 0, -1, 1) * 32767
+      }
+      const forcedNoise = rnnoiseForcedNoiseFrame(input)
+      const frameVoice = rnnoiseFrameVoiceConfidence(input)
+      const vad = clampBenchmark(Number(exports.k(statePtr, outputPtr, inputPtr)) || 0, 0, 1)
+      state.rnnoiseSpeech = state.rnnoiseSpeech * 0.72 + vad * 0.28
+      if (forcedNoise) {
+        state.rnnoiseSpeech *= 0.25
+        state.rnnoiseHoldFrames = 0
+      } else if (frameVoice > 0.42 || (state.rnnoiseSpeech > 0.45 && frameVoice > 0.24)) {
+        state.rnnoiseHoldFrames = 10
+      } else if (state.rnnoiseHoldFrames > 0) {
+        state.rnnoiseHoldFrames--
+      }
+      const targetGate = forcedNoise
+        ? state.floorGain
+        : state.rnnoiseHoldFrames > 0
+        ? 1
+        : (frameVoice < 0.24 ? state.floorGain : 0.32)
+      state.rnnoiseGate += (targetGate - state.rnnoiseGate) * (targetGate > state.rnnoiseGate ? 0.44 : 0.3)
+      state.noiseBias = Math.min(state.noiseFloor * (state.rnnoiseSpeech > 0.55 ? 0.42 : 0.72), state.rnnoiseSpeech > 0.55 ? 0.0065 : 0.014) * state.strength
+      const output = new Array(frameSize)
+      for (let index = 0; index < frameSize; index++) {
+        const rnnoiseSample = clampBenchmark(heapF32[(outputPtr >> 2) + index] / 32767, -1, 1)
+        const biased = Math.sign(rnnoiseSample) * Math.max(0, Math.abs(rnnoiseSample) - state.noiseBias)
+        output[index] = biased * state.rnnoiseGate
+      }
+      return { output, vad, gate: state.rnnoiseGate, speech: state.rnnoiseSpeech, noiseBias: state.noiseBias }
+    }
+  }
+}
+
+async function benchmarkRNNoiseConcurrentNoise(wasmPath) {
+  const cleanProcessor = await createRNNoiseProcessor(wasmPath)
+  const noisyProcessor = await createRNNoiseProcessor(wasmPath)
+  const sampleRate = 48000
+  for (let frameIndex = 0; frameIndex < 100; frameIndex++) {
+    const noise = makeRNNoiseFrame(cleanProcessor.frameSize, sampleRate, frameIndex, rnnoiseFanSample)
+    cleanProcessor.process(noise)
+    noisyProcessor.process(noise)
+  }
+
+  const residualRatios = []
+  const speechRatios = []
+  const biases = []
+  for (let frameIndex = 0; frameIndex < 100; frameIndex++) {
+    const speech = makeRNNoiseFrame(cleanProcessor.frameSize, sampleRate, frameIndex, rnnoiseSpeechSample)
+    const noise = makeRNNoiseFrame(cleanProcessor.frameSize, sampleRate, frameIndex + 100, rnnoiseFanSample)
+    const clean = cleanProcessor.process(speech)
+    const noisy = noisyProcessor.process(mixFramesByIndex(speech, noise))
+    const residual = noisy.output.map((sample, index) => sample - (clean.output[index] || 0))
+    residualRatios.push(rms(residual) / Math.max(rms(noise), 0.000001))
+    speechRatios.push(rms(clean.output) / Math.max(rms(speech), 0.000001))
+    biases.push(noisy.noiseBias)
+  }
+  const settledResidual = residualRatios.slice(-40)
+  const settledSpeech = speechRatios.slice(-40)
+  const residualRatio = average(settledResidual)
+  const speechRatio = average(settledSpeech)
+  const failures = []
+  if (residualRatio > 0.72) {
+    failures.push(`rnnoise speech over fan residual ratio ${residualRatio.toFixed(4)} exceeded 0.72`)
+  }
+  if (speechRatio < 0.8) {
+    failures.push(`rnnoise speech over fan speech ratio ${speechRatio.toFixed(4)} below 0.80`)
+  }
+  return {
+    name: 'rnnoise speech over fan',
+    residualRatio,
+    speechRatio,
+    averageBias: average(biases.slice(-40)),
+    failures
+  }
+}
+
+async function benchmarkRNNoiseNoiseOnly(wasmPath, name, sampleFactory, limits) {
+  const processor = await createRNNoiseProcessor(wasmPath)
+  const sampleRate = 48000
+  const ratios = []
+  const gates = []
+  for (let frameIndex = 0; frameIndex < 130; frameIndex++) {
+    const input = makeRNNoiseFrame(processor.frameSize, sampleRate, frameIndex, sampleFactory)
+    const result = processor.process(input)
+    ratios.push(rms(result.output) / Math.max(rms(input), 0.000001))
+    gates.push(result.gate)
+  }
+  const tail = ratios.slice(-40)
+  const tailGate = gates.slice(-40)
+  const outputRatio = average(tail)
+  const averageGate = average(tailGate)
+  const failures = []
+  if (outputRatio > limits.maxRatio) {
+    failures.push(`${name} output ratio ${outputRatio.toFixed(4)} exceeded ${limits.maxRatio}`)
+  }
+  return {
+    name,
+    outputRatio,
+    averageGate,
+    failures
+  }
+}
+
+function rnnoiseForcedNoiseFrame(frame) {
+  let sum = 0
+  let peak = 0
+  let crossings = 0
+  let previous = frame[0] || 0
+  for (let index = 0; index < frame.length; index++) {
+    const sample = frame[index] || 0
+    const amplitude = Math.abs(sample)
+    peak = Math.max(peak, amplitude)
+    sum += sample * sample
+    if (index > 0 && ((sample >= 0 && previous < 0) || (sample < 0 && previous >= 0))) {
+      crossings++
+    }
+    previous = sample
+  }
+  const frameRms = Math.sqrt(sum / Math.max(1, frame.length))
+  const zcr = crossings / Math.max(1, frame.length - 1)
+  const crest = peak / Math.max(frameRms, 0.0001)
+  const threshold = Math.max(0.012 * 3.35, 0.075 * 0.31, 0.013)
+  return (crest > 6.4 && frameRms < threshold * 2.15)
+    || (zcr > 0.28 && frameRms < threshold * 2.65)
+    || (zcr < 0.006 && frameRms < threshold * 1.55)
+}
+
+function rnnoiseFrameVoiceConfidence(frame) {
+  let sum = 0
+  let peak = 0
+  let crossings = 0
+  let previous = frame[0] || 0
+  for (let index = 0; index < frame.length; index++) {
+    const sample = frame[index] || 0
+    const amplitude = Math.abs(sample)
+    peak = Math.max(peak, amplitude)
+    sum += sample * sample
+    if (index > 0 && ((sample >= 0 && previous < 0) || (sample < 0 && previous >= 0))) {
+      crossings++
+    }
+    previous = sample
+  }
+  const frameRms = Math.sqrt(sum / Math.max(1, frame.length))
+  const zcr = crossings / Math.max(1, frame.length - 1)
+  const crest = peak / Math.max(frameRms, 0.0001)
+  const threshold = Math.max(0.012 * 3.35, 0.075 * 0.31, 0.013)
+  const closeAt = threshold * 0.58
+  const levelBlend = clampBenchmark((frameRms - closeAt) / Math.max(0.0001, threshold * 1.35 - closeAt), 0, 1)
+  const speechLike = zcr >= 0.006 && zcr <= 0.28 && crest < 8.4
+  const steadyVoice = frameRms >= threshold * 1.08 && crest < 5.8 && zcr < 0.28
+  const peakSpeech = peak >= threshold * 2.5 && frameRms >= closeAt && crest < 7.2 && zcr < 0.28
+  return clampBenchmark(levelBlend * (speechLike || steadyVoice ? 1 : 0.2) + (peakSpeech ? 0.28 : 0), 0, 1)
+}
+
+function makeRNNoiseFrame(length, sampleRate, frameIndex, sampleFactory) {
+  const frame = new Array(length)
+  for (let index = 0; index < frame.length; index++) {
+    const sampleIndex = frameIndex * length + index
+    frame[index] = sampleFactory(sampleIndex / sampleRate, sampleIndex)
+  }
+  return frame
+}
+
+function rnnoiseFanSample(t) {
+  return Math.sin(2 * Math.PI * 170 * t) * 0.012
+    + Math.sin(2 * Math.PI * 340 * t) * 0.006
+    + Math.sin(2 * Math.PI * 72 * t) * 0.005
+}
+
+function rnnoiseKeyboardSample(t, sampleIndex) {
+  const click = sampleIndex % 1200 === 0 ? 0.16 : sampleIndex % 1200 === 1 ? -0.07 : 0
+  return click + Math.sin(2 * Math.PI * 420 * t) * 0.003
+}
+
+function rnnoiseSpeechSample(t) {
+  const envelope = 0.8 + Math.sin(2 * Math.PI * 4 * t) * 0.2
+  return envelope * (
+    Math.sin(2 * Math.PI * 145 * t) * 0.055
+    + Math.sin(2 * Math.PI * 290 * t) * 0.035
+    + Math.sin(2 * Math.PI * 870 * t) * 0.016
+  )
+}
+
+function mixFramesByIndex(...frames) {
+  return frames[0].map((_, index) => frames.reduce((total, frame) => total + (frame[index] || 0), 0))
+}
+
+function clampBenchmark(value, min, max) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function makeFanFrame(frameIndex) {
