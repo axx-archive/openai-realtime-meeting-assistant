@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -164,7 +165,8 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)",
 		"strength: 0.998",
 		"const hissNoise = zeroCrossingRate > 0.3",
-		"const rumbleNoise = zeroCrossingRate < 0.018",
+		"const rumbleNoise = zeroCrossingRate < 0.018 && rms < threshold * 1.25",
+		"const blend = Math.min(1, Math.max(0, (rms - closeAt)",
 		"voiceIsolation: { ideal: voiceFocusEnabled() }",
 		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
 		"function trainVoiceFocus()",
@@ -173,6 +175,21 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing voice focus noise reduction %q", want)
 		}
+	}
+}
+
+func TestVoiceFocusBenchmarkPasses(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available for the voice focus benchmark")
+	}
+
+	output, err := exec.Command(node, "scripts/voice-focus-benchmark.mjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("voice focus benchmark failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), `"ok": true`) {
+		t.Fatalf("voice focus benchmark did not report ok: %s", output)
 	}
 }
 
