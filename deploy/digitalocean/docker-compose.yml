@@ -26,7 +26,6 @@ services:
       - --min-port=49160
       - --max-port=49200
       - --no-cli
-      - --no-loopback-peers
       - --no-multicast-peers
     ports:
       - "3478:3478/tcp"
