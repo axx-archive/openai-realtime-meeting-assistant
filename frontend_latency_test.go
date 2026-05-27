@@ -26,6 +26,7 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"configureOutboundSenders().catch(error => {",
 		"function startMediaQualityMonitor(sessionPeer)",
 		"function constrainCameraForLag(reason)",
+		"const sustainedLag = mediaQualityLagSamples >= 2",
 		"screenShareMaxBitrate: 1600000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",

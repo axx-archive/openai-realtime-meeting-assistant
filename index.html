@@ -6172,6 +6172,7 @@
       let voiceTrainingPrivacyMute = false
       let mediaQualityMonitorTimer = 0
       let mediaQualityConstrained = false
+      let mediaQualityLagSamples = 0
       let previousMediaQualityStats = null
       let lastMediaQualityReportAt = 0
       const mediaQualityReportIntervalMs = 12000
@@ -7634,6 +7635,7 @@
         }
         previousMediaQualityStats = null
         mediaQualityConstrained = false
+        mediaQualityLagSamples = 0
         lastMediaQualityReportAt = 0
       }
 
@@ -7650,12 +7652,14 @@
           try {
             const report = await sessionPeer.getStats()
             const snapshot = summarizeMediaQualityStats(report)
-            const laggy = mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)
-            if (laggy) {
+            const rawLaggy = mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)
+            mediaQualityLagSamples = rawLaggy ? mediaQualityLagSamples + 1 : 0
+            const sustainedLag = mediaQualityLagSamples >= 2
+            if (sustainedLag) {
               await constrainCameraForLag('media stats')
             }
             const remoteHealth = repairRemoteMediaHealth('media quality monitor')
-            sendMediaQualityReport(snapshot, previousMediaQualityStats, laggy, remoteHealth)
+            sendMediaQualityReport(snapshot, previousMediaQualityStats, rawLaggy, remoteHealth)
             previousMediaQualityStats = snapshot
           } catch (error) {
             console.warn('Could not read media quality stats', error)
