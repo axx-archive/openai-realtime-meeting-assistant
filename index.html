@@ -10167,6 +10167,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      function remotePlaybackNeedsGesture(element) {
+        if (!element || element.muted || element.defaultMuted || Number(element.volume) === 0) {
+          return false
+        }
+        const tagName = String(element.tagName || '').toLowerCase()
+        return tagName === 'audio' || element.dataset.remotePlayback === 'synced'
+      }
+
+      function remotePlaybackPendingCount(options = {}) {
+        const elements = Array.from(pendingRemotePlaybackElements)
+        if (options.audibleOnly) {
+          return elements.filter(remotePlaybackNeedsGesture).length
+        }
+        if (options.mutedOnly) {
+          return elements.filter(element => !remotePlaybackNeedsGesture(element)).length
+        }
+        return elements.length
+      }
+
+      function roomAudioPlaybackBlocked() {
+        const audiblePending = remotePlaybackPendingCount({ audibleOnly: true })
+        const hasWebAudioPlayback = Array.from(audioMonitors.values()).some(monitor => monitor.playbackGain && liveTrack(monitor.track))
+        return audiblePending > 0 || Boolean(hasWebAudioPlayback && audioContext?.state === 'suspended')
+      }
+
       function createRemoteAudioElement(stream, name) {
         const audio = document.createElement('audio')
         audio.autoplay = true
@@ -10185,14 +10210,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function playRemoteMedia(element) {
         const playPromise = element?.play?.()
         if (!playPromise?.then) {
+          pendingRemotePlaybackElements.delete(element)
           return
         }
         playPromise.then(() => {
           pendingRemotePlaybackElements.delete(element)
         }).catch(error => {
-          pendingRemotePlaybackElements.add(element)
-          console.warn('Remote audio playback is waiting for a user gesture', error)
-          setLog('click once to enable room audio')
+          if (remotePlaybackNeedsGesture(element)) {
+            pendingRemotePlaybackElements.add(element)
+            console.warn('Remote audio playback is waiting for a user gesture', error)
+            setLog('click once to enable room audio')
+          } else {
+            pendingRemotePlaybackElements.delete(element)
+          }
         })
       }
 

@@ -371,6 +371,9 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"attachAudioMonitor(key, name, event.track, { play: true, playbackStream: stream, playbackElement })",
 		"playbackGain.connect(context.destination)",
 		"monitor.playbackGain?.disconnect()",
+		"function remotePlaybackNeedsGesture(element)",
+		"function remotePlaybackPendingCount(options = {})",
+		"function roomAudioPlaybackBlocked()",
 		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
 	} {
 		if !strings.Contains(html, want) {

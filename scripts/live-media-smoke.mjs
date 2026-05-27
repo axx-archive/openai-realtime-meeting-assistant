@@ -203,12 +203,10 @@ async function joinRoom(page) {
       participant.dispatchEvent(new Event('change', { bubbles: true }))
       password.value = ${JSON.stringify(config.password)}
       password.dispatchEvent(new Event('input', { bubbles: true }))
-      if (typeof joinRoom !== 'function') {
-        throw new Error('joinRoom is unavailable')
-      }
-      return joinRoom()
+      return true
     })()
   `)
+  await clickSelector(page, '#joinAccess')
   await waitFor(page, `${page.name} local media`, `
     (() => typeof localStream !== 'undefined'
       && localStream
@@ -299,6 +297,17 @@ async function snapshotPage(page) {
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
         audioMonitors: typeof audioMonitors !== 'undefined' ? audioMonitors.size : -1,
         pendingRemotePlayback: typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1,
+        audiblePendingRemotePlayback: typeof remotePlaybackPendingCount === 'function'
+          ? remotePlaybackPendingCount({ audibleOnly: true })
+          : (typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1),
+        mutedPendingRemotePlayback: typeof remotePlaybackPendingCount === 'function'
+          ? remotePlaybackPendingCount({ mutedOnly: true })
+          : 0,
+        remoteAudioPlaybackBlocked: typeof roomAudioPlaybackBlocked === 'function' ? roomAudioPlaybackBlocked() : false,
+        audioContextState: typeof audioContext !== 'undefined' && audioContext ? audioContext.state : '',
+        playbackGainMonitors: typeof audioMonitors !== 'undefined'
+          ? Array.from(audioMonitors.values()).filter(monitor => monitor.playbackGain).length
+          : -1,
         participantsInRoom: typeof participantsInRoom !== 'undefined' ? participantsInRoom.slice() : [],
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
@@ -355,8 +364,8 @@ function validateSnapshots(snapshots, expectedClientCount) {
     if (snapshot.audioMonitors < expectedClientCount - 1) {
       failures.push(`${snapshot.name} has ${snapshot.audioMonitors} remote audio monitors`)
     }
-    if (snapshot.pendingRemotePlayback > 0) {
-      failures.push(`${snapshot.name} has ${snapshot.pendingRemotePlayback} pending remote playback elements`)
+    if (snapshot.remoteAudioPlaybackBlocked || snapshot.audiblePendingRemotePlayback > 0) {
+      failures.push(`${snapshot.name} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
     }
     if (snapshot.audioMode !== 'voice-focus') {
       failures.push(`${snapshot.name} audio mode is ${snapshot.audioMode}`)
@@ -476,6 +485,45 @@ async function waitFor(page, label, expression) {
     await sleep(500)
   }
   throw new Error(`timed out waiting for ${label}; last=${JSON.stringify(last)}`)
+}
+
+async function clickSelector(page, selector) {
+  const point = await evaluate(page, `
+    (() => {
+      const element = document.querySelector(${JSON.stringify(selector)})
+      if (!element) {
+        throw new Error('missing click target ${selector}')
+      }
+      const rect = element.getBoundingClientRect()
+      if (!rect.width || !rect.height) {
+        throw new Error('empty click target ${selector}')
+      }
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      }
+    })()
+  `)
+  await page.client.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: point.x,
+    y: point.y,
+    button: 'none'
+  })
+  await page.client.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: point.x,
+    y: point.y,
+    button: 'left',
+    clickCount: 1
+  })
+  await page.client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: point.x,
+    y: point.y,
+    button: 'left',
+    clickCount: 1
+  })
 }
 
 async function fetchJSON(url, options = {}) {
