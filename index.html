@@ -6179,7 +6179,8 @@
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const audioSettingsSchemaVersion = 2
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
-      const safariBrowser = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
+      const forcedSafariMediaPath = new URLSearchParams(window.location.search).get('forceSafariMedia') === '1'
+      const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
         standard: 'standard cleanup',
