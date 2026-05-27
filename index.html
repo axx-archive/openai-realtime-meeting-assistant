@@ -8126,11 +8126,11 @@
       function voiceFocusConfig() {
         const profile = audioSettings.profile || defaultVoiceProfile
         return {
-	          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
-	          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
-	          strength: 0.998,
-	          floorGain: 0.0015,
-	          calibrated: Boolean(profile.trainedAt)
+          noiseFloor: clampNumber(profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+          speechFloor: clampNumber(profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+          strength: 0.998,
+          floorGain: 0.0015,
+          calibrated: Boolean(profile.trainedAt)
         }
       }
 
@@ -8142,7 +8142,9 @@
           floorGain: config.floorGain,
           calibrated: config.calibrated,
           gain: 1,
-          holdFrames: 0
+          holdFrames: 0,
+          speechConfidence: 0,
+          noiseBias: 0
         }
       }
 
@@ -8168,32 +8170,50 @@
         const rms = Math.sqrt(sum / Math.max(1, reference.length))
         const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
         const crest = peak / Math.max(rms, 0.0001)
-	        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 2.9 : 3.25), state.speechFloor * (state.calibrated ? 0.34 : 0.28), 0.012)
-	        const closeAt = threshold * 0.64
-	        const transient = crest > 7.5 && rms < threshold * 1.55
-	        const hissNoise = zeroCrossingRate > 0.3 && rms < threshold * 2.05
-	        const rumbleNoise = zeroCrossingRate < 0.018 && rms < threshold * 1.25
-	        const open = !transient && !hissNoise && !rumbleNoise && (rms >= threshold || (peak >= threshold * 2.4 && rms >= closeAt))
-	        if (open) {
-	          state.holdFrames = state.calibrated ? 18 : 14
+        const threshold = Math.max(state.noiseFloor * (state.calibrated ? 3.05 : 3.35), state.speechFloor * (state.calibrated ? 0.37 : 0.31), 0.013)
+        const closeAt = threshold * 0.58
+        const transient = crest > 6.4 && rms < threshold * 2.15
+        const hissNoise = zeroCrossingRate > 0.28 && rms < threshold * 2.65
+        const rumbleNoise = zeroCrossingRate < 0.006 && rms < threshold * 1.55
+        const forcedNoise = transient || hissNoise || rumbleNoise
+        const levelBlend = Math.min(1, Math.max(0, (rms - closeAt) / Math.max(0.0001, threshold * 1.35 - closeAt)))
+        const voiceCrossing = zeroCrossingRate >= 0.006 && zeroCrossingRate <= 0.28
+        const steadyVoice = rms >= threshold * 1.08 && crest < 5.8 && zeroCrossingRate < 0.28
+        const peakSpeech = peak >= threshold * 2.5 && rms >= closeAt && crest < 7.2 && zeroCrossingRate < 0.28
+        const speechLike = (voiceCrossing || steadyVoice) && crest < 8.4
+        const instantConfidence = Math.min(1, levelBlend * (speechLike ? 1 : 0.35) + (peakSpeech ? 0.35 : 0))
+        const open = !forcedNoise && instantConfidence >= 0.5
+        if (open) {
+          state.holdFrames = state.calibrated ? 16 : 12
+        } else if (forcedNoise) {
+          state.holdFrames = 0
         } else if (state.holdFrames > 0) {
           state.holdFrames--
         }
         if (!open && rms < state.noiseFloor * 1.7) {
           state.noiseFloor = Math.max(0.004, state.noiseFloor * 0.988 + rms * 0.012)
         }
+        state.speechConfidence = state.speechConfidence * 0.62 + instantConfidence * 0.38
+        if (forcedNoise) {
+          state.speechConfidence *= 0.45
+        }
 
         let targetGain = 1
-        if (!open && state.holdFrames <= 0) {
-          if (rms <= closeAt) {
+        if (!open && (state.holdFrames <= 0 || forcedNoise)) {
+          if (rms <= closeAt || forcedNoise) {
             targetGain = state.floorGain
           } else {
             const blend = Math.min(1, Math.max(0, (rms - closeAt) / Math.max(0.0001, threshold - closeAt)))
-            targetGain = state.floorGain + blend * (1 - state.floorGain) * (1 - state.strength * 0.28)
+            targetGain = state.floorGain + blend * (1 - state.floorGain) * (1 - state.strength * 0.52)
           }
         }
-	        const coefficient = targetGain > state.gain ? 0.72 : 0.18
+        const coefficient = targetGain > state.gain ? 0.68 : (forcedNoise ? 0.58 : 0.28)
         state.gain += (targetGain - state.gain) * coefficient
+        const closedBlend = Math.max(0, 1 - state.gain)
+        const isolationBlend = Math.max(closedBlend, 1 - state.speechConfidence)
+        const biasCap = state.speechConfidence > 0.72 ? 0.012 : (state.gain > 0.55 ? 0.024 : 0.072)
+        const biasMultiplier = 0.45 + isolationBlend * 2.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+        state.noiseBias = Math.min(state.noiseFloor * biasMultiplier, biasCap) * state.strength
         return state.gain
       }
 
@@ -8204,8 +8224,7 @@
           const input = event.inputBuffer.getChannelData(0)
           const output = event.outputBuffer.getChannelData(0)
           const gain = voiceFocusFrameGain(state, input)
-	          const closedBlend = Math.max(0, 1 - gain)
-	          const noiseBias = Math.min(state.noiseFloor * (0.25 + closedBlend * 2.35), closedBlend > 0.5 ? 0.052 : 0.008) * state.strength
+          const noiseBias = state.noiseBias || 0
           for (let index = 0; index < output.length; index++) {
             const sample = input[index] || 0
             const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
@@ -8224,20 +8243,22 @@
 class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
   constructor() {
     super()
-	    this.noiseFloor = 0.012
-	    this.speechFloor = 0.075
-	    this.strength = 0.998
-	    this.floorGain = 0.0015
+    this.noiseFloor = 0.012
+    this.speechFloor = 0.075
+    this.strength = 0.998
+    this.floorGain = 0.0015
     this.gain = 1
     this.holdFrames = 0
+    this.speechConfidence = 0
+    this.noiseBias = 0
     this.calibrated = false
     this.port.onmessage = event => {
       const data = event.data || {}
       if (data.type !== 'configure') return
       this.noiseFloor = Math.max(0.004, Math.min(0.12, Number(data.noiseFloor) || this.noiseFloor))
       this.speechFloor = Math.max(0.02, Math.min(0.45, Number(data.speechFloor) || this.speechFloor))
-	      this.strength = Math.max(0.25, Math.min(0.999, Number(data.strength) || this.strength))
-	      this.floorGain = Math.max(0.001, Math.min(0.16, Number(data.floorGain) || this.floorGain))
+      this.strength = Math.max(0.25, Math.min(0.999, Number(data.strength) || this.strength))
+      this.floorGain = Math.max(0.001, Math.min(0.16, Number(data.floorGain) || this.floorGain))
       this.calibrated = Boolean(data.calibrated)
     }
   }
@@ -8272,14 +8293,23 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const rms = Math.sqrt(sum / Math.max(1, reference.length))
     const zeroCrossingRate = crossings / Math.max(1, reference.length - 1)
     const crest = peak / Math.max(rms, 0.0001)
-	    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 2.9 : 3.25), this.speechFloor * (this.calibrated ? 0.34 : 0.28), 0.012)
-	    const closeAt = threshold * 0.64
-	    const transient = crest > 7.5 && rms < threshold * 1.55
-	    const hissNoise = zeroCrossingRate > 0.3 && rms < threshold * 2.05
-	    const rumbleNoise = zeroCrossingRate < 0.018 && rms < threshold * 1.25
-	    const open = !transient && !hissNoise && !rumbleNoise && (rms >= threshold || (peak >= threshold * 2.4 && rms >= closeAt))
-	    if (open) {
-	      this.holdFrames = this.calibrated ? 18 : 14
+    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 3.05 : 3.35), this.speechFloor * (this.calibrated ? 0.37 : 0.31), 0.013)
+    const closeAt = threshold * 0.58
+    const transient = crest > 6.4 && rms < threshold * 2.15
+    const hissNoise = zeroCrossingRate > 0.28 && rms < threshold * 2.65
+    const rumbleNoise = zeroCrossingRate < 0.006 && rms < threshold * 1.55
+    const forcedNoise = transient || hissNoise || rumbleNoise
+    const levelBlend = Math.min(1, Math.max(0, (rms - closeAt) / Math.max(0.0001, threshold * 1.35 - closeAt)))
+    const voiceCrossing = zeroCrossingRate >= 0.006 && zeroCrossingRate <= 0.28
+    const steadyVoice = rms >= threshold * 1.08 && crest < 5.8 && zeroCrossingRate < 0.28
+    const peakSpeech = peak >= threshold * 2.5 && rms >= closeAt && crest < 7.2 && zeroCrossingRate < 0.28
+    const speechLike = (voiceCrossing || steadyVoice) && crest < 8.4
+    const instantConfidence = Math.min(1, levelBlend * (speechLike ? 1 : 0.35) + (peakSpeech ? 0.35 : 0))
+    const open = !forcedNoise && instantConfidence >= 0.5
+    if (open) {
+      this.holdFrames = this.calibrated ? 16 : 12
+    } else if (forcedNoise) {
+      this.holdFrames = 0
     } else if (this.holdFrames > 0) {
       this.holdFrames--
     }
@@ -8287,27 +8317,34 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     if (!open && rms < this.noiseFloor * 1.7) {
       this.noiseFloor = Math.max(0.004, this.noiseFloor * 0.988 + rms * 0.012)
     }
+    this.speechConfidence = this.speechConfidence * 0.62 + instantConfidence * 0.38
+    if (forcedNoise) {
+      this.speechConfidence *= 0.45
+    }
 
     let targetGain = 1
-    if (!open && this.holdFrames <= 0) {
-      if (rms <= closeAt) {
+    if (!open && (this.holdFrames <= 0 || forcedNoise)) {
+      if (rms <= closeAt || forcedNoise) {
         targetGain = this.floorGain
       } else {
         const blend = Math.min(1, Math.max(0, (rms - closeAt) / Math.max(0.0001, threshold - closeAt)))
-        targetGain = this.floorGain + blend * (1 - this.floorGain) * (1 - this.strength * 0.28)
+        targetGain = this.floorGain + blend * (1 - this.floorGain) * (1 - this.strength * 0.52)
       }
     }
-	    const coefficient = targetGain > this.gain ? 0.72 : 0.18
+    const coefficient = targetGain > this.gain ? 0.68 : (forcedNoise ? 0.58 : 0.28)
     this.gain += (targetGain - this.gain) * coefficient
 
-	    const closedBlend = Math.max(0, 1 - this.gain)
-	    const noiseBias = Math.min(this.noiseFloor * (0.25 + closedBlend * 2.35), closedBlend > 0.5 ? 0.052 : 0.008) * this.strength
+    const closedBlend = Math.max(0, 1 - this.gain)
+    const isolationBlend = Math.max(closedBlend, 1 - this.speechConfidence)
+    const biasCap = this.speechConfidence > 0.72 ? 0.012 : (this.gain > 0.55 ? 0.024 : 0.072)
+    const biasMultiplier = 0.45 + isolationBlend * 2.9 + (transient ? 0.9 : 0) + (hissNoise ? 0.55 : 0) + (rumbleNoise ? 0.45 : 0)
+    this.noiseBias = Math.min(this.noiseFloor * biasMultiplier, biasCap) * this.strength
     for (let channel = 0; channel < output.length; channel++) {
       const source = input[Math.min(channel, input.length - 1)] || reference
       const target = output[channel]
       for (let index = 0; index < target.length; index++) {
         const sample = source[index] || 0
-        const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
+        const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - this.noiseBias)
         target[index] = denoised * this.gain
       }
     }

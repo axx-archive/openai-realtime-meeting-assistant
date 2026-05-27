@@ -36,9 +36,10 @@ vm.runInContext(functionSource, sandbox)
 const requiredInlineSnippets = [
   'floorGain: 0.0015',
   'strength: 0.998',
-  'const hissNoise = zeroCrossingRate > 0.3',
-  'const rumbleNoise = zeroCrossingRate < 0.018',
-  'closedBlend > 0.5 ? 0.052 : 0.008'
+  'speechConfidence: 0',
+  'const forcedNoise = transient || hissNoise || rumbleNoise',
+  'const biasMultiplier = 0.45 + isolationBlend * 2.9',
+  'state.noiseBias = Math.min(state.noiseFloor * biasMultiplier'
 ]
 
 const snippetFailures = requiredInlineSnippets.filter(snippet => !html.includes(snippet))
@@ -46,7 +47,10 @@ const results = [
   benchmarkNoiseSuppression('steady fan', makeFanFrame, { maxRatio: 0.035, maxGain: 0.025 }),
   benchmarkNoiseSuppression('broadband hiss', makeHissFrame, { maxRatio: 0.055, maxGain: 0.03 }),
   benchmarkTransientSuppression(),
-  benchmarkSpeechRecovery()
+  benchmarkSpeechRecovery(),
+  benchmarkNoisySpeechRecovery(),
+  benchmarkPostSpeechSuppression('post-speech fan', makeFanFrame, { maxRatio: 0.12, maxGain: 0.45 }),
+  benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 })
 ]
 
 const failures = [
@@ -173,13 +177,72 @@ function benchmarkSpeechRecovery() {
   }
 }
 
+function benchmarkNoisySpeechRecovery() {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  for (let frameIndex = 0; frameIndex < 80; frameIndex++) {
+    processFrame(state, makeFanFrame(frameIndex))
+  }
+  const speechFrames = []
+  for (let frameIndex = 0; frameIndex < 28; frameIndex++) {
+    speechFrames.push(processFrame(state, mixFrames(makeSpeechFrame(frameIndex), makeFanFrame(frameIndex + 80))))
+  }
+  const settled = speechFrames.slice(-12)
+  const outputRatio = average(settled.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const averageGain = average(settled.map(frame => frame.gain))
+  const averageBias = average(settled.map(frame => frame.noiseBias))
+  const failures = []
+  if (outputRatio < 0.62) {
+    failures.push(`noisy speech output ratio ${outputRatio.toFixed(4)} below 0.62`)
+  }
+  if (averageGain < 0.82) {
+    failures.push(`noisy speech gain ${averageGain.toFixed(4)} below 0.82`)
+  }
+  if (averageBias < 0.006) {
+    failures.push(`noisy speech noise bias ${averageBias.toFixed(4)} below 0.006`)
+  }
+  return {
+    name: 'speech with fan',
+    outputRatio,
+    averageGain,
+    averageBias,
+    inputRms: average(settled.map(frame => frame.inputRms)),
+    outputRms: average(settled.map(frame => frame.outputRms)),
+    failures
+  }
+}
+
+function benchmarkPostSpeechSuppression(name, frameFactory, limits) {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  for (let frameIndex = 0; frameIndex < 18; frameIndex++) {
+    processFrame(state, mixFrames(makeSpeechFrame(frameIndex), makeFanFrame(frameIndex)))
+  }
+  const noiseFrames = []
+  for (let frameIndex = 0; frameIndex < 12; frameIndex++) {
+    noiseFrames.push(processFrame(state, frameFactory(frameIndex + 18)))
+  }
+  const firstEight = noiseFrames.slice(0, 8)
+  const outputRatio = average(firstEight.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const maxGain = Math.max(...firstEight.map(frame => frame.gain))
+  const failures = []
+  if (outputRatio > limits.maxRatio) {
+    failures.push(`${name} output ratio ${outputRatio.toFixed(4)} exceeded ${limits.maxRatio}`)
+  }
+  if (maxGain > limits.maxGain) {
+    failures.push(`${name} gain ${maxGain.toFixed(4)} exceeded ${limits.maxGain}`)
+  }
+  return {
+    name,
+    outputRatio,
+    maxGain,
+    inputRms: average(firstEight.map(frame => frame.inputRms)),
+    outputRms: average(firstEight.map(frame => frame.outputRms)),
+    failures
+  }
+}
+
 function processFrame(state, input) {
   const gain = sandbox.voiceFocusFrameGain(state, input)
-  const closedBlend = Math.max(0, 1 - gain)
-  const noiseBias = Math.min(
-    state.noiseFloor * (0.25 + closedBlend * 2.35),
-    closedBlend > 0.5 ? 0.052 : 0.008
-  ) * state.strength
+  const noiseBias = state.noiseBias || 0
   const output = input.map(sample => {
     const denoised = Math.sign(sample) * Math.max(0, Math.abs(sample) - noiseBias)
     return denoised * gain
@@ -188,7 +251,8 @@ function processFrame(state, input) {
     gain,
     inputRms: rms(input),
     outputRms: rms(output),
-    noiseBias
+    noiseBias,
+    output
   }
 }
 
@@ -226,6 +290,10 @@ function makeSpeechFrame(frameIndex) {
       + Math.sin(2 * Math.PI * 1320 * t + 1.2) * 0.018
     )
   })
+}
+
+function mixFrames(...frames) {
+  return makeFrame(index => frames.reduce((total, frame) => total + (frame[index] || 0), 0))
 }
 
 function makeFrame(sampleAt) {
