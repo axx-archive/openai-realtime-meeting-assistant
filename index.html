@@ -8588,7 +8588,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!track) {
           return
         }
-        attachAudioMonitor('local', currentParticipantName, track, { play: false, setsActiveSpeaker: false })
         track.addEventListener('ended', handleLocalAudioEnded, { once: true })
         if (localAudioSourceTrack && localAudioSourceTrack !== track) {
           localAudioSourceTrack.addEventListener('ended', handleLocalAudioEnded, { once: true })
@@ -9593,7 +9592,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function remoteAudioMonitorCountsByName() {
         const counts = new Map()
-        for (const monitor of audioMonitors.values()) {
+        for (const monitor of remoteAudioMonitors()) {
           const name = remoteAudioMonitorName(monitor)
           if (!name || name === 'participant') {
             continue
@@ -9601,6 +9600,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1)
         }
         return counts
+      }
+
+      function remoteAudioMonitors() {
+        return Array.from(audioMonitors.values()).filter(monitor => !isCurrentParticipantName(remoteAudioMonitorName(monitor)))
       }
 
       function refreshStalledRemoteVideoTiles(reason = '') {
@@ -9677,7 +9680,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const videoCounts = remoteVideoTileCountsByName()
         const audioCounts = remoteAudioMonitorCountsByName()
         const placeholderVideoTiles = remoteTiles().filter(tile => remoteTileName(tile) === 'participant').length
-        const placeholderAudioMonitors = Array.from(audioMonitors.values()).filter(monitor => remoteAudioMonitorName(monitor) === 'participant').length
+        const audioMonitorsForRemoteParticipants = remoteAudioMonitors()
+        const placeholderAudioMonitors = audioMonitorsForRemoteParticipants.filter(monitor => remoteAudioMonitorName(monitor) === 'participant').length
         const now = performance.now()
         const stalledVideoNames = expectedNames.filter(name => {
           const lowerName = name.toLowerCase()
@@ -9693,7 +9697,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return {
           expectedRemoteParticipants: expectedNames.length,
           remoteVideoTiles: remoteTiles().length,
-          remoteAudioMonitors: audioMonitors.size,
+          remoteAudioMonitors: audioMonitorsForRemoteParticipants.length,
           placeholderVideoTiles,
           placeholderAudioMonitors,
           pendingRemotePlayback: remotePlaybackPendingCount(),

@@ -41,6 +41,8 @@ var (
 	trackParticipants            map[string]string
 	trackParticipantSessions     map[string]string
 	trackSourceIDs               map[string]string
+	signalRequestLock            sync.Mutex
+	signalRequestTimer           *time.Timer
 	participantSessionSeq        atomic.Uint64
 
 	log = logging.NewDefaultLoggerFactory().NewLogger("openai-realtime-meeting-assistant")
@@ -48,6 +50,8 @@ var (
 	kanbanApp *kanbanBoardApp
 	roomMixer *audioMixer
 )
+
+const peerSignalDebounce = 250 * time.Millisecond
 
 type websocketMessage struct {
 	Event string `json:"event"`
@@ -800,7 +804,24 @@ func nextParticipantSessionID() string {
 
 // signalPeerConnections updates each PeerConnection so that it is getting all the expected media tracks.
 func signalPeerConnections() { // nolint
-	signalPeerConnectionsWithRestart(nil)
+	requestPeerConnectionSignal()
+}
+
+func requestPeerConnectionSignal() {
+	signalRequestLock.Lock()
+	defer signalRequestLock.Unlock()
+
+	if signalRequestTimer != nil {
+		signalRequestTimer.Reset(peerSignalDebounce)
+		return
+	}
+
+	signalRequestTimer = time.AfterFunc(peerSignalDebounce, func() {
+		signalRequestLock.Lock()
+		signalRequestTimer = nil
+		signalRequestLock.Unlock()
+		signalPeerConnectionsWithRestart(nil)
+	})
 }
 
 func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) {

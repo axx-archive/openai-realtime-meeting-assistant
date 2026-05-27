@@ -393,6 +393,7 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function removeRemoteParticipantAudioTracksByName(name, options = {})",
 		"function pruneStaleUnidentifiedAudioMonitors(reason = '')",
 		"function scheduleUnidentifiedAudioMonitorRepair(key)",
+		"function remoteAudioMonitors()",
 		"function shouldUseSyncedRemoteAudioPlayback()",
 		"function shouldUseElementRemoteAudioPlayback()",
 		"return safariBrowser || useCrowdedVideoLimits()",

@@ -286,6 +286,11 @@ async function snapshotPage(page) {
             networkType: stat.networkType || ''
           }))
         : []
+      const remoteMonitorList = typeof remoteAudioMonitors === 'function'
+        ? remoteAudioMonitors()
+        : (typeof audioMonitors !== 'undefined'
+          ? Array.from(audioMonitors.values()).filter(monitor => typeof isCurrentParticipantName !== 'function' || !isCurrentParticipantName(monitor.name))
+          : [])
       return {
         name: ${JSON.stringify(page.name)},
         log: document.getElementById('log')?.textContent || '',
@@ -300,10 +305,8 @@ async function snapshotPage(page) {
             }))
           : [],
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
-        audioMonitors: typeof audioMonitors !== 'undefined' ? audioMonitors.size : -1,
-        audioMonitorNames: typeof audioMonitors !== 'undefined'
-          ? Array.from(audioMonitors.values()).map(monitor => monitor.name || '')
-          : [],
+        audioMonitors: typeof audioMonitors !== 'undefined' ? remoteMonitorList.length : -1,
+        audioMonitorNames: remoteMonitorList.map(monitor => monitor.name || ''),
         pendingRemotePlayback: typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1,
         audiblePendingRemotePlayback: typeof remotePlaybackPendingCount === 'function'
           ? remotePlaybackPendingCount({ audibleOnly: true })
@@ -314,7 +317,7 @@ async function snapshotPage(page) {
         remoteAudioPlaybackBlocked: typeof roomAudioPlaybackBlocked === 'function' ? roomAudioPlaybackBlocked() : false,
         audioContextState: typeof audioContext !== 'undefined' && audioContext ? audioContext.state : '',
         playbackGainMonitors: typeof audioMonitors !== 'undefined'
-          ? Array.from(audioMonitors.values()).filter(monitor => monitor.playbackGain).length
+          ? remoteMonitorList.filter(monitor => monitor.playbackGain).length
           : -1,
         participantsInRoom: typeof participantsInRoom !== 'undefined' ? participantsInRoom.slice() : [],
         usesCrowdedVideoLimits: typeof useCrowdedVideoLimits === 'function' ? useCrowdedVideoLimits() : null,
