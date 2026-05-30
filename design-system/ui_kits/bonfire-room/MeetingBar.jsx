@@ -8,7 +8,7 @@ function HangUpIcon() {
   );
 }
 
-function MeetingBar({ log = "team meeting", joined = false, sharing = false, onJoin, onLeave, onShare, onArchive, archiveBusy = false, canJoin = false }) {
+export function MeetingBar({ log = "team meeting", joined = false, sharing = false, onJoin, onLeave, onShare, onArchive, archiveBusy = false, canJoin = false }) {
   return (
     <footer className="meeting-bar mount-stagger">
       <p className="log" aria-live="polite" title={log}>{log}</p>
@@ -24,5 +24,3 @@ function MeetingBar({ log = "team meeting", joined = false, sharing = false, onJ
     </footer>
   );
 }
-
-Object.assign(window, { MeetingBar, HangUpIcon });

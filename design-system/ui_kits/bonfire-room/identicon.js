@@ -11,7 +11,7 @@ function hashString(value) {
   return hash >>> 0;
 }
 
-function identiconCells(seed) {
+export function identiconCells(seed) {
   // Warm clamps: hue 18–60°, sat 60–80%, lit 26–40%.
   const hue = 18 + (hashString(`${seed}:hue`) % 42);
   const sat = 60 + (hashString(`${seed}:sat`) % 20);
@@ -33,6 +33,3 @@ function identiconCells(seed) {
   if (filled === 0) cells.push([2, 2]);
   return { cells, color };
 }
-
-window.hashString = hashString;
-window.identiconCells = identiconCells;

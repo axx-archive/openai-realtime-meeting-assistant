@@ -1,24 +1,8 @@
-// StatusPill.jsx — five states. Pulse animation is CSS.
-const STATUS_LABELS = {
-  idle: "not connected",
-  connecting: "connecting…",
-  room: "room connected",
-  listening: "the room is listening",
-  offline: "assistant offline",
-};
-
-function StatusPill({ state = "idle", label }) {
-  const text = label || STATUS_LABELS[state] || "not connected";
-  return (
-    <span className={`pill pill--${state}`} role="status" aria-live="polite">
-      <span className="pill__dot"></span>
-      <span>{text}</span>
-    </span>
-  );
-}
+import { BrandMark } from "./BrandMark.jsx";
+import { StatusPill } from "./StatusPill.jsx";
 
 // Topbar.jsx — mark + title + status.
-function Topbar({ status = "idle" }) {
+export function Topbar({ status = "idle" }) {
   const listening = status === "listening";
   return (
     <header className="topbar mount-stagger">
@@ -31,5 +15,3 @@ function Topbar({ status = "idle" }) {
     </header>
   );
 }
-
-Object.assign(window, { StatusPill, Topbar, STATUS_LABELS });

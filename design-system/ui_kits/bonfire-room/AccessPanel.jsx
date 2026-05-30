@@ -1,15 +1,15 @@
 // AccessPanel.jsx — participant + password form.
-const { useState } = React;
+import { useState } from "react";
 
-const PARTICIPANT_NAMES = ["Erick", "Tim", "Tyler", "Jake", "Tom", "Caitlyn", "Joel", "AJ"];
+import { PARTICIPANT_NAMES } from "./participants.js";
 
-function AccessPanel({ verified, onChange, accessState = "locked", accessHint }) {
+export function AccessPanel({ verified, onChange, accessState = "locked", accessHint }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
 
   const update = (n, p) => {
     setName(n); setPassword(p);
-    onChange?.({ name: n, password: p, verified: n.trim() && p.trim() });
+    onChange?.({ name: n, password: p, verified: Boolean(n.trim() && p.trim()) });
   };
 
   return (
@@ -41,5 +41,3 @@ function AccessPanel({ verified, onChange, accessState = "locked", accessHint })
     </section>
   );
 }
-
-Object.assign(window, { AccessPanel, PARTICIPANT_NAMES });

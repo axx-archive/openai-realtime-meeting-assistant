@@ -2,7 +2,7 @@
 // Toggle `listening` to start the 2400ms pulse cycle.
 // Toggle `hotEmber` for the 1.6s recognition handshake (faster + drop-shadow).
 
-function BrandMark({ listening = false, hotEmber = false, size = 36 }) {
+export function BrandMark({ listening = false, hotEmber = false, size = 36 }) {
   const cls = `topbar__mark${listening ? " is-listening" : ""}${hotEmber ? " is-hot-ember" : ""}`;
   return (
     <span className={cls} aria-hidden="true" style={{ width: size, height: size }}>
@@ -30,20 +30,3 @@ function BrandMark({ listening = false, hotEmber = false, size = 36 }) {
     </span>
   );
 }
-
-// OwnerAvatar — circular wrapper around an identicon.
-function OwnerAvatar({ name = "Unassigned", large = false }) {
-  const { cells, color } = window.identiconCells(name);
-  return (
-    <span className={`owner-avatar${large ? " large" : ""}`} title={`owner: ${name}`} aria-label={`Owner: ${name}`}>
-      <svg viewBox="0 0 5 5" aria-hidden="true">
-        <rect width="5" height="5" fill="#F6F8FA" />
-        {cells.map(([x, y], i) => (
-          <rect key={i} x={x} y={y} width="1" height="1" fill={color} />
-        ))}
-      </svg>
-    </span>
-  );
-}
-
-Object.assign(window, { BrandMark, OwnerAvatar });

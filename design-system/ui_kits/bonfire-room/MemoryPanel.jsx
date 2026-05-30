@@ -6,7 +6,9 @@ function memoryLabel(entry) {
   return `transcript · ${time}`;
 }
 
-function MemoryPanel({ entries = [] }) {
+const EMPTY_ENTRIES = Object.freeze([]);
+
+export function MemoryPanel({ entries = EMPTY_ENTRIES }) {
   return (
     <section className="memory-panel mount-stagger" aria-label="Meeting memory">
       <header>
@@ -31,5 +33,3 @@ function MemoryPanel({ entries = [] }) {
     </section>
   );
 }
-
-Object.assign(window, { MemoryPanel });

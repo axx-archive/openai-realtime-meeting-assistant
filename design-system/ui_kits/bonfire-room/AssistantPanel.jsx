@@ -1,30 +1,24 @@
 // AssistantPanel.jsx — assistant feed + ask form.
-const { useEffect: useEffectAssistant, useRef: useRefAssistant, useState: useStateAssistant } = React;
+import { useEffect, useRef, useState } from "react";
 
-function assistantLabel(entry) {
-  const time = entry.time || "now";
-  return `${entry.kind || "status"} · ${time}`;
-}
+import { AssistantMessage } from "./AssistantMessage.jsx";
 
-function AssistantMessage({ entry, entering }) {
-  const cls = `assistant-message assistant-message--${entry.kind || "status"}${entering ? " assistant-message--entering" : ""}`;
-  return (
-    <article className={cls}>
-      <span className="assistant-meta">{assistantLabel(entry)}</span>
-      <span className="assistant-text">{entry.text}</span>
-      {entry.downloadUrl && (
-        <a className="assistant-link" href={entry.downloadUrl} download>Download archive</a>
-      )}
-    </article>
-  );
-}
+const EMPTY_MESSAGES = Object.freeze([]);
 
-function AssistantPanel({ messages = [], onAsk, latestId, stateLabel = "ready" }) {
-  const [query, setQuery] = useStateAssistant("");
-  const feedRef = useRefAssistant(null);
-  useEffectAssistant(() => {
+export function AssistantPanel({ messages = EMPTY_MESSAGES, onAsk, latestId, stateLabel = "ready" }) {
+  const [query, setQuery] = useState("");
+  const feedRef = useRef(null);
+
+  useEffect(() => {
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [messages.length]);
+
+  const ask = () => {
+    const nextQuery = query.trim();
+    if (!nextQuery) return;
+    onAsk?.(nextQuery);
+    setQuery("");
+  };
 
   return (
     <section className="assistant-panel mount-stagger" aria-label="Assistant responses">
@@ -42,27 +36,23 @@ function AssistantPanel({ messages = [], onAsk, latestId, stateLabel = "ready" }
           messages.map((m) => <AssistantMessage key={m.id} entry={m} entering={m.id === latestId} />)
         )}
       </div>
-      <form
+      <div
         className="assistant-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!query.trim()) return;
-          onAsk?.(query.trim());
-          setQuery("");
-        }}
       >
         <input
           className="assistant-input"
           type="text"
+          aria-label="Ask meeting memory"
           autoComplete="off"
           placeholder="Ask meeting memory"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") ask();
+          }}
         />
-        <button className="btn btn--primary assistant-send" type="submit">Ask</button>
-      </form>
+        <button className="btn btn--primary assistant-send" type="button" onClick={ask}>Ask</button>
+      </div>
     </section>
   );
 }
-
-Object.assign(window, { AssistantMessage, AssistantPanel });

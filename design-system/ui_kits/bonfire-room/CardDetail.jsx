@@ -1,16 +1,47 @@
 // CardDetail.jsx — modal editor.
-const { useState: useStateCard, useEffect: useEffectCard } = React;
+import { useEffect, useRef, useState } from "react";
 
-function CardDetail({ card, isNew = false, onSave, onDelete, onClose }) {
-  const [draft, setDraft] = useStateCard(card || { title: "", status: "Backlog", owner: "Unassigned", tags: [], notes: "" });
-  useEffectCard(() => { setDraft(card || { title: "", status: "Backlog", owner: "Unassigned", tags: [], notes: "" }); }, [card?.id]);
+import { STATUSES } from "./boardData.js";
+import { OwnerAvatar } from "./OwnerAvatar.jsx";
+import { PARTICIPANT_NAMES } from "./participants.js";
+
+const EMPTY_CARD_DRAFT = Object.freeze({ title: "", status: "Backlog", owner: "Unassigned", tags: [], notes: "" });
+
+function normalizeCardDraft(card) {
+  return { ...EMPTY_CARD_DRAFT, ...card, tags: card?.tags || EMPTY_CARD_DRAFT.tags };
+}
+
+function parseTags(value) {
+  return value.split(",").flatMap((tag) => {
+    const trimmed = tag.trim();
+    return trimmed ? [trimmed] : [];
+  });
+}
+
+export function CardDetail({ card, isNew = false, onSave, onDelete, onClose }) {
+  const dialogRef = useRef(null);
+  const [draft, setDraft] = useState(() => normalizeCardDraft(card));
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || !card) return;
+    if (!dialog.open) dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, [card]);
 
   if (!card) return null;
   const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+  const title = draft.title.trim();
+  const saveCard = () => {
+    if (!title) return;
+    onSave?.({ ...draft, title, tags: (draft.tags || EMPTY_CARD_DRAFT.tags).flatMap((tag) => (tag ? [tag] : [])) });
+  };
 
   return (
-    <div className="card-detail-region visible" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
-      <article className="card-detail" role="dialog" aria-modal="true" aria-label={isNew ? "New card" : `Edit card ${draft.title || "untitled card"}`}>
+    <dialog ref={dialogRef} className="card-detail-region" aria-label={isNew ? "New card" : `Edit card ${draft.title || "untitled card"}`} onCancel={onClose}>
+      <article className="card-detail">
         <header className="card-detail-header">
           <OwnerAvatar name={draft.owner || "Unassigned"} large />
           <div className="card-detail-title">
@@ -21,12 +52,8 @@ function CardDetail({ card, isNew = false, onSave, onDelete, onClose }) {
           </div>
           <button className="card-detail-close" type="button" aria-label="Close card editor" onClick={onClose}>×</button>
         </header>
-        <form
+        <div
           className="card-detail-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSave?.({ ...draft, tags: (draft.tags || []).filter(Boolean) });
-          }}
         >
           <label className="field">
             <span>title</span>
@@ -51,7 +78,7 @@ function CardDetail({ card, isNew = false, onSave, onDelete, onClose }) {
             <input
               placeholder="webrtc, risk, bandwidth"
               value={(draft.tags || []).join(", ")}
-              onChange={(e) => setField("tags", e.target.value.split(",").map((t) => t.trim()).filter(Boolean))}
+              onChange={(e) => setField("tags", parseTags(e.target.value))}
             />
           </label>
           <label className="field">
@@ -62,13 +89,11 @@ function CardDetail({ card, isNew = false, onSave, onDelete, onClose }) {
             <button className="btn btn--danger" type="button" disabled={isNew} onClick={() => onDelete?.(draft)}>Delete</button>
             <div className="card-detail-actions__right">
               <button className="btn btn--secondary" type="button" onClick={onClose}>Cancel</button>
-              <button className="btn btn--primary" type="submit">{isNew ? "Create card" : "Save changes"}</button>
+              <button className="btn btn--primary" type="button" disabled={!title} onClick={saveCard}>{isNew ? "Create card" : "Save changes"}</button>
             </div>
           </div>
-        </form>
+        </div>
       </article>
-    </div>
+    </dialog>
   );
 }
-
-Object.assign(window, { CardDetail });

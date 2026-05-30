@@ -24,7 +24,14 @@ Pixel-faithful recreation of `meetingassist/index.html`. The room is the only pr
 
 ## How to run
 
-Open `index.html`. It uses React 18 + Babel standalone via UMD CDN — no build step. The whole thing is one self-contained doc.
+Install the local package dependencies and run the Vite preview app:
+
+```bash
+npm install
+npm run dev
+```
+
+The kit now uses the same React 18 runtime through package-managed ES modules, which keeps the files analyzable by React tooling while preserving the self-contained design-system surface.
 
 ## What it cuts
 

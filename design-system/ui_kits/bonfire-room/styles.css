@@ -231,10 +231,15 @@ main {
 
 .card {
   display: grid; gap: var(--s-2);
+  width: 100%;
   background: #FFF;
   border: 1px solid var(--line-light);
   border-radius: var(--r-md);
+  color: inherit;
+  font: inherit;
   padding: var(--s-3);
+  text-align: left;
+  appearance: none;
   cursor: pointer;
   box-shadow: var(--shadow-light-1);
   transition: box-shadow 60ms var(--ease-soft),
@@ -361,8 +366,9 @@ main {
 }
 
 /* ============ Card detail modal ============ */
-.card-detail-region { position: fixed; inset: 0; z-index: 1200; display: none; place-items: center; padding: var(--s-6); background: rgba(11, 8, 5, 0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.card-detail-region.visible { display: grid; }
+.card-detail-region { position: fixed; inset: 0; z-index: 1200; display: none; place-items: center; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: var(--s-6); border: 0; background: rgba(11, 8, 5, 0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.card-detail-region[open] { display: grid; }
+.card-detail-region::backdrop { background: transparent; }
 .card-detail { display: grid; gap: var(--s-4); width: min(620px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid var(--line-light); border-radius: var(--r-lg); background: #FFF; box-shadow: var(--shadow-3); color: var(--fg-inverse); padding: var(--s-5); }
 .card-detail-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--s-3); }
 .card-detail-title strong { font-family: var(--font-sans); font-size: 20px; font-weight: 600; line-height: 1.25; }
