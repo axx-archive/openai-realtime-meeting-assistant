@@ -1468,7 +1468,7 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
-			app.handleToolCall(*event.Item, false)
+			app.handleToolCall(*event.Item, true)
 		}
 	case "response.function_call_arguments.done":
 		app.handleToolCall(realtimeFunctionCallFromArgumentsDone(event), true)
@@ -2963,7 +2963,21 @@ func broadcastKanbanEvent(event string, data any) {
 			Event: "kanban",
 			Data:  string(raw),
 		}); err != nil {
+			if isExpectedKanbanBroadcastClose(err) {
+				continue
+			}
 			log.Errorf("Failed to send Kanban event: %v", err)
 		}
 	}
+}
+
+func isExpectedKanbanBroadcastClose(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "websocket: close sent") ||
+		strings.Contains(message, "use of closed network connection") ||
+		strings.Contains(message, "broken pipe")
 }

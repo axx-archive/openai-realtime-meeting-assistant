@@ -583,8 +583,9 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	audioOutput := mapFromPayload(audio, "outputSettings")
 	voiceFocusMetrics := mapFromPayload(audio, "voiceFocusMetrics")
 	videoSettings := mapFromPayload(video, "settings")
+	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		boolFromPayload(browser, "safari"),
@@ -616,6 +617,12 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 		stringFromPayload(candidatePair, "networkType"),
 		int(floatFromPayload(remote, "remoteVideoTiles")),
 		int(floatFromPayload(remote, "remoteAudioMonitors")),
+		floatFromPayload(remote, "remoteAudioMaxLevel"),
+		int(floatFromPayload(remote, "remoteAudioAudibleMonitors")),
+		int(floatFromPayload(remoteAudioPlaybackPaths, "element")),
+		int(floatFromPayload(remoteAudioPlaybackPaths, "webaudio")),
+		int(floatFromPayload(remoteAudioPlaybackPaths, "none")),
+		stringFromPayload(remote, "audioContextState"),
 		arrayLenFromPayload(remote, "missingVideoNames"),
 		arrayLenFromPayload(remote, "missingAudioNames"),
 		arrayLenFromPayload(remote, "duplicateVideoNames"),

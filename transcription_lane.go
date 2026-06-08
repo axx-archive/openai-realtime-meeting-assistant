@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,6 +27,12 @@ const (
 	transcriptionLaneMinCommitSamples  = transcriptionLaneInputSampleRate / 10
 	transcriptionLaneReconnectInitial  = 1 * time.Second
 	transcriptionLaneReconnectMax      = 30 * time.Second
+	transcriptionLaneSessionRefresh    = 55 * time.Minute
+)
+
+var (
+	errTranscriptionLaneSessionExpired = errors.New("transcription session expired")
+	errTranscriptionLaneSessionRefresh = errors.New("transcription session refresh")
 )
 
 type meetingTranscriptionLane struct {
@@ -172,9 +179,22 @@ func (lane *meetingTranscriptionLane) run() {
 		default:
 		}
 
-		if err := lane.runOnce(); err != nil && !lane.stopping() {
-			log.Errorf("Transcript lane failed: %v", err)
-			broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"error": err.Error()})
+		err := lane.runOnce()
+		if err != nil && !lane.stopping() {
+			if errors.Is(err, errTranscriptionLaneSessionRefresh) {
+				log.Infof("Transcript lane refreshing before session expiration")
+				broadcastAssistantEvent("status", "Transcript lane refreshing", map[string]any{"reason": "session refresh"})
+				backoff = transcriptionLaneReconnectInitial
+			} else if errors.Is(err, errTranscriptionLaneSessionExpired) {
+				log.Warnf("Transcript lane session expired; reconnecting")
+				broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"reason": "session expired"})
+				backoff = transcriptionLaneReconnectInitial
+			} else {
+				log.Errorf("Transcript lane failed: %v", err)
+				broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"error": err.Error()})
+			}
+		} else if err == nil {
+			backoff = transcriptionLaneReconnectInitial
 		}
 		lane.setConnected(false)
 
@@ -183,7 +203,7 @@ func (lane *meetingTranscriptionLane) run() {
 			return
 		case <-time.After(backoff):
 		}
-		if backoff < transcriptionLaneReconnectMax {
+		if err != nil && !errors.Is(err, errTranscriptionLaneSessionRefresh) && !errors.Is(err, errTranscriptionLaneSessionExpired) && backoff < transcriptionLaneReconnectMax {
 			backoff *= 2
 			if backoff > transcriptionLaneReconnectMax {
 				backoff = transcriptionLaneReconnectMax
@@ -214,13 +234,18 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				readErr <- err
 				return
 			}
-			lane.app.handleTranscriptionLaneEvent(raw)
+			if lane.app.handleTranscriptionLaneEvent(raw) {
+				readErr <- errTranscriptionLaneSessionExpired
+				return
+			}
 		}
 	}()
 
 	commitTimer := time.NewTimer(time.Hour)
 	stopTranscriptionTimer(commitTimer)
 	defer commitTimer.Stop()
+	refreshTimer := time.NewTimer(transcriptionLaneSessionRefresh)
+	defer refreshTimer.Stop()
 	pendingAudio := false
 	pendingAudioSamples := 0
 
@@ -238,6 +263,12 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				return nil
 			}
 			return fmt.Errorf("read transcription websocket: %w", err)
+		case <-refreshTimer.C:
+			if pendingAudio {
+				refreshTimer.Reset(5 * time.Second)
+				continue
+			}
+			return errTranscriptionLaneSessionRefresh
 		case roomPCM := <-lane.input:
 			audio := roomPCMForTranscription(roomPCM)
 			if len(audio) == 0 {
@@ -393,11 +424,11 @@ func (app *kanbanBoardApp) currentRealtimeModel() string {
 	return app.model
 }
 
-func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) {
+func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
 	var event kanbanRealtimeEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		log.Errorf("Failed to parse OpenAI transcription event: %v", err)
-		return
+		return false
 	}
 
 	switch event.Type {
@@ -405,6 +436,11 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) {
 		broadcastAssistantEvent("status", "OpenAI transcription session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
+			if event.Error.Code == "session_expired" {
+				log.Warnf("OpenAI transcription session expired: %s", event.Error.Message)
+				broadcastAssistantEvent("status", "Transcript lane session expired; reconnecting", map[string]any{"code": event.Error.Code, "lane": "transcript"})
+				return true
+			}
 			log.Errorf("OpenAI transcription error code=%s message=%s", event.Error.Code, event.Error.Message)
 			broadcastAssistantEvent("error", event.Error.Message, map[string]any{"code": event.Error.Code, "lane": "transcript"})
 		}
@@ -418,6 +454,8 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) {
 		app.noteRealtimeSpeechStopped()
 		broadcastAssistantEvent("audio", "transcript lane detected silence", map[string]any{"eventType": event.Type})
 	}
+
+	return false
 }
 
 func transcriptionLaneEnabled() bool {

@@ -306,6 +306,47 @@ func TestHandleToolCallWaitsForCompleteArgumentsBeforeDedupe(t *testing.T) {
 	}
 }
 
+func TestRealtimeOutputItemDoneWithPartialArgumentsWaitsForResponseDone(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	callID := "call-do-nothing"
+
+	app.handleRealtimeEvent([]byte(`{
+		"type": "response.output_item.done",
+		"item": {
+			"type": "function_call",
+			"name": "do_nothing",
+			"call_id": "call-do-nothing",
+			"arguments": "{\"reason\":\""
+		}
+	}`))
+
+	app.mu.Lock()
+	_, handled := app.handledCalls[callID]
+	app.mu.Unlock()
+	if handled {
+		t.Fatal("partial output_item.done arguments should not mark the call as handled")
+	}
+
+	app.handleRealtimeEvent([]byte(`{
+		"type": "response.done",
+		"response": {
+			"output": [{
+				"type": "function_call",
+				"name": "do_nothing",
+				"call_id": "call-do-nothing",
+				"arguments": "{\"reason\":\"nothing actionable\"}"
+			}]
+		}
+	}`))
+
+	app.mu.Lock()
+	_, handled = app.handledCalls[callID]
+	app.mu.Unlock()
+	if !handled {
+		t.Fatal("complete response.done arguments should handle the call")
+	}
+}
+
 func TestUpdateTicketAppliesRichRealtimeChangesAtomically(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 

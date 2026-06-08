@@ -6142,6 +6142,7 @@
       const remoteLabelConflictsByStream = new Set()
       const remoteLabelsByTrack = new Map()
       const participantPlaceholders = new Map()
+      const boardVideoTilesByParticipant = new Map()
       const participantMediaStates = new Map()
       const audioMonitors = new Map()
       const pendingRemotePlaybackElements = new Set()
@@ -6181,7 +6182,7 @@
       let lastMediaQualityReportAt = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
-      const audioSettingsSchemaVersion = 4
+      const audioSettingsSchemaVersion = 5
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
       const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
@@ -6387,7 +6388,7 @@
 
       function loadAudioSettings() {
         const defaults = {
-          mode: 'voice-focus',
+          mode: 'standard',
           version: audioSettingsSchemaVersion,
           profile: { ...defaultVoiceProfile }
         }
@@ -9803,6 +9804,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return Array.from(audioMonitors.values()).filter(monitor => !isCurrentParticipantName(remoteAudioMonitorName(monitor)))
       }
 
+      function remoteAudioSignalSnapshot(monitors = remoteAudioMonitors()) {
+        const now = performance.now()
+        let maxLevel = 0
+        let audibleMonitors = 0
+        const playbackPaths = {
+          element: 0,
+          webaudio: 0,
+          none: 0
+        }
+        const levels = monitors.map(monitor => {
+          const level = Math.max(0, Number(monitor.level) || 0)
+          const audibleRecently = Boolean(monitor.lastAudibleAt && now - monitor.lastAudibleAt < 2500)
+          maxLevel = Math.max(maxLevel, level)
+          if (audibleRecently) {
+            audibleMonitors++
+          }
+          const playback = monitor.audio ? 'element' : (monitor.playbackGain ? 'webaudio' : 'none')
+          playbackPaths[playback] = (playbackPaths[playback] || 0) + 1
+          return {
+            name: remoteAudioMonitorName(monitor) || 'participant',
+            level: Number(level.toFixed(5)),
+            audibleRecently,
+            playback
+          }
+        })
+
+        return {
+          maxLevel: Number(maxLevel.toFixed(5)),
+          audibleMonitors,
+          playbackPaths,
+          levels
+        }
+      }
+
       function refreshStalledRemoteVideoTiles(reason = '') {
         let refreshed = false
         const now = performance.now()
@@ -9879,6 +9914,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const placeholderVideoTiles = remoteTiles().filter(tile => remoteTileName(tile) === 'participant').length
         const audioMonitorsForRemoteParticipants = remoteAudioMonitors()
         const placeholderAudioMonitors = audioMonitorsForRemoteParticipants.filter(monitor => remoteAudioMonitorName(monitor) === 'participant').length
+        const audioSignal = remoteAudioSignalSnapshot(audioMonitorsForRemoteParticipants)
         const now = performance.now()
         const stalledVideoNames = expectedNames.filter(name => {
           const lowerName = name.toLowerCase()
@@ -9900,6 +9936,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           pendingRemotePlayback: remotePlaybackPendingCount(),
           audiblePendingRemotePlayback: remotePlaybackPendingCount({ audibleOnly: true }),
           audioContextState: audioContext?.state || '',
+          remoteAudioMaxLevel: audioSignal.maxLevel,
+          remoteAudioAudibleMonitors: audioSignal.audibleMonitors,
+          remoteAudioPlaybackPaths: audioSignal.playbackPaths,
+          remoteAudioLevels: audioSignal.levels,
           missingVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) === 0),
           duplicateVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) > 1),
           missingAudioNames: expectedNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) === 0),
@@ -9920,6 +9960,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         repaired = refreshStalledRemoteVideoTiles(reason) || repaired
         repaired = repairMissingRemoteVideoTiles(reason) || repaired
         repaired = repairMissingRemoteAudioMonitors(reason) || repaired
+        repaired = repairAuxiliaryVideoPlayback(reason) || repaired
 
         const health = remoteMediaHealthSnapshot()
         if (health.missingVideoNames.length || health.missingAudioNames.length || health.placeholderVideoTiles || health.placeholderAudioMonitors) {
@@ -9927,6 +9968,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         health.repaired = repaired
         return health
+      }
+
+      function auxiliaryVideoPlaybackTargets() {
+        const targets = []
+        const speaker = activeSpeakerDisplayName()
+        if (stageMode === 'speaker' && speaker && speaker !== 'the room') {
+          targets.push({
+            video: activeSpeakerVideo,
+            name: speaker,
+            stream: participantStream(speaker),
+            local: speaker === currentParticipantName
+          })
+        }
+        if (appShell.classList.contains('is-board-expanded') && boardVideoStrip) {
+          for (const tile of boardVideoStrip.querySelectorAll('.board-video-tile')) {
+            const name = String(tile.dataset.participant || '').trim()
+            if (!name || name === 'the room') {
+              continue
+            }
+            targets.push({
+              video: tile.querySelector('video'),
+              name,
+              stream: participantStream(name),
+              local: name === currentParticipantName
+            })
+          }
+        }
+        return targets
+      }
+
+      function repairAuxiliaryVideoPlayback(reason = '') {
+        let repaired = false
+        for (const target of auxiliaryVideoPlaybackTargets()) {
+          const video = target.video
+          const stream = target.stream
+          if (!video || !stream || participantMediaState(target.name).cameraOff) {
+            continue
+          }
+          const hadStream = Boolean(video.srcObject)
+          setVideoElementStream(video, stream, { local: target.local })
+          if (!hadStream || videoElementNeedsRefresh(video)) {
+            setVideoElementStream(video, stream, { local: target.local, force: true })
+            repaired = true
+          } else {
+            ensureVideoElementPlayback(video)
+          }
+        }
+        if (repaired && reason) {
+          console.info('Repaired auxiliary video playback', reason)
+        }
+        return repaired
       }
 
       function scheduleUnidentifiedRemoteTileRepair(tile) {
@@ -10585,16 +10677,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return remoteStreamsByParticipant.get(name) || null
       }
 
-      function setVideoElementStream(video, stream, { hidden = false, local = false } = {}) {
+      function setVideoElementStream(video, stream, { hidden = false, local = false, force = false } = {}) {
+        const wasHidden = video.hidden
+        if (force) {
+          delete video.dataset.sourceStreamSignature
+        }
         const nextStream = videoPlaybackStreamForElement(video, stream || null)
-        if (video.srcObject !== nextStream) {
+        if (force || video.srcObject !== nextStream) {
+          pendingRemotePlaybackElements.delete(video)
+          if (!nextStream) {
+            video.pause?.()
+          }
           video.srcObject = nextStream
+          markVideoElementStreamAttached(video, nextStream)
           if (nextStream) {
-            video.play?.().catch(() => {})
+            ensureVideoElementPlayback(video)
           }
         }
         video.hidden = hidden || !nextStream
         video.classList.toggle('is-local', local)
+        if (nextStream && wasHidden && !video.hidden) {
+          markVideoElementStreamAttached(video, nextStream)
+        }
+        if (nextStream && !video.hidden) {
+          ensureVideoElementPlayback(video)
+        }
       }
 
       function mediaStreamTrackSignature(stream) {
@@ -10611,7 +10718,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return null
         }
         const tagName = String(video?.tagName || '').toLowerCase()
-        if (!safariBrowser || tagName !== 'video') {
+        if (tagName !== 'video') {
           delete video.dataset.sourceStreamSignature
           return stream
         }
@@ -10625,6 +10732,94 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         video.dataset.sourceStreamSignature = signature
         return new MediaStream(stream.getTracks().filter(liveTrack))
+      }
+
+      function markVideoElementStreamAttached(video, stream) {
+        if (!video) {
+          return
+        }
+        if (!stream) {
+          delete video.dataset.videoStreamAttachedAt
+          delete video.dataset.lastVideoFrameAt
+          delete video.dataset.videoFrameWatchToken
+          return
+        }
+        const now = String(performance.now())
+        video.dataset.videoStreamAttachedAt = now
+        delete video.dataset.lastVideoFrameAt
+        watchVideoElementFrames(video)
+      }
+
+      function watchVideoElementFrames(video) {
+        if (!video || typeof video.requestVideoFrameCallback !== 'function') {
+          return
+        }
+        const token = String((Number(video.dataset.videoFrameWatchToken || 0) || 0) + 1)
+        video.dataset.videoFrameWatchToken = token
+        const onFrame = () => {
+          if (video.dataset.videoFrameWatchToken !== token || !video.srcObject) {
+            return
+          }
+          video.dataset.lastVideoFrameAt = String(performance.now())
+          video.requestVideoFrameCallback(onFrame)
+        }
+        video.requestVideoFrameCallback(onFrame)
+      }
+
+      function ensureVideoElementPlayback(video) {
+        if (!video?.srcObject) {
+          return
+        }
+        const play = () => {
+          if (!video.srcObject || video.hidden) {
+            return
+          }
+          video.play?.().catch(() => {})
+        }
+        if (video.isConnected) {
+          window.requestAnimationFrame(play)
+        } else {
+          window.setTimeout(play, 0)
+        }
+      }
+
+      function clearVideoElementStream(video) {
+        if (!video) {
+          return
+        }
+        pendingRemotePlaybackElements.delete(video)
+        video.pause?.()
+        video.srcObject = null
+        delete video.dataset.sourceStreamSignature
+        markVideoElementStreamAttached(video, null)
+      }
+
+      function videoElementHasLiveVideoTrack(video) {
+        return Boolean(video?.srcObject?.getVideoTracks?.().some(liveTrack))
+      }
+
+      function videoElementHasRenderedFrame(video) {
+        return Boolean(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)
+      }
+
+      function videoElementNeedsRefresh(video) {
+        if (!mediaElementIsVisible(video) || !videoElementHasLiveVideoTrack(video)) {
+          return false
+        }
+        const now = performance.now()
+        const attachedAt = Number(video.dataset.videoStreamAttachedAt || 0)
+        if (attachedAt && now - attachedAt < 3500) {
+          return false
+        }
+        const lastFrameAt = Number(video.dataset.lastVideoFrameAt || 0)
+        if (typeof video.requestVideoFrameCallback === 'function' && (!lastFrameAt || now - lastFrameAt > 8000)) {
+          return true
+        }
+        return !videoElementHasRenderedFrame(video)
+      }
+
+      function mediaElementIsVisible(element) {
+        return Boolean(element && !element.hidden && element.isConnected && element.getClientRects().length > 0)
       }
 
       function updateHearthParticipants() {
@@ -10669,6 +10864,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateSpeakerPictureInPicture()
         renderBoardHuddle()
         renderBoardDock()
+        repairAuxiliaryVideoPlayback('hearth update')
         updateStageControls()
       }
 
@@ -10836,6 +11032,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const names = visibleParticipantNames().filter(name => name && name !== 'the room').slice(0, 6)
+        const activeNames = new Set(names)
+        for (const [name, tile] of Array.from(boardVideoTilesByParticipant.entries())) {
+          if (!activeNames.has(name)) {
+            disposeBoardVideoTile(tile)
+            boardVideoTilesByParticipant.delete(name)
+          }
+        }
         const speaker = activeSpeakerDisplayName()
         const tiles = names.map(name => renderBoardVideoTile(name, name === speaker))
         if (tiles.length === 0) {
@@ -10846,6 +11049,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else {
           boardVideoStrip.replaceChildren(...tiles)
         }
+        window.requestAnimationFrame(() => repairAuxiliaryVideoPlayback('board dock render'))
         if (boardDockNow) {
           boardDockNow.textContent = speaker === 'the room'
             ? 'room visible'
@@ -10855,31 +11059,63 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderBoardVideoTile(name, isSpeaker) {
-        const tile = document.createElement('button')
-        tile.type = 'button'
+        let tile = boardVideoTilesByParticipant.get(name)
+        if (!tile) {
+          tile = document.createElement('button')
+          tile.type = 'button'
+          tile.addEventListener('click', () => togglePinnedSpeaker(tile.dataset.participant || name))
+          boardVideoTilesByParticipant.set(name, tile)
+        }
+        tile.dataset.participant = name
         tile.className = `board-video-tile${isSpeaker ? ' is-speaker' : ''}`
         tile.title = isSpeaker ? `${name} is on stage` : `pin ${name}`
-        tile.addEventListener('click', () => togglePinnedSpeaker(name))
 
         const stream = participantStream(name)
         const state = participantMediaState(name)
-        if (stream && !state.cameraOff && shouldRenderBoardDockVideo()) {
-          const video = document.createElement('video')
-          video.autoplay = true
-          video.muted = true
-          video.defaultMuted = true
-          video.playsInline = true
-          setVideoElementStream(video, stream, { local: name === currentParticipantName })
-          tile.appendChild(video)
-        } else {
-          tile.appendChild(renderOwnerAvatar({ owner: name }))
+        let label = tile.querySelector('.board-video-label')
+        if (!label) {
+          label = document.createElement('span')
+          label.className = 'board-video-label'
+          tile.appendChild(label)
         }
 
-        const label = document.createElement('span')
-        label.className = 'board-video-label'
+        if (stream && !state.cameraOff && shouldRenderBoardDockVideo()) {
+          tile.querySelector('.owner-avatar')?.remove()
+          let video = tile.querySelector('video')
+          if (!video) {
+            video = document.createElement('video')
+            video.autoplay = true
+            video.muted = true
+            video.defaultMuted = true
+            video.playsInline = true
+            tile.insertBefore(video, label)
+          }
+          setVideoElementStream(video, stream, { local: name === currentParticipantName })
+        } else {
+          const video = tile.querySelector('video')
+          if (video) {
+            clearVideoElementStream(video)
+            video.remove()
+          }
+          let avatar = tile.querySelector('.owner-avatar')
+          const nextAvatar = renderOwnerAvatar({ owner: name })
+          if (avatar) {
+            avatar.replaceWith(nextAvatar)
+          } else {
+            tile.insertBefore(nextAvatar, label)
+          }
+        }
+
         label.textContent = name === currentParticipantName ? 'you' : name.toLowerCase()
-        tile.appendChild(label)
         return tile
+      }
+
+      function disposeBoardVideoTile(tile) {
+        const video = tile?.querySelector?.('video')
+        if (video) {
+          clearVideoElementStream(video)
+        }
+        tile?.remove?.()
       }
 
       function shouldRenderBoardDockVideo() {
@@ -11057,7 +11293,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function shouldUseElementRemoteAudioPlayback() {
-        return safariBrowser || useCrowdedVideoLimits()
+        return true
       }
 
       function retuneRemoteAudioPlaybackForRoomLoad() {
@@ -11314,6 +11550,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             if (level > loudestLevel) {
               loudestLevel = level
               loudestName = monitor.name
+            }
+            monitor.level = level
+            monitor.lastLevelAt = now
+            if (level > 0.012) {
+              monitor.lastAudibleAt = now
             }
           }
           const visibleSpeakerName = participantDisplayNameInRoom(loudestName)
@@ -13001,6 +13242,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         queuedRemoteCandidates = []
         participantPlaceholders.forEach(tile => tile.remove())
         participantPlaceholders.clear()
+        boardVideoTilesByParticipant.forEach(tile => disposeBoardVideoTile(tile))
+        boardVideoTilesByParticipant.clear()
         participantMediaStates.clear()
         activeScreenShareParticipant = ''
         activeSpeakerName = ''

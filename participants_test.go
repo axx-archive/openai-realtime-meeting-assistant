@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,22 @@ func TestMeetingRoomDefaultSupportsTenParticipants(t *testing.T) {
 	}
 	if len(meetingParticipantNames) < configuredMeetingRoomCapacity() {
 		t.Fatalf("participant seats=%d, want at least %d", len(meetingParticipantNames), configuredMeetingRoomCapacity())
+	}
+}
+
+func TestExpectedKanbanBroadcastCloseDetection(t *testing.T) {
+	for _, message := range []string{
+		"websocket: close sent",
+		"write tcp 172.18.0.3:3000->172.18.0.4:46680: write: broken pipe",
+		"write tcp: use of closed network connection",
+	} {
+		if !isExpectedKanbanBroadcastClose(errors.New(message)) {
+			t.Fatalf("close error %q was not treated as expected", message)
+		}
+	}
+
+	if isExpectedKanbanBroadcastClose(errors.New("temporary upstream write failure")) {
+		t.Fatal("unexpected write failures should still be logged")
 	}
 }
 

@@ -145,3 +145,29 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 		t.Fatalf("model=%q, want gpt-realtime-whisper", model)
 	}
 }
+
+func TestTranscriptionLaneSessionExpiredRequestsReconnect(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	reconnect := app.handleTranscriptionLaneEvent([]byte(`{
+		"type":"error",
+		"error":{
+			"code":"session_expired",
+			"message":"Your session hit the maximum duration of 60 minutes."
+		}
+	}`))
+	if !reconnect {
+		t.Fatal("session_expired should request transcript lane reconnect")
+	}
+
+	reconnect = app.handleTranscriptionLaneEvent([]byte(`{
+		"type":"error",
+		"error":{
+			"code":"invalid_request_error",
+			"message":"bad event"
+		}
+	}`))
+	if reconnect {
+		t.Fatal("non-expiry errors should not request transcript lane reconnect")
+	}
+}

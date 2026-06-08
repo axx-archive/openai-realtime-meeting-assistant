@@ -55,14 +55,24 @@ try {
     }
   }
 
-  await sleep(14000)
-  const snapshots = []
+  await sleep(6000)
   for (const page of pages) {
-    snapshots.push(await snapshotPage(page))
+    await showSpeakerView(page)
   }
+  await sleep(5000)
+  const speakerSnapshots = await collectSnapshots()
 
-  const failures = validateSnapshots(snapshots, pages.length)
-  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots }, null, 2))
+  for (const page of pages) {
+    await showExpandedBoardView(page)
+  }
+  await sleep(5000)
+  const boardSnapshots = await collectSnapshots()
+
+  const failures = [
+    ...validateSnapshots(speakerSnapshots, pages.length, { view: 'speaker', requireSpeakerView: true }),
+    ...validateSnapshots(boardSnapshots, pages.length, { view: 'board', requireBoardDock: true })
+  ]
+  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots }, null, 2))
   await closePages(pages)
   await finish(failures.length === 0 ? 0 : 1)
 } catch (error) {
@@ -284,9 +294,68 @@ async function rejoinParticipant(name) {
   log('rejoin-complete', name)
 }
 
+async function showSpeakerView(page) {
+  await evaluate(page, `
+    (() => {
+      if (typeof setStageMode === 'function') {
+        setStageMode('speaker')
+      }
+      if (typeof repairAuxiliaryVideoPlayback === 'function') {
+        repairAuxiliaryVideoPlayback('live media smoke speaker view')
+      }
+      return true
+    })()
+  `)
+}
+
+async function showExpandedBoardView(page) {
+  await waitFor(page, `${page.name} board ready`, `
+    (() => typeof isBoardReady !== 'undefined' && isBoardReady)()
+  `)
+  await evaluate(page, `
+    (() => {
+      if (typeof setBoardExpanded === 'function') {
+        setBoardExpanded(true)
+      }
+      if (typeof repairAuxiliaryVideoPlayback === 'function') {
+        repairAuxiliaryVideoPlayback('live media smoke board view')
+      }
+      return true
+    })()
+  `)
+}
+
+async function collectSnapshots() {
+  const snapshots = []
+  for (const page of pages) {
+    snapshots.push(await snapshotPage(page))
+  }
+  return snapshots
+}
+
 async function snapshotPage(page) {
   return evaluate(page, `
     (async () => {
+      const videoProbe = video => {
+        if (!video) {
+          return null
+        }
+        let frames = 0
+        if (typeof video.getVideoPlaybackQuality === 'function') {
+          frames = Number(video.getVideoPlaybackQuality().totalVideoFrames) || 0
+        } else {
+          frames = Number(video.webkitDecodedFrameCount) || 0
+        }
+        return {
+          hidden: Boolean(video.hidden),
+          visible: Boolean(video.getClientRects().length),
+          readyState: video.readyState,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          frames,
+          hasLiveVideo: Boolean(video.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended'))
+        }
+      }
       const stats = typeof pc !== 'undefined' && pc
         ? Array.from((await pc.getStats()).values()).map(stat => ({
             id: stat.id || '',
@@ -353,12 +422,24 @@ async function snapshotPage(page) {
         playbackGainMonitors: typeof audioMonitors !== 'undefined'
           ? remoteMonitorList.filter(monitor => monitor.playbackGain).length
           : -1,
+        audioElementMonitors: typeof audioMonitors !== 'undefined'
+          ? remoteMonitorList.filter(monitor => monitor.audio).length
+          : -1,
         participantsInRoom: typeof participantsInRoom !== 'undefined' ? participantsInRoom.slice() : [],
         usesCrowdedVideoLimits: typeof useCrowdedVideoLimits === 'function' ? useCrowdedVideoLimits() : null,
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
         remoteHealth: typeof remoteMediaHealthSnapshot === 'function' ? remoteMediaHealthSnapshot() : null,
+        stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
+        activeSpeaker: typeof activeSpeakerDisplayName === 'function' ? activeSpeakerDisplayName() : '',
+        speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
+        boardExpanded: Boolean(document.getElementById('appShell')?.classList.contains('is-board-expanded')),
+        boardDockVideos: Array.from(document.querySelectorAll('.board-video-tile')).map(tile => ({
+          participant: tile.dataset.participant || '',
+          text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 80),
+          video: videoProbe(tile.querySelector('video'))
+        })),
         tiles: Array.from(document.querySelectorAll('.video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           classes: tile.className,
@@ -397,20 +478,21 @@ async function basicPageState(page) {
   `)
 }
 
-function validateSnapshots(snapshots, expectedClientCount) {
+function validateSnapshots(snapshots, expectedClientCount, options = {}) {
   const failures = []
   const expectedNames = config.participants
   for (const snapshot of snapshots) {
+    const prefix = options.view ? `${snapshot.name} ${options.view}` : snapshot.name
     const localAudio = snapshot.localTracks.find(track => track.kind === 'audio')
     const localVideo = snapshot.localTracks.find(track => track.kind === 'video')
     if (snapshot.connectionState !== 'connected') {
-      failures.push(`${snapshot.name} peer state is ${snapshot.connectionState}`)
+      failures.push(`${prefix} peer state is ${snapshot.connectionState}`)
     }
     if (!localAudio || localAudio.readyState !== 'live' || !localAudio.enabled) {
-      failures.push(`${snapshot.name} local audio is not live/enabled`)
+      failures.push(`${prefix} local audio is not live/enabled`)
     }
     if (!localVideo || localVideo.readyState !== 'live' || !localVideo.enabled) {
-      failures.push(`${snapshot.name} local video is not live/enabled`)
+      failures.push(`${prefix} local video is not live/enabled`)
     }
     const outboundAudioBytes = snapshot.stats
       .filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'audio')
@@ -419,28 +501,31 @@ function validateSnapshots(snapshots, expectedClientCount) {
       .filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'video')
       .reduce((total, stat) => total + Math.max(stat.framesSent || 0, stat.framesEncoded || 0), 0)
     if (localAudio?.readyState === 'live' && localAudio.enabled && outboundAudioBytes <= 0) {
-      failures.push(`${snapshot.name} has a live microphone but sent no outbound audio bytes`)
+      failures.push(`${prefix} has a live microphone but sent no outbound audio bytes`)
     }
     if (localVideo?.readyState === 'live' && localVideo.enabled && outboundVideoFrames <= 0) {
-      failures.push(`${snapshot.name} has a live camera but sent no outbound video frames`)
+      failures.push(`${prefix} has a live camera but sent no outbound video frames`)
     }
     if (snapshot.remoteElements < expectedClientCount - 1) {
-      failures.push(`${snapshot.name} sees ${snapshot.remoteElements} remote media elements`)
+      failures.push(`${prefix} sees ${snapshot.remoteElements} remote media elements`)
     }
     if (snapshot.audioMonitors !== expectedClientCount - 1) {
-      failures.push(`${snapshot.name} has ${snapshot.audioMonitors} remote audio monitors, expected ${expectedClientCount - 1}`)
+      failures.push(`${prefix} has ${snapshot.audioMonitors} remote audio monitors, expected ${expectedClientCount - 1}`)
     }
     if (snapshot.remoteAudioPlaybackBlocked || snapshot.audiblePendingRemotePlayback > 0) {
-      failures.push(`${snapshot.name} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
+      failures.push(`${prefix} has blocked remote audio playback (pending=${snapshot.audiblePendingRemotePlayback}, context=${snapshot.audioContextState})`)
     }
     if (expectedClientCount >= 5 && snapshot.usesCrowdedVideoLimits !== true) {
-      failures.push(`${snapshot.name} is not using crowded media limits`)
+      failures.push(`${prefix} is not using crowded media limits`)
     }
-    if (expectedClientCount >= 5 && snapshot.playbackGainMonitors > 0) {
-      failures.push(`${snapshot.name} still has ${snapshot.playbackGainMonitors} WebAudio playback monitors in a crowded room`)
+    if (snapshot.playbackGainMonitors > 0) {
+      failures.push(`${prefix} still has ${snapshot.playbackGainMonitors} WebAudio playback monitors`)
+    }
+    if (snapshot.audioElementMonitors < expectedClientCount - 1) {
+      failures.push(`${prefix} has ${snapshot.audioElementMonitors} native audio playback monitors`)
     }
     if (!snapshot.remoteHealth) {
-      failures.push(`${snapshot.name} has no remote media health snapshot`)
+      failures.push(`${prefix} has no remote media health snapshot`)
     } else {
       for (const [key, names] of Object.entries({
         missingVideoNames: snapshot.remoteHealth.missingVideoNames || [],
@@ -450,40 +535,60 @@ function validateSnapshots(snapshots, expectedClientCount) {
         stalledVideoNames: snapshot.remoteHealth.stalledVideoNames || []
       })) {
         if (names.length > 0) {
-          failures.push(`${snapshot.name} remote health ${key}=${names.join(',')}`)
+          failures.push(`${prefix} remote health ${key}=${names.join(',')}`)
         }
       }
       if (snapshot.remoteHealth.placeholderVideoTiles > 0 || snapshot.remoteHealth.placeholderAudioMonitors > 0) {
-        failures.push(`${snapshot.name} remote health placeholders video=${snapshot.remoteHealth.placeholderVideoTiles} audio=${snapshot.remoteHealth.placeholderAudioMonitors}`)
+        failures.push(`${prefix} remote health placeholders video=${snapshot.remoteHealth.placeholderVideoTiles} audio=${snapshot.remoteHealth.placeholderAudioMonitors}`)
       }
       if (snapshot.remoteHealth.audiblePendingRemotePlayback > 0) {
-        failures.push(`${snapshot.name} remote health has pending audible playback ${snapshot.remoteHealth.audiblePendingRemotePlayback}`)
+        failures.push(`${prefix} remote health has pending audible playback ${snapshot.remoteHealth.audiblePendingRemotePlayback}`)
+      }
+      if ((snapshot.remoteHealth.remoteAudioPlaybackPaths?.element || 0) < expectedClientCount - 1) {
+        failures.push(`${prefix} remote health is not using native audio playback`)
       }
     }
-    if (snapshot.audioMode !== 'voice-focus') {
-      failures.push(`${snapshot.name} audio mode is ${snapshot.audioMode}`)
+    if (snapshot.audioMode !== 'standard') {
+      failures.push(`${prefix} audio mode is ${snapshot.audioMode}`)
     }
-    if (!['rnnoise-wasm', 'rnnoise-loading', 'worklet', 'script', 'webaudio'].includes(snapshot.voiceProcessor)) {
-      failures.push(`${snapshot.name} voice processor is ${snapshot.voiceProcessor}`)
+    if (snapshot.voiceProcessor !== 'disabled') {
+      failures.push(`${prefix} voice processor is ${snapshot.voiceProcessor}`)
+    }
+    if (options.requireSpeakerView) {
+      if (snapshot.stageMode !== 'speaker') {
+        failures.push(`${prefix} stage mode is ${snapshot.stageMode}`)
+      }
+      if (!videoProbeRendered(snapshot.speakerVideo)) {
+        failures.push(`${prefix} speaker video did not render for ${snapshot.activeSpeaker || 'active speaker'}`)
+      }
+    }
+    if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits) {
+      if (!snapshot.boardExpanded) {
+        failures.push(`${prefix} board is not expanded`)
+      }
+      const renderedDockVideos = snapshot.boardDockVideos.filter(tile => videoProbeRendered(tile.video))
+      if (renderedDockVideos.length < expectedClientCount) {
+        failures.push(`${prefix} board dock rendered ${renderedDockVideos.length} videos, expected ${expectedClientCount}`)
+      }
     }
     for (const name of expectedNames) {
       if (!snapshot.participantsInRoom.includes(name)) {
-        failures.push(`${snapshot.name} participant list is missing ${name}`)
+        failures.push(`${prefix} participant list is missing ${name}`)
       }
       const tileCount = snapshot.tiles.filter(tile => tile.participant === name).length
       if (tileCount !== 1) {
-        failures.push(`${snapshot.name} sees ${tileCount} tiles for ${name}`)
+        failures.push(`${prefix} sees ${tileCount} tiles for ${name}`)
       }
       if (name !== snapshot.name) {
         const audioMonitorCount = snapshot.audioMonitorNames.filter(monitorName => monitorName === name).length
         if (audioMonitorCount !== 1) {
-          failures.push(`${snapshot.name} has ${audioMonitorCount} audio monitors for ${name}`)
+          failures.push(`${prefix} has ${audioMonitorCount} audio monitors for ${name}`)
         }
       }
     }
     const placeholderTiles = snapshot.tiles.filter(tile => tile.participant === 'participant').length
     if (placeholderTiles > 0) {
-      failures.push(`${snapshot.name} still has ${placeholderTiles} unlabeled participant tiles`)
+      failures.push(`${prefix} still has ${placeholderTiles} unlabeled participant tiles`)
     }
     const inboundVideoDecoded = snapshot.stats
       .filter(stat => stat.type === 'inbound-rtp' && stat.kind === 'video')
@@ -492,17 +597,25 @@ function validateSnapshots(snapshots, expectedClientCount) {
       .filter(tile => tile.participant && tile.participant !== snapshot.name)
       .reduce((total, tile) => total + Math.max(tile.renderedVideos || 0, tile.decodedFrames > 0 ? 1 : 0), 0)
     if (expectedClientCount > 1 && inboundVideoDecoded <= 0 && renderedRemoteVideos <= 0) {
-      failures.push(`${snapshot.name} has no decoded remote video frames`)
+      failures.push(`${prefix} has no decoded remote video frames`)
     }
     const candidateRtt = selectedCandidateRtt(snapshot.stats)
     if (candidateRtt > 0.35) {
-      failures.push(`${snapshot.name} candidate RTT is ${(candidateRtt * 1000).toFixed(0)}ms`)
+      failures.push(`${prefix} candidate RTT is ${(candidateRtt * 1000).toFixed(0)}ms`)
     }
     if (snapshot.mediaQualityConstrained) {
-      failures.push(`${snapshot.name} media quality was constrained for lag`)
+      failures.push(`${prefix} media quality was constrained for lag`)
     }
   }
   return failures
+}
+
+function videoProbeRendered(probe) {
+  return Boolean(probe
+    && !probe.hidden
+    && probe.visible
+    && probe.hasLiveVideo
+    && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
 }
 
 function selectedCandidateRtt(stats) {
