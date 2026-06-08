@@ -6147,6 +6147,9 @@
       const audioMonitors = new Map()
       const pendingRemotePlaybackElements = new Set()
       const audioLevelSampleIntervalMs = 80
+      const roomStateRefreshIntervalMs = 8000
+      const roomAudioUnlockRetryIntervalMs = 3000
+      const roomAudioUnlockNoticeIntervalMs = 8000
       const videoFeedOrderStorageKey = 'bonfire.video.order.v1'
       const videoDragStartThreshold = 6
       const cardSnapshots = new Map()
@@ -6176,6 +6179,9 @@
       let voiceTrainingSamples = []
       let voiceTrainingPrivacyMute = false
       let mediaQualityMonitorTimer = 0
+      let roomStateRefreshTimer = 0
+      let roomAudioUnlockRetryTimer = 0
+      let lastRoomAudioUnlockNoticeAt = 0
       let mediaQualityConstrained = false
       let mediaQualityLagSamples = 0
       let previousMediaQualityStats = null
@@ -6776,6 +6782,30 @@
           updateParticipantPreviewText()
         } catch {
           // The room can still be joined if the preview endpoint is unavailable.
+        }
+      }
+
+      async function refreshRoomStateSnapshot(reason = '') {
+        if (!appShell.classList.contains('is-in-room')) {
+          return
+        }
+        await loadParticipantPreview()
+        repairRemoteMediaHealth(reason || 'room state refresh')
+      }
+
+      function startRoomStateRefresh() {
+        stopRoomStateRefresh()
+        roomStateRefreshTimer = window.setInterval(() => {
+          refreshRoomStateSnapshot('periodic room state refresh').catch(error => {
+            console.warn('Could not refresh room state', error)
+          })
+        }, roomStateRefreshIntervalMs)
+      }
+
+      function stopRoomStateRefresh() {
+        if (roomStateRefreshTimer) {
+          window.clearInterval(roomStateRefreshTimer)
+          roomStateRefreshTimer = 0
         }
       }
 
@@ -7621,6 +7651,7 @@
         publishParticipantMediaState()
         startRoomClock()
         startMediaQualityMonitor(sessionPeer)
+        startRoomStateRefresh()
       }
 
       function clearConnectionRecoveryTimer() {
@@ -7672,6 +7703,46 @@
         lastMediaQualityReportAt = 0
       }
 
+      function stopRoomAudioUnlockRetry() {
+        if (roomAudioUnlockRetryTimer) {
+          window.clearInterval(roomAudioUnlockRetryTimer)
+          roomAudioUnlockRetryTimer = 0
+        }
+      }
+
+      function startRoomAudioUnlockRetry() {
+        if (roomAudioUnlockRetryTimer) {
+          return
+        }
+        roomAudioUnlockRetryTimer = window.setInterval(() => {
+          if (!roomAudioPlaybackBlocked()) {
+            stopRoomAudioUnlockRetry()
+            return
+          }
+          unlockRoomAudioPlayback()
+        }, roomAudioUnlockRetryIntervalMs)
+      }
+
+      function notifyRoomAudioBlocked() {
+        setLog('click once to enable room audio')
+        startRoomAudioUnlockRetry()
+
+        const now = Date.now()
+        if (lastRoomAudioUnlockNoticeAt && now - lastRoomAudioUnlockNoticeAt < roomAudioUnlockNoticeIntervalMs) {
+          return
+        }
+        lastRoomAudioUnlockNoticeAt = now
+        showToast({ text: 'click anywhere to enable room audio', kind: 'note' })
+      }
+
+      function syncRoomAudioPlaybackState() {
+        if (roomAudioPlaybackBlocked()) {
+          notifyRoomAudioBlocked()
+        } else {
+          stopRoomAudioUnlockRetry()
+        }
+      }
+
       function startMediaQualityMonitor(sessionPeer) {
         stopMediaQualityMonitor()
         if (!sessionPeer?.getStats) {
@@ -7692,6 +7763,7 @@
               await constrainCameraForLag('media stats')
             }
             const remoteHealth = repairRemoteMediaHealth('media quality monitor')
+            syncRoomAudioPlaybackState()
             sendMediaQualityReport(snapshot, previousMediaQualityStats, rawLaggy, remoteHealth)
             previousMediaQualityStats = snapshot
           } catch (error) {
@@ -9950,6 +10022,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function repairRemoteMediaHealth(reason = '') {
         let repaired = false
+        repaired = pruneRemoteMediaOutsideRoom() || repaired
         for (const name of expectedRemoteParticipantNames()) {
           repaired = pruneDuplicateRemoteVideoTilesByName(name) || repaired
           repaired = pruneDuplicateAudioMonitorsByName(name) || repaired
@@ -9966,6 +10039,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (health.missingVideoNames.length || health.missingAudioNames.length || health.placeholderVideoTiles || health.placeholderAudioMonitors) {
           requestParticipantTrackRefresh(reason || 'remote media health')
         }
+        syncRoomAudioPlaybackState()
         health.repaired = repaired
         return health
       }
@@ -11162,6 +11236,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         for (const element of Array.from(pendingRemotePlaybackElements)) {
           playRemoteMedia(element)
         }
+        window.setTimeout(syncRoomAudioPlaybackState, 250)
       }
 
       function remotePlaybackNeedsGesture(element) {
@@ -11208,17 +11283,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const playPromise = element?.play?.()
         if (!playPromise?.then) {
           pendingRemotePlaybackElements.delete(element)
+          syncRoomAudioPlaybackState()
           return
         }
         playPromise.then(() => {
           pendingRemotePlaybackElements.delete(element)
+          syncRoomAudioPlaybackState()
         }).catch(error => {
           if (remotePlaybackNeedsGesture(element)) {
             pendingRemotePlaybackElements.add(element)
-            console.warn('Remote audio playback is waiting for a user gesture', error)
-            setLog('click once to enable room audio')
+            const now = Date.now()
+            const warnedAt = Number(element.dataset.remotePlaybackWarnedAt || 0)
+            if (!warnedAt || now - warnedAt >= roomAudioUnlockNoticeIntervalMs) {
+              element.dataset.remotePlaybackWarnedAt = String(now)
+              console.warn('Remote audio playback is waiting for a user gesture', error)
+            }
+            notifyRoomAudioBlocked()
           } else {
             pendingRemotePlaybackElements.delete(element)
+            syncRoomAudioPlaybackState()
           }
         })
       }
@@ -13187,6 +13270,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
         stopMediaQualityMonitor()
+        stopRoomStateRefresh()
+        stopRoomAudioUnlockRetry()
         leaveButton.disabled = true
         micSelect.disabled = true
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
