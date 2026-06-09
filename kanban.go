@@ -1528,18 +1528,29 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 	}
 
 	args, parseErr := parseToolCallArguments(outputItem)
-	if parseErr != nil && allowIncompleteArguments && isIncompleteToolArgumentsError(parseErr) {
+	switch classifyToolArgParse(parseErr, allowIncompleteArguments) {
+	case toolArgsAwaitingMore:
+		// Still streaming: the completing event (response.done / output_item.done)
+		// will retry with the full arguments.
 		log.Infof("Waiting for complete %s arguments for call_id=%s", outputItem.Name, outputItem.CallID)
 		return
-	}
-
-	app.mu.Lock()
-	if _, ok := app.handledCalls[outputItem.CallID]; ok {
-		app.mu.Unlock()
+	case toolArgsInterrupted:
+		// The response was interrupted/cancelled before the arguments finished
+		// streaming (common mid-meeting on barge-in). The call will never be
+		// completed, so skip it: don't run a half-specified board mutation and
+		// don't surface a parse error to the meeting chat feed. Mark it handled
+		// so a later duplicate event for the same call is ignored too.
+		if app.markCallHandled(outputItem.CallID) {
+			log.Infof("Skipping interrupted %s tool call with incomplete arguments for call_id=%s", outputItem.Name, outputItem.CallID)
+		}
 		return
 	}
-	app.handledCalls[outputItem.CallID] = struct{}{}
-	app.mu.Unlock()
+	// toolArgsComplete and toolArgsMalformed both fall through: malformed-but-
+	// complete arguments are a genuine error and still surface below.
+
+	if !app.markCallHandled(outputItem.CallID) {
+		return
+	}
 
 	broadcastAssistantEvent("action", "using "+humanizeToolName(outputItem.Name), map[string]any{"tool": outputItem.Name})
 
@@ -1614,6 +1625,50 @@ func parseToolCallArguments(outputItem kanbanRealtimeOutputItem) (map[string]any
 
 func isIncompleteToolArgumentsError(err error) bool {
 	return strings.Contains(err.Error(), "unexpected end of JSON input")
+}
+
+// toolArgParseOutcome classifies the result of parsing a tool call's arguments.
+type toolArgParseOutcome int
+
+const (
+	toolArgsComplete     toolArgParseOutcome = iota // valid arguments, proceed
+	toolArgsAwaitingMore                            // truncated, but more is still streaming in
+	toolArgsInterrupted                             // truncated on the final event: response was cut off
+	toolArgsMalformed                               // complete but invalid JSON: a genuine error
+)
+
+// classifyToolArgParse interprets a tool-argument parse result. "Unexpected end
+// of JSON input" means the arguments ended prematurely: while the model is still
+// streaming (allowIncomplete) the completing event will follow, so we wait; on
+// the final event it means the response was interrupted/cancelled mid-call, so
+// the call should be skipped rather than executed or reported as an error. Any
+// other parse failure is malformed-but-complete JSON and remains a real error.
+func classifyToolArgParse(parseErr error, allowIncomplete bool) toolArgParseOutcome {
+	if parseErr == nil {
+		return toolArgsComplete
+	}
+	if isIncompleteToolArgumentsError(parseErr) {
+		if allowIncomplete {
+			return toolArgsAwaitingMore
+		}
+		return toolArgsInterrupted
+	}
+
+	return toolArgsMalformed
+}
+
+// markCallHandled records a call_id as handled, returning true only the first
+// time so callers can deduplicate the multiple Realtime events that describe the
+// same tool call.
+func (app *kanbanBoardApp) markCallHandled(callID string) bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if _, ok := app.handledCalls[callID]; ok {
+		return false
+	}
+	app.handledCalls[callID] = struct{}{}
+
+	return true
 }
 
 func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]any) (map[string]any, bool, error) {
