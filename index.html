@@ -9530,6 +9530,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         participantsInRoom = normalizeParticipantList(participantsInRoom.filter(participantName => participantName.toLowerCase() !== name.toLowerCase()))
         participantPreview = participantsInRoom
         pruneRemoteMediaOutsideRoom()
+        // A participant who left on a flaky connection may have left behind an
+        // unlabeled tile that name-based cleanup above cannot match. Sweep any
+        // tile whose video track has ended so it cannot linger and flicker as a
+        // ghost "rejoining" box, instead of waiting for the periodic repair tick.
+        pruneDeadRemoteVideoTiles()
+        pruneStaleUnidentifiedRemoteVideoTiles()
         updateParticipantPreviewText()
         updateHearthParticipants()
       }
@@ -9721,7 +9727,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (createdAt && now - createdAt < 3500) {
             continue
           }
-          if (remoteTileHasRenderedVideo(tile)) {
+          // Keep an aged unidentified tile only while its video is actually
+          // live. A frozen last frame from an ended track — e.g. a participant
+          // who left on a flaky mobile connection before their tile could be
+          // labeled — must not keep a ghost tile flickering on screen.
+          if (remoteTileHasLiveVideo(tile) && remoteTileHasRenderedVideo(tile)) {
             continue
           }
           disposeRemoteTile(tile)
@@ -12065,24 +12075,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return [{ label: 'due', date: dueDate }]
         }
 
-        const seed = hashString(`${card?.id || card?.title || 'card'}:date`)
-        const offset = 2 + (seed % 18)
-        const base = new Date(2026, 4, 17 + offset)
-        const date = base.toLocaleDateString([], { month: 'short', day: 'numeric' })
-        if (card?.status === 'Done') {
-          return [{ label: 'shipped', date }]
-        }
-        if (card?.status === 'Blocked') {
-          return [{ label: 'review', date }]
-        }
-        return [{ label: 'due', date }]
+        // No explicit or real due date: report none rather than fabricating a deadline.
+        return []
       }
 
       function cardDateState(card) {
         if (card?.status === 'Done') {
           return 'done'
         }
-        const text = cardKeyDates(card)[0]?.date || ''
+        const keyDate = cardKeyDates(card)[0]
+        if (!keyDate) {
+          return 'none'
+        }
+        const text = keyDate.date || ''
         if (/overdue/i.test(text)) {
           return 'overdue'
         }
