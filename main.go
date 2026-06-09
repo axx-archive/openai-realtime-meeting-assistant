@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -31,7 +32,12 @@ var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
 	}
-	indexHTML []byte
+
+	// maxWebsocketMessageBytes caps a single inbound Websocket frame. Signaling
+	// payloads (SDP, ICE candidates, board events) are well under this; the cap
+	// blocks memory-amplification from oversized frames.
+	maxWebsocketMessageBytes int64 = 256 << 10 // 256 KiB
+	indexHTML                []byte
 
 	// lock for peerConnections and trackLocals
 	listLock                     sync.RWMutex
@@ -41,6 +47,9 @@ var (
 	trackParticipants            map[string]string
 	trackParticipantSessions     map[string]string
 	trackSourceIDs               map[string]string
+	trackLayerRIDs               map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
+	trackLayerGroups             map[string]string // forwarded track ID -> source group key (shared by sibling layers)
+	subscriberLayerTiers         map[string]string // subscriber session ID -> requested layer tier
 	signalRequestLock            sync.Mutex
 	signalRequestTimer           *time.Timer
 	participantSessionSeq        atomic.Uint64
@@ -52,6 +61,23 @@ var (
 )
 
 const peerSignalDebounce = 250 * time.Millisecond
+
+// iceDisconnectGrace is how long a media peer may sit in ICE "disconnected"
+// before the server proactively triggers an ICE restart. ICE disconnects are
+// often transient (a brief network blip) and self-heal, so we wait out a short
+// grace window before spending a renegotiation; a real network change (e.g.
+// Wi-Fi to cellular) persists past it and gets recovered.
+const iceDisconnectGrace = 2500 * time.Millisecond
+
+// iceStateNeedsRecovery reports whether an ICE connection state indicates a
+// recoverable connectivity loss that a server-side ICE restart should address.
+// Only "disconnected" qualifies: it is the transient, network-change signal an
+// ICE restart is designed to repair. "failed" is intentionally excluded because
+// the PeerConnection-level failure handler tears that path down and ejects the
+// participant instead of trying to revive it.
+func iceStateNeedsRecovery(state webrtc.ICEConnectionState) bool {
+	return state == webrtc.ICEConnectionStateDisconnected
+}
 
 type websocketMessage struct {
 	Event string `json:"event"`
@@ -80,11 +106,17 @@ func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) boo
 	if track != nil && sameParticipantName(trackParticipants[track.ID()], p.participantName) {
 		return false
 	}
-	if p.acceptTrack == nil {
+	if p.acceptTrack != nil {
+		return p.acceptTrack(track)
+	}
+	if track == nil {
 		return true
 	}
 
-	return p.acceptTrack(track)
+	// Simulcast forwarding control: when the source sent multiple layers, forward
+	// only the one matching this subscriber's requested tier. Non-simulcast
+	// sources (a group of one) always forward, so the common case is unchanged.
+	return subscriberAcceptsLayerLocked(p.sessionID, track.ID())
 }
 
 func (p peerConnectionState) shouldSignalWithDesiredTrackCount(desiredTrackCount int) bool {
@@ -93,6 +125,56 @@ func (p peerConnectionState) shouldSignalWithDesiredTrackCount(desiredTrackCount
 	}
 
 	return p.shouldSignal(desiredTrackCount)
+}
+
+// sourceGroupLayersLocked returns the simulcast layers that belong to the same
+// source group as trackID. Callers must already hold listLock.
+func sourceGroupLayersLocked(trackID string) []layerOption {
+	group := trackLayerGroups[trackID]
+	if group == "" {
+		return nil
+	}
+
+	var layers []layerOption
+	for id, g := range trackLayerGroups {
+		if g == group {
+			layers = append(layers, layerOption{trackID: id, rid: trackLayerRIDs[id]})
+		}
+	}
+
+	return layers
+}
+
+// subscriberAcceptsLayerLocked decides whether the subscriber identified by
+// sessionID should be forwarded trackID, honouring its requested layer tier when
+// the source is simulcast. Callers must already hold listLock.
+func subscriberAcceptsLayerLocked(sessionID string, trackID string) bool {
+	layers := sourceGroupLayersLocked(trackID)
+	if len(layers) <= 1 {
+		return true // not simulcast (or untracked): forward unchanged
+	}
+
+	return subscriberWantsLayer(trackID, normalizeLayerTier(subscriberLayerTiers[sessionID]), layers)
+}
+
+// setSubscriberLayerTier records a subscriber's requested simulcast tier and
+// reports whether it changed (so the caller can avoid a needless renegotiation).
+func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
+	if sessionID == "" {
+		return false
+	}
+
+	listLock.Lock()
+	defer listLock.Unlock()
+	if subscriberLayerTiers == nil {
+		subscriberLayerTiers = map[string]string{}
+	}
+	if layerTier(subscriberLayerTiers[sessionID]) == tier {
+		return false
+	}
+	subscriberLayerTiers[sessionID] = string(tier)
+
+	return true
 }
 
 func main() {
@@ -104,6 +186,9 @@ func main() {
 	trackParticipants = map[string]string{}
 	trackParticipantSessions = map[string]string{}
 	trackSourceIDs = map[string]string{}
+	trackLayerRIDs = map[string]string{}
+	trackLayerGroups = map[string]string{}
+	subscriberLayerTiers = map[string]string{}
 	activeParticipantConnections = map[string]peerConnectionState{}
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
@@ -145,8 +230,17 @@ func main() {
 		}
 	}()
 
-	// start HTTP server
-	if err = http.ListenAndServe(*addr, nil); err != nil { //nolint: gosec
+	// start HTTP server with header/idle timeouts to bound slowloris-style abuse.
+	// ReadHeaderTimeout protects the request-line/header read; IdleTimeout reaps
+	// idle keep-alive conns. ReadTimeout/WriteTimeout are intentionally left unset
+	// so they do not sever long-lived Websocket/WebRTC signaling sockets (gorilla
+	// hijacks the connection on upgrade, after which these would not apply anyway).
+	srv := &http.Server{
+		Addr:              *addr,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err = srv.ListenAndServe(); err != nil {
 		log.Errorf("Failed to start http server: %v", err)
 	}
 }
@@ -271,11 +365,78 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 	}
 
 	registry := &interceptor.Registry{}
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, registry); err != nil {
-		return nil, nil, fmt.Errorf("register default interceptors: %w", err)
+	// Mirror webrtc.RegisterDefaultInterceptors, but register NACK ourselves with
+	// an explicit, bounded retransmission buffer (see configureRoomNack) instead of
+	// the library default. Everything else matches the upstream default set so we
+	// keep RTCP reports, simulcast header extensions, stats, and TWCC congestion
+	// feedback intact.
+	if err := configureRoomNack(mediaEngine, registry); err != nil {
+		return nil, nil, fmt.Errorf("configure nack: %w", err)
+	}
+	if err := webrtc.ConfigureRTCPReports(registry); err != nil {
+		return nil, nil, fmt.Errorf("configure rtcp reports: %w", err)
+	}
+	if err := webrtc.ConfigureSimulcastExtensionHeaders(mediaEngine); err != nil {
+		return nil, nil, fmt.Errorf("configure simulcast extension headers: %w", err)
+	}
+	if err := webrtc.ConfigureStatsInterceptor(registry); err != nil {
+		return nil, nil, fmt.Errorf("configure stats interceptor: %w", err)
+	}
+	if err := webrtc.ConfigureTWCCSender(mediaEngine, registry); err != nil {
+		return nil, nil, fmt.Errorf("configure twcc sender: %w", err)
 	}
 
 	return mediaEngine, registry, nil
+}
+
+// defaultNackResponderPackets is the per-stream retransmission buffer depth used
+// when ROOM_NACK_BUFFER_PACKETS is unset. 1024 packets matches Pion's default and,
+// at a ~1200-byte MTU, bounds the responder buffer to ~1.2 MiB per active outbound
+// stream — recent enough to satisfy NACK-driven retransmission for typical RTT.
+const defaultNackResponderPackets uint16 = 1024
+
+// configureRoomNack registers the NACK generator (so the SFU requests missing
+// packets from publishers) and a responder whose send buffer is explicitly sized.
+// The responder retains recent outbound RTP packets so subscribers can recover
+// losses via NACK; sizing it explicitly (rather than relying on the library
+// default) makes the worst-case memory bound a documented, tunable knob and
+// guards against unbounded growth.
+func configureRoomNack(mediaEngine *webrtc.MediaEngine, registry *interceptor.Registry) error {
+	responder, err := nack.NewResponderInterceptor(nack.ResponderSize(roomNackResponderSize()))
+	if err != nil {
+		return fmt.Errorf("create nack responder: %w", err)
+	}
+	generator, err := nack.NewGeneratorInterceptor()
+	if err != nil {
+		return fmt.Errorf("create nack generator: %w", err)
+	}
+
+	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack"}, webrtc.RTPCodecTypeVideo)
+	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
+	registry.Add(responder)
+	registry.Add(generator)
+
+	return nil
+}
+
+// roomNackResponderSize resolves the retransmission buffer depth from
+// ROOM_NACK_BUFFER_PACKETS. The Pion responder requires a power of two in
+// [1, 32768]; any unset, unparseable, out-of-range, or non-power-of-two value
+// falls back to defaultNackResponderPackets so a bad config can never enlarge the
+// buffer without bound or fail peer-connection setup.
+func roomNackResponderSize() uint16 {
+	raw := strings.TrimSpace(os.Getenv("ROOM_NACK_BUFFER_PACKETS"))
+	if raw == "" {
+		return defaultNackResponderPackets
+	}
+
+	parsed, err := strconv.ParseUint(raw, 10, 16)
+	if err != nil || parsed == 0 || parsed > 32768 || parsed&(parsed-1) != 0 {
+		log.Errorf("Ignoring invalid ROOM_NACK_BUFFER_PACKETS=%q (must be a power of two in [1, 32768]); using %d", raw, defaultNackResponderPackets)
+		return defaultNackResponderPackets
+	}
+
+	return uint16(parsed)
 }
 
 func configureEphemeralUDPPortRange(settingEngine *webrtc.SettingEngine) error {
@@ -346,10 +507,18 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	if trackSourceIDs == nil {
 		trackSourceIDs = map[string]string{}
 	}
+	if trackLayerRIDs == nil {
+		trackLayerRIDs = map[string]string{}
+	}
+	if trackLayerGroups == nil {
+		trackLayerGroups = map[string]string{}
+	}
 	trackLocals[trackLocal.ID()] = trackLocal
 	trackParticipants[trackLocal.ID()] = canonicalParticipantName(participantName)
 	trackParticipantSessions[trackLocal.ID()] = sessionID
 	trackSourceIDs[trackLocal.ID()] = t.ID()
+	trackLayerRIDs[trackLocal.ID()] = t.RID()
+	trackLayerGroups[trackLocal.ID()] = layerGroupKey(t.StreamID(), t.ID())
 	listLock.Unlock()
 
 	return trackLocal, nil
@@ -371,6 +540,14 @@ func forwardedRemoteTrackID(t *webrtc.TrackRemote) string {
 
 func forwardedTrackLocalID(streamID string, trackID string, ssrc uint32) string {
 	return fmt.Sprintf("%s:%s:%d", mediaIDPart(streamID, "stream"), mediaIDPart(trackID, "track"), ssrc)
+}
+
+// layerGroupKey identifies the source media that a set of simulcast layers share.
+// Sibling layers carry the same stream and source-track IDs and differ only by
+// RID/SSRC, so dropping the SSRC groups them; non-simulcast tracks each form a
+// group of one.
+func layerGroupKey(streamID string, trackID string) string {
+	return fmt.Sprintf("%s:%s", mediaIDPart(streamID, "stream"), mediaIDPart(trackID, "track"))
 }
 
 func mediaIDPart(value string, fallback string) string {
@@ -404,6 +581,8 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackParticipants, t.ID())
 	delete(trackParticipantSessions, t.ID())
 	delete(trackSourceIDs, t.ID())
+	delete(trackLayerRIDs, t.ID())
+	delete(trackLayerGroups, t.ID())
 }
 
 func removeParticipantTracksLocked(name string, sessionID string) bool {
@@ -419,6 +598,8 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackParticipants, trackID)
 		delete(trackParticipantSessions, trackID)
 		delete(trackSourceIDs, trackID)
+		delete(trackLayerRIDs, trackID)
+		delete(trackLayerGroups, trackID)
 		removedTracks = true
 	}
 
@@ -791,11 +972,47 @@ func unregisterParticipantSession(name string, sessionID string) {
 	}
 	peerConnections = retainedConnections
 	removedTracks = removeParticipantTracksLocked(name, sessionID)
+	delete(subscriberLayerTiers, sessionID)
 	listLock.Unlock()
 
 	if removedConnection || removedTracks {
 		signalPeerConnections()
 	}
+}
+
+// prunePeerConnectionPool drops a peer connection from the fan-out pool and the
+// active-participant index immediately. It is called the moment a connection
+// reaches Failed/Closed so a dead peer stops occupying a forwarding slot right
+// away, rather than lingering until the next debounced signaling cycle prunes
+// it. The PeerConnection's own Close() releases its ICE/DTLS/SRTP transports;
+// this only clears our bookkeeping. Idempotent and safe to call repeatedly.
+func prunePeerConnectionPool(peerConnection *webrtc.PeerConnection) bool {
+	if peerConnection == nil {
+		return false
+	}
+
+	listLock.Lock()
+	defer listLock.Unlock()
+
+	removed := false
+	retained := peerConnections[:0]
+	for _, state := range peerConnections {
+		if state.peerConnection == peerConnection {
+			removed = true
+			continue
+		}
+		retained = append(retained, state)
+	}
+	peerConnections = retained
+
+	for name, state := range activeParticipantConnections {
+		if state.peerConnection == peerConnection {
+			delete(activeParticipantConnections, name)
+			removed = true
+		}
+	}
+
+	return removed
 }
 
 func closeParticipantConnections(states []peerConnectionState) {
@@ -1076,6 +1293,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		return
 	}
 
+	// Bound per-message memory: signaling frames (SDP/ICE/board events) are small;
+	// reject oversized frames so an unauthenticated client cannot stream an
+	// arbitrarily large frame and force the server to buffer it before parsing.
+	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
+
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
@@ -1176,10 +1398,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if mediaJoinedState.Load() {
 				cleanupParticipantSession("media connection failed; rejoin the room.", true)
 			}
+			// Drop the dead peer from the fan-out pool before closing so it stops
+			// receiving forwarded media immediately, then release its transports.
+			prunePeerConnectionPool(peerConnection)
 			if err := peerConnection.Close(); err != nil {
 				log.Errorf("Failed to close PeerConnection: %v", err)
 			}
 		case webrtc.PeerConnectionStateClosed:
+			prunePeerConnectionPool(peerConnection)
 			if mediaJoinedState.Load() {
 				cleanupParticipantSession("", false)
 			} else {
@@ -1260,8 +1486,53 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		}
 	})
 
+	// Proactively recover from network changes. When ICE drops to
+	// "disconnected" we wait out a short grace window (transient blips self-heal)
+	// and, if still unhealthy, trigger a server-side ICE restart that refreshes
+	// ICE credentials and renegotiates — reconnecting the peer without making the
+	// browser notice. Returning to "connected"/"completed" cancels a pending
+	// attempt.
+	var iceRecoveryMu sync.Mutex
+	var iceRecoveryTimer *time.Timer
+	cancelICERecovery := func() {
+		iceRecoveryMu.Lock()
+		defer iceRecoveryMu.Unlock()
+		if iceRecoveryTimer != nil {
+			iceRecoveryTimer.Stop()
+			iceRecoveryTimer = nil
+		}
+	}
+	defer cancelICERecovery()
+	scheduleICERecovery := func() {
+		iceRecoveryMu.Lock()
+		defer iceRecoveryMu.Unlock()
+		if iceRecoveryTimer != nil {
+			return // recovery already pending for this disconnect episode
+		}
+		iceRecoveryTimer = time.AfterFunc(iceDisconnectGrace, func() {
+			iceRecoveryMu.Lock()
+			iceRecoveryTimer = nil
+			iceRecoveryMu.Unlock()
+
+			if !mediaJoinedState.Load() {
+				return
+			}
+			if !iceStateNeedsRecovery(peerConnection.ICEConnectionState()) {
+				return // recovered on its own during the grace window
+			}
+			log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s", currentParticipantName(), participantSessionID)
+			signalPeerConnectionICE(peerConnection)
+		})
+	}
+
 	peerConnection.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
 		log.Infof("ICE connection state changed: %s", is)
+		switch {
+		case iceStateNeedsRecovery(is):
+			scheduleICERecovery()
+		case is == webrtc.ICEConnectionStateConnected || is == webrtc.ICEConnectionStateCompleted:
+			cancelICERecovery()
+		}
 	})
 
 	message := &websocketMessage{}
@@ -1427,6 +1698,25 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			log.Infof("Client requested ICE restart for participant=%s session=%s", currentParticipantName(), participantSessionID)
 			signalPeerConnectionICE(peerConnection)
+		case "select_layer":
+			if !participantAccepted || !mediaJoined {
+				continue
+			}
+			layerRequest := struct {
+				Layer string `json:"layer"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &layerRequest); err != nil {
+				log.Errorf("Failed to unmarshal layer selection: %v", err)
+				continue
+			}
+			tier := normalizeLayerTier(layerRequest.Layer)
+			// Only renegotiate when the preference actually changed; switching the
+			// forwarded layer adds/removes senders, so we let signalPeerConnections
+			// reconcile which layer this subscriber receives.
+			if setSubscriberLayerTier(participantSessionID, tier) {
+				log.Infof("Participant=%s session=%s selected simulcast layer tier=%s", currentParticipantName(), participantSessionID, tier)
+				signalPeerConnections()
+			}
 		case "assistant_query":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before asking the assistant.")
