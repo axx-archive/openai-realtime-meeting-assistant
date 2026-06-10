@@ -5461,7 +5461,7 @@
         }
 
         #appShell.is-in-room #audioSettingsButton {
-          grid-column: 1 / 3;
+          grid-column: 1 / -1;
           grid-row: 2;
           width: 100%;
           justify-self: stretch;
@@ -13432,11 +13432,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         ]))
         const title = document.createElement('h3')
         title.textContent = 'Key dates'
-        const sub = document.createElement('span')
-        sub.className = 'card-detail-key-dates__sub'
         const items = cardKeyDates(card)
-        sub.textContent = `· ${items.length} milestone${items.length === 1 ? '' : 's'}`
-        titleWrap.append(calIcon, title, sub)
+        titleWrap.append(calIcon, title)
+        if (items.length > 0) {
+          const sub = document.createElement('span')
+          sub.className = 'card-detail-key-dates__sub'
+          sub.textContent = `· ${items.length} milestone${items.length === 1 ? '' : 's'}`
+          titleWrap.append(sub)
+        }
         header.appendChild(titleWrap)
         if (options.canAdd && card?.id) {
           const addButton = document.createElement('button')
