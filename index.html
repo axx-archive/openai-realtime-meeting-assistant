@@ -1224,7 +1224,8 @@
       }
 
       .assistant-message--answer,
-      .assistant-message--action {
+      .assistant-message--action,
+      .assistant-message--archive {
         background: rgba(255, 122, 43, 0.10);
         border-color: rgba(255, 122, 43, 0.28);
       }
@@ -1259,7 +1260,8 @@
       }
 
       .assistant-message--answer .assistant-meta,
-      .assistant-message--action .assistant-meta { color: var(--ember-300); }
+      .assistant-message--action .assistant-meta,
+      .assistant-message--archive .assistant-meta { color: var(--ember-300); }
       .assistant-message--error .assistant-meta { color: var(--danger); }
 
       .assistant-text {
@@ -1693,6 +1695,18 @@
       .toast--note .toast__bar { background: var(--info); }
       .toast--error .toast__bar { background: var(--danger); }
       .toast--error { border-color: rgba(229, 87, 62, 0.4); }
+
+      .toast__link {
+        color: var(--ember-300);
+        font-weight: 500;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .toast__link:hover {
+        color: var(--ember-200);
+        text-decoration: underline;
+      }
 
       /* ---------- Sparks ---------- */
       .spark {
@@ -3326,10 +3340,11 @@
         justify-self: end;
         border: 1px solid var(--glass-edge);
         border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
-        background: var(--glass-surface-quiet);
+        /* Flat warm fill, no per-bubble backdrop-filter: nested backdrop
+           blurs inside an overflow scroller jank WebKit/mobile, and the
+           backdrop here is the already-glass panel — the blur was a no-op. */
+        background: rgba(255, 235, 200, 0.08);
         box-shadow: var(--glass-highlight);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
       }
 
       .scout-chat-msg--scout {
@@ -6018,7 +6033,7 @@
             <div id="scoutPrivatePane" class="scout-pane scout-pane--private" hidden>
               <p class="scout-private-caption">private · only you can see this</p>
               <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
-                <p class="scout-chat-empty">ask scout about any meeting — only you can see this</p>
+                <p class="scout-chat-empty">ask Scout about any meeting — only you can see this</p>
                 <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
                   <span class="scout-chat-thinking__dot" aria-hidden="true"></span>
                   <span id="scoutChatThinkingText">thinking…</span>
@@ -6026,9 +6041,9 @@
               </div>
               <form id="scoutChatForm" class="scout-chat-form">
                 <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask about prior meetings…" aria-label="Message Scout privately" disabled></textarea>
-                <button id="scoutChatSend" class="btn btn--primary scout-chat-send" type="submit" disabled>send</button>
+                <button id="scoutChatSend" class="btn btn--primary scout-chat-send" type="submit" disabled>Send</button>
               </form>
-              <p id="scoutChatHint" class="scout-chat-hint">join the room to chat with scout</p>
+              <p id="scoutChatHint" class="scout-chat-hint">join the room to chat with Scout</p>
             </div>
           </section>
           <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
@@ -6459,9 +6474,6 @@
       let isMicMuted = false
       let isCameraOff = false
       let currentParticipantName = ''
-      // The password the user entered at join, kept in memory only so archive
-      // links rendered from per-entry events can carry the ?key= gate.
-      let currentRoomKey = ''
       // Active scout rail tab; in-memory only by design (resets on reload).
       let scoutChatTab = 'room'
       let scoutChatSessionSeen = false
@@ -6496,6 +6508,10 @@
       const remoteLabelConflictsByStream = new Set()
       const remoteLabelsByTrack = new Map()
       const remoteTileRemovers = new WeakMap()
+      // Remote MediaStreams outlive tiles (same msid across renegotiations),
+      // so removetrack handlers are tracked per stream+track and replaced on
+      // tile recreate instead of stacking for the life of the connection.
+      const remoteStreamRemoveTrackHandlers = new WeakMap()
       const unlabeledRemoteVideoSightings = new Map()
       const participantPlaceholders = new Map()
       const boardVideoTilesByParticipant = new Map()
@@ -6681,6 +6697,11 @@
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
       scoutChatInput.addEventListener('input', resizeScoutChatInput)
       scoutChatInput.addEventListener('keydown', event => {
+        // Never send mid-IME-composition: the Enter that confirms a
+        // composition candidate must not submit the half-composed message.
+        if (event.isComposing || event.keyCode === 229) {
+          return
+        }
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault()
           sendScoutChatFromForm(event)
@@ -7743,7 +7764,6 @@
         }
         unlockRoomAudioPlayback()
 
-        currentRoomKey = roomPasswordInput.value
         currentParticipantName = selectedParticipantName()
         localVideoLabel.textContent = currentParticipantName
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
@@ -10133,8 +10153,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (tile.dataset.participant !== 'participant') {
             continue
           }
+          // Repair-created placeholders already waited out a 4s sighting
+          // grace; give them a much longer prune window so the repair and
+          // prune cycles do not fight each other and flicker the seats.
+          const isRepairPlaceholder = tile.dataset.repairPlaceholder === 'true'
+          const pruneAfter = isRepairPlaceholder ? 15000 : 3500
           const createdAt = Number(tile.dataset.createdAt || 0)
-          if (createdAt && now - createdAt < 3500) {
+          if (createdAt && now - createdAt < pruneAfter) {
             continue
           }
           // Keep an aged unidentified tile only while its video is actually
@@ -10143,6 +10168,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // labeled — must not keep a ghost tile flickering on screen.
           if (remoteTileHasLiveVideo(tile) && remoteTileHasRenderedVideo(tile)) {
             continue
+          }
+          if (isRepairPlaceholder) {
+            // Cool down the sighting entries so the repair pass does not
+            // instantly recreate the placeholder we are about to remove.
+            for (const key of remoteKeysForTile(tile)) {
+              const sighting = unlabeledRemoteVideoSightings.get(key) || { firstSeenAt: now, retryAt: 0 }
+              sighting.retryAt = now + 20000
+              unlabeledRemoteVideoSightings.set(key, sighting)
+            }
           }
           disposeRemoteTile(tile)
           forgetRemoteTile(tile)
@@ -10572,12 +10606,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             if (!sightingKey) {
               continue
             }
-            const firstSeenAt = unlabeledRemoteVideoSightings.get(sightingKey) || now
-            unlabeledRemoteVideoSightings.set(sightingKey, firstSeenAt)
-            if (now - firstSeenAt < 4000) {
+            const sighting = unlabeledRemoteVideoSightings.get(sightingKey) || { firstSeenAt: now, retryAt: 0 }
+            unlabeledRemoteVideoSightings.set(sightingKey, sighting)
+            if (now - sighting.firstSeenAt < 4000 || now < sighting.retryAt) {
               continue
             }
-            repaired = createRemoteVideoTile(keys, new MediaStream([track]), 'participant', track) || repaired
+            const createdPlaceholder = createRemoteVideoTile(keys, new MediaStream([track]), 'participant', track)
+            if (createdPlaceholder) {
+              // Stamp repair-created placeholders so the unidentified-tile
+              // prune gives them a longer window instead of fighting this
+              // repair in a create/prune oscillation.
+              const placeholderTile = remoteTileForKeys(keys)
+              if (placeholderTile?.dataset.participant === 'participant') {
+                placeholderTile.dataset.repairPlaceholder = 'true'
+              }
+            }
+            repaired = createdPlaceholder || repaired
             continue
           }
           for (const key of keys) {
@@ -10919,14 +10963,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           downloadUrl: result.downloadUrl,
           createdAt: result.archivedAt || new Date().toISOString()
         })
+        const archiveLink = { href: result.downloadUrl, text: 'Download archive' }
         if (result.email?.sent) {
-          showToast({ text: 'meeting notes emailed', kind: 'done' })
+          showToast({ text: 'meeting notes emailed', kind: 'done', link: archiveLink })
         } else if (result.email?.skipped) {
-          showToast({ text: 'meeting notes generated', kind: 'note' })
+          showToast({ text: 'meeting notes generated', kind: 'note', link: archiveLink })
         } else if (result.email?.error) {
-          showToast({ text: 'notes generated, email failed', kind: 'error' })
+          showToast({ text: 'notes generated, email failed', kind: 'error', link: archiveLink })
         } else {
-          showToast({ text: 'meeting archive ready', kind: 'done' })
+          showToast({ text: 'meeting archive ready', kind: 'done', link: archiveLink })
         }
       }
 
@@ -11033,7 +11078,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return false
         }
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-          setLog('join the room to chat with scout')
+          setLog('join the room to chat with Scout')
           return false
         }
         ws.send(JSON.stringify({
@@ -11164,14 +11209,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function hideScoutChatThinking() {
         scoutChatThinking.hidden = true
-      }
-
-      function withArchiveKey(url) {
-        const raw = String(url || '')
-        if (!raw.startsWith('/archives/') || /[?&]key=/.test(raw) || !currentRoomKey) {
-          return raw
-        }
-        return `${raw}${raw.includes('?') ? '&' : '?'}key=${encodeURIComponent(currentRoomKey)}`
       }
 
       async function copyRoomLink() {
@@ -12388,11 +12425,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           removeRemoteTile()
         }
         remoteTileRemovers.set(tile, removeRemoteTileForTrack)
-        stream.addEventListener?.('removetrack', removeEvent => {
+        const onStreamRemoveTrack = removeEvent => {
           if (removeEvent.track === track && removeEvent.track?.kind === 'video') {
             removeRemoteTileForTrack(track)
           }
-        })
+        }
+        const streamHandlers = remoteStreamRemoveTrackHandlers.get(stream) || new Map()
+        const trackHandlerKey = track?.id || ''
+        const staleStreamHandler = streamHandlers.get(trackHandlerKey)
+        if (staleStreamHandler) {
+          stream.removeEventListener?.('removetrack', staleStreamHandler)
+        }
+        stream.addEventListener?.('removetrack', onStreamRemoveTrack)
+        streamHandlers.set(trackHandlerKey, onStreamRemoveTrack)
+        remoteStreamRemoveTrackHandlers.set(stream, streamHandlers)
         track?.addEventListener?.('ended', () => removeRemoteTileForTrack(track), { once: true })
         return true
       }
@@ -12585,7 +12631,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function isScoutFeedMessage(kind) {
-        return ['query', 'answer', 'error'].includes(assistantMessageKind(kind))
+        return ['query', 'answer', 'error', 'archive'].includes(assistantMessageKind(kind))
       }
 
       function renderAssistantMessages(enteringId = '') {
@@ -12629,7 +12675,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (entry.downloadUrl) {
           const link = document.createElement('a')
           link.className = 'assistant-link'
-          link.href = withArchiveKey(entry.downloadUrl)
+          // Server-issued archive URLs already carry their HMAC access token;
+          // render them verbatim — the room password never belongs in a URL.
+          link.href = entry.downloadUrl
           link.download = ''
           link.textContent = 'Download archive'
           item.appendChild(link)
@@ -13406,7 +13454,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const chips = document.createElement('div')
         chips.className = 'card-command-chips'
         const label = document.createElement('span')
-        label.textContent = 'ask scout'
+        label.textContent = 'ask Scout'
         chips.appendChild(label)
 
         const commands = [
@@ -13781,6 +13829,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         bar.className = 'toast__bar'
         const body = document.createElement('span')
         body.textContent = payload.text
+        if (payload.link?.href) {
+          body.append(' ')
+          const link = document.createElement('a')
+          link.className = 'toast__link'
+          link.href = payload.link.href
+          link.download = ''
+          link.textContent = payload.link.text || 'Download'
+          body.appendChild(link)
+        }
 
         toast.append(bar, body)
         toastRegion.appendChild(toast)
@@ -13788,7 +13845,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         while (toastRegion.children.length > 4) {
           toastRegion.firstElementChild.remove()
         }
-        window.setTimeout(() => toast.remove(), 4200)
+        // Toasts carrying a link stay long enough to be clicked.
+        window.setTimeout(() => toast.remove(), payload.link?.href ? 9000 : 4200)
       }
 
       function showCommentPreview(preview) {

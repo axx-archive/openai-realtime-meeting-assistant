@@ -19,7 +19,8 @@ If the user invokes this skill without any other guidance, ask them what they wa
 - **Three fonts** — Geist for everything UI, Geist Mono for system labels and tabular numbers, Instrument Serif italic *only* for empty states and ceremonial moments. All three load from Google Fonts via `colors_and_type.css`.
 - **Tone of voice** — lowercase, second person, mechanical-poetic. "the room is listening", "memory starts when the room speaks", "nothing here yet".
 - **No emoji. Ever.**
-- **Color discipline** — ember (`#FF7A2B`) is the brand, used sparingly. Don't pile gradients on top of it. Don't substitute cool greys for the warm darks.
+- **Color discipline** — ember (`#FF7A2B`) is the brand, used sparingly. Don't pile gradients on top of it. Don't substitute cool greys for the warm darks. One sanctioned cool accent: the active-speaker green `--speaker-accent` (`#34D399`), used only on the speaking video tile (border + `--glow-speaker-md`). Don't add a second.
+- **Liquid glass is chrome-only** — glass tokens (`--glass-surface`, `--glass-surface-quiet`, `--glass-edge`, `--glass-highlight`) plus three blur tiers (`--blur-hero` for the join gate, `--blur-panel` for rails/bars/toasts, `--blur-overlay` for floating chrome and modal backdrops). Apply glass once per surface — panels, bars, toasts, modals — never per-item inside a scroller; items inside glass use flat translucent fills.
 - **Sparks, not confetti.** And only on `Done`.
 
 The complete rules — color, type, motion, hover/press, shadow, layout, content patterns — are in `README.md`. Read it before building.

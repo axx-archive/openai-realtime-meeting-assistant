@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -136,6 +137,16 @@ func (app *kanbanBoardApp) runAmbientAgentOnce(agent ambientAgentConfig, ctx con
 		minBatch = 1
 	}
 
+	// One pass at a time per agent: the cursor only advances when produce
+	// appends its artifact at the end of a pass, so overlapping passes (the
+	// ticker loop vs an archive flush, or two concurrent archives) would
+	// consume — and apply — the same input batch twice. The unconsumed window
+	// is read after the lock is held, so a waiting pass sees the cursor the
+	// previous pass advanced.
+	runLock := app.ambientAgentRunLock(agent.name)
+	runLock.Lock()
+	defer runLock.Unlock()
+
 	inputs := app.memory.unconsumedEntriesAfter(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, agent.maxBatch(), app.ambientAgentBaselineID(agent.name))
 	if len(inputs) < minBatch {
 		return meetingMemoryEntry{}, nil
@@ -149,6 +160,42 @@ func (app *kanbanBoardApp) ambientAgentBaselineID(name string) string {
 	defer app.mu.Unlock()
 
 	return app.agentBaselineIDs[name]
+}
+
+// ambientAgentRunLock returns the per-agent mutex that serializes whole
+// runner passes (read window -> produce -> append artifact).
+func (app *kanbanBoardApp) ambientAgentRunLock(name string) *sync.Mutex {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.agentRunLocks == nil {
+		app.agentRunLocks = map[string]*sync.Mutex{}
+	}
+	lock, ok := app.agentRunLocks[name]
+	if !ok {
+		lock = &sync.Mutex{}
+		app.agentRunLocks[name] = lock
+	}
+
+	return lock
+}
+
+// ensureAmbientAgentBaseline registers the startup cursor for an agent whose
+// loop never ran this boot (the flush can fire before startAmbientAgent), so
+// an archive flush starts where the loop would have and cannot backfill
+// history persisted before this process started.
+func (app *kanbanBoardApp) ensureAmbientAgentBaseline(agent ambientAgentConfig) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if _, registered := app.agentBaselineIDs[agent.name]; registered {
+		return
+	}
+	baselineID := ""
+	if !boolEnv(agent.backfillEnv) {
+		baselineID = app.memory.bootBaselineIDOfKind(agent.inputKind)
+	}
+	app.setAmbientAgentBaselineIDLocked(agent.name, baselineID)
 }
 
 func (app *kanbanBoardApp) setAmbientAgentBaselineID(name string, baselineID string) {
@@ -183,9 +230,12 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 	ctx, cancel := context.WithTimeout(context.Background(), meetingArchiveFlushTimeout)
 	defer cancel()
 	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), meetingBoardAgent()} {
-		if boolEnv(agent.disabledEnv) {
+		// honor both disable forms (interval=0/off/false/disabled and the
+		// _DISABLED env): a turned-off agent must not run at archive time.
+		if boolEnv(agent.disabledEnv) || agent.interval() <= 0 {
 			continue
 		}
+		app.ensureAmbientAgentBaseline(agent)
 		if _, err := app.runAmbientAgentOnce(agent, ctx, apiKey, nil, 1); err != nil {
 			log.Errorf("%s archive flush failed: %v", agent.name, err)
 		}

@@ -2,12 +2,15 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -48,26 +51,67 @@ func validMeetingPassword(password string) bool {
 	return subtle.ConstantTimeCompare(providedHash[:], configuredHash[:]) == 1
 }
 
+const archiveSecretFileName = "archive-secret"
+
+var (
+	archiveSecretMu    sync.Mutex
+	archiveSecretCache = map[string][]byte{}
+)
+
+// archiveTokenSecret returns the random 32-byte server secret that keys
+// archive access tokens, created lazily next to the meeting memory file and
+// loaded thereafter. Tokens are deliberately not derived from the room
+// password: a leaked archive URL must not become an offline brute-force
+// oracle for the room credential.
+func archiveTokenSecret() []byte {
+	path := filepath.Join(filepath.Dir(meetingMemoryPath()), archiveSecretFileName)
+
+	archiveSecretMu.Lock()
+	defer archiveSecretMu.Unlock()
+	if secret, ok := archiveSecretCache[path]; ok {
+		return secret
+	}
+
+	if raw, err := os.ReadFile(path); err == nil {
+		if secret, decodeErr := hex.DecodeString(strings.TrimSpace(string(raw))); decodeErr == nil && len(secret) == 32 {
+			archiveSecretCache[path] = secret
+			return secret
+		}
+		log.Errorf("Ignoring malformed archive secret at %s; generating a new one", path)
+	}
+
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		log.Errorf("Failed to generate archive secret: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Errorf("Failed to create archive secret directory: %v; issued tokens will rotate on restart", err)
+	} else if err := os.WriteFile(path, []byte(hex.EncodeToString(secret)+"\n"), 0o600); err != nil {
+		log.Errorf("Failed to persist archive secret: %v; issued tokens will rotate on restart", err)
+	}
+	archiveSecretCache[path] = secret
+
+	return secret
+}
+
 // archiveAccessToken derives a per-archive access key so server-issued
 // archive links never carry the room password; a leaked URL grants access
 // to that one archive only.
 func archiveAccessToken(archiveID string) string {
 	archiveID = strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
-	mac := hmac.New(sha256.New, []byte(configuredMeetingRoomPassword()))
+	mac := hmac.New(sha256.New, archiveTokenSecret())
 	mac.Write([]byte("bonfire-archive:" + archiveID))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// validArchiveKey accepts the archive's derived token or, as a fallback for
-// links assembled client-side by someone who already joined, the room
-// password itself.
+// validArchiveKey accepts only the archive's derived token, compared in
+// constant time. The room password is deliberately rejected: accepting it
+// here made /archives/ an unauthenticated password-guessing oracle.
 func validArchiveKey(archiveID, key string) bool {
-	key = strings.TrimSpace(key)
-	token := archiveAccessToken(archiveID)
-	if subtle.ConstantTimeCompare([]byte(key), []byte(token)) == 1 {
-		return true
-	}
-	return validMeetingPassword(key)
+	keyHash := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	tokenHash := sha256.Sum256([]byte(archiveAccessToken(archiveID)))
+
+	return subtle.ConstantTimeCompare(keyHash[:], tokenHash[:]) == 1
 }
 
 func configuredMeetingRoomPassword() string {

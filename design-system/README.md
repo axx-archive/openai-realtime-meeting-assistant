@@ -116,6 +116,8 @@ Ember (`#FF7A2B`) appears sparingly: brand mark, primary button, listening pill,
 
 Hue discipline matters more than any single hex. Avoid cold greys, blue-purple gradients, neon. Even semantic colors (success green, danger red, info blue) are pulled toward warm — never saturated.
 
+**The one deliberate exception:** the active-speaker green, `--speaker-accent` (`#34D399`). It is cool and saturated on purpose — "who is talking" must read instantly against a warm screen, and no warm hue can do that job. It appears only on the speaking video tile (border + `--glow-speaker-md`) and is locked in place by guard tests in the product. Do not borrow it for anything else, and do not add a second cool accent.
+
 ### Type
 - **Geist** (sans) — everything UI: 11–20px, weights 400/500/600. 14/1.5 is the default.
 - **Geist Mono** — system labels in `--fg-2`, uppercase, 0.08–0.10em tracking, sizes 10–11px. The "log file voice". Also used for tabular numbers (`font-variant-numeric: tabular-nums`).
@@ -149,7 +151,7 @@ Single power-of-two-ish scale: `4 / 8 / 12 / 16 / 20 / 24 / 32 / 48` (`--s-1` th
 - **Press:** scale `0.96` for buttons, `0.985` for cards. Fast (`--t-fast`).
 - **Focus-visible:** ember glow ring (`--glow-ember-sm`) + 2px outline-offset.
 - **Disabled:** `opacity: 0.45`, no transform, `cursor: not-allowed`.
-- **Speaking video tile:** ember border + `--glow-ember-md`. (Not opacity changes — it's a presence signal.)
+- **Speaking video tile:** `--speaker-accent` green border + `--glow-speaker-md`. (Not opacity changes — it's a presence signal, and the one sanctioned cool accent in the system.)
 
 ### Borders & corners
 - Radii: `--r-xs: 4` (tag chips) / `--r-sm: 6` (inputs, secondary buttons) / `--r-md: 10` (panels, primary cards) / `--r-lg: 14` (modals, brand mark) / `--r-pill: 999`.
@@ -162,17 +164,24 @@ Two systems, never crossed:
 - **Dark shadows** (`--shadow-1/2/3`) — for elevation in the room. Pure brown-black (`rgba(15, 8, 2, 0.45/0.55)`).
 - **Light shadows** (`--shadow-light-1/2`) — for parchment cards. Warm and brown-tinted (`rgba(60, 35, 10, 0.06/0.10)`).
 
-There's also a dedicated **glow** family for ember: `--glow-ember-sm` (focus ring) and `--glow-ember-md` ("the room is listening", a moved card). Glow is a 1px ring + ember-tinted box-shadow blooms, not a pure box-shadow.
+There's also a dedicated **glow** family: `--glow-ember-sm` (focus ring) and `--glow-ember-md` ("the room is listening", a moved card) for ember, plus `--glow-speaker-md` for the active-speaker tile — the only glow built on the cool `--speaker-accent` green. Glow is a 1px ring + tinted box-shadow blooms, not a pure box-shadow.
 
 ### Layout rules
 - The room is a 3-row grid: `topbar / workspace / meeting-bar`. The meeting bar is `position: sticky; bottom: var(--s-3)` so it follows you as you scroll.
 - Workspace is a 2-column grid: presentation tile (board or screen share) + a vertical rail of stacked panels (access, videos, memory, assistant).
 - Breakpoints: 1100px (denser columns), 860px (rail moves above board), 640px (everything stacks).
 - Toasts: bottom-right, `min(360px, calc(100vw - 36px))`, `z-index: 1100`, animate in 180ms.
-- Card detail modal: centered, `min(620px, calc(100vw - 48px))`, dark backdrop with `backdrop-filter: blur(8px)`.
+- Card detail modal: centered, `min(620px, calc(100vw - 48px))`, dark backdrop blurred with `--blur-overlay`.
 
 ### Use of transparency & blur
-- Backdrop blur (`8px`) is reserved for **overlays** (card-detail backdrop), **video chrome** (the participant name pill), and the **screen-share label**. It is not a brand texture used on cards.
+The chrome is **liquid glass** — warm layered glass, never cool grey. The tokens:
+
+- **Glass surfaces:** `--glass-surface` (primary) and `--glass-surface-quiet` (subdued) — translucent warm gradients that fade into the night surface.
+- **Glass edges:** `--glass-edge` for the hairline border, `--glass-highlight` for the specular inset (a top highlight plus a faint ember underglow).
+- **Three blur tiers**, and every `backdrop-filter` routes through one of them: `--blur-hero` (the join gate — the one hero moment), `--blur-panel` (rails, bars, toasts, inputs), `--blur-overlay` (floating chrome, menus, modal backdrops).
+
+The rule that keeps it fast and quiet: **glass is for chrome surfaces** — panels, bars, toasts, menus, modals — applied once per surface. Never apply `backdrop-filter` per-item inside a scroller (cards, chat bubbles, feed rows): stacked backdrop blurs in an overflow container jank WebKit and mid-tier mobile, and the backdrop behind a small item is the already-glass panel anyway. Items inside a glass panel use flat translucent fills.
+
 - Translucent fills are how layers within a dark panel separate. Anywhere you see `rgba(255, 235, 200, ...)` it's a layered surface, not a glass effect.
 
 ### Cards

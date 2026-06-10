@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,136 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	}
 	if !kinds[meetingMemoryKindBrain] || !kinds[meetingMemoryKindBoardUpdate] {
 		t.Fatalf("archive memory kinds=%v, want flushed brain and board_update artifacts in the snapshot", kinds)
+	}
+}
+
+// TestAmbientAgentPassesSerialize locks in the per-agent run mutex: a flush
+// pass that starts while a ticker pass is mid-produce must wait for the
+// cursor to advance instead of consuming the same input batch twice.
+func TestAmbientAgentPassesSerialize(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	var produced [][]string
+	agent := newTestAmbientAgent(&produced)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	innerProduce := agent.produce
+	passCount := 0
+	agent.produce = func(app *kanbanBoardApp, ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+		passCount++
+		if passCount == 1 {
+			close(started)
+			<-release // hold the first pass mid-"model call"
+		}
+		return innerProduce(app, ctx, apiKey, inputs, responder)
+	}
+
+	appendTestTranscript(t, app, "input-1", "Boot Barn kickoff planning notes.")
+	appendTestTranscript(t, app, "input-2", "Boot Barn follow-up commitments.")
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", nil, 1); err != nil {
+			t.Errorf("first pass: %v", err)
+		}
+	}()
+	<-started
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", nil, 1); err != nil {
+			t.Errorf("second pass: %v", err)
+		}
+	}()
+
+	select {
+	case <-secondDone:
+		t.Fatal("second pass finished while the first held the run lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	<-firstDone
+	<-secondDone
+
+	if len(produced) != 1 || strings.Join(produced[0], ",") != "input-1,input-2" {
+		t.Fatalf("produced=%v, want the batch consumed exactly once", produced)
+	}
+}
+
+// TestArchiveFlushSkipsIntervalDisabledAgents covers the second disable form:
+// an operator turning an agent off via its interval env must also keep it
+// from running at archive time.
+func TestArchiveFlushSkipsIntervalDisabledAgents(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("MEETING_BRAIN_INTERVAL", "off")
+	t.Setenv("MEETING_BOARD_INTERVAL", "off")
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		t.Error("disabled agents must not call the model at archive flush")
+		return "", nil
+	}
+
+	appendTestTranscript(t, app, "event-1", "Boot Barn shoot confirmed for Friday.")
+	app.flushAmbientAgentsForArchive()
+}
+
+// TestArchiveFlushDoesNotConsumePreBootHistory: when an agent's loop never
+// started this boot, the flush must use the baseline the loop would have
+// registered instead of backfilling transcripts from previous sessions.
+func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
+	dir := t.TempDir()
+	memoryPath := filepath.Join(dir, "memory.jsonl")
+	t.Setenv("MEETING_MEMORY_PATH", memoryPath)
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	// persist a transcript from a "previous session" before the app boots.
+	preBootStore, err := newMeetingMemoryStore(memoryPath)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, appended, err := preBootStore.appendAttributedTranscript("pre-boot", "pre-boot", "Tom", "dominant", "Boot Barn notes from last week's meeting."); err != nil || !appended {
+		t.Fatalf("append pre-boot transcript: appended=%v err=%v", appended, err)
+	}
+
+	app := newKanbanBoardApp()
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	var calls []string
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if strings.Contains(request.Input, "pre-boot") || strings.Contains(request.Input, "last week's meeting") {
+			t.Errorf("flush consumed pre-boot history: %s", request.Input)
+		}
+		if strings.Contains(request.Instructions, "board intelligence") {
+			calls = append(calls, "board")
+			return `{"summary":"No actionable board changes.","operations":[]}`, nil
+		}
+		calls = append(calls, "brain")
+		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
+	}
+
+	// nothing new since boot: the flush must stay silent.
+	app.flushAmbientAgentsForArchive()
+	if len(calls) != 0 {
+		t.Fatalf("calls=%v, want none when only pre-boot history exists", calls)
+	}
+
+	// fresh in-meeting transcript: the flush picks up from the boot baseline.
+	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
+	app.flushAmbientAgentsForArchive()
+	if len(calls) != 2 || calls[0] != "brain" || calls[1] != "board" {
+		t.Fatalf("calls=%v, want one brain pass then one board pass for post-boot input", calls)
 	}
 }
 

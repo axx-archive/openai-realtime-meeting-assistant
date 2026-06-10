@@ -1188,7 +1188,18 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				case negotiationActionClose:
 					log.Errorf("Negotiation stuck >%s for participant=%s session=%s; closing peer connection so the client can reconnect", negotiationCloseAfter, peer.participantName, peer.sessionID)
 					stuckPeerConnection := peer.peerConnection
+					stuckWebsocket := peer.websocket
 					go func() {
+						// Tell the client why it is being ejected before the
+						// teardown. Without this the stale session's next
+						// message earns a misleading "session_replaced";
+						// media_disconnected drives the client's honest
+						// reconnect affordances. Closing the websocket lets
+						// the read loop run the full session cleanup.
+						if stuckWebsocket != nil {
+							_ = sendKanbanEvent(stuckWebsocket, "media_disconnected", "media negotiation stalled; rejoin the room.")
+							_ = stuckWebsocket.Close()
+						}
 						_ = stuckPeerConnection.Close()
 					}()
 					peer.nonStableSince = time.Time{}
@@ -1435,6 +1446,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
 	scoutChat := newScoutChatSession(c)
+	// Stop the chat worker and cancel any queued/in-flight model calls as
+	// soon as this connection ends.
+	defer scoutChat.close()
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
@@ -1817,9 +1831,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			log.Infof("Got answer: %v", answer)
 
 			if err := peerConnection.SetRemoteDescription(answer); err != nil {
-				log.Errorf("Failed to set remote description: %v", err)
+				// A failed answer must not kill the websocket session. The
+				// common case is a duplicate: a slow-but-healthy client answers
+				// both the original offer and the watchdog's resend, and the
+				// second answer fails in stable state. Drop it and keep the
+				// session alive; the negotiation watchdog recovers any peer
+				// that is genuinely stuck.
+				if peerConnection.SignalingState() == webrtc.SignalingStateStable {
+					log.Infof("Dropping stray answer in stable signaling state (likely a duplicate after an offer resend): %v", err)
+				} else {
+					log.Errorf("Failed to set remote description: %v", err)
+				}
 
-				return
+				continue
 			}
 			for _, candidate := range pendingRemoteCandidates {
 				if err := peerConnection.AddICECandidate(candidate); err != nil {
@@ -1878,7 +1902,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			go answerAssistantQueryForClient(c, assistantQuery)
 		case "scout_chat":
 			if !participantAccepted {
-				_ = sendKanbanEvent(c, "access_denied", "enter the room before chatting with scout")
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before chatting with Scout")
 				continue
 			}
 			chat := struct {
@@ -1893,9 +1917,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				})
 				continue
 			}
-			// answering blocks on a model call; keep the websocket read loop
-			// flowing. the session itself serializes turns per connection.
-			go scoutChat.handle(kanbanApp, chat.Text)
+			// echo synchronously on this read loop (so the message visibly
+			// lands in send order), then hand off to the session's FIFO
+			// worker; model calls never block the websocket read path.
+			scoutChat.submit(kanbanApp, chat.Text)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
@@ -2087,6 +2112,13 @@ func (t *threadSafeWriter) Close() error {
 	return t.Conn.Close()
 }
 
+// websocketWriteTimeout bounds every signaling/board write. Signaling passes
+// (including the negotiation watchdog's offer resend, which targets exactly
+// the stalled-socket population) write under listLock; without a deadline one
+// wedged client's full send buffer could block that write for minutes and
+// freeze signaling for every participant.
+const websocketWriteTimeout = 5 * time.Second
+
 func (t *threadSafeWriter) WriteJSON(v any) error {
 	if t == nil || t.Conn == nil {
 		return fmt.Errorf("websocket is closed")
@@ -2095,5 +2127,9 @@ func (t *threadSafeWriter) WriteJSON(v any) error {
 	t.Lock()
 	defer t.Unlock()
 
-	return t.Conn.WriteJSON(v)
+	_ = t.Conn.SetWriteDeadline(time.Now().Add(websocketWriteTimeout))
+	err := t.Conn.WriteJSON(v)
+	_ = t.Conn.SetWriteDeadline(time.Time{})
+
+	return err
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,9 +28,11 @@ func TestMeetingArchiveHandlerRequiresRoomKey(t *testing.T) {
 		{"/archives/meeting-test.json", http.StatusUnauthorized},
 		{"/archives/meeting-test.json?key=wrong", http.StatusUnauthorized},
 		{"/archives/meeting-test.json?key=" + archiveAccessToken("meeting-test"), http.StatusOK},
-		{"/archives/meeting-test.json?key=test-secret", http.StatusOK},
+		// the room password must NOT open archives: accepting it made
+		// /archives/ an unauthenticated password-guessing oracle.
+		{"/archives/meeting-test.json?key=test-secret", http.StatusUnauthorized},
 		{"/archives/other.json?key=" + archiveAccessToken("meeting-test"), http.StatusUnauthorized},
-		{"/archives/?key=test-secret", http.StatusNotFound},
+		{"/archives/?key=test-secret", http.StatusUnauthorized},
 		{"/archives/", http.StatusUnauthorized},
 	} {
 		recorder := httptest.NewRecorder()
@@ -46,6 +49,34 @@ func TestMeetingArchiveHandlerRequiresRoomKey(t *testing.T) {
 	}
 	if strings.Contains(keyedURL, "test-secret") {
 		t.Fatalf("keyed download url=%q must not embed the room password", keyedURL)
+	}
+}
+
+func TestArchiveTokenKeyedOnServerSecretNotPassword(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_ROOM_PASSWORD", "first-password")
+
+	token := archiveAccessToken("meeting-test")
+	secretPath := filepath.Join(filepath.Dir(meetingMemoryPath()), "archive-secret")
+	info, err := os.Stat(secretPath)
+	if err != nil {
+		t.Fatalf("archive secret not persisted: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("archive secret mode=%v, want 0600", perm)
+	}
+
+	// rotating the room password must not change issued tokens: the token is
+	// keyed on the server secret, not the credential it protects.
+	t.Setenv("MEETING_ROOM_PASSWORD", "second-password")
+	if got := archiveAccessToken("meeting-test"); got != token {
+		t.Fatalf("token changed with the room password: %q vs %q", got, token)
+	}
+	if !validArchiveKey("meeting-test", token) {
+		t.Fatal("issued token should stay valid")
+	}
+	if validArchiveKey("meeting-test", "first-password") || validArchiveKey("meeting-test", "second-password") {
+		t.Fatal("room password must never grant archive access")
 	}
 }
 

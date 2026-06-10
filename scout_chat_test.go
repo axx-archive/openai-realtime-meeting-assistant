@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type capturedChatEvent struct {
@@ -12,23 +14,65 @@ type capturedChatEvent struct {
 	payload map[string]any
 }
 
-func newCapturedChatSession(events *[]capturedChatEvent) *scoutChatSession {
-	return &scoutChatSession{
-		send: func(event string, data any) error {
-			payload, _ := data.(map[string]any)
-			*events = append(*events, capturedChatEvent{event: event, payload: payload})
-			return nil
-		},
-	}
+// chatEventRecorder captures session events race-safely: submit echoes on the
+// caller goroutine while answers arrive from the session worker.
+type chatEventRecorder struct {
+	mu     sync.Mutex
+	events []capturedChatEvent
 }
 
-func chatEventKinds(events []capturedChatEvent) []string {
-	kinds := make([]string, 0, len(events))
-	for _, event := range events {
+func (recorder *chatEventRecorder) record(event string, data any) error {
+	payload, _ := data.(map[string]any)
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	recorder.events = append(recorder.events, capturedChatEvent{event: event, payload: payload})
+
+	return nil
+}
+
+func (recorder *chatEventRecorder) snapshot() []capturedChatEvent {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+
+	return append([]capturedChatEvent(nil), recorder.events...)
+}
+
+func (recorder *chatEventRecorder) kinds() []string {
+	kinds := []string{}
+	for _, event := range recorder.snapshot() {
 		kinds = append(kinds, asString(event.payload["kind"]))
 	}
 
 	return kinds
+}
+
+func (recorder *chatEventRecorder) countKind(kind string) int {
+	count := 0
+	for _, recorded := range recorder.kinds() {
+		if recorded == kind {
+			count++
+		}
+	}
+
+	return count
+}
+
+func (recorder *chatEventRecorder) waitForKindCount(t *testing.T, kind string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if recorder.countKind(kind) >= count {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d %q events; kinds=%v", count, kind, recorder.kinds())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func newCapturedChatSession(recorder *chatEventRecorder) *scoutChatSession {
+	return newScoutChatSessionWithSend(recorder.record)
 }
 
 func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
@@ -37,10 +81,13 @@ func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
 	app.apiKey = "test-key"
 	app.mu.Unlock()
 
+	var inputsMu sync.Mutex
 	var inputs []string
 	originalResponder := createOpenAITextResponse
 	defer func() { createOpenAITextResponse = originalResponder }()
 	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		inputsMu.Lock()
+		defer inputsMu.Unlock()
 		inputs = append(inputs, request.Input)
 		if len(inputs) == 1 {
 			return "the boot barn shoot is friday.", nil
@@ -48,11 +95,14 @@ func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
 		return "it starts at 9am.", nil
 	}
 
-	var events []capturedChatEvent
-	session := newCapturedChatSession(&events)
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
 
-	session.handle(app, "when is the boot barn shoot?")
-	if got, want := strings.Join(chatEventKinds(events), ","), "query,status,answer"; got != want {
+	session.submit(app, "when is the boot barn shoot?")
+	recorder.waitForKindCount(t, "answer", 1)
+	events := recorder.snapshot()
+	if got, want := strings.Join(recorder.kinds(), ","), "query,status,answer"; got != want {
 		t.Fatalf("event kinds=%q, want %q", got, want)
 	}
 	for _, event := range events {
@@ -67,7 +117,10 @@ func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
 		t.Fatalf("answer=%q, want model answer", got)
 	}
 
-	session.handle(app, "what time does it start?")
+	session.submit(app, "what time does it start?")
+	recorder.waitForKindCount(t, "answer", 2)
+	inputsMu.Lock()
+	defer inputsMu.Unlock()
 	if len(inputs) != 2 {
 		t.Fatalf("model calls=%d, want 2", len(inputs))
 	}
@@ -91,12 +144,16 @@ func TestScoutChatHistoryStaysBounded(t *testing.T) {
 		return "noted.", nil
 	}
 
-	var events []capturedChatEvent
-	session := newCapturedChatSession(&events)
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
 	for index := 0; index < scoutChatMaxHistoryTurns; index++ {
-		session.handle(app, fmt.Sprintf("question %d about the boot barn shoot", index))
+		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index))
+		recorder.waitForKindCount(t, "answer", index+1)
 	}
 
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	if len(session.turns) > scoutChatMaxHistoryTurns {
 		t.Fatalf("history turns=%d, want at most %d", len(session.turns), scoutChatMaxHistoryTurns)
 	}
@@ -109,14 +166,156 @@ func TestScoutChatHistoryStaysBounded(t *testing.T) {
 func TestScoutChatRejectsEmptyMessage(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	var events []capturedChatEvent
-	session := newCapturedChatSession(&events)
-	session.handle(app, "   ")
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
+	session.submit(app, "   ")
 
-	if got, want := strings.Join(chatEventKinds(events), ","), "error"; got != want {
+	if got, want := strings.Join(recorder.kinds(), ","), "error"; got != want {
 		t.Fatalf("event kinds=%q, want %q", got, want)
 	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
 	if len(session.turns) != 0 {
 		t.Fatalf("history turns=%d, want 0 after an empty message", len(session.turns))
+	}
+}
+
+// TestScoutChatEchoesQueryBeforeModelWork locks in the lifecycle fix: the
+// query echo and thinking status are emitted synchronously by submit, so a
+// follow-up message never looks dropped while an earlier turn is answering.
+func TestScoutChatEchoesQueryBeforeModelWork(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	release := make(chan struct{})
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		<-release
+		return "noted.", nil
+	}
+
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
+
+	session.submit(app, "when is the boot barn shoot?")
+	session.submit(app, "and who owns the login card work?")
+
+	// both queries are echoed immediately, before any model call returns.
+	if got := recorder.countKind("query"); got != 2 {
+		t.Fatalf("query echoes=%d, want 2 before the model answered; kinds=%v", got, recorder.kinds())
+	}
+	if recorder.countKind("answer") != 0 {
+		t.Fatalf("answers arrived before the model returned; kinds=%v", recorder.kinds())
+	}
+
+	close(release)
+	recorder.waitForKindCount(t, "answer", 2)
+
+	// answers arrive FIFO: first question answered first.
+	events := recorder.snapshot()
+	answers := []string{}
+	for _, event := range events {
+		if asString(event.payload["kind"]) == "answer" {
+			answers = append(answers, asString(event.payload["text"]))
+		}
+	}
+	if len(answers) != 2 {
+		t.Fatalf("answers=%v, want 2", answers)
+	}
+}
+
+// TestScoutChatQueueOverflowSendsError: a flood of unanswered messages gets a
+// bounded queue and an explicit error instead of unbounded goroutines.
+func TestScoutChatQueueOverflowSendsError(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce sync.Once
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		startOnce.Do(func() { close(started) })
+		<-release
+		return "noted.", nil
+	}
+
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
+
+	session.submit(app, "question 0 about the boot barn shoot")
+	<-started // worker is now blocked in the model call; the queue is empty
+
+	for index := 1; index <= scoutChatMaxQueuedTurns; index++ {
+		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index))
+	}
+	if got := recorder.countKind("error"); got != 0 {
+		t.Fatalf("errors=%d before the queue filled; kinds=%v", got, recorder.kinds())
+	}
+
+	session.submit(app, "one question too many")
+	if got := recorder.countKind("error"); got != 1 {
+		t.Fatalf("errors=%d, want 1 overflow error; kinds=%v", got, recorder.kinds())
+	}
+	found := false
+	for _, event := range recorder.snapshot() {
+		if asString(event.payload["kind"]) == "error" {
+			found = true
+			if got := asString(event.payload["text"]); got != "Scout is still answering — try again in a moment" {
+				t.Fatalf("overflow error=%q, want the slow-down message", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("overflow error event missing")
+	}
+
+	close(release)
+	recorder.waitForKindCount(t, "answer", scoutChatMaxQueuedTurns+1)
+}
+
+// TestScoutChatCancelsModelCallOnClose ties the worker's model calls to the
+// connection: closing the session cancels the in-flight request context.
+func TestScoutChatCancelsModelCallOnClose(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(ctx context.Context, _ string, _ openAITextRequest) (string, error) {
+		close(started)
+		select {
+		case <-ctx.Done():
+			close(cancelled)
+			return "", ctx.Err()
+		case <-time.After(3 * time.Second):
+			return "too late.", nil
+		}
+	}
+
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+
+	session.submit(app, "when is the boot barn shoot?")
+	<-started
+	session.close()
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing the session did not cancel the in-flight model call")
 	}
 }

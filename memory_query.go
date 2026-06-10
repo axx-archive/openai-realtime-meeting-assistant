@@ -75,6 +75,12 @@ func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, b
 // memory store without broadcasting anything. history threads prior private
 // chat turns into the model input so follow-up questions work.
 func (app *kanbanBoardApp) resolveAssistantQuery(query string, history []scoutChatTurn) (assistantQueryResult, error) {
+	return app.resolveAssistantQueryContext(context.Background(), query, history)
+}
+
+// resolveAssistantQueryContext is resolveAssistantQuery bounded by a caller
+// context, so a disconnected private-chat session can cancel its model call.
+func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, query string, history []scoutChatTurn) (assistantQueryResult, error) {
 	query = canonicalizeBoardText(query)
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
@@ -91,7 +97,7 @@ func (app *kanbanBoardApp) resolveAssistantQuery(query string, history []scoutCh
 
 	matches, contextEntries := app.memoryMatchesAndContext(query)
 	board := app.snapshotState()
-	answer, modelErr := app.answerAssistantQueryWithModel(query, board.Cards, contextEntries, history)
+	answer, modelErr := app.answerAssistantQueryWithModel(ctx, query, board.Cards, contextEntries, history)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
@@ -108,7 +114,7 @@ func (app *kanbanBoardApp) resolveAssistantQuery(query string, history []scoutCh
 	}, nil
 }
 
-func (app *kanbanBoardApp) answerAssistantQueryWithModel(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn) (string, error) {
+func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
 	}
@@ -120,7 +126,10 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(query string, cards []k
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), assistantQueryRequestTimeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, assistantQueryRequestTimeout)
 	defer cancel()
 
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{

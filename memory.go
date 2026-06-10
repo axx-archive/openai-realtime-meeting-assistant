@@ -53,6 +53,10 @@ type meetingMemoryStore struct {
 	entries   []meetingMemoryEntry
 	seen      map[string]struct{}
 	meetingID string
+	// bootLatestIDs maps entry kind to the newest entry ID already persisted
+	// when the store was loaded — the baseline an ambient agent loop registers
+	// at startup so it never backfills pre-boot history.
+	bootLatestIDs map[string]string
 }
 
 type meetingMemoryEntry struct {
@@ -70,8 +74,9 @@ type meetingMemoryMatch struct {
 
 func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	store := &meetingMemoryStore{
-		path: path,
-		seen: map[string]struct{}{},
+		path:          path,
+		seen:          map[string]struct{}{},
+		bootLatestIDs: map[string]string{},
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -100,6 +105,7 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 		}
 		store.entries = append(store.entries, entry)
 		store.seen[entry.ID] = struct{}{}
+		store.bootLatestIDs[entry.Kind] = entry.ID
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read memory file: %w", err)
@@ -115,6 +121,20 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 
 	return store, nil
+}
+
+// bootBaselineIDOfKind returns the ID of the newest entry of kind that was
+// already persisted when the store was loaded: the cursor an ambient agent
+// loop would have registered had it started at boot.
+func (store *meetingMemoryStore) bootBaselineIDOfKind(kind string) string {
+	if store == nil {
+		return ""
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return store.bootLatestIDs[kind]
 }
 
 // currentMeetingID returns the active meeting id, empty until the first entry

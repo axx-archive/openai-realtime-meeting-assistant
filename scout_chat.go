@@ -9,16 +9,28 @@ package main
 //   client -> server  ws event "scout_chat" with data {"text": "..."}
 //   server -> client  kanban event "scout_chat" with data
 //                     {"kind":"query"|"status"|"answer"|"error","text":...,"ts":RFC3339Nano}
+//
+// Lifecycle: submit runs on the websocket read goroutine and echoes the query
+// immediately (a message must never look dropped while an earlier turn is
+// still answering), then hands the text to a single per-session worker that
+// answers strictly FIFO. The queue is bounded; the worker's model calls are
+// tied to a per-connection context cancelled when the websocket closes, so a
+// disconnected client cannot leave a backlog of model calls running.
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
 )
 
-// scoutChatMaxHistoryTurns bounds the per-connection conversation history;
-// one turn is one user or scout message.
-const scoutChatMaxHistoryTurns = 12
+const (
+	// scoutChatMaxHistoryTurns bounds the per-connection conversation history;
+	// one turn is one user or scout message.
+	scoutChatMaxHistoryTurns = 12
+	// scoutChatMaxQueuedTurns bounds unanswered messages per connection.
+	scoutChatMaxQueuedTurns = 8
+)
 
 type scoutChatTurn struct {
 	role string // "user" or "scout"
@@ -26,46 +38,103 @@ type scoutChatTurn struct {
 }
 
 type scoutChatSession struct {
-	mu    sync.Mutex
-	send  func(event string, data any) error
-	turns []scoutChatTurn
+	mu         sync.Mutex
+	send       func(event string, data any) error
+	turns      []scoutChatTurn
+	queue      chan string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	workerOnce sync.Once
 }
 
 func newScoutChatSession(conn *threadSafeWriter) *scoutChatSession {
+	return newScoutChatSessionWithSend(func(event string, data any) error {
+		return sendKanbanEvent(conn, event, data)
+	})
+}
+
+func newScoutChatSessionWithSend(send func(event string, data any) error) *scoutChatSession {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &scoutChatSession{
-		send: func(event string, data any) error {
-			return sendKanbanEvent(conn, event, data)
-		},
+		send:   send,
+		queue:  make(chan string, scoutChatMaxQueuedTurns),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
-// handle answers one private chat message. The lock serializes messages per
-// connection so follow-ups thread through history in order.
-func (session *scoutChatSession) handle(app *kanbanBoardApp, text string) {
+// close stops the worker and cancels any queued or in-flight model calls;
+// called when the owning websocket connection ends.
+func (session *scoutChatSession) close() {
+	if session == nil || session.cancel == nil {
+		return
+	}
+	session.cancel()
+}
+
+// submit accepts one private chat message on the websocket read goroutine:
+// it echoes the query and a thinking status synchronously (before any model
+// work), then queues the message for the FIFO worker.
+func (session *scoutChatSession) submit(app *kanbanBoardApp, text string) {
 	if session == nil {
 		return
 	}
 
-	session.mu.Lock()
-	defer session.mu.Unlock()
-
 	text = strings.TrimSpace(text)
 	if text == "" {
-		session.sendEventLocked("error", "say something first")
+		session.sendEvent("error", "say something first")
 		return
 	}
 
-	session.sendEventLocked("query", text)
-	session.sendEventLocked("status", "thinking…")
+	session.sendEvent("query", text)
+	session.sendEvent("status", "thinking…")
 
+	session.workerOnce.Do(func() {
+		go session.runWorker(app)
+	})
+
+	select {
+	case session.queue <- text:
+	default:
+		session.sendEvent("error", "Scout is still answering — try again in a moment")
+	}
+}
+
+// runWorker answers queued messages strictly FIFO until the session closes.
+func (session *scoutChatSession) runWorker(app *kanbanBoardApp) {
+	for {
+		select {
+		case <-session.ctx.Done():
+			return
+		case text := <-session.queue:
+			session.answer(app, text)
+		}
+	}
+}
+
+// answer resolves one queued message against the shared answer engine and
+// threads the turn into this session's history.
+func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
+	if session.ctx != nil && session.ctx.Err() != nil {
+		return // connection gone; drop the backlog silently
+	}
+
+	session.mu.Lock()
 	history := make([]scoutChatTurn, len(session.turns))
 	copy(history, session.turns)
-	result, err := app.resolveAssistantQuery(text, history)
+	session.mu.Unlock()
+
+	result, err := app.resolveAssistantQueryContext(session.ctx, text, history)
+	if session.ctx != nil && session.ctx.Err() != nil {
+		return // cancelled mid-call; nobody is listening for this answer
+	}
 	if err != nil {
-		session.sendEventLocked("error", err.Error())
+		session.sendEvent("error", err.Error())
 		return
 	}
 
+	session.mu.Lock()
 	session.turns = append(session.turns,
 		scoutChatTurn{role: "user", text: result.query},
 		scoutChatTurn{role: "scout", text: result.answer},
@@ -73,11 +142,12 @@ func (session *scoutChatSession) handle(app *kanbanBoardApp, text string) {
 	if len(session.turns) > scoutChatMaxHistoryTurns {
 		session.turns = session.turns[len(session.turns)-scoutChatMaxHistoryTurns:]
 	}
+	session.mu.Unlock()
 
-	session.sendEventLocked("answer", result.answer)
+	session.sendEvent("answer", result.answer)
 }
 
-func (session *scoutChatSession) sendEventLocked(kind string, text string) {
+func (session *scoutChatSession) sendEvent(kind string, text string) {
 	if session.send == nil {
 		return
 	}
