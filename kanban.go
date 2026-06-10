@@ -2727,10 +2727,11 @@ func meetingArchiveDownloadURL(archiveID string) string {
 	return "/archives/" + archiveID + ".json"
 }
 
-// meetingArchiveDownloadURLWithKey embeds the room password as a query key so
-// the client can link the archive without knowing where the password lives.
+// meetingArchiveDownloadURLWithKey appends the archive's derived access token
+// so the client can link the archive without the URL ever carrying the room
+// password.
 func meetingArchiveDownloadURLWithKey(archiveID string) string {
-	return meetingArchiveDownloadURL(archiveID) + "?key=" + url.QueryEscape(configuredMeetingRoomPassword())
+	return meetingArchiveDownloadURL(archiveID) + "?key=" + url.QueryEscape(archiveAccessToken(archiveID))
 }
 
 func meetingArchivePath(archiveID string) (string, error) {

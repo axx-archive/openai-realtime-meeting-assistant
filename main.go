@@ -297,16 +297,18 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// archives hold full meeting transcripts; gate listing and files behind the
-	// shared room password (constant-time compare, same as the participant
-	// passcode). clients get a keyed URL in the meeting_archived payload.
-	if !validMeetingPassword(r.URL.Query().Get("key")) {
+	// archives hold full meeting transcripts; gate listing and files behind a
+	// per-archive HMAC token (room password accepted as a fallback for links
+	// assembled client-side). clients get a tokenized URL in the
+	// meeting_archived payload.
+	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
+	if !validArchiveKey(archiveID, r.URL.Query().Get("key")) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
-	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	archivePath, err := meetingArchivePath(archiveID)
 	if err != nil {
 		http.NotFound(w, r)

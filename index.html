@@ -3249,6 +3249,225 @@
         min-height: 0;
       }
 
+      /* ---------- Private Scout chat ---------- */
+      .scout-tabs {
+        width: 100%;
+      }
+
+      .scout-tabs button {
+        flex: 1;
+      }
+
+      .scout-pane {
+        display: grid;
+        gap: var(--s-2);
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .scout-pane[hidden] {
+        display: none;
+      }
+
+      .scout-pane--room {
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .scout-pane--private {
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
+      }
+
+      .scout-private-caption {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.10em;
+        color: var(--fg-3);
+      }
+
+      .scout-chat-thread {
+        display: grid;
+        align-content: start;
+        gap: var(--s-2);
+        min-height: 160px;
+        max-height: min(48vh, 520px);
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 2px;
+      }
+
+      .scout-chat-empty {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-style: italic;
+        font-weight: 400;
+        line-height: 1.25;
+        letter-spacing: 0;
+        color: var(--fg-2);
+        padding: var(--s-4) var(--s-2);
+        text-align: center;
+        text-wrap: balance;
+        font-optical-sizing: auto;
+      }
+
+      .scout-chat-msg {
+        display: grid;
+        gap: 5px;
+        max-width: 88%;
+        padding: var(--s-2) var(--s-3);
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: var(--fg-0);
+      }
+
+      .scout-chat-msg--user {
+        justify-self: end;
+        border: 1px solid var(--glass-edge);
+        border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
+        background: var(--glass-surface-quiet);
+        box-shadow: var(--glass-highlight);
+        backdrop-filter: var(--blur-overlay);
+        -webkit-backdrop-filter: var(--blur-overlay);
+      }
+
+      .scout-chat-msg--scout {
+        justify-self: start;
+        border: 1px solid rgba(255, 122, 43, 0.22);
+        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
+        background: rgba(255, 122, 43, 0.07);
+      }
+
+      .scout-chat-msg--error {
+        justify-self: start;
+        border: 1px solid rgba(229, 87, 62, 0.34);
+        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
+        background: var(--danger-bg);
+      }
+
+      .scout-chat-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        color: var(--fg-2);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .scout-chat-msg--scout .scout-chat-meta { color: var(--ember-300); }
+      .scout-chat-msg--error .scout-chat-meta { color: var(--danger); }
+
+      .scout-chat-meta__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-pill);
+        background: var(--ember-500);
+        box-shadow: 0 0 6px rgba(255, 122, 43, 0.55);
+        flex: 0 0 auto;
+      }
+
+      .scout-chat-text {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .scout-chat-system {
+        margin: 0;
+        justify-self: center;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        color: var(--fg-3);
+        padding: 2px 0;
+      }
+
+      .scout-chat-thinking {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        justify-self: start;
+        padding: var(--s-2) var(--s-3);
+        border: 1px solid var(--line-faint);
+        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
+        background: rgba(255, 235, 200, 0.045);
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        color: var(--fg-2);
+      }
+
+      .scout-chat-thinking[hidden] {
+        display: none;
+      }
+
+      .scout-chat-thinking__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-pill);
+        background: var(--ember-500);
+        box-shadow: 0 0 6px rgba(255, 122, 43, 0.55);
+        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+
+      .scout-chat-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--s-2);
+        align-items: end;
+      }
+
+      .scout-chat-input {
+        min-width: 0;
+        width: 100%;
+        min-height: 40px;
+        max-height: 108px;
+        resize: none;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: rgba(11, 8, 5, 0.56);
+        color: var(--fg-0);
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.45;
+        padding: 10px var(--s-3);
+        outline: 0;
+        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft);
+      }
+
+      .scout-chat-input::placeholder { color: var(--fg-3); }
+
+      .scout-chat-input:focus {
+        border-color: rgba(255, 122, 43, 0.65);
+        background: rgba(11, 8, 5, 0.76);
+      }
+
+      .scout-chat-input[disabled] {
+        opacity: 0.55;
+      }
+
+      .scout-chat-send {
+        min-height: 40px;
+        min-width: 56px;
+        padding: 0 var(--s-3);
+        font-size: 12.5px;
+      }
+
+      .scout-chat-hint {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        color: var(--fg-3);
+      }
+
+      .scout-chat-hint[hidden] {
+        display: none;
+      }
+
       .memory-list--silent {
         position: absolute;
         width: 1px;
@@ -4430,6 +4649,9 @@
         .assistant-feed {
           max-height: 180px;
         }
+        .scout-chat-thread {
+          max-height: 220px;
+        }
       }
 
       @media (max-width: 860px) {
@@ -4590,6 +4812,10 @@
         }
 
         .assistant-feed {
+          max-height: min(260px, 32svh);
+        }
+
+        .scout-chat-thread {
           max-height: min(260px, 32svh);
         }
 
@@ -4936,6 +5162,18 @@
 
         .assistant-feed {
           max-height: 280px;
+        }
+
+        .scout-chat-thread {
+          max-height: min(280px, 34svh);
+        }
+
+        .scout-chat-input {
+          font-size: 14px;
+        }
+
+        .scout-chat-send {
+          min-width: 72px;
         }
 
         .assistant-form {
@@ -5749,28 +5987,49 @@
                 <span id="assistantStateText">ready</span>
               </span>
             </header>
-            <form id="assistantForm" class="assistant-form scout-ask">
-              <span class="scout-ask__icon" aria-hidden="true">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <path d="M21 21l-4.35-4.35"></path>
-                </svg>
-              </span>
-              <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout — this room, past meetings, or private updates…">
-              <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
-            </form>
-            <details class="scout-activity" open>
-              <summary>
-                <span class="scout-activity__label">chat <span id="scoutActivityCount" class="scout-activity__count" hidden>0</span></span>
-                <svg class="scout-activity__chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
-              </summary>
-              <div id="assistantFeed" class="assistant-feed">
-                <article class="assistant-message assistant-message--status">
-                  <span class="assistant-meta">ready</span>
-                  <span class="assistant-text">ask Scout anything.</span>
-                </article>
+            <div class="stage-segmented scout-tabs" role="group" aria-label="Scout chat scope">
+              <button type="button" data-scout-tab="room" aria-pressed="true">room</button>
+              <button type="button" data-scout-tab="private" aria-pressed="false">private</button>
+            </div>
+            <div id="scoutRoomPane" class="scout-pane scout-pane--room">
+              <form id="assistantForm" class="assistant-form scout-ask">
+                <span class="scout-ask__icon" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="M21 21l-4.35-4.35"></path>
+                  </svg>
+                </span>
+                <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout — this room, past meetings, or private updates…">
+                <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
+              </form>
+              <details class="scout-activity" open>
+                <summary>
+                  <span class="scout-activity__label">chat <span id="scoutActivityCount" class="scout-activity__count" hidden>0</span></span>
+                  <svg class="scout-activity__chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+                </summary>
+                <div id="assistantFeed" class="assistant-feed">
+                  <article class="assistant-message assistant-message--status">
+                    <span class="assistant-meta">ready</span>
+                    <span class="assistant-text">ask Scout anything.</span>
+                  </article>
+                </div>
+              </details>
+            </div>
+            <div id="scoutPrivatePane" class="scout-pane scout-pane--private" hidden>
+              <p class="scout-private-caption">private · only you can see this</p>
+              <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
+                <p class="scout-chat-empty">ask scout about any meeting — only you can see this</p>
+                <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
+                  <span class="scout-chat-thinking__dot" aria-hidden="true"></span>
+                  <span id="scoutChatThinkingText">thinking…</span>
+                </div>
               </div>
-            </details>
+              <form id="scoutChatForm" class="scout-chat-form">
+                <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask about prior meetings…" aria-label="Message Scout privately" disabled></textarea>
+                <button id="scoutChatSend" class="btn btn--primary scout-chat-send" type="submit" disabled>send</button>
+              </form>
+              <p id="scoutChatHint" class="scout-chat-hint">join the room to chat with scout</p>
+            </div>
           </section>
           <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
             <article class="memory-item">
@@ -6178,6 +6437,16 @@
       const assistantForm = document.getElementById('assistantForm')
       const assistantInput = document.getElementById('assistantInput')
       const scoutActivityCount = document.getElementById('scoutActivityCount')
+      const scoutTabButtons = Array.from(document.querySelectorAll('button[data-scout-tab]'))
+      const scoutRoomPane = document.getElementById('scoutRoomPane')
+      const scoutPrivatePane = document.getElementById('scoutPrivatePane')
+      const scoutChatThread = document.getElementById('scoutChatThread')
+      const scoutChatThinking = document.getElementById('scoutChatThinking')
+      const scoutChatThinkingText = document.getElementById('scoutChatThinkingText')
+      const scoutChatForm = document.getElementById('scoutChatForm')
+      const scoutChatInput = document.getElementById('scoutChatInput')
+      const scoutChatSend = document.getElementById('scoutChatSend')
+      const scoutChatHint = document.getElementById('scoutChatHint')
 
       let cards = []
       let memoryEntries = []
@@ -6190,6 +6459,13 @@
       let isMicMuted = false
       let isCameraOff = false
       let currentParticipantName = ''
+      // The password the user entered at join, kept in memory only so archive
+      // links rendered from per-entry events can carry the ?key= gate.
+      let currentRoomKey = ''
+      // Active scout rail tab; in-memory only by design (resets on reload).
+      let scoutChatTab = 'room'
+      let scoutChatSessionSeen = false
+      const scoutChatMaxNodes = 200
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
       let pinnedSpeakerName = ''
@@ -6399,6 +6675,17 @@
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
       assistantForm.addEventListener('submit', sendAssistantQuery)
+      scoutTabButtons.forEach(button => {
+        button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
+      })
+      scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
+      scoutChatInput.addEventListener('input', resizeScoutChatInput)
+      scoutChatInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          sendScoutChatFromForm(event)
+        }
+      })
       document.querySelectorAll('[data-scout-query]').forEach(button => {
         button.addEventListener('click', () => {
           assistantInput.value = button.dataset.scoutQuery || ''
@@ -7021,6 +7308,7 @@
         if (!inRoom) {
           setBoardExpanded(false)
         }
+        syncScoutChatToRoomView(inRoom)
         updateParticipantPreviewText()
         updateHearthParticipants()
       }
@@ -7455,6 +7743,7 @@
         }
         unlockRoomAudioPlayback()
 
+        currentRoomKey = roomPasswordInput.value
         currentParticipantName = selectedParticipantName()
         localVideoLabel.textContent = currentParticipantName
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
@@ -9509,6 +9798,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'assistant_event':
             handleAssistantEvent(message.data)
             break
+          case 'scout_chat':
+            handleScoutChatEvent(message.data)
+            break
           case 'participants':
             handleParticipants(message.data)
             break
@@ -10669,9 +10961,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         assistantInput.value = ''
 
         if (/^private\s*:/i.test(query)) {
-          const privateText = query.replace(/^private\s*:\s*/i, '').trim() || 'private update'
-          addAssistantMessage({ kind: 'answer', text: `private Scout note saved locally: ${privateText}` })
-          setLog('private Scout note saved')
+          // Route into the real private chat — nothing typed here may
+          // silently go nowhere.
+          const privateText = query.replace(/^private\s*:\s*/i, '').trim()
+          setScoutTab('private')
+          if (!privateText) {
+            scoutChatInput.focus()
+            return
+          }
+          if (!sendScoutChat(privateText)) {
+            scoutChatInput.value = privateText
+            resizeScoutChatInput()
+          }
           return
         }
 
@@ -10686,6 +10987,191 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           event: 'assistant_query',
           data: JSON.stringify({ query })
         }))
+      }
+
+      // ---------- Private Scout chat ----------
+      // Truly per-connection: the server keeps a 12-turn history for this
+      // websocket only and clears it on reconnect.
+
+      function setScoutTab(tab) {
+        scoutChatTab = tab === 'private' ? 'private' : 'room'
+        scoutTabButtons.forEach(button => {
+          button.setAttribute('aria-pressed', String((button.dataset.scoutTab || 'room') === scoutChatTab))
+        })
+        scoutRoomPane.hidden = scoutChatTab !== 'room'
+        scoutPrivatePane.hidden = scoutChatTab !== 'private'
+        if (scoutChatTab === 'private') {
+          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        }
+      }
+
+      function updateScoutChatAvailability() {
+        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
+        scoutChatInput.disabled = !joined
+        scoutChatSend.disabled = !joined
+        scoutChatHint.hidden = joined
+      }
+
+      function syncScoutChatToRoomView(inRoom) {
+        if (inRoom) {
+          if (scoutChatSessionSeen && scoutChatThread.querySelector('.scout-chat-msg')) {
+            const last = scoutChatLastEntryNode()
+            if (!last?.classList?.contains('scout-chat-system')) {
+              appendScoutChatNode(scoutChatSystemNode('connection reset — history cleared'))
+            }
+          }
+          scoutChatSessionSeen = true
+        } else {
+          hideScoutChatThinking()
+        }
+        updateScoutChatAvailability()
+      }
+
+      function sendScoutChat(text) {
+        const trimmed = String(text || '').trim()
+        if (!trimmed) {
+          return false
+        }
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          setLog('join the room to chat with scout')
+          return false
+        }
+        ws.send(JSON.stringify({
+          event: 'scout_chat',
+          data: JSON.stringify({ text: trimmed })
+        }))
+        return true
+      }
+
+      function sendScoutChatFromForm(event) {
+        event.preventDefault()
+        if (!scoutChatInput.value.trim()) {
+          return
+        }
+        if (sendScoutChat(scoutChatInput.value)) {
+          scoutChatInput.value = ''
+          resizeScoutChatInput()
+        }
+      }
+
+      function resizeScoutChatInput() {
+        // Grow with content up to ~4 lines; settle back to the CSS min-height
+        // when emptied so the row never ratchets taller.
+        if (!scoutChatInput.value) {
+          scoutChatInput.style.height = ''
+          return
+        }
+        scoutChatInput.style.height = 'auto'
+        scoutChatInput.style.height = `${Math.min(scoutChatInput.scrollHeight + 2, 108)}px`
+      }
+
+      function handleScoutChatEvent(payload) {
+        const kind = String(payload?.kind || '').toLowerCase()
+        const text = String(payload?.text || '')
+        const ts = payload?.ts || ''
+        if (kind === 'status') {
+          showScoutChatThinking(text || 'thinking…')
+          return
+        }
+        if (!text) {
+          return
+        }
+        if (kind === 'query') {
+          appendScoutChatNode(scoutChatMessageNode('user', text, ts))
+        } else if (kind === 'answer') {
+          hideScoutChatThinking()
+          appendScoutChatNode(scoutChatMessageNode('scout', text, ts))
+        } else if (kind === 'error') {
+          hideScoutChatThinking()
+          appendScoutChatNode(scoutChatMessageNode('error', text, ts))
+        }
+      }
+
+      function scoutChatMessageNode(kind, text, ts) {
+        const item = document.createElement('article')
+        item.className = `scout-chat-msg scout-chat-msg--${kind}`
+
+        const meta = document.createElement('span')
+        meta.className = 'scout-chat-meta'
+        if (kind !== 'user') {
+          const dot = document.createElement('span')
+          dot.className = 'scout-chat-meta__dot'
+          dot.setAttribute('aria-hidden', 'true')
+          meta.appendChild(dot)
+        }
+        const label = kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : 'error'
+        meta.appendChild(document.createTextNode(`${label} · ${scoutChatTimeLabel(ts)}`))
+
+        const body = document.createElement('span')
+        body.className = 'scout-chat-text'
+        body.textContent = text
+
+        item.append(meta, body)
+        return item
+      }
+
+      function scoutChatSystemNode(text) {
+        const line = document.createElement('p')
+        line.className = 'scout-chat-system'
+        line.textContent = text
+        return line
+      }
+
+      function scoutChatTimeLabel(ts) {
+        const at = ts ? new Date(ts) : null
+        return at && !Number.isNaN(at.valueOf())
+          ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          : 'now'
+      }
+
+      function scoutChatIsNearBottom() {
+        return scoutChatThread.scrollHeight - scoutChatThread.scrollTop - scoutChatThread.clientHeight < 48
+      }
+
+      function scoutChatLastEntryNode() {
+        let node = scoutChatThread.lastElementChild
+        while (node && (node === scoutChatThinking || node.classList.contains('scout-chat-empty'))) {
+          node = node.previousElementSibling
+        }
+        return node
+      }
+
+      function appendScoutChatNode(node) {
+        const stick = scoutChatIsNearBottom()
+        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
+        scoutChatThread.insertBefore(node, scoutChatThinking)
+        // Cap the rendered thread; drop oldest so long sessions stay light.
+        while (scoutChatThread.children.length - 1 > scoutChatMaxNodes) {
+          const first = scoutChatThread.firstElementChild
+          if (!first || first === scoutChatThinking) {
+            break
+          }
+          first.remove()
+        }
+        if (stick) {
+          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        }
+      }
+
+      function showScoutChatThinking(text) {
+        const stick = scoutChatIsNearBottom()
+        scoutChatThinkingText.textContent = text
+        scoutChatThinking.hidden = false
+        if (stick) {
+          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        }
+      }
+
+      function hideScoutChatThinking() {
+        scoutChatThinking.hidden = true
+      }
+
+      function withArchiveKey(url) {
+        const raw = String(url || '')
+        if (!raw.startsWith('/archives/') || /[?&]key=/.test(raw) || !currentRoomKey) {
+          return raw
+        }
+        return `${raw}${raw.includes('?') ? '&' : '?'}key=${encodeURIComponent(currentRoomKey)}`
       }
 
       async function copyRoomLink() {
@@ -12143,7 +12629,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (entry.downloadUrl) {
           const link = document.createElement('a')
           link.className = 'assistant-link'
-          link.href = entry.downloadUrl
+          link.href = withArchiveKey(entry.downloadUrl)
           link.download = ''
           link.textContent = 'Download archive'
           item.appendChild(link)

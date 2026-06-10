@@ -26,7 +26,9 @@ func TestMeetingArchiveHandlerRequiresRoomKey(t *testing.T) {
 	}{
 		{"/archives/meeting-test.json", http.StatusUnauthorized},
 		{"/archives/meeting-test.json?key=wrong", http.StatusUnauthorized},
+		{"/archives/meeting-test.json?key=" + archiveAccessToken("meeting-test"), http.StatusOK},
 		{"/archives/meeting-test.json?key=test-secret", http.StatusOK},
+		{"/archives/other.json?key=" + archiveAccessToken("meeting-test"), http.StatusUnauthorized},
 		{"/archives/?key=test-secret", http.StatusNotFound},
 		{"/archives/", http.StatusUnauthorized},
 	} {
@@ -38,8 +40,12 @@ func TestMeetingArchiveHandlerRequiresRoomKey(t *testing.T) {
 		}
 	}
 
-	if got, want := meetingArchiveDownloadURLWithKey("meeting-test"), "/archives/meeting-test.json?key=test-secret"; got != want {
-		t.Fatalf("keyed download url=%q, want %q", got, want)
+	keyedURL := meetingArchiveDownloadURLWithKey("meeting-test")
+	if want := "/archives/meeting-test.json?key=" + archiveAccessToken("meeting-test"); keyedURL != want {
+		t.Fatalf("keyed download url=%q, want %q", keyedURL, want)
+	}
+	if strings.Contains(keyedURL, "test-secret") {
+		t.Fatalf("keyed download url=%q must not embed the room password", keyedURL)
 	}
 }
 
@@ -66,8 +72,12 @@ func TestMemorySnapshotForClientsAddsKeyedArchiveURL(t *testing.T) {
 			continue
 		}
 		found = true
-		if got, want := entry.Metadata["downloadUrl"], "/archives/meeting-test.json?key=test-secret"; got != want {
+		got := entry.Metadata["downloadUrl"]
+		if want := "/archives/meeting-test.json?key=" + archiveAccessToken("meeting-test"); got != want {
 			t.Fatalf("client downloadUrl=%q, want %q", got, want)
+		}
+		if strings.Contains(got, "test-secret") {
+			t.Fatalf("client downloadUrl=%q must not embed the room password", got)
 		}
 	}
 	if !found {
