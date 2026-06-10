@@ -812,6 +812,12 @@
         justify-content: flex-end;
       }
 
+      /* Undo only surfaces when there's a delete to take back; the board
+         menu keeps the action discoverable in the meantime */
+      #undoDelete[disabled] {
+        display: none;
+      }
+
       .board-surface.is-locked .board {
         opacity: 0.42;
       }
@@ -3229,8 +3235,6 @@
         gap: var(--s-2);
         min-width: 0;
         min-height: 0;
-        border-top: 1px solid var(--line-faint);
-        padding-top: var(--s-2);
       }
 
       .scout-activity summary {
@@ -3297,7 +3301,7 @@
       }
 
       .scout-pane--room {
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
       }
 
       .scout-pane--private {
@@ -6056,16 +6060,6 @@
               <button type="button" data-scout-tab="private" aria-pressed="false">private</button>
             </div>
             <div id="scoutRoomPane" class="scout-pane scout-pane--room">
-              <form id="assistantForm" class="assistant-form scout-ask">
-                <span class="scout-ask__icon" aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <path d="M21 21l-4.35-4.35"></path>
-                  </svg>
-                </span>
-                <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout — this room, past meetings, or private updates…">
-                <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
-              </form>
               <details class="scout-activity" open>
                 <summary>
                   <span class="scout-activity__label">chat <span id="scoutActivityCount" class="scout-activity__count" hidden>0</span></span>
@@ -6078,6 +6072,16 @@
                   </article>
                 </div>
               </details>
+              <form id="assistantForm" class="assistant-form scout-ask">
+                <span class="scout-ask__icon" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="M21 21l-4.35-4.35"></path>
+                  </svg>
+                </span>
+                <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout about this room…">
+                <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
+              </form>
             </div>
             <div id="scoutPrivatePane" class="scout-pane scout-pane--private" hidden>
               <p class="scout-private-caption">private · only you can see this</p>
