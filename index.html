@@ -4021,6 +4021,15 @@
         padding: 6px 2px;
       }
 
+      .board-preview__more {
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: lowercase;
+        padding: 2px 2px 0;
+      }
+
       .board-preview__card {
         display: grid;
         gap: 8px;
@@ -12929,20 +12938,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
 
-        // rail shows In Progress + Blocked columns (multi-card)
+        // rail shows In Progress + Blocked columns (multi-card); when nothing
+        // is active yet, peek at the top of the backlog instead so the rail
+        // stays alive while the meeting spins up
         const railStatuses = ['In Progress', 'Blocked']
         const railHasCards = railStatuses.some(status => cards.some(card => card.status === status))
-        if (!railHasCards) {
-          const empty = document.createElement('p')
-          empty.className = 'board-preview__empty'
-          empty.textContent = 'no active cards.'
-          boardPreview.replaceChildren(empty)
-          return
+        let sections
+        if (railHasCards) {
+          sections = railStatuses.map(status => ({
+            label: status.toLowerCase(),
+            statusCls: statusClass(status),
+            dot: status === 'In Progress' ? 'var(--ember-500)' : 'var(--warning)',
+            cards: cards.filter(card => card.status === status),
+            total: null,
+          }))
+        } else {
+          const backlog = cards.filter(card => card.status === 'Backlog')
+          if (backlog.length === 0) {
+            const empty = document.createElement('p')
+            empty.className = 'board-preview__empty'
+            empty.textContent = 'no active cards.'
+            boardPreview.replaceChildren(empty)
+            return
+          }
+          sections = [{
+            label: 'up next',
+            statusCls: statusClass('Backlog'),
+            dot: 'var(--fg-3)',
+            cards: backlog.slice(0, 4),
+            total: backlog.length,
+          }]
         }
-        const columns = railStatuses.map(status => {
-          const columnCards = cards.filter(card => card.status === status)
+        const columns = sections.map(section => {
+          const columnCards = section.cards
           const column = document.createElement('section')
-          column.className = `board-preview__col ${statusClass(status)}`
+          column.className = `board-preview__col ${section.statusCls}`
 
           const header = document.createElement('header')
           header.className = 'board-rail__col-label'
@@ -12950,11 +12980,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           left.className = 'l'
           const dot = document.createElement('span')
           dot.className = 'dot'
-          dot.style.background = status === 'In Progress' ? 'var(--ember-500)' : 'var(--warning)'
-          left.append(dot, document.createTextNode(' ' + status.toLowerCase()))
+          dot.style.background = section.dot
+          left.append(dot, document.createTextNode(' ' + section.label))
           const count = document.createElement('span')
           count.className = 'n'
-          count.textContent = String(columnCards.length)
+          count.textContent = String(section.total ?? columnCards.length)
           header.append(left, count)
           column.appendChild(header)
 
@@ -12983,6 +13013,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             card.append(heading, date)
             card.addEventListener('click', () => showCardDetail(c))
             column.appendChild(card)
+          }
+          if (section.total && section.total > columnCards.length) {
+            const more = document.createElement('div')
+            more.className = 'board-preview__more'
+            more.textContent = `+${section.total - columnCards.length} more in backlog`
+            column.appendChild(more)
           }
           return column
         })
