@@ -536,11 +536,13 @@
         background: radial-gradient(circle at 50% 40%, var(--night-4), var(--night-0) 72%);
       }
 
-      .video-tile.is-camera-off .tile-avatar {
+      .video-tile.is-camera-off .tile-avatar,
+      .video-tile.is-video-stalled .tile-avatar {
         display: grid;
       }
 
-      .video-tile.is-camera-off video {
+      .video-tile.is-camera-off video,
+      .video-tile.is-video-stalled video {
         opacity: 0;
       }
 
@@ -6630,18 +6632,24 @@
         speechFloor: 0.075,
         trainedAt: ''
       }
+      // Cameras must capture widescreen frames: without an aspect-ratio pin
+      // some sensors fall back to 4:3 (or square) modes that the cover-fit
+      // tiles crop into a zoomed-in square look.
+      const widescreenAspectRatio = { ideal: 16 / 9 }
       const relaxedVideoConstraints = {
-        width: { ideal: 640 },
-        height: { ideal: 360 },
-        frameRate: { ideal: 20 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        aspectRatio: widescreenAspectRatio,
+        frameRate: { ideal: 30 },
         facingMode: 'user'
       }
       let audioSettings = loadAudioSettings()
       const mediaConstraints = {
         video: {
-          width: { ideal: 640, max: 854 },
-          height: { ideal: 360, max: 480 },
-          frameRate: { ideal: 20, max: 20 },
+          width: { ideal: 1280, max: 1280 },
+          height: { ideal: 720, max: 720 },
+          aspectRatio: widescreenAspectRatio,
+          frameRate: { ideal: 30, max: 30 },
           facingMode: 'user'
         },
         audio: {
@@ -6667,21 +6675,21 @@
       const outboundMediaLimits = {
         audio: { maxBitrate: 32000 },
         video: {
-          maxBitrate: 480000,
-          maxFramerate: 18,
-          groupMaxBitrate: 220000,
-          groupMaxFramerate: 12,
-          groupMaxWidth: 480,
-          groupMaxHeight: 270,
-          crowdedMaxBitrate: 110000,
-          crowdedMaxFramerate: 7,
-          crowdedMaxWidth: 320,
-          crowdedMaxHeight: 180,
-          constrainedMaxBitrate: 70000,
-          constrainedMaxFramerate: 5,
-          constrainedMaxWidth: 256,
-          constrainedMaxHeight: 144,
-          screenShareMaxBitrate: 1600000,
+          maxBitrate: 1500000,
+          maxFramerate: 30,
+          groupMaxBitrate: 800000,
+          groupMaxFramerate: 24,
+          groupMaxWidth: 960,
+          groupMaxHeight: 540,
+          crowdedMaxBitrate: 450000,
+          crowdedMaxFramerate: 20,
+          crowdedMaxWidth: 640,
+          crowdedMaxHeight: 360,
+          constrainedMaxBitrate: 250000,
+          constrainedMaxFramerate: 12,
+          constrainedMaxWidth: 480,
+          constrainedMaxHeight: 270,
+          screenShareMaxBitrate: 2500000,
           screenShareMaxFramerate: 15
         }
       }
@@ -7974,23 +7982,27 @@
           ? {
               width: { max: limits.constrainedMaxWidth },
               height: { max: limits.constrainedMaxHeight },
+              aspectRatio: widescreenAspectRatio,
               frameRate: { max: limits.constrainedMaxFramerate }
             }
           : useCrowdedVideoLimits()
             ? {
                 width: { max: limits.crowdedMaxWidth },
                 height: { max: limits.crowdedMaxHeight },
+                aspectRatio: widescreenAspectRatio,
                 frameRate: { max: limits.crowdedMaxFramerate }
               }
           : useGroupVideoLimits()
             ? {
                 width: { max: limits.groupMaxWidth },
                 height: { max: limits.groupMaxHeight },
+                aspectRatio: widescreenAspectRatio,
                 frameRate: { max: limits.groupMaxFramerate }
               }
             : {
-                width: { max: 854 },
-                height: { max: 480 },
+                width: { max: 1280 },
+                height: { max: 720 },
+                aspectRatio: widescreenAspectRatio,
                 frameRate: { max: limits.maxFramerate }
               }
         try {
@@ -8499,6 +8511,7 @@
           await sender.track.applyConstraints?.({
             width: { max: limits.constrainedMaxWidth },
             height: { max: limits.constrainedMaxHeight },
+            aspectRatio: widescreenAspectRatio,
             frameRate: { max: limits.constrainedMaxFramerate }
           })
         } catch (error) {
@@ -10653,6 +10666,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             .map(key => remoteLabelsByTrack.get(key))
             .find(Boolean)
           if (!participantName || participantName === 'participant') {
+            // A muted receiver is not delivering frames — usually a zombie
+            // transceiver left behind after the server removed its sender.
+            // Seating it would render a black ghost tile that pops in and
+            // out of the room, so wait until media actually flows.
+            if (track.muted) {
+              continue
+            }
             // A live track without a label yet: after a grace period show a
             // placeholder tile so the video is not invisible while labels are
             // in flight; the periodic label replay will name it.
@@ -10682,6 +10702,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             unlabeledRemoteVideoSightings.delete(key)
           }
           if (isCurrentParticipantName(participantName)) {
+            continue
+          }
+          if (!participantDisplayNameInRoom(participantName)) {
+            // The labeled participant already left the room; recreating their
+            // tile would fight pruneRemoteMediaOutsideRoom in a create/prune
+            // flicker loop until the server finishes renegotiating.
             continue
           }
           const stream = new MediaStream([track])
@@ -12479,6 +12505,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           removeRemoteTile()
         }
         remoteTileRemovers.set(tile, removeRemoteTileForTrack)
+        watchRemoteVideoTrackStall(tile, track)
         const onStreamRemoveTrack = removeEvent => {
           if (removeEvent.track === track && removeEvent.track?.kind === 'video') {
             removeRemoteTileForTrack(track)
@@ -12540,6 +12567,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         video.srcObject = new MediaStream([track])
         playRemoteMedia(video)
+        tile.classList.remove('is-video-stalled')
+        watchRemoteVideoTrackStall(tile, track)
         const name = String(tile.dataset.participant || participantName || '').trim()
         if (name && name !== 'participant') {
           remoteVideoTracksByParticipant.set(name, track)
@@ -12550,6 +12579,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           track.addEventListener?.('ended', () => removeForTrack(track), { once: true })
         }
         return true
+      }
+
+      // A remote track that stops receiving RTP (its peer dropped, slept, or
+      // the server is mid-renegotiation) goes "muted" while the video element
+      // keeps painting the last decoded frame. Hide that frozen frame behind
+      // the avatar after a short grace, and tear the tile down outright when
+      // its participant is no longer in the room.
+      function watchRemoteVideoTrackStall(tile, track) {
+        if (!tile || !track || track.kind !== 'video' || !track.addEventListener) {
+          return
+        }
+        let stallTimer = 0
+        const tileStillShowsTrack = () => {
+          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          return tile.isConnected && shownTracks.includes(track)
+        }
+        const clearStall = () => {
+          if (stallTimer) {
+            window.clearTimeout(stallTimer)
+            stallTimer = 0
+          }
+          if (tileStillShowsTrack()) {
+            tile.classList.remove('is-video-stalled')
+          }
+        }
+        const onMute = () => {
+          if (stallTimer) {
+            return
+          }
+          stallTimer = window.setTimeout(() => {
+            stallTimer = 0
+            if (!track.muted || !tileStillShowsTrack()) {
+              return
+            }
+            tile.classList.add('is-video-stalled')
+            const name = String(tile.dataset.participant || '').trim()
+            if (!name || name === 'participant' || !participantDisplayNameInRoom(name)) {
+              remoteTileRemovers.get(tile)?.(track)
+            }
+          }, 1600)
+        }
+        track.addEventListener('mute', onMute)
+        track.addEventListener('unmute', clearStall)
+        track.addEventListener('ended', clearStall, { once: true })
+        if (track.muted) {
+          onMute()
+        }
       }
 
       function setTrackContentHint(track, hint) {

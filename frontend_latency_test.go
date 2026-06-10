@@ -15,14 +15,14 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		"width: { ideal: 640, max: 854 }",
-		"maxBitrate: 480000",
-		"groupMaxBitrate: 220000",
-		"groupMaxWidth: 480",
-		"crowdedMaxBitrate: 110000",
-		"crowdedMaxWidth: 320",
-		"constrainedMaxBitrate: 70000",
-		"constrainedMaxWidth: 256",
+		"width: { ideal: 1280, max: 1280 }",
+		"maxBitrate: 1500000",
+		"groupMaxBitrate: 800000",
+		"groupMaxWidth: 960",
+		"crowdedMaxBitrate: 450000",
+		"crowdedMaxWidth: 640",
+		"constrainedMaxBitrate: 250000",
+		"constrainedMaxWidth: 480",
 		"function useGroupVideoLimits()",
 		"function useCrowdedVideoLimits()",
 		"return currentRoomParticipantCount() >= 5",
@@ -31,7 +31,7 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function startMediaQualityMonitor(sessionPeer)",
 		"function constrainCameraForLag(reason)",
 		"const sustainedLag = mediaQualityLagSamples >= 2",
-		"screenShareMaxBitrate: 1600000",
+		"screenShareMaxBitrate: 2500000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",
 		"function remoteVideoStreamForTrack(stream, videoTrack)",
@@ -75,6 +75,43 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("index.html still forces choppy receiver buffering via %q", unwanted)
 		}
+	}
+}
+
+func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		// Every capture and retune path pins 16:9 so cameras never fall back
+		// to square-ish 4:3 sensor modes that the cover-fit tiles crop.
+		"const widescreenAspectRatio = { ideal: 16 / 9 }",
+		"aspectRatio: widescreenAspectRatio",
+		// A muted receiver track carries no frames; seating it as a placeholder
+		// renders a black ghost tile that pops in and out of the room.
+		"track.muted",
+		"function watchRemoteVideoTrackStall(tile, track)",
+		"watchRemoteVideoTrackStall(tile, track)",
+		// A stalled remote track hides its frozen last frame behind the avatar.
+		"tile.classList.add('is-video-stalled')",
+		".video-tile.is-video-stalled video",
+		// Repair must not recreate tiles for participants who already left.
+		"participantDisplayNameInRoom(participantName)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing widescreen capture or calm remote tile hardening %q", want)
+		}
+	}
+
+	retune := functionBody(html, "function retuneLocalCameraCapture()")
+	if retune == "" {
+		t.Fatal("missing retuneLocalCameraCapture helper")
+	}
+	if got := strings.Count(retune, "aspectRatio: widescreenAspectRatio"); got != 4 {
+		t.Fatalf("retuneLocalCameraCapture should pin 16:9 in all four quality tiers, found %d", got)
 	}
 }
 
