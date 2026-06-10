@@ -226,6 +226,9 @@
         font-weight: 500;
         letter-spacing: 0.04em;
       }
+      #topbarElapsed[data-started="true"]::after {
+        content: " elapsed";
+      }
       .topbar__meta-sep {
         width: 1px;
         height: 14px;
@@ -3529,6 +3532,7 @@
         z-index: 1;
         display: grid;
         justify-items: center;
+        align-content: center;
         gap: var(--s-5);
         width: 100%;
         min-height: 0;
@@ -4793,16 +4797,24 @@
         }
 
         .stage-toolbar {
-          align-items: stretch;
-          flex-direction: column;
+          align-items: center;
         }
 
         .stage-segmented {
-          width: 100%;
+          flex: 1 1 auto;
+          min-width: 0;
         }
 
         .stage-segmented button {
           flex: 1;
+          min-width: 0;
+        }
+
+        .stage-tool {
+          flex: 0 0 auto;
+          max-width: 45%;
+          overflow: hidden;
+          white-space: nowrap;
         }
 
         .hearth-speaker {
@@ -4994,6 +5006,15 @@
         .topbar__meta {
           font-size: 10px;
           letter-spacing: 0.04em;
+        }
+
+        /* The narrow topbar only has room for the digits — drop the suffix
+           and hide the clock entirely until the room actually starts. */
+        #topbarElapsed[data-started="true"]::after {
+          content: "";
+        }
+        #topbarElapsed[data-started="false"] {
+          display: none;
         }
 
         .topbar > .pill span:last-child {
@@ -5908,7 +5929,7 @@
           <span class="topbar__meta-sep" aria-hidden="true"></span>
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true"></span>
-          <span class="topbar__meta-item" id="topbarElapsed">00:00 elapsed</span>
+          <span class="topbar__meta-item" id="topbarElapsed" data-started="false">not started</span>
           <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true"></span>
           <span id="topbarRoomPill" class="pill pill--room topbar__meta-pill" data-state="waiting">
             <span class="pill__dot"></span>
@@ -9307,7 +9328,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const topbarRoomPill = document.getElementById('topbarRoomPill')
         const topbarRoomState = document.getElementById('topbarRoomState')
         if (topbarElapsed) {
-          topbarElapsed.textContent = roomStartedAt ? `${elapsed} elapsed` : 'not started'
+          topbarElapsed.dataset.started = roomStartedAt ? 'true' : 'false'
+          topbarElapsed.textContent = roomStartedAt ? elapsed : 'not started'
         }
         if (topbarDate) {
           const fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
