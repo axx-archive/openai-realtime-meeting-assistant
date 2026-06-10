@@ -3130,6 +3130,16 @@
         min-width: 56px;
         padding: 0 12px;
         font-size: 12.5px;
+        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      /* Ask earns its ember — the button stays quiet until there's
+         something typed to ask */
+      .scout-ask:has(.assistant-input:placeholder-shown) .assistant-send {
+        background: rgba(255, 235, 200, 0.06);
+        border-color: var(--line-faint);
+        color: var(--fg-2);
+        box-shadow: none;
       }
 
       .scout-foot {
@@ -3472,6 +3482,15 @@
         min-width: 56px;
         padding: 0 var(--s-3);
         font-size: 12.5px;
+        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      }
+
+      /* Same quiet-until-typed rule as the room tab's Ask button */
+      .scout-chat-form:has(.scout-chat-input:placeholder-shown) .scout-chat-send {
+        background: rgba(255, 235, 200, 0.06);
+        border-color: var(--line-faint);
+        color: var(--fg-2);
+        box-shadow: none;
       }
 
       .scout-chat-hint {
@@ -11196,7 +11215,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function scoutChatTimeLabel(ts) {
         const at = ts ? new Date(ts) : null
         return at && !Number.isNaN(at.valueOf())
-          ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
           : 'now'
       }
 
@@ -12622,7 +12641,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function memoryEntryLabel(entry) {
         const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
         const time = createdAt && !Number.isNaN(createdAt.valueOf())
-          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
           : 'now'
         if (entry.kind === 'answer') {
           return `answer · ${time}`
@@ -12724,7 +12743,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function assistantMessageLabel(entry, kind) {
         const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
         const time = createdAt && !Number.isNaN(createdAt.valueOf())
-          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
           : 'now'
         return `${kind} · ${time}`
       }
@@ -12842,8 +12861,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return 'soon'
       }
 
-      function renderCardDate(card) {
+      function renderCardDate(card, { placeholder = false } = {}) {
         const keyDate = cardKeyDates(card)[0]
+        // card faces stay quiet when no date is set; only the detail modal
+        // shows the editable placeholder
+        if (!keyDate && !placeholder) {
+          return null
+        }
         const row = document.createElement('span')
         row.className = 'card-date'
         row.dataset.dateState = cardDateState(card)
@@ -13002,7 +13026,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             card.className = `board-preview__card${changes.moved?.has(c.id) ? ' is-moved' : ''}`
             card.type = 'button'
             const date = renderCardDate(c)
-            const dateState = date.dataset.dateState
+            const dateState = date?.dataset.dateState
             if (dateState) card.dataset.dateState = dateState
             const heading = document.createElement('div')
             heading.className = 'board-preview__card-heading'
@@ -13010,7 +13034,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             cardTitle.className = 'board-preview__card-title'
             cardTitle.textContent = c.title || 'untitled card'
             heading.append(cardTitle, renderOwnerAvatar(c))
-            card.append(heading, date)
+            card.append(heading, ...(date ? [date] : []))
             card.addEventListener('click', () => showCardDetail(c))
             column.appendChild(card)
           }
@@ -13065,7 +13089,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         heading.append(title, renderOwnerAvatar(card))
         article.appendChild(heading)
 
-        article.appendChild(renderCardDate(card))
+        const cardDate = renderCardDate(card)
+        if (cardDate) {
+          article.appendChild(cardDate)
+        }
 
         return article
       }
@@ -13932,7 +13959,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         details.appendChild(renderPreviewDetail('status', preview.card.status || 'unassigned'))
         details.appendChild(renderPreviewDetail('card id', preview.card.id || 'no card id'))
         details.appendChild(renderPreviewDetail('owner', cardOwner(preview.card).name))
-        details.appendChild(renderPreviewDetail('key date', renderCardDate(preview.card)))
+        details.appendChild(renderPreviewDetail('key date', renderCardDate(preview.card, { placeholder: true })))
         details.appendChild(renderPreviewDetail('notes', preview.card.notes || 'no notes yet.'))
 
         const latest = document.createElement('div')
