@@ -62,6 +62,47 @@ var (
 
 const peerSignalDebounce = 250 * time.Millisecond
 
+// Negotiation watchdog thresholds. A subscriber sitting in a non-stable
+// signaling state means our offer is unanswered; sync attempts skip it, so
+// without intervention a client that silently dropped the offer never gets
+// renegotiated again (new participants stay invisible to it). After
+// negotiationResendAfter we re-send the pending offer once — a healthy client
+// simply answers the duplicate. After negotiationCloseAfter we close the
+// PeerConnection so the client's media_disconnected/reconnect path takes over.
+const (
+	negotiationResendAfter = 8 * time.Second
+	negotiationCloseAfter  = 30 * time.Second
+)
+
+// negotiationAction is the watchdog's verdict for a peer stuck mid-negotiation.
+type negotiationAction int
+
+const (
+	negotiationActionNone negotiationAction = iota
+	negotiationActionResend
+	negotiationActionClose
+)
+
+// negotiationWatchdogAction decides how to recover a subscriber that has been
+// in a non-stable signaling state since firstNonStable: nothing inside the
+// resend window, re-send the pending offer once past it (unless already
+// resent), and close the connection past the close threshold.
+func negotiationWatchdogAction(firstNonStable time.Time, offerResent bool, now time.Time) negotiationAction {
+	if firstNonStable.IsZero() {
+		return negotiationActionNone
+	}
+
+	stuck := now.Sub(firstNonStable)
+	switch {
+	case stuck >= negotiationCloseAfter:
+		return negotiationActionClose
+	case stuck >= negotiationResendAfter && !offerResent:
+		return negotiationActionResend
+	default:
+		return negotiationActionNone
+	}
+}
+
 // iceDisconnectGrace is how long a media peer may sit in ICE "disconnected"
 // before the server proactively triggers an ICE restart. ICE disconnects are
 // often transient (a brief network blip) and self-heal, so we wait out a short
@@ -92,6 +133,11 @@ type peerConnectionState struct {
 	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
 	shouldSignal    func(desiredTrackCount int) bool
 	signal          func(gatherComplete <-chan struct{}) error
+
+	// Negotiation watchdog bookkeeping, mutated only under listLock by
+	// signalPeerConnectionsWithRestart.
+	nonStableSince time.Time
+	offerResent    bool
 }
 
 type participantTrackSnapshot struct {
@@ -150,8 +196,8 @@ func sourceGroupLayersLocked(trackID string) []layerOption {
 // the source is simulcast. Callers must already hold listLock.
 func subscriberAcceptsLayerLocked(sessionID string, trackID string) bool {
 	layers := sourceGroupLayersLocked(trackID)
-	if len(layers) <= 1 {
-		return true // not simulcast (or untracked): forward unchanged
+	if !isSimulcastGroup(layers) {
+		return true // not simulcast (untracked, lone layer, or RID-less duplicates): forward unchanged
 	}
 
 	return subscriberWantsLayer(trackID, normalizeLayerTier(subscriberLayerTiers[sessionID]), layers)
@@ -513,15 +559,37 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	if trackLayerGroups == nil {
 		trackLayerGroups = map[string]string{}
 	}
+	groupKey := layerGroupKey(t.StreamID(), t.ID())
+	reapStaleLayerTwinsLocked(groupKey, t.RID(), trackLocal.ID())
 	trackLocals[trackLocal.ID()] = trackLocal
 	trackParticipants[trackLocal.ID()] = canonicalParticipantName(participantName)
 	trackParticipantSessions[trackLocal.ID()] = sessionID
 	trackSourceIDs[trackLocal.ID()] = t.ID()
 	trackLayerRIDs[trackLocal.ID()] = t.RID()
-	trackLayerGroups[trackLocal.ID()] = layerGroupKey(t.StreamID(), t.ID())
+	trackLayerGroups[trackLocal.ID()] = groupKey
 	listLock.Unlock()
 
 	return trackLocal, nil
+}
+
+// reapStaleLayerTwinsLocked drops the bookkeeping for older forwarded tracks
+// that share a new track's source group and RID. After renegotiation or SSRC
+// churn the same source re-publishes under a new forwarded ID while the old
+// reader stays blocked in ReadRTP for the rest of the session; the newest track
+// must win or subscribers keep a frozen ghost tile. Callers must hold listLock
+// and renegotiate (signalPeerConnections) afterwards.
+func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) {
+	for staleID, group := range trackLayerGroups {
+		if staleID == keepTrackID || group != groupKey || trackLayerRIDs[staleID] != rid {
+			continue
+		}
+		delete(trackLocals, staleID)
+		delete(trackParticipants, staleID)
+		delete(trackParticipantSessions, staleID)
+		delete(trackSourceIDs, staleID)
+		delete(trackLayerRIDs, staleID)
+		delete(trackLayerGroups, staleID)
+	}
 }
 
 func participantTrackPayload(name string, t *webrtc.TrackRemote) map[string]any {
@@ -1099,8 +1167,27 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 
 			if peer.peerConnection.SignalingState() != webrtc.SignalingStateStable {
 				retryLater = true
+				now := time.Now()
+				if peer.nonStableSince.IsZero() {
+					peer.nonStableSince = now
+				}
+				switch negotiationWatchdogAction(peer.nonStableSince, peer.offerResent, now) {
+				case negotiationActionResend:
+					peer.offerResent = true
+					resendPendingOffer(peer)
+				case negotiationActionClose:
+					log.Errorf("Negotiation stuck >%s for participant=%s session=%s; closing peer connection so the client can reconnect", negotiationCloseAfter, peer.participantName, peer.sessionID)
+					stuckPeerConnection := peer.peerConnection
+					go func() {
+						_ = stuckPeerConnection.Close()
+					}()
+					peer.nonStableSince = time.Time{}
+					peer.offerResent = false
+				}
 				continue
 			}
+			peer.nonStableSince = time.Time{}
+			peer.offerResent = false
 
 			desiredTrackCount := 0
 			for _, trackLocal := range trackLocals {
@@ -1224,6 +1311,16 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			}); err != nil {
 				return true
 			}
+
+			// Start the negotiation watchdog clock and schedule a follow-up pass so
+			// a dropped offer is noticed even when no other signaling occurs. The
+			// restart (if any) was delivered, so follow-ups must not force again.
+			peer.nonStableSince = time.Now()
+			peer.offerResent = false
+			if forceSignal {
+				restartPeer = nil
+			}
+			retryLater = true
 		}
 
 		return tryAgain
@@ -1243,6 +1340,34 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 		if !attemptSync() {
 			break
 		}
+	}
+}
+
+// resendPendingOffer re-sends a subscriber's pending local offer over its
+// websocket. The negotiation watchdog uses it when a peer has sat in
+// have-local-offer long enough that the client likely dropped the original
+// offer; a healthy client simply answers the duplicate. Callers hold listLock.
+func resendPendingOffer(peer *peerConnectionState) {
+	if peer.websocket == nil || peer.peerConnection.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
+		return
+	}
+	description := peer.peerConnection.LocalDescription()
+	if description == nil {
+		return
+	}
+
+	offerString, err := json.Marshal(description)
+	if err != nil {
+		log.Errorf("Failed to marshal pending offer for resend: %v", err)
+		return
+	}
+
+	log.Infof("Negotiation stuck >%s for participant=%s session=%s; re-sending pending offer", negotiationResendAfter, peer.participantName, peer.sessionID)
+	if err := peer.websocket.WriteJSON(&websocketMessage{
+		Event: "offer",
+		Data:  string(offerString),
+	}); err != nil {
+		log.Errorf("Failed to re-send pending offer: %v", err)
 	}
 }
 

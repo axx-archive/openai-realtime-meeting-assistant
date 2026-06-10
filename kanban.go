@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -118,6 +119,11 @@ type kanbanRealtimeEvent struct {
 	} `json:"error,omitempty"`
 	Item     *kanbanRealtimeOutputItem `json:"item,omitempty"`
 	Response *struct {
+		Status        string `json:"status,omitempty"`
+		StatusDetails *struct {
+			Type   string `json:"type,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		} `json:"status_details,omitempty"`
 		Output []kanbanRealtimeOutputItem `json:"output,omitempty"`
 	} `json:"response,omitempty"`
 }
@@ -865,7 +871,7 @@ func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offer
 		return "", fmt.Errorf("read Realtime answer: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("Realtime session failed: status=%s body=%s", response.Status, strings.TrimSpace(string(answerSDP)))
+		return "", apiRequestFailedError("Realtime session failed", response.Status, answerSDP)
 	}
 
 	return string(answerSDP), nil
@@ -1429,8 +1435,11 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 				}
 				return
 			}
-			broadcastKanbanEvent("status", event.Error.Message)
-			broadcastAssistantEvent("error", event.Error.Message, map[string]any{"code": event.Error.Code})
+			// Unrecognized server errors stay off the chat feed: only
+			// kind=query/answer/error render there, so downgrade to a short
+			// status line and keep the raw message in metadata + server logs.
+			broadcastKanbanEvent("status", "assistant hit a server error")
+			broadcastAssistantEvent("status", "assistant hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message})
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		app.armScoutVoiceResponse(event.Transcript)
@@ -1476,9 +1485,19 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		app.markRealtimeResponseActive(false)
 		hadFunctionCall := false
 		if event.Response != nil {
+			interrupted := isInterruptedRealtimeResponseStatus(event.Response.Status)
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {
 					hadFunctionCall = true
+					if interrupted {
+						// The response was cancelled/incomplete/failed: its tool
+						// calls were never meant to complete, so skip them
+						// silently instead of executing half-specified calls.
+						if app.markCallHandled(outputItem.CallID) {
+							log.Infof("Skipping %s tool call from %s response for call_id=%s reason=%s", outputItem.Name, event.Response.Status, outputItem.CallID, realtimeResponseStatusReason(event))
+						}
+						continue
+					}
 					app.handleToolCall(outputItem, false)
 				}
 			}
@@ -1492,6 +1511,26 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
 		}
 	}
+}
+
+// isInterruptedRealtimeResponseStatus reports whether a response.done status
+// means the response never completed (barge-in cancellation, truncation, or a
+// server failure) and its tool calls must not be executed.
+func isInterruptedRealtimeResponseStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "cancelled", "incomplete", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func realtimeResponseStatusReason(event kanbanRealtimeEvent) string {
+	if event.Response == nil || event.Response.StatusDetails == nil {
+		return ""
+	}
+
+	return firstNonEmptyString(event.Response.StatusDetails.Reason, event.Response.StatusDetails.Type)
 }
 
 func realtimeFunctionCallFromArgumentsDone(event kanbanRealtimeEvent) kanbanRealtimeOutputItem {
@@ -1528,7 +1567,17 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 	}
 
 	args, parseErr := parseToolCallArguments(outputItem)
-	switch classifyToolArgParse(parseErr, allowIncompleteArguments) {
+	outcome := classifyToolArgParse(parseErr, allowIncompleteArguments)
+	if parseErr == nil && strings.TrimSpace(outputItem.Arguments) == "" {
+		// No argument bytes streamed at all: a barge-in cancelled the response
+		// before the model produced any arguments. Treat it like truncation
+		// rather than executing the tool with no args.
+		outcome = toolArgsAwaitingMore
+		if !allowIncompleteArguments {
+			outcome = toolArgsInterrupted
+		}
+	}
+	switch outcome {
 	case toolArgsAwaitingMore:
 		// Still streaming: the completing event (response.done / output_item.done)
 		// will retry with the full arguments.
@@ -1612,10 +1661,17 @@ func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (m
 	return app.applyToolCallArgs(outputItem.Name, args)
 }
 
+// errTruncatedToolArguments marks a tool-argument parse failure caused by the
+// arguments JSON being cut off rather than malformed.
+var errTruncatedToolArguments = errors.New("tool arguments truncated")
+
 func parseToolCallArguments(outputItem kanbanRealtimeOutputItem) (map[string]any, error) {
 	args := map[string]any{}
 	if rawArgs := strings.TrimSpace(outputItem.Arguments); rawArgs != "" {
 		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+			if isTruncatedJSONError(err, len(rawArgs)) {
+				err = fmt.Errorf("%w: %v", errTruncatedToolArguments, err)
+			}
 			return nil, fmt.Errorf("parse %s arguments: %w", outputItem.Name, err)
 		}
 	}
@@ -1623,8 +1679,20 @@ func parseToolCallArguments(outputItem kanbanRealtimeOutputItem) (map[string]any
 	return args, nil
 }
 
+// isTruncatedJSONError reports whether a JSON parse failure looks like the
+// input was cut off rather than malformed. Truncation mid-string yields
+// "unexpected end of JSON input", but truncation mid-escape, mid-\u sequence,
+// mid-literal, or mid-number yields "invalid character ..." syntax errors whose
+// offset sits at/past the end of the input; genuinely malformed JSON fails at
+// an earlier offset.
+func isTruncatedJSONError(err error, inputLen int) bool {
+	var syntaxErr *json.SyntaxError
+	return errors.As(err, &syntaxErr) && syntaxErr.Offset >= int64(inputLen)
+}
+
 func isIncompleteToolArgumentsError(err error) bool {
-	return strings.Contains(err.Error(), "unexpected end of JSON input")
+	return errors.Is(err, errTruncatedToolArguments) ||
+		strings.Contains(err.Error(), "unexpected end of JSON input")
 }
 
 // toolArgParseOutcome classifies the result of parsing a tool call's arguments.
@@ -1637,10 +1705,11 @@ const (
 	toolArgsMalformed                               // complete but invalid JSON: a genuine error
 )
 
-// classifyToolArgParse interprets a tool-argument parse result. "Unexpected end
-// of JSON input" means the arguments ended prematurely: while the model is still
-// streaming (allowIncomplete) the completing event will follow, so we wait; on
-// the final event it means the response was interrupted/cancelled mid-call, so
+// classifyToolArgParse interprets a tool-argument parse result. A truncation-
+// shaped failure (see isTruncatedJSONError) means the arguments ended
+// prematurely: while the model is still streaming (allowIncomplete) the
+// completing event will follow, so we wait; on the final event it means the
+// response was interrupted/cancelled mid-call, so
 // the call should be skipped rather than executed or reported as an error. Any
 // other parse failure is malformed-but-complete JSON and remains a real error.
 func classifyToolArgParse(parseErr error, allowIncomplete bool) toolArgParseOutcome {

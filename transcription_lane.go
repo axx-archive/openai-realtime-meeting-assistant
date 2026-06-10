@@ -442,7 +442,9 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
 				return true
 			}
 			log.Errorf("OpenAI transcription error code=%s message=%s", event.Error.Code, event.Error.Message)
-			broadcastAssistantEvent("error", event.Error.Message, map[string]any{"code": event.Error.Code, "lane": "transcript"})
+			// Keep raw server errors off the chat feed (only query/answer/error
+			// kinds render there); raw message stays in metadata + server logs.
+			broadcastAssistantEvent("status", "transcript lane hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message, "lane": "transcript"})
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		app.rememberTranscript(event, "transcript_lane", app.currentTranscriptionLaneModel())

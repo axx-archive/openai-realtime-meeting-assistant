@@ -70,6 +70,27 @@ func rankSimulcastRID(rid string) int {
 	}
 }
 
+// isSimulcastGroup reports whether a layer group genuinely represents simulcast
+// encodings: more than one layer carrying distinct, non-empty RIDs. A group of
+// several entries whose RIDs are all empty or identical is not simulcast — it is
+// a stale duplicate of the same source (e.g. after renegotiation/SSRC churn) and
+// every entry must keep forwarding, otherwise a dead twin could win the layer
+// selection and filter the live track for every subscriber.
+func isSimulcastGroup(layers []layerOption) bool {
+	if len(layers) <= 1 {
+		return false
+	}
+
+	rids := map[string]struct{}{}
+	for _, layer := range layers {
+		if rid := strings.TrimSpace(layer.rid); rid != "" {
+			rids[rid] = struct{}{}
+		}
+	}
+
+	return len(rids) > 1
+}
+
 // sortLayersByQuality returns the layers ordered ascending by quality (lowest
 // first). It does not mutate the input slice.
 func sortLayersByQuality(layers []layerOption) []layerOption {
@@ -91,10 +112,10 @@ func sortLayersByQuality(layers []layerOption) []layerOption {
 
 // chooseLayerForTier picks the forwarded TrackLocal ID a subscriber on the given
 // tier should receive from a source group. It returns "" when no selection is
-// needed — i.e. the group has zero or one layer (a non-simulcast source) — in
-// which case the caller forwards every track of the group unchanged.
+// needed — i.e. the group is not simulcast (zero or one layer, or no distinct
+// RIDs) — in which case the caller forwards every track of the group unchanged.
 func chooseLayerForTier(layers []layerOption, tier layerTier) string {
-	if len(layers) <= 1 {
+	if !isSimulcastGroup(layers) {
 		return ""
 	}
 
@@ -111,7 +132,7 @@ func chooseLayerForTier(layers []layerOption, tier layerTier) string {
 
 // subscriberWantsLayer reports whether a subscriber on the given tier should be
 // forwarded the specified track from its source group. Non-simulcast groups
-// (<=1 layer) always forward; simulcast groups forward only the chosen layer.
+// always forward; simulcast groups forward only the chosen layer.
 func subscriberWantsLayer(trackID string, tier layerTier, group []layerOption) bool {
 	chosen := chooseLayerForTier(group, tier)
 	return chosen == "" || chosen == trackID

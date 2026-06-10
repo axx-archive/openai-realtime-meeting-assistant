@@ -72,6 +72,66 @@ func TestChooseLayerForTierNoSelectionWhenNotSimulcast(t *testing.T) {
 	}
 }
 
+func TestIsSimulcastGroup(t *testing.T) {
+	cases := []struct {
+		name   string
+		layers []layerOption
+		want   bool
+	}{
+		{"nil group", nil, false},
+		{"single layer", []layerOption{{trackID: "a"}}, false},
+		{"all empty rids", []layerOption{{trackID: "a"}, {trackID: "b"}}, false},
+		{"duplicated rid", []layerOption{{trackID: "a", rid: "f"}, {trackID: "b", rid: "f"}}, false},
+		{"one empty one set", []layerOption{{trackID: "a"}, {trackID: "b", rid: "f"}}, false},
+		{"distinct rids", []layerOption{{trackID: "a", rid: "q"}, {trackID: "b", rid: "f"}}, true},
+	}
+	for _, tc := range cases {
+		if got := isSimulcastGroup(tc.layers); got != tc.want {
+			t.Errorf("%s: isSimulcastGroup = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestChooseLayerForTierAllEmptyRIDGroupForwardsEverything(t *testing.T) {
+	// Duplicate forwarded tracks of the same source (renegotiation/SSRC churn)
+	// share a group with all-empty RIDs. That is not simulcast: no layer may be
+	// chosen, otherwise a stale twin could win the lexicographic tie-break and
+	// filter the live track.
+	group := []layerOption{
+		{trackID: "stream:cam:999"},  // stale twin, sorts after the live track
+		{trackID: "stream:cam:1000"}, // live track
+	}
+	for _, tier := range []layerTier{layerTierLow, layerTierMedium, layerTierHigh} {
+		if got := chooseLayerForTier(group, tier); got != "" {
+			t.Errorf("tier %q: chooseLayerForTier = %q, want \"\" (forward everything)", tier, got)
+		}
+		if !subscriberWantsLayer("stream:cam:1000", tier, group) {
+			t.Errorf("tier %q: live duplicate must be forwarded", tier)
+		}
+	}
+}
+
+func TestSubscriberAcceptsLayerLockedEmptyRIDDuplicatesAreForwarded(t *testing.T) {
+	snapshotPeerState(t)
+	listLock.Lock()
+	trackLayerGroups = map[string]string{
+		"stream:cam:999":  "stream:cam", // stale twin left behind by SSRC churn
+		"stream:cam:1000": "stream:cam", // live republished track
+	}
+	trackLayerRIDs = map[string]string{"stream:cam:999": "", "stream:cam:1000": ""}
+	subscriberLayerTiers = map[string]string{}
+	listLock.Unlock()
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	if !subscriberAcceptsLayerLocked("sub-1", "stream:cam:1000") {
+		t.Fatal("live track must be forwarded when its RID-less group has a stale duplicate")
+	}
+	if !subscriberAcceptsLayerLocked("sub-1", "stream:cam:999") {
+		t.Fatal("RID-less duplicates must all be forwarded (no false simulcast filtering)")
+	}
+}
+
 func TestSubscriberWantsLayer(t *testing.T) {
 	group := []layerOption{
 		{trackID: "lo", rid: "q"},

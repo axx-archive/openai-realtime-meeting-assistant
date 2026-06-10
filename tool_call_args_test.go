@@ -9,6 +9,18 @@ func TestClassifyToolArgParse(t *testing.T) {
 	incomplete := errors.New("parse do_nothing arguments: unexpected end of JSON input")
 	malformed := errors.New("parse create_ticket arguments: invalid character 'x' looking for beginning of value")
 
+	// probeParseErr produces the real error parseToolCallArguments returns for
+	// the given raw arguments, so the table exercises Go's actual JSON syntax
+	// errors (truncation mid-escape/mid-\u/mid-literal/mid-number yields
+	// "invalid character ..." messages, not "unexpected end of JSON input").
+	probeParseErr := func(arguments string) error {
+		_, err := parseToolCallArguments(kanbanRealtimeOutputItem{Name: "probe", Arguments: arguments})
+		if err == nil {
+			t.Fatalf("expected parse error for %q", arguments)
+		}
+		return err
+	}
+
 	cases := []struct {
 		name            string
 		err             error
@@ -21,6 +33,15 @@ func TestClassifyToolArgParse(t *testing.T) {
 		{"truncated on final event is interrupted", incomplete, false, toolArgsInterrupted},
 		{"malformed complete JSON is a real error", malformed, false, toolArgsMalformed},
 		{"malformed while streaming is still a real error", malformed, true, toolArgsMalformed},
+		{"truncated mid-string waits while streaming", probeParseErr(`{"reason":"half spo`), true, toolArgsAwaitingMore},
+		{"truncated mid-string on final event is interrupted", probeParseErr(`{"reason":"half spo`), false, toolArgsInterrupted},
+		{"truncated mid-escape waits while streaming", probeParseErr(`{"reason":"\`), true, toolArgsAwaitingMore},
+		{"truncated mid-escape on final event is interrupted", probeParseErr(`{"reason":"\`), false, toolArgsInterrupted},
+		{"truncated mid-unicode-escape on final event is interrupted", probeParseErr(`{"reason":"\u0`), false, toolArgsInterrupted},
+		{"truncated mid-literal on final event is interrupted", probeParseErr(`{"done":tru`), false, toolArgsInterrupted},
+		{"truncated mid-number on final event is interrupted", probeParseErr(`{"n":12.`), false, toolArgsInterrupted},
+		{"malformed mid-input number is a real error", probeParseErr(`{"n":12.x}`), false, toolArgsMalformed},
+		{"malformed mid-input value is a real error", probeParseErr(`{"reason":x}`), false, toolArgsMalformed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

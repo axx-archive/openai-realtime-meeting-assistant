@@ -114,7 +114,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		return "", fmt.Errorf("read OpenAI response: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("OpenAI response failed: status=%s body=%s", response.Status, strings.TrimSpace(string(rawBody)))
+		return "", apiRequestFailedError("OpenAI response failed", response.Status, rawBody)
 	}
 
 	var body openAIResponsesBody
@@ -131,6 +131,13 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 
 	return text, nil
+}
+
+// apiRequestFailedError logs the full upstream error body server-side and
+// returns a short status-only error safe to surface to users.
+func apiRequestFailedError(context string, status string, body []byte) error {
+	log.Errorf("%s: status=%s body=%s", context, status, strings.TrimSpace(string(body)))
+	return fmt.Errorf("api request failed (%s)", status)
 }
 
 func extractOpenAIResponseText(body openAIResponsesBody) string {
