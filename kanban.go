@@ -34,6 +34,10 @@ const (
 	scoutWakePhraseFirstWord  = "hey"
 	scoutWakePhraseSecondWord = "scout"
 	scoutVoiceArmDuration     = 12 * time.Second
+	// scoutVoiceRecentToolGrace lets a late-arriving wake transcript still claim
+	// a tool result that completed moments earlier: the async ASR transcript
+	// routinely lands after response.done.
+	scoutVoiceRecentToolGrace = 6 * time.Second
 )
 
 type kanbanStatus string
@@ -164,6 +168,8 @@ type kanbanBoardApp struct {
 	scoutVoiceArmedUntil     time.Time
 	scoutSpokenResponse      bool
 	scoutSpokenResponseSent  bool
+	scoutLastToolResultAt    time.Time
+	scoutLastToolResultName  string
 	transcriptLane           *meetingTranscriptionLane
 	audioActivity            []participantAudioFrame
 	currentSpeechStartedAt   time.Time
@@ -463,6 +469,8 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
 	app.scoutSpokenResponseSent = false
+	app.scoutLastToolResultAt = time.Time{}
+	app.scoutLastToolResultName = ""
 	app.mu.Unlock()
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -502,6 +510,8 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 				app.scoutVoiceArmedUntil = time.Time{}
 				app.scoutSpokenResponse = false
 				app.scoutSpokenResponseSent = false
+				app.scoutLastToolResultAt = time.Time{}
+				app.scoutLastToolResultName = ""
 			}
 			app.mu.Unlock()
 			return
@@ -533,6 +543,8 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 	app.scoutVoiceArmedUntil = time.Time{}
 	app.scoutSpokenResponse = false
 	app.scoutSpokenResponseSent = false
+	app.scoutLastToolResultAt = time.Time{}
+	app.scoutLastToolResultName = ""
 	cancelProactiveRestart := app.proactiveReconnectCancel
 	app.proactiveReconnectCancel = nil
 	app.mu.Unlock()
@@ -589,6 +601,8 @@ func (app *kanbanBoardApp) Close() error {
 		app.scoutVoiceArmedUntil = time.Time{}
 		app.scoutSpokenResponse = false
 		app.scoutSpokenResponseSent = false
+		app.scoutLastToolResultAt = time.Time{}
+		app.scoutLastToolResultName = ""
 		cancelProactiveRestart := app.proactiveReconnectCancel
 		app.proactiveReconnectCancel = nil
 		brainWorkerCancel := app.brainWorkerCancel
@@ -1053,62 +1067,142 @@ func usesAdvancedCommandProfile(model string) bool {
 	return normalizedModel == "gpt-realtime-2"
 }
 
+// scoutWakeFillerWords are leading throwaway tokens ASR often prepends to an
+// addressed turn; one is tolerated before the wake phrase.
+var scoutWakeFillerWords = map[string]struct{}{
+	"um": {}, "uh": {}, "uhm": {}, "ok": {}, "okay": {}, "so": {}, "well": {},
+	"yeah": {}, "oh": {}, "hi": {}, "hello": {}, "alright": {}, "hey": {},
+}
+
+// scoutWakeWords cover the scout token plus common ASR confusions
+// (scout's tokenizes to scout + s, so it matches via "scout").
+var scoutWakeWords = map[string]struct{}{
+	scoutWakePhraseSecondWord: {}, "scouts": {}, "scott": {},
+}
+
+// transcriptStartsWithScoutWakePhrase reports whether a transcript is addressed
+// to Scout. ASR output is messy, so tolerate one leading filler word, a bare
+// scout token without "hey", and common mishearings of the scout token. Speech
+// with no scout token in the first two meaningful words stays rejected.
 func transcriptStartsWithScoutWakePhrase(text string) bool {
 	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
+	if len(words) == 0 {
+		return false
+	}
+	if _, filler := scoutWakeFillerWords[words[0]]; filler && len(words) > 1 {
+		words = words[1:]
+		if words[0] == "there" && len(words) > 1 {
+			words = words[1:]
+		}
+	}
+	if _, wake := scoutWakeWords[words[0]]; wake {
+		return true
+	}
+	if len(words) < 2 || words[0] != scoutWakePhraseFirstWord {
+		return false
+	}
+	_, wake := scoutWakeWords[words[1]]
 
-	return len(words) >= 2 &&
-		words[0] == scoutWakePhraseFirstWord &&
-		words[1] == scoutWakePhraseSecondWord
+	return wake
 }
 
 func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
 	if !transcriptStartsWithScoutWakePhrase(transcript) {
+		// a completed non-wake turn means any armed wake turn is over
+		if strings.TrimSpace(transcript) != "" {
+			app.clearScoutVoiceArm()
+		}
 		return
 	}
 
 	now := time.Now()
 	app.mu.Lock()
-	app.scoutVoiceArmedAt = now
-	app.scoutVoiceArmedUntil = now.Add(scoutVoiceArmDuration)
+	// the wake transcript often arrives after the tool result it triggered;
+	// if a speakable tool result just completed, speak now instead of arming
+	speakNow := !app.scoutLastToolResultAt.IsZero() && now.Sub(app.scoutLastToolResultAt) <= scoutVoiceRecentToolGrace
+	lastToolName := app.scoutLastToolResultName
+	if speakNow {
+		app.scoutLastToolResultAt = time.Time{}
+		app.scoutLastToolResultName = ""
+		app.scoutVoiceArmedAt = time.Time{}
+		app.scoutVoiceArmedUntil = time.Time{}
+		app.scoutSpokenResponse = true
+		app.scoutSpokenResponseSent = false
+	} else {
+		app.scoutVoiceArmedAt = now
+		app.scoutVoiceArmedUntil = now.Add(scoutVoiceArmDuration)
+	}
 	app.mu.Unlock()
 
 	broadcastAssistantEvent("status", "Scout heard the wake phrase.", map[string]any{"wakePhrase": "Hey Scout"})
+	if speakNow {
+		log.Infof("Scout wake transcript arrived after %s tool result; speaking now", lastToolName)
+		app.flushScoutSpokenResponseIfPending()
+	}
 }
 
-func (app *kanbanBoardApp) clearScoutVoiceArmForNewSpeech() {
-	now := time.Now()
+// clearScoutVoiceArmForNewSpeech is intentionally a no-op (the transcript lane
+// still calls it on speech_started): speech_started fires for any participant
+// in the single mixed room stream, so crosstalk used to disarm nearly every
+// armed wake turn. The arm window now clears when a completed non-wake
+// transcript arrives or when it expires.
+func (app *kanbanBoardApp) clearScoutVoiceArmForNewSpeech() {}
 
+func (app *kanbanBoardApp) clearScoutVoiceArm() {
 	app.mu.Lock()
-	if !app.scoutVoiceArmedAt.IsZero() && now.After(app.scoutVoiceArmedAt) {
-		app.scoutVoiceArmedAt = time.Time{}
-		app.scoutVoiceArmedUntil = time.Time{}
-	}
+	app.scoutVoiceArmedAt = time.Time{}
+	app.scoutVoiceArmedUntil = time.Time{}
 	app.mu.Unlock()
 }
 
-func (app *kanbanBoardApp) markScoutSpokenResponsePending(toolName string, result map[string]any, changed bool) {
-	if !scoutToolShouldSpeak(toolName, result, changed) {
-		return
-	}
-
+func (app *kanbanBoardApp) scoutVoiceArmed() bool {
 	now := time.Now()
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	if app.scoutVoiceArmedUntil.IsZero() || now.After(app.scoutVoiceArmedUntil) {
+	return !app.scoutVoiceArmedUntil.IsZero() && !now.After(app.scoutVoiceArmedUntil)
+}
+
+// markScoutSpokenResponsePending queues a spoken reply for an armed wake turn.
+// armedAtStart is the arm state snapshotted when the tool call started, so a
+// slow tool (memory answers can take tens of seconds) still speaks after the
+// window expires mid-call.
+func (app *kanbanBoardApp) markScoutSpokenResponsePending(toolName string, result map[string]any, changed bool, armedAtStart bool) {
+	now := time.Now()
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	armed := armedAtStart || (!app.scoutVoiceArmedUntil.IsZero() && !now.After(app.scoutVoiceArmedUntil))
+	if !armed {
+		// the wake transcript may still be in flight; remember this result so
+		// a late arm within scoutVoiceRecentToolGrace can still speak it
+		if scoutToolShouldSpeak(toolName, result, changed, true) {
+			app.scoutLastToolResultAt = now
+			app.scoutLastToolResultName = toolName
+		}
+		return
+	}
+	if !scoutToolShouldSpeak(toolName, result, changed, armed) {
 		return
 	}
 
 	app.scoutVoiceArmedAt = time.Time{}
 	app.scoutVoiceArmedUntil = time.Time{}
+	app.scoutLastToolResultAt = time.Time{}
+	app.scoutLastToolResultName = ""
 	app.scoutSpokenResponse = true
 	app.scoutSpokenResponseSent = false
 }
 
-func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool) bool {
+func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool, armed bool) bool {
 	if ok, exists := result["ok"].(bool); exists && !ok {
+		return true
+	}
+	if armed {
+		// an armed hey-scout turn gets a confirmation even for ok no-ops,
+		// e.g. moving a card that is already in the requested column
 		return true
 	}
 
@@ -1454,7 +1548,6 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStarted()
 		}
-		app.clearScoutVoiceArmForNewSpeech()
 		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
 		if !app.transcriptionLaneConnected() {
@@ -1591,6 +1684,11 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		// so a later duplicate event for the same call is ignored too.
 		if app.markCallHandled(outputItem.CallID) {
 			log.Infof("Skipping interrupted %s tool call with incomplete arguments for call_id=%s", outputItem.Name, outputItem.CallID)
+			if app.scoutVoiceArmed() {
+				// the user addressed scout directly; don't drop the turn silently
+				app.clearScoutVoiceArm()
+				broadcastAssistantEvent("status", "scout missed that — say it again", map[string]any{"tool": outputItem.Name})
+			}
 		}
 		return
 	}
@@ -1601,8 +1699,22 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		return
 	}
 
+	// Snapshot the arm state before execution: a slow tool must not lose its
+	// armed turn to window expiry while it runs.
+	armedAtStart := app.scoutVoiceArmed()
 	broadcastAssistantEvent("action", "using "+humanizeToolName(outputItem.Name), map[string]any{"tool": outputItem.Name})
 
+	if outputItem.Name == "answer_memory_question" {
+		// Memory answers block on a model call for up to 45s; run off the
+		// datachannel event loop so realtime event processing keeps flowing.
+		// The call id is already marked handled, so it can never run twice.
+		go app.finishToolCall(outputItem, args, parseErr, armedAtStart)
+		return
+	}
+	app.finishToolCall(outputItem, args, parseErr, armedAtStart)
+}
+
+func (app *kanbanBoardApp) finishToolCall(outputItem kanbanRealtimeOutputItem, args map[string]any, parseErr error, armedAtStart bool) {
 	var result map[string]any
 	var changed bool
 	var err error
@@ -1618,7 +1730,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		}
 		broadcastAssistantEvent("error", err.Error(), map[string]any{"tool": outputItem.Name})
 	}
-	app.markScoutSpokenResponsePending(outputItem.Name, result, changed)
+	app.markScoutSpokenResponsePending(outputItem.Name, result, changed, armedAtStart)
 
 	if err := app.SendEvent(map[string]any{
 		"type": "conversation.item.create",

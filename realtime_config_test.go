@@ -182,11 +182,19 @@ func TestRealtimeVoiceEnvironmentOverride(t *testing.T) {
 	}
 }
 
-func TestScoutWakePhraseRequiresLeadingHeyScout(t *testing.T) {
+func TestScoutWakePhraseAcceptsAddressedSpeech(t *testing.T) {
 	for _, transcript := range []string{
 		"Hey Scout, what is blocked?",
 		"hey scout what did Tim commit to last week",
 		"Hey, Scout: summarize this meeting.",
+		"Scout, what is blocked?",
+		"scout move card two to done",
+		"Okay scout, what's next?",
+		"Um, hey scout what's blocked?",
+		"Hey Scott, what's in progress?",
+		"Scouts, give me a status update.",
+		"Scout's the one I'm asking: what's left?",
+		"Hey there scout, what's left?",
 	} {
 		if !transcriptStartsWithScoutWakePhrase(transcript) {
 			t.Fatalf("wake phrase was not detected in %q", transcript)
@@ -195,9 +203,10 @@ func TestScoutWakePhraseRequiresLeadingHeyScout(t *testing.T) {
 
 	for _, transcript := range []string{
 		"Can you ask Scout what is blocked?",
-		"Scout, what is blocked?",
 		"They said hey Scout in the last meeting.",
 		"Hey team, Scout should ignore this.",
+		"Let's wrap up the meeting.",
+		"Hey everyone, let's get started.",
 		"",
 	} {
 		if transcriptStartsWithScoutWakePhrase(transcript) {

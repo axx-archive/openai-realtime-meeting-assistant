@@ -6141,6 +6141,8 @@
       const remoteLabelsByStream = new Map()
       const remoteLabelConflictsByStream = new Set()
       const remoteLabelsByTrack = new Map()
+      const remoteTileRemovers = new WeakMap()
+      const unlabeledRemoteVideoSightings = new Map()
       const participantPlaceholders = new Map()
       const boardVideoTilesByParticipant = new Map()
       const participantMediaStates = new Map()
@@ -9205,13 +9207,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const offer = JSON.parse(message.data)
             await waitForStableSignaling()
             await pc.setRemoteDescription(offer)
-            await flushQueuedRemoteCandidates()
-            await attachLocalTracksToOffer(offer)
-            const answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-            await configureOutboundSenders()
-            if (ws?.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
+            try {
+              await flushQueuedRemoteCandidates()
+              await attachLocalTracksToOffer(offer)
+              const answer = await pc.createAnswer()
+              await pc.setLocalDescription(answer)
+              if (ws?.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
+              }
+            } catch (error) {
+              // Return to stable so the server's re-offer can apply instead of
+              // wedging this peer in have-remote-offer forever.
+              await rollbackRemoteOffer()
+              throw error
+            }
+            try {
+              await configureOutboundSenders()
+            } catch (error) {
+              console.warn('Outbound sender tuning failed after answer', error)
             }
             break
           }
@@ -9239,7 +9252,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           await new Promise(resolve => window.setTimeout(resolve, 50))
         }
         if (pc && pc.signalingState !== 'stable') {
+          // The newer offer supersedes one stuck mid-negotiation; roll the
+          // stale one back rather than dropping the fresh offer.
+          if (await rollbackRemoteOffer()) {
+            return
+          }
           throw new Error('media signaling is still busy; retrying')
+        }
+      }
+
+      async function rollbackRemoteOffer() {
+        if (!pc || pc.signalingState !== 'have-remote-offer') {
+          return false
+        }
+        try {
+          await pc.setLocalDescription({ type: 'rollback' })
+          return true
+        } catch (error) {
+          console.warn('Could not roll back remote offer', error)
+          return false
         }
       }
 
@@ -9258,7 +9289,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const candidates = queuedRemoteCandidates
         queuedRemoteCandidates = []
         for (const candidate of candidates) {
-          await addRemoteIceCandidate(candidate)
+          try {
+            await addRemoteIceCandidate(candidate)
+          } catch (error) {
+            console.warn('Skipped a bad queued remote ICE candidate', error)
+          }
         }
       }
 
@@ -9286,9 +9321,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             continue
           }
 
-          await transceiver.sender.replaceTrack(track)
-          transceiver.direction = 'sendonly'
-          await configureOutboundSender(transceiver.sender, track)
+          // One failed sender must not block the answer; bitrate tuning runs
+          // post-answer via configureOutboundSenders.
+          try {
+            await transceiver.sender.replaceTrack(track)
+            transceiver.direction = 'sendonly'
+          } catch (error) {
+            console.warn('Could not attach local track for the answer', error)
+          }
         }
       }
 
@@ -10135,6 +10175,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return false
         }
         let repaired = false
+        const now = performance.now()
         for (const transceiver of pc.getTransceivers()) {
           const track = transceiver.receiver?.track
           if (!track || track.kind !== 'video' || !liveTrack(track)) {
@@ -10145,12 +10186,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             track.id
           ])
           if (remoteTileForKeys(keys)) {
+            for (const key of keys) {
+              unlabeledRemoteVideoSightings.delete(key)
+            }
             continue
           }
           const participantName = keys
             .map(key => remoteLabelsByTrack.get(key))
             .find(Boolean)
-          if (!participantName || participantName === 'participant' || isCurrentParticipantName(participantName)) {
+          if (!participantName || participantName === 'participant') {
+            // A live track without a label yet: after a grace period show a
+            // placeholder tile so the video is not invisible while labels are
+            // in flight; the periodic label replay will name it.
+            const sightingKey = keys[0] || ''
+            if (!sightingKey) {
+              continue
+            }
+            const firstSeenAt = unlabeledRemoteVideoSightings.get(sightingKey) || now
+            unlabeledRemoteVideoSightings.set(sightingKey, firstSeenAt)
+            if (now - firstSeenAt < 4000) {
+              continue
+            }
+            repaired = createRemoteVideoTile(keys, new MediaStream([track]), 'participant', track) || repaired
+            continue
+          }
+          for (const key of keys) {
+            unlabeledRemoteVideoSightings.delete(key)
+          }
+          if (isCurrentParticipantName(participantName)) {
             continue
           }
           const stream = new MediaStream([track])
@@ -11751,12 +11814,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           updateHearthParticipants()
         }
-        stream.onremovetrack = removeEvent => {
-          if (removeEvent.track?.kind === 'video') {
-            removeRemoteTile()
+        const removeRemoteTileForTrack = deadTrack => {
+          // After a rebind the tile may show a newer track; only the track
+          // currently on screen may take the tile down.
+          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          if (deadTrack && shownTracks.length && !shownTracks.includes(deadTrack)) {
+            return
           }
+          removeRemoteTile()
         }
-        track?.addEventListener?.('ended', removeRemoteTile, { once: true })
+        remoteTileRemovers.set(tile, removeRemoteTileForTrack)
+        stream.addEventListener?.('removetrack', removeEvent => {
+          if (removeEvent.track === track && removeEvent.track?.kind === 'video') {
+            removeRemoteTileForTrack(track)
+          }
+        })
+        track?.addEventListener?.('ended', () => removeRemoteTileForTrack(track), { once: true })
         return true
       }
 
@@ -11780,10 +11853,39 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           removeRemoteParticipantVideoTracksByName(participantName, { exceptKeys: identityKeys.length ? identityKeys : keys })
         }
         if (remoteTileForKeys(identityKeys.length ? identityKeys : keys)) {
+          // A repeat ontrack for a known tile carries the current server-side
+          // track; rebind so the tile does not stay frozen on a dead track.
+          const existingTile = remoteTileForKeys(identityKeys.length ? identityKeys : keys)
+          if (rebindRemoteVideoTileTrack(existingTile, event.track, participantName)) {
+            rememberRemoteTileKeys(existingTile, [...remoteKeysForTile(existingTile), ...keys])
+          }
           return
         }
 
         createRemoteVideoTile(keys, stream, participantName, event.track)
+      }
+
+      function rebindRemoteVideoTileTrack(tile, track, participantName) {
+        const video = tile?.querySelector?.('video')
+        if (!video || !track || track.kind !== 'video' || !liveTrack(track)) {
+          return false
+        }
+        const currentTracks = video.srcObject?.getVideoTracks?.() || []
+        if (currentTracks.includes(track)) {
+          return false
+        }
+        video.srcObject = new MediaStream([track])
+        playRemoteMedia(video)
+        const name = String(tile.dataset.participant || participantName || '').trim()
+        if (name && name !== 'participant') {
+          remoteVideoTracksByParticipant.set(name, track)
+          remoteStreamsByParticipant.set(name, video.srcObject)
+        }
+        const removeForTrack = remoteTileRemovers.get(tile)
+        if (removeForTrack) {
+          track.addEventListener?.('ended', () => removeForTrack(track), { once: true })
+        }
+        return true
       }
 
       function setTrackContentHint(track, hint) {
@@ -13328,6 +13430,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         remoteLabelsByStream.clear()
         remoteLabelConflictsByStream.clear()
         remoteLabelsByTrack.clear()
+        unlabeledRemoteVideoSightings.clear()
         pendingRemotePlaybackElements.clear()
         queuedRemoteCandidates = []
         participantPlaceholders.forEach(tile => tile.remove())

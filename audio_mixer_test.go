@@ -26,7 +26,7 @@ func TestMixAudioFrameDoesNotAttenuateSpeakerWithSilentSource(t *testing.T) {
 	}
 }
 
-func TestMixAudioFrameAveragesActiveSpeakers(t *testing.T) {
+func TestMixAudioFrameSumsActiveSpeakers(t *testing.T) {
 	firstFrame := make([]int16, roomAudioMixFrameSize)
 	secondFrame := make([]int16, roomAudioMixFrameSize)
 	for index := range firstFrame {
@@ -39,9 +39,59 @@ func TestMixAudioFrameAveragesActiveSpeakers(t *testing.T) {
 		"second": {buffer: append([]int16(nil), secondFrame...)},
 	})
 	for index, sample := range mixed {
-		if sample != 1500 {
-			t.Fatalf("mixed sample[%d]=%d, want 1500", index, sample)
+		if sample != 3000 {
+			t.Fatalf("mixed sample[%d]=%d, want straight sum 3000", index, sample)
 		}
+	}
+}
+
+func TestMixAudioFrameSoftClipsLoudCrosstalk(t *testing.T) {
+	firstFrame := make([]int16, roomAudioMixFrameSize)
+	secondFrame := make([]int16, roomAudioMixFrameSize)
+	for index := range firstFrame {
+		firstFrame[index] = 20000
+		secondFrame[index] = 20000
+	}
+
+	mixed := mixAudioFrame(map[string]*audioSource{
+		"first":  {buffer: append([]int16(nil), firstFrame...)},
+		"second": {buffer: append([]int16(nil), secondFrame...)},
+	})
+	for index, sample := range mixed {
+		if sample <= roomAudioSoftClipKnee || sample > 32767 {
+			t.Fatalf("mixed sample[%d]=%d, want soft-clipped above knee without wraparound", index, sample)
+		}
+	}
+}
+
+func TestSoftClipPCM16IsLinearBelowKneeAndSymmetric(t *testing.T) {
+	for _, sample := range []int32{0, 1000, -1000, roomAudioSoftClipKnee, -roomAudioSoftClipKnee} {
+		if got := softClipPCM16(sample); int32(got) != sample {
+			t.Fatalf("softClipPCM16(%d)=%d, want unchanged", sample, got)
+		}
+	}
+	if got := softClipPCM16(40000); got <= roomAudioSoftClipKnee || got > 32767 {
+		t.Fatalf("softClipPCM16(40000)=%d, want compressed into (knee, 32767]", got)
+	}
+	if positive, negative := softClipPCM16(40000), softClipPCM16(-40000); positive != -negative {
+		t.Fatalf("soft clip is asymmetric: %d vs %d", positive, negative)
+	}
+}
+
+func TestSourceAudioActivePassesSoftSpeechOnset(t *testing.T) {
+	// A soft "hey" onset: low RMS but speech-like peaks. The old gate
+	// (min RMS 220, ratio 3.2) clipped this first frame.
+	onsetFrame := make([]int16, roomAudioMixFrameSize)
+	for index := range onsetFrame {
+		onsetFrame[index] = 100
+		if index%16 == 0 {
+			onsetFrame[index] = 1000
+		}
+	}
+
+	source := &audioSource{buffer: append([]int16(nil), onsetFrame...)}
+	if !sourceAudioActive(source) {
+		t.Fatal("soft speech onset should open the gate")
 	}
 }
 

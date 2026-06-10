@@ -16,10 +16,18 @@ const (
 	realtimeAudioChannels = 2
 	roomAudioMaxFrameMs   = 60
 	roomAudioActivePeak   = 256
+	// The mixer pulls one 20ms frame per source per tick, so true pre-roll
+	// would require delaying every source's output to replay gated onsets.
+	// Instead the gate opens earlier (lower floor + ratio, peak-assisted) and
+	// releases later, so a soft "hey" onset is kept rather than clipped.
 	roomAudioNoiseSeedRMS = 96.0
-	roomAudioMinSpeechRMS = 220.0
-	roomAudioGateRatio    = 3.2
-	roomAudioGateRelease  = 8
+	roomAudioMinSpeechRMS = 160.0
+	roomAudioGateRatio    = 2.5
+	roomAudioGateRelease  = 25
+	// roomAudioSoftClipKnee is where summed crosstalk starts to compress:
+	// below it the mix is exact summation, above it a tanh knee prevents
+	// wraparound while keeping each speaker at full level.
+	roomAudioSoftClipKnee = 24576
 
 	roomAudioMixInterval           = 20 * time.Millisecond
 	roomAudioMixFrameSize          = roomAudioSampleRate / 50 * roomAudioChannels
@@ -287,13 +295,16 @@ func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audi
 		return nil, nil
 	}
 
+	// Straight summation keeps each speaker at full level during crosstalk;
+	// dividing by the active-source count attenuated the asker ~6dB and pumped
+	// levels frame to frame as the count changed.
 	mixedPCM := make([]int16, roomAudioMixFrameSize)
 	for sampleIndex := range mixedPCM {
 		var sampleSum int32
 		for _, source := range mixSources {
 			sampleSum += int32(source.buffer[sampleIndex])
 		}
-		mixedPCM[sampleIndex] = clampPCM16(sampleSum / int32(len(mixSources)))
+		mixedPCM[sampleIndex] = softClipPCM16(sampleSum)
 	}
 
 	for _, source := range readySources {
@@ -402,6 +413,27 @@ func updateSourceNoiseFloor(source *audioSource, rms float64, quiet bool) {
 	if source.noiseFloor < roomAudioNoiseSeedRMS {
 		source.noiseFloor = roomAudioNoiseSeedRMS
 	}
+}
+
+// softClipPCM16 passes samples through unchanged up to roomAudioSoftClipKnee
+// and compresses the overshoot with a tanh knee so summed speakers saturate
+// smoothly instead of hard-clipping or wrapping.
+func softClipPCM16(sample int32) int16 {
+	magnitude := sample
+	if magnitude < 0 {
+		magnitude = -magnitude
+	}
+	if magnitude <= roomAudioSoftClipKnee {
+		return int16(sample)
+	}
+
+	headroom := float64(32767 - roomAudioSoftClipKnee)
+	compressed := int32(float64(roomAudioSoftClipKnee) + headroom*math.Tanh(float64(magnitude-roomAudioSoftClipKnee)/headroom))
+	if sample < 0 {
+		return int16(-compressed)
+	}
+
+	return int16(compressed)
 }
 
 func clampPCM16(sample int32) int16 {
