@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	meetingBoardAgentName           = "meeting board"
 	defaultMeetingBoardInterval     = 2 * time.Minute
 	defaultMeetingBoardMinSummaries = 1
 	defaultMeetingBoardMaxSummaries = 6
@@ -48,77 +49,35 @@ type meetingBoardRunResult struct {
 	SkippedOperation int
 }
 
-func (app *kanbanBoardApp) startMeetingBoardWorker(apiKey string) {
-	if app == nil || app.memory == nil || strings.TrimSpace(apiKey) == "" || boolEnv("MEETING_BOARD_DISABLED") {
-		return
+func meetingBoardAgent() ambientAgentConfig {
+	return ambientAgentConfig{
+		name:              meetingBoardAgentName,
+		defaultInterval:   defaultMeetingBoardInterval,
+		intervalEnv:       "MEETING_BOARD_INTERVAL",
+		disabledEnv:       "MEETING_BOARD_DISABLED",
+		backfillEnv:       "MEETING_BOARD_BACKFILL",
+		minBatchEnv:       "MEETING_BOARD_MIN_SUMMARIES",
+		defaultMinBatch:   defaultMeetingBoardMinSummaries,
+		maxBatchEnv:       "MEETING_BOARD_MAX_SUMMARIES",
+		defaultMaxBatch:   defaultMeetingBoardMaxSummaries,
+		inputKind:         meetingMemoryKindBrain,
+		artifactKind:      meetingMemoryKindBoardUpdate,
+		cursorMetadataKey: "throughBrainId",
+		requestTimeout:    meetingBoardRequestTimeout,
+		produce:           (*kanbanBoardApp).produceMeetingBoardUpdate,
 	}
-	interval := meetingBoardInterval()
-	if interval <= 0 {
-		return
-	}
-
-	cancel := make(chan struct{})
-	done := make(chan struct{})
-	baselineID := ""
-	if !meetingBoardBackfillEnabled() {
-		baselineID = app.memory.latestBrainWriteUpID()
-	}
-
-	app.mu.Lock()
-	oldCancel := app.boardWorkerCancel
-	oldDone := app.boardWorkerDone
-	app.boardWorkerCancel = cancel
-	app.boardWorkerDone = done
-	app.boardWorkerBaselineID = baselineID
-	app.mu.Unlock()
-
-	if oldCancel != nil {
-		close(oldCancel)
-		if oldDone != nil {
-			<-oldDone
-		}
-	}
-
-	go app.runMeetingBoardWorker(apiKey, interval, cancel, done)
 }
 
-func (app *kanbanBoardApp) runMeetingBoardWorker(apiKey string, interval time.Duration, cancel <-chan struct{}, done chan<- struct{}) {
-	defer close(done)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			ctx, cancelRequest := context.WithTimeout(context.Background(), meetingBoardRequestTimeout)
-			if _, err := app.runMeetingBoardOnce(ctx, apiKey, createOpenAITextResponse); err != nil {
-				log.Errorf("Meeting board worker failed: %v", err)
-			}
-			cancelRequest()
-		case <-cancel:
-			return
-		}
-	}
+func (app *kanbanBoardApp) startMeetingBoardWorker(apiKey string) {
+	app.startAmbientAgent(meetingBoardAgent(), apiKey)
 }
 
 func (app *kanbanBoardApp) runMeetingBoardOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
-	if app == nil || app.memory == nil {
-		return meetingMemoryEntry{}, nil
-	}
-	if responder == nil {
-		responder = createOpenAITextResponse
-	}
+	agent := meetingBoardAgent()
+	return app.runAmbientAgentOnce(agent, ctx, apiKey, responder, agent.minBatch())
+}
 
-	app.mu.Lock()
-	baselineID := app.boardWorkerBaselineID
-	app.mu.Unlock()
-
-	summaries := app.memory.unprocessedBrainWriteUpsAfter(meetingBoardMaxSummaries(), baselineID)
-	if len(summaries) < meetingBoardMinSummaries() {
-		return meetingMemoryEntry{}, nil
-	}
-
+func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	model := meetingBoardModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
@@ -257,35 +216,6 @@ func meetingBoardToolAllowed(toolName string) bool {
 	default:
 		return false
 	}
-}
-
-func meetingBoardInterval() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("MEETING_BOARD_INTERVAL"))
-	if raw == "" {
-		return defaultMeetingBoardInterval
-	}
-	switch strings.ToLower(raw) {
-	case "0", "off", "false", "disabled":
-		return 0
-	}
-	interval, err := time.ParseDuration(raw)
-	if err != nil || interval < time.Second {
-		return defaultMeetingBoardInterval
-	}
-
-	return interval
-}
-
-func meetingBoardMinSummaries() int {
-	return positiveIntEnv("MEETING_BOARD_MIN_SUMMARIES", defaultMeetingBoardMinSummaries)
-}
-
-func meetingBoardMaxSummaries() int {
-	return positiveIntEnv("MEETING_BOARD_MAX_SUMMARIES", defaultMeetingBoardMaxSummaries)
-}
-
-func meetingBoardBackfillEnabled() bool {
-	return boolEnv("MEETING_BOARD_BACKFILL")
 }
 
 func meetingBoardModel() string {
@@ -525,72 +455,9 @@ func meetingBoardApplicationTarget(application meetingBoardOperationApplication)
 }
 
 func (store *meetingMemoryStore) unprocessedBrainWriteUpsAfter(limit int, baselineBrainID string) []meetingMemoryEntry {
-	if store == nil || limit <= 0 {
-		return nil
-	}
-
-	store.mu.Lock()
-	entries := cloneMemoryEntries(store.entries)
-	store.mu.Unlock()
-
-	startIndex := 0
-	baselineBrainID = strings.TrimSpace(baselineBrainID)
-	if baselineBrainID != "" {
-		for index := len(entries) - 1; index >= 0; index-- {
-			if entries[index].ID == baselineBrainID {
-				startIndex = index + 1
-				break
-			}
-		}
-	}
-	for index := len(entries) - 1; index >= 0; index-- {
-		entry := entries[index]
-		if entry.Kind != meetingMemoryKindBoardUpdate {
-			continue
-		}
-		throughBrainID := strings.TrimSpace(entry.Metadata["throughBrainId"])
-		if throughBrainID != "" {
-			for brainIndex := len(entries) - 1; brainIndex >= 0; brainIndex-- {
-				if entries[brainIndex].ID == throughBrainID {
-					if brainIndex+1 > startIndex {
-						startIndex = brainIndex + 1
-					}
-					break
-				}
-			}
-		} else if index+1 > startIndex {
-			startIndex = index + 1
-		}
-		break
-	}
-
-	summaries := make([]meetingMemoryEntry, 0, limit)
-	for _, entry := range entries[startIndex:] {
-		if entry.Kind != meetingMemoryKindBrain {
-			continue
-		}
-		summaries = append(summaries, entry)
-		if len(summaries) >= limit {
-			break
-		}
-	}
-
-	return summaries
+	return store.unconsumedEntriesAfter(meetingMemoryKindBrain, meetingMemoryKindBoardUpdate, "throughBrainId", limit, baselineBrainID)
 }
 
 func (store *meetingMemoryStore) latestBrainWriteUpID() string {
-	if store == nil {
-		return ""
-	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-
-	for index := len(store.entries) - 1; index >= 0; index-- {
-		if store.entries[index].Kind == meetingMemoryKindBrain {
-			return store.entries[index].ID
-		}
-	}
-
-	return ""
+	return store.latestEntryIDOfKind(meetingMemoryKindBrain)
 }

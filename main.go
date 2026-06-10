@@ -297,6 +297,14 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// archives hold full meeting transcripts; gate listing and files behind the
+	// shared room password (constant-time compare, same as the participant
+	// passcode). clients get a keyed URL in the meeting_archived payload.
+	if !validMeetingPassword(r.URL.Query().Get("key")) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	w.Header().Set("Cache-Control", "no-store")
 	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
 	archivePath, err := meetingArchivePath(archiveID)
@@ -1424,6 +1432,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
+	scoutChat := newScoutChatSession(c)
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
@@ -1728,7 +1737,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 				log.Errorf("Failed to send undo state: %v", err)
 			}
-			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshot(20)); err != nil {
+			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForClients(20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
 			}
 			if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
@@ -1865,6 +1874,26 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			broadcastAssistantEvent("query", assistantQuery, nil)
 			broadcastAssistantEvent("status", "Scout is checking the board and memory.", nil)
 			go answerAssistantQueryForClient(c, assistantQuery)
+		case "scout_chat":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before chatting with scout")
+				continue
+			}
+			chat := struct {
+				Text string `json:"text"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &chat); err != nil {
+				log.Errorf("Failed to unmarshal scout chat payload: %v", err)
+				_ = sendKanbanEvent(c, "scout_chat", map[string]any{
+					"kind": "error",
+					"text": "could not read chat message",
+					"ts":   time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				continue
+			}
+			// answering blocks on a model call; keep the websocket read loop
+			// flowing. the session itself serializes turns per connection.
+			go scoutChat.handle(kanbanApp, chat.Text)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
@@ -1928,7 +1957,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			broadcastKanbanEvent("meeting_archived", result)
-			broadcastKanbanEvent("memory", kanbanApp.memorySnapshot(20))
+			broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
 		case "participant_media_state":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")

@@ -48,10 +48,11 @@ var lowQualityTranscriptPhrases = map[string]struct{}{
 }
 
 type meetingMemoryStore struct {
-	mu      sync.Mutex
-	path    string
-	entries []meetingMemoryEntry
-	seen    map[string]struct{}
+	mu        sync.Mutex
+	path      string
+	entries   []meetingMemoryEntry
+	seen      map[string]struct{}
+	meetingID string
 }
 
 type meetingMemoryEntry struct {
@@ -104,7 +105,52 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 		return nil, fmt.Errorf("read memory file: %w", err)
 	}
 
+	// resume the in-flight meeting after a restart: if the newest entry was not
+	// an archive, the meeting it belongs to is still open.
+	if count := len(store.entries); count > 0 {
+		last := store.entries[count-1]
+		if last.Kind != meetingMemoryKindArchive {
+			store.meetingID = strings.TrimSpace(last.Metadata["meetingId"])
+		}
+	}
+
 	return store, nil
+}
+
+// currentMeetingID returns the active meeting id, empty until the first entry
+// of a meeting is appended.
+func (store *meetingMemoryStore) currentMeetingID() string {
+	if store == nil {
+		return ""
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return store.meetingID
+}
+
+// rotateMeetingID closes the current meeting; the next appended entry lazily
+// starts a new meeting id. Called when archive_meeting completes.
+func (store *meetingMemoryStore) rotateMeetingID() {
+	if store == nil {
+		return
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	store.meetingID = ""
+}
+
+func (store *meetingMemoryStore) currentMeetingIDLocked() string {
+	if store.meetingID == "" {
+		now := time.Now().UTC()
+		// nanosecond suffix keeps back-to-back meetings distinct.
+		store.meetingID = fmt.Sprintf("meeting-%s-%09d", now.Format("20060102-150405"), now.Nanosecond())
+	}
+
+	return store.meetingID
 }
 
 func meetingMemoryPath() string {
@@ -198,6 +244,17 @@ func (store *meetingMemoryStore) appendEntry(kind string, id string, text string
 	if _, ok := store.seen[entry.ID]; ok {
 		return entry, false, nil
 	}
+
+	// stamp every entry with the current meeting id (created lazily at the
+	// first entry of a meeting). entries without one stay readable.
+	stamped := make(map[string]string, len(metadata)+1)
+	for key, value := range metadata {
+		stamped[key] = value
+	}
+	if strings.TrimSpace(stamped["meetingId"]) == "" {
+		stamped["meetingId"] = store.currentMeetingIDLocked()
+	}
+	entry.Metadata = stamped
 
 	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {

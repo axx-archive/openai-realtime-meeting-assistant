@@ -91,7 +91,7 @@ func TestMeetingBoardWorkerBaselineSkipsHistoricalSummaries(t *testing.T) {
 		t.Fatal("historical brain write-up appended=false, want true")
 	}
 
-	app.boardWorkerBaselineID = app.memory.latestBrainWriteUpID()
+	app.setAmbientAgentBaselineID(meetingBoardAgentName, app.memory.latestBrainWriteUpID())
 	if entry, err := app.runMeetingBoardOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder should not run for historical summaries before the baseline")
 		return "", nil

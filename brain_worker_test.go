@@ -63,7 +63,7 @@ func TestMeetingBrainWorkerBaselineSkipsHistoricalTranscripts(t *testing.T) {
 		t.Fatal("historical transcript appended=false, want true")
 	}
 
-	app.brainWorkerBaselineID = app.memory.latestTranscriptID()
+	app.setAmbientAgentBaselineID(meetingBrainAgentName, app.memory.latestTranscriptID())
 	if entry, err := app.runMeetingBrainOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("responder should not run for historical transcripts before the baseline")
 		return "", nil

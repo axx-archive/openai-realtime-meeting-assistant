@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,12 +176,9 @@ type kanbanBoardApp struct {
 	currentSpeechStartedAt   time.Time
 	currentSpeechStoppedAt   time.Time
 	proactiveReconnectCancel chan struct{}
-	brainWorkerCancel        chan struct{}
-	brainWorkerDone          chan struct{}
-	brainWorkerBaselineID    string
-	boardWorkerCancel        chan struct{}
-	boardWorkerDone          chan struct{}
-	boardWorkerBaselineID    string
+	agentCancels             map[string]chan struct{}
+	agentDones               map[string]chan struct{}
+	agentBaselineIDs         map[string]string
 	closeOnce                sync.Once
 }
 
@@ -605,18 +603,13 @@ func (app *kanbanBoardApp) Close() error {
 		app.scoutLastToolResultName = ""
 		cancelProactiveRestart := app.proactiveReconnectCancel
 		app.proactiveReconnectCancel = nil
-		brainWorkerCancel := app.brainWorkerCancel
-		brainWorkerDone := app.brainWorkerDone
-		boardWorkerCancel := app.boardWorkerCancel
-		boardWorkerDone := app.boardWorkerDone
+		agentCancels := app.agentCancels
+		agentDones := app.agentDones
 		transcriptLane := app.transcriptLane
 		app.transcriptLane = nil
-		app.brainWorkerCancel = nil
-		app.brainWorkerDone = nil
-		app.brainWorkerBaselineID = ""
-		app.boardWorkerCancel = nil
-		app.boardWorkerDone = nil
-		app.boardWorkerBaselineID = ""
+		app.agentCancels = nil
+		app.agentDones = nil
+		app.agentBaselineIDs = nil
 		app.mu.Unlock()
 		if transcriptLane != nil {
 			transcriptLane.close()
@@ -624,16 +617,13 @@ func (app *kanbanBoardApp) Close() error {
 		if cancelProactiveRestart != nil {
 			close(cancelProactiveRestart)
 		}
-		if brainWorkerCancel != nil {
-			close(brainWorkerCancel)
-			if brainWorkerDone != nil {
-				<-brainWorkerDone
+		for name, cancel := range agentCancels {
+			if cancel == nil {
+				continue
 			}
-		}
-		if boardWorkerCancel != nil {
-			close(boardWorkerCancel)
-			if boardWorkerDone != nil {
-				<-boardWorkerDone
+			close(cancel)
+			if done := agentDones[name]; done != nil {
+				<-done
 			}
 		}
 		if peerConnection != nil {
@@ -1915,6 +1905,24 @@ func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 	return app.memory.snapshot(limit)
 }
 
+// memorySnapshotForClients decorates archive entries with a keyed download
+// URL at serve time so archive links keep working behind the archives auth
+// gate without persisting the room password into the store.
+func (app *kanbanBoardApp) memorySnapshotForClients(limit int) []meetingMemoryEntry {
+	entries := app.memorySnapshot(limit)
+	for index := range entries {
+		entry := &entries[index]
+		if entry.Kind != meetingMemoryKindArchive || entry.Metadata == nil {
+			continue
+		}
+		if archiveID := strings.TrimSpace(entry.Metadata["archiveId"]); archiveID != "" {
+			entry.Metadata["downloadUrl"] = meetingArchiveDownloadURLWithKey(archiveID)
+		}
+	}
+
+	return entries
+}
+
 func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
 	query := canonicalizeBoardText(asString(args["query"]))
 	if query == "" {
@@ -2629,6 +2637,10 @@ func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 }
 
 func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResult, error) {
+	// flush ambient agents first so the final minutes of the meeting are
+	// summarized and applied to the board before the snapshot is taken.
+	app.flushAmbientAgentsForArchive()
+
 	archivedBy = canonicalParticipantName(archivedBy)
 	archivedAt := time.Now().UTC()
 	archiveID := fmt.Sprintf("meeting-%s", archivedAt.Format("20060102-150405-000000000"))
@@ -2682,6 +2694,8 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		summary += " Meeting notes were generated, but email failed: " + email.Error
 	}
 	if app.memory != nil {
+		// the persisted downloadUrl stays unkeyed so the room password never
+		// lands in the memory store or in archive snapshots.
 		_, _, err = app.memory.appendArchive(archiveID, summary, map[string]string{
 			"archiveId":   archiveID,
 			"downloadUrl": meetingArchiveDownloadURL(archiveID),
@@ -2690,13 +2704,15 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		if err != nil {
 			return meetingArchiveResult{}, fmt.Errorf("remember meeting archive: %w", err)
 		}
+		// the archive closes the current meeting; the next entry starts a new one.
+		app.memory.rotateMeetingID()
 	}
 
 	return meetingArchiveResult{
 		ID:          archiveID,
 		ArchivedAt:  archivedAt.Format(time.RFC3339Nano),
 		ArchivedBy:  archivedBy,
-		DownloadURL: meetingArchiveDownloadURL(archiveID),
+		DownloadURL: meetingArchiveDownloadURLWithKey(archiveID),
 		Summary:     summary,
 		Notes:       notes,
 		Email:       email,
@@ -2709,6 +2725,12 @@ func writeMeetingArchive(path string, archive meetingArchive) error {
 
 func meetingArchiveDownloadURL(archiveID string) string {
 	return "/archives/" + archiveID + ".json"
+}
+
+// meetingArchiveDownloadURLWithKey embeds the room password as a query key so
+// the client can link the archive without knowing where the password lives.
+func meetingArchiveDownloadURLWithKey(archiveID string) string {
+	return meetingArchiveDownloadURL(archiveID) + "?key=" + url.QueryEscape(configuredMeetingRoomPassword())
 }
 
 func meetingArchivePath(archiveID string) (string, error) {

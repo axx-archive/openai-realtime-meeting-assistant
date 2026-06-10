@@ -24,30 +24,74 @@ var (
 	agoDurationQueryPattern  = regexp.MustCompile(`\b(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\s+ago\b`)
 )
 
+// assistantQueryResult is the broadcast-free outcome of answering a query, so
+// the room-wide ask bar and the private scout chat share one answer engine.
+type assistantQueryResult struct {
+	query        string
+	answer       string
+	source       string // "board" or "assistant"
+	matchedCards int
+	matches      int
+	contextSize  int
+}
+
 func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, bool, error) {
-	query = canonicalizeBoardText(query)
-	if query == "" {
-		return nil, false, fmt.Errorf("query is required")
+	result, err := app.resolveAssistantQuery(query, nil)
+	if err != nil {
+		return nil, false, err
 	}
 
-	if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
-		broadcastAssistantEvent("answer", answer, map[string]any{
-			"query":        query,
+	if result.source == "board" {
+		broadcastAssistantEvent("answer", result.answer, map[string]any{
+			"query":        result.query,
 			"source":       "board",
-			"matchedCards": matchedCards,
+			"matchedCards": result.matchedCards,
 		})
 		return map[string]any{
 			"ok":           true,
-			"query":        query,
-			"answer":       answer,
+			"query":        result.query,
+			"answer":       result.answer,
 			"source":       "board",
-			"matchedCards": matchedCards,
+			"matchedCards": result.matchedCards,
 		}, false, nil
+	}
+
+	broadcastAssistantEvent("answer", result.answer, map[string]any{
+		"query":  result.query,
+		"source": "assistant",
+	})
+
+	return map[string]any{
+		"ok":      true,
+		"query":   result.query,
+		"answer":  result.answer,
+		"source":  "assistant",
+		"matches": result.matches,
+		"context": result.contextSize,
+	}, false, nil
+}
+
+// resolveAssistantQuery answers from the current board and the shared room
+// memory store without broadcasting anything. history threads prior private
+// chat turns into the model input so follow-up questions work.
+func (app *kanbanBoardApp) resolveAssistantQuery(query string, history []scoutChatTurn) (assistantQueryResult, error) {
+	query = canonicalizeBoardText(query)
+	if query == "" {
+		return assistantQueryResult{}, fmt.Errorf("query is required")
+	}
+
+	if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
+		return assistantQueryResult{
+			query:        query,
+			answer:       answer,
+			source:       "board",
+			matchedCards: matchedCards,
+		}, nil
 	}
 
 	matches, contextEntries := app.memoryMatchesAndContext(query)
 	board := app.snapshotState()
-	answer, modelErr := app.answerAssistantQueryWithModel(query, board.Cards, contextEntries)
+	answer, modelErr := app.answerAssistantQueryWithModel(query, board.Cards, contextEntries, history)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
@@ -55,22 +99,16 @@ func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, b
 		answer = buildMemoryAnswer(query, matches)
 	}
 
-	broadcastAssistantEvent("answer", answer, map[string]any{
-		"query":  query,
-		"source": "assistant",
-	})
-
-	return map[string]any{
-		"ok":      true,
-		"query":   query,
-		"answer":  answer,
-		"source":  "assistant",
-		"matches": len(matches),
-		"context": len(contextEntries),
-	}, false, nil
+	return assistantQueryResult{
+		query:       query,
+		answer:      answer,
+		source:      "assistant",
+		matches:     len(matches),
+		contextSize: len(contextEntries),
+	}, nil
 }
 
-func (app *kanbanBoardApp) answerAssistantQueryWithModel(query string, cards []kanbanCard, entries []meetingMemoryEntry) (string, error) {
+func (app *kanbanBoardApp) answerAssistantQueryWithModel(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
 	}
@@ -88,7 +126,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(query string, cards []k
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    assistantQueryInstructions(),
-		Input:           buildAssistantQueryInput(query, cards, entries, time.Now()),
+		Input:           buildAssistantQueryInput(query, cards, entries, history, time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 500,
@@ -103,11 +141,12 @@ func assistantQueryInstructions() string {
 		"Use memory only for past discussion, decisions, transcript recall, or archived meeting questions.",
 		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
+		"When a conversation history is supplied, resolve follow-up references from it.",
 		"Keep the answer concise and practical.",
 	}, " ")
 }
 
-func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, now time.Time) string {
+func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, now time.Time) string {
 	location := meetingTimeLocation()
 	boardJSON, err := json.MarshalIndent(cards, "", "  ")
 	if err != nil {
@@ -117,6 +156,15 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 	var builder strings.Builder
 	builder.WriteString("# Current time\n")
 	builder.WriteString(now.In(location).Format(time.RFC1123))
+	if len(history) > 0 {
+		builder.WriteString("\n\n# Conversation so far\n")
+		for _, turn := range history {
+			builder.WriteString(turn.role)
+			builder.WriteString(": ")
+			builder.WriteString(turn.text)
+			builder.WriteByte('\n')
+		}
+	}
 	builder.WriteString("\n\n# User question\n")
 	builder.WriteString(query)
 	builder.WriteString("\n\n# Current Kanban board\n")
@@ -136,6 +184,10 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 		if speaker := strings.TrimSpace(entry.Metadata["speaker"]); speaker != "" {
 			builder.WriteString(" speaker=")
 			builder.WriteString(speaker)
+		}
+		if meetingID := strings.TrimSpace(entry.Metadata["meetingId"]); meetingID != "" {
+			builder.WriteString(" meeting=")
+			builder.WriteString(meetingID)
 		}
 		builder.WriteString("\n")
 		for _, line := range strings.Split(entry.Text, "\n") {
@@ -441,6 +493,10 @@ func buildMemoryQuestionInput(query string, entries []meetingMemoryEntry, now ti
 		if speaker := strings.TrimSpace(entry.Metadata["speaker"]); speaker != "" {
 			builder.WriteString(" speaker=")
 			builder.WriteString(speaker)
+		}
+		if meetingID := strings.TrimSpace(entry.Metadata["meetingId"]); meetingID != "" {
+			builder.WriteString(" meeting=")
+			builder.WriteString(meetingID)
 		}
 		builder.WriteString("\n")
 		for _, line := range strings.Split(entry.Text, "\n") {
