@@ -967,128 +967,259 @@
         background: rgba(255, 122, 43, 0.12);
       }
 
-      /* ---------- Access panel ---------- */
+      /* ---------- Login gate (the whole OS sits behind this) ---------- */
       .access-panel {
-        display: grid;
-        gap: var(--s-3);
-        background: var(--surface-panel);
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-md);
-        padding: var(--s-3);
-        box-shadow: var(--shadow-panel);
-      }
-
-      .access-panel header {
+        width: min(400px, calc(100vw - 48px));
         display: flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: space-between;
-        gap: var(--s-2);
+        gap: 28px;
+        background: transparent;
+        border: 0;
       }
 
-      .access-panel h2 {
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--fg-0);
-        text-wrap: balance;
+      /* ghost theme toggle — the rail isn't visible pre-auth */
+      .login-theme {
+        position: fixed;
+        top: max(16px, env(safe-area-inset-top));
+        right: max(16px, env(safe-area-inset-right));
+        z-index: 60;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-3);
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease);
+      }
+      .login-theme:hover {
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+      .login-theme:active { transform: scale(var(--press-scale)); }
+      .login-theme .tool-rail__icon--sun { display: none; }
+      [data-theme="dark"] .login-theme .tool-rail__icon--sun { display: block; }
+      [data-theme="dark"] .login-theme .tool-rail__icon--moon { display: none; }
+
+      .login-head {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        text-align: center;
+      }
+
+      .login-flame {
+        flex: none;
+        color: var(--text-1);
+      }
+
+      .login-head h2 {
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        color: var(--text-1);
+      }
+
+      .login-subline {
+        margin: 8px 0 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
       }
 
       .access-state {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        text-transform: none;
-        color: var(--fg-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
       }
 
-      .access-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: var(--s-2);
-      }
-
-      .hearth-access .access-grid {
-        gap: var(--s-3);
-        margin-top: 28px;
+      /* panel glass card — the full recipe, specular top edge included */
+      .login-card {
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        padding: 28px;
       }
 
       .field {
         display: grid;
-        gap: 6px;
+        gap: 8px;
         min-width: 0;
       }
 
-      .field span {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--fg-2);
+      .field[hidden] {
+        display: none;
+      }
+
+      .field > span {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: none;
+        color: var(--text-3);
       }
 
       .field select,
       .field input,
       .field textarea {
         width: 100%;
-        height: 42px;
-        border: 1px solid rgba(255, 235, 200, 0.10);
-        border-radius: 12px;
-        background-color: rgba(11, 8, 5, 0.38);
-        color: var(--fg-0);
-        font: inherit;
-        font-size: 13px;
-        padding: 0 var(--s-3);
+        height: 44px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background-color: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        font-family: var(--font-sans);
+        padding: 0 14px;
         outline: 0;
-        box-shadow:
-          inset 0 1px 0 rgba(255, 245, 230, 0.08),
-          inset 0 -1px 0 rgba(255, 122, 43, 0.035),
-          0 8px 24px rgba(15, 8, 2, 0.16);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        transition: border-color var(--t-base) var(--ease-soft), background-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft);
+        transition:
+          border-color var(--dur-fast) var(--ease),
+          box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .field input::placeholder,
+      .field textarea::placeholder {
+        color: var(--text-3);
       }
 
       .field select {
         appearance: none;
         -webkit-appearance: none;
-        padding-right: 32px;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%23737373' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        padding-right: 38px;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%236E6E7A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-repeat: no-repeat;
-        background-position: right 12px center;
+        background-position: right 14px center;
       }
 
       .field select:focus,
       .field input:focus,
       .field textarea:focus {
-        border-color: rgba(255, 122, 43, 0.65);
-        background-color: rgba(11, 8, 5, 0.68);
-        box-shadow: var(--glow-ember-sm);
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
 
       .field textarea {
         height: auto;
         min-height: 96px;
-        padding: 9px var(--s-3);
+        padding: 9px 14px;
         resize: vertical;
       }
 
+      /* Sign in — the one primary on this view; the accent is earned */
+      .login-signin {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        height: 48px;
+        padding: 0 22px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
+        transition:
+          background var(--dur-fast) var(--ease),
+          opacity var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+      .login-signin:hover:not([disabled]) { background: var(--accent-hover); }
+      .login-signin:active:not([disabled]) {
+        background: var(--accent-press);
+        transform: scale(var(--press-scale));
+      }
+      .login-signin[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .login-divider {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .login-divider__line {
+        flex: 1;
+        height: 1px;
+        background: var(--line-1);
+      }
+      .login-divider__label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .login-passkey {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        height: 48px;
+        padding: 0 22px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
+        transition:
+          background var(--dur-fast) var(--ease),
+          opacity var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+      .login-passkey:hover:not([disabled]) { background: var(--surface-3); }
+      .login-passkey:active:not([disabled]) { transform: scale(var(--press-scale)); }
+      .login-passkey[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
       .access-hint {
-        min-height: 18px;
+        min-height: 16px;
         min-width: 0;
-        color: var(--fg-2);
-        font-size: 12px;
-        line-height: 1.45;
+        margin: 0;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
         overflow-wrap: anywhere;
         text-wrap: pretty;
       }
 
-      .access-panel.is-verified {
-        border-color: rgba(95, 190, 122, 0.30);
-        background: linear-gradient(180deg, rgba(95, 190, 122, 0.09), rgba(11, 8, 5, 0.78));
+      .login-foot {
+        margin: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-align: center;
       }
 
-      .access-panel.is-verified .access-state { color: var(--success); }
+      /* gate entry — bfRiseIn stagger with a held final frame */
+      @media (prefers-reduced-motion: no-preference) {
+        .login-rise { animation: bf-rise-in 480ms var(--ease) both; }
+        .login-rise--card { animation-delay: 60ms; }
+        .login-rise--foot { animation-delay: 120ms; }
+      }
+
+      @keyframes bf-rise-in {
+        from { opacity: 0; transform: translateY(12px) scale(0.985); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
 
       /* ---------- Board (parchment) ---------- */
       .presentation-tile {
@@ -3224,9 +3355,11 @@
         align-items: stretch;
       }
 
+      /* pre-auth the gate stands alone, centered on the full ambient canvas
+         (the rail + topbar rows collapse while .is-authed is absent) */
       #appShell:not(.is-in-room) .workspace {
         place-items: center;
-        min-height: min(760px, calc(100svh - 84px));
+        min-height: calc(100svh - var(--sp-6));
       }
 
       #join {
@@ -3250,8 +3383,8 @@
         display: none;
       }
 
-      #appShell.is-in-room .hearth-access,
-      #appShell.is-board-expanded .hearth-access,
+      #appShell.is-in-room .access-panel,
+      #appShell.is-board-expanded .access-panel,
       #appShell.is-board-expanded .scout-rail,
       #appShell.is-board-expanded .hearth-presentation,
       #appShell.is-board-expanded .board-rail {
@@ -3273,192 +3406,27 @@
         transform: none;
       }
 
-      .hearth-access {
-        position: relative;
-        width: min(520px, calc(100vw - 48px));
-        align-self: center;
-        justify-self: center;
-        overflow: visible;
-        padding: 0 var(--s-7) 30px;
-        border-color: rgba(255, 235, 200, 0.05);
-        border-radius: var(--r-2xl);
-        background:
-          radial-gradient(circle at 50% -4%, rgba(255, 122, 43, 0.16), transparent 34%),
-          linear-gradient(135deg, rgba(255, 245, 230, 0.10) 0%, rgba(255, 245, 230, 0.025) 18%, transparent 46%),
-          linear-gradient(180deg, rgba(29, 24, 20, 0.54), rgba(11, 8, 5, 0.74));
-        box-shadow:
-          inset 0 1px 0 rgba(255, 245, 230, 0.16),
-          inset 1px 0 0 rgba(255, 245, 230, 0.045),
-          inset 0 -1px 0 rgba(255, 122, 43, 0.08),
-          0 34px 90px rgba(15, 8, 2, 0.58),
-          0 0 110px rgba(255, 122, 43, 0.12);
-        backdrop-filter: var(--blur-hero);
-        -webkit-backdrop-filter: var(--blur-hero);
-      }
-
-      .hearth-access > * {
-        position: relative;
-        z-index: 1;
-      }
-
-      .hearth-access.is-verified {
-        border-color: rgba(255, 235, 200, 0.16);
-        background:
-          radial-gradient(circle at 50% -4%, rgba(255, 122, 43, 0.18), transparent 34%),
-          linear-gradient(135deg, rgba(255, 245, 230, 0.12) 0%, rgba(255, 245, 230, 0.03) 18%, transparent 46%),
-          linear-gradient(180deg, rgba(29, 24, 20, 0.56), rgba(11, 8, 5, 0.76));
-      }
-
-      .hearth-access::before {
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: -190px;
-        z-index: -1;
-        width: 360px;
-        height: 360px;
-        transform: translateX(-50%);
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(255, 122, 43, 0.28), transparent 62%);
-        pointer-events: none;
-      }
-
-      .hearth-access::after {
-        content: "";
-        position: absolute;
-        inset: 1px;
-        z-index: 0;
-        border-radius: calc(var(--r-2xl) - 1px);
-        background:
-          radial-gradient(ellipse at 18% 0%, rgba(255, 245, 230, 0.12), transparent 32%),
-          radial-gradient(ellipse at 88% 96%, rgba(255, 122, 43, 0.08), transparent 38%),
-          linear-gradient(105deg, transparent 0%, rgba(255, 245, 230, 0.06) 43%, rgba(255, 245, 230, 0.015) 52%, transparent 64%),
-          linear-gradient(to bottom, transparent calc(100% - 106px), rgba(255, 235, 200, 0.12) calc(100% - 105px), transparent calc(100% - 104px));
-        opacity: 0.78;
-        pointer-events: none;
-      }
-
-      .hearth-access header {
-        display: block;
-        text-align: center;
-      }
-
-      .hearth-access h2 {
-        font-family: var(--font-display);
-        font-size: var(--text-hero);
-        font-style: italic;
-        font-weight: 400;
-        letter-spacing: 0;
-        line-height: 0.95;
-        text-align: center;
-        text-wrap: balance;
-      }
-
-      .access-kicker {
-        margin-top: var(--s-3);
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
-        letter-spacing: var(--track-label);
-        text-transform: none;
-      }
-
-      .hearth-access__ember {
-        position: relative;
-        width: 120px;
-        height: 120px;
-        margin: -60px auto 10px;
-        display: grid;
-        place-items: center;
-      }
-
-      .hearth-access__ember svg {
-        position: relative;
-        z-index: 2;
-        width: 100%;
-        height: 100%;
-        filter: drop-shadow(0 0 18px rgba(255, 122, 43, 0.45));
-      }
-
-      .hearth-access__halo {
-        position: absolute;
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(255, 122, 43, 0.45) 0%, transparent 64%);
-        pointer-events: none;
-      }
-
-      .hearth-access__halo--1 {
-        inset: -110%;
-        animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite;
-      }
-      .hearth-access__halo--2 {
-        inset: -150%;
-        animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite;
-        animation-delay: 400ms;
-      }
-      .hearth-access__halo--3 {
-        inset: -200%;
-        animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite;
-        animation-delay: 800ms;
-      }
-
+      /* legacy access trimmings — kept in the DOM (parse-time IDs), hidden
+         on the gate; .stack-avatars is shared with the board huddle */
       .waiting-participants {
         min-width: 0;
         overflow: hidden;
-        color: var(--fg-2);
-        font-size: var(--text-2xs);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .access-join {
-        width: 100%;
-        min-height: 48px;
-        margin-top: var(--s-5);
-        border-radius: 16px;
-        transition:
-          background 300ms var(--ease-soft),
-          border-color 300ms var(--ease-soft),
-          box-shadow 300ms var(--ease-soft),
-          color 300ms var(--ease-soft);
-      }
-
-      /* never a flat grey pill — the disabled CTA is a banked ember that
-         visibly ignites when JS drops the attribute */
-      .access-join[disabled] {
-        background: rgba(255, 122, 43, 0.10);
-        border-color: rgba(255, 122, 43, 0.28);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 245, 230, 0.08),
-          inset 0 -1px 0 rgba(255, 122, 43, 0.06);
-        color: var(--ember-300);
-        opacity: 1;
-        animation: cta-breathe var(--pulse-cycle) var(--ease-soft) infinite;
-      }
-
-      @keyframes cta-breathe {
-        0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.08), 0 0 0 rgba(255, 122, 43, 0); }
-        50%      { box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.08), 0 0 24px rgba(255, 122, 43, 0.16); }
-      }
-
-      .hearth-access .access-state {
-        display: none;
-      }
-
-      /* floats below the card as a quiet mono caption — no box, no rule */
       .inside-row {
-        margin: var(--s-5) 0 calc(-1 * var(--s-2));
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: var(--s-3);
-        padding-top: 0;
-        border-top: 0;
-        transform: translateY(var(--s-4));
-        font-family: var(--font-mono);
-        letter-spacing: var(--track-mono);
-        opacity: 0.85;
+        gap: 12px;
+      }
+
+      .inside-row[hidden] {
+        display: none;
       }
 
       .inside-row .who {
@@ -3481,7 +3449,7 @@
       .stack-avatars .more {
         width: 24px;
         height: 24px;
-        border: 2px solid var(--night-1);
+        border: 2px solid var(--bg-app);
         margin-left: -6px;
         font-size: 11px;
       }
@@ -3496,8 +3464,8 @@
         align-items: center;
         justify-content: center;
         border-radius: 999px;
-        background: var(--night-3);
-        color: var(--fg-2);
+        background: var(--surface-3);
+        color: var(--text-2);
         font-family: var(--font-mono);
         font-size: 11px;
       }
@@ -3507,27 +3475,17 @@
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.12em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       .ready-tag .dot {
         width: 5px;
         height: 5px;
         border-radius: 999px;
-        background: var(--fg-3);
+        background: var(--text-3);
         box-shadow: none;
-      }
-
-      .hearth-access.is-verified .ready-tag {
-        color: var(--presence);
-      }
-
-      .hearth-access.is-verified .ready-tag .dot {
-        background: var(--presence);
-        box-shadow: 0 0 0 3px rgba(201, 139, 79, 0.22);
       }
 
       .scout-rail {
@@ -5370,14 +5328,11 @@
       }
 
       @media (max-width: 640px) {
-        .hearth-access {
+        .access-panel {
           width: calc(100vw - 32px);
-          padding: var(--s-4);
         }
-        .hearth-access__ember {
-          width: 96px;
-          height: 96px;
-          bottom: calc(100% + var(--s-3));
+        .login-card {
+          padding: 20px;
         }
         .hearth-stage {
           padding: var(--s-4);
@@ -5699,56 +5654,23 @@
           min-width: 0;
         }
 
-        .access-grid {
-          grid-template-columns: 1fr;
-        }
-
         .board-toolbar {
           align-items: stretch;
           flex-direction: column;
         }
 
-        .hearth-access {
-          width: min(100%, calc(100vw - 16px));
-          padding: 12px var(--s-4) var(--s-4);
-          border-radius: 16px;
+        .access-panel {
+          width: min(100%, calc(100vw - 24px));
+          gap: 20px;
         }
 
-        .hearth-access::before {
-          top: -130px;
-          width: 260px;
-          height: 260px;
-        }
-
-        .hearth-access__ember {
-          width: 96px;
-          height: 96px;
-          margin: -28px auto 10px;
-          bottom: auto;
-        }
-
-        .hearth-access h2 {
-          font-size: 46px;
-          text-wrap: balance;
-        }
-
-        .hearth-access .access-grid {
-          gap: var(--s-2);
-          margin-top: var(--s-4);
+        .login-card {
+          padding: 20px;
+          gap: 14px;
         }
 
         .access-hint {
           min-height: 0;
-        }
-
-        .inside-row {
-          flex-direction: row;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: center;
-          gap: var(--s-2);
-          margin-bottom: 0;
-          transform: translateY(var(--s-2));
         }
 
         /* the call never fully scrolls offscreen — the stage rides sticky
@@ -6505,10 +6427,6 @@
           gap: 6px;
         }
 
-        .hearth-access h2 {
-          font-size: 40px;
-        }
-
         .board-rail__header {
           align-items: stretch;
           flex-direction: column;
@@ -6587,7 +6505,6 @@
       .is-mounting .topbar         { animation-delay: 60ms; }
       .is-mounting .meeting-bar    { animation-delay: 120ms; }
       .is-mounting .board-surface  { animation-delay: 180ms; }
-      .is-mounting .access-panel   { animation-delay: 320ms; }
       .is-mounting .video-stack    { animation-delay: 380ms; }
       .is-mounting .memory-panel   { animation-delay: 440ms; }
       .is-mounting .assistant-panel{ animation-delay: 500ms; }
@@ -6645,13 +6562,6 @@
 
         /* Hearthlight motion under reduced motion: the fire stays lit but
            dimmer and slower; entrances collapse to fades */
-        .hearth-access__halo--1,
-        .hearth-access__halo--2,
-        .hearth-access__halo--3 {
-          animation-duration: 4800ms;
-          filter: opacity(0.5);
-        }
-        .access-join[disabled] { animation: none; }
         .hearth-bloom { animation-duration: 4800ms; }
         .board-preview__card.is-moved { animation: none; }
         .hearth-speaker,
@@ -6728,40 +6638,29 @@
       </header>
 
       <div class="workspace">
-        <section id="accessPanel" class="access-panel hearth-access mount-stagger" aria-label="Meeting access">
-          <div class="hearth-access__ember" aria-hidden="true">
-            <span class="hearth-access__halo hearth-access__halo--3"></span>
-            <span class="hearth-access__halo hearth-access__halo--2"></span>
-            <span class="hearth-access__halo hearth-access__halo--1"></span>
-            <svg viewBox="0 0 64 64" fill="none">
-              <defs>
-                <radialGradient id="accessEmberCore" cx="50%" cy="55%" r="55%">
-                  <stop offset="0%" stop-color="#FBF5F0"></stop>
-                  <stop offset="22%" stop-color="#D4A47A"></stop>
-                  <stop offset="55%" stop-color="#FF7A2B"></stop>
-                  <stop offset="100%" stop-color="#8B4A27"></stop>
-                </radialGradient>
-                <radialGradient id="accessEmberHalo" cx="50%" cy="55%" r="55%">
-                  <stop offset="0%" stop-color="#FF7A2B" stop-opacity="0.4"></stop>
-                  <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
-                </radialGradient>
-              </defs>
-              <circle cx="32" cy="36" r="28" fill="url(#accessEmberHalo)"></circle>
-              <circle cx="32" cy="36" r="14" fill="url(#accessEmberCore)"></circle>
-              <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
+        <section id="accessPanel" class="access-panel" aria-label="Sign in">
+          <button id="loginThemeToggle" class="login-theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
+            <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+            <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+          </button>
+          <header class="login-head login-rise">
+            <svg class="login-flame" width="36" height="36" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
+              <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
             </svg>
-          </div>
-          <header>
-            <div>
-              <h2>join<br>the fire.</h2>
-              <p class="access-kicker">standup · platform team</p>
+            <div class="login-head__text">
+              <h2>Bonfire</h2>
+              <p class="login-subline">sign in to your office</p>
             </div>
-            <span id="accessState" class="access-state">locked</span>
+            <span id="accessState" class="access-state" hidden>locked</span>
           </header>
-          <div class="access-grid">
+          <div class="login-card login-rise login-rise--card">
             <label class="field">
+              <span>work email</span>
+              <input id="loginEmail" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@company.com">
+            </label>
+            <label class="field" hidden>
               <span>participant</span>
-              <select id="participantName" autocomplete="name">
+              <select id="participantName" autocomplete="name" tabindex="-1" aria-hidden="true">
                 <option value="">choose your name</option>
                 <option>Erick</option>
                 <option>Tim</option>
@@ -6776,13 +6675,23 @@
               </select>
             </label>
             <label class="field">
-              <span>room code</span>
-              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="room code">
+              <span>password</span>
+              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="password">
             </label>
+            <button id="joinAccess" class="login-signin" type="button" disabled>Sign in</button>
+            <div class="login-divider" aria-hidden="true">
+              <span class="login-divider__line"></span>
+              <span class="login-divider__label">or</span>
+              <span class="login-divider__line"></span>
+            </div>
+            <button id="passkeySignIn" class="login-passkey" type="button" disabled title="sign in with your password once on this device first.">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg>
+              Sign in with passkey
+            </button>
+            <p id="accessHint" class="access-hint" aria-live="polite">camera and microphone start after the room lets you in.</p>
           </div>
-          <p id="accessHint" class="access-hint">verify access first. camera and microphone start after the room lets you in.</p>
-          <button id="joinAccess" class="btn btn--primary access-join" type="button">Enter</button>
-          <div class="inside-row">
+          <p class="login-foot login-rise login-rise--foot">sessions stay signed in on this device.</p>
+          <div class="inside-row" hidden>
             <div class="who">
               <div id="participantAvatarStack" class="stack-avatars" aria-hidden="true"></div>
               <span id="waitingParticipants" class="waiting-participants">10 seats ready.</span>
@@ -7184,6 +7093,7 @@
          The pre-paint script in <head> applies the stored/system theme before
          first render; these helpers switch + persist it at runtime. */
       const themeStorageKey = 'bonfire.theme.v1'
+      const identityStorageKey = 'bonfire.identity.v1'
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       function applyTheme(theme) {
         const next = theme === 'dark' ? 'dark' : 'light'
@@ -7259,6 +7169,9 @@
       const accessReadyTag = document.getElementById('accessReadyTag')
       const participantNameInput = document.getElementById('participantName')
       const roomPasswordInput = document.getElementById('roomPassword')
+      const loginEmailInput = document.getElementById('loginEmail')
+      const passkeySignInButton = document.getElementById('passkeySignIn')
+      const loginThemeToggleButton = document.getElementById('loginThemeToggle')
       const presentationTile = document.getElementById('presentationTile')
       const screenStage = document.getElementById('screenStage')
       const screenStageVideo = document.getElementById('screenStageVideo')
@@ -7512,11 +7425,14 @@
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
-      themeToggleButton.addEventListener('click', () => {
-        const next = toggleTheme()
-        themeToggleButton.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false')
-      })
-      themeToggleButton.setAttribute('aria-pressed', document.documentElement.dataset.theme === 'dark' ? 'true' : 'false')
+      function syncThemeToggles(theme) {
+        const pressed = theme === 'dark' ? 'true' : 'false'
+        themeToggleButton.setAttribute('aria-pressed', pressed)
+        loginThemeToggleButton.setAttribute('aria-pressed', pressed)
+      }
+      themeToggleButton.addEventListener('click', () => syncThemeToggles(toggleTheme()))
+      loginThemeToggleButton.addEventListener('click', () => syncThemeToggles(toggleTheme()))
+      syncThemeToggles(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
@@ -7544,6 +7460,10 @@
       })
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
+      loginEmailInput.addEventListener('input', validateAccess)
+      loginEmailInput.addEventListener('keydown', submitLoginOnEnter)
+      roomPasswordInput.addEventListener('keydown', submitLoginOnEnter)
+      passkeySignInButton.addEventListener('click', signInWithPasskey)
       assistantForm.addEventListener('submit', sendAssistantQuery)
       scoutTabButtons.forEach(button => {
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
@@ -7994,19 +7914,104 @@
         return selectedParticipantName() !== '' && roomPasswordInput.value.trim() !== ''
       }
 
+      /* the work-email local-part derives the canonical participant name —
+         the reverse of the server's participantEmail(). Any domain is fine;
+         the office roster lives in the hidden #participantName select. */
+      function participantNameFromEmail(value) {
+        const email = String(value || '').trim()
+        const at = email.indexOf('@')
+        if (at <= 0) {
+          return ''
+        }
+        const compact = email.slice(0, at).toLowerCase().replace(/[\s._-]+/g, '')
+        if (compact === 'e') {
+          return 'Erick'
+        }
+        const roster = Array.from(participantNameInput.options).map(option => option.value)
+        return roster.find(name => name && name.toLowerCase().replace(/\s+/g, '') === compact) || ''
+      }
+
       function validateAccess() {
+        const email = loginEmailInput.value.trim()
+        participantNameInput.value = participantNameFromEmail(email)
         const verified = hasValidAccess()
         joinButton.disabled = !verified || Boolean(ws || pc)
         joinAccessButton.disabled = joinButton.disabled
         accessPanel.classList.toggle('is-verified', verified)
         accessState.textContent = verified ? 'ready' : 'locked'
         accessReadyTag.textContent = verified ? 'ready' : 'locked'
-        accessHint.textContent = verified
-          ? `${selectedParticipantName()} is ready to verify.`
-          : 'verify access first. camera and microphone start after the room lets you in.'
+        if (email !== '' && email.includes('@') && selectedParticipantName() === '') {
+          accessHint.textContent = "that address isn't in this office yet."
+        } else if (verified) {
+          accessHint.textContent = `${selectedParticipantName().toLowerCase()} · ready to sign in.`
+        } else {
+          accessHint.textContent = 'camera and microphone start after the room lets you in.'
+        }
+        updatePasskeyButton()
         updateHearthParticipants()
         updateParticipantPreviewText()
         return verified
+      }
+
+      /* passkey affordance — honest: it replays the identity this device
+         cached on the last successful sign-in, nothing more. */
+      function loadCachedIdentity() {
+        try {
+          const raw = window.localStorage?.getItem(identityStorageKey)
+          if (!raw) {
+            return null
+          }
+          const parsed = JSON.parse(raw)
+          const name = String(parsed?.name || '').trim()
+          const password = String(parsed?.password || '')
+          if (!name || !password) {
+            return null
+          }
+          return { email: String(parsed?.email || '').trim(), name, password }
+        } catch {
+          return null
+        }
+      }
+
+      function saveCachedIdentity(name) {
+        try {
+          window.localStorage?.setItem(identityStorageKey, JSON.stringify({
+            email: loginEmailInput.value.trim(),
+            name,
+            password: roomPasswordInput.value
+          }))
+        } catch {
+          /* private mode — the passkey affordance simply stays disabled */
+        }
+        updatePasskeyButton()
+      }
+
+      function updatePasskeyButton() {
+        const identity = loadCachedIdentity()
+        passkeySignInButton.disabled = !identity || Boolean(ws || pc)
+        passkeySignInButton.title = identity
+          ? `continue as ${identity.name.toLowerCase()}`
+          : 'sign in with your password once on this device first.'
+      }
+
+      function signInWithPasskey() {
+        const identity = loadCachedIdentity()
+        if (!identity || ws || pc) {
+          return
+        }
+        loginEmailInput.value = identity.email
+        roomPasswordInput.value = identity.password
+        participantNameInput.value = identity.name
+        if (validateAccess()) {
+          joinRoom()
+        }
+      }
+
+      function submitLoginOnEnter(event) {
+        if (event.key === 'Enter' && !joinAccessButton.disabled) {
+          event.preventDefault()
+          joinRoom()
+        }
       }
 
       async function loadParticipantPreview() {
@@ -8659,8 +8664,12 @@
 
       async function joinRoom() {
         if (!validateAccess()) {
-          setLog('choose your name and enter the room password')
-          roomPasswordInput.focus()
+          setLog('enter your work email and password')
+          if (selectedParticipantName() === '') {
+            loginEmailInput.focus()
+          } else {
+            roomPasswordInput.focus()
+          }
           return
         }
         unlockRoomAudioPlayback()
@@ -8671,6 +8680,7 @@
         updateHearthParticipants()
         joinButton.disabled = true
         joinAccessButton.disabled = true
+        passkeySignInButton.disabled = true
         setConnectionState('connecting', 'connecting…')
         setLog('checking room access')
 
@@ -11851,6 +11861,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
         currentParticipantName = name
+        saveCachedIdentity(name)
         railAvatarEl.textContent = participantInitials(name)
         railAvatarEl.title = name
         localVideoLabel.textContent = name
