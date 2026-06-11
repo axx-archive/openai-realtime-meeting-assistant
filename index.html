@@ -412,90 +412,215 @@
 
       main {
         display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr) auto;
-        gap: var(--s-3);
+        grid-template-areas:
+          "rail topbar"
+          "rail workspace"
+          "rail dock";
         min-height: 100vh;
         min-height: 100svh;
         position: relative;
         isolation: isolate;
-        padding: max(var(--s-3), env(safe-area-inset-top)) max(var(--s-3), env(safe-area-inset-right)) max(var(--s-3), env(safe-area-inset-bottom)) max(var(--s-3), env(safe-area-inset-left));
+      }
+
+      /* the shell (rail + topbar) only exists once you're signed in;
+         pre-auth the gate stands alone on the ambient backdrop. */
+      #appShell:not(.is-authed) .tool-rail,
+      #appShell:not(.is-authed) .topbar {
+        display: none;
       }
 
 
-      /* ---------- Topbar ---------- */
-      .topbar {
+      /* ---------- Tool rail (the OS's left edge) ---------- */
+      .tool-rail {
+        grid-area: rail;
         position: relative;
-        display: grid;
-        grid-template-columns: auto auto 1fr auto auto;
-        gap: var(--s-3);
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
         align-items: center;
-        min-height: 44px;
-        padding: 4px 6px;
+        gap: var(--sp-2);
+        width: 64px;
+        flex: none;
+        padding: 14px 0;
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border-right: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight);
+      }
+
+      .tool-rail__flame {
+        flex: none;
+        margin-bottom: 12px;
+        color: var(--accent);
+      }
+
+      .tool-rail__slot {
+        position: relative;
+        display: flex;
+        flex: none;
+      }
+
+      .tool-rail__tool {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-3);
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease);
+      }
+      .tool-rail__tool:hover {
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+      .tool-rail__tool:active {
+        transform: scale(var(--press-scale));
+      }
+      .tool-rail__tool[aria-pressed="true"] {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-1);
+      }
+      .tool-rail__tool[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* live dot — the room is live while you're in it */
+      .tool-rail__live {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--live);
+        border: 2px solid var(--bg-app);
+        opacity: 0;
+        transition: opacity var(--dur-med) var(--ease);
+        pointer-events: none;
+      }
+      #appShell.is-in-room .tool-rail__live {
+        opacity: 1;
+      }
+
+      .tool-rail__spacer {
+        flex: 1;
+      }
+
+      /* theme toggle — moon offers dark, sun offers light */
+      .tool-rail__theme .tool-rail__icon--sun { display: none; }
+      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--sun { display: block; }
+      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--moon { display: none; }
+
+      .tool-rail__avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        font: 500 10px/1 var(--font-sans);
+        color: var(--text-2);
+        text-transform: uppercase;
+        user-select: none;
+      }
+
+      /* ---------- Topbar (kit chrome glass) ---------- */
+      .topbar {
+        grid-area: topbar;
+        position: relative;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        gap: var(--sp-4);
+        min-height: 60px;
+        padding: 0 20px;
         border: 0;
         border-radius: 0;
-        background: transparent;
-        box-shadow: none;
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border-bottom: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight);
       }
 
-      .topbar__copy-link {
-        min-height: 32px;
-        padding: 5px 12px;
-        border-color: transparent;
-        background: transparent;
-        color: var(--fg-2);
-        font-size: 12px;
+      .topbar__mark {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 auto;
+        color: var(--text-2);
+        transition: color var(--dur-med) var(--ease);
       }
-      .topbar__copy-link:hover {
-        color: var(--fg-0);
-        background: rgba(255, 235, 200, 0.06);
+      .topbar__mark svg {
+        width: 20px;
+        height: 20px;
       }
-      #appShell:not(.is-in-room) .topbar__copy-link {
-        display: none;
+      .topbar__mark.is-listening {
+        color: var(--live);
+      }
+      /* hot-ember handshake — recognition flares the mark for 1.6s */
+      .topbar__mark.is-hot-ember {
+        color: var(--live);
+      }
+      .topbar__mark.is-hot-ember svg {
+        filter: drop-shadow(0 0 6px rgba(48, 209, 88, 0.45));
+      }
+
+      .topbar__heading {
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        color: var(--text-1);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
       }
 
       .topbar__meta {
         display: flex;
         align-items: center;
-        gap: 14px;
-        justify-content: center;
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        gap: 10px;
+        font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--fg-2);
+        color: var(--text-3);
         text-transform: lowercase;
         font-variant-numeric: tabular-nums;
         min-width: 0;
         overflow: hidden;
+        white-space: nowrap;
       }
       .topbar__meta-item {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      /* the room's name outranks the machine state around it */
-      .topbar__meta-item b {
-        color: var(--fg-0);
-        font-family: var(--font-sans);
-        font-size: 13.5px;
-        font-weight: 500;
-        letter-spacing: var(--track-sans);
-        text-transform: none;
-      }
       #topbarElapsed[data-started="true"]::after {
         content: " elapsed";
       }
       .topbar__meta-sep {
-        width: 1px;
-        height: 14px;
-        background: var(--line);
         flex: 0 0 auto;
+        color: var(--text-3);
       }
       .topbar__meta-pill {
         flex: 0 0 auto;
-        font-family: var(--font-sans);
-        text-transform: none;
-        letter-spacing: 0;
       }
       .topbar__meta-sep--room,
       .topbar__meta-pill {
@@ -509,82 +634,103 @@
         display: none;
       }
 
+      .topbar__spacer {
+        flex: 1;
+      }
+
       .topbar > .pill {
-        justify-self: end;
-        width: max-content;
+        flex: none;
         max-width: 100%;
       }
 
-      .topbar__mark {
-        position: relative;
-        display: grid;
-        place-items: center;
-        width: 30px;
-        height: 30px;
-        flex: 0 0 auto;
+      .topbar__copy-link {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        height: 32px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        white-space: nowrap;
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease);
+      }
+      .topbar__copy-link:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+      .topbar__copy-link:active {
+        transform: scale(var(--press-scale));
+      }
+      .topbar__copy-link svg {
+        flex: none;
+      }
+      #appShell:not(.is-in-room) .topbar__copy-link {
+        display: none;
       }
 
-      .topbar__mark svg {
-        position: relative;
-        z-index: 2;
-        width: 100%;
-        height: 100%;
-        border-radius: var(--r-pill);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 235, 200, 0.12),
-          0 0 0 1px rgba(255, 255, 255, 0.06),
-          0 10px 24px rgba(0, 0, 0, 0.24),
-          0 0 28px rgba(255, 122, 43, 0.18);
+      /* ---------- Pills (kit display/Pill) ---------- */
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        height: 28px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--r-full);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        background: var(--surface-3);
+        color: var(--text-2);
+        transition:
+          background var(--dur-med) var(--ease),
+          color var(--dur-med) var(--ease);
+      }
+      .pill__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-full);
+        background: currentColor;
+        flex: none;
+      }
+      /* breathe — ONLY while the room actually listens */
+      .pill--listening {
+        background: var(--live-soft);
+        color: var(--live);
+      }
+      .pill--listening .pill__dot {
+        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+      .pill--idle {
+        background: var(--surface-3);
+        color: var(--text-2);
+      }
+      .pill--room {
+        background: var(--live-soft);
+        color: var(--live);
+      }
+      .pill--connecting {
+        background: var(--info-soft);
+        color: var(--info);
+      }
+      .pill--offline {
+        background: var(--danger-soft);
+        color: var(--danger);
       }
 
-      /* Three stacked halos, phased — the brand's signature motion.
-         halo-1 leads (largest peak), halo-2 trails by 1/6 cycle, halo-3 by 1/3.
-         Default opacity 0 means the pulse is invisible until .is-listening latches. */
-      .topbar__mark .listening-halo {
-        position: absolute;
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(255, 122, 43,0.45) 0%, transparent 60%);
-        z-index: 1;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity var(--t-base) var(--ease-soft);
-        will-change: transform, opacity;
+      @keyframes bf-breathe {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.45; transform: scale(0.72); }
       }
-      .topbar__mark .listening-halo--1 { inset: -8px; }
-      .topbar__mark .listening-halo--2 { inset: -16px; }
-      .topbar__mark .listening-halo--3 { inset: -26px; }
 
-      .topbar__mark.is-listening .listening-halo--1 {
-        animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite;
-      }
-      .topbar__mark.is-listening .listening-halo--2 {
-        animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite;
-        animation-delay: 400ms;
-      }
-      .topbar__mark.is-listening .listening-halo--3 {
-        animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite;
-        animation-delay: 800ms;
-      }
-      /* hot-ember handshake: a dedicated overlay halo owns its own 1800ms
-         clock and fades in/out — running halos never have their duration
-         mutated mid-flight (that caused a visible phase jump). */
-      .topbar__mark::after {
-        content: "";
-        position: absolute;
-        inset: -20px;
-        border-radius: 999px;
-        background: radial-gradient(circle, rgba(255, 122, 43, 0.5) 0%, transparent 60%);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity var(--t-base) var(--ease-soft);
-        z-index: 1;
-      }
-      .topbar__mark.is-hot-ember::after {
-        opacity: 1;
-        animation: pulse-halo-1 1800ms var(--ease-soft) infinite;
-      }
-      .topbar__mark.is-hot-ember svg { filter: drop-shadow(0 0 14px rgba(255, 122, 43,0.65)); }
-
+      /* legacy halo/dot clocks — consumers remain in access/speaker/dock
+         surfaces until WP3/WP4 rewrite them */
       @keyframes pulse-halo-1 {
         0%, 100% { transform: scale(0.88); opacity: 0; }
         50%      { transform: scale(1.06); opacity: 0.55; }
@@ -597,85 +743,6 @@
         0%, 100% { transform: scale(0.94); opacity: 0; }
         50%      { transform: scale(1.14); opacity: 0.14; }
       }
-
-      .topbar__title { display: grid; gap: 1px; min-width: 0; }
-      .topbar__title h1 {
-        font-family: var(--font-sans);
-        font-size: 15px;
-        font-weight: 600;
-        letter-spacing: 0;
-        color: var(--fg-0);
-        text-wrap: balance;
-      }
-      .topbar__title p {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-2);
-        letter-spacing: 0.11em;
-        text-transform: none;
-        font-feature-settings: "ss01" on, "ss02" on;
-      }
-
-      .topbar__title p:empty {
-        display: none;
-      }
-
-      /* ---------- Status pill ---------- */
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--s-2);
-        padding: 5px var(--s-3);
-        border: 1px solid transparent;
-        border-radius: var(--r-pill);
-        font-family: var(--font-sans);
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 1;
-        white-space: nowrap;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        transition:
-          background 300ms var(--ease-soft),
-          border-color 300ms var(--ease-soft),
-          color 300ms var(--ease-soft);
-      }
-      .pill__dot { width: 7px; height: 7px; border-radius: 999px; }
-      .pill--listening {
-        background: rgba(255, 122, 43,0.12);
-        color: var(--ember-300);
-        animation: pill-ignite 900ms var(--ease-out) 1;
-      }
-      @keyframes pill-ignite {
-        0%   { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--glow-ember-md); }
-        100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 rgba(255, 122, 43, 0); }
-      }
-      .pill--listening .pill__dot {
-        background: var(--ember-500);
-        box-shadow: 0 0 8px var(--ember-500);
-        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
-      }
-      .pill--idle {
-        background: linear-gradient(180deg, rgba(255, 235, 200, 0.10), rgba(255, 235, 200, 0.05));
-        border-color: rgba(255, 235, 200, 0.09);
-        color: var(--fg-1);
-      }
-      .pill--idle .pill__dot { background: var(--fg-3); }
-      .pill--room {
-        background: var(--presence-bg);
-        border-color: rgba(201, 139, 79, 0.32);
-        color: var(--presence);
-      }
-      .pill--room .pill__dot { background: var(--presence); }
-      .pill--connecting { background: var(--info-bg); color: var(--info); }
-      .pill--connecting .pill__dot {
-        background: var(--info);
-        animation: dot-pulse 1.2s var(--ease-soft) infinite;
-      }
-      .pill--offline { background: var(--danger-bg); color: var(--danger); }
-      .pill--offline .pill__dot { background: var(--danger); }
-
       @keyframes dot-pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50%      { opacity: 0.55; transform: scale(0.86); }
@@ -683,10 +750,16 @@
 
       /* ---------- Workspace ---------- */
       .workspace {
+        grid-area: workspace;
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px);
         gap: var(--s-3);
         min-height: 0;
+        padding: var(--sp-3) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-3), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
+      }
+
+      .meeting-bar {
+        grid-area: dock;
       }
 
       .video-stack {
@@ -5576,46 +5649,31 @@
       }
 
       @media (max-width: 640px) {
-        main {
+        .workspace {
           gap: var(--s-2);
-          padding: max(var(--s-2), env(safe-area-inset-top)) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
+          padding: var(--s-2) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
         }
 
-        /* the live clock can never be squeezed — its column is max-content */
+        .tool-rail {
+          width: 56px;
+        }
+
+        /* the live clock can never be squeezed */
         .topbar {
-          min-height: 0;
-          gap: var(--s-2);
-          padding: 9px 10px;
-          border-radius: var(--r-md);
-          grid-template-columns: auto minmax(0, 1fr) max-content auto auto;
+          min-height: 52px;
+          gap: var(--sp-2);
+          padding: 0 12px;
         }
 
-        .topbar__title p {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .topbar__mark {
-          width: 32px;
-          height: 32px;
-        }
-
-        .topbar__title h1 {
+        .topbar__heading {
           font-size: 15px;
         }
 
         .topbar > .pill {
-          min-height: 30px;
           max-width: min(148px, 36vw);
           overflow: hidden;
           padding: 0 10px;
           text-overflow: ellipsis;
-        }
-
-        .topbar__meta {
-          font-size: 11px;
-          letter-spacing: 0.04em;
         }
 
         /* The narrow topbar only has room for the digits — drop the suffix
@@ -6436,10 +6494,6 @@
       }
 
       @media (max-width: 360px) {
-        .topbar__title p {
-          letter-spacing: var(--track-mono);
-        }
-
         .btn {
           font-size: 13px;
         }
@@ -6584,13 +6638,6 @@
         .board-video-tile:focus-visible { transform: none; }
         .board-preview__card:hover { transform: none; }
         .spark { display: none; }
-        .topbar__mark.is-listening .listening-halo--1 { animation-duration: 4800ms; }
-        .topbar__mark.is-listening .listening-halo--2 { animation-duration: 4800ms; }
-        .topbar__mark.is-listening .listening-halo--3 { animation-duration: 4800ms; }
-        .topbar__mark.is-listening .listening-halo {
-          /* Halve peak opacity for sensitive viewers. */
-          filter: opacity(0.5);
-        }
         .pill--listening .pill__dot,
         .pill--connecting .pill__dot,
         .dock-scout-state__dot { animation: none; }
@@ -6606,8 +6653,6 @@
         }
         .access-join[disabled] { animation: none; }
         .hearth-bloom { animation-duration: 4800ms; }
-        .topbar__mark.is-hot-ember::after { animation: none; opacity: 0.5; }
-        .pill--listening { animation: none; }
         .board-preview__card.is-moved { animation: none; }
         .hearth-speaker,
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats { animation: none; }
@@ -6621,48 +6666,61 @@
     </style>
   </head>
   <body>
-    <main id="appShell">
+    <main id="appShell" data-tool="room">
+      <nav id="toolRail" class="tool-rail mount-stagger" aria-label="Tools">
+        <svg class="tool-rail__flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
+          <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
+        </svg>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="Room" title="Room" aria-pressed="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
+          </button>
+          <span class="tool-rail__live" aria-hidden="true"></span>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" title="Chat" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" title="Memory" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__spacer" aria-hidden="true"></span>
+        <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
+          <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+          <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+        </button>
+        <span id="railAvatar" class="tool-rail__avatar" aria-hidden="true">·</span>
+      </nav>
       <header class="topbar mount-stagger">
         <span id="brandMark" class="topbar__mark" aria-hidden="true">
-          <span class="listening-halo listening-halo--3"></span>
-          <span class="listening-halo listening-halo--2"></span>
-          <span class="listening-halo listening-halo--1"></span>
-          <svg viewBox="0 0 64 64" fill="none">
-            <defs>
-              <radialGradient id="emberCore" cx="50%" cy="55%" r="55%">
-                <stop offset="0%"   stop-color="#FBF5F0"></stop>
-                <stop offset="22%"  stop-color="#D4A47A"></stop>
-                <stop offset="55%"  stop-color="#FF7A2B"></stop>
-                <stop offset="100%" stop-color="#8B4A27"></stop>
-              </radialGradient>
-              <radialGradient id="emberHalo" cx="50%" cy="55%" r="55%">
-                <stop offset="0%"   stop-color="#FF7A2B" stop-opacity="0.4"></stop>
-                <stop offset="100%" stop-color="#FF7A2B" stop-opacity="0"></stop>
-              </radialGradient>
-            </defs>
-            <circle cx="32" cy="32" r="31" fill="#110D09"></circle>
-            <circle cx="32" cy="36" r="27" fill="url(#emberHalo)"></circle>
-            <circle cx="32" cy="36" r="14" fill="url(#emberCore)"></circle>
-            <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
+          <svg viewBox="0 0 64 64">
+            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
           </svg>
         </span>
-        <div class="topbar__title">
-          <h1>Bonfire</h1>
-          <p>agentic meeting room</p>
-        </div>
+        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span></h1>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
-          <span class="topbar__meta-item"><b id="topbarProject">platform standup</b></span>
-          <span class="topbar__meta-sep" aria-hidden="true"></span>
           <span class="topbar__meta-item" id="topbarDate">—</span>
-          <span class="topbar__meta-sep" aria-hidden="true"></span>
+          <span class="topbar__meta-sep" aria-hidden="true">·</span>
           <span class="topbar__meta-item" id="topbarElapsed" data-started="false">not started</span>
-          <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true"></span>
+          <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true">·</span>
           <span id="topbarRoomPill" class="pill pill--room topbar__meta-pill" data-state="waiting">
             <span class="pill__dot"></span>
             <span id="topbarRoomState">in the room</span>
           </span>
         </div>
-        <button id="copyRoomLink" class="btn btn--ghost topbar__copy-link" type="button">Copy link</button>
+        <span class="topbar__spacer" aria-hidden="true"></span>
+        <button id="copyRoomLink" class="topbar__copy-link" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+          Copy link
+        </button>
         <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
           <span class="pill__dot"></span>
           <span id="statusText">not connected</span>
@@ -7146,6 +7204,11 @@
 
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
       const appShell = document.getElementById('appShell')
+      const toolRail = document.getElementById('toolRail')
+      const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
+      const toolBoardButton = document.getElementById('toolBoard')
+      const themeToggleButton = document.getElementById('themeToggle')
+      const railAvatarEl = document.getElementById('railAvatar')
       const boardEl = document.getElementById('board')
       const boardSurface = document.getElementById('boardSurface')
       const boardHero = document.getElementById('boardHero')
@@ -7446,6 +7509,14 @@
       resetVoiceFocusButton.addEventListener('click', resetVoiceFocusProfile)
       screenShareButton.addEventListener('click', toggleScreenShare)
       copyRoomLinkButton.addEventListener('click', copyRoomLink)
+      toolButtons.forEach(button => {
+        button.addEventListener('click', () => setActiveTool(button.dataset.tool))
+      })
+      themeToggleButton.addEventListener('click', () => {
+        const next = toggleTheme()
+        themeToggleButton.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false')
+      })
+      themeToggleButton.setAttribute('aria-pressed', document.documentElement.dataset.theme === 'dark' ? 'true' : 'false')
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
@@ -8109,12 +8180,56 @@
 
       function setRoomView(inRoom) {
         appShell.classList.toggle('is-in-room', inRoom)
+        appShell.classList.toggle('is-authed', inRoom)
         if (!inRoom) {
           setBoardExpanded(false)
+          setActiveTool('room')
         }
         syncScoutChatToRoomView(inRoom)
         updateParticipantPreviewText()
         updateHearthParticipants()
+      }
+
+      /* ---------- tool routing (glass & ink shell) ----------
+         data-tool on #appShell names the active tool. It coexists with the
+         meeting state machine (is-in-room / is-board-expanded / stage modes):
+         the Board tool delegates to setBoardExpanded, and every existing
+         expand/collapse path syncs the rail through applyToolState. */
+      const TOOL_IDS = ['room', 'chat', 'board', 'memory']
+      let lastNonBoardTool = 'room'
+
+      function applyToolState(tool) {
+        appShell.dataset.tool = tool
+        if (tool !== 'board') {
+          lastNonBoardTool = tool
+        }
+        toolButtons.forEach(button => {
+          button.setAttribute('aria-pressed', button.dataset.tool === tool ? 'true' : 'false')
+        })
+      }
+
+      function setActiveTool(tool) {
+        const next = TOOL_IDS.includes(tool) ? tool : 'room'
+        if (next === 'board') {
+          // gated on isBoardReady inside; syncs data-tool itself
+          setBoardExpanded(true)
+          return
+        }
+        applyToolState(next)
+        if (appShell.classList.contains('is-board-expanded')) {
+          setBoardExpanded(false)
+        }
+      }
+      window.setActiveTool = setActiveTool
+
+      function participantInitials(name) {
+        const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+        if (!parts.length) {
+          return '·'
+        }
+        const first = parts[0][0] || ''
+        const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : ''
+        return (first + last).toUpperCase() || '·'
       }
 
       function setBoardExpanded(expanded) {
@@ -8123,6 +8238,9 @@
         }
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
+        applyToolState(expanded
+          ? 'board'
+          : (appShell.dataset.tool === 'board' ? lastNonBoardTool : appShell.dataset.tool || 'room'))
         renderBoardHuddle()
         renderBoardDock()
         closeBoardDockMenu()
@@ -11733,6 +11851,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
         currentParticipantName = name
+        railAvatarEl.textContent = participantInitials(name)
+        railAvatarEl.title = name
         localVideoLabel.textContent = name
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         setRoomView(true)
@@ -15009,6 +15129,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         newCardButton.disabled = !canEditBoard
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
+        toolBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
           ? `${cards.length} card${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
