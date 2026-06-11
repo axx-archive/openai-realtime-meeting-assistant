@@ -1261,32 +1261,35 @@
         text-transform: lowercase;
       }
 
+      /* panel glass per the kit BoardPanel — the big board sheet refracts
+         the ambient canvas; the specular top edge rides --glass-highlight */
       .board-surface {
         min-height: 0;
         max-width: 100%;
         overflow: auto;
-        border-radius: var(--r-md);
-        background: var(--ash-50);
-        color: var(--fg-inverse);
-        padding: var(--s-4);
-        border: 1px solid var(--line);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        color: var(--text-1);
+        padding: var(--sp-4);
       }
 
       .board-toolbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-3);
-        margin-bottom: var(--s-3);
+        gap: var(--sp-3);
+        margin-bottom: var(--sp-3);
       }
 
       .board-status {
         min-width: 0;
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
         font-variant-numeric: tabular-nums;
       }
@@ -1294,7 +1297,7 @@
       .board-tools {
         display: flex;
         align-items: center;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         flex-wrap: wrap;
         justify-content: flex-end;
       }
@@ -1312,249 +1315,234 @@
       .board {
         display: grid;
         grid-template-columns: repeat(4, minmax(180px, 1fr));
-        gap: var(--s-3);
+        gap: var(--sp-3);
         align-items: start;
         min-width: 768px;
       }
 
+      /* kit columns are unboxed — hairlines and space do the separating */
       .column {
         display: grid;
-        gap: var(--s-3);
-        background: #FFF;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-md);
-        padding: var(--s-3);
+        align-content: start;
+        gap: var(--sp-2);
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
         min-width: 0;
       }
 
       .column header {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         justify-content: space-between;
-      }
-
-      .column h2 {
-        font-family: var(--font-sans);
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.3;
-        color: var(--fg-inverse);
-        display: inline-flex;
-        align-items: center;
         gap: 8px;
       }
 
-      .column h2::before {
-        content: "";
-        width: 6px;
-        height: 6px;
-        border-radius: 999px;
-        background: var(--ash-500);
-        flex: 0 0 auto;
+      .column h2 {
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
       }
-      .column--backlog h2::before { background: var(--ash-500); }
-      .column--in-progress h2::before { background: var(--ember-500); }
-      .column--blocked h2::before { background: var(--amber-500); }
-      .column--done h2::before { background: var(--presence); }
 
       .count {
         display: inline-grid;
         place-items: center;
-        min-width: 22px;
-        height: 22px;
-        padding: 0 7px;
-        border-radius: 999px;
-        background: var(--ash-100);
-        color: var(--ash-700);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
+        min-width: 0;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         font-variant-numeric: tabular-nums;
       }
 
-      .stack { display: grid; gap: var(--s-2); }
+      .stack { display: grid; gap: var(--sp-2); }
 
       .empty {
-        font-family: var(--font-display);
-        font-size: 19px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         font-style: italic;
-        font-weight: 400;
-        line-height: 1.15;
-        color: var(--ash-600);
-        padding: var(--s-3) 0;
-        font-optical-sizing: auto;
-        letter-spacing: 0;
+        color: var(--text-3);
+        padding: var(--sp-2) 0;
       }
 
       /* When all four columns are empty, the board surface gets a single
          centered hero line above the columns. */
       .board-hero {
         display: none;
-        font-family: var(--font-display);
-        font-size: 24px;
-        font-style: italic;
-        font-weight: 400;
-        line-height: 1.15;
-        color: var(--ash-600);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        color: var(--text-3);
         text-align: center;
-        letter-spacing: 0;
-        padding: var(--s-7) var(--s-3) var(--s-4);
-        font-optical-sizing: auto;
+        padding: var(--sp-8) var(--sp-3) var(--sp-4);
       }
       .board-surface.is-empty .board-hero { display: block; }
       .board-surface.is-locked .board-hero { display: block; }
       .board-surface.is-empty .board { opacity: 0.42; }
-      .board-surface.is-empty .board { transition: opacity 200ms var(--ease-soft); }
+      .board-surface.is-empty .board { transition: opacity var(--dur-med) var(--ease); }
 
+      /* kit Card — surface-2, hairline, radius 16, no shadow at rest */
       .card {
         display: grid;
-        gap: var(--s-2);
-        background: #FFF;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-md);
-        padding: var(--s-3);
+        gap: 8px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        padding: 12px 14px;
         cursor: pointer;
-        box-shadow: var(--shadow-light-1);
-        /* Pre-hover staging: shadow lifts in 60ms (warm-up), then translate
-           kicks in at 60ms so it never feels like a pop. */
-        transition: box-shadow 60ms var(--ease-soft),
-                    background var(--t-base) var(--ease-soft),
-                    border-color var(--t-base) var(--ease-soft),
-                    transform 160ms var(--ease-soft) 60ms;
+        box-shadow: none;
+        transition: background var(--dur-fast) var(--ease),
+                    border-color var(--dur-fast) var(--ease),
+                    box-shadow var(--dur-med) var(--ease),
+                    transform var(--dur-fast) var(--ease);
       }
 
       .card:hover {
-        background: var(--ash-50);
-        box-shadow: var(--shadow-light-2);
-        transform: translateY(-1px);
+        background: var(--surface-3);
       }
       .card:focus-visible {
-        outline: none;
-        box-shadow: var(--glow-ember-sm), var(--shadow-light-2);
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
-      .card:active { transform: scale(0.985); }
+      .card:active { transform: scale(var(--press-scale)); }
 
       .card-heading {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: start;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .card-heading strong {
-        font-family: var(--font-sans);
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.3;
-        color: var(--fg-inverse);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
         min-width: 0;
         overflow-wrap: break-word;
         text-wrap: pretty;
       }
 
       .card p {
-        color: var(--ash-600);
-        font-size: 13px;
-        line-height: 1.45;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
       }
 
       .card-meta {
         display: flex;
         align-items: center;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-width: 0;
-        color: var(--ash-600);
-        font-size: 12px;
-        line-height: 1.2;
+        color: var(--text-2);
+        font: var(--type-caption);
       }
 
-      .card-meta .owner-avatar {
-        width: 20px;
-        height: 20px;
-        border-width: 1px;
+      /* kit Badge row — owner · name, then the date badge with its tone */
+      .card-badges {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        min-width: 0;
       }
 
+      .card-badge,
       .card-date {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        min-width: 0;
-        color: var(--due-future);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
-        letter-spacing: var(--track-mono);
-        line-height: 1.2;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
         text-transform: none;
       }
 
-      .card-date__dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 999px;
-        background: currentColor;
-        flex: 0 0 auto;
-      }
-
-      /* ranked due semantics — red belongs to overdue alone */
+      /* date tones per kit Badge — accent today · danger overdue · live shipped */
       .card-date[data-date-state="soon"] {
-        color: var(--warning-fg);
+        border-color: transparent;
+        background: var(--warn-soft);
+        color: var(--warn);
       }
 
       .card-date[data-date-state="today"] {
-        color: var(--warning-fg);
-        font-weight: 600;
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--on-accent);
       }
 
       .card-date[data-date-state="overdue"] {
+        border-color: transparent;
+        background: var(--danger-soft);
         color: var(--danger);
       }
 
       .card-date[data-date-state="done"] {
-        color: var(--success-fg);
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
       }
 
+      /* kit Avatar — initials on a quiet surface, never colorful per-user */
       .owner-avatar {
         display: inline-grid;
         place-items: center;
         overflow: hidden;
         width: 28px;
         height: 28px;
-        border: 2px solid #FFF;
-        border-radius: 999px;
-        background: transparent;
-        box-shadow: 0 0 0 1px rgba(11, 8, 5, 0.14);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
         flex-shrink: 0;
       }
       .owner-avatar .monogram { width: 100%; height: 100%; }
-      .owner-avatar.large { width: 44px; height: 44px; border-width: 3px; }
+      .owner-avatar.large { width: 44px; height: 44px; }
 
       .monogram {
         width: 28px;
         height: 28px;
-        border-radius: 999px;
+        border-radius: var(--r-full);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-family: var(--font-sans);
-        font-size: 12.5px;
-        font-weight: 500;
+        font: 500 12.5px/1 var(--font-sans);
         letter-spacing: 0;
-        line-height: 1;
       }
 
-      .mono--ember { background: linear-gradient(155deg, #D4A47A, #FF7A2B); color: #0B0805; }
-      .mono--amber { background: linear-gradient(155deg, #F5E6D8, #D4A47A); color: #0B0805; }
-      .mono--rust  { background: linear-gradient(155deg, #D4A47A, #8B4A27); color: #FBF5F0; }
-      .mono--ash   { background: linear-gradient(155deg, #F2ECDD, #948876); color: var(--fg-inverse); }
-      .mono--ink   { background: linear-gradient(155deg, #2A211A, #110D09); color: var(--fg-0); }
+      .mono--ember,
+      .mono--amber,
+      .mono--rust,
+      .mono--ash,
+      .mono--ink {
+        background: var(--surface-3);
+        color: var(--text-2);
+      }
 
       .card.moved {
-        animation: card-move-wiggle 1100ms var(--ease-soft);
-        border-color: var(--ember-500);
-        box-shadow: var(--glow-ember-md);
+        animation: card-place var(--dur-slow) var(--ease-spring);
+        border-color: transparent;
+        box-shadow: var(--glow-accent);
         transform-origin: 50% 50%;
         will-change: transform;
+      }
+
+      /* a fresh Scout-created card earns the accent glow until it settles */
+      .card.is-fresh,
+      .board-preview__card.is-fresh {
+        border-color: transparent;
+        box-shadow: var(--glow-accent);
       }
 
       /* tags removed from kanban cards per design spec */
@@ -1971,16 +1959,6 @@
         color: var(--text-1);
       }
 
-      .board-dock::before {
-        content: "";
-        position: absolute;
-        inset: 1px 10px auto;
-        height: 1px;
-        border-radius: 999px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
-        pointer-events: none;
-      }
-
       /* the mic selector lives in the audio-focus dialog now — plumbing
          belongs with the mixer, verbs stay in the bar */
       .device-control {
@@ -2291,51 +2269,52 @@
         z-index: 1050;
         display: grid;
         place-items: center;
-        padding: var(--s-6);
+        padding: var(--sp-6);
         pointer-events: none;
       }
 
       .comment-preview {
         display: grid;
-        gap: var(--s-3);
+        gap: var(--sp-3);
         width: min(560px, calc(100vw - 48px));
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-lg);
-        background: #FFF;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-2xl);
+        background: var(--surface-1);
         box-shadow: var(--shadow-3);
-        color: var(--fg-inverse);
-        padding: var(--s-5);
+        color: var(--text-1);
+        padding: var(--sp-5);
         transform-origin: 50% 60%;
-        animation: comment-preview-open 260ms cubic-bezier(0.2, 0.9, 0.2, 1.15);
+        animation: comment-preview-open var(--dur-slow) var(--ease-spring);
       }
 
       .comment-preview.closing {
-        animation: comment-preview-close 220ms ease-in forwards;
+        animation: comment-preview-close var(--dur-med) var(--ease) forwards;
       }
 
       .comment-preview-meta {
         justify-self: start;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
-        border-radius: var(--r-pill);
-        background: rgba(255, 122, 43, 0.12);
-        color: var(--ember-700);
-        padding: 6px 10px;
       }
 
       .comment-preview-title {
-        font-family: var(--font-sans);
-        font-size: 18px;
-        font-weight: 500;
-        line-height: 1.25;
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
       }
 
       .comment-preview-details {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .comment-preview-detail {
@@ -2344,29 +2323,26 @@
       }
 
       .comment-preview-detail-label {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
-        color: var(--ash-600);
+        color: var(--text-3);
       }
 
       .comment-preview-detail-value {
-        font-family: var(--font-sans);
-        color: var(--fg-inverse);
-        font-size: 13px;
-        line-height: 1.5;
+        color: var(--text-1);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
         white-space: pre-wrap;
       }
 
       .comment-preview-latest {
         display: grid;
         gap: 6px;
-        border-radius: var(--r-md);
-        background: rgba(255, 122, 43, 0.08);
-        border: 1px solid rgba(255, 122, 43, 0.16);
-        padding: var(--s-3);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        padding: var(--sp-3);
       }
 
       /* ---------- Card detail modal ---------- */
@@ -2379,18 +2355,16 @@
         visibility: hidden;
         opacity: 0;
         place-items: center;
-        padding: var(--s-6);
-        background: rgba(11, 8, 5, 0.62);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        transition: opacity 200ms var(--ease-soft), visibility 0s linear 200ms;
+        padding: var(--sp-6);
+        background: var(--scrim);
+        transition: opacity var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
       }
 
       .card-detail-region.visible {
         display: grid;
         visibility: visible;
         opacity: 1;
-        transition: opacity 200ms var(--ease-soft), visibility 0s;
+        transition: opacity var(--dur-med) var(--ease), visibility 0s;
       }
 
       /* kit Dialog — scrim, opaque surface-1 box, radius 28, shadow-3 */
@@ -2634,6 +2608,8 @@
         }
       }
 
+      /* kit Dialog — opaque surface-1, radius 28, shadow-3; no blur on the
+         dialog itself */
       .card-detail {
         display: flex;
         flex-direction: column;
@@ -2641,14 +2617,11 @@
         width: min(680px, calc(100vw - 48px));
         max-height: calc(100vh - 48px);
         overflow: auto;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-xl);
-        background: linear-gradient(180deg, #FFFFFF, var(--ash-50));
-        box-shadow:
-          0 1px 0 rgba(255, 255, 255, 0.6) inset,
-          0 60px 120px rgba(0, 0, 0, 0.55),
-          0 12px 24px rgba(0, 0, 0, 0.35);
-        color: var(--fg-inverse);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-2xl);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-3);
+        color: var(--text-1);
         padding: 0;
       }
 
@@ -2661,7 +2634,7 @@
         grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: start;
         gap: 14px;
-        padding: 12px var(--s-6) 16px;
+        padding: 12px var(--sp-6) 16px;
       }
 
       .card-detail-title {
@@ -2671,89 +2644,85 @@
       }
 
       .card-detail-title strong {
-        font-family: var(--font-sans);
-        font-size: 27px;
-        font-weight: 600;
-        letter-spacing: -0.015em;
-        line-height: 1.12;
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
         text-wrap: balance;
       }
 
       .card-detail-owner {
-        font-family: var(--font-sans);
-        color: var(--ash-600);
-        font-size: 13px;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
       }
 
-      /* equal weight with the Edit pill — a concentric 40px circle */
+      /* kit Dialog close — a quiet circle on surface-3 */
       .card-detail-close {
         min-width: 0;
-        width: 40px;
-        height: 40px;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-pill);
-        background: rgba(255, 255, 255, 0.72);
-        box-shadow: var(--shadow-light-1);
-        color: var(--ash-600);
+        width: 30px;
+        height: 30px;
+        min-height: 30px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        box-shadow: none;
+        color: var(--text-2);
         font-size: 16px;
         line-height: 1;
         padding: 0;
       }
       .card-detail-close:hover {
-        background: var(--ash-100);
-        color: var(--fg-inverse);
+        filter: brightness(1.12);
+        color: var(--text-1);
       }
 
       .card-detail-header-actions {
         display: inline-flex;
         align-items: center;
         justify-content: end;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
+      /* kit Button sm secondary */
       .card-detail-edit-button,
       .key-date-add {
-        min-height: 40px;
+        min-height: 32px;
         min-width: 0;
-        padding: 0 11px;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-pill);
-        background: rgba(255, 255, 255, 0.72);
-        color: var(--ash-700);
-        font-family: var(--font-sans);
-        font-size: 13px;
-        font-weight: 500;
-        box-shadow: var(--shadow-light-1);
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        padding: 0 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        box-shadow: none;
+        transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .card-detail-edit-button:hover,
       .key-date-add:hover {
-        border-color: rgba(255, 122, 43, 0.30);
-        background: var(--ember-50);
-        color: var(--ember-700);
+        filter: brightness(1.12);
       }
 
       .card-detail-edit-button:active,
       .key-date-add:active {
-        transform: scale(0.96);
+        transform: scale(var(--press-scale));
       }
 
       .card-detail-edit-button:focus-visible,
       .key-date-add:focus-visible,
       .key-date-edit-remove:focus-visible {
-        outline: 2px solid var(--ember-500);
+        outline: 2px solid var(--accent);
         outline-offset: 2px;
-        box-shadow: var(--glow-ember-sm);
       }
 
       .card-detail-view {
         display: grid;
-        gap: var(--s-3);
-        padding: 16px var(--s-6) 2px;
+        gap: var(--sp-3);
+        padding: 16px var(--sp-6) 2px;
       }
 
-      /* one page of parchment — hierarchy by type and space, not boxes */
+      /* one quiet sheet — hierarchy by type and space, not boxes */
       .card-detail-section {
         display: grid;
         gap: 10px;
@@ -2764,23 +2733,21 @@
       }
 
       .card-detail-section + .card-detail-section {
-        border-top: 1px solid var(--line-light);
+        border-top: 1px solid var(--line-1);
       }
 
       .card-detail-section h3 {
         margin: 0;
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        color: var(--text-3);
+        font: var(--type-label);
         letter-spacing: var(--track-label);
-        text-transform: uppercase;
+        text-transform: lowercase;
       }
 
       .card-detail-facts {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--s-3);
+        gap: var(--sp-3);
       }
 
       .card-detail-fact {
@@ -2790,21 +2757,17 @@
       }
 
       .card-detail-fact span {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
       }
 
       .card-detail-fact strong,
       .card-detail-note {
-        color: var(--fg-inverse);
-        font-family: var(--font-sans);
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.4;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
         text-wrap: pretty;
       }
 
@@ -2815,50 +2778,28 @@
       .card-detail-form {
         display: grid;
         gap: 14px;
-        padding: 16px var(--s-6) 4px;
-      }
-
-      .card-detail-form .field span {
-        color: var(--ash-600);
-      }
-
-      .card-detail-form .field input,
-      .card-detail-form .field select,
-      .card-detail-form .field textarea {
-        border-color: var(--line-light);
-        background-color: #FAF6EE;
-        color: var(--fg-inverse);
-      }
-
-      .card-detail-form .field select {
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%23525252' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-      }
-
-      .card-detail-form .field input:focus,
-      .card-detail-form .field select:focus,
-      .card-detail-form .field textarea:focus {
-        background-color: #FFF;
+        padding: 16px var(--sp-6) 4px;
       }
 
       .card-detail-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--s-3);
+        gap: var(--sp-3);
       }
 
       .card-detail-actions {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-3);
+        gap: var(--sp-3);
         flex-wrap: wrap;
-        padding: 2px 0 var(--s-4);
+        padding: 2px 0 var(--sp-4);
       }
 
       .card-detail-actions__right {
         display: flex;
         align-items: center;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         flex-wrap: wrap;
         justify-content: flex-end;
       }
@@ -2867,8 +2808,8 @@
         width: auto;
         min-width: 96px;
         height: auto;
-        border-radius: var(--r-sm);
-        padding: 10px var(--s-4);
+        border-radius: var(--r-md);
+        padding: 10px var(--sp-4);
       }
 
       .card-detail-meta {
@@ -2876,7 +2817,7 @@
         align-items: center;
         gap: 10px;
         flex-wrap: wrap;
-        padding: 22px var(--s-6) 0;
+        padding: 22px var(--sp-6) 0;
       }
 
       .card-detail-meta .status-pill,
@@ -2884,31 +2825,30 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 5px 10px;
-        border-radius: var(--r-pill);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         line-height: 1;
         text-transform: none;
       }
 
       .card-detail-meta .status-pill {
-        background: #FFF;
-        border: 1px solid var(--line-light);
-        color: var(--ash-700);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--text-2);
       }
 
       .card-detail-meta .status-pill .dot {
         width: 6px;
         height: 6px;
-        border-radius: 999px;
-        background: var(--warning);
+        border-radius: var(--r-full);
+        background: currentColor;
       }
 
       .card-detail-meta .card-id-pill {
-        color: var(--ash-600);
+        color: var(--text-3);
         background: transparent;
         border: 0;
       }
@@ -2916,53 +2856,44 @@
       .card-detail-context {
         display: grid;
         grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-        gap: var(--s-3);
-        margin: 0 var(--s-6);
+        gap: var(--sp-3);
+        margin: 0 var(--sp-6);
       }
 
+      /* Scout's context — a quiet card; no colored left borders in this house */
       .card-detail-scout {
         display: grid;
         gap: 6px;
-        padding: 14px var(--s-4) 14px 18px;
-        border: 0;
-        border-left: 2px solid var(--ember-500);
-        border-radius: 4px 12px 12px 4px;
-        background: rgba(255, 122, 43, 0.05);
+        padding: 14px 16px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
       }
 
       .card-detail-scout header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .card-detail-scout strong {
-        color: var(--ember-700);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        color: var(--text-1);
+        font: var(--type-label);
         letter-spacing: var(--track-label);
       }
 
       .card-detail-scout span {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        color: var(--text-3);
+        font: var(--type-label);
         letter-spacing: var(--track-label);
         text-transform: none;
       }
 
-      /* Scout's context is the product's one earned serif moment in the modal */
       .card-detail-scout p {
-        color: var(--ash-700);
-        font-family: var(--font-display);
-        font-style: italic;
-        font-size: 20px;
-        font-weight: 400;
-        letter-spacing: 0;
-        line-height: 1.3;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
         text-wrap: pretty;
       }
 
@@ -2971,7 +2902,7 @@
         gap: 10px;
         padding: 14px 2px;
         border: 0;
-        border-top: 1px solid var(--line-light);
+        border-top: 1px solid var(--line-1);
         border-radius: 0;
         background: transparent;
         box-shadow: none;
@@ -2981,22 +2912,21 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .card-detail-key-dates h3 {
         margin: 0;
-        color: var(--fg-inverse);
-        font-size: 13px;
-        font-weight: 600;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
       }
 
       .card-detail-key-dates p {
         margin: 0;
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       .card-detail-key-dates__title {
@@ -3005,15 +2935,14 @@
         gap: 8px;
       }
       .card-detail-key-dates__icon {
-        color: var(--ash-600);
+        color: var(--text-3);
         display: inline-grid;
         place-items: center;
       }
       .card-detail-key-dates__sub {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.10em;
-        color: var(--ash-600);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
         text-transform: lowercase;
         margin-left: 4px;
       }
@@ -3042,24 +2971,25 @@
       }
 
       .key-date-step + .key-date-step {
-        border-top: 1px solid var(--line-light);
+        border-top: 1px solid var(--line-1);
       }
 
       .key-date-step__dot {
         width: 14px;
         height: 14px;
-        border-radius: 999px;
-        background: #FFFFFF;
-        border: 2px solid #948876;
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+        border: 2px solid var(--line-2);
         margin-left: 0;
-        box-shadow: 0 0 0 3px #FFFFFF, 0 1px 3px rgba(0, 0, 0, 0.12);
+        box-shadow: 0 0 0 3px var(--surface-1);
         display: grid;
         place-items: center;
       }
 
+      /* color = state: done is the one signal green in the timeline */
       .key-date-step.is-done .key-date-step__dot {
-        background: var(--success);
-        border-color: var(--success-fg);
+        background: var(--live);
+        border-color: var(--live);
       }
       .key-date-step.is-done .key-date-step__dot::after {
         content: '';
@@ -3071,108 +3001,102 @@
       }
 
       .key-date-step.is-today .key-date-step__dot {
-        background: var(--ember-500);
-        border-color: var(--ember-700);
-        box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 6px rgba(255, 122, 43, 0.13);
+        background: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 6px var(--accent-soft);
       }
 
       .key-date-step__label {
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--fg-inverse);
-        line-height: 1.25;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
         min-width: 0;
       }
       .key-date-step.is-done .key-date-step__label,
       .key-date-step.is-upcoming .key-date-step__label {
-        color: var(--ash-700);
+        color: var(--text-2);
       }
 
       .key-date-step__date {
         justify-self: end;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.06em;
-        color: var(--ash-600);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
         text-transform: lowercase;
         white-space: nowrap;
       }
       .key-date-step.is-today .key-date-step__date {
-        color: var(--ember-700);
-        font-weight: 500;
+        color: var(--text-1);
       }
 
       .key-date-editor {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         padding: 12px;
-        border: 1px solid var(--line-light);
-        border-radius: 14px;
-        background: #FFF;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
       }
 
       .key-date-editor__header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .key-date-editor__title {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
       }
 
       .key-date-edit-list {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .key-date-edit-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         align-items: end;
       }
 
       .key-date-edit-remove {
         width: 40px;
         min-width: 40px;
-        height: 42px;
+        height: 44px;
         padding: 0;
-        border: 1px solid var(--line-light);
+        border: 1px solid var(--line-1);
         border-radius: var(--r-md);
-        background: var(--ash-50);
-        color: var(--ash-600);
+        background: var(--surface-3);
+        color: var(--text-2);
       }
 
       .key-date-edit-remove:hover {
-        border-color: rgba(229, 87, 62, 0.30);
+        border-color: transparent;
+        background: var(--danger-soft);
         color: var(--danger);
       }
 
       .card-detail-edit-label {
         display: none;
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.1em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
       .card-detail-command {
         display: grid;
-        gap: var(--s-3);
-        margin-top: var(--s-3);
-        padding: var(--s-4) var(--s-6) 18px;
-        border-top: 1px solid var(--line-light);
+        gap: var(--sp-3);
+        margin-top: var(--sp-3);
+        padding: var(--sp-4) var(--sp-6) 18px;
+        border-top: 1px solid var(--line-1);
         border-radius: 0;
-        background: rgba(255, 122, 43, 0.02);
+        background: transparent;
       }
 
       .card-command-chips {
@@ -3183,67 +3107,66 @@
       }
 
       .card-command-chips span {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.12em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
       /* action chips read as sentence-case sans buttons, not log output */
       .card-command-chip,
       .scout-pill {
-        min-height: 40px;
+        min-height: 32px;
         padding: 0 12px;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-pill);
-        background: #FFF;
-        color: var(--ash-700);
-        font-family: var(--font-sans);
-        font-size: var(--text-xs);
-        font-weight: 500;
-        letter-spacing: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
         text-transform: none;
-        box-shadow: var(--shadow-light-1);
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        box-shadow: none;
+        transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .card-command-chip:hover {
-        background: rgba(255, 122, 43, 0.1);
-        border-color: rgba(255, 122, 43, 0.3);
-        color: var(--ember-700);
+        filter: brightness(1.12);
       }
 
-      /* no box-in-a-box: the Ask affordance speaks through fill inside the
-         already-bordered composer */
-      .card-command-form .btn--ghost {
+      /* the send affordance earns the accent inside the composer */
+      .card-detail .card-command-form .btn--ghost {
         border-color: transparent;
-        background: var(--ash-100);
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      .card-detail .card-command-form .btn--ghost:hover:not([disabled]) {
+        border-color: transparent;
+        background: var(--accent-hover);
+        color: var(--on-accent);
       }
 
       .card-command-chip:active {
-        transform: scale(0.96);
+        transform: scale(var(--press-scale));
       }
 
-      /* the composer is the single bordered element at the modal's foot —
-         the magic gets the chrome */
+      /* kit Composer — a quiet pill that sharpens on focus */
       .card-command-form {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         align-items: center;
-        padding: 6px;
-        border: 1px solid rgba(255, 122, 43, 0.26);
-        border-radius: 12px;
-        background: #FFF;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 20px rgba(255, 122, 43, 0.06);
-        transition: border-color 200ms var(--ease-soft), box-shadow 200ms var(--ease-soft);
+        padding: 6px 6px 6px 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
 
       .card-command-form:focus-within {
-        border-color: rgba(255, 122, 43, 0.5);
-        box-shadow: var(--glow-ember-sm);
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
 
       .card-command-form input {
@@ -3251,52 +3174,42 @@
         min-height: 40px;
         border: 0;
         background: transparent;
-        color: var(--fg-inverse);
-        font: inherit;
-        font-size: 13px;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
         outline: 0;
-        padding: 7px var(--s-2);
+        padding: 7px var(--sp-2);
       }
 
       .card-command-form input::placeholder {
-        color: var(--ash-500);
+        color: var(--text-3);
       }
 
       .card-command-form button {
         min-width: 0;
         min-height: 40px;
-        padding: 8px var(--s-3);
+        padding: 8px var(--sp-3);
       }
 
       .card-detail .btn--primary {
         min-height: 40px;
         padding: 0 14px;
-        font-size: 13px;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
       }
 
       .card-detail .btn--ghost {
         min-height: 40px;
-        border-color: var(--line-light);
+        border-color: transparent;
         background: transparent;
-        color: var(--ash-700);
+        color: var(--text-2);
         box-shadow: none;
       }
 
       .card-detail .btn--ghost:hover:not([disabled]) {
-        background: #FBF5F0;
-        border-color: var(--ember-500);
-        color: var(--ember-700);
-      }
-
-      @keyframes card-move-wiggle {
-        0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
-        12%  { transform: translate3d(-10px, -12px, 0) rotate(-4deg) scale(1.05); }
-        24%  { transform: translate3d(9px, 4px, 0) rotate(4deg) scale(1.03); }
-        36%  { transform: translate3d(-7px, -7px, 0) rotate(-3deg) scale(1.04); }
-        48%  { transform: translate3d(6px, 2px, 0) rotate(3deg) scale(1.02); }
-        62%  { transform: translate3d(-4px, -4px, 0) rotate(-2deg) scale(1.025); }
-        78%  { transform: translate3d(3px, 1px, 0) rotate(1.2deg) scale(1.01); }
-        100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+        background: var(--surface-3);
+        border-color: transparent;
+        color: var(--text-1);
       }
 
       @keyframes toast-in {
@@ -4373,51 +4286,47 @@
         border-radius: var(--r-full);
       }
 
-      /* the board rail dissolves — numbers and parchment sit directly on the
-         night; the header hairline is the one earned edge */
+      /* kit BoardPanel as the in-room rail — panel glass over the ambient
+         canvas, the specular top edge in --glass-highlight */
       .board-rail {
         min-width: 0;
         display: grid;
         align-content: start;
-        gap: var(--s-3);
-        padding: 0 var(--s-2);
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        box-shadow: none;
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
+        gap: var(--sp-3);
+        padding: var(--sp-4);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
       }
 
       .board-rail__header {
         display: flex;
         align-items: start;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-height: 44px;
-        border-bottom: 1px solid var(--line-faint);
-        padding-bottom: var(--s-2);
+        border-bottom: 1px solid var(--line-1);
+        padding-bottom: var(--sp-2);
       }
 
       .board-rail__header h2 {
-        font-family: var(--font-sans);
-        font-size: var(--text-md);
-        font-weight: 600;
-        letter-spacing: -0.01em;
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
         text-transform: none;
-        color: var(--fg-0);
+        color: var(--text-1);
         text-wrap: balance;
       }
 
       .board-rail__subtitle {
         display: block;
         margin-top: 3px;
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
-        letter-spacing: var(--track-mono);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
-        color: var(--fg-2);
+        color: var(--text-3);
       }
 
       /* stats are the big-number moment — unboxed, one shared baseline */
@@ -4425,7 +4334,7 @@
         display: grid;
         grid-template-columns: auto auto auto;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         align-items: baseline;
         padding: 0;
         border: 0;
@@ -4440,26 +4349,22 @@
         min-width: 0;
       }
       .board-stat__value {
-        font-family: var(--font-mono);
-        font-size: 28px;
-        font-weight: 500;
+        font: 500 28px/1.05 var(--font-mono);
         font-variant-numeric: tabular-nums;
-        color: var(--fg-0);
-        line-height: 1.05;
+        color: var(--text-1);
       }
-      .board-stat__value--warn { color: var(--warning); }
-      .board-stat__value--done { color: var(--presence); }
+      /* color = state: overdue is danger, shipped is live */
+      .board-stat__value--warn { color: var(--danger); }
+      .board-stat__value--done { color: var(--live); }
       .board-stat__label {
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
-        letter-spacing: var(--track-mono);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         line-height: 1.15;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         text-transform: none;
-        color: var(--fg-2);
+        color: var(--text-3);
       }
 
       .board-rail__col-label {
@@ -4467,100 +4372,88 @@
         align-items: center;
         justify-content: space-between;
         margin-top: 2px;
-      }
-      /* museum labels on parchment — hairline rule, plain-text count */
-      .board-rail__col-label {
-        border-bottom: 1px solid var(--line-light);
+        border-bottom: 1px solid var(--line-1);
         padding-bottom: 5px;
       }
       .board-rail__col-label .l {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        font: var(--type-label);
         letter-spacing: var(--track-label);
-        text-transform: uppercase;
-        color: var(--ash-700);
+        text-transform: lowercase;
+        color: var(--text-2);
       }
       .board-rail__col-label .l .dot {
         width: 6px;
         height: 6px;
-        border-radius: 999px;
+        border-radius: var(--r-full);
       }
       .board-rail__col-label .n {
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        color: var(--ash-600);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
         background: transparent;
         border-radius: 0;
         padding: 1px 2px;
         font-variant-numeric: tabular-nums;
       }
 
+      /* kit Button sm secondary */
       .board-expand,
       .board-collapse {
-        min-height: 40px;
+        min-height: 32px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 6px;
-        padding: 7px 10px;
-        border: 1px solid var(--line);
-        border-radius: var(--r-sm);
-        color: var(--fg-2);
-        font-family: var(--font-sans);
-        font-size: 13px;
-        font-weight: 500;
-        letter-spacing: 0;
+        padding: 0 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
         text-transform: none;
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .board-expand:hover:not([disabled]),
       .board-collapse:hover:not([disabled]) {
-        background: rgba(255, 235, 200, 0.09);
-        border-color: var(--line-strong);
-        color: var(--fg-0);
+        filter: brightness(1.12);
       }
 
       .board-expand:active:not([disabled]),
       .board-collapse:active:not([disabled]) {
-        transform: scale(0.96);
+        transform: scale(var(--press-scale));
       }
 
       .board-expand[disabled] {
-        opacity: 0.45;
+        opacity: 0.4;
         cursor: not-allowed;
       }
 
-      /* a warm parchment well set into the night — mediates the luminance
-         cliff between the dark rail and the white cards */
       .board-preview {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-3);
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
-        padding: var(--s-3);
-        border-radius: var(--r-xl);
-        background: var(--board-well);
-        box-shadow: var(--shadow-well-light);
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
       }
 
       .board-preview__empty {
-        padding: var(--s-4);
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-md);
-        background: rgba(11, 8, 5, 0.45);
-        color: var(--fg-2);
-        font-family: var(--font-display);
-        font-size: 19px;
+        padding: var(--sp-3) 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         font-style: italic;
-        font-weight: 400;
-        letter-spacing: 0;
-        line-height: 1.15;
         text-wrap: pretty;
       }
 
@@ -4569,60 +4462,50 @@
         gap: 8px;
       }
 
-      /* empty hints fall back to italic Geist */
       .board-preview__col.is-empty .board-preview__more {
-        color: var(--ash-500);
-        font-family: var(--font-sans);
-        font-size: 12px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         font-style: italic;
-        font-weight: 400;
-        letter-spacing: 0;
         padding: 6px 2px;
       }
 
       .board-preview__more {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        letter-spacing: var(--track-mono);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: lowercase;
         padding: 2px 2px 0;
       }
 
+      /* kit Card — surface-2, hairline, radius 16, no shadow at rest */
       .board-preview__card {
         display: grid;
         gap: 8px;
         width: 100%;
         text-align: left;
-        padding: 11px 12px;
-        border: 1px solid var(--line-light);
-        border-radius: 12px;
-        background: #FFFCF6;
-        color: var(--fg-inverse);
-        font-size: var(--text-xs);
-        line-height: 1.3;
+        padding: 12px 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
         text-wrap: pretty;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-        transition: background var(--t-base) var(--ease-soft),
-                    border-color var(--t-base) var(--ease-soft),
-                    box-shadow 60ms var(--ease-soft),
-                    transform 160ms var(--ease-soft) 60ms;
+        box-shadow: none;
+        transition: background var(--dur-fast) var(--ease),
+                    border-color var(--dur-fast) var(--ease),
+                    box-shadow var(--dur-med) var(--ease),
+                    transform var(--dur-fast) var(--ease);
         cursor: pointer;
       }
 
       .board-preview__card:hover {
-        background: var(--ash-50);
-        box-shadow: var(--shadow-light-2);
-        transform: translateY(-1px);
+        background: var(--surface-3);
       }
       .board-preview__card:focus-visible {
-        outline: none;
-        box-shadow: var(--glow-ember-sm), var(--shadow-light-2);
-      }
-
-      .board-preview__card[data-date-state="today"] {
-        background: linear-gradient(180deg, #FBF5F0 0%, var(--ash-50) 100%);
-        border-color: #E8C9B0;
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
 
       .board-preview__card-heading {
@@ -4634,33 +4517,26 @@
 
       .board-preview__card-title {
         min-width: 0;
-        font-weight: 500;
-        color: var(--fg-inverse);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
         overflow-wrap: break-word;
       }
 
-      .board-preview__card .owner-avatar {
-        width: 22px;
-        height: 22px;
-        border-width: 2px;
-      }
-
-      /* the agent visibly places a card — rise, tilt, settle, glow decays */
+      /* the agent visibly places a card — rise, settle, glow decays */
       .board-preview__card.is-moved {
-        border-color: var(--ember-500);
-        box-shadow: var(--glow-ember-md);
-        animation: card-place var(--t-place) var(--ease-place);
+        border-color: transparent;
+        box-shadow: var(--glow-accent);
+        animation: card-place var(--dur-slow) var(--ease-spring);
       }
 
       /* …and signs its work: a quiet attribution line that fades over 10s */
       .board-preview__card.is-moved::after {
         content: "moved · just now";
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
-        letter-spacing: var(--track-mono);
-        color: var(--ember-600);
-        animation: attribution-fade 10s var(--ease-soft) forwards;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        animation: attribution-fade 10s var(--ease) forwards;
       }
 
       @keyframes attribution-fade {
@@ -4669,10 +4545,8 @@
       }
 
       @keyframes card-place {
-        0%   { transform: translateY(-10px) rotate(-1.5deg); box-shadow: var(--glow-ember-md), var(--shadow-light-2); }
-        55%  { transform: translateY(2px) rotate(0.4deg); }
-        75%  { transform: translateY(-1px) rotate(0); }
-        100% { transform: translateY(0) rotate(0); }
+        0%   { opacity: 0; transform: translateY(-8px) scale(0.985); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
       }
 
       .screen-stage {
@@ -4735,8 +4609,8 @@
         gap: 0;
         min-height: min(72vh, 760px);
         overflow: hidden;
-        border-color: var(--line-light);
-        box-shadow: var(--shadow-light-2);
+        border-color: var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
         padding: 0;
         position: relative;
       }
@@ -4745,45 +4619,45 @@
         display: grid;
         grid-template-columns: 1fr auto 1fr;
         align-items: center;
-        gap: var(--s-4);
-        padding: var(--s-4) 28px;
+        gap: var(--sp-4);
+        padding: var(--sp-4) 28px;
         border: 0;
-        border-bottom: 1px solid var(--line-light);
+        border-bottom: 1px solid var(--line-1);
         border-radius: 0;
-        background: #FFF;
+        background: transparent;
         box-shadow: none;
       }
 
       .board-expanded-brand {
         display: flex;
         align-items: center;
-        gap: var(--s-3);
+        gap: var(--sp-3);
       }
 
+      /* the monochrome flame — inverts with the theme via the accent */
       .board-expanded-mark {
-        width: 28px;
-        height: 28px;
+        width: 26px;
+        height: 26px;
         display: inline-flex;
+        color: var(--accent);
       }
 
       .board-expanded-mark svg {
         display: block;
         width: 100%;
         height: 100%;
-        border-radius: 8px;
       }
 
       .board-expanded-brand h2 {
-        color: var(--fg-inverse);
-        font-size: 14px;
-        font-weight: 500;
+        color: var(--text-1);
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
       }
 
       .board-expanded-brand p {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.1em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
@@ -4798,10 +4672,10 @@
       .board-huddle.presence {
         justify-self: center;
         padding: 6px 12px 6px 6px;
-        border: 1px solid var(--line-light);
-        border-radius: var(--r-pill);
-        background: var(--ash-50);
-        color: var(--ash-700);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
       }
 
       .presence-label {
@@ -4809,27 +4683,29 @@
         align-items: center;
         gap: 6px;
         white-space: nowrap;
-        font-size: 12px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
+      /* the one green: the room is live */
       .presence-pulse {
         width: 6px;
         height: 6px;
-        border-radius: 999px;
-        background: var(--ember-500);
-        box-shadow: 0 0 0 3px rgba(255, 122, 43, 0.18);
+        border-radius: var(--r-full);
+        background: var(--live);
+        box-shadow: 0 0 0 3px var(--live-soft);
       }
 
       .board-huddle .stack-avatars .monogram,
       .board-huddle .stack-avatars .more {
         width: 22px;
         height: 22px;
-        border-color: #FFF;
+        border-color: var(--bg-app);
         font-size: 11px;
       }
 
       .board-huddle .monogram.is-you {
-        box-shadow: 0 0 0 2px var(--ember-500);
+        box-shadow: 0 0 0 2px var(--accent);
       }
 
       .board-huddle__tile {
@@ -4846,16 +4722,16 @@
         display: grid;
         place-items: center;
         overflow: hidden;
-        border: 2px solid #FFF;
-        border-radius: 999px;
-        background: var(--night-0);
-        box-shadow: var(--shadow-light-1);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--ink-900);
+        box-shadow: none;
       }
 
       .board-huddle__tile.is-speaker .board-huddle__media {
         width: 50px;
         height: 50px;
-        border-color: var(--speaker-accent);
+        border-color: var(--live);
         box-shadow: var(--glow-speaker-md);
       }
 
@@ -4876,38 +4752,36 @@
       }
 
       .board-huddle__label {
-        color: var(--ash-600);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.06em;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
       .board-huddle__tile.is-speaker .board-huddle__label {
-        color: var(--success-fg);
-        font-weight: 500;
+        color: var(--signal-600);
       }
 
       .board-collapse,
       .board-back {
         justify-self: end;
-        min-height: 0;
-        padding: 8px 12px;
+        min-height: 32px;
+        padding: 0 12px;
         border-color: transparent;
         background: transparent;
-        color: var(--ash-700);
+        color: var(--text-2);
         box-shadow: none;
-        font-family: var(--font-sans);
-        font-size: 13px;
-        letter-spacing: 0;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
         text-transform: none;
       }
 
       .board-collapse:hover:not([disabled]),
       .board-back:hover:not([disabled]) {
-        background: var(--ash-50);
-        border-color: var(--line-light);
-        color: var(--fg-inverse);
+        background: var(--surface-3);
+        border-color: transparent;
+        color: var(--text-1);
+        filter: none;
       }
 
       .board-back svg {
@@ -4920,7 +4794,7 @@
         min-height: 0;
         overflow: auto;
         padding: 0 28px 132px;
-        gap: 14px;
+        gap: 20px;
       }
 
       .board-expanded-surface .board-toolbar {
@@ -4929,31 +4803,33 @@
       }
 
       .board-expanded-surface .column {
-        border-radius: 14px;
-        padding: 14px 12px;
+        border-radius: 0;
+        padding: 0;
         gap: 10px;
         min-height: 320px;
+        align-content: start;
       }
 
       .board-expanded-surface .column header {
-        padding: 4px 6px 8px;
-        border-bottom: 1px dashed var(--line-light);
+        padding: 4px 0 8px;
+        border-bottom: 1px solid var(--line-1);
         margin-bottom: 2px;
       }
 
       .board-expanded-surface .btn--ghost,
       .board-expanded-surface .btn--secondary {
-        min-height: 40px;
-        border-color: var(--line-light);
-        border-radius: 8px;
-        background: #FFF;
-        color: var(--fg-inverse);
+        min-height: 32px;
+        border-color: var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
       }
 
       .board-expanded-surface .btn--ghost:hover:not([disabled]),
       .board-expanded-surface .btn--secondary:hover:not([disabled]) {
-        background: var(--ash-50);
-        border-color: var(--line-light);
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        filter: brightness(1.12);
       }
 
       .board-dock-wrap {
@@ -4967,18 +4843,19 @@
         pointer-events: none;
       }
 
+      /* kit ControlDock — chrome glass pill with the specular top edge */
       .board-dock {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 8px;
-        border: 1px solid rgba(255, 235, 200, 0.12);
-        border-radius: 999px;
-        background: rgba(11, 8, 5, 0.92);
-        box-shadow: 0 16px 40px rgba(15, 8, 2, 0.34), 0 2px 8px rgba(15, 8, 2, 0.22);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        color: var(--fg-0);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
         pointer-events: auto;
         max-width: calc(100vw - 36px);
       }
@@ -4989,7 +4866,7 @@
         gap: 8px;
         padding-right: 10px;
         margin-right: 4px;
-        border-right: 1px solid rgba(255, 235, 200, 0.12);
+        border-right: 1px solid var(--line-1);
         min-width: 0;
         max-width: min(44vw, 460px);
       }
@@ -5000,31 +4877,31 @@
         aspect-ratio: 4/3;
         height: auto;
         overflow: hidden;
-        border: 1px solid rgba(255, 235, 200, 0.12);
-        border-radius: 10px;
-        background: var(--night-0);
-        color: var(--fg-0);
-        transition: width 220ms var(--ease-out), transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 200ms var(--ease-soft);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--ink-900);
+        color: #FFFFFF;
+        transition: width var(--dur-med) var(--ease), transform var(--dur-med) var(--ease), box-shadow var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease);
       }
 
       .board-video-tile.is-speaker {
         width: 96px;
-        border-color: rgba(52, 211, 153, 0.70);
-        box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.55), 0 0 22px rgba(52, 211, 153, 0.20);
+        border-color: var(--live);
+        box-shadow: var(--glow-live);
       }
 
       .board-video-tile:hover,
       .board-video-tile:focus-visible {
         width: 140px;
         transform: translateY(-4px);
-        border-color: rgba(255, 122, 43, 0.44);
+        border-color: var(--line-2);
         outline: none;
         z-index: 2;
       }
       .board-video-tile.is-speaker:hover,
       .board-video-tile.is-speaker:focus-visible {
         width: 160px;
-        border-color: rgba(52, 211, 153, 0.82);
+        border-color: var(--live);
       }
 
       .board-video-tile video,
@@ -5045,6 +4922,7 @@
         border: 0;
         border-radius: 0;
         box-shadow: none;
+        background: var(--ink-900);
       }
 
       .board-video-tile .monogram {
@@ -5052,8 +4930,11 @@
         height: 100%;
         border-radius: 0;
         font-size: 18px;
+        background: var(--ink-900);
+        color: rgba(255, 255, 255, 0.75);
       }
 
+      /* over live video: the one sanctioned dark scrim + white label */
       .board-video-label {
         position: absolute;
         left: 6px;
@@ -5061,12 +4942,11 @@
         max-width: calc(100% - 12px);
         overflow: hidden;
         padding: 3px 6px;
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.68);
-        color: var(--fg-0);
-        font-family: var(--font-mono);
-        font-size: 10px;
-        line-height: 1;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
+        font: 500 10px/1 var(--font-mono);
+        letter-spacing: var(--track-label);
         text-overflow: ellipsis;
         white-space: nowrap;
       }
@@ -5076,37 +4956,37 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.10em;
-        color: var(--fg-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
         text-transform: lowercase;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
       .board-dock-now b {
-        color: var(--ember-300);
+        color: var(--text-1);
         font-weight: 500;
       }
 
       .board-dock-sep {
         width: 1px;
         height: 22px;
-        background: rgba(255, 235, 200, 0.12);
+        background: var(--line-1);
         margin: 0 2px;
       }
 
+      /* kit IconButton secondary — 40px circles on the glass */
       .board-dock-icon,
       .board-dock-btn {
         min-height: 40px;
-        border: 0;
-        border-radius: 999px;
-        background: transparent;
-        color: var(--fg-1);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-1);
         box-shadow: none;
         line-height: 1;
         white-space: nowrap;
-        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .board-dock-icon {
@@ -5119,63 +4999,45 @@
 
       .board-dock-icon:hover:not([disabled]),
       .board-dock-btn:hover:not([disabled]) {
-        background: rgba(255, 235, 200, 0.06);
-        color: var(--fg-0);
+        filter: brightness(1.14);
       }
       .board-dock-icon:active,
-      .board-dock-btn:active { transform: scale(0.96); }
+      .board-dock-btn:active { transform: scale(var(--press-scale)); }
+
+      .board-dock-icon[disabled],
+      .board-dock-btn[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
 
       .board-dock-btn {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 9px 14px;
-        background: rgba(255, 235, 200, 0.06);
-        color: var(--fg-0);
+        padding: 0 16px;
         flex: 0 0 auto;
-        font-size: 13px;
-        font-weight: 500;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
       }
+
+      /* the one primary in the dock — monochrome accent, never a hue */
       .board-dock-btn.primary {
-        background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
-        color: var(--fg-inverse);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 0 rgba(255, 122, 43, 0.4), 0 8px 24px rgba(255, 122, 43, 0.25);
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--on-accent);
+        box-shadow: none;
       }
       .board-dock-btn.primary:hover:not([disabled]) {
-        background: linear-gradient(180deg, var(--ember-300), var(--ember-600));
-        color: var(--fg-inverse);
-      }
-
-      .board-dock-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 0 12px;
-        font-size: 13px;
-      }
-
-      .board-dock-icon:hover,
-      .board-dock-btn:hover {
-        background: rgba(255, 235, 200, 0.09);
-        border-color: var(--line);
-        color: var(--fg-0);
-      }
-
-      .board-dock-icon:active,
-      .board-dock-btn:active {
-        transform: scale(0.96);
-      }
-
-      .board-dock-btn.primary {
-        border-color: rgba(255, 122, 43, 0.2);
-        background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
-        color: #0B0805;
+        background: var(--accent-hover);
+        color: var(--on-accent);
+        filter: none;
       }
 
       .board-menu-wrap {
         position: relative;
       }
 
+      /* chrome-glass menu — floating, shadow-2 */
       .board-menu {
         position: absolute;
         right: 0;
@@ -5184,12 +5046,12 @@
         gap: 4px;
         min-width: 220px;
         padding: 6px;
-        border: 1px solid var(--glass-edge);
-        border-radius: 12px;
-        background: var(--glass-surface);
-        box-shadow: var(--glass-highlight), 0 18px 50px rgba(15, 8, 2, 0.45);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-lg);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--shadow-2);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
       }
 
       .board-menu[hidden] {
@@ -5201,15 +5063,17 @@
         justify-content: flex-start;
         padding: 0 10px;
         border: 0;
-        border-radius: 8px;
-        color: var(--fg-1);
-        font-size: 13px;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
         text-align: left;
       }
 
       .board-menu button:hover {
-        background: rgba(255, 235, 200, 0.06);
-        color: var(--fg-0);
+        background: var(--accent-soft);
+        color: var(--text-1);
       }
 
       .board-expand:focus-visible,
@@ -5222,9 +5086,8 @@
       .board-preview__card:focus-visible,
       .card-command-chip:focus-visible,
       .scout-pill:focus-visible {
-        outline: 2px solid var(--ember-500);
+        outline: 2px solid var(--accent);
         outline-offset: 2px;
-        box-shadow: var(--glow-ember-sm);
       }
 
       @media (max-width: 1100px) {
@@ -5315,11 +5178,6 @@
         }
       }
 
-      .board-expand,
-      .board-collapse,
-      .board-back,
-      .board-preview__card,
-      .card-detail-close,
       .text-link {
         min-height: 40px;
       }
@@ -6287,8 +6145,8 @@
           z-index: 2;
           margin: 0 calc(var(--s-4) * -1);
           padding: var(--s-2) var(--s-4);
-          border-top: 1px solid var(--line-light);
-          background: linear-gradient(180deg, rgba(250, 248, 245, 0.88), #FAF6EE 42%);
+          border-top: 1px solid var(--line-1);
+          background: var(--surface-1);
         }
 
         .card-detail-actions__right {
@@ -6486,11 +6344,11 @@
          everything else snaps. */
       @media (prefers-reduced-motion: reduce) {
         .mount-stagger { opacity: 1; transform: none; animation: none !important; }
-        .card { transition: box-shadow var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft); }
+        .card { transition: box-shadow var(--dur-med) var(--ease), background var(--dur-med) var(--ease); }
         .card:hover { transform: none; }
         .card.moved {
           animation: none;
-          background: rgba(255, 122, 43, 0.12);
+          background: var(--accent-soft);
         }
         .toast { animation: none; }
         .comment-preview { animation: none; }
@@ -6769,7 +6627,7 @@
               <span id="boardPreviewState" class="board-rail__subtitle">platform · <span id="boardRailCount">0 cards</span></span>
             </div>
             <button id="expandBoard" class="board-expand" type="button" aria-expanded="false" disabled>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="15 3 21 3 21 9"></polyline>
                 <polyline points="9 21 3 21 3 15"></polyline>
                 <line x1="21" y1="3" x2="14" y2="10"></line>
@@ -6801,18 +6659,8 @@
           <header class="board-expanded-top">
             <div class="board-expanded-brand">
               <span class="board-expanded-mark" aria-hidden="true">
-                <svg viewBox="0 0 64 64" fill="none">
-                  <defs>
-                    <radialGradient id="boardEmberCore" cx="50%" cy="55%" r="55%">
-                      <stop offset="0%" stop-color="#FBF5F0"></stop>
-                      <stop offset="22%" stop-color="#D4A47A"></stop>
-                      <stop offset="55%" stop-color="#FF7A2B"></stop>
-                      <stop offset="100%" stop-color="#8B4A27"></stop>
-                    </radialGradient>
-                  </defs>
-                  <rect width="64" height="64" rx="14" fill="#110D09"></rect>
-                  <circle cx="32" cy="36" r="14" fill="url(#boardEmberCore)"></circle>
-                  <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
+                <svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+                  <path d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z" fill-rule="evenodd" clip-rule="evenodd"></path>
                 </svg>
               </span>
               <div>
@@ -6822,7 +6670,7 @@
             </div>
             <div id="boardHuddle" class="board-huddle presence" aria-label="Room huddle"></div>
             <button id="collapseBoard" class="board-collapse board-back" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="4 14 10 14 10 20"></polyline>
                 <polyline points="20 10 14 10 14 4"></polyline>
                 <line x1="14" y1="10" x2="21" y2="3"></line>
@@ -6846,26 +6694,26 @@
               <span id="boardDockNow" class="board-dock-now">room visible</span>
               <span class="board-dock-sep" aria-hidden="true"></span>
               <button id="boardDockMute" class="board-dock-icon" type="button" aria-label="Mute microphone" title="mic">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                   <path d="M12 19v3"></path>
                 </svg>
               </button>
               <button id="boardDockCamera" class="board-dock-icon" type="button" aria-label="Toggle camera" title="camera">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
                   <rect x="3" y="6" width="12" height="12" rx="2"></rect>
                 </svg>
               </button>
               <button id="boardDockShare" class="board-dock-icon" type="button" aria-label="Share screen" title="share screen">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <rect x="2" y="4" width="20" height="12" rx="2"></rect>
                   <path d="M8 20h8"></path>
                   <path d="M12 16v4"></path>
                 </svg>
               </button>
-              <button id="boardDockArchive" class="board-dock-btn primary" type="button">send notes</button>
+              <button id="boardDockArchive" class="board-dock-btn primary" type="button">Send notes</button>
               <div class="board-menu-wrap">
                 <button id="boardDockMenuButton" class="board-dock-icon" type="button" aria-label="More board actions" aria-expanded="false" title="more">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -13725,18 +13573,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!keyDate && !placeholder) {
           return null
         }
+        // kit Badge — tone rides data-date-state (accent today · danger
+        // overdue · live shipped)
         const row = document.createElement('span')
         row.className = 'card-date'
         row.dataset.dateState = cardDateState(card)
-        const dot = document.createElement('span')
-        dot.className = 'card-date__dot'
-        const text = document.createElement('span')
-        text.textContent = keyDate ? `${keyDate.label} · ${keyDate.date}` : 'date not set'
-        row.append(dot, text)
+        row.textContent = keyDate ? `${keyDate.label} · ${keyDate.date}` : 'date not set'
         return row
       }
 
-      function renderBoard(changes = { moved: new Set(), completed: new Set(), toasts: [], commentPreviews: [] }) {
+      function renderCardBadge(text) {
+        const badge = document.createElement('span')
+        badge.className = 'card-badge'
+        badge.textContent = text
+        return badge
+      }
+
+      function renderBoard(changes = { moved: new Set(), completed: new Set(), fresh: new Set(), toasts: [], commentPreviews: [] }) {
         boardEl.replaceChildren(...statuses.map(status => {
           const columnCards = cards.filter(card => card.status === status)
           const column = document.createElement('section')
@@ -13762,7 +13615,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             stack.append(...columnCards.map(card => renderCard(
               card,
               changes.moved.has(card.id),
-              changes.completed.has(card.id)
+              changes.completed.has(card.id),
+              changes.fresh?.has(card.id)
             )))
           }
 
@@ -13829,7 +13683,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           sections = railStatuses.map(status => ({
             label: status.toLowerCase(),
             statusCls: statusClass(status),
-            dot: status === 'In Progress' ? 'var(--ember-500)' : 'var(--warning)',
+            dot: status === 'In Progress' ? 'var(--accent)' : 'var(--warn)',
             cards: cards.filter(card => card.status === status),
             total: null,
           }))
@@ -13845,7 +13699,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           sections = [{
             label: 'up next',
             statusCls: statusClass('Backlog'),
-            dot: 'var(--fg-3)',
+            dot: 'var(--text-3)',
             cards: backlog.slice(0, 4),
             total: backlog.length,
           }]
@@ -13880,7 +13734,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
           for (const c of columnCards) {
             const card = document.createElement('button')
-            card.className = `board-preview__card${changes.moved?.has(c.id) ? ' is-moved' : ''}`
+            card.className = `board-preview__card${changes.moved?.has(c.id) ? ' is-moved' : ''}${changes.fresh?.has(c.id) ? ' is-fresh' : ''}`
             card.type = 'button'
             const date = renderCardDate(c)
             const dateState = date?.dataset.dateState
@@ -13890,8 +13744,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const cardTitle = document.createElement('span')
             cardTitle.className = 'board-preview__card-title'
             cardTitle.textContent = c.title || 'untitled card'
-            heading.append(cardTitle, renderOwnerAvatar(c))
-            card.append(heading, ...(date ? [date] : []))
+            heading.append(cardTitle)
+            // kit badge row — owner · name, then the toned date badge
+            const badges = document.createElement('div')
+            badges.className = 'card-badges'
+            badges.appendChild(renderCardBadge(`owner · ${cardOwner(c).name}`))
+            if (date) {
+              badges.appendChild(date)
+            }
+            card.append(heading, badges)
             card.addEventListener('click', () => showCardDetail(c))
             column.appendChild(card)
           }
@@ -13919,7 +13780,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function renderCard(card, moved = false, completed = false) {
+      function renderCard(card, moved = false, completed = false, fresh = false) {
         const article = document.createElement('article')
         article.className = 'card'
         article.tabIndex = 0
@@ -13938,6 +13799,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             window.setTimeout(() => article.classList.remove('moved'), 1200)
           })
         }
+        if (fresh) {
+          // a fresh Scout-created card carries the accent glow, then settles
+          article.classList.add('is-fresh')
+          window.setTimeout(() => article.classList.remove('is-fresh'), 6000)
+        }
         if (completed) {
           window.requestAnimationFrame(() => fireSparks(article))
         }
@@ -13947,13 +13813,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const title = document.createElement('strong')
         title.textContent = card.title
-        heading.append(title, renderOwnerAvatar(card))
+        heading.append(title)
         article.appendChild(heading)
 
+        // kit badge row — owner · name, then the toned date badge
+        const badges = document.createElement('div')
+        badges.className = 'card-badges'
+        badges.appendChild(renderCardBadge(`owner · ${cardOwner(card).name}`))
         const cardDate = renderCardDate(card)
         if (cardDate) {
-          article.appendChild(cardDate)
+          badges.appendChild(cardDate)
         }
+        article.appendChild(badges)
 
         return article
       }
@@ -14663,6 +14534,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function cardChanges(nextCards) {
         const moved = new Set()
         const completed = new Set()
+        const fresh = new Set()
         const toasts = []
         const commentPreviews = []
         const nextIds = new Set()
@@ -14673,6 +14545,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const previousCard = cardSnapshots.get(card.id)
           if (!previousCard) {
             if (shouldToast) {
+              // the fresh card earns the accent glow on the board
+              fresh.add(card.id)
               toasts.push({ text: `new card · ${card.title} → ${card.status}`, kind: 'move' })
             }
             cardSnapshots.set(card.id, cardSnapshot(card))
@@ -14725,7 +14599,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         hasBoardSnapshot = true
 
-        return { moved, completed, toasts, commentPreviews }
+        return { moved, completed, fresh, toasts, commentPreviews }
       }
 
       function cardSnapshot(card) {
@@ -14928,20 +14802,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function tagColors(tag) {
-        let hash = 0
-        for (const character of String(tag)) {
-          hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0
-        }
-
-        const palette = [
-          { background: 'var(--ember-50)', color: 'var(--ember-700)' },
-          { background: 'var(--ember-100)', color: 'var(--ember-600)' },
-          { background: 'var(--ash-100)', color: 'var(--ash-700)' },
-          { background: 'var(--ash-200)', color: 'var(--night-4)' },
-          { background: '#FFFFFF', color: 'var(--night-3)' }
-        ]
-        return palette[Math.abs(hash) % palette.length]
+      function tagColors() {
+        // kit Badge — tags are neutral mono chips, never colorful per-tag
+        return { background: 'var(--surface-3)', color: 'var(--text-2)' }
       }
 
       function leaveRoom() {
