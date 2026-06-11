@@ -729,20 +729,7 @@
         50%      { opacity: 0.45; transform: scale(0.72); }
       }
 
-      /* legacy halo/dot clocks — consumers remain in access/speaker/dock
-         surfaces until WP3/WP4 rewrite them */
-      @keyframes pulse-halo-1 {
-        0%, 100% { transform: scale(0.88); opacity: 0; }
-        50%      { transform: scale(1.06); opacity: 0.55; }
-      }
-      @keyframes pulse-halo-2 {
-        0%, 100% { transform: scale(0.92); opacity: 0; }
-        50%      { transform: scale(1.10); opacity: 0.32; }
-      }
-      @keyframes pulse-halo-3 {
-        0%, 100% { transform: scale(0.94); opacity: 0; }
-        50%      { transform: scale(1.14); opacity: 0.14; }
-      }
+      /* legacy dot clock — assistant rail consumers remain until WP6 */
       @keyframes dot-pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50%      { opacity: 0.55; transform: scale(0.86); }
@@ -768,46 +755,41 @@
         align-content: start;
       }
 
+      /* kit VideoTile — true black, radius 22, hairline at rest, signal ring
+         while speaking; the bottom protection gradient is the one sanctioned
+         gradient on a tile */
       .video-tile {
         position: relative;
         overflow: hidden;
-        border-radius: var(--r-md);
-        background: var(--night-0);
-        border: 1px solid var(--line);
-        aspect-ratio: 16 / 9;
+        border-radius: var(--r-xl);
+        background: var(--bg-stage);
+        border: 0;
+        box-shadow: inset 0 0 0 1px var(--line-1);
+        aspect-ratio: 16 / 10;
         cursor: grab;
         user-select: none;
-        transition: border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), opacity var(--t-base) var(--ease-soft);
+        transition: box-shadow var(--dur-med) var(--ease), opacity var(--dur-med) var(--ease);
       }
 
       .video-tile:active {
         cursor: grabbing;
       }
 
-      .video-tile.is-speaking {
-        border-color: var(--ember-500);
-        box-shadow: var(--glow-ember-md);
-      }
-
       .video-tile.is-active-speaker {
-        border-color: var(--speaker-accent);
         box-shadow: var(--glow-speaker-md);
       }
 
+      /* shadow appears on lift only */
       .video-tile.is-dragging {
         opacity: 0.94;
-        box-shadow:
-          0 0 0 1px rgba(255, 122, 43, 0.34),
-          0 18px 42px rgba(15, 8, 2, 0.54),
-          0 0 38px rgba(255, 122, 43, 0.18);
+        box-shadow: var(--glow-accent), var(--shadow-2);
         cursor: grabbing;
       }
 
       .video-drag-slot {
-        border-style: dashed;
-        border-color: rgba(255, 122, 43, 0.36);
-        background: rgba(255, 122, 43, 0.08);
-        box-shadow: inset 0 0 0 1px rgba(255, 122, 43, 0.08);
+        border: 1px dashed var(--line-2);
+        background: var(--accent-soft);
+        box-shadow: none;
         cursor: default;
       }
 
@@ -816,85 +798,93 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
-        background: var(--night-0);
+        background: var(--bg-stage);
       }
 
       #localVideo { transform: scaleX(-1); }
 
       .video-label {
         position: absolute;
-        bottom: var(--s-2);
-        left: var(--s-2);
+        right: 0;
+        bottom: 0;
+        left: 0;
         z-index: 3;
-        max-width: calc(100% - 16px);
-        padding: 5px var(--s-2);
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.72);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        color: var(--fg-0);
-        font-family: var(--font-sans);
-        font-size: 11px;
-        font-weight: 500;
-        line-height: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 26px 14px 10px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+        color: #fff;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        pointer-events: none;
+      }
+
+      /* speaking dot rides the name while the signal ring is up */
+      .video-tile.is-active-speaker .video-label::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--live);
+        flex: none;
       }
 
       .video-tile.has-drag-control .video-label {
-        max-width: calc(100% - 56px);
+        padding-right: 56px;
       }
 
       .video-reorder-handle {
         position: absolute;
-        right: var(--s-2);
-        bottom: var(--s-2);
+        right: 10px;
+        bottom: 8px;
         z-index: 5;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 32px;
-        height: 32px;
+        width: 30px;
+        height: 30px;
         padding: 0;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.66);
-        color: var(--fg-2);
+        border: 0;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
         cursor: grab;
         opacity: 0.76;
         touch-action: none;
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), opacity var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .video-reorder-handle:hover,
       .video-reorder-handle:focus-visible {
-        background: rgba(255, 235, 200, 0.09);
-        border-color: var(--line);
-        color: var(--fg-0);
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
         opacity: 1;
       }
 
+      /* over live video an ink ring vanishes — the focus ring goes white */
       .video-reorder-handle:focus-visible {
-        outline: 2px solid var(--ember-500);
+        outline: 2px solid #fff;
         outline-offset: 2px;
-        box-shadow: var(--glow-ember-sm);
       }
 
       .video-reorder-handle:active {
         cursor: grabbing;
-        transform: scale(0.96);
+        transform: scale(var(--press-scale));
       }
 
+      /* camera-off fallback — initials on ink */
       .tile-avatar {
         position: absolute;
         inset: 0;
         z-index: 1;
         display: none;
         place-items: center;
-        background: radial-gradient(circle at 50% 40%, var(--night-4), var(--night-0) 72%);
+        background: var(--ink-900);
       }
 
       .video-tile.is-camera-off .tile-avatar,
@@ -917,38 +907,43 @@
       .tile-avatar .monogram {
         width: 100%;
         height: 100%;
-        font-size: 24px;
+        font-size: 18px;
+      }
+
+      /* avatars are monochrome — never colorful per-user */
+      .tile-avatar .monogram,
+      .speaker-avatar .monogram {
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--text-2);
+        border-radius: var(--r-full);
       }
 
       .media-flags {
         position: absolute;
-        top: var(--s-2);
-        left: var(--s-2);
+        top: 10px;
+        left: 10px;
         z-index: 4;
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 6px;
         flex-wrap: wrap;
-        max-width: calc(100% - 16px);
+        max-width: calc(100% - 56px);
         pointer-events: none;
       }
 
       .media-flag {
         display: none;
         align-items: center;
-        min-height: 20px;
-        padding: 4px 7px;
-        border: 1px solid var(--line);
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.76);
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        line-height: 1;
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
+        min-height: 26px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
       }
 
       .video-tile.is-muted .media-flag--muted,
@@ -957,14 +952,9 @@
         display: inline-flex;
       }
 
-      .video-tile.is-sharing-screen {
-        border-color: rgba(255, 122, 43, 0.38);
-      }
-
-      .video-tile.is-sharing-screen .media-flag--share {
-        color: var(--ember-300);
-        border-color: rgba(255, 122, 43, 0.32);
-        background: rgba(255, 122, 43, 0.12);
+      /* color = state: a muted mic is the only red on a tile */
+      .video-tile.is-muted .media-flag--muted {
+        color: var(--danger);
       }
 
       /* ---------- Login gate (the whole OS sits behind this) ---------- */
@@ -1234,9 +1224,9 @@
         overflow: hidden;
         display: none;
         min-height: 0;
-        border-radius: var(--r-md);
-        border: 1px solid var(--line);
-        background: var(--night-0);
+        border-radius: var(--r-xl);
+        border: 1px solid var(--line-1);
+        background: var(--ink-900);
       }
 
       .presentation-tile.is-screen-sharing .screen-stage {
@@ -1251,21 +1241,24 @@
         width: 100%;
         min-height: min(62vh, 680px);
         object-fit: contain;
-        background: var(--night-0);
+        background: var(--ink-900);
       }
 
+      /* the system labels the share in its own voice: screen share · {name} */
       .screen-stage__label {
         position: absolute;
-        left: var(--s-3);
-        bottom: var(--s-3);
-        padding: 6px 10px;
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.72);
-        color: var(--fg-0);
-        font-size: 12px;
-        font-weight: 500;
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
+        left: 12px;
+        bottom: 12px;
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
       }
 
       .board-surface {
@@ -1897,23 +1890,38 @@
         white-space: nowrap;
       }
 
+      /* kit ControlDock — one floating chrome-glass pill; the specular top
+         edge rides in --glass-highlight */
       .controls {
         position: relative;
-        overflow: hidden;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 10px;
         justify-content: center;
-        padding: 7px;
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-pill);
-        background: var(--glass-surface);
-        box-shadow:
-          var(--glass-highlight),
-          0 18px 50px rgba(15, 8, 2, 0.42),
-          0 0 52px rgba(255, 122, 43, 0.06);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
+        padding: 10px 12px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+
+      .controls__divider {
+        width: 1px;
+        align-self: stretch;
+        margin: 6px 2px;
+        background: var(--line-1);
+        flex: none;
+      }
+
+      /* dock text verbs ride the pill geometry */
+      .controls #screenShare,
+      .controls #archiveMeeting,
+      .controls #join {
+        min-width: 0;
+        border-radius: var(--r-full);
+        white-space: nowrap;
       }
 
       /* the glanceable Scout line in the mobile dock — desktop has the rail */
@@ -1926,10 +1934,8 @@
         padding: 2px 10px;
         border: 0;
         background: transparent;
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        color: var(--text-2);
+        font: var(--type-label);
         letter-spacing: var(--track-label);
         text-transform: lowercase;
       }
@@ -1937,37 +1943,41 @@
       .dock-scout-state__dot {
         width: 5px;
         height: 5px;
-        border-radius: 999px;
-        background: var(--presence);
-        box-shadow: 0 0 5px var(--presence);
-        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+        border-radius: var(--r-full);
+        background: var(--live);
+        flex: none;
       }
 
-      /* one cast-glass instrument: the pill provides the chrome; inner
-         segments are borderless and speak through hover fills */
+      /* media toggles: 44px circles; off = danger-soft (color means state) */
       .controls .btn--ghost {
-        border-color: transparent;
-        background: transparent;
+        border-color: var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-1);
       }
       .controls .btn--ghost:hover:not([disabled]) {
-        border-color: transparent;
-        background: rgba(255, 235, 200, 0.10);
+        border-color: var(--line-1);
+        background: var(--surface-3);
+        filter: brightness(1.14);
       }
       .controls .btn--ghost.is-muted,
-      .controls .btn--ghost.is-off,
+      .controls .btn--ghost.is-off {
+        border-color: transparent;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
       .controls .btn--ghost.is-voice-focus {
         border-color: transparent;
-        background: rgba(255, 122, 43, 0.14);
+        background: var(--accent-soft);
+        color: var(--text-1);
       }
 
-      .controls::before,
       .board-dock::before {
         content: "";
         position: absolute;
         inset: 1px 10px auto;
         height: 1px;
         border-radius: 999px;
-        background: linear-gradient(90deg, transparent, rgba(255, 245, 230, 0.32), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
         pointer-events: none;
       }
 
@@ -1979,38 +1989,36 @@
       }
 
       .device-control span {
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        font-weight: 500;
+        font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--fg-2);
+        color: var(--text-3);
         text-transform: lowercase;
       }
 
+      /* kit Select — native select dressed to the form spec */
       .device-select {
         appearance: none;
         -webkit-appearance: none;
         width: 100%;
-        min-height: 40px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-pill);
-        background-color: rgba(255, 235, 200, 0.05);
-        background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23A3A3A3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        height: 44px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background-color: var(--surface-3);
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%236E6E7A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-position: right 14px center;
         background-repeat: no-repeat;
-        background-size: 14px 14px;
-        color: var(--fg-1);
-        font-family: var(--font-sans);
-        font-size: 12.5px;
-        font-weight: 500;
-        line-height: 1;
-        padding: 0 44px 0 12px;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        padding: 0 38px 0 14px;
         outline: 0;
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
 
       .device-select:focus-visible {
-        border-color: rgba(255, 122, 43, 0.65);
-        box-shadow: var(--glow-ember-sm);
+        outline: none;
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
 
       .device-select[disabled] {
@@ -2018,14 +2026,16 @@
         cursor: not-allowed;
       }
 
+      /* kit IconButton md — 44px circles in the dock */
       #muteMic,
       #toggleCamera {
         min-width: 44px;
         width: 44px;
-        min-height: 40px;
-        height: 40px;
+        min-height: 44px;
+        height: 44px;
         padding: 0;
         gap: 7px;
+        border-radius: var(--r-full);
       }
 
       #muteMic .mute-label,
@@ -2038,32 +2048,19 @@
         flex: 0 0 auto;
       }
 
-      #muteMic.is-muted,
-      #toggleCamera.is-off {
-        border-color: rgba(255, 122, 43, 0.44);
-        background: rgba(255, 122, 43, 0.14);
-        color: var(--ember-300);
-      }
-
-      /* .btn base sets min-width: 96px later in source — match its
-         specificity so the mixer stays a square icon in the dock trio */
+      /* .btn base sets min-width later in source — match its specificity so
+         the mixer stays a circular icon in the dock trio */
       .btn.audio-settings-button {
         min-width: 44px;
         width: 44px;
-        min-height: 40px;
-        height: 40px;
+        min-height: 44px;
+        height: 44px;
         padding: 0;
-        border-radius: var(--r-pill);
+        border-radius: var(--r-full);
       }
 
       .audio-settings-button svg {
         flex: 0 0 auto;
-      }
-
-      .audio-settings-button.is-voice-focus {
-        border-color: rgba(255, 122, 43, 0.44);
-        background: rgba(255, 122, 43, 0.14);
-        color: var(--ember-300);
       }
 
       .audio-settings-label {
@@ -2097,17 +2094,15 @@
         min-width: 0;
         max-width: min(360px, 28vw);
         padding: 0 14px;
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-pill);
-        background: var(--glass-surface-quiet);
-        box-shadow: var(--glass-highlight), 0 16px 36px rgba(15, 8, 2, 0.30);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-2);
+        font: var(--type-numeric);
+        letter-spacing: var(--track-numeric);
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
       }
@@ -2116,85 +2111,76 @@
         display: none;
       }
 
+      /* kit Button — md: height 40, radius 12, one primary per view */
       .btn {
-        font-family: var(--font-sans);
-        font-weight: 500;
-        font-size: 13.5px;
-        letter-spacing: 0;
-        border-radius: 10px;
-        padding: 0 var(--s-4);
-        transition: background var(--t-base) var(--ease-soft),
-                    box-shadow var(--t-base) var(--ease-soft),
-                    border-color var(--t-base) var(--ease-soft),
-                    transform var(--t-fast) var(--ease-soft),
-                    opacity var(--t-base) var(--ease-soft);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        border-radius: var(--r-md);
+        padding: 0 16px;
+        transition: background var(--dur-fast) var(--ease),
+                    color var(--dur-fast) var(--ease),
+                    border-color var(--dur-fast) var(--ease),
+                    filter var(--dur-fast) var(--ease),
+                    transform var(--dur-fast) var(--ease),
+                    opacity var(--dur-fast) var(--ease);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: var(--s-2);
+        gap: 8px;
         min-height: 40px;
         min-width: 96px;
       }
-      .btn:active { transform: scale(0.96); }
-      .btn:focus-visible {
-        outline: 2px solid var(--ember-500);
-        outline-offset: 2px;
-        box-shadow: var(--glow-ember-sm);
-      }
+      .btn:active { transform: scale(var(--press-scale)); }
       .btn[disabled] {
-        opacity: 0.45;
+        opacity: 0.4;
         cursor: not-allowed;
         transform: none;
       }
 
       .btn--primary {
-        background: linear-gradient(180deg, var(--ember-400), var(--ember-600));
-        color: #0B0805;
-        border-color: rgba(255, 122, 43, 0.24);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.25),
-          0 1px 0 rgba(255, 122, 43, 0.4),
-          0 8px 24px rgba(255, 122, 43, 0.25);
+        background: var(--accent);
+        color: var(--on-accent);
+        border-color: transparent;
       }
       .btn--primary:hover:not([disabled]) {
-        background: linear-gradient(180deg, var(--ember-300), var(--ember-600));
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.28),
-          0 1px 0 rgba(255, 122, 43, 0.46),
-          0 10px 30px rgba(255, 122, 43, 0.30);
+        background: var(--accent-hover);
       }
       .btn--primary:active:not([disabled]) {
-        background: linear-gradient(180deg, var(--ember-600), var(--ember-700));
+        background: var(--accent-press);
       }
 
       .btn--danger {
-        background: rgba(229, 87, 62, 0.12);
+        background: var(--danger-soft);
         color: var(--danger);
-        border-color: rgba(229, 87, 62, 0.25);
+        border-color: transparent;
       }
 
-      /* inside the cast-glass dock, state speaks through fill alone */
+      /* leave is the ONLY solid red in the room */
       .controls .btn--danger {
         border-color: transparent;
-        min-width: 0;
-        padding: 9px;
-        border-radius: var(--r-pill);
-        width: 40px;
-        height: 40px;
+        min-width: 44px;
+        padding: 0;
+        border-radius: var(--r-full);
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+        background: var(--danger);
+        color: #fff;
       }
-      .btn--danger:hover:not([disabled]) { background: rgba(229, 87, 62, 0.18); }
+      .btn--danger:hover:not([disabled]) { filter: brightness(1.14); }
       .btn--danger svg { display: block; }
 
       .btn--secondary,
       .btn--ghost {
-        background: rgba(255, 235, 200, 0.06);
-        color: var(--fg-1);
-        border-color: var(--line);
+        background: var(--surface-3);
+        color: var(--text-1);
+        border-color: var(--line-1);
       }
       .btn--secondary:hover:not([disabled]),
       .btn--ghost:hover:not([disabled]) {
-        background: rgba(255, 235, 200, 0.10);
-        border-color: var(--line-strong);
+        background: var(--surface-3);
+        border-color: var(--line-2);
+        filter: brightness(1.08);
       }
 
       .btn--text,
@@ -2205,14 +2191,14 @@
         border: 0;
         border-radius: var(--r-sm);
         background: transparent;
-        color: var(--ash-700);
+        color: var(--text-2);
         box-shadow: none;
         font-size: 13px;
       }
 
       .btn--text:hover:not([disabled]),
       .text-link:hover:not([disabled]) {
-        color: var(--ember-700);
+        color: var(--text-1);
         background: transparent;
       }
 
@@ -2221,98 +2207,81 @@
       }
 
       .text-link--danger:hover:not([disabled]) {
-        color: var(--danger-fg);
+        color: var(--danger);
+        filter: brightness(1.14);
       }
 
       .text-link[disabled] {
-        opacity: 0.45;
+        opacity: 0.4;
         cursor: not-allowed;
       }
 
-      /* ---------- Toasts ---------- */
+      /* ---------- Toasts (kit feedback/Toast — chrome-glass pill, mono voice,
+         leading tone dot; bottom-center, stacked above the dock) ---------- */
       .toast-region {
         position: fixed;
-        right: var(--s-4);
-        bottom: var(--s-4);
+        right: 0;
+        bottom: calc(96px + env(safe-area-inset-bottom));
+        left: 0;
         z-index: 1100;
         display: grid;
-        gap: var(--s-2);
-        width: min(360px, calc(100vw - 36px));
+        gap: var(--sp-2);
+        justify-items: center;
         pointer-events: none;
       }
 
       .toast {
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-md);
-        background: var(--glass-surface);
-        box-shadow: var(--glass-highlight), var(--shadow-2);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        color: var(--fg-0);
-        font-family: var(--font-sans);
-        font-size: 14px;
-        font-weight: 500;
-        line-height: 1.35;
-        padding: var(--s-3);
-        display: grid;
-        grid-template-columns: 4px 1fr;
-        gap: var(--s-3);
+        display: inline-flex;
         align-items: center;
-        animation: toast-in 180ms var(--ease-out);
+        gap: 10px;
+        max-width: min(560px, calc(100vw - 32px));
+        padding: 12px 16px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        animation: toast-in 320ms var(--ease);
         pointer-events: auto;
       }
 
-      /* toasts burn out instead of vanishing — JS adds .is-leaving and removes
-         the node on animationend (hook flagged for the owner; CSS ships now) */
+      /* toasts ease out instead of vanishing — JS adds .is-leaving and removes
+         the node on animationend */
       .toast.is-leaving {
-        animation: toast-out 220ms var(--ease-soft) forwards;
+        animation: toast-out 220ms var(--ease) forwards;
       }
 
       @keyframes toast-out {
         to { opacity: 0; transform: translateY(6px); }
       }
 
+      /* the leading dot carries the tone — color means state */
       .toast__bar {
-        width: 4px;
-        height: 22px;
-        border-radius: 999px;
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-full);
         align-self: center;
-        background: var(--ember-500);
+        flex: none;
+        background: var(--accent);
       }
-      .toast--done .toast__bar { background: var(--presence); }
+      .toast--done .toast__bar { background: var(--live); }
       .toast--note .toast__bar { background: var(--info); }
       .toast--error .toast__bar { background: var(--danger); }
-      .toast--error { border-color: rgba(229, 87, 62, 0.4); }
 
       .toast__link {
-        color: var(--ember-300);
+        color: var(--text-1);
         font-weight: 500;
-        text-decoration: none;
+        text-decoration: underline;
+        text-underline-offset: 3px;
         white-space: nowrap;
       }
 
       .toast__link:hover {
-        color: var(--ember-200);
-        text-decoration: underline;
-      }
-
-      /* ---------- Sparks ---------- */
-      .spark {
-        position: fixed;
-        z-index: 1000;
-        width: 6px;
-        height: 10px;
-        border-radius: 2px;
-        background: var(--spark-color);
-        pointer-events: none;
-        animation: spark-fly 1000ms var(--ease-out) forwards;
-      }
-
-      @keyframes spark-fly {
-        0%   { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.6) rotate(0deg); }
-        10%  { opacity: 1; transform: translate3d(calc(-50% + var(--dx) * 0.1), calc(-50% + var(--dy) * 0.1), 0) scale(1) rotate(calc(var(--rotation) * 0.1)); }
-        80%  { opacity: 1; transform: translate3d(calc(-50% + var(--dx) * 0.8), calc(-50% + var(--dy) * 0.8), 0) scale(0.95) rotate(calc(var(--rotation) * 0.8)); }
-        100% { opacity: 0; transform: translate3d(calc(-50% + var(--dx)), calc(-50% + var(--dy)), 0) scale(0) rotate(var(--rotation)); }
+        color: var(--text-2);
       }
 
       /* ---------- Comment preview ---------- */
@@ -2424,31 +2393,35 @@
         transition: opacity 200ms var(--ease-soft), visibility 0s;
       }
 
+      /* kit Dialog — scrim, opaque surface-1 box, radius 28, shadow-3 */
       .audio-settings-region {
         position: fixed;
         inset: 0;
         z-index: 1260;
         display: none;
         place-items: center;
-        padding: var(--s-6);
-        background: rgba(11, 8, 5, 0.66);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
+        padding: var(--sp-6);
+        background: var(--scrim);
       }
 
-      .audio-settings-region.visible { display: grid; }
+      .audio-settings-region.visible {
+        display: grid;
+        animation: bf-fade var(--dur-med) var(--ease);
+      }
+
+      @keyframes bf-fade {
+        from { opacity: 0; }
+      }
 
       .audio-settings-panel {
-        width: min(560px, calc(100vw - 48px));
+        width: min(480px, calc(100vw - 48px));
         max-height: calc(100svh - 48px);
         overflow: auto;
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-lg);
-        background: var(--surface-panel);
-        box-shadow: var(--shadow-3), var(--glass-highlight);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        color: var(--fg-0);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-2xl);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-3);
+        color: var(--text-1);
       }
 
       .audio-settings-panel:focus {
@@ -2459,80 +2432,91 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: start;
-        gap: var(--s-3);
-        padding: var(--s-5) var(--s-5) var(--s-3);
+        gap: var(--sp-4);
+        padding: var(--sp-6) var(--sp-6) var(--sp-3);
       }
 
       .audio-settings-header h2 {
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: 0;
-        line-height: 1.2;
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
       }
 
       .audio-settings-header p,
       .voice-profile p {
-        color: var(--fg-2);
-        font-size: 13px;
-        line-height: 1.45;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
         text-wrap: pretty;
       }
 
-      .audio-settings-close {
-        width: 40px;
-        height: 40px;
+      .audio-settings-header p {
+        margin-top: 4px;
+      }
+
+      .btn.audio-settings-close {
+        width: 30px;
+        height: 30px;
         min-width: 0;
+        min-height: 30px;
         padding: 0;
-        border-radius: var(--r-pill);
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
       }
 
       .audio-settings-body {
         display: grid;
-        gap: var(--s-4);
-        padding: 0 var(--s-5) var(--s-5);
+        gap: var(--sp-5);
+        padding: 0 var(--sp-6) var(--sp-5);
       }
 
       .noise-mode-group {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-width: 0;
         margin: 0;
         padding: 0;
         border: 0;
       }
 
+      /* mono lowercase — the system voice labels its own controls */
       .noise-mode-group legend,
       .voice-profile__label {
-        margin-bottom: var(--s-2);
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
+        margin-bottom: var(--sp-2);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
       }
 
       .noise-mode-option {
         position: relative;
         display: grid;
         grid-template-columns: 18px minmax(0, 1fr);
-        gap: var(--s-3);
+        gap: var(--sp-3);
         align-items: center;
         min-height: 56px;
-        padding: var(--s-3);
-        border: 1px solid var(--line);
+        padding: var(--sp-3);
+        border: 1px solid var(--line-1);
         border-radius: var(--r-md);
-        background: rgba(255, 235, 200, 0.045);
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        background: var(--surface-2);
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .noise-mode-option:hover {
-        border-color: var(--line-strong);
-        background: rgba(255, 235, 200, 0.07);
+        border-color: var(--line-2);
+        background: var(--surface-3);
       }
 
       .noise-mode-option:active {
         transform: scale(0.985);
+      }
+
+      .noise-mode-option:has(input:checked) {
+        border-color: var(--line-2);
+        background: var(--surface-3);
       }
 
       .noise-mode-option input {
@@ -2544,19 +2528,20 @@
       .noise-mode-control {
         width: 16px;
         height: 16px;
-        border: 1px solid var(--line-strong);
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.56);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+        transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
       }
 
+      /* the selection is ink — monochrome accent, no hue */
       .noise-mode-option input:checked + .noise-mode-control {
-        border-color: rgba(255, 122, 43, 0.74);
-        background: radial-gradient(circle at 50% 50%, var(--ember-500) 0 34%, rgba(255, 122, 43, 0.16) 38% 100%);
-        box-shadow: 0 0 18px rgba(255, 122, 43, 0.18);
+        border-color: var(--accent);
+        background: radial-gradient(circle at 50% 50%, var(--accent) 0 34%, transparent 40%), var(--surface-1);
       }
 
       .noise-mode-option input:focus-visible + .noise-mode-control {
-        outline: 2px solid var(--ember-500);
+        outline: 2px solid var(--accent);
         outline-offset: 3px;
       }
 
@@ -2567,56 +2552,54 @@
       }
 
       .noise-mode-text strong {
-        color: var(--fg-0);
-        font-size: 14px;
-        font-weight: 600;
-        line-height: 1.2;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
       }
 
       .noise-mode-text span {
-        color: var(--fg-2);
-        font-size: 12.5px;
-        line-height: 1.35;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
       }
 
       .voice-profile {
         display: grid;
-        gap: var(--s-3);
+        gap: var(--sp-3);
         min-width: 0;
-        padding: var(--s-4);
-        border: 1px solid var(--line);
-        border-radius: var(--r-md);
-        background: rgba(11, 8, 5, 0.34);
+        padding: var(--sp-4);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
       }
 
       .voice-profile__meta {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-3);
-        color: var(--fg-2);
-        font-family: var(--font-mono);
-        font-size: 11px;
+        gap: var(--sp-3);
+        color: var(--text-2);
+        font: var(--type-numeric);
+        letter-spacing: var(--track-numeric);
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.06em;
         text-transform: lowercase;
       }
 
       .voice-meter {
         position: relative;
         overflow: hidden;
-        height: 8px;
-        border-radius: var(--r-pill);
-        background: rgba(255, 235, 200, 0.08);
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
       }
 
+      /* the meter is a live signal — the one green in this dialog */
       .voice-meter__bar {
         display: block;
         width: 0%;
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(90deg, var(--amber-500), var(--ember-500));
-        box-shadow: 0 0 18px rgba(255, 122, 43, 0.22);
+        background: var(--live);
         transition: width 80ms linear;
       }
 
@@ -2625,17 +2608,17 @@
         display: flex;
         align-items: center;
         justify-content: flex-end;
-        gap: var(--s-2);
+        gap: 10px;
         flex-wrap: wrap;
       }
 
       .audio-settings-actions {
-        padding: 0 var(--s-5) var(--s-5);
+        padding: 0 var(--sp-6) var(--sp-6);
       }
 
       @media (max-width: 640px) {
         .audio-settings-region {
-          padding: var(--s-3);
+          padding: var(--sp-3);
         }
 
         .audio-settings-panel {
@@ -2646,8 +2629,8 @@
         .audio-settings-header,
         .audio-settings-body,
         .audio-settings-actions {
-          padding-right: var(--s-4);
-          padding-left: var(--s-4);
+          padding-right: var(--sp-4);
+          padding-left: var(--sp-4);
         }
       }
 
@@ -3321,14 +3304,14 @@
         100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
       }
 
-      /* Modals arrive the way panels mount — a short rise, nothing showy. */
+      /* Modals arrive on the kit spring — a short rise, nothing showy. */
       .card-detail-region.visible .card-detail,
       .audio-settings-region.visible .audio-settings-panel {
-        animation: modal-rise 220ms var(--ease-out);
+        animation: modal-rise var(--dur-slow) var(--ease-spring);
       }
 
       @keyframes modal-rise {
-        0%   { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
+        0%   { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.98); }
         100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
       }
 
@@ -3368,7 +3351,6 @@
 
       #appShell.is-in-room .workspace {
         grid-template-columns: var(--rail-w) minmax(480px, 1fr) var(--rail-w);
-        background: var(--stage-vignette);
       }
 
       #appShell:not(.is-in-room) .meeting-bar,
@@ -4045,6 +4027,7 @@
         box-shadow: none;
       }
 
+      /* the stage — true black in both themes; video is the imagery */
       .hearth-stage {
         position: relative;
         min-height: min(74vh, 820px);
@@ -4053,151 +4036,163 @@
         grid-template-rows: minmax(0, 1fr);
         place-items: stretch;
         overflow: hidden;
-        padding: var(--s-2) 0 0;
+        padding: var(--sp-4);
       }
 
-      .hearth-bloom {
-        position: absolute;
-        inset: 0;
-        background:
-          radial-gradient(ellipse at 50% 42%, rgba(255, 122, 43, 0.22) 0%, rgba(255, 122, 43, 0.06) 30%, transparent 62%),
-          linear-gradient(180deg, rgba(255, 235, 200, 0.025), transparent 28%);
-        pointer-events: none;
-        animation: bloom-breathe var(--pulse-cycle) var(--ease-soft) infinite;
+      .hearth-presentation {
+        background: var(--bg-stage);
+        border-radius: var(--r-xl);
+        overflow: hidden;
       }
 
-      /* the room breathes — amplitude rides --breathe, so when the assistant
-         is listening the whole scene swells on the shared heartbeat */
-      @keyframes bloom-breathe {
-        0%, 100% { opacity: calc(0.55 + 0.25 * var(--breathe)); transform: scale(1); }
-        50%      { opacity: calc(0.75 + 0.25 * var(--breathe)); transform: scale(1.04); }
-      }
-
-      /* hot-ember recognition ripples outward from the mark to the scene */
-      #appShell:has(.topbar__mark.is-hot-ember) .hearth-bloom {
-        animation-duration: 1800ms;
-      }
-
+      /* speaker mode (the base layout): big tile + 200px strip per kit */
       .hearth-center {
         position: relative;
         z-index: 1;
         display: grid;
-        justify-items: center;
-        align-content: center;
-        gap: var(--s-5);
+        grid-template-columns: minmax(0, 1fr) 200px;
+        grid-template-rows: minmax(0, 1fr);
+        gap: 12px;
         width: 100%;
+        height: 100%;
         min-height: 0;
       }
 
-      /* one floating strip of stage chrome, cast over the video itself */
+      /* stage layout chrome lives in the TopBar now (kit Room instance) */
       .stage-toolbar {
-        position: absolute;
-        top: var(--s-4);
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 6;
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: var(--s-2);
-        margin-bottom: 0;
-        padding: 3px;
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-pill);
-        background: var(--glass-surface-quiet);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        box-shadow: var(--glass-highlight), var(--shadow-1);
-        color: var(--fg-2);
+        gap: var(--sp-2);
+        flex: none;
+        min-width: 0;
       }
 
+      #appShell:not(.is-in-room) .stage-toolbar {
+        display: none;
+      }
+
+      /* kit Segmented sm — sliding selection rendered as the lit option */
       .stage-segmented {
         position: relative;
-        display: inline-flex;
-        gap: 3px;
-        padding: 0;
-        border: 0;
-        border-radius: var(--r-pill);
-        background: transparent;
+        display: inline-grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        height: 30px;
+        padding: 3px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
       }
 
       .stage-segmented button,
-      .stage-tool,
-      .pin-speaker {
-        min-height: 40px;
-        border-radius: var(--r-pill);
-        color: var(--fg-2);
-        font-family: var(--font-sans);
-        font-size: 12px;
-        font-weight: 500;
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+      .stage-tool {
+        border-radius: var(--r-full);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        transition: background var(--dur-med) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .stage-segmented button {
-        padding: 0 12px;
+        min-height: 0;
+        padding: 0 14px;
         border: 0;
+        background: transparent;
       }
 
       .stage-segmented button[aria-pressed="true"] {
-        background: rgba(255, 235, 200, 0.10);
-        color: var(--fg-0);
+        background: var(--surface-1);
+        color: var(--text-1);
+        box-shadow: inset 0 0 0 1px var(--line-1), var(--shadow-1);
       }
 
       .stage-tool {
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        min-height: 30px;
+        max-width: 200px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
         padding: 0 12px;
         border: 0;
         background: transparent;
       }
 
-      .stage-segmented button:hover,
-      .stage-tool:hover,
-      .pin-speaker:hover {
-        background: rgba(255, 235, 200, 0.08);
-        color: var(--fg-0);
+      .stage-tool[aria-pressed="true"] {
+        background: var(--accent-soft);
+        color: var(--text-1);
       }
 
-      .stage-segmented button:focus-visible,
-      .stage-tool:focus-visible,
-      .pin-speaker:focus-visible,
-      .scout-chip:focus-visible {
-        outline: 2px solid var(--ember-500);
-        outline-offset: 2px;
-        box-shadow: var(--glow-ember-sm);
+      .stage-tool[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .stage-segmented button:hover,
+      .stage-tool:hover:not([disabled]) {
+        color: var(--text-1);
+      }
+
+      .stage-tool:hover:not([disabled]) {
+        background: var(--surface-3);
       }
 
       .stage-segmented button:active,
-      .stage-tool:active,
-      .pin-speaker:active {
-        transform: scale(0.96);
+      .stage-tool:active:not([disabled]) {
+        transform: scale(var(--press-scale));
       }
 
+      /* tile pin — shows on hover or when pinned, per kit VideoTile */
       .pin-speaker {
         position: absolute;
-        top: var(--s-2);
-        right: var(--s-2);
+        top: 10px;
+        right: 10px;
         z-index: 5;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 40px;
-        width: 40px;
+        min-width: 28px;
+        width: 28px;
+        height: 28px;
+        min-height: 28px;
         padding: 0;
-        border: 1px solid var(--line-faint);
-        background: rgba(11, 8, 5, 0.66);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
+        border: 0;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: #fff;
+        opacity: 0;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .video-tile:hover .pin-speaker,
+      .video-tile:focus-within .pin-speaker,
+      .pin-speaker[aria-pressed="true"] {
+        opacity: 1;
+      }
+
+      .pin-speaker:hover {
+        background: rgba(0, 0, 0, 0.7);
+      }
+
+      .pin-speaker:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .pin-speaker:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 2px;
       }
 
       .pin-speaker[aria-pressed="true"] {
-        border-color: rgba(255, 122, 43, 0.44);
-        background: rgba(255, 122, 43, 0.16);
-        color: var(--ember-300);
+        background: var(--accent);
+        color: var(--on-accent);
       }
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-center {
+        grid-template-columns: minmax(0, 1fr);
         height: 100%;
         justify-items: stretch;
         gap: 0;
@@ -4211,6 +4206,7 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
         grid-auto-rows: auto;
+        gap: 12px;
         align-content: center;
         align-items: start;
         justify-content: center;
@@ -4224,28 +4220,25 @@
         width: 100%;
         height: auto;
         min-height: 0;
-        aspect-ratio: 16 / 9;
+        aspect-ratio: 16 / 10;
       }
 
+      /* the active speaker holds the stage — the signal ring is the loudest
+         color on screen */
       .hearth-speaker {
         position: relative;
-        width: min(96%, 1240px);
-        min-width: 280px;
-        aspect-ratio: 16 / 9;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
         display: grid;
         place-items: center;
-        overflow: visible;
-        border: 1px solid rgba(52, 211, 153, 0.72);
-        border-radius: var(--r-stage);
+        overflow: hidden;
+        border: 0;
+        border-radius: var(--r-xl);
         animation: stage-arrive 240ms var(--ease-out);
-        background:
-          radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%),
-          var(--night-0);
-        box-shadow:
-          0 0 0 1px rgba(52, 211, 153, 0.30),
-          0 0 0 6px rgba(52, 211, 153, 0.07),
-          0 0 88px rgba(52, 211, 153, 0.14),
-          0 34px 70px rgba(15, 8, 2, 0.58);
+        background: var(--bg-stage);
+        box-shadow: var(--glow-speaker-md);
       }
 
       .hearth-speaker video,
@@ -4257,7 +4250,7 @@
         height: 100%;
         border-radius: inherit;
         object-fit: cover;
-        background: var(--night-0);
+        background: var(--bg-stage);
       }
 
       .hearth-speaker video.is-local,
@@ -4277,7 +4270,7 @@
         place-items: center;
         width: 96px;
         height: 96px;
-        border-radius: 999px;
+        border-radius: var(--r-full);
         overflow: hidden;
         background: transparent;
       }
@@ -4289,20 +4282,8 @@
       .speaker-avatar .monogram {
         width: 100%;
         height: 100%;
-        font-size: 38px;
+        font-size: 30px;
       }
-
-      .speaker-halo {
-        position: absolute;
-        border-radius: inherit;
-        background: radial-gradient(circle, rgba(255, 122, 43, 0.20) 0%, transparent 64%);
-        pointer-events: none;
-        z-index: 0;
-      }
-
-      .speaker-halo--1 { inset: -16px; animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite; }
-      .speaker-halo--2 { inset: -36px; animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite 400ms; }
-      .speaker-halo--3 { inset: -64px; animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite 800ms; }
 
       /* incoming stage layouts rise into place instead of cutting */
       @keyframes stage-arrive {
@@ -4313,71 +4294,58 @@
         animation: stage-arrive 240ms var(--ease-out);
       }
 
+      /* protection gradient + name — same recipe as every tile */
       .speaker-name-pill {
         position: absolute;
-        left: var(--s-3);
-        bottom: var(--s-3);
+        right: 0;
+        bottom: 0;
+        left: 0;
         z-index: 2;
-        display: inline-flex;
+        display: flex;
         align-items: center;
-        gap: 6px;
-        max-width: calc(100% - 24px);
-        padding: 6px 10px;
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.78);
-        backdrop-filter: var(--blur-overlay);
-        -webkit-backdrop-filter: var(--blur-overlay);
-        color: var(--fg-0);
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 1;
+        gap: 8px;
+        max-width: none;
+        padding: 26px 14px 10px;
+        border-radius: 0;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+        color: #fff;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
         white-space: nowrap;
+        pointer-events: none;
       }
 
       .speaker-dot {
         width: 6px;
         height: 6px;
-        border-radius: 999px;
-        background: var(--speaker-accent);
-        box-shadow: 0 0 6px var(--speaker-accent);
-        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+        border-radius: 50%;
+        background: var(--live);
+        flex: none;
       }
 
-      .speaker-ember {
-        display: none;
-      }
-
-      .speaker-ember svg {
-        width: 18px;
-        height: 18px;
-      }
-
+      /* speaker-mode strip — a quiet 200px column of tiles */
       .hearth-seats {
         display: flex;
-        flex-wrap: wrap;
-        align-items: flex-end;
-        justify-content: center;
-        gap: var(--s-3);
-        overflow: visible;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: 10px;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
       }
 
       .hearth-seat {
         position: relative;
-        width: clamp(148px, 12vw, 220px);
+        width: 100%;
         height: auto;
-        aspect-ratio: 16 / 9;
+        flex: none;
+        aspect-ratio: 16 / 10;
         display: grid;
         place-items: center;
         overflow: hidden;
-        border-width: 1px;
-        border-color: rgba(255, 235, 200, 0.12);
-        border-radius: 12px;
-        background: var(--night-2);
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-        transition:
-          border-color 200ms var(--ease-soft),
-          box-shadow 200ms var(--ease-soft),
-          opacity 240ms var(--ease-soft);
       }
 
       .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat.is-active-speaker {
@@ -4386,24 +4354,12 @@
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-seat.is-active-speaker,
       .hearth-seat.is-active-speaker {
-        border-color: rgba(52, 211, 153, 0.82);
-        box-shadow:
-          0 0 0 1px rgba(52, 211, 153, 0.38),
-          0 0 26px rgba(52, 211, 153, 0.18),
-          inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-      }
-
-      .hearth-seat.is-local {
-        border-color: rgba(255, 235, 200, 0.20);
-      }
-
-      .hearth-seat.is-local.is-active-speaker {
-        border-color: rgba(52, 211, 153, 0.82);
+        box-shadow: var(--glow-speaker-md);
       }
 
       .hearth-seat.is-placeholder {
-        border-style: dashed;
-        border-color: var(--line-strong);
+        border: 1px dashed var(--line-2);
+        box-shadow: none;
       }
 
       .hearth-seat .owner-avatar {
@@ -4414,7 +4370,7 @@
       }
 
       .hearth-seat .owner-avatar .monogram {
-        border-radius: 10px;
+        border-radius: var(--r-full);
       }
 
       /* the board rail dissolves — numbers and parchment sit directly on the
@@ -4723,7 +4679,6 @@
         width: 100%;
         height: 100%;
         min-height: min(62vh, 620px);
-        box-shadow: var(--shadow-3);
       }
 
       .presentation-tile.is-screen-sharing .hearth-stage {
@@ -4738,20 +4693,21 @@
         min-height: 100%;
       }
 
+      /* the speaker rides the share as a small signal-ringed circle */
       .screen-stage__pip {
         position: absolute;
-        right: var(--s-4);
-        bottom: var(--s-4);
+        right: var(--sp-4);
+        bottom: var(--sp-4);
         z-index: 2;
         width: 72px;
         height: 72px;
         display: grid;
         place-items: center;
         overflow: visible;
-        border: 2px solid var(--ember-500);
-        border-radius: 999px;
-        background: var(--night-0);
-        box-shadow: var(--glow-ember-md);
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--bg-stage);
+        box-shadow: var(--glow-speaker-md);
       }
 
       .screen-stage__pip .speaker-avatar {
@@ -4761,17 +4717,16 @@
 
       .screen-stage__pip-label {
         position: absolute;
-        top: calc(100% + 5px);
+        top: calc(100% + 6px);
         left: 50%;
         transform: translateX(-50%);
         padding: 4px 8px;
-        border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.78);
-        color: var(--ember-300);
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        letter-spacing: var(--track-mono);
-        text-transform: none;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
         white-space: nowrap;
       }
 
@@ -5385,16 +5340,8 @@
           min-height: clamp(500px, 66svh, 720px);
         }
 
-        .hearth-speaker {
-          width: min(94%, 900px);
-        }
-
-        .hearth-seats {
-          gap: var(--s-2);
-        }
-
-        .hearth-seat {
-          width: clamp(136px, 16vw, 180px);
+        .hearth-stage:not([data-stage-mode="gallery"]) .hearth-center {
+          grid-template-columns: minmax(0, 1fr) 160px;
         }
 
         .assistant-panel.scout-panel {
@@ -5423,36 +5370,29 @@
 
         .hearth-stage {
           min-height: clamp(420px, 58svh, 640px);
-          padding: var(--s-5);
+          padding: var(--sp-3);
         }
 
-        .stage-toolbar {
-          align-items: center;
+        /* the topbar tightens — pin folds, the segmented stays */
+        .stage-toolbar .stage-tool {
+          display: none;
         }
 
-        .stage-segmented {
-          flex: 1 1 auto;
-          min-width: 0;
+        /* speaker strip drops below the stage and scrolls sideways */
+        .hearth-stage:not([data-stage-mode="gallery"]) .hearth-center {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr) auto;
         }
 
-        .stage-segmented button {
-          flex: 1;
-          min-width: 0;
+        .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seats {
+          flex-direction: row;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding-bottom: 2px;
         }
 
-        .stage-tool {
-          flex: 0 0 auto;
-          max-width: 45%;
-          overflow: hidden;
-          white-space: nowrap;
-        }
-
-        .hearth-speaker {
-          width: min(100%, 680px);
-        }
-
-        .hearth-seats {
-          max-width: 100%;
+        .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat {
+          width: clamp(140px, 24vw, 180px);
         }
 
         .board-rail,
@@ -5499,17 +5439,18 @@
           margin: 0 auto;
           min-height: 0;
           padding: 8px;
-          border-color: var(--glass-edge);
+          border: 1px solid var(--glass-border);
           border-radius: var(--r-2xl);
-          background: rgba(11, 8, 5, 0.88);
-          box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-          backdrop-filter: var(--blur-overlay);
-          -webkit-backdrop-filter: var(--blur-overlay);
+          background: var(--glass-chrome);
+          box-shadow: var(--glass-highlight), var(--glass-shadow);
+          backdrop-filter: var(--glass-blur);
+          -webkit-backdrop-filter: var(--glass-blur);
         }
 
         #appShell.is-in-room .meeting-bar .log,
         #appShell.is-in-room .meeting-bar .room-clock,
         #appShell.is-in-room .meeting-bar .device-control,
+        #appShell.is-in-room .meeting-bar .controls__divider,
         #appShell.is-in-room .meeting-bar #copyRoomLink {
           display: none;
         }
@@ -5622,6 +5563,7 @@
 
         .topbar__heading {
           font-size: 15px;
+          min-width: 56px;
         }
 
         .topbar > .pill {
@@ -5638,6 +5580,18 @@
         }
         #topbarElapsed[data-started="false"] {
           display: none;
+        }
+
+        /* phones keep title · clock · layout · status; the date and copy
+           link fold so nothing gets squeezed offscreen */
+        #topbarDate,
+        #topbarDate + .topbar__meta-sep,
+        .topbar__copy-link {
+          display: none;
+        }
+
+        .stage-segmented button {
+          padding: 0 10px;
         }
 
         .topbar > .pill span:last-child {
@@ -5691,17 +5645,16 @@
           left: calc(-1 * var(--s-2));
           right: calc(-1 * var(--s-2));
           height: calc(max(var(--s-2), env(safe-area-inset-top)) + 1px);
-          background: var(--night-0);
+          background: var(--bg-app);
         }
 
-        #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation .hearth-stage {
-          background: var(--night-1);
-          box-shadow: 0 18px 36px -22px rgba(11, 8, 5, 0.9);
+        #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation {
+          box-shadow: var(--shadow-2);
         }
 
         .hearth-stage {
           min-height: clamp(280px, 38svh, 420px);
-          padding: var(--s-3);
+          padding: var(--sp-2);
         }
 
         /* coarse-pointer fields hold 16px so iOS never zooms the page */
@@ -5746,13 +5699,13 @@
         }
 
         .hearth-center {
-          gap: var(--s-3);
+          gap: var(--sp-2);
         }
 
         .hearth-speaker {
           width: 100%;
           min-width: 0;
-          border-radius: 12px;
+          border-radius: var(--r-lg);
         }
 
         .speaker-avatar {
@@ -5761,41 +5714,28 @@
         }
 
         .speaker-avatar .monogram {
-          font-size: 30px;
+          font-size: 26px;
         }
 
         .speaker-name-pill {
-          left: var(--s-2);
-          bottom: var(--s-2);
-          max-width: calc(100% - 16px);
-          padding: 6px 9px;
+          padding: 20px 10px 8px;
         }
 
-        .speaker-ember {
-          top: var(--s-2);
-          right: var(--s-2);
+        .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat {
+          width: clamp(120px, 36vw, 156px);
         }
 
-        .hearth-seats {
-          width: 100%;
-          justify-content: flex-start;
-          gap: var(--s-2);
-        }
-
+        .video-tile,
         .hearth-seat {
-          width: min(156px, calc((100% - var(--s-2)) / 2));
-          min-width: 0;
-          border-radius: 10px;
+          border-radius: var(--r-lg);
         }
 
         .video-label {
-          left: 6px;
-          bottom: 6px;
-          max-width: calc(100% - 12px);
+          padding: 20px 10px 8px;
         }
 
         .video-tile.has-drag-control .video-label {
-          max-width: calc(100% - 48px);
+          padding-right: 48px;
         }
 
         .video-reorder-handle {
@@ -6051,16 +5991,17 @@
           bottom: max(var(--s-2), env(safe-area-inset-bottom));
           left: max(var(--s-2), env(safe-area-inset-left));
           padding: 8px;
+          border: 1px solid var(--glass-border);
           border-radius: var(--r-2xl);
-          border-color: var(--glass-edge);
-          background: rgba(11, 8, 5, 0.88);
-          box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-          backdrop-filter: var(--blur-overlay);
-          -webkit-backdrop-filter: var(--blur-overlay);
+          background: var(--glass-chrome);
+          box-shadow: var(--glass-highlight), var(--glass-shadow);
+          backdrop-filter: var(--glass-blur);
+          -webkit-backdrop-filter: var(--glass-blur);
         }
 
         #appShell.is-in-room .meeting-bar .log,
         #appShell.is-in-room .meeting-bar .room-clock,
+        #appShell.is-in-room .meeting-bar .controls__divider,
         #appShell.is-in-room .meeting-bar #screenShare {
           display: none;
         }
@@ -6117,7 +6058,7 @@
         /* the fixed dock yields while composing to Scout */
         #appShell.is-in-room:has(.scout-panel :focus-within) .meeting-bar {
           transform: translateY(140%);
-          transition: transform 200ms var(--ease-soft);
+          transition: transform var(--dur-med) var(--ease);
         }
 
         .board-expanded-surface {
@@ -6381,9 +6322,9 @@
         }
 
         .toast-region {
-          right: var(--s-2);
-          bottom: max(96px, calc(env(safe-area-inset-bottom) + 96px));
-          left: var(--s-2);
+          right: var(--sp-2);
+          bottom: max(124px, calc(env(safe-area-inset-bottom) + 124px));
+          left: var(--sp-2);
           width: auto;
         }
 
@@ -6442,7 +6383,6 @@
          keeps a 44px landing. Hover-only flourishes are stilled. */
       @media (hover: none), (pointer: coarse) {
         .btn,
-        .stage-segmented button,
         .scout-chip,
         .scout-ask .assistant-send,
         .card-command-chip,
@@ -6453,6 +6393,11 @@
           min-height: var(--touch-min);
         }
 
+        /* the topbar segmented grows a fingertip landing */
+        .stage-segmented {
+          height: 38px;
+        }
+
         .card-detail-close {
           width: var(--touch-min);
           height: var(--touch-min);
@@ -6461,6 +6406,7 @@
         .pin-speaker {
           min-width: 44px;
           width: 44px;
+          height: 44px;
           min-height: 44px;
           opacity: 1;
         }
@@ -6472,7 +6418,7 @@
         }
 
         .video-tile.has-drag-control .video-label {
-          max-width: calc(100% - 56px);
+          padding-right: 56px;
         }
 
         .board-video-tile:hover {
@@ -6554,15 +6500,10 @@
         .board-video-tile:hover,
         .board-video-tile:focus-visible { transform: none; }
         .board-preview__card:hover { transform: none; }
-        .spark { display: none; }
         .pill--listening .pill__dot,
         .pill--connecting .pill__dot,
         .dock-scout-state__dot { animation: none; }
         .board-preview__card.is-moved::after { animation: none; }
-
-        /* Hearthlight motion under reduced motion: the fire stays lit but
-           dimmer and slower; entrances collapse to fades */
-        .hearth-bloom { animation-duration: 4800ms; }
         .board-preview__card.is-moved { animation: none; }
         .hearth-speaker,
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats { animation: none; }
@@ -6627,6 +6568,13 @@
           </span>
         </div>
         <span class="topbar__spacer" aria-hidden="true"></span>
+        <div class="stage-toolbar" aria-label="Stage layout">
+          <div class="stage-segmented" role="group" aria-label="Video layout">
+            <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
+            <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
+          </div>
+          <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
+        </div>
         <button id="copyRoomLink" class="topbar__copy-link" type="button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
           Copy link
@@ -6781,35 +6729,10 @@
           </div>
 
           <div id="hearthStage" class="hearth-stage" aria-label="Room videos">
-            <div class="hearth-bloom" aria-hidden="true"></div>
-            <div class="stage-toolbar" aria-label="Stage layout">
-              <div class="stage-segmented" role="group" aria-label="Video layout">
-                <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
-                <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
-              </div>
-              <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
-            </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
-                <span class="speaker-halo speaker-halo--1" aria-hidden="true"></span>
-                <span class="speaker-halo speaker-halo--2" aria-hidden="true"></span>
-                <span class="speaker-halo speaker-halo--3" aria-hidden="true"></span>
                 <video id="activeSpeakerVideo" autoplay muted playsinline></video>
                 <span id="activeSpeakerAvatar" class="speaker-avatar"></span>
-                <span class="speaker-ember" aria-hidden="true">
-                  <svg viewBox="0 0 64 64" fill="none">
-                    <defs>
-                      <radialGradient id="speakerEmberCore" cx="50%" cy="55%" r="55%">
-                        <stop offset="0%" stop-color="#FBF5F0"></stop>
-                        <stop offset="22%" stop-color="#D4A47A"></stop>
-                        <stop offset="55%" stop-color="#FF7A2B"></stop>
-                        <stop offset="100%" stop-color="#8B4A27"></stop>
-                      </radialGradient>
-                    </defs>
-                    <circle cx="32" cy="36" r="14" fill="url(#speakerEmberCore)"></circle>
-                    <ellipse cx="29" cy="31" rx="3" ry="5" fill="#FBF5F0" fill-opacity="0.55"></ellipse>
-                  </svg>
-                </span>
                 <span class="speaker-name-pill">
                   <span class="speaker-dot"></span>
                   <span id="activeSpeakerLabel">the room · waiting</span>
@@ -6826,7 +6749,7 @@
                     <span class="media-flag media-flag--share">sharing</span>
                   </span>
                   <button class="pin-speaker" type="button" aria-label="Pin speaker" aria-pressed="false" title="pin to stage">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 2v6"></path>
                       <path d="M5 8h14l-2 6H7L5 8Z"></path>
                       <path d="M12 14v8"></path>
@@ -6972,7 +6895,7 @@
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Enter</button>
           <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
-            <svg class="mute-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="mute-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <path d="M12 19v3"></path>
@@ -6980,14 +6903,15 @@
             <span class="mute-label">Mute</span>
           </button>
           <button id="toggleCamera" class="btn btn--ghost" type="button" aria-label="Turn camera off" aria-pressed="false" title="Turn camera off" disabled>
-            <svg class="camera-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="camera-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
               <rect x="3" y="6" width="12" height="12" rx="2"></rect>
             </svg>
             <span class="camera-label">Camera</span>
           </button>
+          <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
           <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4 21v-7"></path>
               <path d="M4 10V3"></path>
               <path d="M12 21v-9"></path>
@@ -7000,10 +6924,10 @@
             </svg>
             <span class="audio-settings-label">audio</span>
           </button>
-          <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
-          <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
-          <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <button id="archiveMeeting" class="btn btn--primary" type="button" disabled>Send notes</button>
+          <span class="controls__divider" aria-hidden="true"></span>
+          <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" title="Leave the room" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"></path>
               <line x1="22" y1="2" x2="2" y2="22"></line>
             </svg>
@@ -7023,7 +6947,7 @@
             <p>the room cleans your microphone before it reaches people or Scout.</p>
           </div>
           <button id="audioSettingsClose" class="btn btn--ghost audio-settings-close" type="button" aria-label="Close audio settings" title="close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 6 6 18"></path>
               <path d="m6 6 12 12"></path>
             </svg>
@@ -12278,7 +12202,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!stream) {
           presentationTile.classList.remove('is-screen-sharing')
           setVideoElementStream(screenStageVideo, null)
-          screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
+          screenStageLabel.textContent = `screen share · ${activeScreenShareParticipant}`
           updateSpeakerPictureInPicture()
           updateStageControls()
           updateBoardDockControls()
@@ -12286,7 +12210,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         presentationTile.classList.add('is-screen-sharing')
         setVideoElementStream(screenStageVideo, stream)
-        screenStageLabel.textContent = `${activeScreenShareParticipant} is sharing`
+        screenStageLabel.textContent = `screen share · ${activeScreenShareParticipant}`
         updateSpeakerPictureInPicture()
         updateStageControls()
         updateBoardDockControls()
