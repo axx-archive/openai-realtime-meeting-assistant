@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#110D09">
     <title>Bonfire</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,12 +128,65 @@
         /* one heartbeat for the whole screen — pulse, listening dot, identity chip
            glow, anything else that breathes inherits this clock. */
         --pulse-cycle: 2400ms;
+
+        /* ---------- Hearthlight type scale ----------
+           hard floor 11px (in-tile media flags may sit at 10px as the single
+           sanctioned exception). Instrument Serif never renders below 19px —
+           below that it falls back to 12px italic Geist. */
+        --text-2xs: 11px;
+        --text-xs: 13px;
+        --text-sm: 15px;
+        --text-md: 18px;
+        --text-lg: 24px;
+        --text-xl: 32px;
+        --text-hero: clamp(46px, 6.5vw, 84px);
+
+        /* the only three letter-spacing values allowed */
+        --track-sans: 0;
+        --track-mono: 0.06em;
+        --track-label: 0.10em;
+
+        /* ---------- Hearthlight layout / depth ---------- */
+        --touch-min: 44px;
+        --rail-w: clamp(260px, 19vw, 320px);
+        --r-stage: 22px;
+        --dock-h: 76px;
+        --stage-vignette: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(11, 8, 5, 0.55) 100%);
+        --board-well: var(--ash-50);
+        --shadow-well-light: inset 0 1px 3px rgba(60, 35, 10, 0.08), 0 1px 0 rgba(255, 245, 230, 0.05);
+
+        /* ---------- Warm presence (liveness that isn't the speaker) ----------
+           green #34D399 keeps its monopoly on "who is talking"; everything else
+           that is merely alive uses this warm tone. */
+        --presence: #C98B4F;
+        --presence-bg: rgba(201, 139, 79, 0.14);
+
+        /* due-date semantics: red is reserved for overdue */
+        --due-future: var(--ash-600);
+        --due-soon: var(--warning);
+        --due-today: var(--warning);
+        --due-overdue: var(--danger);
+
+        /* breathing amplitude — the whole room swells on one switch */
+        --breathe-rest: 0.4;
+        --breathe-live: 1;
+        --breathe: var(--breathe-rest);
+
+        /* the "agent places an object" signature */
+        --t-place: 1100ms;
+        --ease-place: cubic-bezier(0.2, 0.9, 0.2, 1.15);
+      }
+
+      #appShell:has(.topbar__mark.is-listening) {
+        --breathe: var(--breathe-live);
       }
 
       * { box-sizing: border-box; }
 
+      /* clip, not hidden — hidden creates a scroll container and kills
+         position: sticky for the mobile stage */
       html {
-        overflow-x: hidden;
+        overflow-x: clip;
       }
 
       html, body {
@@ -151,7 +205,7 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
-        overflow-x: hidden;
+        overflow-x: clip;
       }
 
       h1, h2, p { margin: 0; }
@@ -190,7 +244,7 @@
       .topbar {
         position: relative;
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: auto auto 1fr auto auto;
         gap: var(--s-3);
         align-items: center;
         min-height: 44px;
@@ -201,15 +255,31 @@
         box-shadow: none;
       }
 
+      .topbar__copy-link {
+        min-height: 32px;
+        padding: 5px 12px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--fg-2);
+        font-size: 12px;
+      }
+      .topbar__copy-link:hover {
+        color: var(--fg-0);
+        background: rgba(255, 235, 200, 0.06);
+      }
+      #appShell:not(.is-in-room) .topbar__copy-link {
+        display: none;
+      }
+
       .topbar__meta {
         display: flex;
         align-items: center;
         gap: 14px;
         justify-content: center;
         font-family: var(--font-mono);
-        font-size: 10.5px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.10em;
+        letter-spacing: var(--track-label);
         color: var(--fg-2);
         text-transform: lowercase;
         font-variant-numeric: tabular-nums;
@@ -221,10 +291,14 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      /* the room's name outranks the machine state around it */
       .topbar__meta-item b {
         color: var(--fg-0);
+        font-family: var(--font-sans);
+        font-size: 13.5px;
         font-weight: 500;
-        letter-spacing: 0.04em;
+        letter-spacing: var(--track-sans);
+        text-transform: none;
       }
       #topbarElapsed[data-started="true"]::after {
         content: " elapsed";
@@ -260,7 +334,12 @@
       }
 
       .topbar__mark {
-        display: none;
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 auto;
       }
 
       .topbar__mark svg {
@@ -304,9 +383,24 @@
         animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite;
         animation-delay: 800ms;
       }
-      .topbar__mark.is-hot-ember .listening-halo--1 { animation-duration: 1800ms; }
-      .topbar__mark.is-hot-ember .listening-halo--2 { animation-duration: 1800ms; }
-      .topbar__mark.is-hot-ember .listening-halo--3 { animation-duration: 1800ms; }
+      /* hot-ember handshake: a dedicated overlay halo owns its own 1800ms
+         clock and fades in/out — running halos never have their duration
+         mutated mid-flight (that caused a visible phase jump). */
+      .topbar__mark::after {
+        content: "";
+        position: absolute;
+        inset: -20px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.5) 0%, transparent 60%);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--t-base) var(--ease-soft);
+        z-index: 1;
+      }
+      .topbar__mark.is-hot-ember::after {
+        opacity: 1;
+        animation: pulse-halo-1 1800ms var(--ease-soft) infinite;
+      }
       .topbar__mark.is-hot-ember svg { filter: drop-shadow(0 0 14px rgba(255, 122, 43,0.65)); }
 
       @keyframes pulse-halo-1 {
@@ -333,7 +427,7 @@
       }
       .topbar__title p {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         color: var(--fg-2);
         letter-spacing: 0.11em;
         text-transform: none;
@@ -360,9 +454,21 @@
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
         backdrop-filter: var(--blur-panel);
         -webkit-backdrop-filter: var(--blur-panel);
+        transition:
+          background 300ms var(--ease-soft),
+          border-color 300ms var(--ease-soft),
+          color 300ms var(--ease-soft);
       }
       .pill__dot { width: 7px; height: 7px; border-radius: 999px; }
-      .pill--listening { background: rgba(255, 122, 43,0.12); color: var(--ember-300); }
+      .pill--listening {
+        background: rgba(255, 122, 43,0.12);
+        color: var(--ember-300);
+        animation: pill-ignite 900ms var(--ease-out) 1;
+      }
+      @keyframes pill-ignite {
+        0%   { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--glow-ember-md); }
+        100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 rgba(255, 122, 43, 0); }
+      }
       .pill--listening .pill__dot {
         background: var(--ember-500);
         box-shadow: 0 0 8px var(--ember-500);
@@ -375,11 +481,11 @@
       }
       .pill--idle .pill__dot { background: var(--fg-3); }
       .pill--room {
-        background: var(--success-bg);
-        border-color: rgba(95, 190, 122, 0.32);
-        color: var(--success);
+        background: var(--presence-bg);
+        border-color: rgba(201, 139, 79, 0.32);
+        color: var(--presence);
       }
-      .pill--room .pill__dot { background: var(--success); }
+      .pill--room .pill__dot { background: var(--presence); }
       .pill--connecting { background: var(--info-bg); color: var(--info); }
       .pill--connecting .pill__dot {
         background: var(--info);
@@ -582,7 +688,7 @@
         background: rgba(11, 8, 5, 0.76);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 9px;
+        font-size: 10px;
         font-weight: 500;
         letter-spacing: 0.08em;
         line-height: 1;
@@ -633,7 +739,7 @@
 
       .access-state {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -659,7 +765,7 @@
 
       .field span {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -994,11 +1100,11 @@
         align-items: center;
         gap: 6px;
         min-width: 0;
-        color: var(--ash-600);
+        color: var(--due-future);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.06em;
+        letter-spacing: var(--track-mono);
         line-height: 1.2;
         text-transform: none;
       }
@@ -1011,9 +1117,14 @@
         flex: 0 0 auto;
       }
 
-      .card-date[data-date-state="today"],
+      /* ranked due semantics — red belongs to overdue alone */
       .card-date[data-date-state="soon"] {
-        color: var(--ember-700);
+        color: var(--warning-fg);
+      }
+
+      .card-date[data-date-state="today"] {
+        color: var(--warning-fg);
+        font-weight: 600;
       }
 
       .card-date[data-date-state="overdue"] {
@@ -1146,7 +1257,7 @@
 
       .memory-meta {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -1187,7 +1298,7 @@
 
       .assistant-state {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -1262,7 +1373,7 @@
 
       .assistant-meta {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -1278,6 +1389,26 @@
       .assistant-text {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+      }
+
+      /* the resting state is a koan, not a log row — unboxed serif ceremony */
+      .scout-panel .assistant-feed .assistant-message--status:only-child {
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: var(--s-6) var(--s-2);
+        justify-items: center;
+        text-align: center;
+      }
+      .scout-panel .assistant-feed .assistant-message--status:only-child .assistant-meta {
+        display: none;
+      }
+      .scout-panel .assistant-feed .assistant-message--status:only-child .assistant-text {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 20px;
+        line-height: 1.3;
+        color: var(--fg-2);
       }
 
       .assistant-link {
@@ -1399,6 +1530,23 @@
         -webkit-backdrop-filter: var(--blur-panel);
       }
 
+      /* one cast-glass instrument: the pill provides the chrome; inner
+         segments are borderless and speak through hover fills */
+      .controls .btn--ghost {
+        border-color: transparent;
+        background: transparent;
+      }
+      .controls .btn--ghost:hover:not([disabled]) {
+        border-color: transparent;
+        background: rgba(255, 235, 200, 0.10);
+      }
+      .controls .btn--ghost.is-muted,
+      .controls .btn--ghost.is-off,
+      .controls .btn--ghost.is-voice-focus {
+        border-color: rgba(255, 122, 43, 0.44);
+        background: rgba(255, 122, 43, 0.14);
+      }
+
       .controls::before,
       .board-dock::before {
         content: "";
@@ -1410,21 +1558,20 @@
         pointer-events: none;
       }
 
+      /* the mic selector lives in the audio-focus dialog now — plumbing
+         belongs with the mixer, verbs stay in the bar */
       .device-control {
-        flex: 1 1 220px;
-        min-width: 220px;
-        max-width: 280px;
         display: grid;
+        gap: 6px;
       }
 
       .device-control span {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        clip-path: inset(50%);
-        white-space: nowrap;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        font-weight: 500;
+        letter-spacing: var(--track-label);
+        color: var(--fg-2);
+        text-transform: lowercase;
       }
 
       .device-select {
@@ -1543,7 +1690,7 @@
         -webkit-backdrop-filter: var(--blur-panel);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         white-space: nowrap;
@@ -1695,6 +1842,16 @@
         pointer-events: auto;
       }
 
+      /* toasts burn out instead of vanishing — JS adds .is-leaving and removes
+         the node on animationend (hook flagged for the owner; CSS ships now) */
+      .toast.is-leaving {
+        animation: toast-out 220ms var(--ease-soft) forwards;
+      }
+
+      @keyframes toast-out {
+        to { opacity: 0; transform: translateY(6px); }
+      }
+
       .toast__bar {
         width: 4px;
         height: 22px;
@@ -1770,7 +1927,7 @@
       .comment-preview-meta {
         justify-self: start;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -1799,7 +1956,7 @@
 
       .comment-preview-detail-label {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         text-transform: none;
@@ -1824,19 +1981,28 @@
       }
 
       /* ---------- Card detail modal ---------- */
+      /* both open AND close animate — visibility delays until the fade ends */
       .card-detail-region {
         position: fixed;
         inset: 0;
         z-index: 1200;
-        display: none;
+        display: grid;
+        visibility: hidden;
+        opacity: 0;
         place-items: center;
         padding: var(--s-6);
         background: rgba(11, 8, 5, 0.62);
         backdrop-filter: var(--blur-overlay);
         -webkit-backdrop-filter: var(--blur-overlay);
+        transition: opacity 200ms var(--ease-soft), visibility 0s linear 200ms;
       }
 
-      .card-detail-region.visible { display: grid; }
+      .card-detail-region.visible {
+        display: grid;
+        visibility: visible;
+        opacity: 1;
+        transition: opacity 200ms var(--ease-soft), visibility 0s;
+      }
 
       .audio-settings-region {
         position: fixed;
@@ -1920,7 +2086,7 @@
         margin-bottom: var(--s-2);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.09em;
         text-transform: uppercase;
@@ -2010,7 +2176,7 @@
         gap: var(--s-3);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.06em;
         text-transform: lowercase;
@@ -2103,10 +2269,10 @@
 
       .card-detail-title strong {
         font-family: var(--font-sans);
-        font-size: 22px;
-        font-weight: 500;
-        letter-spacing: 0;
-        line-height: 1.15;
+        font-size: 27px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        line-height: 1.12;
         text-wrap: balance;
       }
 
@@ -2182,20 +2348,28 @@
         padding: 16px var(--s-6) 2px;
       }
 
+      /* one page of parchment — hierarchy by type and space, not boxes */
       .card-detail-section {
         display: grid;
         gap: 10px;
-        padding: 14px;
-        border: 1px solid var(--line-light);
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.74);
+        padding: 14px 2px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      .card-detail-section + .card-detail-section {
+        border-top: 1px solid var(--line-light);
       }
 
       .card-detail-section h3 {
         margin: 0;
-        color: var(--fg-inverse);
-        font-size: 13px;
-        font-weight: 600;
+        color: var(--ash-600);
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        font-weight: 500;
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
       }
 
       .card-detail-facts {
@@ -2213,7 +2387,7 @@
       .card-detail-fact span {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -2308,7 +2482,7 @@
         padding: 5px 10px;
         border-radius: var(--r-pill);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         line-height: 1;
@@ -2361,38 +2535,41 @@
       .card-detail-scout strong {
         color: var(--ember-700);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.12em;
+        letter-spacing: var(--track-label);
       }
 
       .card-detail-scout span {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.12em;
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
+      /* Scout's context is the product's one earned serif moment in the modal */
       .card-detail-scout p {
         color: var(--ash-700);
-        font-family: var(--font-sans);
-        font-size: 15px;
-        font-weight: 500;
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 20px;
+        font-weight: 400;
         letter-spacing: 0;
-        line-height: 1.35;
+        line-height: 1.3;
         text-wrap: pretty;
       }
 
       .card-detail-key-dates {
         display: grid;
         gap: 10px;
-        padding: 14px;
-        border: 1px solid var(--line-light);
-        border-radius: 14px;
-        background: #FFF;
-        box-shadow: var(--shadow-light-1);
+        padding: 14px 2px;
+        border: 0;
+        border-top: 1px solid var(--line-light);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
       }
 
       .card-detail-key-dates header {
@@ -2413,7 +2590,7 @@
         margin: 0;
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.08em;
       }
 
@@ -2429,7 +2606,7 @@
       }
       .card-detail-key-dates__sub {
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.10em;
         color: var(--ash-600);
         text-transform: lowercase;
@@ -2509,7 +2686,7 @@
       .key-date-step__date {
         justify-self: end;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.06em;
         color: var(--ash-600);
         text-transform: lowercase;
@@ -2539,7 +2716,7 @@
       .key-date-editor__title {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -2577,7 +2754,7 @@
         display: none;
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.1em;
         text-transform: none;
@@ -2603,12 +2780,13 @@
       .card-command-chips span {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.12em;
         text-transform: none;
       }
 
+      /* action chips read as sentence-case sans buttons, not log output */
       .card-command-chip,
       .scout-pill {
         min-height: 40px;
@@ -2617,8 +2795,8 @@
         border-radius: var(--r-pill);
         background: #FFF;
         color: var(--ash-700);
-        font-family: var(--font-mono);
-        font-size: 12.5px;
+        font-family: var(--font-sans);
+        font-size: var(--text-xs);
         font-weight: 500;
         letter-spacing: 0;
         text-transform: none;
@@ -2636,15 +2814,24 @@
         transform: scale(0.96);
       }
 
+      /* the composer is the single bordered element at the modal's foot —
+         the magic gets the chrome */
       .card-command-form {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: var(--s-2);
         align-items: center;
         padding: 6px;
-        border: 1px solid var(--line-light);
+        border: 1px solid rgba(255, 122, 43, 0.26);
         border-radius: 12px;
         background: #FFF;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 20px rgba(255, 122, 43, 0.06);
+        transition: border-color 200ms var(--ease-soft), box-shadow 200ms var(--ease-soft);
+      }
+
+      .card-command-form:focus-within {
+        border-color: rgba(255, 122, 43, 0.5);
+        box-shadow: var(--glow-ember-sm);
       }
 
       .card-command-form input {
@@ -2749,7 +2936,8 @@
       }
 
       #appShell.is-in-room .workspace {
-        grid-template-columns: clamp(280px, 24vw, 360px) minmax(420px, 1fr) clamp(280px, 22vw, 340px);
+        grid-template-columns: var(--rail-w) minmax(480px, 1fr) var(--rail-w);
+        background: var(--stage-vignette);
       }
 
       #appShell:not(.is-in-room) .meeting-bar,
@@ -2794,7 +2982,7 @@
         justify-self: center;
         overflow: visible;
         padding: 0 var(--s-7) 30px;
-        border-color: rgba(255, 235, 200, 0.12);
+        border-color: rgba(255, 235, 200, 0.05);
         border-radius: var(--r-2xl);
         background:
           radial-gradient(circle at 50% -4%, rgba(255, 122, 43, 0.16), transparent 34%),
@@ -2859,30 +3047,30 @@
 
       .hearth-access h2 {
         font-family: var(--font-display);
-        font-size: 46px;
+        font-size: var(--text-hero);
         font-style: italic;
         font-weight: 400;
         letter-spacing: 0;
-        line-height: 0.96;
+        line-height: 0.95;
         text-align: center;
         text-wrap: balance;
       }
 
       .access-kicker {
-        margin-top: 10px;
+        margin-top: var(--s-3);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10.5px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.14em;
+        letter-spacing: var(--track-label);
         text-transform: none;
       }
 
       .hearth-access__ember {
         position: relative;
-        width: 54px;
-        height: 54px;
-        margin: -27px auto 18px;
+        width: 120px;
+        height: 120px;
+        margin: -60px auto 10px;
         display: grid;
         place-items: center;
       }
@@ -2902,15 +3090,26 @@
         pointer-events: none;
       }
 
-      .hearth-access__halo--1 { inset: -150%; opacity: 0.68; }
-      .hearth-access__halo--2,
-      .hearth-access__halo--3 { display: none; }
+      .hearth-access__halo--1 {
+        inset: -110%;
+        animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+      .hearth-access__halo--2 {
+        inset: -150%;
+        animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite;
+        animation-delay: 400ms;
+      }
+      .hearth-access__halo--3 {
+        inset: -200%;
+        animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite;
+        animation-delay: 800ms;
+      }
 
       .waiting-participants {
         min-width: 0;
         overflow: hidden;
-        color: var(--fg-1);
-        font-size: 12.5px;
+        color: var(--fg-2);
+        font-size: var(--text-2xs);
         text-overflow: ellipsis;
         white-space: nowrap;
       }
@@ -2920,32 +3119,48 @@
         min-height: 48px;
         margin-top: var(--s-5);
         border-radius: 16px;
+        transition:
+          background 300ms var(--ease-soft),
+          border-color 300ms var(--ease-soft),
+          box-shadow 300ms var(--ease-soft),
+          color 300ms var(--ease-soft);
       }
 
+      /* never a flat grey pill — the disabled CTA is a banked ember that
+         visibly ignites when JS drops the attribute */
       .access-join[disabled] {
-        background:
-          linear-gradient(180deg, rgba(255, 245, 230, 0.08), rgba(255, 235, 200, 0.025)),
-          rgba(11, 8, 5, 0.22);
-        border-color: rgba(255, 235, 200, 0.10);
+        background: rgba(255, 122, 43, 0.10);
+        border-color: rgba(255, 122, 43, 0.28);
         box-shadow:
           inset 0 1px 0 rgba(255, 245, 230, 0.08),
-          inset 0 -1px 0 rgba(255, 122, 43, 0.035);
-        color: var(--fg-3);
+          inset 0 -1px 0 rgba(255, 122, 43, 0.06);
+        color: var(--ember-300);
         opacity: 1;
+        animation: cta-breathe var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+
+      @keyframes cta-breathe {
+        0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.08), 0 0 0 rgba(255, 122, 43, 0); }
+        50%      { box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.08), 0 0 24px rgba(255, 122, 43, 0.16); }
       }
 
       .hearth-access .access-state {
         display: none;
       }
 
+      /* floats below the card as a quiet mono caption — no box, no rule */
       .inside-row {
-        margin-top: var(--s-5);
+        margin: var(--s-5) 0 calc(-1 * var(--s-2));
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: center;
         gap: var(--s-3);
-        padding-top: 18px;
-        border-top: 1px solid rgba(255, 235, 200, 0.10);
+        padding-top: 0;
+        border-top: 0;
+        transform: translateY(var(--s-6));
+        font-family: var(--font-mono);
+        letter-spacing: var(--track-mono);
+        opacity: 0.85;
       }
 
       .inside-row .who {
@@ -2986,7 +3201,7 @@
         background: var(--night-3);
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
       }
 
       .ready-tag {
@@ -2996,7 +3211,7 @@
         flex-shrink: 0;
         color: var(--fg-2);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.12em;
       }
 
@@ -3020,27 +3235,35 @@
       .scout-rail {
         min-width: 0;
         display: grid;
-        align-content: start;
+        grid-template-rows: minmax(0, 1fr);
+        align-content: stretch;
       }
 
+      /* the rail dissolves into the scene — no box, no glass; the header's
+         hairline running rule is the one earned edge */
       .assistant-panel.scout-panel {
         min-height: 0;
         grid-template-rows: auto auto minmax(0, 1fr);
-        border-color: var(--line-faint);
-        border-radius: var(--r-xl);
-        background: var(--glass-surface-quiet);
-        box-shadow:
-          var(--shadow-panel),
-          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        padding: var(--s-4);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        padding: 0 var(--s-2);
+      }
+
+      .scout-panel__header {
+        min-height: 44px;
+        border-bottom: 1px solid var(--line-faint);
+        padding-bottom: var(--s-2);
       }
 
       .scout-panel header h2,
       .scout-panel .scout-panel__title h2 {
-        font-size: 14px;
+        font-size: var(--text-md);
         font-weight: 600;
+        letter-spacing: -0.01em;
         margin: 0;
       }
 
@@ -3074,9 +3297,9 @@
         align-items: center;
         gap: 6px;
         font-family: var(--font-mono);
-        font-size: 10px;
-        letter-spacing: 0.10em;
-        color: var(--success);
+        font-size: var(--text-2xs);
+        letter-spacing: var(--track-label);
+        color: var(--presence);
         text-transform: lowercase;
       }
 
@@ -3084,8 +3307,8 @@
         width: 6px;
         height: 6px;
         border-radius: 999px;
-        background: var(--success);
-        box-shadow: 0 0 6px var(--success);
+        background: var(--presence);
+        box-shadow: 0 0 6px var(--presence);
         animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
       }
 
@@ -3168,7 +3391,7 @@
         background: rgba(255, 235, 200, 0.045);
         border: 1px solid var(--line-faint);
         font-family: var(--font-mono);
-        font-size: 9.5px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.06em;
         color: var(--fg-2);
@@ -3248,7 +3471,7 @@
         color: var(--fg-2);
         cursor: default;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.12em;
         list-style: none;
@@ -3313,7 +3536,7 @@
       .scout-private-caption {
         margin: 0;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.10em;
         color: var(--fg-3);
@@ -3385,7 +3608,7 @@
         align-items: center;
         gap: 6px;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 500;
         letter-spacing: 0.08em;
         color: var(--fg-2);
@@ -3413,7 +3636,7 @@
         margin: 0;
         justify-self: center;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.08em;
         color: var(--fg-3);
         padding: 2px 0;
@@ -3429,7 +3652,7 @@
         border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
         background: rgba(255, 235, 200, 0.045);
         font-family: var(--font-mono);
-        font-size: 10.5px;
+        font-size: 11px;
         letter-spacing: 0.08em;
         color: var(--fg-2);
       }
@@ -3502,7 +3725,7 @@
       .scout-chat-hint {
         margin: 0;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.08em;
         color: var(--fg-3);
       }
@@ -3511,25 +3734,56 @@
         display: none;
       }
 
+      /* the memory ledger — continuous quiet proof the room hears.
+         a log-file whisper at the foot of the Scout rail, fading at the top. */
       .memory-list--silent {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        clip-path: inset(50%);
-        white-space: nowrap;
+        position: relative;
+        width: auto;
+        height: auto;
+        max-height: 120px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        contain: content;
+        clip: auto;
+        clip-path: none;
+        white-space: normal;
+        margin-top: var(--s-2);
+        padding: var(--s-2) var(--s-2) 0;
+        mask-image: linear-gradient(180deg, transparent 0, #000 28px);
+        -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 28px);
       }
 
+      .memory-list--silent .memory-item {
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        padding: 2px 0;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: var(--s-2);
+        align-items: baseline;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        letter-spacing: var(--track-mono);
+        line-height: 1.6;
+        color: var(--fg-2);
+        animation: assistant-message-in 280ms var(--ease-out);
+      }
+
+      .memory-list--silent .memory-item span:last-child {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* the stage is a transparent region of the scene, not a boxed panel —
+         the video tile itself is the protagonist */
       .hearth-presentation {
         position: relative;
         overflow: hidden;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-xl);
-        background: var(--night-0);
-        box-shadow:
-          var(--shadow-panel),
-          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
       }
 
       .hearth-stage {
@@ -3537,10 +3791,10 @@
         min-height: min(74vh, 820px);
         height: 100%;
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
         place-items: stretch;
         overflow: hidden;
-        padding: var(--s-6);
+        padding: var(--s-2) 0 0;
       }
 
       .hearth-bloom {
@@ -3550,6 +3804,19 @@
           radial-gradient(ellipse at 50% 42%, rgba(255, 122, 43, 0.22) 0%, rgba(255, 122, 43, 0.06) 30%, transparent 62%),
           linear-gradient(180deg, rgba(255, 235, 200, 0.025), transparent 28%);
         pointer-events: none;
+        animation: bloom-breathe var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+
+      /* the room breathes — amplitude rides --breathe, so when the assistant
+         is listening the whole scene swells on the shared heartbeat */
+      @keyframes bloom-breathe {
+        0%, 100% { opacity: calc(0.55 + 0.25 * var(--breathe)); transform: scale(1); }
+        50%      { opacity: calc(0.75 + 0.25 * var(--breathe)); transform: scale(1.04); }
+      }
+
+      /* hot-ember recognition ripples outward from the mark to the scene */
+      #appShell:has(.topbar__mark.is-hot-ember) .hearth-bloom {
+        animation-duration: 1800ms;
       }
 
       .hearth-center {
@@ -3563,24 +3830,36 @@
         min-height: 0;
       }
 
+      /* one floating strip of stage chrome, cast over the video itself */
       .stage-toolbar {
-        position: relative;
-        z-index: 3;
+        position: absolute;
+        top: var(--s-4);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 6;
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: center;
         gap: var(--s-2);
-        margin-bottom: var(--s-4);
+        margin-bottom: 0;
+        padding: 3px;
+        border: 1px solid var(--glass-edge);
+        border-radius: var(--r-pill);
+        background: var(--glass-surface-quiet);
+        backdrop-filter: var(--blur-overlay);
+        -webkit-backdrop-filter: var(--blur-overlay);
+        box-shadow: var(--glass-highlight), var(--shadow-1);
         color: var(--fg-2);
       }
 
       .stage-segmented {
+        position: relative;
         display: inline-flex;
         gap: 3px;
-        padding: 3px;
-        border: 1px solid var(--line-faint);
+        padding: 0;
+        border: 0;
         border-radius: var(--r-pill);
-        background: rgba(11, 8, 5, 0.52);
+        background: transparent;
       }
 
       .stage-segmented button,
@@ -3610,8 +3889,8 @@
         align-items: center;
         gap: 6px;
         padding: 0 12px;
-        border: 1px solid var(--line-faint);
-        background: rgba(11, 8, 5, 0.52);
+        border: 0;
+        background: transparent;
       }
 
       .stage-segmented button:hover,
@@ -3691,14 +3970,15 @@
 
       .hearth-speaker {
         position: relative;
-        width: min(92%, 1180px);
+        width: min(96%, 1240px);
         min-width: 280px;
         aspect-ratio: 16 / 9;
         display: grid;
         place-items: center;
         overflow: visible;
         border: 1px solid rgba(52, 211, 153, 0.72);
-        border-radius: var(--r-lg);
+        border-radius: var(--r-stage);
+        animation: stage-arrive 240ms var(--ease-out);
         background:
           radial-gradient(circle at 50% 40%, var(--night-4) 0%, var(--night-0) 72%),
           var(--night-0);
@@ -3754,12 +4034,25 @@
       }
 
       .speaker-halo {
-        display: none;
+        position: absolute;
+        border-radius: inherit;
+        background: radial-gradient(circle, rgba(255, 122, 43, 0.20) 0%, transparent 64%);
+        pointer-events: none;
+        z-index: 0;
       }
 
       .speaker-halo--1 { inset: -16px; animation: pulse-halo-1 var(--pulse-cycle) var(--ease-soft) infinite; }
       .speaker-halo--2 { inset: -36px; animation: pulse-halo-2 var(--pulse-cycle) var(--ease-soft) infinite 400ms; }
       .speaker-halo--3 { inset: -64px; animation: pulse-halo-3 var(--pulse-cycle) var(--ease-soft) infinite 800ms; }
+
+      /* incoming stage layouts rise into place instead of cutting */
+      @keyframes stage-arrive {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+        animation: stage-arrive 240ms var(--ease-out);
+      }
 
       .speaker-name-pill {
         position: absolute;
@@ -3822,6 +4115,10 @@
         border-radius: 12px;
         background: var(--night-2);
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+        transition:
+          border-color 200ms var(--ease-soft),
+          box-shadow 200ms var(--ease-soft),
+          opacity 240ms var(--ease-soft);
       }
 
       .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat.is-active-speaker {
@@ -3861,20 +4158,20 @@
         border-radius: 10px;
       }
 
+      /* the board rail dissolves — numbers and parchment sit directly on the
+         night; the header hairline is the one earned edge */
       .board-rail {
         min-width: 0;
         display: grid;
         align-content: start;
         gap: var(--s-3);
-        padding: var(--s-4);
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-xl);
-        background: var(--glass-surface-quiet);
-        box-shadow:
-          var(--shadow-panel),
-          inset 0 0 0 1px rgba(255, 235, 200, 0.018);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
+        padding: 0 var(--s-2);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
       }
 
       .board-rail__header {
@@ -3882,13 +4179,16 @@
         align-items: start;
         justify-content: space-between;
         gap: var(--s-2);
+        min-height: 44px;
+        border-bottom: 1px solid var(--line-faint);
+        padding-bottom: var(--s-2);
       }
 
       .board-rail__header h2 {
         font-family: var(--font-sans);
-        font-size: 14px;
+        font-size: var(--text-md);
         font-weight: 600;
-        letter-spacing: 0;
+        letter-spacing: -0.01em;
         text-transform: none;
         color: var(--fg-0);
         text-wrap: balance;
@@ -3898,45 +4198,50 @@
         display: block;
         margin-top: 3px;
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.06em;
+        letter-spacing: var(--track-mono);
         text-transform: none;
         color: var(--fg-2);
       }
 
+      /* stats are the big-number moment — unboxed, one shared baseline */
       .board-rail__summary {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--s-2);
-        padding: 10px 12px;
-        border: 1px solid var(--line-faint);
-        border-radius: 12px;
-        background: rgba(255, 235, 200, 0.035);
+        align-items: baseline;
+        padding: 0 2px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
       }
       .board-rail__summary[hidden] { display: none; }
 
       .board-stat {
         display: grid;
-        gap: 2px;
+        gap: 4px;
         min-width: 0;
       }
       .board-stat__value {
         font-family: var(--font-mono);
-        font-size: 16px;
+        font-size: 28px;
         font-weight: 500;
         font-variant-numeric: tabular-nums;
         color: var(--fg-0);
-        line-height: 1.1;
+        line-height: 1.05;
       }
       .board-stat__value--warn { color: var(--warning); }
-      .board-stat__value--done { color: var(--success); }
+      .board-stat__value--done { color: var(--presence); }
       .board-stat__label {
         font-family: var(--font-mono);
-        font-size: 9.5px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.06em;
+        letter-spacing: var(--track-mono);
         line-height: 1.15;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         text-transform: none;
         color: var(--fg-2);
       }
@@ -3947,16 +4252,21 @@
         justify-content: space-between;
         margin-top: 2px;
       }
+      /* museum labels on parchment — hairline rule, plain-text count */
+      .board-rail__col-label {
+        border-bottom: 1px solid var(--line-light);
+        padding-bottom: 5px;
+      }
       .board-rail__col-label .l {
         display: inline-flex;
         align-items: center;
         gap: 8px;
         font-family: var(--font-mono);
-        font-size: 10.5px;
+        font-size: var(--text-2xs);
         font-weight: 500;
-        letter-spacing: 0.12em;
+        letter-spacing: var(--track-label);
         text-transform: uppercase;
-        color: var(--fg-1);
+        color: var(--ash-700);
       }
       .board-rail__col-label .l .dot {
         width: 6px;
@@ -3965,11 +4275,11 @@
       }
       .board-rail__col-label .n {
         font-family: var(--font-mono);
-        font-size: 10px;
-        color: var(--fg-2);
-        background: rgba(255, 235, 200, 0.045);
-        border-radius: 999px;
-        padding: 1px 7px;
+        font-size: var(--text-2xs);
+        color: var(--ash-600);
+        background: transparent;
+        border-radius: 0;
+        padding: 1px 2px;
         font-variant-numeric: tabular-nums;
       }
 
@@ -4009,11 +4319,18 @@
         cursor: not-allowed;
       }
 
+      /* a warm parchment well set into the night — mediates the luminance
+         cliff between the dark rail and the white cards */
       .board-preview {
         display: grid;
         gap: var(--s-2);
         min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: var(--s-3);
+        border-radius: var(--r-xl);
+        background: var(--board-well);
+        box-shadow: var(--shadow-well-light);
       }
 
       .board-preview__empty {
@@ -4036,10 +4353,12 @@
         gap: 8px;
       }
 
+      /* serif floor: Instrument Serif never below 19px — empty hints fall
+         back to italic Geist */
       .board-preview__col.is-empty .board-preview__more {
         color: var(--ash-500);
-        font-family: var(--font-display);
-        font-size: 13px;
+        font-family: var(--font-sans);
+        font-size: 12px;
         font-style: italic;
         font-weight: 400;
         letter-spacing: 0;
@@ -4047,10 +4366,10 @@
       }
 
       .board-preview__more {
-        color: var(--fg-2);
+        color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
-        letter-spacing: 0.08em;
+        font-size: var(--text-2xs);
+        letter-spacing: var(--track-mono);
         text-transform: lowercase;
         padding: 2px 2px 0;
       }
@@ -4063,9 +4382,9 @@
         padding: 11px 12px;
         border: 1px solid var(--line-light);
         border-radius: 12px;
-        background: #FFFFFF;
+        background: #FFFCF6;
         color: var(--fg-inverse);
-        font-size: 13.5px;
+        font-size: var(--text-xs);
         line-height: 1.3;
         text-wrap: pretty;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -4111,13 +4430,18 @@
         border-width: 2px;
       }
 
-      .board-preview__card .card-date {
-        font-size: 10px;
-      }
-
+      /* the agent visibly places a card — rise, tilt, settle, glow decays */
       .board-preview__card.is-moved {
         border-color: var(--ember-500);
         box-shadow: var(--glow-ember-md);
+        animation: card-place var(--t-place) var(--ease-place);
+      }
+
+      @keyframes card-place {
+        0%   { transform: translateY(-10px) rotate(-1.5deg); box-shadow: var(--glow-ember-md), var(--shadow-light-2); }
+        55%  { transform: translateY(2px) rotate(0.4deg); }
+        75%  { transform: translateY(-1px) rotate(0); }
+        100% { transform: translateY(0) rotate(0); }
       }
 
       .screen-stage {
@@ -4170,7 +4494,7 @@
         background: rgba(11, 8, 5, 0.78);
         color: var(--ember-300);
         font-family: var(--font-mono);
-        font-size: 9px;
+        font-size: 10px;
         letter-spacing: 0.08em;
         text-transform: none;
         white-space: nowrap;
@@ -4228,7 +4552,7 @@
       .board-expanded-brand p {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: 11px;
         letter-spacing: 0.1em;
         text-transform: none;
       }
@@ -4271,7 +4595,7 @@
         width: 22px;
         height: 22px;
         border-color: #FFF;
-        font-size: 10.5px;
+        font-size: 11px;
       }
 
       .board-huddle .monogram.is-you {
@@ -4324,7 +4648,7 @@
       .board-huddle__label {
         color: var(--ash-600);
         font-family: var(--font-mono);
-        font-size: 9px;
+        font-size: 11px;
         letter-spacing: 0.06em;
         text-transform: none;
       }
@@ -4511,7 +4835,7 @@
         background: rgba(11, 8, 5, 0.68);
         color: var(--fg-0);
         font-family: var(--font-mono);
-        font-size: 9px;
+        font-size: 10px;
         line-height: 1;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -4523,7 +4847,7 @@
         align-items: center;
         gap: 8px;
         font-family: var(--font-mono);
-        font-size: 10.5px;
+        font-size: 11px;
         letter-spacing: 0.10em;
         color: var(--fg-2);
         text-transform: lowercase;
@@ -5038,7 +5362,7 @@
         }
 
         .topbar__meta {
-          font-size: 10px;
+          font-size: 11px;
           letter-spacing: 0.04em;
         }
 
@@ -5087,14 +5411,14 @@
         }
 
         .hearth-access__ember {
-          width: 44px;
-          height: 44px;
-          margin: 0 auto 10px;
+          width: 96px;
+          height: 96px;
+          margin: -28px auto 10px;
           bottom: auto;
         }
 
         .hearth-access h2 {
-          font-size: 30px;
+          font-size: 46px;
           text-wrap: balance;
         }
 
@@ -5113,9 +5437,45 @@
           gap: var(--s-2);
         }
 
+        /* the call never fully scrolls offscreen — the stage rides sticky
+           while board and Scout slide beneath it */
+        #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation {
+          position: sticky;
+          top: max(var(--s-2), env(safe-area-inset-top));
+          z-index: 30;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation .hearth-stage {
+          background: var(--night-1);
+        }
+
         .hearth-stage {
-          min-height: clamp(320px, 48svh, 440px);
+          min-height: clamp(280px, 38svh, 420px);
           padding: var(--s-3);
+        }
+
+        /* coarse-pointer fields hold 16px so iOS never zooms the page */
+        .field select,
+        .field input,
+        .scout-ask .assistant-input,
+        .scout-chat-input,
+        .card-command-form input {
+          font-size: 16px;
+        }
+
+        .field select,
+        .field input {
+          min-height: 52px;
+        }
+
+        body {
+          overscroll-behavior-y: none;
+        }
+
+        .assistant-feed,
+        .scout-chips,
+        .board-preview {
+          overscroll-behavior: contain;
         }
 
         .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
@@ -5206,11 +5566,7 @@
         }
 
         .board-stat__value {
-          font-size: 15px;
-        }
-
-        .board-stat__label {
-          font-size: 8.5px;
+          font-size: 17px;
         }
 
         .board-rail__header {
@@ -5239,7 +5595,7 @@
         }
 
         .scout-chat-input {
-          font-size: 14px;
+          font-size: 16px;
         }
 
         .scout-chat-send {
@@ -5279,9 +5635,9 @@
         }
 
         .scout-ask .assistant-input {
-          min-height: 40px;
+          min-height: 44px;
           padding: 0 10px;
-          font-size: 14px;
+          font-size: 16px;
         }
 
         .scout-ask .assistant-send {
@@ -5420,24 +5776,20 @@
           display: none;
         }
 
+        /* one source of truth: the last board card always clears the dock */
         #appShell.is-in-room:not(.is-board-expanded) .workspace {
-          padding-bottom: 160px;
+          padding-bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s-3));
         }
 
-        #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
-          right: max(var(--s-2), env(safe-area-inset-right));
-          bottom: max(var(--s-2), env(safe-area-inset-bottom));
-          left: max(var(--s-2), env(safe-area-inset-left));
-        }
-
-        #appShell.is-in-room:not(.is-board-expanded) .workspace {
-          padding-bottom: 144px;
-        }
-
+        /* the dock: ONE row of ≥48px glass verbs — mic · cam · mixer ·
+           Send notes · leave. Share screen folds on phones (element kept). */
         #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
           display: grid;
           grid-template-columns: 1fr;
           min-height: 0;
+          right: max(var(--s-2), env(safe-area-inset-right));
+          bottom: max(var(--s-2), env(safe-area-inset-bottom));
+          left: max(var(--s-2), env(safe-area-inset-left));
           padding: 8px;
           border-radius: var(--r-2xl);
           border-color: var(--glass-edge);
@@ -5449,51 +5801,47 @@
 
         #appShell.is-in-room .meeting-bar .log,
         #appShell.is-in-room .meeting-bar .room-clock,
-        #appShell.is-in-room .meeting-bar .device-control,
-        #appShell.is-in-room .meeting-bar #copyRoomLink {
+        #appShell.is-in-room .meeting-bar #screenShare {
           display: none;
         }
 
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: 44px 44px minmax(76px, 1fr) minmax(92px, 1.1fr) 44px;
+          grid-template-columns: 48px 48px 48px minmax(0, 1fr) 48px;
           align-items: center;
           gap: 8px;
           width: 100%;
         }
 
-        #appShell.is-in-room #audioSettingsButton {
-          grid-column: 1 / -1;
-          grid-row: 2;
-          width: 100%;
-          justify-self: stretch;
+        #appShell.is-in-room #muteMic,
+        #appShell.is-in-room #toggleCamera,
+        #appShell.is-in-room #audioSettingsButton,
+        #appShell.is-in-room #leave {
+          width: 48px;
+          height: 48px;
+          min-height: 48px;
         }
 
-        #appShell.is-in-room #audioSettingsButton .audio-settings-label {
-          display: inline;
-        }
-
-        #appShell.is-in-room #screenShare,
         #appShell.is-in-room #archiveMeeting {
-          height: 44px;
-          min-height: 44px;
+          height: 48px;
+          min-height: 48px;
           min-width: 0;
           padding: 0 10px;
           font-size: 13px;
           white-space: nowrap;
-        }
-
-        #appShell.is-in-room #screenShare {
-          grid-column: 3;
-        }
-
-        #appShell.is-in-room #archiveMeeting {
           grid-column: 4;
         }
 
         #appShell.is-in-room #leave {
           grid-column: 5;
           grid-row: 1;
+          justify-self: end;
+        }
+
+        /* the fixed dock yields while composing to Scout */
+        #appShell.is-in-room:has(.scout-panel :focus-within) .meeting-bar {
+          transform: translateY(140%);
+          transition: transform 200ms var(--ease-soft);
         }
 
         .board-expanded-surface {
@@ -5793,30 +6141,22 @@
 
       @media (max-width: 360px) {
         .topbar__title p {
-          letter-spacing: 0.06em;
+          letter-spacing: var(--track-mono);
         }
 
         .btn {
           font-size: 13px;
         }
 
-        .controls {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-
-        #muteMic,
-        #toggleCamera {
-          width: 40px;
-          height: 40px;
-        }
-
-        #leave {
-          width: 40px;
-          height: 40px;
+        /* nothing shrinks below --touch-min; "Send notes" simply gets the
+           narrower middle column */
+        #appShell.is-in-room .meeting-bar .controls {
+          grid-template-columns: 48px 48px 48px minmax(0, 1fr) 48px;
+          gap: 6px;
         }
 
         .hearth-access h2 {
-          font-size: 27px;
+          font-size: 40px;
         }
 
         .board-rail__header {
@@ -5833,6 +6173,14 @@
          No hover on glass — anything a fingertip needs stays visible and
          keeps a 44px landing. Hover-only flourishes are stilled. */
       @media (hover: none), (pointer: coarse) {
+        .btn,
+        .stage-segmented button,
+        .scout-chip,
+        .scout-ask .assistant-send,
+        .card-command-chip {
+          min-height: var(--touch-min);
+        }
+
         .pin-speaker {
           min-width: 44px;
           width: 44px;
@@ -5870,12 +6218,12 @@
          home with a staggered delay. The pulse is alive from frame 1; everything
          else gathers around it. Fast-path skips the cascade entirely. */
       .mount-stagger {
-        opacity: 0.5;
-        transform: translate3d(0, 6px, 0);
+        opacity: 0;
+        transform: translate3d(0, 16px, 0);
         will-change: opacity, transform;
       }
       .is-mounting .mount-stagger {
-        animation: mount-rise 280ms var(--ease-out) forwards;
+        animation: mount-rise 520ms var(--ease-out) forwards;
       }
       .is-mounting .topbar         { animation-delay: 60ms; }
       .is-mounting .meeting-bar    { animation-delay: 120ms; }
@@ -5886,8 +6234,20 @@
       .is-mounting .assistant-panel{ animation-delay: 500ms; }
 
       @keyframes mount-rise {
-        from { opacity: 0.5; transform: translate3d(0, 6px, 0); }
-        to   { opacity: 1;   transform: translate3d(0, 0, 0); }
+        from { opacity: 0; transform: translate3d(0, 16px, 0); }
+        to   { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+
+      /* room-entry choreography — the room assembles around the stage,
+         keyed off the .is-in-room class JS already toggles */
+      #appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) backwards; }
+      #appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms backwards; }
+      #appShell.is-in-room .board-rail          { animation: rise-in 480ms var(--ease-out) 160ms backwards; }
+      #appShell.is-in-room .meeting-bar         { animation: rise-in 480ms var(--ease-out) 240ms backwards; }
+
+      @keyframes rise-in {
+        from { opacity: 0; transform: translate3d(0, 16px, 0); }
+        to   { opacity: 1; transform: translate3d(0, 0, 0); }
       }
 
       .is-fast-mount .mount-stagger {
@@ -5925,6 +6285,28 @@
         }
         .pill--listening .pill__dot,
         .pill--connecting .pill__dot { animation: none; }
+
+        /* Hearthlight motion under reduced motion: the fire stays lit but
+           dimmer and slower; entrances collapse to fades */
+        .hearth-access__halo--1,
+        .hearth-access__halo--2,
+        .hearth-access__halo--3 {
+          animation-duration: 4800ms;
+          filter: opacity(0.5);
+        }
+        .access-join[disabled] { animation: none; }
+        .hearth-bloom { animation-duration: 4800ms; }
+        .topbar__mark.is-hot-ember::after { animation: none; opacity: 0.5; }
+        .pill--listening { animation: none; }
+        .board-preview__card.is-moved { animation: none; }
+        .hearth-speaker,
+        .hearth-stage[data-stage-mode="gallery"] .hearth-seats { animation: none; }
+        #appShell.is-in-room .hearth-presentation,
+        #appShell.is-in-room .scout-rail,
+        #appShell.is-in-room .board-rail,
+        #appShell.is-in-room .meeting-bar { animation-duration: 1ms; }
+        .toast.is-leaving { animation-duration: 1ms; }
+        .memory-list--silent .memory-item { animation: none; }
       }
     </style>
   </head>
@@ -5970,6 +6352,7 @@
             <span id="topbarRoomState">in the room</span>
           </span>
         </div>
+        <button id="copyRoomLink" class="btn btn--ghost topbar__copy-link" type="button">Copy link</button>
         <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
           <span class="pill__dot"></span>
           <span id="statusText">not connected</span>
@@ -6070,7 +6453,7 @@
                 <div id="assistantFeed" class="assistant-feed">
                   <article class="assistant-message assistant-message--status">
                     <span class="assistant-meta">ready</span>
-                    <span class="assistant-text">ask Scout anything.</span>
+                    <span class="assistant-text">the room is listening.</span>
                   </article>
                 </div>
               </details>
@@ -6101,7 +6484,7 @@
               <p id="scoutChatHint" class="scout-chat-hint">join the room to chat with Scout</p>
             </div>
           </section>
-          <div id="memoryList" class="memory-list memory-list--silent" aria-hidden="true">
+          <div id="memoryList" class="memory-list memory-list--silent" role="log" aria-label="meeting memory">
             <article class="memory-item">
               <span class="memory-meta">ready</span>
               <span>memory starts when the room speaks.</span>
@@ -6307,12 +6690,6 @@
         <p id="log" class="log" aria-live="polite">team meeting</p>
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Enter</button>
-          <label class="device-control">
-            <span>mic</span>
-            <select id="micSelect" class="device-select" disabled>
-              <option value="">microphone</option>
-            </select>
-          </label>
           <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
             <svg class="mute-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
@@ -6343,7 +6720,6 @@
             <span class="audio-settings-label">audio</span>
           </button>
           <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
-          <button id="copyRoomLink" class="btn btn--ghost" type="button">Copy link</button>
           <button id="archiveMeeting" class="btn btn--ghost" type="button" disabled>Send notes</button>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -6373,6 +6749,12 @@
           </button>
         </header>
         <div class="audio-settings-body">
+          <label class="device-control device-control--settings">
+            <span>microphone</span>
+            <select id="micSelect" class="device-select" disabled>
+              <option value="">microphone</option>
+            </select>
+          </label>
           <fieldset class="noise-mode-group">
             <legend>noise reduction</legend>
             <label class="noise-mode-option">
@@ -12773,7 +13155,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           meta.textContent = 'ready'
           const text = document.createElement('span')
           text.className = 'assistant-text'
-          text.textContent = 'ask Scout anything.'
+          text.textContent = 'the room is listening.'
           empty.append(meta, text)
           assistantFeed.replaceChildren(empty)
           setAssistantStateText('ready')
