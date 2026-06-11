@@ -3,178 +3,359 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#110D09">
+    <meta name="theme-color" content="#F5F5F7">
     <title>Bonfire</title>
+    <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+    <script>
+      /* pre-paint theme: stored choice wins, else system preference. */
+      (() => {
+        let theme = null
+        try { theme = window.localStorage?.getItem('bonfire.theme.v1') } catch (err) { theme = null }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
+        const meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#F5F5F7')
+      })()
+    </script>
     <style>
       :root {
-        color-scheme: dark;
+        color-scheme: light;
 
-        /* ---------- Bonfire ember ---------- */
-        --ember-50:  #FFF1E3;
-        --ember-100: #FFD9B0;
-        --ember-200: #FFC082;
-        --ember-300: #FFA463;
-        --ember-400: #FF8A3D;
-        --ember-500: #FF7A2B;
-        --ember-600: #ED5A14;
-        --ember-700: #C13E07;
-        --ember-800: #8B2A04;
+        /* ================= glass & ink tokens (kit verbatim) ================= */
 
-        --amber-300: #FFD27A;
-        --amber-500: #FFB23F;
+        /* ---------- fonts.css ---------- */
+        --font-sans: "Geist", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+        --font-mono: "Geist Mono", "SF Mono", "Menlo", monospace;
 
-        /* ---------- Warm night ---------- */
-        --night-0: #0B0805;
-        --night-1: #110D09;
-        --night-2: #15110D;
-        --night-3: #1D1814;
-        --night-4: #2A231C;
-        --night-5: #3A3127;
+        /* ---------- colors.css · base ramps ---------- */
+        /* ink — true neutral darks */
+        --ink-950: #09090B;
+        --ink-900: #101013;
+        --ink-850: #141418;
+        --ink-800: #1B1B21;
+        --ink-700: #26262E;
+        --ink-600: #34343E;
+        --ink-500: #4D4D59;
+        --ink-400: #6E6E7A;
+        --ink-300: #9A9AA4;
 
-        /* ---------- Ash / parchment ---------- */
-        --ash-50:  #FAF6EE;
-        --ash-100: #F2ECDD;
-        --ash-200: #E6DDC6;
-        --ash-500: #948876;
-        --ash-600: #6E6457;
-        --ash-700: #4D4538;
+        /* paper — cool neutral lights */
+        --paper-0: #FFFFFF;
+        --paper-50: #F5F5F7;
+        --paper-100: #EDEDF0;
+        --paper-200: #E2E2E7;
 
-        /* ---------- Foreground ---------- */
-        --fg-0: #FAF5EC;
-        --fg-1: #D9D0BF;
-        --fg-2: #948876;
-        --fg-3: #5D5448;
-        --fg-inverse: #1B130A;
+        /* signal — live/speaking green. The loudest color in the system. */
+        --signal-400: #5CE08A;
+        --signal-500: #30D158;
+        --signal-600: #23A847;
 
-        /* ---------- Hairlines ---------- */
-        --line-faint:  rgba(255, 235, 200, 0.06);
-        --line:        rgba(255, 235, 200, 0.10);
-        --line-strong: rgba(255, 235, 200, 0.16);
-        --line-light:  #EAE1CF;
+        /* semantic hues (state only) */
+        --red-500: #FF453A;
+        --amber-500: #FF9F0A;
+        --blue-500: #0A84FF;
 
-        /* ---------- Semantic (warm, never tailwind) ---------- */
-        --success:    #5FBE7A;
-        --success-bg: rgba(95, 190, 122, 0.14);
-        --success-fg: #2E7D4F;
-        --speaker-accent: #34D399;
-        --warning:    #FFB23F;
-        --warning-bg: rgba(255, 178, 63, 0.16);
-        --warning-fg: #9A6519;
-        --danger:     #E5573E;
-        --danger-bg:  rgba(229, 87, 62, 0.14);
-        --danger-fg:  #B23A26;
-        --info:       #88A8FF;
-        --info-bg:    rgba(136, 168, 255, 0.14);
-        --info-fg:    #5E79D9;
+        /* ---------- colors.css · semantic aliases · LIGHT (default) ---------- */
+        --bg-app: var(--paper-50);
+        --bg-stage: #000000;            /* video always sits on true black */
+        --surface-1: var(--paper-0);    /* panels, rails */
+        --surface-2: var(--paper-0);    /* cards on panels */
+        --surface-3: var(--paper-100);  /* inputs, wells, hover fills */
+        --surface-flood: var(--glass-chrome); /* legacy alias — floating layers are glass now */
 
-        /* ---------- Type ---------- */
-        --font-display: "Instrument Serif", "Times New Roman", ui-serif, serif;
-        --font-sans:    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        --font-mono:    "Geist Mono", "SF Mono", "IBM Plex Mono", Menlo, ui-monospace, monospace;
+        --text-1: #0E0E10;
+        --text-2: rgba(14, 14, 16, 0.60);
+        --text-3: rgba(14, 14, 16, 0.38);
+        --text-disabled: rgba(14, 14, 16, 0.24);
 
-        /* ---------- Radii ---------- */
-        --r-xs: 4px;
-        --r-sm: 6px;
-        --r-md: 10px;
-        --r-lg: 14px;
-        --r-xl: 18px;
-        --r-2xl: 28px;
-        --r-pill: 999px;
+        --line-1: rgba(14, 14, 16, 0.08);   /* hairline */
+        --line-2: rgba(14, 14, 16, 0.15);   /* emphasized hairline */
 
-        /* ---------- Spacing ---------- */
-        --s-1:  4px;
-        --s-2:  8px;
-        --s-3:  12px;
-        --s-4:  16px;
-        --s-5:  20px;
-        --s-6:  24px;
-        --s-7:  32px;
-        --s-8:  48px;
+        /* accent = ink. Inverts in dark mode. */
+        --accent: #0E0E10;
+        --accent-hover: #26262C;
+        --accent-press: #000000;
+        --accent-soft: rgba(14, 14, 16, 0.06);
+        --on-accent: #FFFFFF;
 
-        /* ---------- Shadows ---------- */
-        --shadow-1: 0 1px 2px rgba(15, 8, 2, 0.35);
-        --shadow-2: 0 16px 40px rgba(15, 8, 2, 0.42), 0 1px 2px rgba(15, 8, 2, 0.50);
-        --shadow-3: 0 32px 80px rgba(15, 8, 2, 0.56), 0 8px 24px rgba(15, 8, 2, 0.38);
-        --shadow-light-1: 0 1px 2px rgba(60, 35, 10, 0.06);
-        --shadow-light-2: 0 10px 28px rgba(60, 35, 10, 0.10), 0 1px 2px rgba(60, 35, 10, 0.06);
-        --shadow-panel: 0 18px 42px rgba(15, 8, 2, 0.38), inset 0 1px 0 rgba(255, 235, 200, 0.045);
-        --surface-panel: linear-gradient(180deg, rgba(29, 24, 20, 0.68), rgba(11, 8, 5, 0.88));
-        --surface-panel-soft: linear-gradient(180deg, rgba(29, 24, 20, 0.52), rgba(11, 8, 5, 0.76));
-        --glass-surface: linear-gradient(180deg, rgba(255, 235, 200, 0.105), rgba(255, 235, 200, 0.036) 38%, rgba(11, 8, 5, 0.72));
-        --glass-surface-quiet: linear-gradient(180deg, rgba(255, 235, 200, 0.07), rgba(255, 235, 200, 0.025) 42%, rgba(11, 8, 5, 0.64));
-        --glass-edge: rgba(255, 235, 200, 0.13);
-        --glass-highlight: inset 0 1px 0 rgba(255, 245, 230, 0.10), inset 0 -1px 0 rgba(255, 122, 43, 0.04);
+        --live: var(--signal-500);
+        --live-soft: rgba(35, 168, 71, 0.13);
+        --danger: var(--red-500);
+        --danger-soft: rgba(255, 69, 58, 0.10);
+        --warn: var(--amber-500);
+        --warn-soft: rgba(255, 159, 10, 0.14);
+        --info: var(--blue-500);
+        --info-soft: rgba(10, 132, 255, 0.10);
 
-        /* Liquid-glass blur tiers — every backdrop-filter routes through one
-           of these three. hero = the join gate, panel = rails/bars/inputs,
-           overlay = floating chrome and modal backdrops. */
-        --blur-hero: blur(34px) saturate(1.34) brightness(1.06);
-        --blur-panel: blur(22px) saturate(1.2);
-        --blur-overlay: blur(12px) saturate(1.1);
+        --scrim: rgba(14, 14, 16, 0.35);
+        --blur-material: var(--glass-blur); /* legacy alias */
 
-        --glow-ember-sm: 0 0 0 1px rgba(255, 122, 43, 0.42), 0 0 18px rgba(255, 122, 43, 0.20);
-        --glow-ember-md: 0 0 0 1px rgba(255, 122, 43, 0.52), 0 0 30px rgba(255, 122, 43, 0.28), 0 0 70px rgba(255, 122, 43, 0.12);
-        --glow-speaker-md: 0 0 0 1px rgba(52, 211, 153, 0.72), 0 0 28px rgba(52, 211, 153, 0.26), 0 0 64px rgba(16, 185, 129, 0.12);
+        /* ambient backdrop — the wallpaper glass refracts. Barely-there washes. */
+        --backdrop-ambient:
+          radial-gradient(1100px 700px at 12% -10%, rgba(14, 14, 16, 0.05), transparent 60%),
+          radial-gradient(900px 600px at 105% 15%, rgba(14, 14, 16, 0.04), transparent 55%),
+          var(--paper-50);
 
-        /* ---------- Motion ---------- */
-        --ease-out:  cubic-bezier(0.22, 0.61, 0.36, 1);
-        --ease-soft: cubic-bezier(0.4, 0.0, 0.2, 1);
-        --t-fast: 120ms;
-        --t-base: 200ms;
+        /* ---------- glass.css · LIGHT ---------- */
+        --glass-chrome: rgba(255, 255, 255, 0.62);
+        --glass-panel: rgba(255, 255, 255, 0.44);
+        --glass-blur: saturate(1.8) blur(28px);
+        --glass-border: rgba(14, 14, 16, 0.10);
+        --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.70);
+        --glass-shadow: 0 8px 32px rgba(14, 14, 16, 0.10);
 
-        /* one heartbeat for the whole screen — pulse, listening dot, identity chip
-           glow, anything else that breathes inherits this clock. */
-        --pulse-cycle: 2400ms;
+        /* ---------- typography.css ---------- */
+        --type-display-xl: 600 56px/1.04 var(--font-sans);
+        --track-display-xl: -0.035em;
+        --type-display: 600 40px/1.08 var(--font-sans);
+        --track-display: -0.03em;
+        --type-title-1: 600 28px/1.15 var(--font-sans);
+        --track-title-1: -0.022em;
+        --type-title-2: 600 21px/1.25 var(--font-sans);
+        --track-title-2: -0.016em;
+        --type-headline: 600 17px/1.3 var(--font-sans);
+        --track-headline: -0.01em;
+        --type-body: 400 15px/1.5 var(--font-sans);
+        --type-body-medium: 500 15px/1.5 var(--font-sans);
+        --type-caption: 400 13px/1.45 var(--font-sans);
+        --type-caption-medium: 500 13px/1.45 var(--font-sans);
+        --track-text: -0.005em;
+        --type-label: 500 11px/1.2 var(--font-mono);
+        --track-label: 0.06em;
+        --type-label-lg: 500 13px/1.3 var(--font-mono);
+        --track-label-lg: 0.04em;
+        --type-numeric: 500 13px/1.2 var(--font-mono);
+        --track-numeric: 0;
 
-        /* ---------- Hearthlight type scale ----------
-           hard floor 11px (in-tile media flags may sit at 10px as the single
-           sanctioned exception). Instrument Serif never renders below 19px —
-           below that it falls back to 12px italic Geist. */
-        --text-2xs: 11px;
-        --text-xs: 13px;
-        --text-sm: 15px;
-        --text-md: 18px;
-        --text-lg: 24px;
-        --text-xl: 32px;
-        --text-hero: clamp(46px, 6.5vw, 84px);
+        /* ---------- spacing.css ---------- */
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 20px;
+        --sp-6: 24px;
+        --sp-8: 32px;
+        --sp-10: 40px;
+        --sp-12: 48px;
+        --sp-16: 64px;
 
-        /* the only three letter-spacing values allowed */
-        --track-sans: 0;
-        --track-mono: 0.06em;
-        --track-label: 0.10em;
+        /* radius — generous */
+        --r-sm: 8px;     /* tags, chips, small wells */
+        --r-md: 12px;    /* inputs, buttons (rect), menu items */
+        --r-lg: 16px;    /* cards, tiles */
+        --r-xl: 22px;    /* panels, sheets, video tiles */
+        --r-2xl: 28px;   /* dialogs, PiP window */
+        --r-full: 999px; /* pills, avatars, control dock buttons */
 
-        /* ---------- Hearthlight layout / depth ---------- */
-        --touch-min: 44px;
-        --rail-w: clamp(260px, 19vw, 320px);
-        --r-stage: 22px;
-        --dock-h: 76px;
-        --stage-vignette: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(11, 8, 5, 0.55) 100%);
-        --board-well: var(--ash-50);
-        --shadow-well-light: inset 0 1px 3px rgba(60, 35, 10, 0.08), 0 1px 0 rgba(255, 245, 230, 0.05);
+        /* elevation — hairlines do most of the work; shadows stay soft */
+        --shadow-1: 0 1px 2px rgba(14, 14, 16, 0.10);
+        --shadow-2: 0 8px 24px rgba(14, 14, 16, 0.12);
+        --shadow-3: 0 24px 64px rgba(14, 14, 16, 0.22);
+        --glow-accent: 0 0 0 1.5px var(--accent), 0 4px 24px rgba(14, 14, 16, 0.14);
+        --glow-live: 0 0 0 1.5px var(--live), 0 4px 20px rgba(48, 209, 88, 0.30);
 
-        /* ---------- Warm presence (liveness that isn't the speaker) ----------
-           green #34D399 keeps its monopoly on "who is talking"; everything else
-           that is merely alive uses this warm tone. */
-        --presence: #C98B4F;
-        --presence-bg: rgba(201, 139, 79, 0.14);
+        /* hit targets */
+        --hit-min: 44px;
 
-        /* due-date semantics: red is reserved for overdue */
-        --due-future: var(--ash-600);
-        --due-soon: var(--warning);
-        --due-today: var(--warning);
-        --due-overdue: var(--danger);
+        /* ---------- motion.css ---------- */
+        --ease: cubic-bezier(0.32, 0.72, 0, 1);        /* default — Apple sheet ease */
+        --ease-spring: cubic-bezier(0.34, 1.25, 0.5, 1); /* enters, PiP snap */
+        --dur-fast: 120ms;   /* hover, press */
+        --dur-med: 220ms;    /* fades, toggles, toasts */
+        --dur-slow: 360ms;   /* panels, sheets, PiP travel */
+        --dur-breathe: 2400ms; /* ambient "listening" pulse */
+        --press-scale: 0.97;
 
         /* breathing amplitude — the whole room swells on one switch */
         --breathe-rest: 0.4;
         --breathe-live: 1;
         --breathe: var(--breathe-rest);
 
-        /* the "agent places an object" signature */
-        --t-place: 1100ms;
-        --ease-place: cubic-bezier(0.2, 0.9, 0.2, 1.15);
+        /* ================= LEGACY ALIAS BRIDGE — delete in WP7 =================
+           Maps every Hearthlight-era token name still referenced in this file
+           onto the nearest glass & ink value so every surface keeps rendering
+           while WP3–WP6 rewrite each surface to consume kit tokens directly. */
+
+        /* warm ember accent → monochrome accent */
+        --ember-50:  var(--text-1);
+        --ember-100: var(--text-1);
+        --ember-200: var(--text-2);
+        --ember-300: var(--accent);
+        --ember-400: var(--accent);
+        --ember-500: var(--accent);
+        --ember-600: var(--accent-hover);
+        --ember-700: var(--accent-press);
+        --ember-800: var(--accent-press);
+        --amber-300: var(--warn);
+
+        /* warm night surfaces → app/surface tiers */
+        --night-0: var(--bg-app);
+        --night-1: var(--bg-app);
+        --night-2: var(--surface-1);
+        --night-3: var(--surface-2);
+        --night-4: var(--surface-3);
+        --night-5: var(--surface-3);
+
+        /* ash / parchment → surfaces + text tiers */
+        --ash-50:  var(--surface-1);
+        --ash-100: var(--surface-3);
+        --ash-200: var(--surface-3);
+        --ash-500: var(--text-3);
+        --ash-600: var(--text-2);
+        --ash-700: var(--text-1);
+
+        /* foreground → text tiers */
+        --fg-0: var(--text-1);
+        --fg-1: var(--text-2);
+        --fg-2: var(--text-2);
+        --fg-3: var(--text-3);
+        --fg-inverse: var(--on-accent);
+
+        /* hairlines */
+        --line-faint:  var(--line-1);
+        --line:        var(--line-1);
+        --line-strong: var(--line-2);
+        --line-light:  var(--line-1);
+
+        /* semantic */
+        --success:    var(--live);
+        --success-bg: var(--live-soft);
+        --success-fg: var(--signal-600);
+        --speaker-accent: #30D158;
+        --warning:    var(--warn);
+        --warning-bg: var(--warn-soft);
+        --warning-fg: var(--warn);
+        --danger-bg:  var(--danger-soft);
+        --danger-fg:  var(--danger);
+        --info-bg:    var(--info-soft);
+        --info-fg:    var(--info);
+
+        /* type */
+        --font-display: var(--font-sans);
+        --text-2xs: 11px;
+        --text-xs: 13px;
+        --text-sm: 15px;
+        --text-md: 17px;
+        --text-lg: 21px;
+        --text-xl: 28px;
+        --text-hero: clamp(40px, 6vw, 56px);
+        --track-sans: var(--track-text);
+        --track-mono: var(--track-label);
+
+        /* radii / spacing */
+        --r-xs: 4px;
+        --r-pill: var(--r-full);
+        --s-1: var(--sp-1);
+        --s-2: var(--sp-2);
+        --s-3: var(--sp-3);
+        --s-4: var(--sp-4);
+        --s-5: var(--sp-5);
+        --s-6: var(--sp-6);
+        --s-7: var(--sp-8);
+        --s-8: var(--sp-12);
+
+        /* shadows / panels / glass */
+        --shadow-light-1: var(--shadow-1);
+        --shadow-light-2: var(--shadow-2);
+        --shadow-panel: var(--glass-highlight), var(--glass-shadow);
+        --surface-panel: var(--surface-1);
+        --surface-panel-soft: var(--surface-1);
+        --glass-surface: var(--glass-panel);
+        --glass-surface-quiet: var(--glass-panel);
+        --glass-edge: var(--glass-border);
+        --blur-hero: var(--glass-blur);
+        --blur-panel: var(--glass-blur);
+        --blur-overlay: var(--glass-blur);
+        --glow-ember-sm: var(--glow-accent);
+        --glow-ember-md: var(--glow-accent);
+        --glow-speaker-md: 0 0 0 1.5px var(--live), 0 4px 20px rgba(48, 209, 88, 0.30);
+
+        /* motion — legacy names ride the kit family */
+        --ease-out:  cubic-bezier(0.32, 0.72, 0, 1);
+        --ease-soft: var(--ease);
+        --t-fast: var(--dur-fast);
+        --t-base: var(--dur-med);
+        --t-place: var(--dur-slow);
+        --ease-place: var(--ease-spring);
+        --pulse-cycle: var(--dur-breathe);
+
+        /* layout / depth */
+        --touch-min: var(--hit-min);
+        --rail-w: clamp(260px, 19vw, 320px);
+        --r-stage: var(--r-xl);
+        --dock-h: 76px;
+        --stage-vignette: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+        --board-well: var(--surface-3);
+        --shadow-well-light: inset 0 0 0 1px var(--line-1);
+
+        /* presence → quiet monochrome */
+        --presence: var(--text-2);
+        --presence-bg: var(--accent-soft);
+
+        /* due-date semantics: red stays reserved for overdue */
+        --due-future: var(--text-3);
+        --due-soon: var(--warn);
+        --due-today: var(--warn);
+        --due-overdue: var(--danger);
+        /* =============== end LEGACY ALIAS BRIDGE =============== */
+      }
+
+      [data-theme="dark"] {
+        color-scheme: dark;
+
+        /* ---------- colors.css · semantic aliases · DARK (true black) ---------- */
+        --bg-app: #000000;              /* true black */
+        --bg-stage: #000000;
+        --surface-1: #101012;
+        --surface-2: #161619;
+        --surface-3: #1E1E23;
+        --surface-flood: var(--glass-chrome);
+
+        --text-1: #F5F5F7;
+        --text-2: rgba(245, 245, 247, 0.62);
+        --text-3: rgba(245, 245, 247, 0.40);
+        --text-disabled: rgba(245, 245, 247, 0.24);
+
+        --line-1: rgba(255, 255, 255, 0.09);
+        --line-2: rgba(255, 255, 255, 0.16);
+
+        --accent: #F5F5F7;
+        --accent-hover: #FFFFFF;
+        --accent-press: #E2E2E7;
+        --accent-soft: rgba(255, 255, 255, 0.10);
+        --on-accent: #0E0E10;
+
+        --live-soft: rgba(48, 209, 88, 0.14);
+        --danger-soft: rgba(255, 69, 58, 0.14);
+        --warn-soft: rgba(255, 159, 10, 0.14);
+        --info-soft: rgba(10, 132, 255, 0.14);
+
+        --scrim: rgba(0, 0, 0, 0.60);
+
+        --backdrop-ambient:
+          radial-gradient(1100px 700px at 12% -10%, rgba(255, 255, 255, 0.05), transparent 60%),
+          radial-gradient(900px 600px at 105% 15%, rgba(255, 255, 255, 0.035), transparent 55%),
+          #000000;
+
+        /* ---------- glass.css · DARK ---------- */
+        --glass-chrome: rgba(24, 24, 27, 0.55);
+        --glass-panel: rgba(18, 18, 20, 0.45);
+        --glass-border: rgba(255, 255, 255, 0.13);
+        --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.50);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --dur-fast: 0ms;
+          --dur-med: 0ms;
+          --dur-slow: 0ms;
+        }
       }
 
       #appShell:has(.topbar__mark.is-listening) {
@@ -193,19 +374,30 @@
         margin: 0;
         min-height: 100vh;
         min-height: 100svh;
-        background:
-          linear-gradient(180deg, rgba(255, 122, 43, 0.07) 0%, transparent 34%),
-          linear-gradient(180deg, var(--night-2) 0%, var(--night-1) 48%, var(--night-0) 100%);
-        color: var(--fg-0);
+        background: var(--backdrop-ambient);
+        color: var(--text-1);
+        font: var(--type-body);
         font-family: var(--font-sans);
-        font-weight: 400;
-        font-size: 14px;
-        line-height: 1.5;
-        font-feature-settings: "ss01" on, "cv11" on;
+        letter-spacing: var(--track-text);
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
+        -webkit-tap-highlight-color: transparent;
         overflow-x: clip;
+      }
+
+      /* quiet scrollbars (kit base.css) */
+      * { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+      *::-webkit-scrollbar { width: 8px; height: 8px; }
+      *::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; }
+      *::-webkit-scrollbar-track { background: transparent; }
+
+      ::selection { background: var(--accent-soft); }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 4px;
       }
 
       h1, h2, p { margin: 0; }
@@ -229,16 +421,6 @@
         padding: max(var(--s-3), env(safe-area-inset-top)) max(var(--s-3), env(safe-area-inset-right)) max(var(--s-3), env(safe-area-inset-bottom)) max(var(--s-3), env(safe-area-inset-left));
       }
 
-      main::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        z-index: -1;
-        pointer-events: none;
-        background:
-          radial-gradient(ellipse at 50% -10%, rgba(255, 122, 43, 0.14), transparent 42%),
-          linear-gradient(90deg, rgba(255, 235, 200, 0.022), transparent 18%, transparent 82%, rgba(255, 235, 200, 0.018));
-      }
 
       /* ---------- Topbar ---------- */
       .topbar {
@@ -4400,8 +4582,7 @@
         gap: 8px;
       }
 
-      /* serif floor: Instrument Serif never below 19px — empty hints fall
-         back to italic Geist */
+      /* empty hints fall back to italic Geist */
       .board-preview__col.is-empty .board-preview__more {
         color: var(--ash-500);
         font-family: var(--font-sans);
@@ -6940,6 +7121,29 @@
     </div>
 
     <script>
+      /* ---------- theme (glass & ink) ----------
+         light is default; dark = data-theme="dark" on <html> (true black).
+         The pre-paint script in <head> applies the stored/system theme before
+         first render; these helpers switch + persist it at runtime. */
+      const themeStorageKey = 'bonfire.theme.v1'
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]')
+      function applyTheme(theme) {
+        const next = theme === 'dark' ? 'dark' : 'light'
+        if (next === 'dark') {
+          document.documentElement.dataset.theme = 'dark'
+        } else {
+          delete document.documentElement.dataset.theme
+        }
+        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#F5F5F7')
+        try { window.localStorage?.setItem(themeStorageKey, next) } catch (err) { /* private mode */ }
+        return next
+      }
+      function toggleTheme() {
+        return applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')
+      }
+      window.applyTheme = applyTheme
+      window.toggleTheme = toggleTheme
+
       const statuses = ['Backlog', 'In Progress', 'Blocked', 'Done']
       const appShell = document.getElementById('appShell')
       const boardEl = document.getElementById('board')
