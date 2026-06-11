@@ -976,7 +976,7 @@
       .column--backlog h2::before { background: var(--ash-500); }
       .column--in-progress h2::before { background: var(--ember-500); }
       .column--blocked h2::before { background: var(--amber-500); }
-      .column--done h2::before { background: var(--success); }
+      .column--done h2::before { background: var(--presence); }
 
       .count {
         display: inline-grid;
@@ -1543,7 +1543,7 @@
       .controls .btn--ghost.is-muted,
       .controls .btn--ghost.is-off,
       .controls .btn--ghost.is-voice-focus {
-        border-color: rgba(255, 122, 43, 0.44);
+        border-color: transparent;
         background: rgba(255, 122, 43, 0.14);
       }
 
@@ -1632,7 +1632,9 @@
         color: var(--ember-300);
       }
 
-      .audio-settings-button {
+      /* .btn base sets min-width: 96px later in source — match its
+         specificity so the mixer stays a square icon in the dock trio */
+      .btn.audio-settings-button {
         min-width: 44px;
         width: 44px;
         min-height: 40px;
@@ -1756,6 +1758,11 @@
         background: rgba(229, 87, 62, 0.12);
         color: var(--danger);
         border-color: rgba(229, 87, 62, 0.25);
+      }
+
+      /* inside the cast-glass dock, state speaks through fill alone */
+      .controls .btn--danger {
+        border-color: transparent;
         min-width: 0;
         padding: 9px;
         border-radius: var(--r-pill);
@@ -1859,7 +1866,7 @@
         align-self: center;
         background: var(--ember-500);
       }
-      .toast--done .toast__bar { background: var(--success); }
+      .toast--done .toast__bar { background: var(--presence); }
       .toast--note .toast__bar { background: var(--info); }
       .toast--error .toast__bar { background: var(--danger); }
       .toast--error { border-color: rgba(229, 87, 62, 0.4); }
@@ -2282,15 +2289,17 @@
         font-size: 13px;
       }
 
+      /* equal weight with the Edit pill — a concentric 40px circle */
       .card-detail-close {
         min-width: 0;
         width: 40px;
         height: 40px;
-        border: 0;
-        border-radius: var(--r-sm);
-        background: transparent;
+        border: 1px solid var(--line-light);
+        border-radius: var(--r-pill);
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: var(--shadow-light-1);
         color: var(--ash-600);
-        font-size: 18px;
+        font-size: 16px;
         line-height: 1;
         padding: 0;
       }
@@ -2810,6 +2819,13 @@
         color: var(--ember-700);
       }
 
+      /* no box-in-a-box: the Ask affordance speaks through fill inside the
+         already-bordered composer */
+      .card-command-form .btn--ghost {
+        border-color: transparent;
+        background: var(--ash-100);
+      }
+
       .card-command-chip:active {
         transform: scale(0.96);
       }
@@ -3157,7 +3173,7 @@
         gap: var(--s-3);
         padding-top: 0;
         border-top: 0;
-        transform: translateY(var(--s-6));
+        transform: translateY(var(--s-4));
         font-family: var(--font-mono);
         letter-spacing: var(--track-mono);
         opacity: 0.85;
@@ -3224,12 +3240,12 @@
       }
 
       .hearth-access.is-verified .ready-tag {
-        color: var(--success);
+        color: var(--presence);
       }
 
       .hearth-access.is-verified .ready-tag .dot {
-        background: var(--success);
-        box-shadow: 0 0 0 3px rgba(95, 190, 122, 0.22);
+        background: var(--presence);
+        box-shadow: 0 0 0 3px rgba(201, 139, 79, 0.22);
       }
 
       .scout-rail {
@@ -3349,6 +3365,7 @@
         background: transparent;
         padding: 7px 0;
         font-size: 13.5px;
+        text-overflow: ellipsis;
       }
 
       .scout-ask .assistant-input:focus {
@@ -3556,7 +3573,7 @@
       .scout-chat-empty {
         margin: 0;
         font-family: var(--font-display);
-        font-size: 18px;
+        font-size: 19px;
         font-style: italic;
         font-weight: 400;
         line-height: 1.25;
@@ -3770,9 +3787,11 @@
       }
 
       .memory-list--silent .memory-item span:last-child {
-        white-space: nowrap;
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
         overflow: hidden;
-        text-overflow: ellipsis;
       }
 
       /* the stage is a transparent region of the scene, not a boxed panel —
@@ -4208,10 +4227,11 @@
       /* stats are the big-number moment — unboxed, one shared baseline */
       .board-rail__summary {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: auto auto auto;
+        justify-content: space-between;
         gap: var(--s-2);
         align-items: baseline;
-        padding: 0 2px;
+        padding: 0;
         border: 0;
         border-radius: 0;
         background: transparent;
@@ -4340,7 +4360,7 @@
         background: rgba(11, 8, 5, 0.45);
         color: var(--fg-2);
         font-family: var(--font-display);
-        font-size: 16px;
+        font-size: 19px;
         font-style: italic;
         font-weight: 400;
         letter-spacing: 0;
@@ -4494,8 +4514,8 @@
         background: rgba(11, 8, 5, 0.78);
         color: var(--ember-300);
         font-family: var(--font-mono);
-        font-size: 10px;
-        letter-spacing: 0.08em;
+        font-size: var(--text-2xs);
+        letter-spacing: var(--track-mono);
         text-transform: none;
         white-space: nowrap;
       }
@@ -5337,11 +5357,19 @@
           padding: max(var(--s-2), env(safe-area-inset-top)) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
         }
 
+        /* the live clock can never be squeezed — its column is max-content */
         .topbar {
           min-height: 0;
           gap: var(--s-2);
           padding: 9px 10px;
           border-radius: var(--r-md);
+          grid-template-columns: auto minmax(0, 1fr) max-content auto auto;
+        }
+
+        .topbar__title p {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .topbar__mark {
@@ -5432,21 +5460,39 @@
         }
 
         .inside-row {
-          flex-direction: column;
-          align-items: flex-start;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
           gap: var(--s-2);
+          margin-bottom: 0;
+          transform: translateY(var(--s-2));
         }
 
         /* the call never fully scrolls offscreen — the stage rides sticky
-           while board and Scout slide beneath it */
+           while board and Scout slide beneath it. The ::before scrim fills
+           the gap above the stuck stage so passing content reads as depth,
+           not a glitch. */
         #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation {
           position: sticky;
           top: max(var(--s-2), env(safe-area-inset-top));
           z-index: 30;
+          overflow: visible;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation::before {
+          content: "";
+          position: absolute;
+          top: calc(-1 * max(var(--s-2), env(safe-area-inset-top)) - 1px);
+          left: calc(-1 * var(--s-2));
+          right: calc(-1 * var(--s-2));
+          height: calc(max(var(--s-2), env(safe-area-inset-top)) + 1px);
+          background: var(--night-0);
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation .hearth-stage {
           background: var(--night-1);
+          box-shadow: 0 18px 36px -22px rgba(11, 8, 5, 0.9);
         }
 
         .hearth-stage {
@@ -5665,6 +5711,11 @@
 
         .scout-activity summary {
           min-height: 40px;
+        }
+
+        /* "ask scout" label takes its own line; chips wrap beneath it */
+        .card-command-chips span {
+          flex-basis: 100%;
         }
 
         .meeting-bar {
@@ -6177,8 +6228,17 @@
         .stage-segmented button,
         .scout-chip,
         .scout-ask .assistant-send,
-        .card-command-chip {
+        .card-command-chip,
+        .card-detail-edit-button,
+        .board-collapse,
+        .device-select,
+        .scout-activity summary {
           min-height: var(--touch-min);
+        }
+
+        .card-detail-close {
+          width: var(--touch-min);
+          height: var(--touch-min);
         }
 
         .pin-speaker {
@@ -6464,7 +6524,7 @@
                     <path d="M21 21l-4.35-4.35"></path>
                   </svg>
                 </span>
-                <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask Scout about this room…">
+                <input id="assistantInput" class="assistant-input" type="text" autocomplete="off" placeholder="ask the room…">
                 <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
               </form>
             </div>
@@ -14396,7 +14456,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           toastRegion.firstElementChild.remove()
         }
         // Toasts carrying a link stay long enough to be clicked.
-        window.setTimeout(() => toast.remove(), payload.link?.href ? 9000 : 4200)
+        // Burn out via CSS (.is-leaving) instead of vanishing in one frame.
+        window.setTimeout(() => {
+          toast.classList.add('is-leaving')
+          toast.addEventListener('animationend', () => toast.remove(), { once: true })
+          window.setTimeout(() => toast.remove(), 600)
+        }, payload.link?.href ? 9000 : 4200)
       }
 
       function showCommentPreview(preview) {

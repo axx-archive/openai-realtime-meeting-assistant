@@ -125,6 +125,49 @@
   /* One heartbeat for the whole screen — the pulse halo, listening dot,
      identity chip glow, anything else that "breathes" inherits this clock. */
   --pulse-cycle: 2400ms;
+
+  /* ---------- Hearthlight (2026-06-10 revamp) ----------
+     Type scale: hard floor 11px (in-tile media flags may sit at 10px as the
+     single sanctioned exception). Instrument Serif never renders below 19px. */
+  --text-2xs: 11px;
+  --text-xs: 13px;
+  --text-sm: 15px;
+  --text-md: 18px;
+  --text-lg: 24px;
+  --text-xl: 32px;
+  --text-hero: clamp(46px, 6.5vw, 84px);
+
+  /* the only three letter-spacing values allowed */
+  --track-sans: 0;
+  --track-mono: 0.06em;
+  --track-label: 0.10em;
+
+  /* warm presence — liveness that isn't the active speaker. The cool green
+     --speaker-accent keeps its monopoly on "who is talking". */
+  --presence: #C98B4F;
+  --presence-bg: rgba(201, 139, 79, 0.14);
+
+  /* due-date semantics: red belongs to overdue alone */
+  --due-future: var(--ash-600);
+  --due-soon: var(--warning);
+  --due-today: var(--warning);
+  --due-overdue: var(--danger);
+
+  /* layout / depth */
+  --touch-min: 44px;
+  --rail-w: clamp(260px, 19vw, 320px);
+  --r-stage: 22px;
+  --dock-h: 76px;
+
+  /* breathing amplitude — ambient halo/bloom opacity multiplies by
+     --breathe; the room flips rest → live on one switch when listening */
+  --breathe-rest: 0.4;
+  --breathe-live: 1;
+  --breathe: var(--breathe-rest);
+
+  /* the "agent places an object" signature */
+  --t-place: 1100ms;
+  --ease-place: cubic-bezier(0.2, 0.9, 0.2, 1.15);
 }
 
 /* ============================================================

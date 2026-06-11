@@ -236,3 +236,19 @@ The product uses `×` (×, U+00D7) as the close button glyph in the card-detail 
 The Bonfire is one product, one surface: the room. There is no marketing site, settings screen, or mobile app in the codebase — only the meeting room. The UI kit (`ui_kits/bonfire-room/`) reflects that.
 
 If you need to extend the system to new surfaces (a marketing landing, a settings page, a mobile companion), the rules above hold and the answer is almost always: more dark warm surface, very little ember, italic Instrument Serif for the one poetic moment per page, and Geist for everything else.
+
+---
+
+## Hearthlight (2026-06-10 revamp)
+
+The room was recast as **one cinematic scene** — "the room is a stage" — replacing the boxed three-panel dashboard. The rules above still hold; these supersede where they conflict:
+
+- **The stage takes the frame.** `.hearth-presentation` has no border, background, or shadow — the video tile itself (radius `--r-stage: 22px`) is the protagonist. Stage chrome floats as a single glass strip *over* the video.
+- **Rails are borderless.** Scout and the board sit directly on the night. Each rail earns exactly one edge: a hairline rule under a 44px header (18px/600 sans). No panel glass on rails — backdrop-filter is reserved for genuinely floating chrome (dock, toasts, modals).
+- **Type scale** `--text-2xs…--text-hero` with an 11px hard floor (10px only for in-tile media flags). Three tracking values only (`--track-sans/mono/label`). Instrument Serif never below 19px — smaller ceremony falls back to 12px italic Geist.
+- **Warm presence** `--presence: #C98B4F` carries all liveness that isn't the active speaker ("in the room" pill, Scout ready dot, shipped-today stat). `--speaker-accent` green remains exclusively the speaking tile.
+- **Due-date ranks:** neutral future → amber soon/today → red only on overdue.
+- **The room breathes.** The stage bloom and gate halos pulse on `--pulse-cycle`; amplitude multiplies by `--breathe` (0.4 at rest → 1 when listening). The hot-ember handshake uses a dedicated 1800ms overlay halo, never a mid-flight duration change.
+- **Motion grammar:** `rise` (chrome entrances, 480ms staggered), `place` (`--t-place`/`--ease-place` — the agent setting a card down), `breathe` (the heartbeat). Nothing changes state in a single frame; toasts burn out via `.is-leaving`.
+- **The board sits in a parchment well** (`--board-well` + inset shadow) so white cards never cliff against the night. Stats are unboxed 28px tabular numerals over 11px mono captions. Column headers are museum labels with plain-text counts.
+- **Mobile is native-grade:** viewport-fit=cover + `theme-color #110D09` (the night reaches the screen edges), a sticky ~38svh stage, ONE row of ≥48px dock verbs, 16px inputs (no iOS focus-zoom), and the dock yields to the keyboard while composing to Scout. `html/body` use `overflow-x: clip` — `hidden` would kill the sticky stage.
