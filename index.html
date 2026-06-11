@@ -1547,94 +1547,55 @@
 
       /* tags removed from kanban cards per design spec */
 
-      /* ---------- Memory panel ---------- */
-      .memory-panel {
-        display: grid;
-        gap: var(--s-2);
-        background: var(--night-3);
-        border: 1px solid var(--line);
-        border-radius: var(--r-md);
-        padding: var(--s-3);
-      }
-
-      .memory-panel header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--s-2);
-      }
-
-      .memory-panel h2 {
-        font-family: var(--font-sans);
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--fg-0);
-      }
-
-      .memory-count {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--fg-2);
-        font-variant-numeric: tabular-nums;
-      }
-
+      /* ---------- Memory — quiet log entries (kit) ----------
+         transcripts/summaries read like a clean log; hairlines do the
+         separating, the mono meta line carries the system voice */
       .memory-list {
         display: grid;
-        gap: var(--s-2);
-        max-height: 220px;
-        overflow: auto;
+        gap: 0;
+        min-height: 0;
       }
 
       .memory-item {
         display: grid;
-        gap: 5px;
-        background: rgba(255, 235, 200, 0.045);
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-sm);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 22px rgba(0, 0, 0, 0.10);
-        padding: var(--s-2) var(--s-3);
-        color: var(--fg-0);
-        font-size: 12px;
-        line-height: 1.5;
+        gap: 4px;
+        padding: 14px 2px;
+        background: transparent;
+        border: 0;
+        border-bottom: 1px solid var(--line-1);
+        border-radius: 0;
+        box-shadow: none;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
       }
 
-      .memory-item.answer {
-        background: rgba(255, 122, 43, 0.10);
-        border-color: rgba(255, 122, 43, 0.30);
-      }
-
-      .memory-item.archive {
-        background: rgba(95, 190, 122, 0.10);
-        border-color: rgba(95, 190, 122, 0.30);
-      }
-
-      .memory-item.brain {
-        background: rgba(255, 235, 200, 0.06);
-        border-color: rgba(255, 122, 43, 0.24);
-      }
-
-      .memory-item.board_update {
-        background: rgba(95, 190, 122, 0.10);
-        border-color: rgba(95, 190, 122, 0.30);
+      .memory-item:last-child {
+        border-bottom: 0;
       }
 
       .memory-item span:last-child {
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
 
       .memory-meta {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        text-transform: none;
-        color: var(--fg-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
       }
 
-      .memory-item.answer .memory-meta { color: var(--ember-300); }
-      .memory-item.archive .memory-meta { color: var(--success-fg); }
-      .memory-item.brain .memory-meta { color: var(--ember-300); }
-      .memory-item.board_update .memory-meta { color: var(--success-fg); }
+      /* color names state quietly: a shipped archive / board change is live-green */
+      .memory-item.archive .memory-meta,
+      .memory-item.board_update .memory-meta {
+        color: var(--live);
+      }
+
+      .memory-item.answer .memory-meta,
+      .memory-item.brain .memory-meta {
+        color: var(--text-2);
+      }
 
       /* ---------- Assistant panel ---------- */
       .assistant-panel {
@@ -3301,6 +3262,56 @@
         transform: none;
       }
 
+      /* ---------- tool pages (chat · memory) ----------
+         data-tool routes the workspace; the meeting keeps running and
+         follows you as the PiP window. */
+      #chatTool,
+      #memoryTool {
+        display: none;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      #appShell[data-tool="chat"] .hearth-presentation,
+      #appShell[data-tool="chat"] .scout-rail,
+      #appShell[data-tool="chat"] .board-rail,
+      #appShell[data-tool="chat"] .meeting-bar,
+      #appShell[data-tool="memory"] .hearth-presentation,
+      #appShell[data-tool="memory"] .scout-rail,
+      #appShell[data-tool="memory"] .board-rail,
+      #appShell[data-tool="memory"] .meeting-bar {
+        display: none;
+      }
+
+      #appShell.is-in-room[data-tool="chat"] .workspace,
+      #appShell.is-in-room[data-tool="memory"] .workspace {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 0;
+        gap: 0;
+      }
+
+      /* outranks the responsive dock-clearance padding — no dock on tool pages */
+      #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace {
+        padding: 0;
+      }
+
+      #appShell.is-in-room[data-tool="chat"] #chatTool {
+        display: flex;
+      }
+
+      #appShell.is-in-room[data-tool="memory"] #memoryTool {
+        display: grid;
+      }
+
+      /* tool pages swap the topbar's meeting meta for the tool's own line */
+      #appShell[data-tool="chat"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="memory"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="chat"] .stage-toolbar,
+      #appShell[data-tool="memory"] .stage-toolbar {
+        display: none;
+      }
+
       /* legacy access trimmings — kept in the DOM (parse-time IDs), hidden
          on the gate; .stack-avatars is shared with the board huddle */
       .waiting-participants {
@@ -3657,13 +3668,11 @@
         min-height: 0;
       }
 
-      /* ---------- Private Scout chat ---------- */
-      .scout-tabs {
-        width: 100%;
-      }
-
-      .scout-tabs button {
-        flex: 1;
+      /* ---------- Chat tool — the private Scout thread (kit ui_kits/chat) ---------- */
+      /* the legacy scope tabs stay in the DOM as tool-navigation proxies */
+      .scout-tabs,
+      .scout-tabs[hidden] {
+        display: none;
       }
 
       .scout-pane {
@@ -3681,132 +3690,232 @@
         grid-template-rows: minmax(0, 1fr) auto;
       }
 
-      .scout-pane--private {
-        grid-template-rows: auto minmax(0, 1fr) auto auto;
+      /* layout: thread list (panel glass) | conversation */
+      #chatTool {
+        flex-direction: row;
+        align-items: stretch;
       }
 
-      .scout-private-caption {
-        margin: 0;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.10em;
-        color: var(--fg-3);
-      }
-
-      .scout-chat-thread {
-        display: grid;
-        align-content: start;
-        gap: var(--s-2);
-        min-height: 160px;
-        max-height: min(48vh, 520px);
-        overflow: auto;
-        overscroll-behavior: contain;
-        padding: 2px;
-      }
-
-      .scout-chat-empty {
-        margin: 0;
-        font-family: var(--font-display);
-        font-size: 19px;
-        font-style: italic;
-        font-weight: 400;
-        line-height: 1.25;
-        letter-spacing: 0;
-        color: var(--fg-2);
-        padding: var(--s-4) var(--s-2);
-        text-align: center;
-        text-wrap: balance;
-        font-optical-sizing: auto;
-      }
-
-      .scout-chat-msg {
-        display: grid;
-        gap: 5px;
-        max-width: 88%;
-        padding: var(--s-2) var(--s-3);
-        font-size: 12.5px;
-        line-height: 1.5;
-        color: var(--fg-0);
-      }
-
-      .scout-chat-msg--user {
-        justify-self: end;
-        border: 1px solid var(--glass-edge);
-        border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
-        /* Flat warm fill, no per-bubble backdrop-filter: nested backdrop
-           blurs inside an overflow scroller jank WebKit/mobile, and the
-           backdrop here is the already-glass panel — the blur was a no-op. */
-        background: rgba(255, 235, 200, 0.08);
+      .chat-threads {
+        width: 280px;
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px;
+        overflow-y: auto;
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border-right: 1px solid var(--glass-border);
         box-shadow: var(--glass-highlight);
       }
 
-      .scout-chat-msg--scout {
-        justify-self: start;
-        border: 1px solid rgba(255, 122, 43, 0.22);
-        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
-        background: rgba(255, 122, 43, 0.07);
+      .chat-threads__label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        padding: 6px 14px 10px;
       }
 
-      .scout-chat-msg--error {
-        justify-self: start;
-        border: 1px solid rgba(229, 87, 62, 0.34);
-        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
-        background: var(--danger-bg);
+      /* exactly ONE thread — the server keeps one ephemeral conversation
+         per connection; the list never pretends otherwise */
+      .chat-thread-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        width: 100%;
+        text-align: left;
+        padding: 12px 14px;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
       }
 
-      .scout-chat-meta {
+      .chat-thread-item[aria-pressed="true"] {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+      }
+
+      .chat-thread-item__icon {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        color: var(--fg-2);
-        font-variant-numeric: tabular-nums;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--text-2);
       }
 
-      .scout-chat-msg--scout .scout-chat-meta { color: var(--ember-300); }
-      .scout-chat-msg--error .scout-chat-meta { color: var(--danger); }
+      .chat-thread-item__body {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+      }
 
-      .scout-chat-meta__dot {
-        width: 6px;
-        height: 6px;
-        border-radius: var(--r-pill);
-        background: var(--ember-500);
-        box-shadow: 0 0 6px rgba(255, 122, 43, 0.55);
-        flex: 0 0 auto;
+      .chat-thread-item__title {
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-thread-item__preview {
+        font: var(--type-caption);
+        color: var(--text-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-thread-item__meta {
+        margin-top: 2px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-conversation {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* privacy pill — centered under the bar */
+      .scout-private-caption {
+        margin: 0;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        margin-top: 14px;
+        padding: 0 12px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-thread {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 18px 28px;
+      }
+
+      .scout-chat-empty {
+        margin: auto;
+        max-width: 360px;
+        text-align: center;
+        text-wrap: balance;
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* MessageBubble — you: ink, right; Scout: surface, left; the meta
+         line under the bubble is the system's mono voice */
+      .scout-chat-msg {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-width: 78%;
+      }
+
+      .scout-chat-msg--user {
+        align-self: flex-end;
+        align-items: flex-end;
+      }
+
+      .scout-chat-msg--scout,
+      .scout-chat-msg--error {
+        align-self: flex-start;
+        align-items: flex-start;
       }
 
       .scout-chat-text {
+        order: 1;
+        padding: 10px 14px;
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
 
+      .scout-chat-msg--user .scout-chat-text {
+        background: var(--accent);
+        color: var(--on-accent);
+        border: 1px solid transparent;
+        border-radius: 18px 18px 6px 18px;
+      }
+
+      .scout-chat-msg--scout .scout-chat-text {
+        background: var(--surface-2);
+        color: var(--text-1);
+        border: 1px solid var(--line-1);
+        border-radius: 18px 18px 18px 6px;
+      }
+
+      /* color = state: an error bubble wears danger, nothing else does */
+      .scout-chat-msg--error .scout-chat-text {
+        background: var(--danger-soft);
+        color: var(--danger);
+        border: 1px solid transparent;
+        border-radius: 18px 18px 18px 6px;
+      }
+
+      .scout-chat-meta {
+        order: 2;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 4px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .scout-chat-meta__dot {
+        display: none;
+      }
+
       .scout-chat-system {
         margin: 0;
-        justify-self: center;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        color: var(--fg-3);
+        align-self: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
         padding: 2px 0;
       }
 
+      /* ThinkingIndicator — searching memory… */
       .scout-chat-thinking {
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        justify-self: start;
-        padding: var(--s-2) var(--s-3);
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-md) var(--r-md) var(--r-md) var(--r-xs);
-        background: rgba(255, 235, 200, 0.045);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        color: var(--fg-2);
+        gap: 8px;
+        align-self: flex-start;
+        padding: 0 4px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
       }
 
       .scout-chat-thinking[hidden] {
@@ -3816,117 +3925,380 @@
       .scout-chat-thinking__dot {
         width: 6px;
         height: 6px;
-        border-radius: var(--r-pill);
-        background: var(--ember-500);
-        box-shadow: 0 0 6px rgba(255, 122, 43, 0.55);
-        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        flex: none;
+        animation: bf-think var(--dur-breathe) var(--ease) infinite;
       }
 
+      @keyframes bf-think {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.4; transform: scale(0.7); }
+      }
+
+      /* Composer — flat pill, 36×36 arrowUp send; the accent is earned */
       .scout-chat-form {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: var(--s-2);
-        align-items: end;
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        margin: 0 28px;
+        padding: 6px;
+        padding-left: 16px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .scout-chat-form:focus-within {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .scout-chat-form:has(.scout-chat-input[disabled]) {
+        opacity: 0.5;
       }
 
       .scout-chat-input {
+        flex: 1;
         min-width: 0;
-        width: 100%;
-        min-height: 40px;
+        min-height: 36px;
         max-height: 108px;
         resize: none;
-        border: 1px solid var(--line);
-        border-radius: var(--r-md);
-        background: rgba(11, 8, 5, 0.56);
-        color: var(--fg-0);
-        font: inherit;
-        font-size: 13px;
-        line-height: 1.45;
-        padding: 10px var(--s-3);
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        font-family: var(--font-sans);
+        padding: 7px 0;
         outline: 0;
-        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft);
       }
 
-      .scout-chat-input::placeholder { color: var(--fg-3); }
-
-      .scout-chat-input:focus {
-        border-color: rgba(255, 122, 43, 0.65);
-        background: rgba(11, 8, 5, 0.76);
-      }
-
-      .scout-chat-input[disabled] {
-        opacity: 0.55;
+      .scout-chat-input::placeholder {
+        color: var(--text-3);
       }
 
       .scout-chat-send {
-        min-height: 40px;
-        min-width: 56px;
-        padding: 0 var(--s-3);
-        font-size: 12.5px;
-        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        flex: none;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
-      /* Same quiet-until-typed rule as the room tab's Ask button */
-      .scout-chat-form:has(.scout-chat-input:placeholder-shown) .scout-chat-send {
-        background: rgba(255, 235, 200, 0.06);
-        border-color: var(--line-faint);
-        color: var(--fg-2);
-        box-shadow: none;
+      .scout-chat-send:active {
+        transform: scale(var(--press-scale));
+      }
+
+      /* quiet until there's something typed to send */
+      .scout-chat-form:has(.scout-chat-input:placeholder-shown) .scout-chat-send,
+      .scout-chat-send[disabled] {
+        background: var(--surface-2);
+        color: var(--text-disabled);
+        cursor: default;
+        transform: none;
       }
 
       .scout-chat-hint {
-        margin: 0;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        color: var(--fg-3);
+        margin: 8px 28px 16px;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
       }
 
       .scout-chat-hint[hidden] {
         display: none;
       }
 
-      /* the memory ledger — continuous quiet proof the room hears.
-         a log-file whisper at the foot of the Scout rail, fading at the top. */
-      .memory-list--silent {
-        position: relative;
-        width: auto;
-        height: auto;
-        max-height: 120px;
+      .chat-conversation .scout-chat-form {
+        margin-bottom: 20px;
+      }
+
+      .chat-conversation .scout-chat-hint {
+        margin-top: -12px;
+      }
+
+      /* ---------- Memory tool — quiet log entries ---------- */
+      #memoryTool {
+        grid-template-rows: minmax(0, 1fr);
         overflow-y: auto;
         overscroll-behavior: contain;
-        contain: content;
-        clip: auto;
-        clip-path: none;
-        white-space: normal;
-        margin-top: var(--s-2);
-        padding: var(--s-2) var(--s-2) 0;
-        mask-image: linear-gradient(180deg, transparent 0, #000 28px);
-        -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 28px);
+        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
       }
 
-      .memory-list--silent .memory-item {
-        background: transparent;
-        border: 0;
-        box-shadow: none;
-        padding: 2px 0;
-        grid-template-columns: auto minmax(0, 1fr);
-        gap: var(--s-2);
+      .memory-tool__inner {
+        width: min(640px, 100%);
+        margin: 0 auto;
+        align-self: start;
+      }
+
+      .memory-tool__head {
+        display: flex;
         align-items: baseline;
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
-        letter-spacing: var(--track-mono);
-        line-height: 1.6;
-        color: var(--fg-2);
-        animation: assistant-message-in 280ms var(--ease-out);
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 2px 12px;
       }
 
-      .memory-list--silent .memory-item span:last-child {
-        white-space: normal;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+      .memory-tool__title {
+        margin: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        font-weight: 500;
+      }
+
+      .memory-tool__count {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- PiP meeting — the room follows you (kit meeting/PiPMeeting) ---------- */
+      .pip-meeting {
+        /* chat-kit geometry: top-right under the bar, clear of the composer */
+        position: fixed;
+        top: 76px;
+        right: 20px;
+        width: 300px;
+        z-index: 80;
+        padding: 10px;
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--shadow-3);
+      }
+
+      .pip-meeting[hidden] {
+        display: none;
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .pip-meeting {
+          animation: pip-rise 480ms var(--ease) 120ms both;
+        }
+      }
+
+      @keyframes pip-rise {
+        from { opacity: 0; transform: translateY(12px) scale(0.985); }
+      }
+
+      .pip-meeting__head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 6px 10px;
+        cursor: grab;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+
+      .pip-meeting__head:active {
+        cursor: grabbing;
+      }
+
+      /* live dot — opacity-only breathe while the meeting is live */
+      .pip-meeting__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--live);
+        flex: none;
+        animation: pip-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+
+      @keyframes pip-breathe {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.4; }
+      }
+
+      .pip-meeting__title {
+        flex: 1;
+        min-width: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
         overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .pip-meeting__expand {
+        display: inline-flex;
+        border: 0;
+        background: transparent;
+        color: var(--text-3);
+        padding: 2px;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease);
+      }
+
+      .pip-meeting__expand:hover {
+        color: var(--text-1);
+      }
+
+      .pip-meeting__tiles {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .pip-meeting__tiles.is-pair {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .pip-tile {
+        position: relative;
+        overflow: hidden;
+        border-radius: var(--r-lg);
+        background: var(--bg-stage);
+        aspect-ratio: 16 / 10;
+        box-shadow: inset 0 0 0 1px var(--line-1);
+        transition: box-shadow var(--dur-med) var(--ease);
+      }
+
+      .pip-tile.is-speaker {
+        box-shadow: var(--glow-live);
+      }
+
+      .pip-tile video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .pip-tile video.is-local {
+        transform: scaleX(-1);
+      }
+
+      .pip-tile .owner-avatar {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: var(--ink-900);
+      }
+
+      .pip-tile .monogram {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        font-size: 16px;
+        background: var(--ink-900);
+        color: rgba(255, 255, 255, 0.75);
+      }
+
+      /* over live video: the sanctioned protection gradient + white label */
+      .pip-tile__label {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        padding: 18px 10px 7px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+        color: #fff;
+        font: 500 10px/1.2 var(--font-mono);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+      }
+
+      .pip-meeting__more {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2;
+        padding: 3px 8px;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: rgba(255, 255, 255, 0.75);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .pip-meeting__empty {
+        display: block;
+        padding: 18px 0;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .pip-meeting__controls {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding-top: 10px;
+      }
+
+      .pip-control {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-1);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+      }
+
+      .pip-control:hover {
+        filter: brightness(1.14);
+      }
+
+      .pip-control:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .pip-control[disabled] {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      /* off state — danger-soft fill, danger glyph (color = state) */
+      .pip-control.is-off {
+        background: var(--danger-soft);
+        border-color: transparent;
+        color: var(--danger);
+      }
+
+      .pip-control svg:last-child {
+        display: none;
+      }
+
+      .pip-control.is-off svg:first-child {
+        display: none;
+      }
+
+      .pip-control.is-off svg:last-child {
+        display: block;
       }
 
       /* the stage is a transparent region of the scene, not a boxed panel —
@@ -5270,8 +5642,36 @@
           max-height: min(260px, 32svh);
         }
 
+        /* chat tool folds to the conversation alone; the single thread
+           is already the active one */
+        .chat-threads {
+          display: none;
+        }
+
         .scout-chat-thread {
-          max-height: min(260px, 32svh);
+          padding: 14px 16px;
+        }
+
+        .scout-chat-form {
+          margin: 0 16px;
+        }
+
+        .chat-conversation .scout-chat-form {
+          margin-bottom: 16px;
+        }
+
+        .scout-chat-hint {
+          margin: 8px 16px 12px;
+        }
+
+        #memoryTool {
+          padding: 20px 16px 36px;
+        }
+
+        .pip-meeting {
+          width: 236px;
+          top: 70px;
+          right: 12px;
         }
 
         .meeting-bar {
@@ -5638,16 +6038,8 @@
           max-height: 280px;
         }
 
-        .scout-chat-thread {
-          max-height: min(280px, 34svh);
-        }
-
         .scout-chat-input {
           font-size: 16px;
-        }
-
-        .scout-chat-send {
-          min-width: 72px;
         }
 
         .assistant-form {
@@ -6310,7 +6702,6 @@
       .is-mounting .meeting-bar    { animation-delay: 120ms; }
       .is-mounting .board-surface  { animation-delay: 180ms; }
       .is-mounting .video-stack    { animation-delay: 380ms; }
-      .is-mounting .memory-panel   { animation-delay: 440ms; }
       .is-mounting .assistant-panel{ animation-delay: 500ms; }
 
       @keyframes mount-rise {
@@ -6370,7 +6761,8 @@
         #appShell.is-in-room .board-rail,
         #appShell.is-in-room .meeting-bar { animation-duration: 1ms; }
         .toast.is-leaving { animation-duration: 1ms; }
-        .memory-list--silent .memory-item { animation: none; }
+        .scout-chat-thinking__dot,
+        .pip-meeting__dot { animation: none; }
       }
     </style>
   </head>
@@ -6414,7 +6806,7 @@
             <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
           </svg>
         </span>
-        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span></h1>
+        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span><span id="topbarToolTitle" hidden></span></h1>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true">·</span>
@@ -6424,6 +6816,7 @@
             <span class="pill__dot"></span>
             <span id="topbarRoomState">in the room</span>
           </span>
+          <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
         <span class="topbar__spacer" aria-hidden="true"></span>
         <div class="stage-toolbar" aria-label="Stage layout">
@@ -6523,7 +6916,9 @@
                 <span id="assistantStateText">ready</span>
               </span>
             </header>
-            <div class="stage-segmented scout-tabs" role="group" aria-label="Scout chat scope">
+            <!-- legacy scope switcher — the private thread is the Chat tool now;
+                 the buttons stay in the DOM as tool-navigation proxies -->
+            <div class="stage-segmented scout-tabs" role="group" aria-label="Scout chat scope" hidden>
               <button type="button" data-scout-tab="room" aria-pressed="true">room</button>
               <button type="button" data-scout-tab="private" aria-pressed="false">private</button>
             </div>
@@ -6551,28 +6946,7 @@
                 <button class="btn btn--primary assistant-send" type="submit" aria-label="Ask Scout">Ask</button>
               </form>
             </div>
-            <div id="scoutPrivatePane" class="scout-pane scout-pane--private" hidden>
-              <p class="scout-private-caption">private · only you can see this</p>
-              <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
-                <p class="scout-chat-empty">ask Scout about any meeting — only you can see this</p>
-                <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
-                  <span class="scout-chat-thinking__dot" aria-hidden="true"></span>
-                  <span id="scoutChatThinkingText">thinking…</span>
-                </div>
-              </div>
-              <form id="scoutChatForm" class="scout-chat-form">
-                <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask about prior meetings…" aria-label="Message Scout privately" disabled></textarea>
-                <button id="scoutChatSend" class="btn btn--primary scout-chat-send" type="submit" disabled>Send</button>
-              </form>
-              <p id="scoutChatHint" class="scout-chat-hint">join the room to chat with Scout</p>
-            </div>
           </section>
-          <div id="memoryList" class="memory-list memory-list--silent" role="log" aria-label="meeting memory">
-            <article class="memory-item">
-              <span class="memory-meta">ready</span>
-              <span>memory starts when the room speaks.</span>
-            </article>
-          </div>
         </aside>
 
         <section id="presentationTile" class="presentation-tile hearth-presentation mount-stagger" aria-label="Shared workspace">
@@ -6616,6 +6990,62 @@
                   <span id="localVideoLabel" class="video-label">you</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chat tool — the private Scout thread, first-class (kit ui_kits/chat) -->
+        <section id="chatTool" class="chat-tool" aria-label="Chat with Scout">
+          <aside class="chat-threads" aria-label="Threads">
+            <span class="chat-threads__label">threads</span>
+            <button class="chat-thread-item" type="button" aria-pressed="true">
+              <span class="chat-thread-item__icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
+                  <path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path>
+                </svg>
+              </span>
+              <span class="chat-thread-item__body">
+                <span class="chat-thread-item__title">Scout</span>
+                <span class="chat-thread-item__preview">ask about any meeting</span>
+                <span class="chat-thread-item__meta">this conversation lives in this session</span>
+              </span>
+            </button>
+          </aside>
+          <div id="scoutPrivatePane" class="chat-conversation">
+            <p class="scout-private-caption">private · only you can see this</p>
+            <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
+              <p class="scout-chat-empty">ask Scout about any meeting — only you can see this</p>
+              <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
+                <span class="scout-chat-thinking__dot" aria-hidden="true"></span>
+                <span id="scoutChatThinkingText">searching memory…</span>
+              </div>
+            </div>
+            <form id="scoutChatForm" class="scout-chat-form">
+              <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask about prior meetings…" aria-label="Message Scout privately" disabled></textarea>
+              <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 19V5"></path>
+                  <path d="m5 12 7-7 7 7"></path>
+                </svg>
+              </button>
+            </form>
+            <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
+          </div>
+        </section>
+
+        <!-- Memory tool — the durable archive as quiet log entries -->
+        <section id="memoryTool" class="memory-tool" aria-label="Memory">
+          <div class="memory-tool__inner">
+            <header class="memory-tool__head">
+              <h2 class="memory-tool__title">room memory</h2>
+              <span id="memoryCount" class="memory-tool__count">0 saved</span>
+            </header>
+            <div id="memoryList" class="memory-list" role="log" aria-label="meeting memory">
+              <article class="memory-item">
+                <span class="memory-meta">ready</span>
+                <span>memory starts when the room speaks.</span>
+              </article>
             </div>
           </div>
         </section>
@@ -6787,6 +7217,50 @@
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
+    <!-- PiP meeting — the room follows you into Chat/Memory (kit meeting/PiPMeeting) -->
+    <aside id="pipMeeting" class="pip-meeting" hidden aria-label="Meeting — picture in picture">
+      <div id="pipHandle" class="pip-meeting__head">
+        <span class="pip-meeting__dot" aria-hidden="true"></span>
+        <span id="pipTitle" class="pip-meeting__title">room</span>
+        <button id="pipExpand" class="pip-meeting__expand" type="button" aria-label="Return to the room" title="Return to the room">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 3h6v6"></path>
+            <path d="M9 21H3v-6"></path>
+            <path d="m21 3-7 7"></path>
+            <path d="m3 21 7-7"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="pipTiles" class="pip-meeting__tiles"></div>
+      <div class="pip-meeting__controls">
+        <button id="pipMute" class="pip-control" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <path d="M12 19v3"></path>
+          </svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="2" y1="2" x2="22" y2="22"></line>
+            <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path>
+            <path d="M5 10v2a7 7 0 0 0 12 4.14"></path>
+            <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path>
+            <path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path>
+            <path d="M12 19v3"></path>
+          </svg>
+        </button>
+        <button id="pipCamera" class="pip-control" type="button" aria-label="Turn camera off" aria-pressed="false" title="Turn camera off">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path>
+            <rect x="3" y="6" width="12" height="12" rx="2"></rect>
+          </svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.25-3.06a.5.5 0 0 1 .75.43V16"></path>
+            <path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"></path>
+            <line x1="2" y1="2" x2="22" y2="22"></line>
+          </svg>
+        </button>
+      </div>
+    </aside>
     <div id="audioSettingsRegion" class="audio-settings-region" role="dialog" aria-modal="true" aria-labelledby="audioSettingsTitle">
       <section class="audio-settings-panel" tabindex="-1">
         <header class="audio-settings-header">
@@ -6984,6 +7458,17 @@
       const scoutChatInput = document.getElementById('scoutChatInput')
       const scoutChatSend = document.getElementById('scoutChatSend')
       const scoutChatHint = document.getElementById('scoutChatHint')
+      const topbarProjectEl = document.getElementById('topbarProject')
+      const topbarToolTitle = document.getElementById('topbarToolTitle')
+      const topbarToolMeta = document.getElementById('topbarToolMeta')
+      const topbarElapsedEl = document.getElementById('topbarElapsed')
+      const pipMeeting = document.getElementById('pipMeeting')
+      const pipTiles = document.getElementById('pipTiles')
+      const pipTitle = document.getElementById('pipTitle')
+      const pipHandle = document.getElementById('pipHandle')
+      const pipExpand = document.getElementById('pipExpand')
+      const pipMute = document.getElementById('pipMute')
+      const pipCamera = document.getElementById('pipCamera')
 
       let cards = []
       let memoryEntries = []
@@ -6998,6 +7483,10 @@
       let currentParticipantName = ''
       // Active scout rail tab; in-memory only by design (resets on reload).
       let scoutChatTab = 'room'
+      // Last honest connection state — the tool pages may dress the pill
+      // as "memory ready" but never hide trouble (applyStatusPillForTool).
+      let lastConnectionState = 'idle'
+      let lastConnectionLabel = 'not connected'
       let scoutChatSessionSeen = false
       const scoutChatMaxNodes = 200
       let activeScreenShareParticipant = ''
@@ -7197,6 +7686,12 @@
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
+      pipExpand.addEventListener('click', () => setActiveTool('room'))
+      // single source of truth for media state — the PiP controls proxy
+      // the dock's own buttons
+      pipMute.addEventListener('click', () => muteMicButton.click())
+      pipCamera.addEventListener('click', () => toggleCameraButton.click())
+      pipHandle.addEventListener('pointerdown', startPipDrag)
       function syncThemeToggles(theme) {
         const pressed = theme === 'dark' ? 'true' : 'false'
         themeToggleButton.setAttribute('aria-pressed', pressed)
@@ -7983,6 +8478,43 @@
         toolButtons.forEach(button => {
           button.setAttribute('aria-pressed', button.dataset.tool === tool ? 'true' : 'false')
         })
+        syncToolTopbar()
+        applyStatusPillForTool()
+        renderPipMeeting()
+        if (tool === 'chat') {
+          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        }
+      }
+
+      /* the topbar speaks for the active tool: Chat/Memory swap the meeting
+         meta for the tool's own line; the Room keeps date · elapsed · pill */
+      function syncToolTopbar() {
+        const tool = appShell.dataset.tool || 'room'
+        const toolPage = tool === 'chat' || tool === 'memory'
+        const memoryTotal = memoryEntries.length
+        topbarProjectEl.hidden = toolPage
+        topbarToolTitle.hidden = !toolPage
+        topbarToolTitle.textContent = tool === 'chat' ? 'Chat' : tool === 'memory' ? 'Memory' : ''
+        topbarToolMeta.hidden = !toolPage
+        topbarToolMeta.textContent = tool === 'chat'
+          ? `scout · room memory · ${memoryTotal}`
+          : tool === 'memory'
+            ? `room memory · ${memoryTotal} saved`
+            : ''
+      }
+
+      /* on a tool page with a live connection the pill reads "memory ready";
+         any honest connection trouble still wins */
+      function applyStatusPillForTool() {
+        const tool = appShell.dataset.tool || 'room'
+        const toolPage = tool === 'chat' || tool === 'memory'
+        if (toolPage && ws?.readyState === WebSocket.OPEN) {
+          statusPillEl.className = 'pill pill--idle'
+          statusTextEl.textContent = 'memory ready'
+        } else {
+          statusPillEl.className = `pill pill--${lastConnectionState}`
+          statusTextEl.textContent = lastConnectionLabel
+        }
       }
 
       function setActiveTool(tool) {
@@ -7998,6 +8530,184 @@
         }
       }
       window.setActiveTool = setActiveTool
+
+      /* ---------- PiP meeting (kit meeting/PiPMeeting) ----------
+         The meeting follows you into Chat/Memory as a draggable chrome-glass
+         window. Tiles reuse the board-strip pattern; their <video> elements
+         join auxiliaryVideoPlaybackTargets() so the existing repair machinery
+         keeps them alive. The Board tool keeps its own dock strip instead. */
+      const pipVideoTilesByParticipant = new Map()
+      let pipRenderTimer = 0
+
+      function pipMeetingActive() {
+        const tool = appShell.dataset.tool || 'room'
+        return Boolean(localStream) && (tool === 'chat' || tool === 'memory')
+      }
+
+      function renderPipMeeting() {
+        if (!pipMeeting) {
+          return
+        }
+        if (!pipMeetingActive()) {
+          hidePipMeeting()
+          return
+        }
+        const wasHidden = pipMeeting.hidden
+        pipMeeting.hidden = false
+
+        const names = visibleParticipantNames().filter(name => name && name !== 'the room')
+        const speaker = activeSpeakerDisplayName()
+        const shown = names.slice(0, 2)
+        const shownSet = new Set(shown)
+        for (const [name, tile] of Array.from(pipVideoTilesByParticipant.entries())) {
+          if (!shownSet.has(name)) {
+            disposePipVideoTile(tile)
+            pipVideoTilesByParticipant.delete(name)
+          }
+        }
+        const children = shown.map(name => renderPipVideoTile(name, name === speaker))
+        pipTiles.classList.toggle('is-pair', shown.length > 1)
+        const rest = names.length - shown.length
+        if (rest > 0) {
+          const more = document.createElement('span')
+          more.className = 'pip-meeting__more'
+          more.textContent = `+${rest}`
+          children.push(more)
+        }
+        if (children.length === 0) {
+          const empty = document.createElement('span')
+          empty.className = 'pip-meeting__empty'
+          empty.textContent = 'waiting for video'
+          children.push(empty)
+        }
+        pipTiles.replaceChildren(...children)
+
+        const project = (topbarProjectEl.textContent || 'room').trim().toLowerCase()
+        const elapsed = topbarElapsedEl.dataset.started === 'true' ? topbarElapsedEl.textContent : ''
+        pipTitle.textContent = elapsed ? `${project} · ${elapsed}` : project
+
+        // mirror the dock's media state — never a second source of truth
+        const micOff = muteMicButton.getAttribute('aria-pressed') === 'true'
+        pipMute.classList.toggle('is-off', micOff)
+        pipMute.setAttribute('aria-pressed', micOff ? 'true' : 'false')
+        pipMute.setAttribute('aria-label', micOff ? 'Unmute microphone' : 'Mute microphone')
+        pipMute.title = micOff ? 'Unmute microphone' : 'Mute microphone'
+        pipMute.disabled = muteMicButton.disabled
+        const camOff = toggleCameraButton.getAttribute('aria-pressed') === 'true'
+        pipCamera.classList.toggle('is-off', camOff)
+        pipCamera.setAttribute('aria-pressed', camOff ? 'true' : 'false')
+        pipCamera.setAttribute('aria-label', camOff ? 'Turn camera on' : 'Turn camera off')
+        pipCamera.title = camOff ? 'Turn camera on' : 'Turn camera off'
+        pipCamera.disabled = toggleCameraButton.disabled
+
+        if (wasHidden) {
+          window.requestAnimationFrame(() => repairAuxiliaryVideoPlayback('pip shown'))
+        }
+        if (!pipRenderTimer) {
+          pipRenderTimer = window.setInterval(renderPipMeeting, 1000)
+        }
+      }
+
+      function hidePipMeeting() {
+        if (pipRenderTimer) {
+          window.clearInterval(pipRenderTimer)
+          pipRenderTimer = 0
+        }
+        if (!pipMeeting || pipMeeting.hidden) {
+          return
+        }
+        pipMeeting.hidden = true
+        for (const tile of pipVideoTilesByParticipant.values()) {
+          disposePipVideoTile(tile)
+        }
+        pipVideoTilesByParticipant.clear()
+        pipTiles.replaceChildren()
+      }
+
+      function renderPipVideoTile(name, isSpeaker) {
+        let tile = pipVideoTilesByParticipant.get(name)
+        if (!tile) {
+          tile = document.createElement('div')
+          tile.className = 'pip-tile'
+          pipVideoTilesByParticipant.set(name, tile)
+        }
+        tile.dataset.participant = name
+        tile.classList.toggle('is-speaker', Boolean(isSpeaker))
+
+        let label = tile.querySelector('.pip-tile__label')
+        if (!label) {
+          label = document.createElement('span')
+          label.className = 'pip-tile__label'
+          tile.appendChild(label)
+        }
+
+        const stream = participantStream(name)
+        const state = participantMediaState(name)
+        if (stream && !state.cameraOff) {
+          tile.querySelector('.owner-avatar')?.remove()
+          let video = tile.querySelector('video')
+          if (!video) {
+            video = document.createElement('video')
+            video.autoplay = true
+            video.muted = true
+            video.defaultMuted = true
+            video.playsInline = true
+            tile.insertBefore(video, label)
+          }
+          setVideoElementStream(video, stream, { local: name === currentParticipantName })
+        } else {
+          const video = tile.querySelector('video')
+          if (video) {
+            clearVideoElementStream(video)
+            video.remove()
+          }
+          const nextAvatar = renderOwnerAvatar({ owner: name })
+          const avatar = tile.querySelector('.owner-avatar')
+          if (avatar) {
+            avatar.replaceWith(nextAvatar)
+          } else {
+            tile.insertBefore(nextAvatar, label)
+          }
+        }
+
+        label.textContent = name === currentParticipantName ? 'you' : name.toLowerCase()
+        return tile
+      }
+
+      function disposePipVideoTile(tile) {
+        const video = tile?.querySelector?.('video')
+        if (video) {
+          clearVideoElementStream(video)
+        }
+        tile?.remove?.()
+      }
+
+      /* kit drag spec: pointer events, fixed left/top, 8px viewport clamp */
+      function startPipDrag(event) {
+        if (event.target.closest('button')) {
+          return
+        }
+        const rect = pipMeeting.getBoundingClientRect()
+        const dx = event.clientX - rect.left
+        const dy = event.clientY - rect.top
+        const move = ev => {
+          const x = Math.min(Math.max(8, ev.clientX - dx), window.innerWidth - rect.width - 8)
+          const y = Math.min(Math.max(8, ev.clientY - dy), window.innerHeight - rect.height - 8)
+          pipMeeting.style.left = `${x}px`
+          pipMeeting.style.top = `${y}px`
+          pipMeeting.style.right = 'auto'
+          pipMeeting.style.bottom = 'auto'
+        }
+        const up = () => {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+          window.removeEventListener('pointercancel', up)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+        event.preventDefault()
+      }
 
       function participantInitials(name) {
         const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
@@ -11212,6 +11922,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             })
           }
         }
+        if (pipMeeting && !pipMeeting.hidden && pipTiles) {
+          for (const tile of pipTiles.querySelectorAll('.pip-tile')) {
+            const name = String(tile.dataset.participant || '').trim()
+            if (!name || name === 'the room') {
+              continue
+            }
+            targets.push({
+              video: tile.querySelector('video'),
+              name,
+              stream: participantStream(name),
+              local: name === currentParticipantName
+            })
+          }
+        }
         return targets
       }
 
@@ -11744,15 +12468,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // websocket only and clears it on reconnect.
 
       function setScoutTab(tab) {
+        // The private thread is the Chat tool now; the tab API survives as
+        // tool navigation so every legacy caller keeps working.
         scoutChatTab = tab === 'private' ? 'private' : 'room'
         scoutTabButtons.forEach(button => {
           button.setAttribute('aria-pressed', String((button.dataset.scoutTab || 'room') === scoutChatTab))
         })
-        scoutRoomPane.hidden = scoutChatTab !== 'room'
-        scoutPrivatePane.hidden = scoutChatTab !== 'private'
-        if (scoutChatTab === 'private') {
-          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
-        }
+        scoutRoomPane.hidden = false
+        setActiveTool(scoutChatTab === 'private' ? 'chat' : 'room')
       }
 
       function updateScoutChatAvailability() {
@@ -11783,7 +12506,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return false
         }
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-          setLog('join the room to chat with Scout')
+          setLog('join the room to ask Scout')
           return false
         }
         ws.send(JSON.stringify({
@@ -11820,7 +12543,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const text = String(payload?.text || '')
         const ts = payload?.ts || ''
         if (kind === 'status') {
-          showScoutChatThinking(text || 'thinking…')
+          showScoutChatThinking(text || 'searching memory…')
           return
         }
         if (!text) {
@@ -11868,9 +12591,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function scoutChatTimeLabel(ts) {
+        // kit meta format: HH:MM, 24h, zero-padded — `you · 10:47`
         const at = ts ? new Date(ts) : null
         return at && !Number.isNaN(at.valueOf())
-          ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+          ? `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
           : 'now'
       }
 
@@ -13311,6 +14035,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (memoryCount) {
           memoryCount.textContent = `${memoryEntries.length} saved`
         }
+        syncToolTopbar()
         if (memoryEntries.length === 0) {
           const empty = document.createElement('article')
           empty.className = 'memory-item'
@@ -13344,9 +14069,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function memoryEntryLabel(entry) {
+        // kit log format: HH:MM, 24h, zero-padded — `transcript · 10:47`
         const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
         const time = createdAt && !Number.isNaN(createdAt.valueOf())
-          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+          ? `${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`
           : 'now'
         if (entry.kind === 'answer') {
           return `answer · ${time}`
@@ -14907,8 +15633,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function setConnectionState(state, label) {
-        statusPillEl.className = `pill pill--${state}`
-        statusTextEl.textContent = label
+        lastConnectionState = state
+        lastConnectionLabel = label
+        applyStatusPillForTool()
         if (state === 'listening') {
           brandMarkEl.classList.add('is-listening')
         } else {
