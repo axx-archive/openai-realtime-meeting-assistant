@@ -176,133 +176,14 @@
         --breathe-live: 1;
         --breathe: var(--breathe-rest);
 
-        /* ================= LEGACY ALIAS BRIDGE — delete in WP7 =================
-           Maps every Hearthlight-era token name still referenced in this file
-           onto the nearest glass & ink value so every surface keeps rendering
-           while WP3–WP6 rewrite each surface to consume kit tokens directly. */
-
-        /* warm ember accent → monochrome accent */
-        --ember-50:  var(--text-1);
-        --ember-100: var(--text-1);
-        --ember-200: var(--text-2);
-        --ember-300: var(--accent);
-        --ember-400: var(--accent);
-        --ember-500: var(--accent);
-        --ember-600: var(--accent-hover);
-        --ember-700: var(--accent-press);
-        --ember-800: var(--accent-press);
-        --amber-300: var(--warn);
-
-        /* warm night surfaces → app/surface tiers */
-        --night-0: var(--bg-app);
-        --night-1: var(--bg-app);
-        --night-2: var(--surface-1);
-        --night-3: var(--surface-2);
-        --night-4: var(--surface-3);
-        --night-5: var(--surface-3);
-
-        /* ash / parchment → surfaces + text tiers */
-        --ash-50:  var(--surface-1);
-        --ash-100: var(--surface-3);
-        --ash-200: var(--surface-3);
-        --ash-500: var(--text-3);
-        --ash-600: var(--text-2);
-        --ash-700: var(--text-1);
-
-        /* foreground → text tiers */
-        --fg-0: var(--text-1);
-        --fg-1: var(--text-2);
-        --fg-2: var(--text-2);
-        --fg-3: var(--text-3);
-        --fg-inverse: var(--on-accent);
-
-        /* hairlines */
-        --line-faint:  var(--line-1);
-        --line:        var(--line-1);
-        --line-strong: var(--line-2);
-        --line-light:  var(--line-1);
-
-        /* semantic */
-        --success:    var(--live);
-        --success-bg: var(--live-soft);
-        --success-fg: var(--signal-600);
+        /* ---------- pinned product tokens (kept past the legacy purge) ----------
+           --speaker-accent / --glow-speaker-md are test-pinned; --ease-out keeps
+           the pinned room-entry lines true on the kit ease; --pulse-cycle is the
+           sanctioned alias of the breathe cycle. */
         --speaker-accent: #30D158;
-        --warning:    var(--warn);
-        --warning-bg: var(--warn-soft);
-        --warning-fg: var(--warn);
-        --danger-bg:  var(--danger-soft);
-        --danger-fg:  var(--danger);
-        --info-bg:    var(--info-soft);
-        --info-fg:    var(--info);
-
-        /* type */
-        --font-display: var(--font-sans);
-        --text-2xs: 11px;
-        --text-xs: 13px;
-        --text-sm: 15px;
-        --text-md: 17px;
-        --text-lg: 21px;
-        --text-xl: 28px;
-        --text-hero: clamp(40px, 6vw, 56px);
-        --track-sans: var(--track-text);
-        --track-mono: var(--track-label);
-
-        /* radii / spacing */
-        --r-xs: 4px;
-        --r-pill: var(--r-full);
-        --s-1: var(--sp-1);
-        --s-2: var(--sp-2);
-        --s-3: var(--sp-3);
-        --s-4: var(--sp-4);
-        --s-5: var(--sp-5);
-        --s-6: var(--sp-6);
-        --s-7: var(--sp-8);
-        --s-8: var(--sp-12);
-
-        /* shadows / panels / glass */
-        --shadow-light-1: var(--shadow-1);
-        --shadow-light-2: var(--shadow-2);
-        --shadow-panel: var(--glass-highlight), var(--glass-shadow);
-        --surface-panel: var(--surface-1);
-        --surface-panel-soft: var(--surface-1);
-        --glass-surface: var(--glass-panel);
-        --glass-surface-quiet: var(--glass-panel);
-        --glass-edge: var(--glass-border);
-        --blur-hero: var(--glass-blur);
-        --blur-panel: var(--glass-blur);
-        --blur-overlay: var(--glass-blur);
-        --glow-ember-sm: var(--glow-accent);
-        --glow-ember-md: var(--glow-accent);
         --glow-speaker-md: 0 0 0 1.5px var(--live), 0 4px 20px rgba(48, 209, 88, 0.30);
-
-        /* motion — legacy names ride the kit family */
         --ease-out:  cubic-bezier(0.32, 0.72, 0, 1);
-        --ease-soft: var(--ease);
-        --t-fast: var(--dur-fast);
-        --t-base: var(--dur-med);
-        --t-place: var(--dur-slow);
-        --ease-place: var(--ease-spring);
         --pulse-cycle: var(--dur-breathe);
-
-        /* layout / depth */
-        --touch-min: var(--hit-min);
-        --rail-w: clamp(260px, 19vw, 320px);
-        --r-stage: var(--r-xl);
-        --dock-h: 76px;
-        --stage-vignette: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
-        --board-well: var(--surface-3);
-        --shadow-well-light: inset 0 0 0 1px var(--line-1);
-
-        /* presence → quiet monochrome */
-        --presence: var(--text-2);
-        --presence-bg: var(--accent-soft);
-
-        /* due-date semantics: red stays reserved for overdue */
-        --due-future: var(--text-3);
-        --due-soon: var(--warn);
-        --due-today: var(--warn);
-        --due-overdue: var(--danger);
-        /* =============== end LEGACY ALIAS BRIDGE =============== */
       }
 
       [data-theme="dark"] {
@@ -729,18 +610,12 @@
         50%      { opacity: 0.45; transform: scale(0.72); }
       }
 
-      /* legacy dot clock — assistant rail consumers remain until WP6 */
-      @keyframes dot-pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50%      { opacity: 0.55; transform: scale(0.86); }
-      }
-
       /* ---------- Workspace ---------- */
       .workspace {
         grid-area: workspace;
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px);
-        gap: var(--s-3);
+        gap: var(--sp-3);
         min-height: 0;
         padding: var(--sp-3) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-3), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
       }
@@ -751,7 +626,7 @@
 
       .video-stack {
         display: grid;
-        gap: var(--s-3);
+        gap: var(--sp-3);
         align-content: start;
       }
 
@@ -1597,15 +1472,14 @@
         color: var(--text-2);
       }
 
-      /* ---------- Assistant panel ---------- */
+      /* ---------- Assistant panel (room scout rail · ambient feed) ---------- */
       .assistant-panel {
         display: grid;
-        gap: var(--s-2);
-        background: var(--surface-panel);
-        border: 1px solid var(--line-faint);
+        gap: var(--sp-2);
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
         border-radius: var(--r-xl);
-        box-shadow: var(--shadow-panel);
-        padding: var(--s-3);
+        padding: var(--sp-3);
         min-height: 260px;
       }
 
@@ -1613,51 +1487,47 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .assistant-panel h2 {
         font-family: var(--font-sans);
         font-size: 13px;
         font-weight: 500;
-        color: var(--fg-0);
+        color: var(--text-1);
         text-wrap: balance;
       }
 
       .assistant-state {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
-        color: var(--fg-2);
+        color: var(--text-2);
         font-variant-numeric: tabular-nums;
       }
 
       .assistant-feed {
         display: grid;
         align-content: start;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         max-height: 320px;
         overflow: auto;
       }
 
+      /* quiet log entries — hairline + surface, never a colored edge */
       .assistant-message {
         display: grid;
         gap: 6px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-sm);
-        background: rgba(255, 235, 200, 0.045);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 22px rgba(0, 0, 0, 0.12);
-        color: var(--fg-0);
-        padding: var(--s-2) var(--s-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-1);
+        padding: var(--sp-2) var(--sp-3);
         font-size: 12px;
         line-height: 1.5;
       }
 
       .assistant-message--audio {
-        border-left: 2px solid var(--ember-500);
-        background: rgba(255, 122, 43, 0.06);
         grid-template-columns: minmax(0, 1fr);
       }
 
@@ -1666,52 +1536,51 @@
         font-size: 14px;
         font-weight: 500;
         line-height: 1.35;
-        color: var(--fg-0);
+        color: var(--text-1);
       }
 
       .assistant-message--entering {
-        animation: assistant-message-in 180ms var(--ease-out);
+        animation: assistant-message-in var(--dur-med) var(--ease) both;
       }
 
+      /* Scout speaking up (answers · actions · archive) earns the accent edge */
       .assistant-message--answer,
       .assistant-message--action,
       .assistant-message--archive {
-        background: rgba(255, 122, 43, 0.10);
-        border-color: rgba(255, 122, 43, 0.28);
+        background: var(--accent-soft);
+        border-color: var(--line-2);
       }
 
-      /* Passive system events stay warm-neutral so the topbar pulse remains
+      /* Passive system events stay neutral so the topbar pulse remains
          the only listening cue. */
       .assistant-message--audio,
       .assistant-message--signal,
       .assistant-message--status,
       .assistant-message--query {
-        background: rgba(255, 235, 200, 0.045);
-        border-color: var(--line-faint);
+        background: var(--surface-2);
+        border-color: var(--line-1);
       }
       .assistant-message--audio .assistant-meta,
       .assistant-message--signal .assistant-meta,
       .assistant-message--status .assistant-meta,
-      .assistant-message--query .assistant-meta { color: var(--fg-2); }
+      .assistant-message--query .assistant-meta { color: var(--text-2); }
 
       .assistant-message--error {
-        background: var(--danger-bg);
-        border-color: rgba(229, 87, 62, 0.34);
+        background: var(--danger-soft);
+        border-color: var(--danger-soft);
       }
 
       .assistant-meta {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         text-transform: none;
-        color: var(--fg-2);
+        color: var(--text-2);
         font-variant-numeric: tabular-nums;
       }
 
       .assistant-message--answer .assistant-meta,
       .assistant-message--action .assistant-meta,
-      .assistant-message--archive .assistant-meta { color: var(--ember-300); }
+      .assistant-message--archive .assistant-meta { color: var(--text-1); }
       .assistant-message--error .assistant-meta { color: var(--danger); }
 
       .assistant-text {
@@ -1719,12 +1588,12 @@
         overflow-wrap: anywhere;
       }
 
-      /* the resting state is a koan, not a log row — unboxed serif ceremony */
+      /* the resting state is a quiet line, not a log row */
       .scout-panel .assistant-feed .assistant-message--status:only-child {
         border: 0;
         background: transparent;
         box-shadow: none;
-        padding: var(--s-6) var(--s-2);
+        padding: var(--sp-6) var(--sp-2);
         justify-items: center;
         text-align: center;
       }
@@ -1732,71 +1601,72 @@
         display: none;
       }
       .scout-panel .assistant-feed .assistant-message--status:only-child .assistant-text {
-        font-family: var(--font-display);
-        font-style: italic;
-        font-size: 20px;
-        line-height: 1.3;
-        color: var(--fg-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        text-transform: lowercase;
+        color: var(--text-3);
       }
 
       .assistant-link {
         justify-self: start;
-        color: var(--ember-300);
+        color: var(--text-1);
         font-size: 12px;
         font-weight: 500;
-        text-decoration: none;
+        text-decoration: underline;
+        text-decoration-color: var(--line-2);
+        text-underline-offset: 2px;
       }
 
       .assistant-link:hover {
-        color: var(--ember-200);
-        text-decoration: underline;
+        color: var(--accent-hover);
+        text-decoration-color: currentColor;
       }
 
       .assistant-form {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         align-items: center;
-        border-radius: 8px;
+        border-radius: var(--r-sm);
         padding: 2px;
-        transition: box-shadow var(--t-base) var(--ease-soft);
+        transition: box-shadow var(--dur-med) var(--ease);
       }
 
       .assistant-form:focus-within {
-        box-shadow: var(--glow-ember-sm);
+        box-shadow: none;
       }
 
       .assistant-input {
         min-width: 0;
         width: 100%;
-        border: 1px solid var(--line);
-        border-radius: var(--r-sm);
-        background: rgba(11, 8, 5, 0.56);
-        color: var(--fg-0);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        color: var(--text-1);
         font: inherit;
         font-size: 13px;
         min-height: 40px;
-        padding: 10px var(--s-3);
+        padding: 10px var(--sp-3);
         outline: 0;
-        transition: border-color var(--t-base) var(--ease-soft), background var(--t-base) var(--ease-soft);
+        transition: border-color var(--dur-med) var(--ease), background var(--dur-med) var(--ease);
       }
 
-      .assistant-input::placeholder { color: var(--fg-3); }
+      .assistant-input::placeholder { color: var(--text-3); }
       .assistant-input:focus {
-        border-color: rgba(255, 122, 43, 0.65);
-        background: rgba(11, 8, 5, 0.76);
+        border-color: var(--line-2);
+        background: var(--surface-1);
       }
 
       .assistant-send {
         min-height: 40px;
         min-width: 0;
-        padding: 10px var(--s-3);
+        padding: 10px var(--sp-3);
       }
 
       /* ---------- Meeting bar ---------- */
       .meeting-bar {
         position: sticky;
-        bottom: var(--s-3);
+        bottom: var(--sp-3);
         z-index: 900;
         display: flex;
         align-items: center;
@@ -1818,9 +1688,9 @@
 
       #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
         position: fixed;
-        right: max(var(--s-3), env(safe-area-inset-right));
-        bottom: max(var(--s-3), env(safe-area-inset-bottom));
-        left: max(var(--s-3), env(safe-area-inset-left));
+        right: max(var(--sp-3), env(safe-area-inset-right));
+        bottom: max(var(--sp-3), env(safe-area-inset-bottom));
+        left: max(var(--sp-3), env(safe-area-inset-left));
         width: fit-content;
         max-width: calc(100vw - 24px);
         margin: 0 auto;
@@ -3224,7 +3094,7 @@
       }
 
       #appShell.is-in-room .workspace {
-        grid-template-columns: var(--rail-w) minmax(480px, 1fr) var(--rail-w);
+        grid-template-columns: clamp(260px, 19vw, 320px) minmax(480px, 1fr) clamp(260px, 19vw, 320px);
       }
 
       #appShell:not(.is-in-room) .meeting-bar,
@@ -3412,18 +3282,18 @@
         box-shadow: none;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
-        padding: 0 var(--s-2);
+        padding: 0 var(--sp-2);
       }
 
       .scout-panel__header {
         min-height: 44px;
-        border-bottom: 1px solid var(--line-faint);
-        padding-bottom: var(--s-2);
+        border-bottom: 1px solid var(--line-1);
+        padding-bottom: var(--sp-2);
       }
 
       .scout-panel header h2,
       .scout-panel .scout-panel__title h2 {
-        font-size: var(--text-md);
+        font-size: 17px;
         font-weight: 600;
         letter-spacing: -0.01em;
         margin: 0;
@@ -3433,7 +3303,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
       }
 
       .scout-panel__title {
@@ -3449,8 +3319,8 @@
         width: 22px;
         height: 22px;
         border-radius: 6px;
-        background: rgba(255, 122, 43, 0.12);
-        color: var(--ember-300);
+        background: var(--accent-soft);
+        color: var(--text-1);
         flex: 0 0 auto;
       }
 
@@ -3458,20 +3328,18 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-family: var(--font-mono);
-        font-size: var(--text-2xs);
+        font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--presence);
+        color: var(--text-2);
         text-transform: lowercase;
       }
 
+      /* quiet presence dot — static; the topbar pill carries the breathe */
       .scout-panel .assistant-state__dot {
         width: 6px;
         height: 6px;
-        border-radius: 999px;
-        background: var(--presence);
-        box-shadow: 0 0 6px var(--presence);
-        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+        border-radius: var(--r-full);
+        background: var(--text-3);
       }
 
       .scout-subtitle {
@@ -3484,21 +3352,19 @@
         gap: 8px;
         align-items: center;
         padding: 5px 6px 5px 12px;
-        border: 1px solid rgba(255, 122, 43, 0.22);
-        border-radius: 13px;
-        background: rgba(255, 235, 200, 0.045);
-        box-shadow: inset 0 0 0 1px rgba(255, 122, 43, 0.04), 0 0 24px rgba(255, 122, 43, 0.05);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
       }
 
       .scout-ask:focus-within {
-        box-shadow: var(--glow-ember-sm);
-        border-color: rgba(255, 122, 43, 0.45);
+        border-color: var(--line-2);
       }
 
       .scout-ask__icon {
         display: inline-grid;
         place-items: center;
-        color: var(--fg-2);
+        color: var(--text-2);
       }
 
       .scout-ask__kbd {
@@ -3524,15 +3390,15 @@
         min-width: 56px;
         padding: 0 12px;
         font-size: 12.5px;
-        transition: background var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), box-shadow var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        transition: background var(--dur-med) var(--ease), color var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease), box-shadow var(--dur-med) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
-      /* Ask earns its ember — the button stays quiet until there's
+      /* Ask earns its accent — the button stays quiet until there's
          something typed to ask */
       .scout-ask:has(.assistant-input:placeholder-shown) .assistant-send {
-        background: rgba(255, 235, 200, 0.06);
-        border-color: var(--line-faint);
-        color: var(--fg-2);
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-2);
         box-shadow: none;
       }
 
@@ -3540,8 +3406,8 @@
         display: none;
         gap: 6px;
         flex-wrap: wrap;
-        padding-top: var(--s-2);
-        border-top: 1px solid var(--line-faint);
+        padding-top: var(--sp-2);
+        border-top: 1px solid var(--line-1);
         margin-top: 4px;
       }
 
@@ -3550,14 +3416,12 @@
         align-items: center;
         gap: 6px;
         padding: 5px 9px;
-        border-radius: 6px;
-        background: rgba(255, 235, 200, 0.045);
-        border: 1px solid var(--line-faint);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.06em;
-        color: var(--fg-2);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
         text-transform: lowercase;
       }
 
@@ -3568,17 +3432,17 @@
       }
 
       .scout-activity__count {
-        color: var(--fg-0);
-        background: rgba(255, 235, 200, 0.06);
+        color: var(--text-1);
+        background: var(--accent-soft);
         padding: 1px 7px;
-        border-radius: 999px;
+        border-radius: var(--r-full);
         letter-spacing: 0.04em;
         font-variant-numeric: tabular-nums;
       }
 
       .scout-activity__chev {
-        color: var(--fg-3);
-        transition: transform var(--t-base) var(--ease-soft);
+        color: var(--text-3);
+        transition: transform var(--dur-med) var(--ease);
       }
       .scout-activity[open] .scout-activity__chev {
         transform: rotate(180deg);
@@ -3593,34 +3457,34 @@
       .scout-chip {
         min-height: 40px;
         padding: 0 12px;
-        border: 1px solid var(--line-faint);
-        border-radius: var(--r-pill);
-        background: rgba(255, 235, 200, 0.04);
-        color: var(--fg-1);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
         font-size: 12px;
-        transition: background var(--t-base) var(--ease-soft), border-color var(--t-base) var(--ease-soft), color var(--t-base) var(--ease-soft), transform var(--t-fast) var(--ease-soft);
+        transition: background var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease), color var(--dur-med) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .scout-chip:hover {
-        background: rgba(255, 235, 200, 0.08);
-        border-color: var(--line);
-        color: var(--fg-0);
+        background: var(--surface-3);
+        border-color: var(--line-2);
+        color: var(--text-1);
       }
 
       .scout-chip:active {
-        transform: scale(0.96);
+        transform: scale(var(--press-scale));
       }
 
       .scout-chip.is-private {
-        border-color: rgba(255, 122, 43, 0.24);
-        background: rgba(255, 122, 43, 0.10);
-        color: var(--ember-300);
+        border-color: var(--line-2);
+        background: var(--accent-soft);
+        color: var(--text-1);
       }
 
       .scout-activity {
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-width: 0;
         min-height: 0;
       }
@@ -3629,14 +3493,12 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-height: 40px;
-        color: var(--fg-2);
+        color: var(--text-2);
         cursor: default;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.12em;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         list-style: none;
         text-transform: none;
       }
@@ -3650,7 +3512,7 @@
       }
 
       .scout-activity__count {
-        color: var(--fg-2);
+        color: var(--text-2);
         font-variant-numeric: tabular-nums;
       }
 
@@ -3660,7 +3522,7 @@
       }
 
       .scout-activity[open] .assistant-feed {
-        margin-top: var(--s-2);
+        margin-top: var(--sp-2);
       }
 
       .scout-panel .assistant-feed {
@@ -3677,7 +3539,7 @@
 
       .scout-pane {
         display: grid;
-        gap: var(--s-2);
+        gap: var(--sp-2);
         min-width: 0;
         min-height: 0;
       }
@@ -5525,7 +5387,7 @@
           padding: 20px;
         }
         .hearth-stage {
-          padding: var(--s-4);
+          padding: var(--sp-4);
         }
         .hearth-speaker {
           width: min(100%, 420px);
@@ -5582,7 +5444,7 @@
       @media (max-width: 860px) {
         #appShell.is-in-room .workspace {
           align-content: start;
-          gap: var(--s-2);
+          gap: var(--sp-2);
         }
 
         .hearth-presentation {
@@ -5675,7 +5537,7 @@
         }
 
         .meeting-bar {
-          bottom: max(var(--s-3), env(safe-area-inset-bottom));
+          bottom: max(var(--sp-3), env(safe-area-inset-bottom));
         }
 
         .device-control:has(.device-select[disabled]) {
@@ -5688,9 +5550,9 @@
 
         #appShell.is-in-room:not(.is-board-expanded) .meeting-bar {
           position: fixed;
-          right: max(var(--s-3), env(safe-area-inset-right));
-          bottom: max(var(--s-3), env(safe-area-inset-bottom));
-          left: max(var(--s-3), env(safe-area-inset-left));
+          right: max(var(--sp-3), env(safe-area-inset-right));
+          bottom: max(var(--sp-3), env(safe-area-inset-bottom));
+          left: max(var(--sp-3), env(safe-area-inset-left));
           display: grid;
           grid-template-columns: 1fr;
           width: min(100% - 24px, 720px);
@@ -5767,8 +5629,8 @@
         }
 
         .board-expanded-top {
-          gap: var(--s-3);
-          padding: 14px var(--s-4);
+          gap: var(--sp-3);
+          padding: 14px var(--sp-4);
         }
 
         .board-expanded-brand {
@@ -5804,8 +5666,8 @@
 
       @media (max-width: 640px) {
         .workspace {
-          gap: var(--s-2);
-          padding: var(--s-2) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
+          gap: var(--sp-2);
+          padding: var(--sp-2) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
         }
 
         .tool-rail {
@@ -5891,7 +5753,7 @@
            not a glitch. */
         #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation {
           position: sticky;
-          top: max(var(--s-2), env(safe-area-inset-top));
+          top: max(var(--sp-2), env(safe-area-inset-top));
           z-index: 30;
           overflow: visible;
         }
@@ -5899,10 +5761,10 @@
         #appShell.is-in-room:not(.is-board-expanded) .hearth-presentation::before {
           content: "";
           position: absolute;
-          top: calc(-1 * max(var(--s-2), env(safe-area-inset-top)) - 1px);
-          left: calc(-1 * var(--s-2));
-          right: calc(-1 * var(--s-2));
-          height: calc(max(var(--s-2), env(safe-area-inset-top)) + 1px);
+          top: calc(-1 * max(var(--sp-2), env(safe-area-inset-top)) - 1px);
+          left: calc(-1 * var(--sp-2));
+          right: calc(-1 * var(--sp-2));
+          height: calc(max(var(--sp-2), env(safe-area-inset-top)) + 1px);
           background: var(--bg-app);
         }
 
@@ -6004,7 +5866,7 @@
         }
 
         .board-rail {
-          padding: var(--s-3);
+          padding: var(--sp-3);
         }
 
         .board-rail__summary {
@@ -6052,8 +5914,8 @@
         }
 
         .assistant-panel.scout-panel {
-          gap: var(--s-3);
-          padding: var(--s-3);
+          gap: var(--sp-3);
+          padding: var(--sp-3);
         }
 
         .scout-panel__mark {
@@ -6113,8 +5975,8 @@
         }
 
         .meeting-bar {
-          gap: var(--s-2);
-          padding: var(--s-2);
+          gap: var(--sp-2);
+          padding: var(--sp-2);
           border-radius: var(--r-md);
         }
 
@@ -6134,7 +5996,7 @@
           display: grid;
           grid-template-columns: 44px 44px minmax(0, 1fr) minmax(0, 1fr) 44px;
           align-items: end;
-          gap: var(--s-2);
+          gap: var(--sp-2);
           width: 100%;
         }
 
@@ -6158,8 +6020,8 @@
         #archiveMeeting {
           width: 100%;
           min-width: 0;
-          padding-right: var(--s-2);
-          padding-left: var(--s-2);
+          padding-right: var(--sp-2);
+          padding-left: var(--sp-2);
           white-space: nowrap;
         }
 
@@ -6228,7 +6090,7 @@
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .workspace {
-          padding-bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s-3));
+          padding-bottom: calc(76px + env(safe-area-inset-bottom) + var(--sp-3));
         }
 
         /* the dock: ONE row of ≥48px glass verbs — mic · cam · mixer ·
@@ -6237,9 +6099,9 @@
           display: grid;
           grid-template-columns: 1fr;
           min-height: 0;
-          right: max(var(--s-2), env(safe-area-inset-right));
-          bottom: max(var(--s-2), env(safe-area-inset-bottom));
-          left: max(var(--s-2), env(safe-area-inset-left));
+          right: max(var(--sp-2), env(safe-area-inset-right));
+          bottom: max(var(--sp-2), env(safe-area-inset-bottom));
+          left: max(var(--sp-2), env(safe-area-inset-left));
           padding: 8px;
           border: 1px solid var(--glass-border);
           border-radius: var(--r-2xl);
@@ -6265,7 +6127,7 @@
 
         /* jumping to Scout lands its header below the sticky stage */
         #appShell.is-in-room:not(.is-board-expanded) .scout-panel {
-          scroll-margin-top: calc(min(38svh, 420px) + var(--s-6));
+          scroll-margin-top: calc(min(38svh, 420px) + var(--sp-6));
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .dock-scout-state + .controls {
@@ -6318,8 +6180,8 @@
         .board-expanded-top {
           grid-template-columns: minmax(0, 1fr) auto;
           align-items: center;
-          gap: var(--s-2);
-          padding: var(--s-3);
+          gap: var(--sp-2);
+          padding: var(--sp-3);
         }
 
         .board-expanded-brand p {
@@ -6345,25 +6207,25 @@
           grid-row: 1;
           justify-self: end;
           min-height: 40px;
-          padding: 0 var(--s-2);
+          padding: 0 var(--sp-2);
         }
 
         .board-expanded-surface .board-toolbar {
-          gap: var(--s-2);
-          padding: var(--s-3);
+          gap: var(--sp-2);
+          padding: var(--sp-3);
         }
 
         .board-expanded-surface .board {
           align-items: start;
           grid-auto-rows: max-content;
           grid-template-columns: 1fr;
-          gap: var(--s-3);
+          gap: var(--sp-3);
           min-width: 0;
-          padding: 0 var(--s-3) 104px;
+          padding: 0 var(--sp-3) 104px;
         }
 
         .board-dock-wrap {
-          bottom: var(--s-2);
+          bottom: var(--sp-2);
           width: calc(100% - 16px);
         }
 
@@ -6371,9 +6233,9 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: var(--s-2);
+          gap: var(--sp-2);
           min-height: 0;
-          padding: var(--s-2);
+          padding: var(--sp-2);
         }
 
         .board-video-strip {
@@ -6414,7 +6276,7 @@
         .card-detail-region {
           align-items: start;
           overflow: auto;
-          padding: max(var(--s-2), env(safe-area-inset-top)) max(var(--s-2), env(safe-area-inset-right)) max(var(--s-2), env(safe-area-inset-bottom)) max(var(--s-2), env(safe-area-inset-left));
+          padding: max(var(--sp-2), env(safe-area-inset-top)) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
         }
 
         .card-detail {
@@ -6424,13 +6286,13 @@
         }
 
         .card-detail-meta {
-          padding: 12px var(--s-4) 0;
+          padding: 12px var(--sp-4) 0;
         }
 
         .card-detail-header {
           gap: 10px;
           align-items: start;
-          padding: 8px var(--s-4) 12px;
+          padding: 8px var(--sp-4) 12px;
         }
 
         .card-detail-header-actions {
@@ -6460,8 +6322,8 @@
 
         .card-detail-context {
           grid-template-columns: 1fr;
-          gap: var(--s-2);
-          margin: 0 var(--s-4);
+          gap: var(--sp-2);
+          margin: 0 var(--sp-4);
         }
 
         .card-detail-scout {
@@ -6478,7 +6340,7 @@
         }
 
         .card-detail-key-dates {
-          gap: var(--s-2);
+          gap: var(--sp-2);
           padding: 10px 12px;
         }
 
@@ -6499,12 +6361,12 @@
 
         .card-detail-form {
           gap: 10px;
-          padding: 14px var(--s-4) 4px;
+          padding: 14px var(--sp-4) 4px;
         }
 
         .card-detail-view {
-          gap: var(--s-2);
-          padding: 12px var(--s-4) 2px;
+          gap: var(--sp-2);
+          padding: 12px var(--sp-4) 2px;
         }
 
         .card-detail-facts {
@@ -6524,19 +6386,19 @@
         }
 
         .card-detail-command {
-          padding: 14px var(--s-4) var(--s-4);
+          padding: 14px var(--sp-4) var(--sp-4);
         }
 
         .card-detail-actions {
           display: grid;
           grid-template-columns: auto minmax(0, 1fr);
           align-items: center;
-          gap: var(--s-2);
+          gap: var(--sp-2);
           position: sticky;
           bottom: 0;
           z-index: 2;
-          margin: 0 calc(var(--s-4) * -1);
-          padding: var(--s-2) var(--s-4);
+          margin: 0 calc(var(--sp-4) * -1);
+          padding: var(--sp-2) var(--sp-4);
           border-top: 1px solid var(--line-1);
           background: var(--surface-1);
         }
@@ -6559,7 +6421,7 @@
 
         .card-command-form {
           grid-template-columns: 1fr;
-          padding: var(--s-2);
+          padding: var(--sp-2);
         }
 
         .card-command-form button {
@@ -6579,14 +6441,14 @@
         }
 
         .comment-preview-region {
-          padding: var(--s-2);
+          padding: var(--sp-2);
         }
 
         .comment-preview {
           width: 100%;
           max-height: calc(100svh - 16px);
           overflow: auto;
-          padding: var(--s-4);
+          padding: var(--sp-4);
         }
       }
 
@@ -6640,7 +6502,7 @@
         .board-collapse,
         .device-select,
         .scout-activity summary {
-          min-height: var(--touch-min);
+          min-height: var(--hit-min);
         }
 
         /* the topbar segmented grows a fingertip landing */
@@ -6649,8 +6511,8 @@
         }
 
         .card-detail-close {
-          width: var(--touch-min);
-          height: var(--touch-min);
+          width: var(--hit-min);
+          height: var(--hit-min);
         }
 
         .pin-speaker {
@@ -6731,10 +6593,18 @@
       }
 
       /* ---------- Reduced motion ----------
-         Pulse halos keep beating (the fire stays lit) but at half intensity;
-         everything else snaps. */
+         The kit zeroes the motion tokens (--dur-fast/--dur-med/--dur-slow → 0ms,
+         declared beside the token table); everything declared in token time
+         snaps for free. This block catches the rest: hardcoded-duration enters
+         and every looping dot, including breathe — nothing moves on its own. */
       @media (prefers-reduced-motion: reduce) {
         .mount-stagger { opacity: 1; transform: none; animation: none !important; }
+        .topbar__mark.is-listening,
+        .pill--listening,
+        .login-rise,
+        .login-rise--card,
+        .login-rise--foot,
+        .pip-meeting { animation: none; }
         .card { transition: box-shadow var(--dur-med) var(--ease), background var(--dur-med) var(--ease); }
         .card:hover { transform: none; }
         .card.moved {
@@ -6883,7 +6753,7 @@
               <span class="login-divider__label">or</span>
               <span class="login-divider__line"></span>
             </div>
-            <button id="passkeySignIn" class="login-passkey" type="button" disabled title="sign in with your password once on this device first.">
+            <button id="passkeySignIn" class="login-passkey" type="button" disabled title="sign in with your password once first.">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg>
               Sign in with passkey
             </button>
@@ -7340,6 +7210,7 @@
          first render; these helpers switch + persist it at runtime. */
       const themeStorageKey = 'bonfire.theme.v1'
       const identityStorageKey = 'bonfire.identity.v1'
+      const sessionPasswordKey = 'bonfire.session.v1'
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       function applyTheme(theme) {
         const next = theme === 'dark' ? 'dark' : 'light'
@@ -8221,7 +8092,21 @@
       }
 
       /* passkey affordance — honest: it replays the identity this device
-         cached on the last successful sign-in, nothing more. */
+         cached on the last successful sign-in, nothing more. The password is
+         NEVER persisted: identity (email + name) lives in localStorage, the
+         password only in sessionStorage for this tab session. */
+      function loadSessionPassword() {
+        try {
+          const raw = window.sessionStorage?.getItem(sessionPasswordKey)
+          if (!raw) {
+            return ''
+          }
+          return String(JSON.parse(raw)?.password || '')
+        } catch {
+          return ''
+        }
+      }
+
       function loadCachedIdentity() {
         try {
           const raw = window.localStorage?.getItem(identityStorageKey)
@@ -8230,11 +8115,19 @@
           }
           const parsed = JSON.parse(raw)
           const name = String(parsed?.name || '').trim()
-          const password = String(parsed?.password || '')
-          if (!name || !password) {
+          if (!name) {
             return null
           }
-          return { email: String(parsed?.email || '').trim(), name, password }
+          const email = String(parsed?.email || '').trim()
+          if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'password')) {
+            /* migrate pre-fix entries: scrub the persisted password */
+            window.localStorage?.setItem(identityStorageKey, JSON.stringify({ email, name }))
+          }
+          const password = loadSessionPassword()
+          if (!password) {
+            return null
+          }
+          return { email, name, password }
         } catch {
           return null
         }
@@ -8244,7 +8137,9 @@
         try {
           window.localStorage?.setItem(identityStorageKey, JSON.stringify({
             email: loginEmailInput.value.trim(),
-            name,
+            name
+          }))
+          window.sessionStorage?.setItem(sessionPasswordKey, JSON.stringify({
             password: roomPasswordInput.value
           }))
         } catch {
@@ -8258,7 +8153,7 @@
         passkeySignInButton.disabled = !identity || Boolean(ws || pc)
         passkeySignInButton.title = identity
           ? `continue as ${identity.name.toLowerCase()}`
-          : 'sign in with your password once on this device first.'
+          : 'sign in with your password once first.'
       }
 
       function signInWithPasskey() {
@@ -8863,7 +8758,7 @@
           handle = document.createElement('button')
           handle.className = 'video-reorder-handle'
           handle.type = 'button'
-          handle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>'
+          handle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="5" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>'
           handle.addEventListener('click', event => event.preventDefault())
           tile.appendChild(handle)
         }
@@ -13101,7 +12996,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           button = document.createElement('button')
           button.className = 'pin-speaker'
           button.type = 'button'
-          button.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v6"></path><path d="M5 8h14l-2 6H7L5 8Z"></path><path d="M12 14v8"></path></svg>'
+          button.setAttribute('aria-label', `Pin ${name} to stage`)
+          button.setAttribute('aria-pressed', 'false')
+          button.title = 'pin to stage'
+          button.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v6"></path><path d="M5 8h14l-2 6H7L5 8Z"></path><path d="M12 14v8"></path></svg>'
           button.addEventListener('click', event => {
             event.stopPropagation()
             togglePinnedSpeaker(tile.dataset.participant || name)
