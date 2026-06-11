@@ -1530,6 +1530,33 @@
         -webkit-backdrop-filter: var(--blur-panel);
       }
 
+      /* the glanceable Scout line in the mobile dock — desktop has the rail */
+      .dock-scout-state {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 28px;
+        padding: 2px 10px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-2);
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        font-weight: 500;
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+      }
+
+      .dock-scout-state__dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--presence);
+        box-shadow: 0 0 5px var(--presence);
+        animation: dot-pulse var(--pulse-cycle) var(--ease-soft) infinite;
+      }
+
       /* one cast-glass instrument: the pill provides the chrome; inner
          segments are borderless and speak through hover fills */
       .controls .btn--ghost {
@@ -4457,6 +4484,22 @@
         animation: card-place var(--t-place) var(--ease-place);
       }
 
+      /* …and signs its work: a quiet attribution line that fades over 10s */
+      .board-preview__card.is-moved::after {
+        content: "moved · just now";
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        font-weight: 500;
+        letter-spacing: var(--track-mono);
+        color: var(--ember-600);
+        animation: attribution-fade 10s var(--ease-soft) forwards;
+      }
+
+      @keyframes attribution-fade {
+        0%, 70% { opacity: 1; }
+        100%    { opacity: 0; }
+      }
+
       @keyframes card-place {
         0%   { transform: translateY(-10px) rotate(-1.5deg); box-shadow: var(--glow-ember-md), var(--shadow-light-2); }
         55%  { transform: translateY(2px) rotate(0.4deg); }
@@ -5827,7 +5870,12 @@
           display: none;
         }
 
-        /* one source of truth: the last board card always clears the dock */
+        /* one source of truth: the last board card always clears the dock
+           (two rows on mobile: scout strip + verbs) */
+        #appShell.is-in-room:not(.is-board-expanded) {
+          --dock-h: 104px;
+        }
+
         #appShell.is-in-room:not(.is-board-expanded) .workspace {
           padding-bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s-3));
         }
@@ -5854,6 +5902,22 @@
         #appShell.is-in-room .meeting-bar .room-clock,
         #appShell.is-in-room .meeting-bar #screenShare {
           display: none;
+        }
+
+        /* the intelligence is glanceable without the long scroll — one mono
+           line inside the dock's existing glass; tap jumps to Scout */
+        #appShell.is-in-room:not(.is-board-expanded) .dock-scout-state {
+          display: inline-flex;
+          grid-row: 1;
+        }
+
+        /* jumping to Scout lands its header below the sticky stage */
+        #appShell.is-in-room:not(.is-board-expanded) .scout-panel {
+          scroll-margin-top: calc(min(38svh, 420px) + var(--s-6));
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .dock-scout-state + .controls {
+          grid-row: 2;
         }
 
         #appShell.is-in-room .meeting-bar .controls {
@@ -6344,7 +6408,9 @@
           filter: opacity(0.5);
         }
         .pill--listening .pill__dot,
-        .pill--connecting .pill__dot { animation: none; }
+        .pill--connecting .pill__dot,
+        .dock-scout-state__dot { animation: none; }
+        .board-preview__card.is-moved::after { animation: none; }
 
         /* Hearthlight motion under reduced motion: the fire stays lit but
            dimmer and slower; entrances collapse to fades */
@@ -6748,6 +6814,10 @@
 
       <footer class="meeting-bar mount-stagger">
         <p id="log" class="log" aria-live="polite">team meeting</p>
+        <button id="dockScoutState" class="dock-scout-state" type="button" aria-label="Scout status — jump to Scout">
+          <span class="dock-scout-state__dot" aria-hidden="true"></span>
+          <span id="dockScoutStateText">ready</span>
+        </button>
         <div class="controls">
           <button id="join" class="btn btn--primary" type="button">Enter</button>
           <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
@@ -7147,6 +7217,9 @@
       muteMicButton.addEventListener('click', toggleLocalMute)
       toggleCameraButton.addEventListener('click', toggleLocalCamera)
       audioSettingsButton.addEventListener('click', openAudioSettings)
+      document.getElementById('dockScoutState')?.addEventListener('click', () => {
+        document.querySelector('.scout-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
       audioSettingsClose.addEventListener('click', closeAudioSettings)
       audioSettingsDone.addEventListener('click', closeAudioSettings)
       audioSettingsRegion.addEventListener('click', event => {
@@ -13577,6 +13650,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           node.textContent = text
         } else if (assistantState) {
           assistantState.textContent = text
+        }
+        const dockNode = document.getElementById('dockScoutStateText')
+        if (dockNode) {
+          dockNode.textContent = text
         }
       }
 
