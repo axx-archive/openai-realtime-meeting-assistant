@@ -581,3 +581,33 @@ func functionBody(source string, signature string) string {
 	}
 	return ""
 }
+
+func TestIndexRoomEntryChoreographyHoldsFinalVisibleState(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+
+	// The .mount-stagger base state is opacity 0, so any animation that
+	// overrides mount-rise (which uses a forwards fill) must also hold its
+	// final frame. A bare backwards fill snaps the room back to opacity 0
+	// once the entry animation ends, leaving a first-time visitor staring
+	// at the background gradient until they refresh (the reload path takes
+	// the .is-fast-mount branch, which masks the bug).
+	for _, want := range []string{
+		"#appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) both; }",
+		"#appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms both; }",
+		"#appShell.is-in-room .board-rail          { animation: rise-in 480ms var(--ease-out) 160ms both; }",
+		"#appShell.is-in-room .meeting-bar         { animation: rise-in 480ms var(--ease-out) 240ms both; }",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing room-entry animation that stays visible after it ends: %q", want)
+		}
+	}
+
+	if strings.Contains(html, "backwards;") {
+		t.Fatal("index.html uses a bare backwards animation fill; over an opacity-0 base state the element vanishes when the animation ends — use both")
+	}
+}

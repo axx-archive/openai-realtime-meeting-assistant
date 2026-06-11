@@ -6364,10 +6364,13 @@
 
       /* room-entry choreography — the room assembles around the stage,
          keyed off the .is-in-room class JS already toggles */
-      #appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) backwards; }
-      #appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms backwards; }
-      #appShell.is-in-room .board-rail          { animation: rise-in 480ms var(--ease-out) 160ms backwards; }
-      #appShell.is-in-room .meeting-bar         { animation: rise-in 480ms var(--ease-out) 240ms backwards; }
+      /* `both`, not `backwards`: these override the mount-rise forwards fill
+         on elements whose base .mount-stagger state is opacity 0, so the
+         final frame must be held or the room vanishes after the entrance. */
+      #appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) both; }
+      #appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms both; }
+      #appShell.is-in-room .board-rail          { animation: rise-in 480ms var(--ease-out) 160ms both; }
+      #appShell.is-in-room .meeting-bar         { animation: rise-in 480ms var(--ease-out) 240ms both; }
 
       @keyframes rise-in {
         from { opacity: 0; transform: translate3d(0, 16px, 0); }
