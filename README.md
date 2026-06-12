@@ -136,7 +136,10 @@ You can update:
 
 ### Meeting access and notes
 
-- Set `MEETING_ROOM_PASSWORD` to change the room passcode. If unset, the demo passcode is used.
+- Access is account-based. Six fixed accounts exist (`aj@`, `tim@`, `e@`, `joel@`, `tyler@`, `caitlyn@` at `shareability.com`); there is no public signup. Accounts live in `data/users.json` (override with `BONFIRE_USERS_PATH`), sessions in `data/sessions.json` (`BONFIRE_SESSIONS_PATH`).
+- `MEETING_ROOM_PASSWORD` now only seeds the **initial** password for accounts that do not exist yet in `users.json`; after first run, users change passwords (or add passkeys) in the in-app settings dialog.
+- Password reset emails are sent through [Resend](https://resend.com): set `RESEND_API_KEY` and optionally `RESEND_FROM` (default `Bonfire <no-reply@thebonfire.xyz>`). Without a key, the reset link is logged at info level instead. Set `BONFIRE_PUBLIC_URL` (e.g. `https://thebonfire.xyz`) in production — reset links refuse to derive from the request Host header on non-loopback hosts.
+- Passkeys (WebAuthn) bind to the origin that serves the page; they work on `https://` origins and on `localhost` during development.
 - Set `MEETING_ROOM_MAX_PARTICIPANTS` to change the room capacity. The default is `10`.
 - Set `MEETING_ALLOWED_ORIGINS` to a comma-separated list of allowed browser origins for WebSocket access. If unset, same-host origins are allowed.
 - For more reliable media on restrictive networks, configure browser ICE servers with `MEETING_STUN_URLS`, `MEETING_TURN_URLS`, `MEETING_TURN_USERNAME`, and `MEETING_TURN_CREDENTIAL`. You can also provide a full JSON array with `MEETING_ICE_SERVERS_JSON`.

@@ -42,15 +42,6 @@ func canonicalParticipantName(name string) string {
 	return ""
 }
 
-func validMeetingPassword(password string) bool {
-	providedPassword := strings.TrimSpace(password)
-	configuredPassword := configuredMeetingRoomPassword()
-	providedHash := sha256.Sum256([]byte(providedPassword))
-	configuredHash := sha256.Sum256([]byte(configuredPassword))
-
-	return subtle.ConstantTimeCompare(providedHash[:], configuredHash[:]) == 1
-}
-
 const archiveSecretFileName = "archive-secret"
 
 var (

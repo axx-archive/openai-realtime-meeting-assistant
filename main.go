@@ -255,6 +255,7 @@ func main() {
 
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
+	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
@@ -1431,6 +1432,15 @@ func dispatchKeyFrame() {
 
 // Handle incoming websockets.
 func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
+	// Accounts gate the room: resolve the session cookie before upgrading so
+	// an unauthenticated socket never allocates a PeerConnection or chat
+	// session.
+	sessionUser := userFromRequest(r)
+	if sessionUser == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Upgrade HTTP request to Websocket
 	unsafeConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1713,20 +1723,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 		switch message.Event {
 		case "participant":
-			payload := struct {
-				Name     string `json:"name"`
-				Password string `json:"password"`
-			}{}
-			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
-				log.Errorf("Failed to unmarshal participant payload: %v", err)
-				_ = sendKanbanEvent(c, "access_denied", "Could not read participant access details.")
-				continue
-			}
-			name := canonicalParticipantName(payload.Name)
-			if name == "" || !validMeetingPassword(payload.Password) {
-				_ = sendKanbanEvent(c, "access_denied", "Choose a listed participant and enter the room password.")
-				continue
-			}
+			// Identity comes from the authenticated session, never from the
+			// payload: a client cannot join as anyone but their own account.
+			name := sessionUser.Name
 			if participantAccepted {
 				continue
 			}
