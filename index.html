@@ -493,9 +493,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      #topbarElapsed[data-started="true"]::after {
-        content: " elapsed";
-      }
       .topbar__meta-sep {
         flex: 0 0 auto;
         color: var(--text-3);
@@ -553,6 +550,11 @@
         flex: none;
       }
       #appShell:not(.is-in-room) .topbar__copy-link {
+        display: none;
+      }
+      /* kit TopBar for Chat/Memory passes no actions — only the status pill */
+      #appShell[data-tool="chat"] .topbar__copy-link,
+      #appShell[data-tool="memory"] .topbar__copy-link {
         display: none;
       }
 
@@ -730,9 +732,15 @@
         background: rgba(0, 0, 0, 0.5);
         color: rgba(255, 255, 255, 0.85);
         cursor: grab;
-        opacity: 0.76;
+        /* kit affordance: hover-revealed only — nothing persistent on tiles */
+        opacity: 0;
         touch-action: none;
         transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .video-tile:hover .video-reorder-handle,
+      .video-tile:focus-within .video-reorder-handle {
+        opacity: 0.76;
       }
 
       .video-reorder-handle:hover,
@@ -837,9 +845,14 @@
       }
 
       .video-tile.is-muted .media-flag--muted,
-      .video-tile.is-camera-off .media-flag--camera,
       .video-tile.is-sharing-screen .media-flag--share {
         display: inline-flex;
+      }
+
+      /* per kit VideoTile the only resting flag is muted — a camera-off tile
+         already reads as the centered avatar, no chip needed */
+      .video-tile.is-camera-off .media-flag--camera {
+        display: none;
       }
 
       /* color = state: a muted mic is the only red on a tile */
@@ -1069,12 +1082,11 @@
       .login-passkey:hover:not([disabled]) { background: var(--surface-3); }
       .login-passkey:active:not([disabled]) { transform: scale(var(--press-scale)); }
       .login-passkey[disabled] {
-        opacity: 0.4;
+        opacity: 1;
         cursor: not-allowed;
       }
 
       .access-hint {
-        min-height: 16px;
         min-width: 0;
         margin: 0;
         text-align: center;
@@ -1084,6 +1096,7 @@
         overflow-wrap: anywhere;
         text-wrap: pretty;
       }
+      .access-hint:empty { display: none; }
 
       .login-foot {
         margin: 0;
@@ -1796,8 +1809,12 @@
         background: var(--surface-3);
         filter: brightness(1.14);
       }
+      /* kit IconButton off-state: danger-soft circle, danger glyph — never a
+         solid red fill (leave keeps that exclusively) */
       .controls .btn--ghost.is-muted,
-      .controls .btn--ghost.is-off {
+      .controls .btn--ghost.is-off,
+      .controls .btn--ghost.is-muted:hover:not([disabled]),
+      .controls .btn--ghost.is-off:hover:not([disabled]) {
         border-color: transparent;
         background: var(--danger-soft);
         color: var(--danger);
@@ -1859,7 +1876,8 @@
 
       /* kit IconButton md — 44px circles in the dock */
       #muteMic,
-      #toggleCamera {
+      #toggleCamera,
+      .controls #screenShare {
         min-width: 44px;
         width: 44px;
         min-height: 44px;
@@ -1870,12 +1888,14 @@
       }
 
       #muteMic .mute-label,
-      #toggleCamera .camera-label {
+      #toggleCamera .camera-label,
+      #screenShare .share-label {
         display: none;
       }
 
       #muteMic svg,
-      #toggleCamera svg {
+      #toggleCamera svg,
+      #screenShare svg {
         flex: 0 0 auto;
       }
 
@@ -3112,8 +3132,15 @@
         display: none;
       }
 
+      /* reference room: the stage owns the full width between the tool rail
+         and the canvas edge — Scout and the board live behind rail tools */
       #appShell.is-in-room .workspace {
-        grid-template-columns: clamp(260px, 19vw, 320px) minmax(480px, 1fr) clamp(260px, 19vw, 320px);
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #appShell.is-in-room .scout-rail,
+      #appShell.is-in-room .board-rail {
+        display: none;
       }
 
       #appShell:not(.is-in-room) .meeting-bar,
@@ -3652,7 +3679,16 @@
         gap: 2px;
       }
 
+      .chat-thread-item__row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+      }
+
       .chat-thread-item__title {
+        flex: 1;
+        min-width: 0;
         font: var(--type-caption-medium);
         color: var(--text-1);
         overflow: hidden;
@@ -3660,19 +3696,18 @@
         white-space: nowrap;
       }
 
-      .chat-thread-item__preview {
-        font: var(--type-caption);
-        color: var(--text-2);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .chat-thread-item__meta {
-        margin-top: 2px;
+      /* kit ThreadItem meta — right-aligned mono timestamp on the title row */
+      .chat-thread-item__time {
+        flex: none;
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
+        white-space: nowrap;
+      }
+
+      .chat-thread-item__preview {
+        font: var(--type-caption);
+        color: var(--text-2);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -4087,24 +4122,33 @@
         transform: scaleX(-1);
       }
 
+      /* kit VideoTile cameraOff branch: a floating Avatar disc on the
+         true-black tile — surface-3 fill, hairline, dark sans initial */
       .pip-tile .owner-avatar {
         position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        border: 0;
-        border-radius: 0;
+        top: 50%;
+        left: 50%;
+        translate: -50% -50%;
+        width: 56px;
+        height: 56px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
         box-shadow: none;
-        background: var(--ink-900);
+        background: var(--surface-3);
       }
 
       .pip-tile .monogram {
         width: 100%;
         height: 100%;
-        border-radius: 0;
-        font-size: 16px;
-        background: var(--ink-900);
-        color: rgba(255, 255, 255, 0.75);
+        border-radius: var(--r-full);
+        font: 500 18px/1 var(--font-sans);
+        background: var(--surface-3);
+        color: var(--text-2);
+      }
+
+      /* the speaking disc carries the live glow ring */
+      .pip-tile.is-speaker .owner-avatar {
+        box-shadow: var(--glow-live);
       }
 
       /* over live video: the sanctioned protection gradient + white label */
@@ -4113,15 +4157,27 @@
         right: 0;
         bottom: 0;
         left: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
         padding: 18px 10px 7px;
         background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
         color: #fff;
-        font: 500 10px/1.2 var(--font-mono);
-        letter-spacing: var(--track-label);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         pointer-events: none;
+      }
+
+      .pip-tile__label-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        flex: none;
       }
 
       .pip-meeting__more {
@@ -4221,13 +4277,9 @@
         grid-template-rows: minmax(0, 1fr);
         place-items: stretch;
         overflow: hidden;
-        padding: var(--sp-4);
-      }
-
-      .hearth-presentation {
-        background: var(--bg-stage);
-        border-radius: var(--r-xl);
-        overflow: hidden;
+        /* tiles sit directly on the light canvas — the workspace padding is
+           the only inset, per the reference grid */
+        padding: 0;
       }
 
       /* speaker mode (the base layout): big tile + 200px strip per kit */
@@ -4316,6 +4368,21 @@
         cursor: not-allowed;
       }
 
+      /* the resting top bar holds gallery|speaker · Board · Copy link only;
+         pinning stays a per-tile hover affordance */
+      #pinActiveSpeaker {
+        display: none;
+      }
+
+      #appShell:not(.is-in-room) #topbarBoard {
+        display: none;
+      }
+
+      .topbar__copy-link[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
       .stage-segmented button:hover,
       .stage-tool:hover:not([disabled]) {
         color: var(--text-1);
@@ -4389,9 +4456,9 @@
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         grid-auto-rows: auto;
-        gap: 12px;
+        gap: var(--sp-3);
         align-content: center;
         align-items: start;
         justify-content: center;
@@ -5379,11 +5446,7 @@
           white-space: nowrap;
         }
         #appShell.is-in-room .workspace {
-          grid-template-columns: minmax(0, 1fr) clamp(240px, 30vw, 300px);
-        }
-        #appShell.is-in-room .scout-rail {
-          grid-column: 1 / -1;
-          order: 3;
+          grid-template-columns: minmax(0, 1fr);
         }
         .scout-panel {
           min-height: 0;
@@ -6759,7 +6822,7 @@
           <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true">·</span>
           <span id="topbarRoomPill" class="topbar__meta-item" data-state="waiting">
             <span class="pill__dot"></span>
-            <span id="topbarRoomState">in the room</span>
+            <span id="topbarRoomState">in room</span>
           </span>
           <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
@@ -6771,6 +6834,10 @@
           </div>
           <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
         </div>
+        <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
+          Board
+        </button>
         <button id="copyRoomLink" class="topbar__copy-link" type="button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
           Copy link
@@ -6832,7 +6899,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg>
               Sign in with passkey
             </button>
-            <p id="accessHint" class="access-hint" aria-live="polite">camera and microphone start after the room lets you in.</p>
+            <p id="accessHint" class="access-hint" aria-live="polite"></p>
           </form>
           <p class="login-foot login-rise login-rise--foot">sessions stay signed in on this device.</p>
           <div class="inside-row" hidden>
@@ -6972,9 +7039,11 @@
                 </svg>
               </span>
               <span class="chat-thread-item__body">
-                <span class="chat-thread-item__title">Scout</span>
-                <span class="chat-thread-item__preview">ask about any meeting</span>
-                <span class="chat-thread-item__meta">this conversation lives in this session</span>
+                <span class="chat-thread-item__row">
+                  <span class="chat-thread-item__title">Scout</span>
+                  <span id="chatThreadTime" class="chat-thread-item__time" hidden></span>
+                </span>
+                <span id="chatThreadPreview" class="chat-thread-item__preview">ask about any meeting</span>
               </span>
             </button>
           </aside>
@@ -7137,7 +7206,7 @@
           <span id="dockScoutStateText">ready</span>
         </button>
         <div class="controls">
-          <span id="roomClock" class="room-clock" aria-live="polite">00:00 · 0/10</span>
+          <span id="roomClock" class="room-clock" aria-live="polite">00:00</span>
           <button id="join" class="btn btn--primary" type="button">Enter</button>
           <button id="muteMic" class="btn btn--ghost" type="button" aria-label="Mute microphone" aria-pressed="false" title="Mute microphone" disabled>
             <svg class="mute-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -7154,7 +7223,14 @@
             </svg>
             <span class="camera-label">Camera</span>
           </button>
-          <button id="screenShare" class="btn btn--ghost" type="button" disabled>Share screen</button>
+          <button id="screenShare" class="btn btn--ghost" type="button" aria-label="Share screen" title="Share screen" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="4" width="20" height="12" rx="2"></rect>
+              <path d="M8 20h8"></path>
+              <path d="M12 16v4"></path>
+            </svg>
+            <span class="share-label">Share screen</span>
+          </button>
           <button id="audioSettingsButton" class="btn btn--ghost audio-settings-button" type="button" aria-label="Audio settings" title="audio settings" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M4 21v-7"></path>
@@ -7339,6 +7415,7 @@
       const boardPreview = document.getElementById('boardPreview')
       const boardPreviewState = document.getElementById('boardPreviewState')
       const expandBoardButton = document.getElementById('expandBoard')
+      const topbarBoardButton = document.getElementById('topbarBoard')
       const collapseBoardButton = document.getElementById('collapseBoard')
       const boardHuddle = document.getElementById('boardHuddle')
       const boardVideoStrip = document.getElementById('boardVideoStrip')
@@ -7676,6 +7753,7 @@
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
       expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
+      topbarBoardButton.addEventListener('click', () => setBoardExpanded(!appShell.classList.contains('is-board-expanded')))
       collapseBoardButton.addEventListener('click', () => setBoardExpanded(false))
       stageModeButtons.forEach(button => {
         button.addEventListener('click', () => setStageMode(button.dataset.stageMode || 'gallery'))
@@ -8186,7 +8264,9 @@
         } else if (verified) {
           accessHint.textContent = `${selectedParticipantName().toLowerCase()} · ready to sign in.`
         } else {
-          accessHint.textContent = 'camera and microphone start after the room lets you in.'
+          // reference card ends after the passkey button — the hint line only
+          // appears (aria-live) once sign-in actually begins
+          accessHint.textContent = ''
         }
         updatePasskeyButton()
         updateHearthParticipants()
@@ -8675,7 +8755,15 @@
           }
         }
 
-        label.textContent = name === currentParticipantName ? 'you' : name.toLowerCase()
+        // kit VideoTile label: original-case name, 6px live dot while speaking
+        label.replaceChildren()
+        if (isSpeaker) {
+          const dot = document.createElement('span')
+          dot.className = 'pip-tile__label-dot'
+          dot.setAttribute('aria-hidden', 'true')
+          label.appendChild(dot)
+        }
+        label.appendChild(document.createTextNode(name === currentParticipantName ? 'you' : name))
         return tile
       }
 
@@ -9406,7 +9494,7 @@
           if (state === 'connected') {
             clearConnectionRecoveryTimer()
             if (!statusPillEl.classList.contains('pill--listening')) {
-              setConnectionState('room', 'in the room')
+              setConnectionState('room', 'the room is listening')
             }
           } else if (state === 'connecting' || state === 'new') {
             clearConnectionRecoveryTimer()
@@ -10696,15 +10784,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const minutes = Math.floor(elapsedSeconds / 60)
         const seconds = elapsedSeconds % 60
         const elapsed = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-        const seats = `${Math.max(occupiedSeats, participantsInRoom.length)}/${roomCapacity}`
-        const media = localStream
-          ? `${effectiveMicMuted() ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'} · ${audioModeLabel()}`
-          : 'waiting room'
         if (roomClock) {
-          // phones: the dock's mic/cam buttons already convey media state,
-          // so the clock stays short — 'MM:SS · n/10'
-          const compactClock = window.matchMedia('(max-width: 640px)').matches
-          roomClock.textContent = compactClock ? `${elapsed} · ${seats}` : `${elapsed} · ${seats} · ${media}`
+          // kit ControlDock: the dock carries only the quiet mono elapsed —
+          // the icon buttons already convey media state
+          roomClock.textContent = elapsed
         }
 
         // Sync topbar meta strip
@@ -10717,7 +10800,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           topbarElapsed.textContent = roomStartedAt ? elapsed : 'not started'
         }
         if (topbarDate) {
-          const fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+          const fmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
           topbarDate.textContent = fmt.format(new Date()).toLowerCase()
         }
         if (topbarRoomPill && topbarRoomState) {
@@ -11270,7 +11353,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
         } else if (normalized.includes('connected to conference room')) {
-          setConnectionState('room', 'in the room')
+          setConnectionState('room', 'the room is listening')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
@@ -12371,7 +12454,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         setRoomView(true)
         accessState.textContent = 'verified'
         accessHint.textContent = `${name} is verified. Starting camera and microphone.`
-        setConnectionState('room', 'in the room')
+        setConnectionState('room', 'the room is listening')
         setLog(`${name} is verified`)
         try {
           await beginMediaSession()
@@ -12568,12 +12651,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (kind === 'query') {
           appendScoutChatNode(scoutChatMessageNode('user', text, ts))
+          updateChatThreadItem(text, ts)
         } else if (kind === 'answer') {
           hideScoutChatThinking()
-          appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(text), ts))
+          const voiced = scoutVoice(text)
+          appendScoutChatNode(scoutChatMessageNode('scout', voiced, ts))
+          updateChatThreadItem(voiced, ts)
         } else if (kind === 'error') {
           hideScoutChatThinking()
           appendScoutChatNode(scoutChatMessageNode('error', text, ts))
+          updateChatThreadItem(text, ts)
+        }
+      }
+
+      // kit ThreadItem: the row mirrors the last message — preview text plus
+      // a right-aligned HH:MM timestamp on the title row
+      function updateChatThreadItem(text, ts) {
+        const time = document.getElementById('chatThreadTime')
+        const preview = document.getElementById('chatThreadPreview')
+        if (preview) {
+          preview.textContent = text
+        }
+        if (time) {
+          time.hidden = false
+          time.textContent = scoutChatTimeLabel(ts)
         }
       }
 
@@ -12729,8 +12830,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           await sender.replaceTrack(screenTrack)
           await configureOutboundSender(sender, screenTrack)
           activeScreenShareParticipant = currentParticipantName
-          screenShareButton.textContent = 'Stop sharing'
-          screenShareButton.classList.add('is-sharing')
+          setScreenShareButtonState(true)
           renderScreenStage()
           updateBoardDockControls()
           publishParticipantMediaState()
@@ -12742,6 +12842,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           screenShareStream?.getTracks().forEach(track => track.stop())
           screenShareStream = undefined
           setLog(error.message || String(error))
+        }
+      }
+
+      // kit ControlDock: share is an icon-only circle — state lives in the
+      // accessible name and the is-sharing (primary) fill, not in dock text
+      function setScreenShareButtonState(sharing) {
+        screenShareButton.classList.toggle('is-sharing', Boolean(sharing))
+        const label = sharing ? 'Stop sharing' : 'Share screen'
+        screenShareButton.setAttribute('aria-label', label)
+        screenShareButton.title = label
+        const text = screenShareButton.querySelector('.share-label')
+        if (text) {
+          text.textContent = label
         }
       }
 
@@ -12768,8 +12881,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (activeScreenShareParticipant === currentParticipantName) {
           activeScreenShareParticipant = ''
         }
-        screenShareButton.textContent = 'Share screen'
-        screenShareButton.classList.remove('is-sharing')
+        setScreenShareButtonState(false)
         renderScreenStage()
         updateBoardDockControls()
         publishParticipantMediaState()
@@ -15535,8 +15647,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
         screenShareButton.disabled = true
         archiveMeetingButton.disabled = true
-        screenShareButton.textContent = 'Share screen'
-        screenShareButton.classList.remove('is-sharing')
+        setScreenShareButtonState(false)
         archiveMeetingButton.textContent = 'Send notes'
         closeAudioSettings({ restoreFocus: false })
         updateBoardDockControls()
@@ -15642,6 +15753,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
         toolBoardButton.disabled = !isBoardReady
+        topbarBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
           ? `${cards.length} card${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
