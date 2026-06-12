@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -43,6 +45,7 @@ type userAccount struct {
 	PasswordHash      []byte                `json:"passwordHash"`
 	WebAuthnHandle    []byte                `json:"webauthnHandle"`
 	Credentials       []webauthn.Credential `json:"credentials,omitempty"`
+	PasskeyAddedAt    map[string]time.Time  `json:"passkeyAddedAt,omitempty"`
 	PasswordChangedAt time.Time             `json:"passwordChangedAt"`
 }
 
@@ -52,6 +55,14 @@ func (u *userAccount) WebAuthnID() []byte                         { return u.Web
 func (u *userAccount) WebAuthnName() string                       { return u.Email }
 func (u *userAccount) WebAuthnDisplayName() string                { return u.Name }
 func (u *userAccount) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
+
+func (u *userAccount) credentialDescriptors() []protocol.CredentialDescriptor {
+	descriptors := make([]protocol.CredentialDescriptor, 0, len(u.Credentials))
+	for _, credential := range u.Credentials {
+		descriptors = append(descriptors, credential.Descriptor())
+	}
+	return descriptors
+}
 
 type resetTokenRecord struct {
 	email   string
@@ -174,6 +185,17 @@ func (s *userAccountStore) findUser(email string) *userAccount {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.users[normalizeAccountEmail(email)]
+}
+
+func (s *userAccountStore) findUserByWebAuthnHandle(handle []byte) *userAccount {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, user := range s.users {
+		if len(user.WebAuthnHandle) > 0 && subtle.ConstantTimeCompare(user.WebAuthnHandle, handle) == 1 {
+			return user
+		}
+	}
+	return nil
 }
 
 func (s *userAccountStore) findUserByName(name string) *userAccount {

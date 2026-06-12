@@ -293,6 +293,18 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		handleAuthMe(w, r)
 	case r.URL.Path == "/auth/change-password" && r.Method == http.MethodPost:
 		handleAuthChangePassword(w, r)
+	case r.URL.Path == "/auth/passkey/register/begin" && r.Method == http.MethodPost:
+		handlePasskeyRegisterBegin(w, r)
+	case r.URL.Path == "/auth/passkey/register/finish" && r.Method == http.MethodPost:
+		handlePasskeyRegisterFinish(w, r)
+	case r.URL.Path == "/auth/passkey/login/begin" && r.Method == http.MethodPost:
+		handlePasskeyLoginBegin(w, r)
+	case r.URL.Path == "/auth/passkey/login/finish" && r.Method == http.MethodPost:
+		handlePasskeyLoginFinish(w, r)
+	case r.URL.Path == "/auth/passkeys" && r.Method == http.MethodGet:
+		handlePasskeyList(w, r)
+	case r.URL.Path == "/auth/passkey/delete" && r.Method == http.MethodPost:
+		handlePasskeyDelete(w, r)
 	default:
 		http.NotFound(w, r)
 	}
