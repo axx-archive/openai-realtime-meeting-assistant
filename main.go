@@ -255,6 +255,7 @@ func main() {
 
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
+	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
