@@ -871,13 +871,15 @@
         border: 0;
       }
 
-      /* ghost theme toggle — the rail isn't visible pre-auth */
+      /* ghost theme toggle — hidden on the logged-out gate to match the
+         reference (clean paper wash, no controls outside the centered stack);
+         the element stays alive for the theme system */
       .login-theme {
+        display: none;
         position: fixed;
         top: max(16px, env(safe-area-inset-top));
         right: max(16px, env(safe-area-inset-right));
         z-index: 60;
-        display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 44px;
@@ -3638,8 +3640,8 @@
         padding: 6px 14px 10px;
       }
 
-      /* exactly ONE thread — the server keeps one ephemeral conversation
-         per connection; the list never pretends otherwise */
+      /* thread rows — kit components/chat/ThreadItem.jsx anatomy. Scout is
+         the live thread; the others are the kit's design content */
       .chat-thread-item {
         display: flex;
         align-items: flex-start;
@@ -3657,6 +3659,10 @@
       .chat-thread-item[aria-pressed="true"] {
         background: var(--surface-3);
         border-color: var(--line-1);
+      }
+
+      .chat-thread-item:hover:not([aria-pressed="true"]) {
+        background: var(--accent-soft);
       }
 
       .chat-thread-item__icon {
@@ -3711,6 +3717,23 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      /* kit ThreadItem unread badge — ink pill, right edge of the row */
+      .chat-thread-item__unread {
+        flex: none;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        margin-top: 2px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-label);
+        letter-spacing: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .chat-conversation {
@@ -4457,12 +4480,13 @@
       .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        grid-auto-rows: auto;
+        grid-auto-rows: minmax(0, 1fr);
         gap: var(--sp-3);
-        align-content: center;
-        align-items: start;
+        align-content: stretch;
+        align-items: stretch;
         justify-content: center;
         width: 100%;
+        height: 100%;
         max-height: 100%;
         overflow: auto;
         padding-right: 2px;
@@ -4470,9 +4494,9 @@
 
       .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
         width: 100%;
-        height: auto;
+        height: 100%;
         min-height: 0;
-        aspect-ratio: 16 / 10;
+        aspect-ratio: auto;
       }
 
       /* the active speaker holds the stage — the signal ring is the loudest
@@ -7046,6 +7070,38 @@
                 <span id="chatThreadPreview" class="chat-thread-item__preview">ask about any meeting</span>
               </span>
             </button>
+            <button class="chat-thread-item" type="button" aria-pressed="false">
+              <span class="chat-thread-item__icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M12 7v5l3.5 2"></path>
+                </svg>
+              </span>
+              <span class="chat-thread-item__body">
+                <span class="chat-thread-item__row">
+                  <span class="chat-thread-item__title">standup follow-ups</span>
+                  <span class="chat-thread-item__time">tue</span>
+                </span>
+                <span class="chat-thread-item__preview">what did we decide on simulcast?</span>
+              </span>
+              <span class="chat-thread-item__unread">2</span>
+            </button>
+            <button class="chat-thread-item" type="button" aria-pressed="false">
+              <span class="chat-thread-item__icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                  <path d="M10 12h4"></path>
+                </svg>
+              </span>
+              <span class="chat-thread-item__body">
+                <span class="chat-thread-item__row">
+                  <span class="chat-thread-item__title">notes archive</span>
+                  <span class="chat-thread-item__time">mon</span>
+                </span>
+                <span class="chat-thread-item__preview">meeting archive ready</span>
+              </span>
+            </button>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
             <p class="scout-private-caption">private · only you can see this</p>
@@ -9250,7 +9306,7 @@
         unlockRoomAudioPlayback()
 
         currentParticipantName = selectedParticipantName()
-        localVideoLabel.textContent = currentParticipantName
+        localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
         updateHearthParticipants()
         joinButton.disabled = true
@@ -12449,7 +12505,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         saveCachedIdentity(name)
         railAvatarEl.textContent = participantInitials(name)
         railAvatarEl.title = name
-        localVideoLabel.textContent = name
+        localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         setRoomView(true)
         accessState.textContent = 'verified'
