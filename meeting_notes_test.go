@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,12 +81,16 @@ func TestDeleteTicketCanBeRestored(t *testing.T) {
 	}
 }
 
-func TestMeetingRoomPasswordCanComeFromEnvironment(t *testing.T) {
+func TestMeetingRoomPasswordSeedsAccountsFromEnvironment(t *testing.T) {
 	t.Setenv("MEETING_ROOM_PASSWORD", "secret-room")
-	if !validMeetingPassword("secret-room") {
-		t.Fatal("validMeetingPassword rejected env password")
+	store, err := newUserAccountStore(filepath.Join(t.TempDir(), "users.json"))
+	if err != nil {
+		t.Fatalf("newUserAccountStore: %v", err)
 	}
-	if validMeetingPassword(defaultMeetingRoomPassword) {
-		t.Fatal("validMeetingPassword accepted default while env override is set")
+	if _, ok := store.authenticate("aj@shareability.com", "secret-room"); !ok {
+		t.Fatal("expected env password to seed account passwords")
+	}
+	if _, ok := store.authenticate("aj@shareability.com", defaultMeetingRoomPassword); ok {
+		t.Fatal("expected default password to be rejected while env override is set")
 	}
 }

@@ -185,33 +185,65 @@ var (
 )
 
 func clientIPForRateLimit(r *http.Request) string {
-	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
-		return forwarded
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+
+	// Honor X-Forwarded-For only when the direct peer is the local reverse
+	// proxy (Caddy on the compose network); a remote client setting the header
+	// itself must not be able to mint fresh rate-limit identities.
+	remote := net.ParseIP(host)
+	if remote != nil && (remote.IsLoopback() || remote.IsPrivate()) {
+		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
+			return forwarded
+		}
 	}
 	return host
 }
 
+// maxTrackedAttemptWindows bounds the limiter map; past it, expired windows
+// are swept before admitting new keys so hostile traffic cannot grow memory
+// without bound.
+const maxTrackedAttemptWindows = 10000
+
 func authAttemptAllowed(scope string, r *http.Request) bool {
-	key := scope + "|" + clientIPForRateLimit(r)
-	authRateMu.Lock()
-	defer authRateMu.Unlock()
-	window, ok := authRateAttempts[key]
-	if !ok || time.Since(window.started) > loginAttemptWindow {
-		window = attemptWindow{started: time.Now()}
-	}
-	window.count++
-	authRateAttempts[key] = window
-	return window.count <= loginAttemptLimit
+	return authAttemptAllowedForKeys(scope + "|" + clientIPForRateLimit(r))
 }
 
-func clearAuthAttempts(scope string, r *http.Request) {
+func authAttemptAllowedForKeys(keys ...string) bool {
 	authRateMu.Lock()
 	defer authRateMu.Unlock()
-	delete(authRateAttempts, scope+"|"+clientIPForRateLimit(r))
+
+	if len(authRateAttempts) > maxTrackedAttemptWindows {
+		for key, window := range authRateAttempts {
+			if time.Since(window.started) > loginAttemptWindow {
+				delete(authRateAttempts, key)
+			}
+		}
+	}
+
+	allowed := true
+	for _, key := range keys {
+		window, ok := authRateAttempts[key]
+		if !ok || time.Since(window.started) > loginAttemptWindow {
+			window = attemptWindow{started: time.Now()}
+		}
+		window.count++
+		authRateAttempts[key] = window
+		if window.count > loginAttemptLimit {
+			allowed = false
+		}
+	}
+	return allowed
+}
+
+func clearAuthAttempts(keys ...string) {
+	authRateMu.Lock()
+	defer authRateMu.Unlock()
+	for _, key := range keys {
+		delete(authRateAttempts, key)
+	}
 }
 
 func resetAuthRateLimitersForTest() {
@@ -276,17 +308,23 @@ func identityPayload(user *userAccount) map[string]any {
 }
 
 func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	if !authAttemptAllowed("login", r) {
-		writeAuthError(w, http.StatusTooManyRequests, "too many sign-in attempts; try again in a few minutes")
-		return
-	}
-
 	payload := struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}{}
 	if err := decodeAuthBody(r, &payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Throttle per source IP and per target account, so neither rotating
+	// source addresses nor spraying one address across accounts gets
+	// unlimited guesses.
+	if !authAttemptAllowedForKeys(
+		"login|"+clientIPForRateLimit(r),
+		"login-email|"+normalizeAccountEmail(payload.Email),
+	) {
+		writeAuthError(w, http.StatusTooManyRequests, "too many sign-in attempts; try again in a few minutes")
 		return
 	}
 
@@ -301,7 +339,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	clearAuthAttempts("login", r)
+	clearAuthAttempts("login|"+clientIPForRateLimit(r), "login-email|"+user.Email)
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
 }
@@ -342,6 +380,13 @@ func handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err := accountStore().changePassword(user.Email, payload.CurrentPassword, payload.NewPassword); err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Rotate sessions: a password change revokes every other signed-in
+	// device, then re-issues a fresh session for this one.
+	userSessionStore().destroyAllForEmail(user.Email)
+	if token, err := userSessionStore().create(user.Email); err == nil {
+		setSessionCookie(w, r, token, int(sessionTTL/time.Second))
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
