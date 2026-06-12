@@ -3172,6 +3172,14 @@
         display: none;
       }
 
+      /* Higher-specificity companion (1-4-0): keeps the dock hidden on the
+         Chat/Memory tool pages even where the responsive in-room rules
+         (1-3-0) re-show .meeting-bar, regardless of source order. */
+      #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .meeting-bar {
+        display: none;
+      }
+
       #appShell.is-in-room[data-tool="chat"] .workspace,
       #appShell.is-in-room[data-tool="memory"] .workspace {
         grid-template-columns: minmax(0, 1fr);
@@ -4617,16 +4625,16 @@
         font-variant-numeric: tabular-nums;
         color: var(--text-1);
       }
-      /* color = state: overdue is danger, shipped is live */
+      /* color = state: overdue is danger, shipped is live —
+         but a zero count is not a state, so it stays quiet */
       .board-stat__value--warn { color: var(--danger); }
       .board-stat__value--done { color: var(--live); }
+      .board-stat__value.is-zero { color: var(--text-2); }
       .board-stat__label {
         font: var(--type-label);
         letter-spacing: var(--track-label);
         line-height: 1.15;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: normal;
         text-transform: none;
         color: var(--text-3);
       }
@@ -5699,11 +5707,19 @@
       }
 
       /* phone: bubbles take the full width and the feed starts below the
-         PiP instead (PiP docks at top: 70px, ~226px tall) */
+         PiP instead (PiP docks at top: 70px, ~226px tall) — the privacy
+         pill sits above the thread, so it carries the clearance and the
+         thread keeps its normal padding */
       @media (max-width: 640px) {
+        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-private-caption {
+          /* the pane starts ~52px down, the PiP bottoms out near 297px —
+             256px lands the pill fully below it with a small breath */
+          margin-top: 256px;
+        }
+
         body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
           padding-right: 16px;
-          padding-top: 236px;
+          padding-top: 18px;
         }
       }
 
@@ -10685,7 +10701,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ? `${effectiveMicMuted() ? 'muted' : 'mic live'} · ${isCameraOff ? 'camera off' : 'camera live'} · ${audioModeLabel()}`
           : 'waiting room'
         if (roomClock) {
-          roomClock.textContent = `${elapsed} · ${seats} · ${media}`
+          // phones: the dock's mic/cam buttons already convey media state,
+          // so the clock stays short — 'MM:SS · n/10'
+          const compactClock = window.matchMedia('(max-width: 640px)').matches
+          roomClock.textContent = compactClock ? `${elapsed} · ${seats}` : `${elapsed} · ${seats} · ${media}`
         }
 
         // Sync topbar meta strip
@@ -14089,7 +14108,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // archivers may have spaced names ("Guest 1") or be anonymous
         const archived = raw.match(/^(?:(.+?) archived|Archived) meeting (\S+) with (\d+) transcript item\(s\), (\d+) board card\(s\), (\d+) participant\(s\)/)
         if (archived) {
-          return `archived · ${archived[4]} cards · ${archived[5]} participants`
+          return `archived · ${archived[4]} ${Number(archived[4]) === 1 ? 'card' : 'cards'} · ${archived[5]} ${Number(archived[5]) === 1 ? 'participant' : 'participants'}`
         }
         return raw
       }
@@ -14416,7 +14435,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             else if (state === 'today' || state === 'soon') due++
             if (state === 'done') shipped++
           }
-          const setStat = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = String(n) }
+          const setStat = (id, n) => {
+            const el = document.getElementById(id)
+            if (!el) return
+            el.textContent = String(n)
+            // zero is not a state — drop the state hue when the count is 0
+            el.classList.toggle('is-zero', Number(n) === 0)
+          }
           setStat('boardStatDue', due)
           setStat('boardStatOverdue', overdue)
           setStat('boardStatShipped', shipped)
