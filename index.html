@@ -795,18 +795,25 @@
         border-radius: var(--r-full);
       }
 
-      /* kit VideoTile — flags at top 10 right 10, beside the pin slot
-         (.pin-speaker holds the corner: 10px edge + 28px pin + 6px gap) */
+      /* kit VideoTile — flags hug the corner at top 10 right 10; they only
+         shift left while the hover-revealed pin actually occupies the slot
+         (10px edge + 28px pin + 6px gap) */
       .media-flags {
         position: absolute;
         top: 10px;
-        right: 44px;
+        right: 10px;
         z-index: 4;
         display: flex;
         align-items: center;
         justify-content: flex-end;
         gap: 6px;
         pointer-events: none;
+      }
+
+      .video-tile:hover .media-flags,
+      .video-tile:focus-within .media-flags,
+      .video-tile:has(.pin-speaker[aria-pressed="true"]) .media-flags {
+        right: 44px;
       }
 
       .media-flag {
@@ -1465,10 +1472,10 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* color names state quietly: a shipped archive / board change is live-green */
+      /* memory entries are quiet log lines — green stays reserved for live state */
       .memory-item.archive .memory-meta,
       .memory-item.board_update .memory-meta {
-        color: var(--live);
+        color: var(--text-2);
       }
 
       .memory-item.answer .memory-meta,
@@ -1905,11 +1912,11 @@
         justify-content: flex-end;
       }
 
-      /* kit ControlDock — elapsed rides as the first dock item, quiet mono */
+      /* kit ControlDock — elapsed rides as the first dock item, quiet mono
+         (no max-width cap: the dock grid row already bounds it on phones) */
       .room-clock {
         display: inline-block;
         min-width: 0;
-        max-width: min(360px, 28vw);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -5556,10 +5563,6 @@
           right: 12px;
         }
 
-        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
-          padding-right: 264px;
-        }
-
         .meeting-bar {
           bottom: max(var(--sp-3), env(safe-area-inset-bottom));
         }
@@ -5684,6 +5687,23 @@
         #appShell.is-board-expanded .board-expanded-surface {
           min-height: 0;
           height: calc(100svh - 128px);
+        }
+      }
+
+      /* tablet: the docked PiP (236px wide) still rides the right edge,
+         so the chat feed clears it sideways */
+      @media (min-width: 641px) and (max-width: 860px) {
+        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
+          padding-right: 264px;
+        }
+      }
+
+      /* phone: bubbles take the full width and the feed starts below the
+         PiP instead (PiP docks at top: 70px, ~226px tall) */
+      @media (max-width: 640px) {
+        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
+          padding-right: 16px;
+          padding-top: 236px;
         }
       }
 
@@ -6144,7 +6164,7 @@
         #appShell.is-in-room .meeting-bar .room-clock {
           grid-column: 1 / -1;
           grid-row: 1;
-          justify-content: center;
+          text-align: center;
           padding: 0 0 2px;
         }
 
@@ -6551,6 +6571,15 @@
           height: 44px;
           min-height: 44px;
           opacity: 1;
+        }
+
+        /* the pin never hides on touch, so the flags always clear its slot
+           (10px edge + 44px pin + 6px gap) */
+        .media-flags,
+        .video-tile:hover .media-flags,
+        .video-tile:focus-within .media-flags,
+        .video-tile:has(.pin-speaker[aria-pressed="true"]) .media-flags {
+          right: 60px;
         }
 
         .video-reorder-handle {
@@ -7384,6 +7413,7 @@
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
       const topbarElapsedEl = document.getElementById('topbarElapsed')
+      const topbarMetaEl = document.getElementById('topbarMeta')
       const pipMeeting = document.getElementById('pipMeeting')
       const pipTiles = document.getElementById('pipTiles')
       const pipTitle = document.getElementById('pipTitle')
@@ -8446,6 +8476,20 @@
           : tool === 'memory'
             ? `room memory · ${memoryTotal} saved`
             : ''
+        // the meeting meta (date · elapsed · in-room pill) leaves the
+        // accessibility tree with the visual hide on tool pages
+        for (const node of topbarMetaEl.children) {
+          if (node.id === 'topbarToolMeta') {
+            continue
+          }
+          if (toolPage) {
+            node.setAttribute('aria-hidden', 'true')
+          } else if (node.classList.contains('topbar__meta-sep')) {
+            node.setAttribute('aria-hidden', 'true')
+          } else {
+            node.removeAttribute('aria-hidden')
+          }
+        }
       }
 
       /* on a tool page with a live connection the pill reads "memory ready";
@@ -14039,10 +14083,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function memoryEntryText(entry) {
-        const raw = entry.text || ''
+        const raw = entry.kind === 'answer' ? scoutVoice(entry.text || '') : (entry.text || '')
         // the server archive summary speaks in raw ids and (s) plurals —
-        // render the quiet-log voice instead (backend stays untouched)
-        const archived = raw.match(/^(\w+) archived meeting (\S+) with (\d+) transcript item\(s\), (\d+) board card\(s\), (\d+) participant\(s\)/)
+        // render the quiet-log voice instead (backend stays untouched);
+        // archivers may have spaced names ("Guest 1") or be anonymous
+        const archived = raw.match(/^(?:(.+?) archived|Archived) meeting (\S+) with (\d+) transcript item\(s\), (\d+) board card\(s\), (\d+) participant\(s\)/)
         if (archived) {
           return `archived · ${archived[4]} cards · ${archived[5]} participants`
         }
@@ -14131,7 +14176,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const text = document.createElement('span')
         text.className = 'assistant-text'
-        text.textContent = entry.text
+        text.textContent = kind === 'answer' ? scoutVoice(entry.text) : entry.text
 
         item.append(meta, text)
         if (entry.downloadUrl) {
@@ -14153,9 +14198,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function assistantMessageLabel(entry, kind) {
+        // kit log format: HH:MM, 24h, zero-padded — matches memoryEntryLabel
         const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
         const time = createdAt && !Number.isNaN(createdAt.valueOf())
-          ? createdAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+          ? `${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`
           : 'now'
         return `${kind} · ${time}`
       }
