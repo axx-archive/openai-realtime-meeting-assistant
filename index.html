@@ -936,6 +936,34 @@
         color: var(--text-3);
       }
 
+      /* quiet inline text actions on the login card — forgot password,
+         not-you sign out */
+      .login-textlink {
+        appearance: none;
+        background: none;
+        border: 0;
+        padding: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        cursor: pointer;
+      }
+
+      .login-textlink:hover {
+        color: var(--text-1);
+      }
+
+      .login-forgot {
+        align-self: center;
+      }
+
+      .login-forgot[hidden],
+      #authedRow[hidden] {
+        display: none;
+      }
+
       /* panel glass card — the full recipe, specular top edge included */
       .login-card {
         align-self: stretch;
@@ -2459,6 +2487,55 @@
         justify-content: flex-end;
         gap: 10px;
         flex-wrap: wrap;
+      }
+
+      /* account section — same card recipe as the voice profile */
+      .account-settings {
+        display: grid;
+        gap: var(--sp-3);
+        min-width: 0;
+        padding: var(--sp-4);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+      }
+
+      .account-settings__identity {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .account-settings__form {
+        display: grid;
+        gap: var(--sp-3);
+      }
+
+      .account-settings__form .btn {
+        justify-self: end;
+      }
+
+      .account-settings__passkeys {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+      }
+
+      .account-settings__passkeys li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .account-settings__passkeys .login-textlink {
+        flex: none;
       }
 
       .audio-settings-actions {
@@ -6912,11 +6989,21 @@
                 <option>Guest 2</option>
               </select>
             </label>
-            <label class="field">
+            <label class="field" id="passwordField">
               <span>password</span>
               <input id="roomPassword" type="password" autocomplete="current-password" placeholder="password">
             </label>
+            <label class="field" id="resetPasswordField" hidden>
+              <span>new password</span>
+              <input id="resetPassword" type="password" autocomplete="new-password" placeholder="at least 8 characters">
+            </label>
+            <label class="field" id="resetPasswordConfirmField" hidden>
+              <span>confirm new password</span>
+              <input id="resetPasswordConfirm" type="password" autocomplete="new-password" placeholder="repeat the new password">
+            </label>
+            <p id="authedRow" class="access-hint" hidden>signed in as <span id="authedEmail"></span> · <button id="loginSignOut" class="login-textlink" type="button">not you? sign out</button></p>
             <button id="joinAccess" class="login-signin" type="submit" disabled>Sign in</button>
+            <button id="forgotPassword" class="login-textlink login-forgot" type="button">forgot password?</button>
             <div class="login-divider" aria-hidden="true">
               <span class="login-divider__line"></span>
               <span class="login-divider__label">or</span>
@@ -7366,8 +7453,8 @@
       <section class="audio-settings-panel" tabindex="-1">
         <header class="audio-settings-header">
           <div>
-            <h2 id="audioSettingsTitle">audio focus.</h2>
-            <p>the room cleans your microphone before it reaches people or Scout.</p>
+            <h2 id="audioSettingsTitle">settings.</h2>
+            <p>audio focus and your account. the room cleans your microphone before it reaches people or Scout.</p>
           </div>
           <button id="audioSettingsClose" class="btn btn--ghost audio-settings-close" type="button" aria-label="Close audio settings" title="close">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -7427,6 +7514,28 @@
               <button id="resetVoiceFocus" class="btn btn--text" type="button">reset</button>
             </div>
           </section>
+          <section class="account-settings" aria-label="Account">
+            <div class="voice-profile__label">account</div>
+            <p id="accountIdentity" class="account-settings__identity">not signed in</p>
+            <form id="changePasswordForm" class="account-settings__form" novalidate>
+              <label class="field">
+                <span>current password</span>
+                <input id="currentPasswordInput" type="password" autocomplete="current-password">
+              </label>
+              <label class="field">
+                <span>new password</span>
+                <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="at least 8 characters">
+              </label>
+              <button class="btn btn--ghost" type="submit">Change password</button>
+            </form>
+            <div class="voice-profile__label">passkeys</div>
+            <ul id="passkeyList" class="account-settings__passkeys"></ul>
+            <div class="voice-profile__actions">
+              <button id="addPasskeyButton" class="btn btn--ghost" type="button">Add a passkey on this device</button>
+              <button id="accountSignOut" class="btn btn--text" type="button">sign out</button>
+            </div>
+            <p id="accountStatus" class="access-hint" aria-live="polite"></p>
+          </section>
         </div>
         <footer class="audio-settings-actions">
           <button id="audioSettingsDone" class="btn btn--primary" type="button">Done</button>
@@ -7442,6 +7551,10 @@
       const themeStorageKey = 'bonfire.theme.v1'
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
+      /* auth state — the session itself lives in an HttpOnly cookie the
+         server owns; authedUser mirrors GET /auth/me for UI decisions. */
+      let authedUser = null
+      let resetToken = ''
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       function applyTheme(theme) {
         const next = theme === 'dark' ? 'dark' : 'light'
@@ -7520,6 +7633,17 @@
       const roomPasswordInput = document.getElementById('roomPassword')
       const loginEmailInput = document.getElementById('loginEmail')
       const passkeySignInButton = document.getElementById('passkeySignIn')
+      const passwordFieldEl = document.getElementById('passwordField')
+      const resetPasswordFieldEl = document.getElementById('resetPasswordField')
+      const resetPasswordConfirmFieldEl = document.getElementById('resetPasswordConfirmField')
+      const resetPasswordInput = document.getElementById('resetPassword')
+      const resetPasswordConfirmInput = document.getElementById('resetPasswordConfirm')
+      const forgotPasswordButton = document.getElementById('forgotPassword')
+      const authedRowEl = document.getElementById('authedRow')
+      const authedEmailEl = document.getElementById('authedEmail')
+      const loginSignOutButton = document.getElementById('loginSignOut')
+      const loginSublineEl = document.querySelector('.login-subline')
+      const loginDividerEl = document.querySelector('.login-divider')
       const loginThemeToggleButton = document.getElementById('loginThemeToggle')
       const presentationTile = document.getElementById('presentationTile')
       const screenStage = document.getElementById('screenStage')
@@ -7762,7 +7886,11 @@
       // the login gate is a real form — password managers + Enter-to-submit
       document.getElementById('loginForm').addEventListener('submit', event => {
         event.preventDefault()
-        joinRoom()
+        if (resetToken) {
+          submitPasswordReset()
+        } else {
+          joinRoom()
+        }
       })
       leaveButton.addEventListener('click', leaveRoom)
       micSelect.addEventListener('change', switchMicrophone)
@@ -7837,7 +7965,11 @@
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
       loginEmailInput.addEventListener('input', validateAccess)
+      resetPasswordInput.addEventListener('input', validateAccess)
+      resetPasswordConfirmInput.addEventListener('input', validateAccess)
       passkeySignInButton.addEventListener('click', signInWithPasskey)
+      forgotPasswordButton.addEventListener('click', requestPasswordReset)
+      loginSignOutButton.addEventListener('click', signOutOfAccount)
       assistantForm.addEventListener('submit', sendAssistantQuery)
       scoutTabButtons.forEach(button => {
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
@@ -7915,7 +8047,17 @@
       })
 
       setConnectionState('idle', 'not connected')
-      validateAccess()
+      resetToken = new URLSearchParams(window.location.search).get('reset') || ''
+      {
+        const cachedIdentity = loadCachedIdentity()
+        if (cachedIdentity?.email && !loginEmailInput.value) {
+          loginEmailInput.value = cachedIdentity.email
+        }
+      }
+      renderLoginMode()
+      if (!resetToken) {
+        refreshAuthState()
+      }
       renderBoard()
       updateBoardControls()
       updateMuteButton()
@@ -8053,6 +8195,7 @@
           return
         }
         renderAudioSettings()
+        renderAccountSettings()
         audioSettingsRegion.classList.add('visible')
         audioSettingsPanel.focus()
       }
@@ -8289,7 +8432,14 @@
       }
 
       function hasValidAccess() {
-        return selectedParticipantName() !== '' && roomPasswordInput.value.trim() !== ''
+        if (resetToken) {
+          return resetPasswordInput.value.length >= 8 &&
+            resetPasswordInput.value === resetPasswordConfirmInput.value
+        }
+        if (authedUser) {
+          return true
+        }
+        return loginEmailInput.value.trim().includes('@') && roomPasswordInput.value.trim() !== ''
       }
 
       /* the work-email local-part derives the canonical participant name —
@@ -8310,18 +8460,17 @@
       }
 
       function validateAccess() {
-        const email = loginEmailInput.value.trim()
-        participantNameInput.value = participantNameFromEmail(email)
+        const email = (authedUser?.email || loginEmailInput.value).trim()
+        participantNameInput.value = authedUser?.name || participantNameFromEmail(email)
         const verified = hasValidAccess()
         joinButton.disabled = !verified || Boolean(ws || pc)
         joinAccessButton.disabled = joinButton.disabled
         accessPanel.classList.toggle('is-verified', verified)
         accessState.textContent = verified ? 'ready' : 'locked'
         accessReadyTag.textContent = verified ? 'ready' : 'locked'
-        if (email !== '' && email.includes('@') && selectedParticipantName() === '') {
-          accessHint.textContent = "that address isn't in this office yet."
-        } else if (verified) {
-          accessHint.textContent = `${selectedParticipantName().toLowerCase()} · ready to sign in.`
+        if (verified && !resetToken) {
+          const readyName = authedUser?.name || selectedParticipantName() || email
+          accessHint.textContent = `${String(readyName).toLowerCase()} · ready to sign in.`
         } else {
           // reference card ends after the passkey button — the hint line only
           // appears (aria-live) once sign-in actually begins
@@ -8333,22 +8482,48 @@
         return verified
       }
 
-      /* passkey affordance — honest: it replays the identity this device
-         cached on the last successful sign-in, nothing more. The password is
-         NEVER persisted: identity (email + name) lives in localStorage, the
-         password only in sessionStorage for this tab session. */
-      function loadSessionPassword() {
-        try {
-          const raw = window.sessionStorage?.getItem(sessionPasswordKey)
-          if (!raw) {
-            return ''
-          }
-          return String(JSON.parse(raw)?.password || '')
-        } catch {
-          return ''
+      /* the login card serves three states: normal sign-in, "continue as"
+         when a session cookie is already live, and the emailed reset flow. */
+      function renderLoginMode() {
+        const mode = resetToken ? 'reset' : authedUser ? 'authed' : 'login'
+        loginEmailInput.closest('label').hidden = mode === 'reset'
+        passwordFieldEl.hidden = mode !== 'login'
+        resetPasswordFieldEl.hidden = mode !== 'reset'
+        resetPasswordConfirmFieldEl.hidden = mode !== 'reset'
+        forgotPasswordButton.hidden = mode !== 'login'
+        if (loginDividerEl) {
+          loginDividerEl.hidden = mode !== 'login'
         }
+        passkeySignInButton.hidden = mode !== 'login'
+        authedRowEl.hidden = mode !== 'authed'
+        if (mode === 'authed') {
+          authedEmailEl.textContent = authedUser.email
+          if (!loginEmailInput.value.trim()) {
+            loginEmailInput.value = authedUser.email
+          }
+        }
+        if (loginSublineEl) {
+          loginSublineEl.textContent = mode === 'reset' ? 'set a new password' : 'sign in to your office'
+        }
+        joinAccessButton.textContent = mode === 'reset'
+          ? 'Set new password'
+          : mode === 'authed' ? `Enter as ${authedUser.name}` : 'Sign in'
+        validateAccess()
       }
 
+      async function refreshAuthState() {
+        try {
+          const response = await fetch('/auth/me', { cache: 'no-store' })
+          authedUser = response.ok ? await response.json() : null
+        } catch {
+          authedUser = null
+        }
+        renderLoginMode()
+      }
+
+      /* identity cache — prefill only. Nothing secret lives in storage: the
+         session is an HttpOnly cookie, passkeys live in the platform
+         authenticator. */
       function loadCachedIdentity() {
         try {
           const raw = window.localStorage?.getItem(identityStorageKey)
@@ -8357,19 +8532,12 @@
           }
           const parsed = JSON.parse(raw)
           const name = String(parsed?.name || '').trim()
-          if (!name) {
-            return null
-          }
           const email = String(parsed?.email || '').trim()
           if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'password')) {
             /* migrate pre-fix entries: scrub the persisted password */
             window.localStorage?.setItem(identityStorageKey, JSON.stringify({ email, name }))
           }
-          const password = loadSessionPassword()
-          if (!password) {
-            return null
-          }
-          return { email, name, password }
+          return name || email ? { email, name } : null
         } catch {
           return null
         }
@@ -8378,38 +8546,306 @@
       function saveCachedIdentity(name) {
         try {
           window.localStorage?.setItem(identityStorageKey, JSON.stringify({
-            email: loginEmailInput.value.trim(),
+            email: (authedUser?.email || loginEmailInput.value).trim(),
             name
           }))
-          window.sessionStorage?.setItem(sessionPasswordKey, JSON.stringify({
-            password: roomPasswordInput.value
-          }))
+          /* scrub the legacy per-tab password cache */
+          window.sessionStorage?.removeItem(sessionPasswordKey)
         } catch {
-          /* private mode — the passkey affordance simply stays disabled */
+          /* private mode — prefill simply won't survive the tab */
         }
         updatePasskeyButton()
       }
 
-      function updatePasskeyButton() {
-        const identity = loadCachedIdentity()
-        passkeySignInButton.disabled = !identity || Boolean(ws || pc)
-        passkeySignInButton.title = identity
-          ? `continue as ${identity.name.toLowerCase()}`
-          : 'sign in with your password once first.'
+      function passkeysSupported() {
+        return Boolean(window.PublicKeyCredential && navigator.credentials?.get)
       }
 
-      function signInWithPasskey() {
-        const identity = loadCachedIdentity()
-        if (!identity || ws || pc) {
+      function updatePasskeyButton() {
+        passkeySignInButton.disabled = !passkeysSupported() || Boolean(ws || pc)
+        passkeySignInButton.title = passkeysSupported()
+          ? 'sign in with a passkey'
+          : 'this browser does not support passkeys.'
+      }
+
+      /* base64url <-> buffer, the wire format WebAuthn options use */
+      function base64urlToBuffer(value) {
+        const padded = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
+        const binary = window.atob(padded + '='.repeat((4 - padded.length % 4) % 4))
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index++) {
+          bytes[index] = binary.charCodeAt(index)
+        }
+        return bytes.buffer
+      }
+
+      function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (const byte of bytes) {
+          binary += String.fromCharCode(byte)
+        }
+        return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      }
+
+      async function postAuthJSON(path, body) {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body)
+        })
+        const data = await response.json().catch(() => ({}))
+        return { ok: response.ok, status: response.status, data }
+      }
+
+      async function signInWithPasskey() {
+        if (ws || pc || !passkeysSupported()) {
           return
         }
-        loginEmailInput.value = identity.email
-        roomPasswordInput.value = identity.password
-        participantNameInput.value = identity.name
-        if (validateAccess()) {
+        passkeySignInButton.disabled = true
+        accessHint.textContent = 'waiting for your passkey.'
+        try {
+          const begin = await postAuthJSON('/auth/passkey/login/begin')
+          if (!begin.ok) {
+            throw new Error(begin.data?.error || 'could not start passkey sign-in')
+          }
+          const publicKey = begin.data.publicKey
+          publicKey.challenge = base64urlToBuffer(publicKey.challenge)
+          if (Array.isArray(publicKey.allowCredentials)) {
+            publicKey.allowCredentials = publicKey.allowCredentials.map(credential => ({
+              ...credential,
+              id: base64urlToBuffer(credential.id)
+            }))
+          }
+          const assertion = await navigator.credentials.get({ publicKey })
+          const finish = await postAuthJSON('/auth/passkey/login/finish', {
+            id: assertion.id,
+            rawId: bufferToBase64url(assertion.rawId),
+            type: assertion.type,
+            clientExtensionResults: assertion.getClientExtensionResults?.() || {},
+            response: {
+              authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+              clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+              signature: bufferToBase64url(assertion.response.signature),
+              userHandle: assertion.response.userHandle
+                ? bufferToBase64url(assertion.response.userHandle)
+                : null
+            }
+          })
+          if (!finish.ok) {
+            throw new Error(finish.data?.error || 'passkey sign-in failed')
+          }
+          authedUser = finish.data
+          renderLoginMode()
           joinRoom()
+        } catch (error) {
+          /* NotAllowedError is the user dismissing the prompt — not an error */
+          accessHint.textContent = error?.name === 'NotAllowedError'
+            ? ''
+            : (error.message || 'passkey sign-in failed.')
+        } finally {
+          updatePasskeyButton()
         }
       }
+
+      async function requestPasswordReset() {
+        const email = loginEmailInput.value.trim()
+        if (!email.includes('@')) {
+          accessHint.textContent = 'enter your work email first.'
+          loginEmailInput.focus()
+          return
+        }
+        forgotPasswordButton.disabled = true
+        try {
+          await postAuthJSON('/auth/reset/request', { email })
+          accessHint.textContent = 'if that address has an account, a reset link is on its way.'
+        } catch {
+          accessHint.textContent = 'could not reach the server; try again.'
+        } finally {
+          forgotPasswordButton.disabled = false
+        }
+      }
+
+      async function submitPasswordReset() {
+        if (!validateAccess()) {
+          accessHint.textContent = 'passwords must match and be at least 8 characters.'
+          resetPasswordInput.focus()
+          return
+        }
+        joinAccessButton.disabled = true
+        try {
+          const result = await postAuthJSON('/auth/reset/confirm', {
+            token: resetToken,
+            newPassword: resetPasswordInput.value
+          })
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not reset the password')
+          }
+          resetToken = ''
+          window.history.replaceState({}, '', window.location.pathname)
+          resetPasswordInput.value = ''
+          resetPasswordConfirmInput.value = ''
+          renderLoginMode()
+          accessHint.textContent = 'password updated — sign in with it now.'
+        } catch (error) {
+          accessHint.textContent = error.message || 'could not reset the password.'
+          joinAccessButton.disabled = false
+        }
+      }
+
+      async function signOutOfAccount() {
+        try {
+          await postAuthJSON('/auth/logout')
+        } catch {
+          /* the cookie clear below still happens server-side on next request */
+        }
+        authedUser = null
+        roomPasswordInput.value = ''
+        renderLoginMode()
+      }
+
+      /* ---------- account settings (inside the settings dialog) ---------- */
+      const accountIdentityEl = document.getElementById('accountIdentity')
+      const accountStatusEl = document.getElementById('accountStatus')
+      const changePasswordForm = document.getElementById('changePasswordForm')
+      const currentPasswordInput = document.getElementById('currentPasswordInput')
+      const newPasswordInput = document.getElementById('newPasswordInput')
+      const passkeyListEl = document.getElementById('passkeyList')
+      const addPasskeyButton = document.getElementById('addPasskeyButton')
+      const accountSignOutButton = document.getElementById('accountSignOut')
+
+      function setAccountStatus(message, isError = false) {
+        accountStatusEl.textContent = message
+        accountStatusEl.style.color = isError ? 'var(--danger, #c0392b)' : ''
+      }
+
+      function renderAccountSettings() {
+        accountIdentityEl.textContent = authedUser
+          ? `${authedUser.name} · ${authedUser.email}`
+          : 'not signed in'
+        setAccountStatus('')
+        renderPasskeyList()
+      }
+
+      async function renderPasskeyList() {
+        passkeyListEl.innerHTML = ''
+        if (!authedUser) {
+          return
+        }
+        let passkeys = []
+        try {
+          const response = await fetch('/auth/passkeys', { cache: 'no-store' })
+          if (response.ok) {
+            passkeys = (await response.json())?.passkeys || []
+          }
+        } catch {
+          /* the list simply stays empty if the server is unreachable */
+        }
+        if (!passkeys.length) {
+          const empty = document.createElement('li')
+          empty.textContent = 'no passkeys on this account yet.'
+          passkeyListEl.appendChild(empty)
+          return
+        }
+        for (const passkey of passkeys) {
+          const item = document.createElement('li')
+          const label = document.createElement('span')
+          label.textContent = passkey.label || 'passkey'
+          const remove = document.createElement('button')
+          remove.type = 'button'
+          remove.className = 'login-textlink'
+          remove.textContent = 'remove'
+          remove.addEventListener('click', async () => {
+            remove.disabled = true
+            const result = await postAuthJSON('/auth/passkey/delete', { id: passkey.id })
+            if (!result.ok) {
+              setAccountStatus(result.data?.error || 'could not remove the passkey.', true)
+              remove.disabled = false
+              return
+            }
+            setAccountStatus('passkey removed.')
+            renderPasskeyList()
+          })
+          item.append(label, remove)
+          passkeyListEl.appendChild(item)
+        }
+      }
+
+      changePasswordForm.addEventListener('submit', async event => {
+        event.preventDefault()
+        if (newPasswordInput.value.length < 8) {
+          setAccountStatus('the new password needs at least 8 characters.', true)
+          newPasswordInput.focus()
+          return
+        }
+        const result = await postAuthJSON('/auth/change-password', {
+          currentPassword: currentPasswordInput.value,
+          newPassword: newPasswordInput.value
+        })
+        if (!result.ok) {
+          setAccountStatus(result.data?.error || 'could not change the password.', true)
+          return
+        }
+        currentPasswordInput.value = ''
+        newPasswordInput.value = ''
+        setAccountStatus('password changed. other devices were signed out.')
+      })
+
+      addPasskeyButton.addEventListener('click', async () => {
+        if (!passkeysSupported()) {
+          setAccountStatus('this browser does not support passkeys.', true)
+          return
+        }
+        addPasskeyButton.disabled = true
+        try {
+          const begin = await postAuthJSON('/auth/passkey/register/begin')
+          if (!begin.ok) {
+            throw new Error(begin.data?.error || 'could not start passkey setup')
+          }
+          const publicKey = begin.data.publicKey
+          publicKey.challenge = base64urlToBuffer(publicKey.challenge)
+          publicKey.user.id = base64urlToBuffer(publicKey.user.id)
+          if (Array.isArray(publicKey.excludeCredentials)) {
+            publicKey.excludeCredentials = publicKey.excludeCredentials.map(credential => ({
+              ...credential,
+              id: base64urlToBuffer(credential.id)
+            }))
+          }
+          const credential = await navigator.credentials.create({ publicKey })
+          const finish = await postAuthJSON('/auth/passkey/register/finish', {
+            id: credential.id,
+            rawId: bufferToBase64url(credential.rawId),
+            type: credential.type,
+            clientExtensionResults: credential.getClientExtensionResults?.() || {},
+            response: {
+              attestationObject: bufferToBase64url(credential.response.attestationObject),
+              clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+              transports: credential.response.getTransports?.() || []
+            }
+          })
+          if (!finish.ok) {
+            throw new Error(finish.data?.error || 'could not save the passkey')
+          }
+          setAccountStatus('passkey added — you can sign in with it from the login screen.')
+          renderPasskeyList()
+        } catch (error) {
+          if (error?.name !== 'NotAllowedError') {
+            setAccountStatus(error.message || 'could not add the passkey.', true)
+          }
+        } finally {
+          addPasskeyButton.disabled = false
+        }
+      })
+
+      accountSignOutButton.addEventListener('click', async () => {
+        accountSignOutButton.disabled = true
+        try {
+          await postAuthJSON('/auth/logout')
+        } catch {
+          /* reload below still lands on the login gate */
+        }
+        window.location.reload()
+      })
 
       async function loadParticipantPreview() {
         try {
@@ -9299,7 +9735,7 @@
       async function joinRoom() {
         if (!validateAccess()) {
           setLog('enter your work email and password')
-          if (selectedParticipantName() === '') {
+          if (!loginEmailInput.value.trim().includes('@')) {
             loginEmailInput.focus()
           } else {
             roomPasswordInput.focus()
@@ -9308,14 +9744,42 @@
         }
         unlockRoomAudioPlayback()
 
-        currentParticipantName = selectedParticipantName()
-        localVideoLabel.textContent = 'you'
-        localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
-        updateHearthParticipants()
         joinButton.disabled = true
         joinAccessButton.disabled = true
         passkeySignInButton.disabled = true
         setConnectionState('connecting', 'connecting…')
+
+        if (!authedUser) {
+          accessState.textContent = 'checking'
+          accessHint.textContent = 'signing in.'
+          setLog('signing in')
+          try {
+            const result = await postAuthJSON('/auth/login', {
+              email: loginEmailInput.value.trim(),
+              password: roomPasswordInput.value
+            })
+            if (!result.ok) {
+              throw new Error(result.data?.error || 'sign-in failed')
+            }
+            authedUser = result.data
+            roomPasswordInput.value = ''
+            renderLoginMode()
+          } catch (error) {
+            setConnectionState('idle', 'not connected')
+            accessState.textContent = 'locked'
+            accessHint.textContent = error.message || 'sign-in failed.'
+            setLog(error.message || 'sign-in failed')
+            joinButton.disabled = false
+            joinAccessButton.disabled = false
+            updatePasskeyButton()
+            return
+          }
+        }
+
+        currentParticipantName = authedUser.name
+        localVideoLabel.textContent = 'you'
+        localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
+        updateHearthParticipants()
         setLog('checking room access')
 
         try {
@@ -9327,8 +9791,7 @@
             ws.send(JSON.stringify({
               event: 'participant',
               data: JSON.stringify({
-                name: currentParticipantName,
-                password: roomPasswordInput.value
+                name: currentParticipantName
               })
             }))
           }
@@ -9350,7 +9813,12 @@
               })
           }
           ws.onclose = () => leaveRoom()
-          ws.onerror = () => setLog('websocket error')
+          ws.onerror = () => {
+            setLog('websocket error')
+            // an expired session cookie rejects the upgrade with 401 — resync
+            // the login card so the password field comes back
+            refreshAuthState()
+          }
         } catch (error) {
           setLog(error.message || String(error))
           leaveRoom()
