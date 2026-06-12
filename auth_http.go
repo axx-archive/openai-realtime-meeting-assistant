@@ -377,17 +377,27 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
 }
 
-// publicBaseURL is where emailed links should point: BONFIRE_PUBLIC_URL when
-// set, otherwise the origin that served this request.
-func publicBaseURL(r *http.Request) string {
+// publicBaseURL is where emailed links should point. The request Host header
+// is attacker-controlled and must never reach a reset email (reset-link
+// poisoning), so only BONFIRE_PUBLIC_URL or a loopback dev host is trusted.
+func publicBaseURL(r *http.Request) (string, error) {
 	if base := strings.TrimSpace(os.Getenv("BONFIRE_PUBLIC_URL")); base != "" {
-		return strings.TrimRight(base, "/")
+		return strings.TrimRight(base, "/"), nil
 	}
-	scheme := "http"
-	if requestIsSecure(r) {
-		scheme = "https"
+
+	host := r.Host
+	if splitHost, _, err := net.SplitHostPort(r.Host); err == nil {
+		host = splitHost
 	}
-	return scheme + "://" + r.Host
+	if ip := net.ParseIP(host); strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback()) {
+		scheme := "http"
+		if requestIsSecure(r) {
+			scheme = "https"
+		}
+		return scheme + "://" + r.Host, nil
+	}
+
+	return "", errors.New("BONFIRE_PUBLIC_URL is not set; refusing to build an email link from the Host header")
 }
 
 func handleAuthResetRequest(w http.ResponseWriter, r *http.Request) {
@@ -410,8 +420,10 @@ func handleAuthResetRequest(w http.ResponseWriter, r *http.Request) {
 	// Always answer 202 so the endpoint cannot be used to discover which
 	// addresses have accounts.
 	if user := accountStore().findUser(payload.Email); user != nil {
-		if token, err := accountStore().createPasswordResetToken(user.Email); err == nil {
-			resetURL := publicBaseURL(r) + "/?reset=" + token
+		if base, err := publicBaseURL(r); err != nil {
+			log.Errorf("Password reset email for %s not sent: %v", user.Email, err)
+		} else if token, err := accountStore().createPasswordResetToken(user.Email); err == nil {
+			resetURL := base + "/?reset=" + token
 			if err := sendAccountEmail(user.Email, "Reset your Bonfire password", passwordResetEmailHTML(user.Name, resetURL)); err != nil {
 				log.Errorf("Failed to send password reset email to %s: %v", user.Email, err)
 			}

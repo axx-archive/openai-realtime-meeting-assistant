@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestResetRequestRefusesUntrustedHostForLinks(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("BONFIRE_PUBLIC_URL", "")
+	sent := captureAccountEmails(t)
+
+	// httptest requests carry Host "example.com" — an untrusted, non-loopback
+	// host must never become a reset link.
+	recorder := postAuthJSON(t, "/auth/reset/request", `{"email":"aj@shareability.com"}`, nil)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", recorder.Code)
+	}
+	if len(*sent) != 0 {
+		t.Fatalf("expected no email when the link base cannot be trusted, got %d", len(*sent))
+	}
+}
+
 func newAuthGet(t *testing.T, path string, cookies []*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)

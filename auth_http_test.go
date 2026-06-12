@@ -15,6 +15,7 @@ func setupAuthTestEnv(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
 	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	t.Setenv("BONFIRE_PUBLIC_URL", "https://bonfire.test")
 	resetAuthRateLimitersForTest()
 }
 
