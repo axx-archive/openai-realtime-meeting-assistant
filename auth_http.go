@@ -293,6 +293,10 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		handleAuthMe(w, r)
 	case r.URL.Path == "/auth/change-password" && r.Method == http.MethodPost:
 		handleAuthChangePassword(w, r)
+	case r.URL.Path == "/auth/reset/request" && r.Method == http.MethodPost:
+		handleAuthResetRequest(w, r)
+	case r.URL.Path == "/auth/reset/confirm" && r.Method == http.MethodPost:
+		handleAuthResetConfirm(w, r)
 	case r.URL.Path == "/auth/passkey/register/begin" && r.Method == http.MethodPost:
 		handlePasskeyRegisterBegin(w, r)
 	case r.URL.Path == "/auth/passkey/register/finish" && r.Method == http.MethodPost:
@@ -371,6 +375,75 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
+}
+
+// publicBaseURL is where emailed links should point: BONFIRE_PUBLIC_URL when
+// set, otherwise the origin that served this request.
+func publicBaseURL(r *http.Request) string {
+	if base := strings.TrimSpace(os.Getenv("BONFIRE_PUBLIC_URL")); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	scheme := "http"
+	if requestIsSecure(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+func handleAuthResetRequest(w http.ResponseWriter, r *http.Request) {
+	payload := struct {
+		Email string `json:"email"`
+	}{}
+	if err := decodeAuthBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if !authAttemptAllowedForKeys(
+		"reset|"+clientIPForRateLimit(r),
+		"reset-email|"+normalizeAccountEmail(payload.Email),
+	) {
+		writeAuthError(w, http.StatusTooManyRequests, "too many reset requests; try again in a few minutes")
+		return
+	}
+
+	// Always answer 202 so the endpoint cannot be used to discover which
+	// addresses have accounts.
+	if user := accountStore().findUser(payload.Email); user != nil {
+		if token, err := accountStore().createPasswordResetToken(user.Email); err == nil {
+			resetURL := publicBaseURL(r) + "/?reset=" + token
+			if err := sendAccountEmail(user.Email, "Reset your Bonfire password", passwordResetEmailHTML(user.Name, resetURL)); err != nil {
+				log.Errorf("Failed to send password reset email to %s: %v", user.Email, err)
+			}
+		}
+	}
+	writeAuthJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+func handleAuthResetConfirm(w http.ResponseWriter, r *http.Request) {
+	payload := struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"newPassword"`
+	}{}
+	if err := decodeAuthBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	email, ok := accountStore().consumePasswordResetToken(payload.Token)
+	if !ok {
+		writeAuthError(w, http.StatusBadRequest, "that reset link is no longer valid; request a new one")
+		return
+	}
+	if err := accountStore().setPassword(email, payload.NewPassword); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// A reset proves control of the inbox, not of existing sessions — sign
+	// everything out so a stolen session dies with the old password.
+	userSessionStore().destroyAllForEmail(email)
+	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
