@@ -369,7 +369,7 @@ func TestIndexLocksControlsAndUsesGreenSpeakerAccent(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		"--speaker-accent: #34D399",
+		"--speaker-accent: #30D158",
 		"--glow-speaker-md:",
 		"#appShell.is-in-room:not(.is-board-expanded) .meeting-bar",
 		"position: fixed;",
