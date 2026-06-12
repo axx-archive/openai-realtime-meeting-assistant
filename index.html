@@ -441,8 +441,11 @@
       }
 
       .topbar__mark {
+        /* reference anatomy: the rail flame is the sole brand mark; this node
+           stays in the DOM as the is-listening state carrier for the
+           #appShell:has() breathe switch above */
+        display: none;
         position: relative;
-        display: grid;
         place-items: center;
         width: 26px;
         height: 26px;
