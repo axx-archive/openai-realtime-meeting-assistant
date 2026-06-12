@@ -2,3 +2,4 @@
 /*.test
 /openai-realtime-meeting-assistant
 /data/
+.playwright-mcp/
