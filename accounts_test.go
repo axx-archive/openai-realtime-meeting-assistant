@@ -15,12 +15,12 @@ func newTestUserStore(t *testing.T) *userAccountStore {
 	return store
 }
 
-func TestUserStoreSeedsSixAccounts(t *testing.T) {
+func TestUserStoreSeedsAllAccounts(t *testing.T) {
 	store := newTestUserStore(t)
 
 	emails := store.accountEmails()
-	if len(emails) != 6 {
-		t.Fatalf("expected 6 seeded accounts, got %d: %v", len(emails), emails)
+	if len(emails) != 7 {
+		t.Fatalf("expected 7 seeded accounts, got %d: %v", len(emails), emails)
 	}
 
 	expected := map[string]string{
@@ -30,6 +30,7 @@ func TestUserStoreSeedsSixAccounts(t *testing.T) {
 		"joel@shareability.com":    "Joel",
 		"tyler@shareability.com":   "Tyler",
 		"caitlyn@shareability.com": "Caitlyn",
+		"tom@shareability.com":     "Tom",
 	}
 	for email, name := range expected {
 		user := store.findUser(email)
@@ -101,8 +102,8 @@ func TestUserStorePersistsAcrossReload(t *testing.T) {
 	if _, ok := reloaded.authenticate("joel@shareability.com", "rotated-pass-9"); !ok {
 		t.Error("expected changed password to survive reload (seeding must be idempotent)")
 	}
-	if emails := reloaded.accountEmails(); len(emails) != 6 {
-		t.Errorf("expected reload to keep 6 accounts, got %d", len(emails))
+	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts) {
+		t.Errorf("expected reload to keep %d accounts, got %d", len(seededAccounts), len(emails))
 	}
 }
 

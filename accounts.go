@@ -37,6 +37,7 @@ var seededAccounts = []struct {
 	{"joel@shareability.com", "Joel"},
 	{"tyler@shareability.com", "Tyler"},
 	{"caitlyn@shareability.com", "Caitlyn"},
+	{"tom@shareability.com", "Tom"},
 }
 
 type userAccount struct {
