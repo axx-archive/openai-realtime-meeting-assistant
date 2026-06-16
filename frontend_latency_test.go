@@ -111,7 +111,45 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 		t.Fatal("missing retuneLocalCameraCapture helper")
 	}
 	if got := strings.Count(retune, "aspectRatio: widescreenAspectRatio"); got != 4 {
-		t.Fatalf("retuneLocalCameraCapture should pin 16:9 in all four quality tiers, found %d", got)
+		t.Fatalf("retuneLocalCameraCapture should pin 16:9 in all four desktop quality tiers, found %d", got)
+	}
+	// Phones keep their native orientation: pinning a landscape aspect ratio and
+	// re-applying capture constraints on every roster change made the mobile feed
+	// flip between portrait and landscape for all participants. Capture pins are
+	// gated behind cameraAspectRatioConstraint (undefined on mobile) and the
+	// retune restart is skipped on mobile entirely.
+	for _, want := range []string{
+		"const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)",
+		"const cameraAspectRatioConstraint = isMobileDevice ? undefined : widescreenAspectRatio",
+		"...(cameraAspectRatioConstraint ? { aspectRatio: cameraAspectRatioConstraint } : {})",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing mobile-aware capture guard %q", want)
+		}
+	}
+	if !strings.Contains(retune, "if (isMobileDevice) {") {
+		t.Fatal("retuneLocalCameraCapture must skip the capture restart on mobile to avoid orientation flips")
+	}
+}
+
+// TestMediaFixesBehaveCorrectly executes the shipped media helpers extracted from
+// index.html against the exact bug + regression scenarios for the Safari flicker,
+// mobile orientation-swap, and screen-share-for-all fixes. This is behavioral
+// verification of the JS logic, not a string match. (Device-engine behavior — real
+// Safari rVFC, a physical phone sensor, live getDisplayMedia — still needs a manual
+// pass on hardware; this proves the fix logic is correct.)
+func TestMediaFixesBehaveCorrectly(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available for the media fix verification")
+	}
+
+	output, err := exec.Command(node, "scripts/media-fix-verification.mjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("media fix verification failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), `"ok":true`) {
+		t.Fatalf("media fix verification did not report ok: %s", output)
 	}
 }
 

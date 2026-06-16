@@ -7806,6 +7806,14 @@
       const voiceFocusRNNoiseWasmPath = '/public/voice-focus/rnnoise.wasm'
       const forcedSafariMediaPath = new URLSearchParams(window.location.search).get('forceSafariMedia') === '1'
       const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
+      // Phones expose a portrait-native camera sensor. Pinning a landscape aspect
+      // ratio (see widescreenAspectRatio below) fights that sensor, and because we
+      // re-tune capture on every roster change the feed ends up flipping between
+      // portrait and landscape for everyone watching. Detect mobile so capture can
+      // stay in the device's native orientation. (iPadOS reports as "Macintosh"
+      // but exposes touch points, so fold that in.)
+      const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+        || (/Macintosh/.test(navigator.userAgent) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
         standard: 'standard cleanup',
@@ -7820,10 +7828,13 @@
       // some sensors fall back to 4:3 (or square) modes that the cover-fit
       // tiles crop into a zoomed-in square look.
       const widescreenAspectRatio = { ideal: 16 / 9 }
+      // Only desktop captures get the widescreen pin; phones keep their native
+      // orientation so the feed does not flip for other participants.
+      const cameraAspectRatioConstraint = isMobileDevice ? undefined : widescreenAspectRatio
       const relaxedVideoConstraints = {
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        aspectRatio: widescreenAspectRatio,
+        ...(cameraAspectRatioConstraint ? { aspectRatio: cameraAspectRatioConstraint } : {}),
         frameRate: { ideal: 30 },
         facingMode: 'user'
       }
@@ -7832,7 +7843,7 @@
         video: {
           width: { ideal: 1280, max: 1280 },
           height: { ideal: 720, max: 720 },
-          aspectRatio: widescreenAspectRatio,
+          ...(cameraAspectRatioConstraint ? { aspectRatio: cameraAspectRatioConstraint } : {}),
           frameRate: { ideal: 30, max: 30 },
           facingMode: 'user'
         },
@@ -9927,6 +9938,15 @@
       async function retuneLocalCameraCapture() {
         const track = localVideoTrack()
         if (!track?.applyConstraints || !liveTrack(track)) {
+          return
+        }
+        // On phones, re-applying capture constraints restarts the camera and can
+        // flip its orientation — which other participants see as the feed swapping
+        // between portrait and landscape every time someone joins. Outbound
+        // bitrate/framerate are already bounded per-encoding in
+        // configureOutboundSender (which never restarts capture), so skip the
+        // capture-level retune entirely on mobile.
+        if (isMobileDevice) {
           return
         }
         const limits = outboundMediaLimits.video
@@ -13026,6 +13046,54 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         participantMediaStates.set(activeScreenShareParticipant, { ...state, screenSharing: true })
         renderScreenStage()
         updateHearthParticipants()
+        ensureRemoteScreenShareVisible(activeScreenShareParticipant)
+      }
+
+      // The shared screen rides the sharer's existing forwarded video track
+      // (startScreenShare uses replaceTrack), so its frames — and the stream-map
+      // entry the stage reads from — can land a beat after the
+      // screen_share_started signal. Re-render the stage until the stream
+      // resolves (bounded) so a late-arriving share still appears for every
+      // viewer instead of leaving the stage stuck on an empty label.
+      function ensureRemoteScreenShareVisible(name, attempt = 0) {
+        if (!name || name === currentParticipantName) {
+          return
+        }
+        if (activeScreenShareParticipant !== name || attempt > 12) {
+          return
+        }
+        if (remoteScreenShareStream(name)) {
+          renderScreenStage()
+          return
+        }
+        window.setTimeout(() => ensureRemoteScreenShareVisible(name, attempt + 1), 500)
+      }
+
+      // Resolve the shared-screen stream for a remote sharer. The participant
+      // name arrives via the screen_share_started signal, while the stream is
+      // keyed by the remote track label — guard against any casing/format skew
+      // between those two independent paths, and fall back to the participant's
+      // live remote video track so the stage still fills.
+      function remoteScreenShareStream(name) {
+        if (!name) {
+          return null
+        }
+        const direct = remoteStreamsByParticipant.get(name)
+        if (direct) {
+          return direct
+        }
+        const target = String(name).trim().toLowerCase()
+        for (const [key, stream] of remoteStreamsByParticipant) {
+          if (String(key).trim().toLowerCase() === target) {
+            return stream
+          }
+        }
+        for (const [key, track] of remoteVideoTracksByParticipant) {
+          if (String(key).trim().toLowerCase() === target && liveTrack(track)) {
+            return new MediaStream([track])
+          }
+        }
+        return null
       }
 
       function handleScreenShareStopped(event) {
@@ -13428,7 +13496,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const stream = activeScreenShareParticipant === currentParticipantName
           ? screenShareStream
-          : remoteStreamsByParticipant.get(activeScreenShareParticipant)
+          : remoteScreenShareStream(activeScreenShareParticipant)
         if (!stream) {
           presentationTile.classList.remove('is-screen-sharing')
           setVideoElementStream(screenStageVideo, null)
@@ -13577,11 +13645,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           delete video.dataset.videoStreamAttachedAt
           delete video.dataset.lastVideoFrameAt
           delete video.dataset.videoFrameWatchToken
+          delete video.dataset.videoProgressTime
+          delete video.dataset.videoProgressAt
           return
         }
         const now = String(performance.now())
         video.dataset.videoStreamAttachedAt = now
         delete video.dataset.lastVideoFrameAt
+        delete video.dataset.videoProgressTime
+        delete video.dataset.videoProgressAt
         watchVideoElementFrames(video)
       }
 
@@ -13646,11 +13718,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (attachedAt && now - attachedAt < 3500) {
           return false
         }
-        const lastFrameAt = Number(video.dataset.lastVideoFrameAt || 0)
-        if (typeof video.requestVideoFrameCallback === 'function' && (!lastFrameAt || now - lastFrameAt > 8000)) {
-          return true
+        // currentTime advancing is the authoritative, cross-browser proof that
+        // frames are still flowing. Safari's requestVideoFrameCallback is
+        // unreliable for live MediaStream sources — it stops firing on perfectly
+        // healthy feeds — so trusting rVFC staleness alone forced a srcObject
+        // reattach (setVideoElementStream force:true) that made Safari flicker.
+        // Track currentTime progress and only treat playback as stalled once it
+        // has genuinely frozen for the threshold.
+        const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0
+        const lastProgressTime = Number(video.dataset.videoProgressTime || 0)
+        const lastProgressAt = Number(video.dataset.videoProgressAt || 0)
+        if (!lastProgressAt || currentTime > lastProgressTime + 0.01) {
+          video.dataset.videoProgressTime = String(currentTime)
+          video.dataset.videoProgressAt = String(now)
+          return false
         }
-        return !videoElementHasRenderedFrame(video)
+        if (now - lastProgressAt < 8000) {
+          return false
+        }
+        const lastFrameAt = Number(video.dataset.lastVideoFrameAt || 0)
+        const frameCallbackStale = typeof video.requestVideoFrameCallback === 'function'
+          && (!lastFrameAt || now - lastFrameAt > 8000)
+        return frameCallbackStale || !videoElementHasRenderedFrame(video)
       }
 
       function mediaElementIsVisible(element) {
@@ -14594,6 +14683,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (name && name !== 'participant') {
           remoteVideoTracksByParticipant.set(name, track)
           remoteStreamsByParticipant.set(name, video.srcObject)
+        }
+        if (name && activeScreenShareParticipant
+            && name.toLowerCase() === String(activeScreenShareParticipant).toLowerCase()) {
+          // The sharer swapped camera→screen on this same track; surface it on
+          // the presentation stage now that the live track is rebound.
+          renderScreenStage()
         }
         const removeForTrack = remoteTileRemovers.get(tile)
         if (removeForTrack) {
