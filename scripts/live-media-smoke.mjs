@@ -8,7 +8,7 @@ import { join } from 'node:path'
 const defaults = {
   chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   password: process.env.ROOM_PASSWORD || 'B0NFIRE!',
-  participants: ['Guest 1', 'Guest 2'],
+  participants: ['Tom', 'Caitlyn'],
   rejoin: '',
   separateBrowsers: false,
   timeoutMs: 45000,
@@ -55,6 +55,8 @@ try {
     }
   }
 
+  const screenShareSnapshots = await exerciseScreenShare(pages[0])
+
   await sleep(6000)
   for (const page of pages) {
     await showSpeakerView(page)
@@ -69,10 +71,12 @@ try {
   const boardSnapshots = await collectSnapshots()
 
   const failures = [
+    ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name),
+    ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
     ...validateSnapshots(speakerSnapshots, pages.length, { view: 'speaker', requireSpeakerView: true }),
     ...validateSnapshots(boardSnapshots, pages.length, { view: 'board', requireBoardDock: true })
   ]
-  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots }, null, 2))
+  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots }, null, 2))
   await closePages(pages)
   await finish(failures.length === 0 ? 0 : 1)
 } catch (error) {
@@ -217,14 +221,18 @@ async function joinRoom(page) {
   await waitFor(page, `${page.name} form`, `
     Boolean(document.readyState !== 'loading'
       && typeof joinRoom === 'function'
+      && document.getElementById('loginEmail')
       && document.getElementById('participantName')
       && document.getElementById('roomPassword')
       && document.getElementById('joinAccess'))
   `)
   await evaluate(page, `
     (() => {
+      const email = document.getElementById('loginEmail')
       const participant = document.getElementById('participantName')
       const password = document.getElementById('roomPassword')
+      email.value = ${JSON.stringify(participantEmailForName(page.name))}
+      email.dispatchEvent(new Event('input', { bubbles: true }))
       participant.value = ${JSON.stringify(page.name)}
       participant.dispatchEvent(new Event('change', { bubbles: true }))
       password.value = ${JSON.stringify(config.password)}
@@ -245,6 +253,20 @@ async function joinRoom(page) {
       && typeof currentParticipantName !== 'undefined'
       && currentParticipantName === ${JSON.stringify(page.name)})()
   `)
+}
+
+function participantEmailForName(name) {
+  const cleanName = String(name || '').trim()
+  if (cleanName.includes('@')) {
+    return cleanName
+  }
+  if (/^aj$/i.test(cleanName)) {
+    return 'aj@shareability.com'
+  }
+  if (/^erick$/i.test(cleanName)) {
+    return 'e@shareability.com'
+  }
+  return `${cleanName.toLowerCase()}@shareability.com`
 }
 
 async function waitForRoomMedia(page, expectedClientCount) {
@@ -292,6 +314,94 @@ async function rejoinParticipant(name) {
   pages.splice(pageIndex, 0, newPage)
   await joinRoom(newPage)
   log('rejoin-complete', name)
+}
+
+async function exerciseScreenShare(sharer) {
+  if (!sharer) {
+    return { started: [], stopped: [] }
+  }
+  await installFakeDisplayMedia(sharer)
+  await evaluate(sharer, `
+    (async () => {
+      await startScreenShare()
+      return Boolean(screenShareStream)
+    })()
+  `)
+  await waitFor(sharer, `${sharer.name} local screen share`, `
+    (() => Boolean(screenShareStream
+      && activeScreenShareParticipant === currentParticipantName
+      && document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')))()
+  `)
+  for (const page of pages) {
+    await waitFor(page, `${page.name} screen share visible`, `
+      (() => {
+        const stage = document.getElementById('presentationTile')
+        const video = document.getElementById('screenStageVideo')
+        const stripTiles = Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile:not(.is-sharing-screen)'))
+        return typeof activeScreenShareParticipant !== 'undefined'
+          && activeScreenShareParticipant === ${JSON.stringify(sharer.name)}
+          && stage?.classList.contains('is-screen-sharing')
+          && video?.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended')
+          && stripTiles.length >= ${Math.max(0, pages.length - 1)}
+      })()
+    `)
+  }
+  await sleep(3500)
+  const started = await collectSnapshots()
+
+  await evaluate(sharer, `
+    (async () => {
+      await stopScreenShare()
+      return true
+    })()
+  `)
+  for (const page of pages) {
+    await waitFor(page, `${page.name} screen share stopped`, `
+      (() => !document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')
+        && !activeScreenShareParticipant)()
+    `)
+  }
+  await sleep(3500)
+  const stopped = await collectSnapshots()
+  return { started, stopped }
+}
+
+async function installFakeDisplayMedia(page) {
+  await evaluate(page, `
+    (() => {
+      navigator.mediaDevices.getDisplayMedia = async () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 1280
+        canvas.height = 720
+        const ctx = canvas.getContext('2d')
+        let frame = 0
+        const draw = () => {
+          frame += 1
+          const hue = (frame * 7) % 360
+          ctx.fillStyle = 'hsl(' + hue + ' 70% 18%)'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.fillStyle = 'hsl(' + ((hue + 80) % 360) + ' 80% 56%)'
+          ctx.fillRect((frame * 18) % canvas.width, 96, 180, 180)
+          ctx.fillStyle = '#fff'
+          ctx.font = '42px sans-serif'
+          ctx.fillText('screen share ' + frame, 80, 620)
+        }
+        draw()
+        const timer = window.setInterval(draw, 66)
+        const stream = canvas.captureStream(15)
+        const track = stream.getVideoTracks()[0]
+        if (track) {
+          const stop = track.stop.bind(track)
+          track.stop = () => {
+            window.clearInterval(timer)
+            stop()
+          }
+        }
+        return stream
+      }
+      return true
+    })()
+  `)
 }
 
 async function showSpeakerView(page) {
@@ -434,6 +544,22 @@ async function snapshotPage(page) {
         stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
         activeSpeaker: typeof activeSpeakerDisplayName === 'function' ? activeSpeakerDisplayName() : '',
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
+        screenSharing: Boolean(document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')),
+        activeScreenShareParticipant: typeof activeScreenShareParticipant !== 'undefined' ? activeScreenShareParticipant : '',
+        screenStageVideo: videoProbe(document.getElementById('screenStageVideo')),
+        screenShareStripTiles: Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile')).map(tile => ({
+          participant: tile.dataset.participant || '',
+          classes: tile.className,
+          videos: tile.querySelectorAll('video').length,
+          renderedVideos: Array.from(tile.querySelectorAll('video')).filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0).length,
+          decodedFrames: Array.from(tile.querySelectorAll('video')).reduce((total, video) => {
+            if (typeof video.getVideoPlaybackQuality === 'function') {
+              return total + (Number(video.getVideoPlaybackQuality().totalVideoFrames) || 0)
+            }
+            return total + (Number(video.webkitDecodedFrameCount) || 0)
+          }, 0),
+          text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 120)
+        })),
         boardExpanded: Boolean(document.getElementById('appShell')?.classList.contains('is-board-expanded')),
         boardDockVideos: Array.from(document.querySelectorAll('.board-video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
@@ -605,6 +731,53 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
     }
     if (snapshot.mediaQualityConstrained) {
       failures.push(`${prefix} media quality was constrained for lag`)
+    }
+  }
+  return failures
+}
+
+function validateScreenShareSnapshots(snapshots, sharerName) {
+  const failures = []
+  for (const snapshot of snapshots) {
+    const prefix = `${snapshot.name} screen share`
+    if (!snapshot.screenSharing || snapshot.activeScreenShareParticipant !== sharerName) {
+      failures.push(`${prefix} is not showing ${sharerName}'s share`)
+    }
+    if (!videoProbeRendered(snapshot.screenStageVideo)) {
+      failures.push(`${prefix} stage video did not render`)
+    }
+    const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => !tile.classes.includes('is-sharing-screen'))
+    if (visibleStripTiles.length < Math.max(0, config.participants.length - 1)) {
+      failures.push(`${prefix} participant strip has ${visibleStripTiles.length} visible tiles`)
+    }
+    if (visibleStripTiles.some(tile => tile.participant === sharerName)) {
+      failures.push(`${prefix} duplicates the sharer in the participant strip`)
+    }
+    const renderedStripVideos = visibleStripTiles.filter(tile => tile.renderedVideos > 0 || tile.decodedFrames > 0)
+    if (renderedStripVideos.length < visibleStripTiles.length) {
+      failures.push(`${prefix} participant strip rendered ${renderedStripVideos.length}/${visibleStripTiles.length} videos`)
+    }
+  }
+  return failures
+}
+
+function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
+  const failures = []
+  for (const snapshot of snapshots) {
+    const prefix = `${snapshot.name} after screen share`
+    if (snapshot.screenSharing || snapshot.activeScreenShareParticipant) {
+      failures.push(`${prefix} still thinks a screen share is active`)
+    }
+    const sharerTile = snapshot.tiles.find(tile => tile.participant === sharerName)
+    if (!sharerTile) {
+      failures.push(`${prefix} is missing ${sharerName}'s camera tile after stop`)
+      continue
+    }
+    if (sharerTile.renderedVideos <= 0 && sharerTile.decodedFrames <= 0) {
+      failures.push(`${prefix} ${sharerName}'s camera tile did not resume rendering`)
+    }
+    if (snapshot.remoteHealth?.stalledVideoNames?.includes(sharerName)) {
+      failures.push(`${prefix} reports ${sharerName}'s video as stalled`)
     }
   }
   return failures

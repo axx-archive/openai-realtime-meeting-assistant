@@ -85,7 +85,7 @@ async function join(browserType, ctxOpts, label, email, portrait) {
   page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t) && !/auth\/me|401/.test(t)) console.log(`   [${label} console] ${t.slice(0,120)}`) })
   await page.addInitScript(`window.__LABEL = ${JSON.stringify(label)};`)
   await page.addInitScript(initScript(label, portrait))
-  await page.goto(BASE)
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded')
   // fill + submit the access form
   await page.fill('#loginEmail', email).catch(()=>{})
@@ -184,6 +184,21 @@ try {
   console.log('   B sees screen stage:', bSees, '| C sees screen stage:', cSees)
   ok('B (Safari engine) sees the shared screen on the presentation stage', bSees)
   ok('C (iPhone) sees the shared screen on the presentation stage', cSees)
+
+  console.log('\n[4] Screen share SURVIVES renegotiation — D joins WHILE A is sharing')
+  // A new participant joining triggers SDP renegotiation on every peer. The old
+  // code rebound outbound video to the CAMERA track on renegotiation, killing the
+  // share for everyone. outboundTrackForKind() must keep the screen track bound.
+  const D = await join(chromium, {}, 'Tyler', 'tyler@shareability.com', false)
+  sessions.push(D)
+  await sleep(8000)
+  const dSees = await stageVisible(D)
+  const bStill = await stageVisible(B)
+  const cStill = await stageVisible(C)
+  console.log('   after D joined → D sees:', dSees, '| B still:', bStill, '| C still:', cStill)
+  ok('D (late joiner) sees the shared screen', dSees)
+  ok('B still sees the screen after renegotiation (share did NOT revert to camera)', bStill)
+  ok('C still sees the screen after renegotiation', cStill)
 
 } catch (e) {
   console.log('\nHARNESS ERROR:', e.message)

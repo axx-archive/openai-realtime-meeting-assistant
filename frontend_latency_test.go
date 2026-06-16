@@ -153,6 +153,42 @@ func TestMediaFixesBehaveCorrectly(t *testing.T) {
 	}
 }
 
+func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function activeScreenShareTrack()",
+		"return liveTrack(track) ? track : null",
+		"function outboundVideoTrack()",
+		"return activeScreenShareTrack() || localVideoTrack()",
+		"function outboundTrackForKind(kind)",
+		"return kind === 'video' ? outboundVideoTrack() : localAudioTrack()",
+		"const track = outboundTrackForKind(section.kind)",
+		".presentation-tile.is-screen-sharing {",
+		"grid-template-columns: minmax(0, 1fr) 200px;",
+		".presentation-tile.is-screen-sharing .hearth-stage {",
+		".presentation-tile.is-screen-sharing .hearth-seats,",
+		".presentation-tile.is-screen-sharing .hearth-seat.is-sharing-screen",
+		"grid-template-rows: minmax(0, 1fr) auto;",
+		"video: screenStageVideo",
+		"? screenShareStream",
+		"ignoreCameraOff: true",
+		"!target.ignoreCameraOff && participantMediaState(target.name).cameraOff",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing screen-share track or participant-strip guard %q", want)
+		}
+	}
+
+	if strings.Contains(html, ".presentation-tile.is-screen-sharing .hearth-stage {\n        display: none;") {
+		t.Fatal("screen sharing must keep the room video strip mounted, not hide the hearth stage")
+	}
+}
+
 func TestIndexDeduplicatesParticipantsAndPrunesStaleMedia(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {

@@ -1173,6 +1173,12 @@
         display: block;
       }
 
+      .presentation-tile.is-screen-sharing {
+        grid-template-columns: minmax(0, 1fr) 200px;
+        gap: 12px;
+        align-items: stretch;
+      }
+
       .presentation-tile.is-screen-sharing .board-surface {
         display: none;
       }
@@ -4999,15 +5005,58 @@
       }
 
       .presentation-tile.is-screen-sharing .hearth-stage {
-        display: none;
+        display: grid;
+        grid-column: 2;
+        min-height: 0;
+        height: 100%;
       }
 
       .presentation-tile.is-screen-sharing .screen-stage {
         display: grid;
+        grid-column: 1;
       }
 
       .screen-stage video#screenStageVideo {
         min-height: 100%;
+      }
+
+      .presentation-tile.is-screen-sharing .screen-stage__pip {
+        display: none;
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-center,
+      .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-center {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        gap: 0;
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-speaker {
+        display: none;
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-seats,
+      .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: hidden;
+        gap: 10px;
+        padding-right: 2px;
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-seat,
+      .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seat,
+      .presentation-tile.is-screen-sharing .hearth-seat.is-active-speaker {
+        display: grid;
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        aspect-ratio: 16 / 10;
+      }
+
+      .presentation-tile.is-screen-sharing .hearth-seat.is-sharing-screen {
+        display: none;
       }
 
       /* the speaker rides the share as a small signal-ringed circle */
@@ -5638,6 +5687,10 @@
           grid-template-columns: minmax(0, 1fr) 160px;
         }
 
+        .presentation-tile.is-screen-sharing {
+          grid-template-columns: minmax(0, 1fr) 160px;
+        }
+
         .assistant-panel.scout-panel {
           min-height: 220px;
         }
@@ -5687,6 +5740,36 @@
 
         .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat {
           width: clamp(140px, 24vw, 180px);
+        }
+
+        .presentation-tile.is-screen-sharing {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr) auto;
+        }
+
+        .presentation-tile.is-screen-sharing .screen-stage,
+        .presentation-tile.is-screen-sharing .hearth-stage {
+          grid-column: 1;
+        }
+
+        .presentation-tile.is-screen-sharing .hearth-stage {
+          height: auto;
+          min-height: 0;
+        }
+
+        .presentation-tile.is-screen-sharing .hearth-seats,
+        .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+          flex-direction: row;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding-right: 0;
+          padding-bottom: 2px;
+        }
+
+        .presentation-tile.is-screen-sharing .hearth-seat,
+        .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
+          width: clamp(140px, 24vw, 180px);
+          flex: 0 0 auto;
         }
 
         .board-rail,
@@ -8953,6 +9036,21 @@
           activeScreenShareParticipant = ''
           renderScreenStage()
         }
+        // A participant may already be sharing when we join — the live
+        // screen_share_started event fired before we were in the room, so adopt
+        // the in-progress share straight from the roster. Without this, late
+        // joiners never render the screen stage ("screen share not working for
+        // all participants").
+        if (!activeScreenShareParticipant) {
+          const current = String(currentParticipantName || '').toLowerCase()
+          const sharer = [...participantMediaStates.entries()]
+            .find(([name, state]) => state.screenSharing && String(name).toLowerCase() !== current)
+          if (sharer) {
+            activeScreenShareParticipant = sharer[0]
+            renderScreenStage()
+            ensureRemoteScreenShareVisible(activeScreenShareParticipant)
+          }
+        }
       }
 
       function localParticipantMediaState() {
@@ -11243,6 +11341,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return (localStream?.getVideoTracks?.() || [])[0] || null
       }
 
+      function activeScreenShareTrack() {
+        const track = (screenShareStream?.getVideoTracks?.() || [])[0] || null
+        return liveTrack(track) ? track : null
+      }
+
+      function outboundVideoTrack() {
+        return activeScreenShareTrack() || localVideoTrack()
+      }
+
+      function outboundTrackForKind(kind) {
+        return kind === 'video' ? outboundVideoTrack() : localAudioTrack()
+      }
+
       function localAudioDeviceId() {
         return localAudioSourceTrack?.getSettings?.().deviceId || localAudioTrack()?.getSettings?.().deviceId || ''
       }
@@ -11725,7 +11836,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         const sections = remoteMediaSections(offer.sdp || '')
-        const localTracks = localStream.getTracks()
         for (const transceiver of pc.getTransceivers()) {
           const section = sections.get(transceiver.mid)
           if (!section) {
@@ -11738,7 +11848,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             continue
           }
 
-          const track = localTracks.find(candidate => candidate.kind === section.kind)
+          const track = outboundTrackForKind(section.kind)
           if (!track || transceiver.sender.track === track) {
             continue
           }
@@ -12535,6 +12645,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function auxiliaryVideoPlaybackTargets() {
         const targets = []
+        if (activeScreenShareParticipant) {
+          targets.push({
+            video: screenStageVideo,
+            name: activeScreenShareParticipant,
+            stream: activeScreenShareParticipant === currentParticipantName
+              ? screenShareStream
+              : remoteScreenShareStream(activeScreenShareParticipant),
+            local: activeScreenShareParticipant === currentParticipantName,
+            ignoreCameraOff: true
+          })
+        }
         const speaker = activeSpeakerDisplayName()
         if (stageMode === 'speaker' && speaker && speaker !== 'the room') {
           targets.push({
@@ -12580,7 +12701,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         for (const target of auxiliaryVideoPlaybackTargets()) {
           const video = target.video
           const stream = target.stream
-          if (!video || !stream || participantMediaState(target.name).cameraOff) {
+          if (!video || !stream || (!target.ignoreCameraOff && participantMediaState(target.name).cameraOff)) {
             continue
           }
           const hadStream = Boolean(video.srcObject)
