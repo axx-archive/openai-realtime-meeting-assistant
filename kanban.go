@@ -87,6 +87,12 @@ type participantMediaState struct {
 	UpdatedAt     string `json:"updatedAt,omitempty"`
 }
 
+type roomRecordingState struct {
+	Enabled   bool   `json:"enabled"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
+}
+
 type meetingArchive struct {
 	ID           string               `json:"id"`
 	ArchivedAt   time.Time            `json:"archivedAt"`
@@ -99,13 +105,14 @@ type meetingArchive struct {
 }
 
 type meetingArchiveResult struct {
-	ID          string             `json:"id"`
-	ArchivedAt  string             `json:"archivedAt"`
-	ArchivedBy  string             `json:"archivedBy,omitempty"`
-	DownloadURL string             `json:"downloadUrl"`
-	Summary     string             `json:"summary"`
-	Notes       meetingNotes       `json:"notes"`
-	Email       meetingEmailStatus `json:"email"`
+	ID          string              `json:"id"`
+	ArchivedAt  string              `json:"archivedAt"`
+	ArchivedBy  string              `json:"archivedBy,omitempty"`
+	DownloadURL string              `json:"downloadUrl"`
+	Summary     string              `json:"summary"`
+	Notes       meetingNotes        `json:"notes"`
+	Email       meetingEmailStatus  `json:"email"`
+	Artifact    *meetingMemoryEntry `json:"artifact,omitempty"`
 }
 
 type kanbanRealtimeEvent struct {
@@ -142,20 +149,23 @@ type kanbanRealtimeOutputItem struct {
 }
 
 type kanbanBoardApp struct {
-	mu                  sync.Mutex
-	cards               []kanbanCard
-	nextCreatedIndex    int
-	updatedAt           time.Time
-	handledCalls        map[string]struct{}
-	memory              *meetingMemoryStore
-	participants        map[string]time.Time
-	participantCounts   map[string]int
-	participantSessions map[string]string
-	participantMedia    map[string]participantMediaState
-	lastDeletedCard     *kanbanCard
-	apiKey              string
-	restarting          bool
-	assistantStatus     string
+	mu                           sync.Mutex
+	cards                        []kanbanCard
+	nextCreatedIndex             int
+	updatedAt                    time.Time
+	handledCalls                 map[string]struct{}
+	memory                       *meetingMemoryStore
+	participants                 map[string]time.Time
+	participantCounts            map[string]int
+	participantSessions          map[string]string
+	participantMedia             map[string]participantMediaState
+	transcriptRecordingEnabled   bool
+	transcriptRecordingUpdatedAt time.Time
+	transcriptRecordingUpdatedBy string
+	lastDeletedCard              *kanbanCard
+	apiKey                       string
+	restarting                   bool
+	assistantStatus              string
 
 	model                    string
 	pc                       *webrtc.PeerConnection
@@ -249,15 +259,17 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:               cards,
-		nextCreatedIndex:    nextKanbanCardIndex(cards),
-		updatedAt:           updatedAt,
-		handledCalls:        map[string]struct{}{},
-		memory:              memory,
-		participants:        map[string]time.Time{},
-		participantCounts:   map[string]int{},
-		participantSessions: map[string]string{},
-		participantMedia:    map[string]participantMediaState{},
+		cards:                        cards,
+		nextCreatedIndex:             nextKanbanCardIndex(cards),
+		updatedAt:                    updatedAt,
+		handledCalls:                 map[string]struct{}{},
+		memory:                       memory,
+		participants:                 map[string]time.Time{},
+		participantCounts:            map[string]int{},
+		participantSessions:          map[string]string{},
+		participantMedia:             map[string]participantMediaState{},
+		transcriptRecordingEnabled:   true,
+		transcriptRecordingUpdatedAt: updatedAt,
 	}
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
@@ -722,12 +734,13 @@ func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 	}
 
 	isSyntheticSilence := pcmIsZero(roomPCM)
+	recordingEnabled := app.transcriptRecordingActive()
 	transcriptQueued := false
-	if !isSyntheticSilence {
+	if !isSyntheticSilence && recordingEnabled {
 		transcriptQueued = app.enqueueTranscriptionLaneAudio(roomPCM)
 	}
 
-	if isSyntheticSilence && !app.realtimeAudioInputAvailable() {
+	if (isSyntheticSilence || !recordingEnabled) && !app.realtimeAudioInputAvailable() {
 		return nil
 	}
 
@@ -1929,6 +1942,10 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 		log.Errorf("Meeting memory unavailable; transcript was not saved")
 		return
 	}
+	if !app.transcriptRecordingActive() {
+		log.Infof("Transcript recording disabled; transcript was not saved")
+		return
+	}
 
 	speaker, confidence := app.speakerForCompletedTranscript(time.Now().UTC())
 	entry, appended, err := app.memory.appendAttributedTranscriptWithMetadata(event.EventID, event.ItemID, speaker, confidence, event.Transcript, map[string]string{
@@ -1961,16 +1978,27 @@ func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 func (app *kanbanBoardApp) memorySnapshotForClients(limit int) []meetingMemoryEntry {
 	entries := app.memorySnapshot(limit)
 	for index := range entries {
-		entry := &entries[index]
-		if entry.Kind != meetingMemoryKindArchive || entry.Metadata == nil {
-			continue
-		}
-		if archiveID := strings.TrimSpace(entry.Metadata["archiveId"]); archiveID != "" {
-			entry.Metadata["downloadUrl"] = meetingArchiveDownloadURLWithKey(archiveID)
-		}
+		entries[index] = decorateArchiveDownloadURLForClient(entries[index])
 	}
 
 	return entries
+}
+
+func decorateArchiveDownloadURLForClient(entry meetingMemoryEntry) meetingMemoryEntry {
+	if entry.Metadata == nil {
+		return entry
+	}
+	archiveID := strings.TrimSpace(entry.Metadata["archiveId"])
+	if archiveID == "" {
+		return entry
+	}
+	metadata := make(map[string]string, len(entry.Metadata)+1)
+	for key, value := range entry.Metadata {
+		metadata[key] = value
+	}
+	metadata["downloadUrl"] = meetingArchiveDownloadURLWithKey(archiveID)
+	entry.Metadata = metadata
+	return entry
 }
 
 func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
@@ -2664,6 +2692,40 @@ func (app *kanbanBoardApp) setParticipantScreenSharing(name string, screenSharin
 	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
 }
 
+func (app *kanbanBoardApp) transcriptRecordingActive() bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.transcriptRecordingEnabled
+}
+
+func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string) map[string]any {
+	updatedBy = canonicalParticipantName(updatedBy)
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.transcriptRecordingEnabled != enabled || app.transcriptRecordingUpdatedAt.IsZero() {
+		app.transcriptRecordingEnabled = enabled
+		app.transcriptRecordingUpdatedAt = time.Now().UTC()
+		app.transcriptRecordingUpdatedBy = updatedBy
+	}
+
+	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+}
+
+func (app *kanbanBoardApp) roomRecordingStateLocked() roomRecordingState {
+	state := roomRecordingState{
+		Enabled:   app.transcriptRecordingEnabled,
+		UpdatedBy: app.transcriptRecordingUpdatedBy,
+	}
+	if !app.transcriptRecordingUpdatedAt.IsZero() {
+		state.UpdatedAt = app.transcriptRecordingUpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	return state
+}
+
 func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 	participants := app.participantSnapshotLocked()
 	occupiedSeats := app.activeParticipantCountLocked()
@@ -2683,6 +2745,7 @@ func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 		"occupiedSeats":  occupiedSeats,
 		"availableSeats": availableSeats,
 		"mediaStates":    mediaStates,
+		"recording":      app.roomRecordingStateLocked(),
 	}
 }
 
@@ -2743,6 +2806,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	} else if email.Error != "" {
 		summary += " Meeting notes were generated, but email failed: " + email.Error
 	}
+	var artifact *meetingMemoryEntry
 	if app.memory != nil {
 		// the persisted downloadUrl stays unkeyed so the room password never
 		// lands in the memory store or in archive snapshots.
@@ -2754,6 +2818,18 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		if err != nil {
 			return meetingArchiveResult{}, fmt.Errorf("remember meeting archive: %w", err)
 		}
+		artifactEntry, _, err := app.memory.appendOSArtifact(archiveID+"-artifact", buildMeetingArchiveArtifactText(archive, summary), map[string]string{
+			"mode":        "meeting",
+			"title":       meetingArchiveArtifactTitle(archive),
+			"archiveId":   archiveID,
+			"downloadUrl": meetingArchiveDownloadURL(archiveID),
+			"createdBy":   archivedBy,
+		})
+		if err != nil {
+			return meetingArchiveResult{}, fmt.Errorf("remember meeting artifact: %w", err)
+		}
+		clientArtifact := decorateArchiveDownloadURLForClient(artifactEntry)
+		artifact = &clientArtifact
 		// the archive closes the current meeting; the next entry starts a new one.
 		app.memory.rotateMeetingID()
 	}
@@ -2766,7 +2842,86 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		Summary:     summary,
 		Notes:       notes,
 		Email:       email,
+		Artifact:    artifact,
 	}, nil
+}
+
+func meetingArchiveArtifactTitle(archive meetingArchive) string {
+	title := strings.TrimSpace(archive.Notes.Subject)
+	if title == "" {
+		title = "Meeting artifact"
+	}
+	if !archive.ArchivedAt.IsZero() {
+		title = title + " - " + archive.ArchivedAt.Format("Jan 2")
+	}
+	return title
+}
+
+func buildMeetingArchiveArtifactText(archive meetingArchive, summary string) string {
+	var body strings.Builder
+	body.WriteString("Meeting artifact\n\n")
+	if strings.TrimSpace(summary) != "" {
+		body.WriteString("Summary\n")
+		body.WriteString(summary)
+		body.WriteString("\n\n")
+	}
+	if archive.ID != "" {
+		body.WriteString("Archive ID: ")
+		body.WriteString(archive.ID)
+		body.WriteString("\n")
+	}
+	if !archive.ArchivedAt.IsZero() {
+		body.WriteString("Archived: ")
+		body.WriteString(archive.ArchivedAt.Format(time.RFC1123))
+		body.WriteString("\n")
+	}
+	if archive.ArchivedBy != "" {
+		body.WriteString("Archived by: ")
+		body.WriteString(archive.ArchivedBy)
+		body.WriteString("\n")
+	}
+	if len(archive.Participants) > 0 {
+		body.WriteString("Participants: ")
+		body.WriteString(strings.Join(archive.Participants, ", "))
+		body.WriteString("\n")
+	}
+
+	body.WriteString("\nDecisions\n")
+	if len(archive.Notes.Decisions) == 0 {
+		body.WriteString("- No explicit decisions were captured in the transcript.\n")
+	} else {
+		for _, decision := range archive.Notes.Decisions {
+			body.WriteString("- ")
+			body.WriteString(decision)
+			body.WriteByte('\n')
+		}
+	}
+
+	body.WriteString("\nProject status\n")
+	if len(archive.Notes.ProjectStatuses) == 0 {
+		body.WriteString("- No active project cards were on the board.\n")
+	} else {
+		for _, project := range archive.Notes.ProjectStatuses {
+			owner := strings.TrimSpace(project.Owner)
+			if owner == "" {
+				owner = "Unassigned"
+			}
+			body.WriteString("- ")
+			body.WriteString(project.Title)
+			body.WriteString(": ")
+			body.WriteString(project.Status)
+			body.WriteString(" · ")
+			body.WriteString(owner)
+			body.WriteByte('\n')
+		}
+	}
+
+	if strings.TrimSpace(archive.Notes.Text) != "" {
+		body.WriteString("\nFull notes\n")
+		body.WriteString(archive.Notes.Text)
+	}
+
+	return strings.TrimSpace(body.String())
 }
 
 func writeMeetingArchive(path string, archive meetingArchive) error {

@@ -29,10 +29,18 @@ var (
 type assistantQueryResult struct {
 	query        string
 	answer       string
-	source       string // "board" or "assistant"
+	source       string // "board", "assistant", or an OS assistant mode.
 	matchedCards int
 	matches      int
 	contextSize  int
+}
+
+type osAssistantAction struct {
+	Type       string `json:"type"`
+	Tool       string `json:"tool,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	ArtifactID string `json:"artifactId,omitempty"`
+	Label      string `json:"label,omitempty"`
 }
 
 func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, bool, error) {
@@ -140,6 +148,434 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 		Verbosity:       "low",
 		MaxOutputTokens: 500,
 	})
+}
+
+func normalizeOSAssistantMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "artifacts", "research", "design", "grill":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return "chat"
+	}
+}
+
+func buildOSAssistantModeAnswer(mode string, result assistantQueryResult, board kanbanBoardState, memory []meetingMemoryEntry) assistantQueryResult {
+	mode = normalizeOSAssistantMode(mode)
+	if mode == "chat" {
+		return result
+	}
+
+	query := strings.TrimSpace(result.query)
+	if query == "" {
+		query = "this request"
+	}
+	contextAnswer := strings.TrimSpace(result.answer)
+	if contextAnswer == "" {
+		contextAnswer = "I do not have a direct board or memory answer yet."
+	}
+
+	output := ""
+	switch mode {
+	case "artifacts":
+		output = buildArtifactModeAnswer(query, contextAnswer, board, memory)
+	case "research":
+		output = buildResearchModeAnswer(query, contextAnswer, board, memory)
+	case "design":
+		output = buildDesignModeAnswer(query, contextAnswer, board)
+	case "grill":
+		output = buildGrillModeAnswer(query, contextAnswer)
+	}
+	if strings.TrimSpace(output) == "" {
+		output = contextAnswer
+	}
+
+	result.answer = output
+	result.source = mode
+	return result
+}
+
+func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer string, createdBy string) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
+	}
+
+	mode = normalizeOSAssistantMode(mode)
+	if mode == "chat" {
+		return meetingMemoryEntry{}, false, nil
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return meetingMemoryEntry{}, false, nil
+	}
+
+	artifactID := fmt.Sprintf("os-artifact-%s-%d", mode, time.Now().UnixNano())
+	metadata := map[string]string{
+		"mode":  mode,
+		"query": strings.TrimSpace(query),
+		"title": osArtifactTitle(mode, query, answer),
+	}
+	if createdBy = canonicalParticipantName(createdBy); createdBy != "" {
+		metadata["createdBy"] = createdBy
+	}
+
+	return app.memory.appendOSArtifact(artifactID, answer, metadata)
+}
+
+func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
+	}
+	rawUpdatedBy := strings.TrimSpace(updatedBy)
+	if updatedBy = canonicalParticipantName(rawUpdatedBy); updatedBy == "" {
+		updatedBy = rawUpdatedBy
+	}
+
+	return app.memory.updateOSArtifact(id, title, text, updatedBy)
+}
+
+func (app *kanbanBoardApp) osArtifactsSnapshot(limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+
+	entries := app.memory.snapshot(0)
+	artifacts := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			artifacts = append(artifacts, decorateArchiveDownloadURLForClient(entry))
+		}
+	}
+	if limit > 0 && len(artifacts) > limit {
+		artifacts = artifacts[len(artifacts)-limit:]
+	}
+
+	return artifacts
+}
+
+func (app *kanbanBoardApp) osAssistantActions(query string, mode string, artifact meetingMemoryEntry) []osAssistantAction {
+	mode = normalizeOSAssistantMode(mode)
+	lower := strings.ToLower(strings.Join(strings.Fields(query), " "))
+	artifactID := strings.TrimSpace(artifact.ID)
+	actions := make([]osAssistantAction, 0, 3)
+	seen := map[string]bool{}
+
+	add := func(action osAssistantAction) {
+		action.Type = strings.TrimSpace(action.Type)
+		action.Tool = strings.TrimSpace(action.Tool)
+		action.Mode = strings.TrimSpace(action.Mode)
+		action.ArtifactID = strings.TrimSpace(action.ArtifactID)
+		action.Label = strings.TrimSpace(action.Label)
+		if action.Type == "" {
+			return
+		}
+		key := action.Type + "|" + action.Tool + "|" + action.Mode + "|" + action.ArtifactID
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		actions = append(actions, action)
+	}
+	addTool := func(tool string, label string, id string) {
+		add(osAssistantAction{
+			Type:       "open_tool",
+			Tool:       tool,
+			Mode:       mode,
+			ArtifactID: id,
+			Label:      label,
+		})
+	}
+	addArtifactTool := func(id string) {
+		addTool("artifacts", "Opened artifacts", id)
+		if id != "" {
+			add(osAssistantAction{
+				Type:       "select_artifact",
+				Tool:       "artifacts",
+				ArtifactID: id,
+				Label:      "Selected artifact",
+			})
+		}
+	}
+
+	switch mode {
+	case "research", "design", "grill":
+		addTool(mode, "Opened "+assistantToolLabel(mode), artifactID)
+		return actions
+	case "artifacts":
+		addArtifactTool(artifactID)
+		return actions
+	}
+
+	if hasAssistantPhrase(lower, "research", "investigate", "market", "competitive", "sources", "source this", "dig into", "brief") {
+		addTool("research", "Opened research", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "design", "design studio", "ux", "wireframe", "prototype", "mockup", "flow", "creative") {
+		addTool("design", "Opened design studio", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "grill", "pitch", "score", "pressure test", "tough question", "objection", "evaluate my delivery", "scorecard") {
+		addTool("grill", "Opened grill mode", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "artifact", "artifacts", "memo", "notes", "summary", "summarize", "output", "draft") {
+		if artifactID == "" {
+			artifactID = app.latestOSArtifactID()
+		}
+		addArtifactTool(artifactID)
+		return actions
+	}
+	if hasAssistantPhrase(lower, "prior meeting", "previous meeting", "last meeting", "archive", "archives", "memory", "transcript") {
+		addTool("memory", "Opened memory", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "chat", "thread", "scout") {
+		addTool("chat", "Opened chat", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "join room", "open room", "video room", "meeting room", "start call") {
+		addTool("room", "Opened room", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "board", "kanban", "card", "task") {
+		addTool("board", "Opened board", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "dashboard", "home", "office", "os dashboard") {
+		addTool("office", "Opened office", "")
+		return actions
+	}
+
+	return actions
+}
+
+func (app *kanbanBoardApp) latestOSArtifactID() string {
+	artifacts := app.osArtifactsSnapshot(1)
+	if len(artifacts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(artifacts[len(artifacts)-1].ID)
+}
+
+func hasAssistantPhrase(text string, phrases ...string) bool {
+	text = strings.ToLower(text)
+	for _, phrase := range phrases {
+		if strings.Contains(text, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantToolLabel(tool string) string {
+	switch tool {
+	case "research":
+		return "research"
+	case "design":
+		return "design studio"
+	case "grill":
+		return "grill mode"
+	default:
+		return tool
+	}
+}
+
+func osArtifactTitle(mode string, query string, answer string) string {
+	query = compactAssistantLine(query)
+	if query != "" && query != "no direct context yet" {
+		return query
+	}
+
+	for _, line := range strings.Split(answer, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return compactAssistantLine(line)
+		}
+	}
+
+	return strings.Title(normalizeOSAssistantMode(mode)) + " artifact"
+}
+
+func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+	artifactType := inferArtifactType(query)
+	return strings.Join([]string{
+		"Artifact draft",
+		"",
+		"Type: " + artifactType,
+		"Source signal: " + compactAssistantLine(contextAnswer),
+		"",
+		"Structure",
+		"1. Decision or thesis: " + artifactThesis(query, contextAnswer),
+		"2. Evidence: pull the strongest board card, transcript quote, or archive note that supports it.",
+		"3. Risks: name the assumption that would make this wrong.",
+		"4. Next move: assign one owner and one date before sending.",
+		"",
+		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+	}, "\n")
+}
+
+func buildResearchModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+	return strings.Join([]string{
+		"Research brief",
+		"",
+		"Question: " + query,
+		"Known inside Bonfire: " + compactAssistantLine(contextAnswer),
+		"",
+		"Research lanes",
+		"1. Market proof: find the clearest comparable product, buyer, or workflow.",
+		"2. Evidence proof: collect numbers, customer quotes, or operational examples that can survive scrutiny.",
+		"3. Contrarian proof: look for the best reason this idea fails or becomes a commodity.",
+		"",
+		"Deliverable: a one-page brief with claim, evidence, counterargument, and recommendation.",
+		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+	}, "\n")
+}
+
+func buildDesignModeAnswer(query string, contextAnswer string, board kanbanBoardState) string {
+	return strings.Join([]string{
+		"Design kickoff",
+		"",
+		"Intent: " + query,
+		"Current signal: " + compactAssistantLine(contextAnswer),
+		"",
+		"Product frame",
+		"1. User: the person making a decision under time pressure.",
+		"2. Job: make the next best action obvious without flattening the nuance.",
+		"3. Surface: start with the OS dashboard, then drill into the app or artifact.",
+		"4. Quality bar: fast scan, clear hierarchy, unambiguous controls, no decorative bulk.",
+		"",
+		"First pass: sketch states for empty, active, evidence-rich, and decision-ready.",
+		"Board context: " + boardContextLine(board),
+	}, "\n")
+}
+
+func buildGrillModeAnswer(query string, contextAnswer string) string {
+	score := grillScore(query)
+	return strings.Join([]string{
+		"Grill mode scorecard",
+		"",
+		fmt.Sprintf("Final score: %d/100", score),
+		"Context check: " + compactAssistantLine(contextAnswer),
+		"",
+		"Readout",
+		grillReadoutLine(score),
+		"",
+		"Tough questions",
+		"1. What exact buyer pain gets worse if nobody acts this quarter?",
+		"2. What proof would make a skeptical operator believe this in under two minutes?",
+		"3. What is the smallest paid or operational test that proves demand?",
+		"4. Which competitor, spreadsheet, or status quo wins if the story is vague?",
+		"",
+		"Delivery note: answer with one crisp claim, one concrete proof point, and one ask.",
+	}, "\n")
+}
+
+func inferArtifactType(query string) string {
+	lower := strings.ToLower(query)
+	switch {
+	case strings.Contains(lower, "memo"):
+		return "decision memo"
+	case strings.Contains(lower, "brief"):
+		return "strategy brief"
+	case strings.Contains(lower, "summary"), strings.Contains(lower, "summarize"):
+		return "meeting summary"
+	case strings.Contains(lower, "plan"), strings.Contains(lower, "roadmap"):
+		return "execution plan"
+	default:
+		return "operating artifact"
+	}
+}
+
+func artifactThesis(query string, contextAnswer string) string {
+	if query = strings.TrimSpace(query); query != "" {
+		return compactAssistantLine(query)
+	}
+	return compactAssistantLine(contextAnswer)
+}
+
+func compactAssistantLine(text string) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if text == "" {
+		return "no direct context yet"
+	}
+	const limit = 220
+	if len(text) <= limit {
+		return text
+	}
+	return strings.TrimSpace(text[:limit-1]) + "…"
+}
+
+func boardAndMemoryContextLine(board kanbanBoardState, memory []meetingMemoryEntry) string {
+	return fmt.Sprintf("%s · %d recent memory item%s", boardContextLine(board), len(memory), pluralSuffix(len(memory)))
+}
+
+func boardContextLine(board kanbanBoardState) string {
+	if len(board.Cards) == 0 {
+		return "no current board cards"
+	}
+
+	statusCounts := map[kanbanStatus]int{}
+	for _, card := range board.Cards {
+		statusCounts[card.Status]++
+	}
+	return fmt.Sprintf("%d card%s: %d backlog, %d in progress, %d blocked, %d done",
+		len(board.Cards),
+		pluralSuffix(len(board.Cards)),
+		statusCounts[kanbanStatusBacklog],
+		statusCounts[kanbanStatusInProgress],
+		statusCounts[kanbanStatusBlocked],
+		statusCounts[kanbanStatusDone],
+	)
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func grillScore(query string) int {
+	words := strings.Fields(query)
+	lower := strings.ToLower(query)
+	score := 42
+	if len(words) >= 30 {
+		score += 12
+	}
+	if len(words) >= 80 {
+		score += 8
+	}
+	if regexp.MustCompile(`[$%]|\b\d+(?:\.\d+)?\b`).MatchString(query) {
+		score += 14
+	}
+	if strings.Contains(lower, "customer") || strings.Contains(lower, "buyer") || strings.Contains(lower, "operator") {
+		score += 8
+	}
+	if strings.Contains(lower, "because") || strings.Contains(lower, "so that") || strings.Contains(lower, "therefore") {
+		score += 8
+	}
+	if strings.Contains(lower, "ask") || strings.Contains(lower, "need") || strings.Contains(lower, "will") {
+		score += 6
+	}
+	if score > 92 {
+		score = 92
+	}
+	if score < 28 {
+		score = 28
+	}
+	return score
+}
+
+func grillReadoutLine(score int) string {
+	switch {
+	case score >= 80:
+		return "Strong spine. Now tighten the proof and make the ask impossible to miss."
+	case score >= 65:
+		return "Promising, but the evidence needs to get sharper before this lands cleanly."
+	case score >= 50:
+		return "The idea is visible, but the buyer pain, proof, and ask are still too soft."
+	default:
+		return "This needs a harder claim, a real proof point, and a clearer reason to act now."
+	}
 }
 
 func assistantQueryInstructions() string {

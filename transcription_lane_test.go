@@ -118,6 +118,68 @@ func TestSyntheticSilenceBypassesTranscriptLane(t *testing.T) {
 	}
 }
 
+func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	lane := &meetingTranscriptionLane{input: make(chan []int16, 1)}
+	app.mu.Lock()
+	app.transcriptLane = lane
+	app.mu.Unlock()
+
+	initialRecording, ok := app.roomSnapshot()["recording"].(roomRecordingState)
+	if !ok {
+		t.Fatalf("initial recording snapshot type=%T, want roomRecordingState", app.roomSnapshot()["recording"])
+	}
+	if !initialRecording.Enabled {
+		t.Fatal("new rooms should start with transcript recording enabled")
+	}
+
+	snapshot := app.setTranscriptRecording(false, "AJ")
+	recording, ok := snapshot["recording"].(roomRecordingState)
+	if !ok {
+		t.Fatalf("recording snapshot type=%T, want roomRecordingState", snapshot["recording"])
+	}
+	if recording.Enabled {
+		t.Fatal("recording enabled=true, want false after pause")
+	}
+	if recording.UpdatedBy != "AJ" {
+		t.Fatalf("recording updatedBy=%q, want AJ", recording.UpdatedBy)
+	}
+
+	speechFrame := make([]int16, roomAudioMixFrameSize)
+	speechFrame[0] = 1000
+	if err := app.WriteMixedPCM(speechFrame); err != nil {
+		t.Fatalf("WriteMixedPCM paused recording: %v", err)
+	}
+	select {
+	case <-lane.input:
+		t.Fatal("paused recording should not queue speech to the transcript lane")
+	default:
+	}
+
+	app.rememberTranscript(kanbanRealtimeEvent{
+		EventID:    "event-paused-transcript",
+		ItemID:     "item-paused-transcript",
+		Transcript: "This paused transcript should not be persisted.",
+	}, "test", "test-model")
+	if entries := app.memorySnapshot(5); len(entries) != 0 {
+		t.Fatalf("memory entries=%d, want 0 while recording is paused", len(entries))
+	}
+
+	app.setTranscriptRecording(true, "AJ")
+	app.rememberTranscript(kanbanRealtimeEvent{
+		EventID:    "event-resumed-transcript",
+		ItemID:     "item-resumed-transcript",
+		Transcript: "This resumed transcript should be persisted.",
+	}, "test", "test-model")
+	entries := app.memorySnapshot(5)
+	if len(entries) != 1 {
+		t.Fatalf("memory entries=%d, want 1 after recording resumes", len(entries))
+	}
+	if !strings.Contains(entries[0].Text, "resumed transcript") {
+		t.Fatalf("entry text=%q, want resumed transcript", entries[0].Text)
+	}
+}
+
 func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")

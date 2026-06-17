@@ -18,6 +18,7 @@ const (
 	meetingMemoryKindBrain       = "brain"
 	meetingMemoryKindBoardUpdate = "board_update"
 	meetingMemoryKindArchive     = "archive"
+	meetingMemoryKindOSArtifact  = "os_artifact"
 	defaultMeetingMemoryPath     = "data/meeting-memory.jsonl"
 )
 
@@ -237,6 +238,67 @@ func (store *meetingMemoryStore) appendArchive(id string, text string, metadata 
 	return store.appendEntry(meetingMemoryKindArchive, id, text, metadata)
 }
 
+func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindOSArtifact, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact id is required")
+	}
+	text = normalizeMemoryEntryText(meetingMemoryKindOSArtifact, text)
+	if text == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact text is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	index := -1
+	for candidateIndex, entry := range store.entries {
+		if entry.ID == id && entry.Kind == meetingMemoryKindOSArtifact {
+			index = candidateIndex
+			break
+		}
+	}
+	if index < 0 {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+	}
+
+	previousEntry := store.entries[index]
+	entry := cloneMemoryEntry(previousEntry)
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]string{}
+	}
+	nextTitle := strings.TrimSpace(title)
+	if nextTitle == "" {
+		nextTitle = entry.Metadata["title"]
+	}
+	nextUpdatedBy := strings.TrimSpace(updatedBy)
+	changed := entry.Text != text || entry.Metadata["title"] != nextTitle
+	if !changed {
+		return cloneMemoryEntry(entry), false, nil
+	}
+	entry.Metadata["title"] = nextTitle
+	if nextUpdatedBy != "" {
+		entry.Metadata["updatedBy"] = nextUpdatedBy
+	}
+	entry.Metadata["updatedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	entry.Text = text
+
+	store.entries[index] = entry
+	if err := store.rewriteLocked(); err != nil {
+		store.entries[index] = previousEntry
+		return meetingMemoryEntry{}, false, err
+	}
+
+	return cloneMemoryEntry(entry), changed, nil
+}
+
 func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	if strings.TrimSpace(kind) == "" {
 		kind = meetingMemoryKindTranscript
@@ -294,6 +356,46 @@ func (store *meetingMemoryStore) appendEntry(kind string, id string, text string
 	store.seen[entry.ID] = struct{}{}
 
 	return entry, true, nil
+}
+
+func (store *meetingMemoryStore) rewriteLocked() error {
+	dir := filepath.Dir(store.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create memory directory: %w", err)
+	}
+
+	file, err := os.CreateTemp(dir, ".meeting-memory-*.jsonl")
+	if err != nil {
+		return fmt.Errorf("create memory temp file: %w", err)
+	}
+	tempPath := file.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	encoder := json.NewEncoder(file)
+	for _, entry := range store.entries {
+		if err := encoder.Encode(entry); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("encode memory entry: %w", err)
+		}
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("chmod memory temp file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close memory temp file: %w", err)
+	}
+	if err := os.Rename(tempPath, store.path); err != nil {
+		return fmt.Errorf("replace memory file: %w", err)
+	}
+	cleanup = false
+
+	return nil
 }
 
 func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
@@ -437,7 +539,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact {
 		return normalizeMemoryText(value)
 	}
 

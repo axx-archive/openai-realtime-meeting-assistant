@@ -557,7 +557,8 @@
       }
       /* kit TopBar for Chat/Memory passes no actions — only the status pill */
       #appShell[data-tool="chat"] .topbar__copy-link,
-      #appShell[data-tool="memory"] .topbar__copy-link {
+      #appShell[data-tool="memory"] .topbar__copy-link,
+      #appShell[data-tool="artifacts"] .topbar__copy-link {
         display: none;
       }
 
@@ -1799,6 +1800,7 @@
 
       /* dock text verbs ride the pill geometry */
       .controls #screenShare,
+      .controls #recordMeeting,
       .controls #archiveMeeting,
       .controls #join {
         min-width: 0;
@@ -1811,6 +1813,40 @@
         background: var(--accent);
         color: var(--on-accent);
         border-color: transparent;
+      }
+
+      .btn--recording,
+      .board-dock-icon.recording-toggle {
+        gap: 7px;
+      }
+
+      .record-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        box-shadow: 0 0 0 4px var(--live-soft);
+        flex: none;
+      }
+
+      .btn--recording.is-recording,
+      .board-dock-icon.recording-toggle.is-recording {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .btn--recording.is-paused,
+      .board-dock-icon.recording-toggle.is-paused {
+        border-color: transparent;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .btn--recording.is-paused .record-dot,
+      .board-dock-icon.recording-toggle.is-paused .record-dot {
+        background: var(--danger);
+        box-shadow: none;
       }
 
       /* the glanceable Scout line in the mobile dock — desktop has the rail */
@@ -1961,6 +1997,7 @@
       #appShell:not(.is-in-room) #toggleCamera,
       #appShell:not(.is-in-room) #audioSettingsButton,
       #appShell:not(.is-in-room) #screenShare,
+      #appShell:not(.is-in-room) #recordMeeting,
       #appShell:not(.is-in-room) #archiveMeeting,
       #appShell:not(.is-in-room) #leave,
       #appShell:not(.is-in-room) .device-control {
@@ -3216,6 +3253,14 @@
         min-height: calc(100svh - var(--sp-6));
       }
 
+      #appShell.is-authed:not(.is-in-room) .workspace {
+        align-items: stretch;
+        align-content: stretch;
+        place-items: stretch;
+        min-height: calc(100svh - 60px);
+        padding: var(--sp-4);
+      }
+
       #join {
         display: none;
       }
@@ -3236,6 +3281,10 @@
         display: none;
       }
 
+      #appShell.is-authed:not(.is-in-room) .topbar > .pill {
+        display: inline-flex;
+      }
+
       #appShell:not(.is-in-room) .scout-rail,
       #appShell:not(.is-in-room) .hearth-presentation,
       #appShell:not(.is-in-room) .board-rail,
@@ -3243,6 +3292,7 @@
         display: none;
       }
 
+      #appShell.is-authed .access-panel,
       #appShell.is-in-room .access-panel,
       #appShell.is-board-expanded .access-panel,
       #appShell.is-board-expanded .scout-rail,
@@ -3269,11 +3319,32 @@
       /* ---------- tool pages (chat · memory) ----------
          data-tool routes the workspace; the meeting keeps running and
          follows you as the PiP window. */
+      #officeTool,
       #chatTool,
+      #artifactsTool,
+      #researchTool,
+      #designTool,
+      #grillTool,
       #memoryTool {
         display: none;
         min-width: 0;
         min-height: 0;
+      }
+
+      #appShell.is-authed[data-tool="office"] #officeTool {
+        display: grid;
+      }
+
+      #appShell.is-authed[data-tool="office"] .workspace {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+      }
+
+      #appShell.is-authed[data-tool="office"] .hearth-presentation,
+      #appShell.is-authed[data-tool="office"] .scout-rail,
+      #appShell.is-authed[data-tool="office"] .board-rail,
+      #appShell.is-authed[data-tool="office"] .meeting-bar {
+        display: none;
       }
 
       #appShell[data-tool="chat"] .hearth-presentation,
@@ -3283,7 +3354,23 @@
       #appShell[data-tool="memory"] .hearth-presentation,
       #appShell[data-tool="memory"] .scout-rail,
       #appShell[data-tool="memory"] .board-rail,
-      #appShell[data-tool="memory"] .meeting-bar {
+      #appShell[data-tool="memory"] .meeting-bar,
+      #appShell[data-tool="artifacts"] .hearth-presentation,
+      #appShell[data-tool="artifacts"] .scout-rail,
+      #appShell[data-tool="artifacts"] .board-rail,
+      #appShell[data-tool="artifacts"] .meeting-bar,
+      #appShell[data-tool="research"] .hearth-presentation,
+      #appShell[data-tool="research"] .scout-rail,
+      #appShell[data-tool="research"] .board-rail,
+      #appShell[data-tool="research"] .meeting-bar,
+      #appShell[data-tool="design"] .hearth-presentation,
+      #appShell[data-tool="design"] .scout-rail,
+      #appShell[data-tool="design"] .board-rail,
+      #appShell[data-tool="design"] .meeting-bar,
+      #appShell[data-tool="grill"] .hearth-presentation,
+      #appShell[data-tool="grill"] .scout-rail,
+      #appShell[data-tool="grill"] .board-rail,
+      #appShell[data-tool="grill"] .meeting-bar {
         display: none;
       }
 
@@ -3291,12 +3378,20 @@
          Chat/Memory tool pages even where the responsive in-room rules
          (1-3-0) re-show .meeting-bar, regardless of source order. */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .meeting-bar,
-      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .meeting-bar {
+      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .meeting-bar {
         display: none;
       }
 
-      #appShell.is-in-room[data-tool="chat"] .workspace,
-      #appShell.is-in-room[data-tool="memory"] .workspace {
+      #appShell.is-authed[data-tool="chat"] .workspace,
+      #appShell.is-authed[data-tool="memory"] .workspace,
+      #appShell.is-authed[data-tool="artifacts"] .workspace,
+      #appShell.is-authed[data-tool="research"] .workspace,
+      #appShell.is-authed[data-tool="design"] .workspace,
+      #appShell.is-authed[data-tool="grill"] .workspace {
         grid-template-columns: minmax(0, 1fr);
         padding: 0;
         gap: 0;
@@ -3308,23 +3403,45 @@
 
       /* outranks the responsive dock-clearance padding — no dock on tool pages */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
-      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace {
+      #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
         padding: 0;
       }
 
-      #appShell.is-in-room[data-tool="chat"] #chatTool {
+      #appShell.is-authed[data-tool="chat"] #chatTool {
         display: flex;
       }
 
-      #appShell.is-in-room[data-tool="memory"] #memoryTool {
+      #appShell.is-authed[data-tool="memory"] #memoryTool {
+        display: grid;
+      }
+
+      #appShell.is-authed[data-tool="artifacts"] #artifactsTool {
+        display: grid;
+      }
+
+      #appShell.is-authed[data-tool="research"] #researchTool,
+      #appShell.is-authed[data-tool="design"] #designTool,
+      #appShell.is-authed[data-tool="grill"] #grillTool {
         display: grid;
       }
 
       /* tool pages swap the topbar's meeting meta for the tool's own line */
       #appShell[data-tool="chat"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="memory"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="artifacts"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="research"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="design"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="grill"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="chat"] .stage-toolbar,
-      #appShell[data-tool="memory"] .stage-toolbar {
+      #appShell[data-tool="memory"] .stage-toolbar,
+      #appShell[data-tool="artifacts"] .stage-toolbar,
+      #appShell[data-tool="research"] .stage-toolbar,
+      #appShell[data-tool="design"] .stage-toolbar,
+      #appShell[data-tool="grill"] .stage-toolbar {
         display: none;
       }
 
@@ -3408,6 +3525,513 @@
         border-radius: 999px;
         background: var(--text-3);
         box-shadow: none;
+      }
+
+      /* ---------- Office dashboard (BI OS home) ---------- */
+      .office-tool {
+        width: min(1180px, 100%);
+        min-height: 0;
+        align-self: stretch;
+        justify-self: center;
+        gap: var(--sp-4);
+      }
+
+      .office-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 0.42fr);
+        gap: var(--sp-4);
+        align-items: stretch;
+      }
+
+      .office-panel,
+      .office-app-card,
+      .office-insight {
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+      }
+
+      .office-panel {
+        display: grid;
+        gap: var(--sp-4);
+        padding: clamp(24px, 3vw, 36px);
+        min-width: 0;
+      }
+
+      .office-kicker,
+      .office-label,
+      .office-app-card__label,
+      .office-insight__label,
+      .os-assistant__mode-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .office-title {
+        max-width: 760px;
+        color: var(--text-1);
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        text-wrap: balance;
+      }
+
+      .office-subtitle {
+        max-width: 720px;
+        color: var(--text-2);
+        font: var(--type-body);
+        text-wrap: pretty;
+      }
+
+      .office-actions,
+      .office-meter,
+      .office-app-card__top {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        flex-wrap: wrap;
+      }
+
+      .office-actions {
+        margin-top: var(--sp-1);
+      }
+
+      .office-meter {
+        align-self: stretch;
+        align-content: start;
+      }
+
+      .office-stat {
+        flex: 1 1 128px;
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+        padding: 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+      }
+
+      .office-stat__value {
+        color: var(--text-1);
+        font: 600 22px/1 var(--font-sans);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .office-stat__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .office-section {
+        display: grid;
+        gap: var(--sp-3);
+      }
+
+      .office-section__head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: var(--sp-3);
+      }
+
+      .office-section h2,
+      .office-panel h2 {
+        color: var(--text-1);
+        font: 600 15px/1.2 var(--font-sans);
+        letter-spacing: 0;
+      }
+
+      .office-app-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--sp-3);
+      }
+
+      .office-app-card {
+        min-height: 156px;
+        display: grid;
+        align-content: space-between;
+        gap: var(--sp-3);
+        padding: 18px;
+        color: var(--text-1);
+        text-align: left;
+        transition:
+          border-color var(--dur-fast) var(--ease),
+          background var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .office-app-card:hover {
+        border-color: var(--line-2);
+        background: var(--glass-panel);
+        transform: translateY(-1px);
+      }
+
+      .office-app-card:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .office-app-card__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--text-1);
+      }
+
+      .office-app-card__body {
+        display: grid;
+        gap: 7px;
+      }
+
+      .office-app-card__title {
+        color: var(--text-1);
+        font: 600 15px/1.2 var(--font-sans);
+      }
+
+      .office-app-card__copy {
+        color: var(--text-2);
+        font: 13px/1.45 var(--font-sans);
+        text-wrap: pretty;
+      }
+
+      .office-insights {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--sp-3);
+      }
+
+      .office-insight {
+        display: grid;
+        gap: 8px;
+        padding: 16px;
+      }
+
+      .office-insight strong {
+        color: var(--text-1);
+        font: 600 14px/1.25 var(--font-sans);
+      }
+
+      .office-insight span {
+        color: var(--text-2);
+        font: 13px/1.45 var(--font-sans);
+      }
+
+      /* ---------- Floating OS assistant ---------- */
+      .os-assistant {
+        position: fixed;
+        right: max(18px, env(safe-area-inset-right));
+        bottom: max(18px, env(safe-area-inset-bottom));
+        z-index: 1300;
+        display: grid;
+        justify-items: end;
+        gap: 12px;
+        pointer-events: none;
+      }
+
+      .os-assistant[hidden] {
+        display: none;
+      }
+
+      #appShell.is-in-room ~ .os-assistant {
+        display: none;
+      }
+
+      .os-assistant__panel {
+        width: min(420px, calc(100vw - 32px));
+        max-height: min(620px, calc(100svh - 116px));
+        display: none;
+        grid-template-rows: auto auto minmax(120px, 1fr) auto;
+        gap: var(--sp-3);
+        padding: 16px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        pointer-events: auto;
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .os-assistant.is-open .os-assistant__panel {
+        display: grid;
+      }
+
+      .os-assistant.is-listening .os-assistant__panel {
+        border-color: var(--line-2);
+        box-shadow: var(--glass-highlight), var(--glass-shadow), 0 0 0 4px var(--live-soft);
+      }
+
+      .os-assistant__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-3);
+      }
+
+      .os-assistant__title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        color: var(--text-1);
+        font: 600 14px/1.2 var(--font-sans);
+      }
+
+      .os-wave {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        flex: none;
+        border-radius: var(--r-full);
+        background:
+          radial-gradient(circle at 50% 38%, rgba(255, 122, 43, 0.22), transparent 58%),
+          var(--surface-3);
+        border: 1px solid var(--line-1);
+        overflow: hidden;
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .os-assistant.is-listening .os-wave {
+        border-color: transparent;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(48, 209, 88, 0.28), transparent 62%),
+          var(--live-soft);
+        box-shadow: 0 0 0 4px var(--live-soft);
+      }
+
+      .os-assistant.is-listening .os-assistant__toggle .os-wave {
+        transform: scale(1.05);
+      }
+
+      .os-wave span {
+        width: 3px;
+        height: 16px;
+        margin: 0 2px;
+        border-radius: 99px;
+        background: currentColor;
+        color: var(--accent);
+        opacity: 0.82;
+        animation: os-wave 1200ms var(--ease) infinite;
+      }
+
+      .os-wave span:nth-child(2) { animation-delay: 120ms; height: 24px; }
+      .os-wave span:nth-child(3) { animation-delay: 240ms; height: 12px; }
+      .os-wave span:nth-child(4) { animation-delay: 360ms; height: 20px; }
+
+      @keyframes os-wave {
+        0%, 100% { transform: scaleY(0.55); opacity: 0.48; }
+        50% { transform: scaleY(1); opacity: 1; }
+      }
+
+      .os-assistant__toggle {
+        width: 68px;
+        height: 68px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        pointer-events: auto;
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .os-assistant__toggle:hover {
+        border-color: var(--line-2);
+        transform: translateY(-1px);
+      }
+
+      .os-assistant__toggle:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .os-assistant__close {
+        width: 34px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-md);
+        color: var(--text-3);
+      }
+
+      .os-assistant__close:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .os-assistant__modes {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .os-assistant__mode {
+        flex: none;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        color: var(--text-2);
+        background: transparent;
+        font: 500 12px/1 var(--font-sans);
+      }
+
+      .os-assistant__mode[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: var(--line-2);
+        color: var(--text-1);
+      }
+
+      .os-assistant__log {
+        min-height: 150px;
+        overflow: auto;
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-xl);
+        background: var(--surface-2);
+      }
+
+      .os-assistant__msg {
+        display: grid;
+        gap: 4px;
+      }
+
+      .os-assistant__msg b {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .os-assistant__msg span {
+        color: var(--text-1);
+        font: 13px/1.45 var(--font-sans);
+        white-space: pre-wrap;
+      }
+
+      .os-assistant__form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 10px;
+        align-items: end;
+      }
+
+      .os-assistant__input {
+        min-height: 44px;
+        max-height: 120px;
+        resize: vertical;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 11px 12px;
+        outline: 0;
+      }
+
+      .os-assistant__voice,
+      .os-assistant__send {
+        min-width: 44px;
+        width: 44px;
+        height: 44px;
+        border-radius: var(--r-lg);
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .os-assistant__voice {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+      }
+
+      .os-assistant__voice:hover:not([disabled]) {
+        color: var(--text-1);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .os-assistant__voice:active,
+      .os-assistant__send:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .os-assistant__voice[aria-pressed="true"] {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+        box-shadow: 0 0 0 4px var(--live-soft);
+      }
+
+      .os-assistant__voice[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .os-assistant__send {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      @media (max-width: 980px) {
+        .office-hero {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .office-app-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .office-insights {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      @media (max-width: 640px) {
+        #appShell.is-authed:not(.is-in-room) .workspace {
+          padding: var(--sp-3);
+        }
+
+        .office-app-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .office-panel {
+          padding: 22px;
+        }
+
+        .os-assistant {
+          right: max(12px, env(safe-area-inset-right));
+          bottom: max(12px, env(safe-area-inset-bottom));
+        }
+
+        .os-assistant__toggle {
+          width: 60px;
+          height: 60px;
+        }
       }
 
       .scout-rail {
@@ -4078,6 +4702,438 @@
         overflow-y: auto;
         overscroll-behavior: contain;
         padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+      }
+
+      #artifactsTool {
+        grid-template-rows: minmax(0, 1fr);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+      }
+
+      .artifacts-tool__inner {
+        width: min(920px, 100%);
+        margin: 0 auto;
+        align-self: start;
+        display: grid;
+        gap: var(--sp-4);
+      }
+
+      .artifacts-tool__head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        padding: 0 2px;
+      }
+
+      .artifacts-tool__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+      }
+
+      .artifacts-tool__meta {
+        margin-top: 4px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifacts-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: var(--sp-3);
+      }
+
+      .artifacts-workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.8fr);
+        gap: var(--sp-4);
+        align-items: start;
+      }
+
+      .artifact-item {
+        display: grid;
+        gap: var(--sp-3);
+        min-width: 0;
+        padding: var(--sp-4);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        color: inherit;
+        box-shadow: var(--shadow-1);
+        text-align: left;
+        cursor: pointer;
+        transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .artifact-item:hover {
+        background: var(--surface-2);
+        box-shadow: var(--shadow-2);
+      }
+
+      .artifact-item:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .artifact-item.is-selected {
+        background: var(--accent-soft);
+        box-shadow: 0 0 0 1px var(--line-2), var(--shadow-1);
+      }
+
+      .artifact-item__top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+      }
+
+      .artifact-item__mode,
+      .artifact-item__time {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifact-item__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-item__body {
+        color: var(--text-2);
+        font: 13px/1.45 var(--font-sans);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-line-clamp: 9;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .artifact-detail {
+        position: sticky;
+        top: 84px;
+        display: grid;
+        gap: var(--sp-3);
+        padding: var(--sp-4);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--shadow-2);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+
+      .artifact-detail__top,
+      .artifact-detail__actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+      }
+
+      .artifact-detail__mode,
+      .artifact-detail__status {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifact-detail__field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .artifact-detail__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifact-detail__input,
+      .artifact-detail__body {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 10px 12px;
+        outline: 0;
+      }
+
+      .artifact-detail__body {
+        min-height: 320px;
+        resize: vertical;
+        white-space: pre-wrap;
+      }
+
+      .artifact-detail__input:focus,
+      .artifact-detail__body:focus {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .artifact-detail__input[disabled],
+      .artifact-detail__body[disabled] {
+        opacity: 0.55;
+      }
+
+      #researchTool,
+      #designTool,
+      #grillTool {
+        grid-template-rows: minmax(0, 1fr);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+      }
+
+      .agent-tool__inner {
+        width: min(1040px, 100%);
+        margin: 0 auto;
+        align-self: start;
+        display: grid;
+        gap: var(--sp-4);
+      }
+
+      .agent-tool__head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: var(--sp-4);
+        padding: 0 2px;
+      }
+
+      .agent-tool__eyebrow {
+        margin: 0 0 6px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .agent-tool__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        text-wrap: balance;
+      }
+
+      .agent-tool__meta {
+        max-width: 680px;
+        margin: 6px 0 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        text-wrap: pretty;
+      }
+
+      .agent-workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 0.45fr);
+        gap: var(--sp-4);
+        align-items: start;
+      }
+
+      .agent-composer,
+      .agent-output {
+        display: grid;
+        gap: var(--sp-3);
+        min-width: 0;
+        padding: var(--sp-4);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--shadow-2);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+
+      .agent-composer__top,
+      .agent-output__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+      }
+
+      .agent-composer__mode,
+      .agent-composer__status,
+      .agent-output__head {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .agent-composer__status {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .agent-composer__field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .agent-composer__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .agent-composer__input {
+        width: 100%;
+        min-width: 0;
+        min-height: 260px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 12px 14px;
+        resize: vertical;
+        outline: 0;
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .agent-composer__input:focus {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .agent-template-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--sp-2);
+      }
+
+      .agent-template-grid button,
+      .agent-output__link {
+        min-height: 40px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .agent-template-grid button:hover,
+      .agent-output__link:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+        box-shadow: var(--shadow-1);
+      }
+
+      .agent-template-grid button:active,
+      .agent-output__link:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .agent-composer__actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .agent-output {
+        position: sticky;
+        top: 84px;
+        align-content: start;
+      }
+
+      .agent-output__link {
+        padding: 0 12px;
+      }
+
+      .agent-output__latest {
+        min-height: 160px;
+        max-height: 320px;
+        overflow: auto;
+        padding: 12px;
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: 13px/1.45 var(--font-sans);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .agent-output__list {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .agent-artifact-link {
+        display: grid;
+        gap: 4px;
+        min-height: 56px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .agent-artifact-link:hover {
+        background: var(--surface-2);
+        box-shadow: var(--shadow-1);
+      }
+
+      .agent-artifact-link:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .agent-artifact-link__title {
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .agent-artifact-link__meta {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (max-width: 980px) {
+        .artifacts-workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .artifact-detail {
+          position: static;
+        }
+
+        .agent-workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .agent-output {
+          position: static;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .agent-tool__head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .agent-template-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       .memory-tool__inner {
@@ -5811,7 +6867,8 @@
           margin: 8px 16px 12px;
         }
 
-        #memoryTool {
+        #memoryTool,
+        #artifactsTool {
           padding: 20px 16px 36px;
         }
 
@@ -5861,7 +6918,7 @@
 
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: auto 44px 44px 44px minmax(112px, 1fr) minmax(112px, 1fr) 44px;
+          grid-template-columns: auto 44px 44px 44px minmax(104px, 0.9fr) minmax(112px, 1fr) minmax(112px, 1fr) 44px;
           align-items: center;
           gap: 8px;
           width: 100%;
@@ -5890,6 +6947,7 @@
         }
 
         #appShell.is-in-room #screenShare,
+        #appShell.is-in-room #recordMeeting,
         #appShell.is-in-room #archiveMeeting {
           height: 44px;
           min-height: 44px;
@@ -5902,12 +6960,16 @@
           grid-column: 5;
         }
 
-        #appShell.is-in-room #archiveMeeting {
+        #appShell.is-in-room #recordMeeting {
           grid-column: 6;
         }
 
-        #appShell.is-in-room #leave {
+        #appShell.is-in-room #archiveMeeting {
           grid-column: 7;
+        }
+
+        #appShell.is-in-room #leave {
+          grid-column: 8;
           grid-row: 1;
           justify-self: end;
         }
@@ -6452,7 +7514,7 @@
 
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: 48px 48px 48px minmax(0, 1fr) 48px;
+          grid-template-columns: 48px 48px 48px 48px minmax(0, 1fr) 48px;
           align-items: center;
           gap: 8px;
           width: 100%;
@@ -6461,10 +7523,13 @@
         #appShell.is-in-room #muteMic,
         #appShell.is-in-room #toggleCamera,
         #appShell.is-in-room #audioSettingsButton,
+        #appShell.is-in-room #recordMeeting,
         #appShell.is-in-room #leave {
           width: 48px;
+          min-width: 0;
           height: 48px;
           min-height: 48px;
+          padding: 0;
         }
 
         #appShell.is-in-room #archiveMeeting {
@@ -6474,11 +7539,19 @@
           padding: 0 10px;
           font-size: 13px;
           white-space: nowrap;
+          grid-column: 5;
+        }
+
+        #appShell.is-in-room #recordMeeting {
           grid-column: 4;
         }
 
+        #appShell.is-in-room #recordMeeting .record-label {
+          display: none;
+        }
+
         #appShell.is-in-room #leave {
-          grid-column: 5;
+          grid-column: 6;
           grid-row: 2;
           justify-self: end;
         }
@@ -6792,7 +7865,7 @@
         /* nothing shrinks below --touch-min; "Send notes" simply gets the
            narrower middle column */
         #appShell.is-in-room .meeting-bar .controls {
-          grid-template-columns: 48px 48px 48px minmax(0, 1fr) 48px;
+          grid-template-columns: 48px 48px 48px 48px minmax(0, 1fr) 48px;
           gap: 6px;
         }
 
@@ -6962,13 +8035,18 @@
     </style>
   </head>
   <body>
-    <main id="appShell" data-tool="room">
+    <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail mount-stagger" aria-label="Tools">
         <svg class="tool-rail__flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
           <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
         </svg>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="Room" title="Room" aria-pressed="true">
+          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Office" title="Office" aria-pressed="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="Room" title="Room" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
@@ -6976,6 +8054,26 @@
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" title="Chat" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" title="Grill mode" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -7036,6 +8134,132 @@
       </header>
 
       <div class="workspace">
+        <section id="officeTool" class="office-tool" aria-label="Office dashboard">
+          <div class="office-hero">
+            <section class="office-panel" aria-label="Operating dashboard">
+              <p class="office-kicker">business intelligence operating system</p>
+              <h2 class="office-title">your office is awake, and the room is just one app.</h2>
+              <p class="office-subtitle">Ask across meetings, open artifacts, launch research or design work, and enter the live room only when you want camera and microphone on.</p>
+              <div class="office-actions">
+                <button class="btn btn--primary" type="button" data-office-tool="room">Enter room</button>
+                <button class="btn btn--ghost" type="button" data-open-assistant-mode="chat">Ask assistant</button>
+                <button class="btn btn--ghost" type="button" data-office-tool="grill">Start grill mode</button>
+              </div>
+            </section>
+            <section class="office-panel office-meter" aria-label="Office status">
+              <div class="office-stat">
+                <span id="officeArtifactStat" class="office-stat__value">0</span>
+                <span class="office-stat__label">artifacts saved</span>
+              </div>
+              <div class="office-stat">
+                <span id="officeMemoryStat" class="office-stat__value">0</span>
+                <span class="office-stat__label">memories saved</span>
+              </div>
+              <div class="office-stat">
+                <span id="officeBoardStat" class="office-stat__value">0</span>
+                <span class="office-stat__label">active cards</span>
+              </div>
+              <div class="office-stat">
+                <span id="officeRoomStat" class="office-stat__value">ready</span>
+                <span class="office-stat__label">room agent</span>
+              </div>
+            </section>
+          </div>
+
+          <section class="office-section" aria-label="Apps">
+            <div class="office-section__head">
+              <div>
+                <p class="office-label">apps</p>
+                <h2>launch work</h2>
+              </div>
+            </div>
+            <div class="office-app-grid">
+              <button class="office-app-card" type="button" data-office-tool="room">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg></span>
+                  <span class="office-app-card__label">live</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Room</span><span class="office-app-card__copy">camera, board, shared transcript agent, and notes.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="chat">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg></span>
+                  <span class="office-app-card__label">private</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Chat</span><span class="office-app-card__copy">ask Scout across board state and remembered meetings.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="memory">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg></span>
+                  <span class="office-app-card__label">durable</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Memory</span><span class="office-app-card__copy">transcripts, brain summaries, board updates, and archives.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="artifacts">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span>
+                  <span class="office-app-card__label">outputs</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Artifacts</span><span class="office-app-card__copy">summaries, action plans, scorecards, and briefs.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="research">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg></span>
+                  <span class="office-app-card__label">scout</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Research</span><span class="office-app-card__copy">open a research lane and turn findings into saved work.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="design">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></span>
+                  <span class="office-app-card__label">studio</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Design</span><span class="office-app-card__copy">kick off product, UX, and creative direction work.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="grill">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg></span>
+                  <span class="office-app-card__label">practice</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Grill mode</span><span class="office-app-card__copy">hear a pitch, pressure-test it, and score delivery.</span></span>
+              </button>
+              <button class="office-app-card" type="button" data-office-tool="board">
+                <span class="office-app-card__top">
+                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg></span>
+                  <span class="office-app-card__label">shared</span>
+                </span>
+                <span class="office-app-card__body"><span class="office-app-card__title">Board</span><span class="office-app-card__copy">open the live board once the room is running.</span></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="office-section" aria-label="Insights">
+            <div class="office-section__head">
+              <div>
+                <p class="office-label">insights</p>
+                <h2>what the office knows</h2>
+              </div>
+            </div>
+            <div class="office-insights">
+              <article class="office-insight">
+                <span class="office-insight__label">meeting truth</span>
+                <strong>room transcript is the shared source.</strong>
+                <span>private assistants stay explicit; the room agent owns meeting artifacts.</span>
+              </article>
+              <article class="office-insight">
+                <span class="office-insight__label">next artifact</span>
+                <strong>turn the last conversation into a decision record.</strong>
+                <span>ask the assistant to summarize decisions, risks, asks, and owners.</span>
+              </article>
+              <article class="office-insight">
+                <span class="office-insight__label">operator mode</span>
+                <strong>grill mode can score clarity, conviction, and evidence.</strong>
+                <span>open the assistant, choose grill, then pitch like it matters.</span>
+              </article>
+            </div>
+          </section>
+        </section>
+
         <section id="accessPanel" class="access-panel" aria-label="Sign in">
           <button id="loginThemeToggle" class="login-theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
             <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
@@ -7298,6 +8522,173 @@
           </div>
         </section>
 
+        <!-- Artifacts tool — durable outputs from OS assistant modes -->
+        <section id="artifactsTool" class="artifacts-tool" aria-label="Artifacts">
+          <div class="artifacts-tool__inner">
+            <header class="artifacts-tool__head">
+              <div>
+                <h2 class="artifacts-tool__title">Artifacts</h2>
+                <p class="artifacts-tool__meta">briefs, scorecards, design kickoffs, and operating memos saved by the assistant</p>
+              </div>
+              <button class="btn btn--ghost" type="button" data-open-assistant-mode="artifacts">New artifact</button>
+            </header>
+            <div class="artifacts-workspace">
+              <div id="artifactList" class="artifacts-list" aria-label="Saved artifacts">
+                <article class="artifact-item">
+                  <div class="artifact-item__top">
+                    <span class="artifact-item__mode">ready</span>
+                    <span class="artifact-item__time">now</span>
+                  </div>
+                  <h3 class="artifact-item__title">No artifacts yet</h3>
+                  <p class="artifact-item__body">Use artifact, research, design, or grill mode in the assistant to create durable operating outputs.</p>
+                </article>
+              </div>
+              <form id="artifactDetailForm" class="artifact-detail" aria-label="Artifact editor">
+                <div class="artifact-detail__top">
+                  <span id="artifactDetailMode" class="artifact-detail__mode">artifact</span>
+                  <span id="artifactDetailStatus" class="artifact-detail__status">no selection</span>
+                </div>
+                <label class="artifact-detail__field">
+                  <span class="artifact-detail__label">title</span>
+                  <input id="artifactTitleInput" class="artifact-detail__input" type="text" autocomplete="off" disabled>
+                </label>
+                <label class="artifact-detail__field">
+                  <span class="artifact-detail__label">body</span>
+                  <textarea id="artifactBodyInput" class="artifact-detail__body" rows="14" disabled></textarea>
+                </label>
+                <div class="artifact-detail__actions">
+                  <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
+                  <button id="artifactSaveButton" class="btn btn--primary" type="submit" disabled>Save</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <!-- Agent apps — first-class OS workspaces backed by artifact generation -->
+        <section id="researchTool" class="agent-tool" data-agent-tool="research" aria-label="Research">
+          <div class="agent-tool__inner">
+            <header class="agent-tool__head">
+              <div>
+                <p class="agent-tool__eyebrow">research app</p>
+                <h2 class="agent-tool__title">turn a question into a brief</h2>
+                <p class="agent-tool__meta">Scout frames the claim, evidence plan, counterargument, and recommendation, then saves the output as a durable artifact.</p>
+              </div>
+              <button class="btn btn--ghost" type="button" data-open-assistant-mode="research">Open assistant</button>
+            </header>
+            <div class="agent-workspace">
+              <form class="agent-composer" data-agent-tool-form="research">
+                <div class="agent-composer__top">
+                  <span class="agent-composer__mode">research lane</span>
+                  <span class="agent-composer__status" data-agent-status="research">ready</span>
+                </div>
+                <label class="agent-composer__field">
+                  <span class="agent-composer__label">question</span>
+                  <textarea class="agent-composer__input" data-agent-input="research" rows="10" autocomplete="off" aria-label="Research question">Research whether a business intelligence OS for meetings should start with executive weekly reviews, product leadership standups, or sales pipeline calls. Include buyer urgency, proof needed, failure modes, and a recommendation.</textarea>
+                </label>
+                <div class="agent-template-grid" aria-label="Research starters">
+                  <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS. Compare executive weekly reviews, product leadership standups, and sales pipeline calls. Include buying trigger, data needed, proof plan, risks, and recommendation.">First segment</button>
+                  <button type="button" data-agent-template="research" data-template-text="Create a research brief for the competitive landscape around meeting-to-artifact operating systems. Include comparable products, differentiation, commodity risk, customer proof to collect, and a recommended wedge.">Competitive wedge</button>
+                  <button type="button" data-agent-template="research" data-template-text="Build an interview guide for three operators evaluating a meeting intelligence OS. Include discovery questions, signals of urgency, success metrics, objections, and a synthesis format.">Interview guide</button>
+                </div>
+                <div class="agent-composer__actions">
+                  <button class="btn btn--primary" type="submit" data-agent-submit="research">Create research brief</button>
+                </div>
+              </form>
+              <aside class="agent-output" aria-label="Research artifacts">
+                <div class="agent-output__head">
+                  <span>saved research</span>
+                  <button class="agent-output__link" type="button" data-office-tool="artifacts">All artifacts</button>
+                </div>
+                <div class="agent-output__latest" data-agent-output="research">No research artifact yet.</div>
+                <div class="agent-output__list" data-agent-artifacts="research"></div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section id="designTool" class="agent-tool" data-agent-tool="design" aria-label="Design Studio">
+          <div class="agent-tool__inner">
+            <header class="agent-tool__head">
+              <div>
+                <p class="agent-tool__eyebrow">design studio</p>
+                <h2 class="agent-tool__title">kick off product and UX work</h2>
+                <p class="agent-tool__meta">Generate a scoped design brief with screens, principles, interaction states, and handoff questions that can move into implementation.</p>
+              </div>
+              <button class="btn btn--ghost" type="button" data-open-assistant-mode="design">Open assistant</button>
+            </header>
+            <div class="agent-workspace">
+              <form class="agent-composer" data-agent-tool-form="design">
+                <div class="agent-composer__top">
+                  <span class="agent-composer__mode">studio lane</span>
+                  <span class="agent-composer__status" data-agent-status="design">ready</span>
+                </div>
+                <label class="agent-composer__field">
+                  <span class="agent-composer__label">brief</span>
+                  <textarea class="agent-composer__input" data-agent-input="design" rows="10" autocomplete="off" aria-label="Design brief">Design the artifact workspace for a meeting intelligence OS. Include the core screens, selected-artifact editing state, empty state, saved state, trust boundary with the meeting room, and mobile layout risks.</textarea>
+                </label>
+                <div class="agent-template-grid" aria-label="Design starters">
+                  <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the BI OS dashboard. Include app launcher hierarchy, insight surface, live room entry, assistant affordances, mobile behavior, and risks.">Dashboard</button>
+                  <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the artifact workspace. Include list/detail layout, edit/save states, cross-linking to agent apps, empty state, mobile behavior, and implementation risks.">Artifacts</button>
+                  <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for grill mode. Include pitch capture, tough-question loop, score presentation, saved evaluation artifact, and privacy expectations.">Grill mode</button>
+                </div>
+                <div class="agent-composer__actions">
+                  <button class="btn btn--primary" type="submit" data-agent-submit="design">Create design kickoff</button>
+                </div>
+              </form>
+              <aside class="agent-output" aria-label="Design artifacts">
+                <div class="agent-output__head">
+                  <span>saved design work</span>
+                  <button class="agent-output__link" type="button" data-office-tool="artifacts">All artifacts</button>
+                </div>
+                <div class="agent-output__latest" data-agent-output="design">No design artifact yet.</div>
+                <div class="agent-output__list" data-agent-artifacts="design"></div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section id="grillTool" class="agent-tool" data-agent-tool="grill" aria-label="Grill Mode">
+          <div class="agent-tool__inner">
+            <header class="agent-tool__head">
+              <div>
+                <p class="agent-tool__eyebrow">grill mode</p>
+                <h2 class="agent-tool__title">pressure-test the pitch</h2>
+                <p class="agent-tool__meta">Paste the pitch or delivery notes. Scout scores clarity, evidence, urgency, and conviction, asks tough questions, and saves the scorecard.</p>
+              </div>
+              <button class="btn btn--ghost" type="button" data-open-assistant-mode="grill">Open assistant</button>
+            </header>
+            <div class="agent-workspace">
+              <form class="agent-composer agent-composer--grill" data-agent-tool-form="grill">
+                <div class="agent-composer__top">
+                  <span class="agent-composer__mode">practice lane</span>
+                  <span class="agent-composer__status" data-agent-status="grill">ready</span>
+                </div>
+                <label class="agent-composer__field">
+                  <span class="agent-composer__label">pitch</span>
+                  <textarea class="agent-composer__input" data-agent-input="grill" rows="10" autocomplete="off" aria-label="Pitch for grill mode">Our BI OS turns meetings into operating artifacts. Leaders get summaries, decisions, risks, and follow-through without waiting for manual notes. We will pilot with three teams and measure recall, follow-up speed, and decision clarity.</textarea>
+                </label>
+                <div class="agent-template-grid" aria-label="Grill mode starters">
+                  <button type="button" data-agent-template="grill" data-template-text="Score this pitch for the meeting intelligence OS. Evaluate clarity, evidence, urgency, differentiation, delivery risk, and ask the toughest five investor-style questions before giving a final score.">Investor pitch</button>
+                  <button type="button" data-agent-template="grill" data-template-text="Grill this customer demo talk track. Score whether the buyer understands the pain, why now, the workflow, the proof, and the next step. Ask tough questions and give a final score.">Demo talk track</button>
+                  <button type="button" data-agent-template="grill" data-template-text="Evaluate this product strategy narrative. Score strategic clarity, customer proof, market timing, risks, and confidence. Ask hard questions and give a final score.">Strategy narrative</button>
+                </div>
+                <div class="agent-composer__actions">
+                  <button class="btn btn--primary" type="submit" data-agent-submit="grill">Run grill mode</button>
+                </div>
+              </form>
+              <aside class="agent-output" aria-label="Grill mode artifacts">
+                <div class="agent-output__head">
+                  <span>saved scorecards</span>
+                  <button class="agent-output__link" type="button" data-office-tool="artifacts">All artifacts</button>
+                </div>
+                <div class="agent-output__latest" data-agent-output="grill">No scorecard yet.</div>
+                <div class="agent-output__list" data-agent-artifacts="grill"></div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
         <!-- Memory tool — the durable archive as quiet log entries -->
         <section id="memoryTool" class="memory-tool" aria-label="Memory">
           <div class="memory-tool__inner">
@@ -7407,6 +8798,9 @@
                   <path d="M12 16v4"></path>
                 </svg>
               </button>
+              <button id="boardDockRecord" class="board-dock-icon recording-toggle is-recording" type="button" aria-label="Pause transcript recording" aria-pressed="true" title="recording">
+                <span class="record-dot" aria-hidden="true"></span>
+              </button>
               <button id="boardDockArchive" class="board-dock-btn primary" type="button">Send notes</button>
               <div class="board-menu-wrap">
                 <button id="boardDockMenuButton" class="board-dock-icon" type="button" aria-label="More board actions" aria-expanded="false" title="more">
@@ -7474,6 +8868,10 @@
             </svg>
             <span class="audio-settings-label">audio</span>
           </button>
+          <button id="recordMeeting" class="btn btn--ghost btn--recording is-recording" type="button" aria-label="Pause transcript recording" aria-pressed="true" title="Pause transcript recording" disabled>
+            <span class="record-dot" aria-hidden="true"></span>
+            <span class="record-label">Recording</span>
+          </button>
           <button id="archiveMeeting" class="btn btn--primary" type="button" disabled>Send notes</button>
           <span class="controls__divider" aria-hidden="true"></span>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" title="Leave the room" disabled>
@@ -7485,6 +8883,44 @@
         </div>
       </footer>
     </main>
+    <aside id="osAssistant" class="os-assistant" hidden aria-label="Bonfire assistant">
+      <section class="os-assistant__panel" aria-label="Assistant conversation">
+        <header class="os-assistant__head">
+          <div class="os-assistant__title">
+            <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+            <div>
+              <span>Bonfire assistant</span>
+              <p id="osAssistantModeLabel" class="os-assistant__mode-label">chat mode</p>
+            </div>
+          </div>
+          <button id="osAssistantClose" class="os-assistant__close" type="button" aria-label="Close assistant" title="Close assistant">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </header>
+        <div class="os-assistant__modes" role="group" aria-label="Assistant mode">
+          <button class="os-assistant__mode" type="button" data-assistant-mode="chat" aria-pressed="true">chat</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="artifacts" aria-pressed="false">artifacts</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false">research</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false">design</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false">grill</button>
+        </div>
+        <div id="osAssistantLog" class="os-assistant__log" role="log" aria-live="polite">
+          <p class="os-assistant__msg"><b>ready</b><span>ask about the board, prior meetings, artifacts, research, design work, or pitch feedback.</span></p>
+        </div>
+        <form id="osAssistantForm" class="os-assistant__form">
+          <textarea id="osAssistantInput" class="os-assistant__input" rows="1" autocomplete="off" placeholder="ask the office..." aria-label="Ask Bonfire assistant"></textarea>
+          <button id="osAssistantVoice" class="os-assistant__voice" type="button" aria-label="Start voice assistant" aria-pressed="false" title="Start voice assistant">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg>
+          </button>
+          <button id="osAssistantSend" class="os-assistant__send" type="submit" aria-label="Send" title="Send">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+          </button>
+        </form>
+      </section>
+      <button id="osAssistantToggle" class="os-assistant__toggle" type="button" aria-label="Open assistant" title="Open assistant" aria-expanded="false">
+        <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      </button>
+    </aside>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
@@ -7678,6 +9114,7 @@
       const boardDockMute = document.getElementById('boardDockMute')
       const boardDockCamera = document.getElementById('boardDockCamera')
       const boardDockShare = document.getElementById('boardDockShare')
+      const boardDockRecord = document.getElementById('boardDockRecord')
       const boardDockArchive = document.getElementById('boardDockArchive')
       const boardDockMenuButton = document.getElementById('boardDockMenuButton')
       const boardDockMenu = document.getElementById('boardDockMenu')
@@ -7706,6 +9143,8 @@
       const voiceTrainingMeter = document.getElementById('voiceTrainingMeter')
       const screenShareButton = document.getElementById('screenShare')
       const copyRoomLinkButton = document.getElementById('copyRoomLink')
+      const recordMeetingButton = document.getElementById('recordMeeting')
+      const recordMeetingLabel = recordMeetingButton.querySelector('.record-label')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
       const roomClock = document.getElementById('roomClock')
       const accessPanel = document.getElementById('accessPanel')
@@ -7751,6 +9190,14 @@
       const toastRegion = document.getElementById('toastRegion')
       const commentPreviewRegion = document.getElementById('commentPreviewRegion')
       const cardDetailRegion = document.getElementById('cardDetailRegion')
+      const artifactList = document.getElementById('artifactList')
+      const artifactDetailForm = document.getElementById('artifactDetailForm')
+      const artifactDetailMode = document.getElementById('artifactDetailMode')
+      const artifactDetailStatus = document.getElementById('artifactDetailStatus')
+      const artifactTitleInput = document.getElementById('artifactTitleInput')
+      const artifactBodyInput = document.getElementById('artifactBodyInput')
+      const artifactCopyButton = document.getElementById('artifactCopyButton')
+      const artifactSaveButton = document.getElementById('artifactSaveButton')
       const memoryList = document.getElementById('memoryList')
       const memoryCount = document.getElementById('memoryCount')
       const assistantFeed = document.getElementById('assistantFeed')
@@ -7780,9 +9227,33 @@
       const pipExpand = document.getElementById('pipExpand')
       const pipMute = document.getElementById('pipMute')
       const pipCamera = document.getElementById('pipCamera')
+      const officeArtifactStat = document.getElementById('officeArtifactStat')
+      const officeMemoryStat = document.getElementById('officeMemoryStat')
+      const officeBoardStat = document.getElementById('officeBoardStat')
+      const officeRoomStat = document.getElementById('officeRoomStat')
+      const officeToolButtons = Array.from(document.querySelectorAll('[data-office-tool]'))
+      const assistantModeOpeners = Array.from(document.querySelectorAll('[data-open-assistant-mode]'))
+      const osAssistant = document.getElementById('osAssistant')
+      const osAssistantToggle = document.getElementById('osAssistantToggle')
+      const osAssistantClose = document.getElementById('osAssistantClose')
+      const osAssistantForm = document.getElementById('osAssistantForm')
+      const osAssistantInput = document.getElementById('osAssistantInput')
+      const osAssistantVoice = document.getElementById('osAssistantVoice')
+      const osAssistantSend = document.getElementById('osAssistantSend')
+      const osAssistantLog = document.getElementById('osAssistantLog')
+      const osAssistantModeLabel = document.getElementById('osAssistantModeLabel')
+      const osAssistantModeButtons = Array.from(document.querySelectorAll('[data-assistant-mode]'))
+      const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      const agentToolIds = ['research', 'design', 'grill']
+      const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
+      const agentToolForms = Array.from(document.querySelectorAll('[data-agent-tool-form]'))
+      const agentTemplateButtons = Array.from(document.querySelectorAll('[data-agent-template]'))
 
       let cards = []
       let memoryEntries = []
+      let artifactEntries = []
+      let selectedArtifactId = ''
+      let artifactStatusTimer = 0
       let assistantMessages = []
       let pc
       let ws
@@ -7799,6 +9270,15 @@
       let lastConnectionState = 'idle'
       let lastConnectionLabel = 'not connected'
       let scoutChatSessionSeen = false
+      let osAssistantMode = 'chat'
+      let osAssistantVoiceActive = false
+      let osAssistantVoiceRecognizer = null
+      let osAssistantVoiceRestartTimer = 0
+      let osAssistantVoiceQueue = Promise.resolve()
+      const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
+      let lastNonBoardTool = 'office'
+      const pipVideoTilesByParticipant = new Map()
+      let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
@@ -7810,6 +9290,9 @@
       let participantPreview = []
       let roomCapacity = 10
       let occupiedSeats = 0
+      let roomRecordingEnabled = true
+      let roomRecordingUpdatedAt = ''
+      let roomRecordingUpdatedBy = ''
       let hasBoardSnapshot = false
       let isBoardReady = false
       let canEditBoard = false
@@ -7982,8 +9465,10 @@
         event.preventDefault()
         if (resetToken) {
           submitPasswordReset()
+        } else if (authedUser) {
+          setActiveTool('office')
         } else {
-          joinRoom()
+          signInToOffice()
         }
       })
       leaveButton.addEventListener('click', leaveRoom)
@@ -8016,6 +9501,28 @@
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
+      officeToolButtons.forEach(button => {
+        button.addEventListener('click', () => openOfficeTool(button.dataset.officeTool))
+      })
+      assistantModeOpeners.forEach(button => {
+        button.addEventListener('click', () => openOSAssistant(button.dataset.openAssistantMode || 'chat'))
+      })
+      osAssistantToggle.addEventListener('click', () => setOSAssistantOpen(!osAssistant.classList.contains('is-open')))
+      osAssistantClose.addEventListener('click', () => {
+        stopOSAssistantVoice()
+        setOSAssistantOpen(false)
+      })
+      osAssistantModeButtons.forEach(button => {
+        button.addEventListener('click', () => setOSAssistantMode(button.dataset.assistantMode || 'chat'))
+      })
+      osAssistantVoice.addEventListener('click', toggleOSAssistantVoice)
+      osAssistantForm.addEventListener('submit', sendOSAssistantQuery)
+      agentToolForms.forEach(form => {
+        form.addEventListener('submit', runAgentTool)
+      })
+      agentTemplateButtons.forEach(button => {
+        button.addEventListener('click', () => applyAgentTemplate(button.dataset.agentTemplate, button.dataset.templateText))
+      })
       pipExpand.addEventListener('click', () => setActiveTool('room'))
       // single source of truth for media state — the PiP controls proxy
       // the dock's own buttons
@@ -8030,6 +9537,7 @@
       themeToggleButton.addEventListener('click', () => syncThemeToggles(toggleTheme()))
       loginThemeToggleButton.addEventListener('click', () => syncThemeToggles(toggleTheme()))
       syncThemeToggles(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
+      recordMeetingButton.addEventListener('click', toggleRoomRecording)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
@@ -8046,6 +9554,7 @@
       boardDockMute.addEventListener('click', () => muteMicButton.disabled || muteMicButton.click())
       boardDockCamera.addEventListener('click', () => toggleCameraButton.disabled || toggleCameraButton.click())
       boardDockShare.addEventListener('click', () => screenShareButton.disabled || screenShareButton.click())
+      boardDockRecord.addEventListener('click', () => recordMeetingButton.disabled || recordMeetingButton.click())
       boardDockArchive.addEventListener('click', () => archiveMeetingButton.disabled || archiveMeetingButton.click())
       boardDockMenuButton.addEventListener('click', event => {
         event.stopPropagation()
@@ -8069,6 +9578,8 @@
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
       })
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
+      artifactDetailForm.addEventListener('submit', saveSelectedArtifact)
+      artifactCopyButton.addEventListener('click', copySelectedArtifact)
       scoutChatInput.addEventListener('input', resizeScoutChatInput)
       scoutChatInput.addEventListener('keydown', event => {
         // Never send mid-IME-composition: the Enter that confirms a
@@ -8149,10 +9660,12 @@
         }
       }
       renderLoginMode()
+      updateOSAssistantVoiceControls()
       if (!resetToken) {
         refreshAuthState()
       }
       renderBoard()
+      renderArtifacts()
       updateBoardControls()
       updateMuteButton()
       updateCameraButton()
@@ -8564,7 +10077,7 @@
         accessReadyTag.textContent = verified ? 'ready' : 'locked'
         if (verified && !resetToken) {
           const readyName = authedUser?.name || selectedParticipantName() || email
-          accessHint.textContent = `${String(readyName).toLowerCase()} · ready to sign in.`
+          accessHint.textContent = `${String(readyName).toLowerCase()} · ready to open office.`
         } else {
           // reference card ends after the passkey button — the hint line only
           // appears (aria-live) once sign-in actually begins
@@ -8601,8 +10114,9 @@
         }
         joinAccessButton.textContent = mode === 'reset'
           ? 'Set new password'
-          : mode === 'authed' ? `Enter as ${authedUser.name}` : 'Sign in'
+          : mode === 'authed' ? `Open office as ${authedUser.name}` : 'Sign in'
         validateAccess()
+        syncAuthenticatedShell()
       }
 
       async function refreshAuthState() {
@@ -8613,6 +10127,12 @@
           authedUser = null
         }
         renderLoginMode()
+        if (authedUser) {
+          loadArtifacts()
+        } else {
+          artifactEntries = []
+          renderArtifacts()
+        }
       }
 
       /* identity cache — prefill only. Nothing secret lives in storage: the
@@ -8692,6 +10212,77 @@
         return { ok: response.ok, status: response.status, data }
       }
 
+      function syncAuthenticatedShell() {
+        const authed = Boolean(authedUser)
+        appShell.classList.toggle('is-authed', authed)
+        syncOSAssistantAvailability()
+        if (railAvatarEl) {
+          railAvatarEl.textContent = authed ? initialsForName(authedUser.name || authedUser.email) : '·'
+        }
+        if (authed && !appShell.classList.contains('is-in-room') && (appShell.dataset.tool || 'office') === 'room') {
+          applyToolState('office')
+        }
+        if (!authed) {
+          appShell.classList.remove('is-in-room', 'is-board-expanded')
+          if ((appShell.dataset.tool || 'office') !== 'office') {
+            applyToolState('office')
+          }
+        }
+        updateScoutChatAvailability()
+        syncToolTopbar()
+        applyStatusPillForTool()
+      }
+
+      function initialsForName(value) {
+        const text = String(value || '').trim()
+        if (!text) return '·'
+        const parts = text.split(/[\s@._-]+/).filter(Boolean)
+        return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase()
+      }
+
+      async function signInToOffice() {
+        if (!validateAccess()) {
+          setLog('enter your work email and password')
+          if (!loginEmailInput.value.trim().includes('@')) {
+            loginEmailInput.focus()
+          } else {
+            roomPasswordInput.focus()
+          }
+          return false
+        }
+        joinAccessButton.disabled = true
+        passkeySignInButton.disabled = true
+        accessState.textContent = 'checking'
+        accessHint.textContent = 'signing in.'
+        setLog('signing in')
+        try {
+          const result = await postAuthJSON('/auth/login', {
+            email: loginEmailInput.value.trim(),
+            password: roomPasswordInput.value
+          })
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'sign-in failed')
+          }
+          authedUser = result.data
+          roomPasswordInput.value = ''
+          renderLoginMode()
+          saveCachedIdentity(authedUser.name)
+          setActiveTool('office')
+          loadArtifacts()
+          setConnectionState('idle', 'office ready')
+          setLog('office ready')
+          return true
+        } catch (error) {
+          accessState.textContent = 'locked'
+          accessHint.textContent = error.message || 'sign-in failed.'
+          setLog(error.message || 'sign-in failed')
+          return false
+        } finally {
+          validateAccess()
+          updatePasskeyButton()
+        }
+      }
+
       async function signInWithPasskey() {
         if (ws || pc || !passkeysSupported()) {
           return
@@ -8731,7 +10322,10 @@
           }
           authedUser = finish.data
           renderLoginMode()
-          joinRoom()
+          saveCachedIdentity(authedUser.name)
+          setActiveTool('office')
+          setConnectionState('idle', 'office ready')
+          setLog('office ready')
         } catch (error) {
           /* NotAllowedError is the user dismissing the prompt — not an error */
           accessHint.textContent = error?.name === 'NotAllowedError'
@@ -8788,14 +10382,22 @@
       }
 
       async function signOutOfAccount() {
+        if (appShell.classList.contains('is-in-room')) {
+          leaveRoom()
+        }
         try {
           await postAuthJSON('/auth/logout')
         } catch {
           /* the cookie clear below still happens server-side on next request */
         }
         authedUser = null
+        artifactEntries = []
         roomPasswordInput.value = ''
         renderLoginMode()
+        renderArtifacts()
+        renderAgentWorkspaces()
+        setConnectionState('idle', 'not connected')
+        setLog('team meeting')
       }
 
       /* ---------- account settings (inside the settings dialog) ---------- */
@@ -8991,11 +10593,23 @@
           roomCapacity = Number.isFinite(Number(payload?.capacity)) ? Number(payload.capacity) : roomCapacity
           occupiedSeats = Number.isFinite(Number(payload?.occupiedSeats)) ? Number(payload.occupiedSeats) : names.length
           applyParticipantMediaStates(payload?.mediaStates)
+          applyRoomRecordingState(payload?.recording)
         } else {
           occupiedSeats = names.length
         }
         updateRoomClock()
         return normalizeParticipantList(names)
+      }
+
+      function applyRoomRecordingState(recording) {
+        if (!recording || typeof recording !== 'object') {
+          updateRoomRecordingControls()
+          return
+        }
+        roomRecordingEnabled = recording.enabled !== false
+        roomRecordingUpdatedAt = recording.updatedAt || ''
+        roomRecordingUpdatedBy = recording.updatedBy || ''
+        updateRoomRecordingControls()
       }
 
       function normalizeParticipantList(names) {
@@ -9127,14 +10741,18 @@
 
       function setRoomView(inRoom) {
         appShell.classList.toggle('is-in-room', inRoom)
-        appShell.classList.toggle('is-authed', inRoom)
-        if (!inRoom) {
-          setBoardExpanded(false)
+        appShell.classList.toggle('is-authed', Boolean(authedUser))
+        if (inRoom && (appShell.dataset.tool || 'office') === 'office') {
           setActiveTool('room')
+        } else if (!inRoom) {
+          setBoardExpanded(false)
+          setActiveTool('office')
         }
         syncScoutChatToRoomView(inRoom)
         updateParticipantPreviewText()
         updateHearthParticipants()
+        updateRoomRecordingControls()
+        syncAuthenticatedShell()
       }
 
       /* ---------- tool routing (glass & ink shell) ----------
@@ -9142,9 +10760,6 @@
          meeting state machine (is-in-room / is-board-expanded / stage modes):
          the Board tool delegates to setBoardExpanded, and every existing
          expand/collapse path syncs the rail through applyToolState. */
-      const TOOL_IDS = ['room', 'chat', 'board', 'memory']
-      let lastNonBoardTool = 'room'
-
       function applyToolState(tool) {
         appShell.dataset.tool = tool
         if (tool !== 'board') {
@@ -9158,24 +10773,49 @@
         renderPipMeeting()
         if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
+          loadArtifacts()
+          if (agentToolIds.includes(tool)) {
+            renderAgentWorkspaces()
+          }
         }
       }
 
-      /* the topbar speaks for the active tool: Chat/Memory swap the meeting
-         meta for the tool's own line; the Room keeps date · elapsed · pill */
+      /* the topbar speaks for the active tool: OS app pages swap the
+         meeting meta for the tool's own line; the Room keeps date · elapsed · pill */
       function syncToolTopbar() {
-        const tool = appShell.dataset.tool || 'room'
-        const toolPage = tool === 'chat' || tool === 'memory'
+        const tool = appShell.dataset.tool || 'office'
+        const toolPage = osToolIds.includes(tool)
         const memoryTotal = memoryEntries.length
+        const artifactTotal = artifactEntries.length
+        const toolTitles = {
+          office: 'Office',
+          chat: 'Chat',
+          artifacts: 'Artifacts',
+          research: 'Research',
+          design: 'Design',
+          grill: 'Grill mode',
+          memory: 'Memory'
+        }
         topbarProjectEl.hidden = toolPage
         topbarToolTitle.hidden = !toolPage
-        topbarToolTitle.textContent = tool === 'chat' ? 'Chat' : tool === 'memory' ? 'Memory' : ''
+        topbarToolTitle.textContent = toolTitles[tool] || ''
         topbarToolMeta.hidden = !toolPage
-        topbarToolMeta.textContent = tool === 'chat'
-          ? `scout · room memory · ${memoryTotal} saved`
-          : tool === 'memory'
-            ? `room memory · ${memoryTotal} saved`
-            : ''
+        topbarToolMeta.textContent = tool === 'office'
+          ? `${authedUser?.name || 'office'} · ${artifactTotal} artifacts · ${memoryTotal} memories`
+          : tool === 'chat'
+            ? `scout · room memory · ${memoryTotal} saved`
+            : tool === 'artifacts'
+              ? `${artifactTotal} saved · assistant modes`
+              : tool === 'research'
+                ? `${agentArtifacts('research').length} briefs · saved artifacts`
+                : tool === 'design'
+                  ? `${agentArtifacts('design').length} kickoffs · saved artifacts`
+                  : tool === 'grill'
+                    ? `${agentArtifacts('grill').length} scorecards · saved artifacts`
+                    : tool === 'memory'
+                      ? `room memory · ${memoryTotal} saved`
+                      : ''
         // the meeting meta (date · elapsed · in-room pill) leaves the
         // accessibility tree with the visual hide on tool pages
         for (const node of topbarMetaEl.children) {
@@ -9195,11 +10835,14 @@
       /* on a tool page with a live connection the pill reads "memory ready";
          any honest connection trouble still wins */
       function applyStatusPillForTool() {
-        const tool = appShell.dataset.tool || 'room'
-        const toolPage = tool === 'chat' || tool === 'memory'
+        const tool = appShell.dataset.tool || 'office'
+        const toolPage = osToolIds.includes(tool)
         if (toolPage && ws?.readyState === WebSocket.OPEN) {
           statusPillEl.className = 'pill pill--idle'
           statusTextEl.textContent = 'memory ready'
+        } else if (toolPage && authedUser) {
+          statusPillEl.className = 'pill pill--idle'
+          statusTextEl.textContent = 'office ready'
         } else {
           statusPillEl.className = `pill pill--${lastConnectionState}`
           statusTextEl.textContent = lastConnectionLabel
@@ -9207,7 +10850,11 @@
       }
 
       function setActiveTool(tool) {
-        const next = TOOL_IDS.includes(tool) ? tool : 'room'
+        const next = TOOL_IDS.includes(tool) ? tool : 'office'
+        if (next === 'room' && !appShell.classList.contains('is-in-room')) {
+          joinRoom()
+          return
+        }
         if (next === 'board') {
           // gated on isBoardReady inside; syncs data-tool itself
           setBoardExpanded(true)
@@ -9220,17 +10867,475 @@
       }
       window.setActiveTool = setActiveTool
 
+      function openOfficeTool(tool) {
+        const next = String(tool || '').trim()
+        if (next === 'room') {
+          joinRoom()
+          return
+        }
+        if (next === 'board') {
+          if (isBoardReady) {
+            setBoardExpanded(true)
+          } else {
+            joinRoom()
+          }
+          return
+        }
+        setActiveTool(next)
+      }
+
+      function handleOSAssistantActions(actions) {
+        if (!Array.isArray(actions)) {
+          return
+        }
+
+        let selectedArtifactChanged = false
+        for (const action of actions) {
+          if (!action || typeof action !== 'object') {
+            continue
+          }
+          const type = String(action.type || '').trim()
+          const tool = String(action.tool || '').trim()
+          const artifactId = String(action.artifactId || '').trim()
+          if (type === 'open_tool' && TOOL_IDS.includes(tool)) {
+            if (artifactId) {
+              selectedArtifactId = artifactId
+              selectedArtifactChanged = true
+            }
+            setActiveTool(tool)
+          } else if (type === 'select_artifact' && artifactId) {
+            selectedArtifactId = artifactId
+            selectedArtifactChanged = true
+          } else if (type === 'assistant_mode') {
+            const mode = String(action.mode || '').trim()
+            if (['chat', 'artifacts', ...agentToolIds].includes(mode)) {
+              setOSAssistantMode(mode)
+            }
+          }
+        }
+
+        if (selectedArtifactChanged) {
+          renderArtifacts()
+        }
+      }
+
+      function normalizeAgentMode(mode) {
+        const next = String(mode || '').trim()
+        return agentToolIds.includes(next) ? next : ''
+      }
+
+      function agentStatusElement(mode) {
+        return document.querySelector(`[data-agent-status="${mode}"]`)
+      }
+
+      function agentOutputElement(mode) {
+        return document.querySelector(`[data-agent-output="${mode}"]`)
+      }
+
+      function agentInputElement(mode) {
+        return document.querySelector(`[data-agent-input="${mode}"]`)
+      }
+
+      function setAgentStatus(mode, text) {
+        const status = agentStatusElement(mode)
+        if (status) {
+          status.textContent = text
+        }
+      }
+
+      function applyAgentTemplate(mode, text) {
+        mode = normalizeAgentMode(mode)
+        const input = mode ? agentInputElement(mode) : null
+        if (!input) {
+          return
+        }
+        input.value = String(text || '').trim()
+        input.focus()
+      }
+
+      async function runAgentTool(event) {
+        event.preventDefault()
+        const form = event.currentTarget
+        const mode = normalizeAgentMode(form?.dataset?.agentToolForm)
+        const input = mode ? agentInputElement(mode) : null
+        const submit = mode ? form.querySelector(`[data-agent-submit="${mode}"]`) : null
+        const output = mode ? agentOutputElement(mode) : null
+        const query = String(input?.value || '').trim()
+        if (!mode || !query) {
+          input?.focus()
+          return
+        }
+
+        if (submit) submit.disabled = true
+        setAgentStatus(mode, 'working')
+        if (output) output.textContent = `${mode} mode is working...`
+        try {
+          const response = await fetch('/assistant/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, mode })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || `${mode} app failed`)
+          }
+          if (output) {
+            output.textContent = payload.answer || 'No output yet.'
+          }
+          if (payload.artifact) {
+            addArtifactEntry(payload.artifact, { select: false })
+            setAgentStatus(mode, 'artifact saved')
+            showToast({ text: `${mode} artifact saved`, kind: 'done' })
+          } else {
+            setAgentStatus(mode, 'complete')
+          }
+          handleOSAssistantActions(payload.actions)
+        } catch (error) {
+          setAgentStatus(mode, 'failed')
+          if (output) output.textContent = error.message || `${mode} app failed`
+          showToast({ text: error.message || `${mode} app failed`, kind: 'error' })
+        } finally {
+          if (submit) submit.disabled = false
+        }
+      }
+
+      function agentArtifacts(mode) {
+        mode = normalizeAgentMode(mode)
+        if (!mode) {
+          return []
+        }
+        return artifactEntries.filter(entry => String(entry?.metadata?.mode || '').trim() === mode)
+      }
+
+      function renderAgentWorkspaces() {
+        for (const mode of agentToolIds) {
+          renderAgentWorkspace(mode)
+        }
+      }
+
+      function renderAgentWorkspace(mode) {
+        mode = normalizeAgentMode(mode)
+        if (!mode) {
+          return
+        }
+        const list = document.querySelector(`[data-agent-artifacts="${mode}"]`)
+        const output = agentOutputElement(mode)
+        if (!list) {
+          return
+        }
+        const artifacts = agentArtifacts(mode).slice().reverse()
+        if (!artifacts.length) {
+          list.replaceChildren()
+          if (output && !output.dataset.generated) {
+            output.textContent = mode === 'grill' ? 'No scorecard yet.' : `No ${mode} artifact yet.`
+          }
+          return
+        }
+        if (output && !output.dataset.generated) {
+          output.textContent = artifacts[0].text || ''
+        }
+        list.replaceChildren(...artifacts.slice(0, 4).map(renderAgentArtifactLink))
+      }
+
+      function renderAgentArtifactLink(entry) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'agent-artifact-link'
+        button.addEventListener('click', () => {
+          selectedArtifactId = entry.id || ''
+          setActiveTool('artifacts')
+        })
+
+        const title = document.createElement('span')
+        title.className = 'agent-artifact-link__title'
+        title.textContent = entry.metadata?.title || artifactModeLabel(entry)
+        const meta = document.createElement('span')
+        meta.className = 'agent-artifact-link__meta'
+        meta.textContent = artifactTimeLabel(entry)
+        button.append(title, meta)
+        return button
+      }
+
+      function openOSAssistant(mode) {
+        if (!osAssistantAvailable()) {
+          showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
+          return
+        }
+        setOSAssistantMode(mode || 'chat')
+        setOSAssistantOpen(true)
+        window.requestAnimationFrame(() => osAssistantInput?.focus())
+      }
+
+      function setOSAssistantOpen(open) {
+        if (open && !osAssistantAvailable()) {
+          return
+        }
+        if (!osAssistant || (osAssistant.hidden && open)) {
+          return
+        }
+        osAssistant.classList.toggle('is-open', Boolean(open))
+        osAssistantToggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+      }
+
+      function osAssistantAvailable() {
+        return Boolean(authedUser) && !appShell.classList.contains('is-in-room')
+      }
+
+      function syncOSAssistantAvailability() {
+        if (!osAssistant) {
+          return
+        }
+        const available = osAssistantAvailable()
+        osAssistant.hidden = !available
+        osAssistantToggle.disabled = !available
+        osAssistantInput.disabled = !available
+        osAssistantSend.disabled = !available
+        if (!available) {
+          stopOSAssistantVoice()
+          setOSAssistantOpen(false)
+        }
+        updateOSAssistantVoiceControls()
+      }
+
+      function setOSAssistantMode(mode) {
+        const next = ['chat', 'artifacts', 'research', 'design', 'grill'].includes(mode) ? mode : 'chat'
+        osAssistantMode = next
+        osAssistantModeButtons.forEach(button => {
+          button.setAttribute('aria-pressed', button.dataset.assistantMode === next ? 'true' : 'false')
+        })
+        updateOSAssistantModeLabel()
+        const placeholders = {
+          chat: 'ask the office...',
+          artifacts: 'turn this into an artifact...',
+          research: 'research this question...',
+          design: 'kick off design work...',
+          grill: 'paste the pitch or ask for the first question...'
+        }
+        osAssistantInput.placeholder = placeholders[next] || placeholders.chat
+      }
+
+      function updateOSAssistantModeLabel() {
+        const labels = {
+          chat: 'chat mode',
+          artifacts: 'artifact mode',
+          research: 'research mode',
+          design: 'design studio',
+          grill: 'grill mode'
+        }
+        if (osAssistantModeLabel) {
+          const base = labels[osAssistantMode] || 'chat mode'
+          osAssistantModeLabel.textContent = osAssistantVoiceActive ? `listening · ${base}` : base
+        }
+      }
+
+      function appendOSAssistantMessage(kind, text) {
+        if (!osAssistantLog) return
+        const message = document.createElement('p')
+        message.className = 'os-assistant__msg'
+        const label = document.createElement('b')
+        label.textContent = kind
+        const body = document.createElement('span')
+        body.textContent = text
+        message.append(label, body)
+        osAssistantLog.appendChild(message)
+        while (osAssistantLog.children.length > 16) {
+          osAssistantLog.firstElementChild?.remove()
+        }
+        osAssistantLog.scrollTop = osAssistantLog.scrollHeight
+      }
+
+      async function sendOSAssistantQuery(event) {
+        event.preventDefault()
+        if (!osAssistantAvailable()) {
+          return
+        }
+        const query = osAssistantInput.value.trim()
+        if (!query) {
+          osAssistantInput.focus()
+          return
+        }
+        osAssistantInput.value = ''
+        await submitOSAssistantQuery(query, { source: 'text' })
+      }
+
+      async function submitOSAssistantQuery(query, options = {}) {
+        if (!osAssistantAvailable()) {
+          return
+        }
+        query = String(query || '').trim()
+        if (!query) {
+          return
+        }
+        osAssistantSend.disabled = true
+        osAssistantVoice.disabled = !OSAssistantSpeechRecognition
+        appendOSAssistantMessage('you', query)
+        appendOSAssistantMessage('assistant', `${osAssistantMode} mode is thinking...`)
+        try {
+          const response = await fetch('/assistant/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, mode: osAssistantMode })
+          })
+          const payload = await response.json().catch(() => ({}))
+          const last = osAssistantLog.lastElementChild
+          if (last?.querySelector('b')?.textContent === 'assistant') {
+            last.remove()
+          }
+          if (!response.ok) {
+            throw new Error(payload.error || 'assistant query failed')
+          }
+          appendOSAssistantMessage('assistant', payload.answer || 'no answer yet')
+          if (payload.artifact) {
+            addArtifactEntry(payload.artifact)
+            showToast({ text: 'artifact saved', kind: 'done' })
+          }
+          handleOSAssistantActions(payload.actions)
+        } catch (error) {
+          appendOSAssistantMessage('error', error.message || 'assistant query failed')
+        } finally {
+          osAssistantSend.disabled = false
+          updateOSAssistantVoiceControls()
+          if (options.source !== 'voice') {
+            osAssistantInput.focus()
+          }
+        }
+      }
+
+      function updateOSAssistantVoiceControls() {
+        const available = osAssistantAvailable()
+        const supported = available && Boolean(OSAssistantSpeechRecognition)
+        osAssistant.classList.toggle('is-listening', osAssistantVoiceActive)
+        osAssistantVoice.disabled = !supported
+        osAssistantVoice.setAttribute('aria-pressed', osAssistantVoiceActive ? 'true' : 'false')
+        if (!available) {
+          osAssistantVoice.setAttribute('aria-label', 'Room uses shared Scout')
+          osAssistantVoice.title = 'Room uses shared Scout'
+        } else if (!supported) {
+          osAssistantVoice.setAttribute('aria-label', 'Voice assistant unavailable')
+          osAssistantVoice.title = 'Voice assistant unavailable'
+        } else if (osAssistantVoiceActive) {
+          osAssistantVoice.setAttribute('aria-label', 'Stop voice assistant')
+          osAssistantVoice.title = 'Stop voice assistant'
+        } else {
+          osAssistantVoice.setAttribute('aria-label', 'Start voice assistant')
+          osAssistantVoice.title = 'Start voice assistant'
+        }
+        updateOSAssistantModeLabel()
+      }
+
+      function toggleOSAssistantVoice() {
+        if (osAssistantVoiceActive) {
+          stopOSAssistantVoice()
+          return
+        }
+        startOSAssistantVoice()
+      }
+
+      function startOSAssistantVoice() {
+        if (!osAssistantAvailable()) {
+          return
+        }
+        if (!OSAssistantSpeechRecognition) {
+          appendOSAssistantMessage('error', 'voice input is not available in this browser')
+          return
+        }
+        setOSAssistantOpen(true)
+        osAssistantVoiceActive = true
+        updateOSAssistantVoiceControls()
+        startOSAssistantVoiceRecognition()
+      }
+
+      function startOSAssistantVoiceRecognition() {
+        if (!osAssistantVoiceActive || osAssistantVoiceRecognizer) {
+          return
+        }
+        const recognizer = new OSAssistantSpeechRecognition()
+        osAssistantVoiceRecognizer = recognizer
+        recognizer.continuous = true
+        recognizer.interimResults = true
+        recognizer.lang = navigator.language || 'en-US'
+        recognizer.onresult = event => {
+          let finalText = ''
+          let interimText = ''
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const transcript = event.results[index]?.[0]?.transcript || ''
+            if (event.results[index].isFinal) {
+              finalText += `${transcript} `
+            } else {
+              interimText += transcript
+            }
+          }
+          if (interimText.trim()) {
+            osAssistantInput.value = interimText.trim()
+          }
+          finalText = finalText.trim()
+          if (finalText) {
+            osAssistantInput.value = ''
+            queueOSAssistantVoiceQuery(finalText)
+          }
+        }
+        recognizer.onerror = event => {
+          const code = String(event.error || '')
+          if (code === 'not-allowed' || code === 'service-not-allowed') {
+            stopOSAssistantVoice()
+            appendOSAssistantMessage('error', 'voice permission was not allowed')
+            return
+          }
+          if (code && code !== 'no-speech' && code !== 'aborted') {
+            appendOSAssistantMessage('error', `voice input stopped: ${code}`)
+          }
+        }
+        recognizer.onend = () => {
+          osAssistantVoiceRecognizer = null
+          if (osAssistantVoiceActive) {
+            window.clearTimeout(osAssistantVoiceRestartTimer)
+            osAssistantVoiceRestartTimer = window.setTimeout(startOSAssistantVoiceRecognition, 280)
+          }
+        }
+        try {
+          recognizer.start()
+        } catch (error) {
+          osAssistantVoiceRecognizer = null
+          stopOSAssistantVoice()
+          appendOSAssistantMessage('error', error.message || 'voice input could not start')
+        }
+      }
+
+      function queueOSAssistantVoiceQuery(text) {
+        osAssistantVoiceQueue = osAssistantVoiceQueue
+          .catch(() => {})
+          .then(() => submitOSAssistantQuery(text, { source: 'voice' }))
+      }
+
+      function stopOSAssistantVoice() {
+        osAssistantVoiceActive = false
+        window.clearTimeout(osAssistantVoiceRestartTimer)
+        osAssistantVoiceRestartTimer = 0
+        const recognizer = osAssistantVoiceRecognizer
+        osAssistantVoiceRecognizer = null
+        if (recognizer) {
+          recognizer.onend = null
+          try {
+            recognizer.stop()
+          } catch {
+            try {
+              recognizer.abort()
+            } catch {
+              // Already stopped.
+            }
+          }
+        }
+        updateOSAssistantVoiceControls()
+      }
+
       /* ---------- PiP meeting (kit meeting/PiPMeeting) ----------
          The meeting follows you into Chat/Memory as a draggable chrome-glass
          window. Tiles reuse the board-strip pattern; their <video> elements
          join auxiliaryVideoPlaybackTargets() so the existing repair machinery
          keeps them alive. The Board tool keeps its own dock strip instead. */
-      const pipVideoTilesByParticipant = new Map()
-      let pipRenderTimer = 0
-
       function pipMeetingActive() {
         const tool = appShell.dataset.tool || 'room'
-        return Boolean(localStream) && (tool === 'chat' || tool === 'memory')
+        return Boolean(localStream) && (tool === 'chat' || tool === 'artifacts' || agentToolIds.includes(tool) || tool === 'memory')
       }
 
       function renderPipMeeting() {
@@ -10168,8 +12273,10 @@
 
         leaveButton.disabled = false
         screenShareButton.disabled = false
+        recordMeetingButton.disabled = false
         archiveMeetingButton.disabled = false
         canEditBoard = true
+        updateRoomRecordingControls()
         updateBoardControls()
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
         publishParticipantMediaState()
@@ -13149,15 +15256,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           downloadUrl: result.downloadUrl,
           createdAt: result.archivedAt || new Date().toISOString()
         })
+        if (result.artifact) {
+          addArtifactEntry(result.artifact, { select: false })
+        }
         const archiveLink = { href: result.downloadUrl, text: 'Download archive' }
         if (result.email?.sent) {
-          showToast({ text: 'meeting notes emailed', kind: 'done', link: archiveLink })
+          showToast({ text: 'meeting artifact saved and notes emailed', kind: 'done', link: archiveLink })
         } else if (result.email?.skipped) {
-          showToast({ text: 'meeting notes generated', kind: 'note', link: archiveLink })
+          showToast({ text: 'meeting artifact saved', kind: 'done', link: archiveLink })
         } else if (result.email?.error) {
-          showToast({ text: 'notes generated, email failed', kind: 'error', link: archiveLink })
+          showToast({ text: 'artifact saved, email failed', kind: 'error', link: archiveLink })
         } else {
-          showToast({ text: 'meeting archive ready', kind: 'done', link: archiveLink })
+          showToast({ text: 'meeting artifact ready', kind: 'done', link: archiveLink })
         }
       }
 
@@ -13285,9 +15395,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function updateScoutChatAvailability() {
         const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
-        scoutChatInput.disabled = !joined
-        scoutChatSend.disabled = !joined
-        scoutChatHint.hidden = joined
+        const available = joined || Boolean(authedUser)
+        scoutChatInput.disabled = !available
+        scoutChatSend.disabled = !available
+        scoutChatHint.hidden = available
+        if (!available) {
+          scoutChatHint.textContent = 'sign in to ask Scout'
+        }
       }
 
       function syncScoutChatToRoomView(inRoom) {
@@ -13311,14 +15425,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return false
         }
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-          setLog('join the room to ask Scout')
-          return false
+          sendScoutChatViaOffice(trimmed)
+          return true
         }
         ws.send(JSON.stringify({
           event: 'scout_chat',
           data: JSON.stringify({ text: trimmed })
         }))
         return true
+      }
+
+      async function sendScoutChatViaOffice(text) {
+        const ts = new Date().toISOString()
+        appendScoutChatNode(scoutChatMessageNode('user', text, ts))
+        updateChatThreadItem(text, ts)
+        showScoutChatThinking('thinking...')
+        try {
+          const response = await fetch('/assistant/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: text, mode: 'chat' })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || 'assistant query failed')
+          }
+          hideScoutChatThinking()
+          const answer = scoutVoice(payload.answer || 'no answer yet')
+          appendScoutChatNode(scoutChatMessageNode('scout', answer, new Date().toISOString()))
+          updateChatThreadItem(answer, new Date().toISOString())
+        } catch (error) {
+          hideScoutChatThinking()
+          const message = error.message || 'assistant query failed'
+          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
+          updateChatThreadItem(message, new Date().toISOString())
+        }
       }
 
       function sendScoutChatFromForm(event) {
@@ -13493,6 +15634,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           showToast({ text: 'room link copied', kind: 'note' })
           setLog('room link copied')
         }
+      }
+
+      function updateRoomRecordingControls() {
+        const inRoom = appShell.classList.contains('is-in-room')
+        const connected = Boolean(ws && ws.readyState === WebSocket.OPEN)
+        const disabled = !inRoom || !connected
+        const label = roomRecordingEnabled ? 'Recording' : 'Record off'
+        const action = roomRecordingEnabled ? 'Pause transcript recording' : 'Resume transcript recording'
+        const stateClass = roomRecordingEnabled ? 'is-recording' : 'is-paused'
+        const staleClass = roomRecordingEnabled ? 'is-paused' : 'is-recording'
+
+        recordMeetingButton.disabled = disabled
+        recordMeetingButton.setAttribute('aria-pressed', roomRecordingEnabled ? 'true' : 'false')
+        recordMeetingButton.setAttribute('aria-label', action)
+        recordMeetingButton.title = action
+        recordMeetingButton.classList.toggle(stateClass, true)
+        recordMeetingButton.classList.toggle(staleClass, false)
+        recordMeetingLabel.textContent = label
+
+        boardDockRecord.disabled = disabled
+        boardDockRecord.setAttribute('aria-pressed', roomRecordingEnabled ? 'true' : 'false')
+        boardDockRecord.setAttribute('aria-label', action)
+        boardDockRecord.title = roomRecordingUpdatedBy
+          ? `${label.toLowerCase()} · ${roomRecordingUpdatedBy}`
+          : label.toLowerCase()
+        boardDockRecord.classList.toggle(stateClass, true)
+        boardDockRecord.classList.toggle(staleClass, false)
+      }
+
+      function toggleRoomRecording() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          const message = 'join the room before changing recording.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
+
+        ws.send(JSON.stringify({
+          event: 'set_recording',
+          data: JSON.stringify({ enabled: !roomRecordingEnabled })
+        }))
       }
 
       function archiveMeeting() {
@@ -14195,6 +16377,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         boardDockShare.disabled = screenShareButton.disabled
         boardDockShare.setAttribute('aria-pressed', screenShareStream ? 'true' : 'false')
         boardDockShare.title = screenShareStream ? 'stop sharing' : 'share screen'
+        updateRoomRecordingControls()
         boardDockArchive.disabled = archiveMeetingButton.disabled
       }
 
@@ -14907,9 +17090,219 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return remoteNames.length === 1 ? remoteNames[0] : ''
       }
 
+      async function loadArtifacts() {
+        if (!authedUser) {
+          artifactEntries = []
+          renderArtifacts()
+          return
+        }
+        try {
+          const response = await fetch('/artifacts', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          artifactEntries = Array.isArray(payload?.artifacts) ? payload.artifacts : []
+          ensureSelectedArtifact()
+          renderArtifacts()
+        } catch {
+          // Artifacts are additive; the assistant and memory views still work
+          // if this refresh misses during a reconnect.
+        }
+      }
+
+      function addArtifactEntry(entry, options = {}) {
+        if (!entry?.text || entry.kind !== 'os_artifact') {
+          return
+        }
+        const id = String(entry.id || '').trim()
+        if (id) {
+          artifactEntries = artifactEntries.filter(candidate => candidate.id !== id)
+        }
+        artifactEntries.push(entry)
+        if (id && options.select !== false) {
+          selectedArtifactId = id
+        }
+        if (artifactEntries.length > 100) {
+          artifactEntries = artifactEntries.slice(artifactEntries.length - 100)
+        }
+        ensureSelectedArtifact()
+        renderArtifacts()
+      }
+
+      function ensureSelectedArtifact() {
+        if (selectedArtifactId && artifactEntries.some(entry => entry.id === selectedArtifactId)) {
+          return
+        }
+        selectedArtifactId = artifactEntries.length ? artifactEntries[artifactEntries.length - 1].id : ''
+      }
+
+      function selectedArtifact() {
+        return artifactEntries.find(entry => entry.id === selectedArtifactId) || null
+      }
+
+      function selectArtifact(id) {
+        selectedArtifactId = String(id || '')
+        renderArtifacts()
+      }
+
+      function renderArtifacts() {
+        ensureSelectedArtifact()
+        syncToolTopbar()
+        updateOfficeDashboard()
+        renderAgentWorkspaces()
+        if (!artifactList) {
+          return
+        }
+        if (!artifactEntries.length) {
+          const empty = document.createElement('article')
+          empty.className = 'artifact-item'
+          const top = document.createElement('div')
+          top.className = 'artifact-item__top'
+          const mode = document.createElement('span')
+          mode.className = 'artifact-item__mode'
+          mode.textContent = 'ready'
+          const time = document.createElement('span')
+          time.className = 'artifact-item__time'
+          time.textContent = 'now'
+          top.append(mode, time)
+          const title = document.createElement('h3')
+          title.className = 'artifact-item__title'
+          title.textContent = 'No artifacts yet'
+          const body = document.createElement('p')
+          body.className = 'artifact-item__body'
+          body.textContent = 'Use artifact, research, design, or grill mode in the assistant to create durable operating outputs.'
+          empty.append(top, title, body)
+          artifactList.replaceChildren(empty)
+          renderArtifactDetail()
+          return
+        }
+        artifactList.replaceChildren(...artifactEntries.slice().reverse().map(renderArtifactEntry))
+        renderArtifactDetail()
+      }
+
+      function renderArtifactEntry(entry) {
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = 'artifact-item'
+        item.classList.toggle('is-selected', entry.id === selectedArtifactId)
+        item.addEventListener('click', () => selectArtifact(entry.id))
+
+        const top = document.createElement('div')
+        top.className = 'artifact-item__top'
+        const mode = document.createElement('span')
+        mode.className = 'artifact-item__mode'
+        mode.textContent = artifactModeLabel(entry)
+        const time = document.createElement('span')
+        time.className = 'artifact-item__time'
+        time.textContent = artifactTimeLabel(entry)
+        top.append(mode, time)
+
+        const title = document.createElement('h3')
+        title.className = 'artifact-item__title'
+        title.textContent = entry.metadata?.title || artifactModeLabel(entry)
+
+        const body = document.createElement('p')
+        body.className = 'artifact-item__body'
+        body.textContent = entry.text || ''
+
+        item.append(top, title, body)
+        return item
+      }
+
+      function renderArtifactDetail() {
+        const artifact = selectedArtifact()
+        const disabled = !artifact
+        artifactTitleInput.disabled = disabled
+        artifactBodyInput.disabled = disabled
+        artifactCopyButton.disabled = disabled
+        artifactSaveButton.disabled = disabled
+        artifactDetailMode.textContent = artifact ? artifactModeLabel(artifact) : 'artifact'
+        artifactDetailStatus.textContent = artifact ? artifactTimeLabel(artifact) : 'no selection'
+        artifactTitleInput.value = artifact?.metadata?.title || ''
+        artifactBodyInput.value = artifact?.text || ''
+      }
+
+      function setArtifactDetailStatus(text, transient = false) {
+        artifactDetailStatus.textContent = text
+        window.clearTimeout(artifactStatusTimer)
+        if (transient) {
+          artifactStatusTimer = window.setTimeout(renderArtifactDetail, 1400)
+        }
+      }
+
+      async function saveSelectedArtifact(event) {
+        event.preventDefault()
+        const artifact = selectedArtifact()
+        if (!artifact) {
+          return
+        }
+        artifactSaveButton.disabled = true
+        setArtifactDetailStatus('saving')
+        try {
+          const response = await fetch('/artifacts', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: artifact.id,
+              title: artifactTitleInput.value,
+              text: artifactBodyInput.value
+            })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || 'artifact save failed')
+          }
+          if (payload.artifact) {
+            addArtifactEntry(payload.artifact, { select: true })
+          }
+          setArtifactDetailStatus(payload.updated ? 'saved' : 'unchanged', true)
+          showToast({ text: payload.updated ? 'artifact saved' : 'artifact unchanged', kind: 'done' })
+        } catch (error) {
+          setArtifactDetailStatus('save failed', true)
+          showToast({ text: error.message || 'artifact save failed', kind: 'error' })
+        } finally {
+          artifactSaveButton.disabled = false
+        }
+      }
+
+      async function copySelectedArtifact() {
+        const artifact = selectedArtifact()
+        if (!artifact) {
+          return
+        }
+        const title = artifactTitleInput.value.trim()
+        const body = artifactBodyInput.value.trim()
+        const text = title ? `${title}\n\n${body}` : body
+        try {
+          await navigator.clipboard.writeText(text)
+          setArtifactDetailStatus('copied', true)
+          showToast({ text: 'artifact copied', kind: 'note' })
+        } catch {
+          setArtifactDetailStatus('copy failed', true)
+          showToast({ text: 'artifact copy failed', kind: 'error' })
+        }
+      }
+
+      function artifactModeLabel(entry) {
+        const mode = String(entry?.metadata?.mode || '').trim()
+        return mode ? `${mode} artifact` : 'artifact'
+      }
+
+      function artifactTimeLabel(entry) {
+        const createdAt = entry?.createdAt ? new Date(entry.createdAt) : null
+        if (!createdAt || Number.isNaN(createdAt.valueOf())) {
+          return 'now'
+        }
+        return `${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`
+      }
+
       function addMemoryEntry(entry) {
         if (!entry?.text) {
           return
+        }
+        if (entry.kind === 'os_artifact') {
+          addArtifactEntry(entry)
         }
 
         memoryEntries.push(entry)
@@ -14923,6 +17316,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (memoryCount) {
           memoryCount.textContent = `${memoryEntries.length} saved`
         }
+        updateOfficeDashboard()
         syncToolTopbar()
         if (memoryEntries.length === 0) {
           const empty = document.createElement('article')
@@ -14942,7 +17336,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderMemoryEntry(entry) {
         const item = document.createElement('article')
-        const kindClass = ['answer', 'archive', 'brain', 'board_update'].includes(entry.kind) ? entry.kind : ''
+        const kindClass = ['answer', 'archive', 'brain', 'board_update', 'os_artifact'].includes(entry.kind) ? entry.kind : ''
         item.className = `memory-item ${kindClass}`.trim()
 
         const meta = document.createElement('span')
@@ -14985,6 +17379,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (entry.kind === 'board_update') {
           return `board · ${time}`
+        }
+        if (entry.kind === 'os_artifact') {
+          return `artifact · ${time}`
         }
         return `transcript · ${time}`
       }
@@ -15252,6 +17649,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
         updateBoardEmptyState()
         renderBoardPreview(changes)
+        updateOfficeDashboard()
       }
 
       function renderBoardPreview(changes = { moved: new Set() }) {
@@ -16389,10 +18787,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         micSelect.disabled = true
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
         screenShareButton.disabled = true
+        recordMeetingButton.disabled = true
         archiveMeetingButton.disabled = true
         setScreenShareButtonState(false)
         archiveMeetingButton.textContent = 'Send notes'
         closeAudioSettings({ restoreFocus: false })
+        updateRoomRecordingControls()
         updateBoardDockControls()
 
         const socket = ws
@@ -16477,6 +18877,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         lastConnectionState = state
         lastConnectionLabel = label
         applyStatusPillForTool()
+        updateOfficeDashboard()
         if (state === 'listening') {
           brandMarkEl.classList.add('is-listening')
         } else {
@@ -16502,6 +18903,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : 'waiting room'
         boardPreviewState.textContent = boardState.textContent
         updateBoardDockControls()
+        updateOfficeDashboard()
+      }
+
+      function updateOfficeDashboard() {
+        if (officeArtifactStat) {
+          officeArtifactStat.textContent = String(artifactEntries.length)
+        }
+        if (officeMemoryStat) {
+          officeMemoryStat.textContent = String(memoryEntries.length)
+        }
+        if (officeBoardStat) {
+          officeBoardStat.textContent = String(cards.length)
+        }
+        if (officeRoomStat) {
+          officeRoomStat.textContent = appShell.classList.contains('is-in-room')
+            ? 'live'
+            : authedUser ? 'ready' : 'locked'
+        }
       }
 
       // Recognition flare: a one-shot 1.6s live-green flare + drop-shadow on

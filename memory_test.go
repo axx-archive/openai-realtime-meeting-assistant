@@ -130,3 +130,80 @@ func TestMeetingMemoryLoadsLargeEntries(t *testing.T) {
 		t.Fatalf("entries=%d, want 1", len(entries))
 	}
 }
+
+func TestMeetingMemoryPersistsOSArtifactsWithStructure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	body := "Research brief\n\n1. Evidence lane\n2. Contrarian lane"
+	entry, appended, err := store.appendOSArtifact("artifact-1", body, map[string]string{
+		"mode":  "research",
+		"title": "Research brief",
+	})
+	if err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	}
+	if !appended {
+		t.Fatal("appendOSArtifact appended=false, want true")
+	}
+	if entry.Kind != meetingMemoryKindOSArtifact {
+		t.Fatalf("kind=%q, want %q", entry.Kind, meetingMemoryKindOSArtifact)
+	}
+	if !strings.Contains(entry.Text, "\n\n1. Evidence lane") {
+		t.Fatalf("artifact text lost structure: %q", entry.Text)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	entries := reloaded.snapshot(10)
+	if len(entries) != 1 || entries[0].Kind != meetingMemoryKindOSArtifact {
+		t.Fatalf("entries=%v, want one OS artifact", entries)
+	}
+}
+
+func TestMeetingMemoryUpdatesOSArtifactAndReloads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, appended, err := store.appendOSArtifact("artifact-1", "Draft body", map[string]string{
+		"mode":  "design",
+		"title": "Draft",
+	}); err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	} else if !appended {
+		t.Fatal("appendOSArtifact appended=false, want true")
+	}
+
+	updated, changed, err := store.updateOSArtifact("artifact-1", "Edited title", "Edited body\n\nKeep structure.", "AJ")
+	if err != nil {
+		t.Fatalf("updateOSArtifact: %v", err)
+	}
+	if !changed {
+		t.Fatal("updateOSArtifact changed=false, want true")
+	}
+	if updated.Text != "Edited body\n\nKeep structure." {
+		t.Fatalf("updated text=%q, want edited structured body", updated.Text)
+	}
+	if updated.Metadata["title"] != "Edited title" || updated.Metadata["updatedBy"] != "AJ" || updated.Metadata["updatedAt"] == "" {
+		t.Fatalf("updated metadata=%v, want title/updater/timestamp", updated.Metadata)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	entries := reloaded.snapshot(10)
+	if len(entries) != 1 {
+		t.Fatalf("entries=%d, want 1", len(entries))
+	}
+	if entries[0].Text != updated.Text || entries[0].Metadata["title"] != "Edited title" {
+		t.Fatalf("reloaded entry=%#v, want edited artifact", entries[0])
+	}
+}

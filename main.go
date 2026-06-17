@@ -256,6 +256,8 @@ func main() {
 	// websocket handler
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
+	http.HandleFunc("/assistant/query", assistantQueryHandler)
+	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
@@ -352,6 +354,133 @@ func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		log.Errorf("Failed to encode client config: %v", err)
 	}
+}
+
+func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		Query string `json:"query"`
+		Mode  string `json:"mode"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read assistant query")
+		return
+	}
+
+	query := strings.TrimSpace(payload.Query)
+	if query == "" {
+		writeAuthError(w, http.StatusBadRequest, "query is required")
+		return
+	}
+
+	mode := normalizeOSAssistantMode(payload.Mode)
+	result, err := kanbanApp.resolveAssistantQueryContext(r.Context(), query, nil)
+	if err != nil {
+		log.Errorf("Failed to answer OS assistant query for %s: %v", user.Email, err)
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result = buildOSAssistantModeAnswer(mode, result, kanbanApp.snapshotState(), kanbanApp.memorySnapshotForClients(12))
+
+	response := map[string]any{
+		"ok":           true,
+		"query":        result.query,
+		"answer":       result.answer,
+		"source":       result.source,
+		"matchedCards": result.matchedCards,
+		"matches":      result.matches,
+		"context":      result.contextSize,
+		"mode":         mode,
+		"user":         user.Name,
+	}
+	var artifact meetingMemoryEntry
+	if mode != "chat" {
+		var appended bool
+		var artifactErr error
+		artifact, appended, artifactErr = kanbanApp.createOSArtifact(mode, result.query, result.answer, user.Name)
+		if artifactErr != nil {
+			log.Errorf("Failed to save OS artifact for %s: %v", user.Email, artifactErr)
+			response["artifactSaved"] = false
+			response["artifactError"] = artifactErr.Error()
+		} else if strings.TrimSpace(artifact.ID) != "" {
+			response["artifact"] = artifact
+			response["artifactSaved"] = appended
+		}
+	}
+	response["actions"] = kanbanApp.osAssistantActions(result.query, mode, artifact)
+
+	writeAuthJSON(w, http.StatusOK, response)
+}
+
+func artifactsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+
+	if r.Method == http.MethodPatch {
+		payload := struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+			Text  string `json:"text"`
+		}{}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read artifact update")
+			return
+		}
+		artifact, updated, err := kanbanApp.updateOSArtifact(payload.ID, payload.Title, payload.Text, user.Name)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeAuthError(w, status, err.Error())
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"updated":  updated,
+			"artifact": artifact,
+		})
+		return
+	}
+
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"artifacts": kanbanApp.osArtifactsSnapshot(100),
+	})
 }
 
 func publicAssetHandler(w http.ResponseWriter, r *http.Request) {
@@ -1984,6 +2113,20 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			broadcastKanbanEvent("meeting_archived", result)
 			broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+		case "set_recording":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before changing recording.")
+				continue
+			}
+			payload := struct {
+				Enabled bool `json:"enabled"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
+				log.Errorf("Failed to unmarshal recording state: %v", err)
+				continue
+			}
+			snapshot := kanbanApp.setTranscriptRecording(payload.Enabled, currentParticipantName())
+			broadcastKanbanEvent("participants", snapshot)
 		case "participant_media_state":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")

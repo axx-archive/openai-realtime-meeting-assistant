@@ -132,6 +132,78 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	}
 }
 
+func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		`<main id="appShell" data-tool="office">`,
+		`id="officeTool" class="office-tool"`,
+		"business intelligence operating system",
+		"data-open-assistant-mode=\"grill\"",
+		`data-office-tool="research"`,
+		`data-office-tool="design"`,
+		`data-office-tool="grill"`,
+		`id="osAssistant" class="os-assistant"`,
+		"function signInToOffice()",
+		"fetch('/assistant/query'",
+		"fetch('/artifacts'",
+		`id="artifactsTool" class="artifacts-tool"`,
+		`id="artifactDetailForm" class="artifact-detail"`,
+		`id="researchTool" class="agent-tool" data-agent-tool="research"`,
+		`id="designTool" class="agent-tool" data-agent-tool="design"`,
+		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
+		`data-tool="artifacts"`,
+		"function renderArtifacts()",
+		"async function runAgentTool(event)",
+		"function renderAgentWorkspaces()",
+		"data-agent-tool-form=\"research\"",
+		"data-agent-tool-form=\"design\"",
+		"data-agent-tool-form=\"grill\"",
+		"function addArtifactEntry(entry, options = {})",
+		"function renderArtifactDetail()",
+		"async function saveSelectedArtifact(event)",
+		"addArtifactEntry(result.artifact, { select: false })",
+		"meeting artifact saved",
+		"method: 'PATCH'",
+		"function handleOSAssistantActions(actions)",
+		"handleOSAssistantActions(payload.actions)",
+		"type === 'open_tool'",
+		"type === 'select_artifact'",
+		`id="osAssistantVoice" class="os-assistant__voice"`,
+		"window.SpeechRecognition || window.webkitSpeechRecognition",
+		"function toggleOSAssistantVoice()",
+		"function startOSAssistantVoiceRecognition()",
+		"function submitOSAssistantQuery(query, options = {})",
+		"function syncOSAssistantAvailability()",
+		"#appShell.is-in-room ~ .os-assistant",
+		`id="recordMeeting" class="btn btn--ghost btn--recording is-recording"`,
+		"event: 'set_recording'",
+		"function updateRoomRecordingControls()",
+		"roomRecordingEnabled = recording.enabled !== false",
+		"const agentToolIds = ['research', 'design', 'grill']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
+		"appShell.classList.toggle('is-authed', Boolean(authedUser))",
+		"setActiveTool('office')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing BI OS dashboard or assistant marker %q", want)
+		}
+	}
+
+	for _, unwanted := range []string{
+		"mode === 'authed' ? `Enter as",
+		"renderLoginMode()\n          joinRoom()",
+	} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("index.html still couples sign-in directly to room entry via %q", unwanted)
+		}
+	}
+}
+
 // TestMediaFixesBehaveCorrectly executes the shipped media helpers extracted from
 // index.html against the exact bug + regression scenarios for the Safari flicker,
 // mobile orientation-swap, and screen-share-for-all fixes. This is behavioral

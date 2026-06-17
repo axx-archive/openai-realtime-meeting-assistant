@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,64 @@ func TestArchiveMeetingRotatesMeetingID(t *testing.T) {
 	}
 	if next.Metadata["meetingId"] == first.Metadata["meetingId"] {
 		t.Fatalf("post-archive meetingId=%q, want a new meeting id", next.Metadata["meetingId"])
+	}
+}
+
+func TestArchiveMeetingCreatesClientMeetingArtifact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	first, _, err := app.memory.appendTranscript("event-1", "item-1", "AJ: We decided to turn the meeting notes into an artifact.")
+	if err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+
+	result, err := app.archiveMeeting("AJ")
+	if err != nil {
+		t.Fatalf("archiveMeeting: %v", err)
+	}
+	if result.Artifact == nil {
+		t.Fatal("archive result missing meeting artifact")
+	}
+	if result.Artifact.Kind != meetingMemoryKindOSArtifact {
+		t.Fatalf("artifact kind=%q, want %q", result.Artifact.Kind, meetingMemoryKindOSArtifact)
+	}
+	if result.Artifact.Metadata["mode"] != "meeting" || result.Artifact.Metadata["archiveId"] != result.ID {
+		t.Fatalf("artifact metadata=%v, want meeting mode and archive id", result.Artifact.Metadata)
+	}
+	if !strings.Contains(result.Artifact.Metadata["downloadUrl"], "?key=") {
+		t.Fatalf("client artifact downloadUrl=%q, want keyed URL", result.Artifact.Metadata["downloadUrl"])
+	}
+	if !strings.Contains(result.Artifact.Text, "Meeting artifact") || !strings.Contains(result.Artifact.Text, "Decisions") {
+		t.Fatalf("artifact text=%q, want structured meeting artifact", result.Artifact.Text)
+	}
+	if result.Artifact.Metadata["meetingId"] != first.Metadata["meetingId"] {
+		t.Fatalf("artifact meetingId=%q, want archived meeting %q", result.Artifact.Metadata["meetingId"], first.Metadata["meetingId"])
+	}
+
+	var persistedArtifact meetingMemoryEntry
+	for _, entry := range app.memory.snapshot(50) {
+		if entry.ID == result.Artifact.ID {
+			persistedArtifact = entry
+			break
+		}
+	}
+	if persistedArtifact.ID == "" {
+		t.Fatal("persisted meeting artifact not found")
+	}
+	if strings.Contains(persistedArtifact.Metadata["downloadUrl"], "?key=") {
+		t.Fatalf("persisted downloadUrl=%q, should not include archive key", persistedArtifact.Metadata["downloadUrl"])
+	}
+
+	foundClientArtifact := false
+	for _, entry := range app.osArtifactsSnapshot(10) {
+		if entry.ID != result.Artifact.ID {
+			continue
+		}
+		foundClientArtifact = true
+		if !strings.Contains(entry.Metadata["downloadUrl"], "?key=") {
+			t.Fatalf("client snapshot downloadUrl=%q, want keyed URL", entry.Metadata["downloadUrl"])
+		}
+	}
+	if !foundClientArtifact {
+		t.Fatalf("client artifacts missing meeting artifact %q", result.Artifact.ID)
 	}
 }
