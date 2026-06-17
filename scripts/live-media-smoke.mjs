@@ -10,7 +10,7 @@ const defaults = {
   password: process.env.ROOM_PASSWORD || 'B0NFIRE!',
   participants: ['Tom', 'Caitlyn'],
   rejoin: '',
-  separateBrowsers: false,
+  separateBrowsers: true,
   timeoutMs: 45000,
   url: 'https://thebonfire.xyz'
 }
@@ -241,6 +241,21 @@ async function joinRoom(page) {
     })()
   `)
   await clickSelector(page, '#joinAccess')
+  await waitFor(page, `${page.name} office session`, `
+    (() => {
+      const hasLocalMedia = typeof localStream !== 'undefined' && localStream
+      const hasOfficeSession = typeof authedUser !== 'undefined'
+        && authedUser
+        && document.querySelector('[data-office-tool="room"]')
+      return Boolean(hasLocalMedia || hasOfficeSession)
+    })()
+  `)
+  const hasLocalMedia = await evaluate(page, `
+    (() => Boolean(typeof localStream !== 'undefined' && localStream))()
+  `)
+  if (!hasLocalMedia) {
+    await clickSelector(page, '[data-office-tool="room"]')
+  }
   await waitFor(page, `${page.name} local media`, `
     (() => typeof localStream !== 'undefined'
       && localStream
