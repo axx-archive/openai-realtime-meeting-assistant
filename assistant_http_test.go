@@ -196,6 +196,11 @@ func TestAssistantQueryInfersOSNavigationActions(t *testing.T) {
 	if !hasAssistantAction(designPayload.Actions, "open_tool", "design", "") {
 		t.Fatalf("actions=%#v, want design open_tool", designPayload.Actions)
 	}
+
+	chatPayload := postAssistantQueryForTest(t, `{"query":"open the chat app and start a thread with Scout","mode":"chat"}`)
+	if !hasAssistantAction(chatPayload.Actions, "open_tool", "chat", "") {
+		t.Fatalf("actions=%#v, want chat open_tool", chatPayload.Actions)
+	}
 }
 
 func TestArtifactsHandlerListsSavedArtifactsForSignedInUser(t *testing.T) {

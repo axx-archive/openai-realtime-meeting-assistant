@@ -193,13 +193,13 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, `"memory"`} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", `"memory"`} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "goal workflow", "Codex runner", "Voice control mode"} {
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "goal workflow", "start a thread", "Codex runner", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
@@ -226,6 +226,23 @@ func TestRealtimeControlAppReturnsOSActions(t *testing.T) {
 	if !hasAssistantAction(actions, "open_tool", "artifacts", "os-artifact-research-1") ||
 		!hasAssistantAction(actions, "select_artifact", "artifacts", "os-artifact-research-1") {
 		t.Fatalf("actions=%#v, want artifact navigation", actions)
+	}
+
+	result, changed, err = app.applyToolCallArgs("control_app", map[string]any{
+		"tool": "chat",
+	})
+	if err != nil {
+		t.Fatalf("control_app chat: %v", err)
+	}
+	if changed {
+		t.Fatal("control_app chat changed board state")
+	}
+	actions, ok = result["actions"].([]osAssistantAction)
+	if !ok {
+		t.Fatalf("chat actions type=%T, want []osAssistantAction", result["actions"])
+	}
+	if !hasAssistantAction(actions, "open_tool", "chat", "") {
+		t.Fatalf("actions=%#v, want chat open_tool", actions)
 	}
 }
 
