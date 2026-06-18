@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +23,7 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
-	defaultReasoningEffort    = "minimal"
+	defaultReasoningEffort    = "low"
 	defaultRealtimeVADType    = "server_vad"
 	defaultVADEagerness       = "high"
 	defaultRealtimeVoice      = "marin"
@@ -175,6 +176,9 @@ type kanbanBoardApp struct {
 	connected                bool
 	forwardedAudioNotice     bool
 	realtimeResponseActive   bool
+	voiceControlActive       bool
+	voiceControlUpdatedAt    time.Time
+	voiceControlUpdatedBy    string
 	scoutVoiceArmedAt        time.Time
 	scoutVoiceArmedUntil     time.Time
 	scoutSpokenResponse      bool
@@ -975,6 +979,44 @@ func (app *kanbanBoardApp) sessionUpdateEvent() map[string]any {
 	}
 }
 
+func (app *kanbanBoardApp) setVoiceControlActive(active bool, updatedBy string) {
+	if app == nil {
+		return
+	}
+	updatedBy = canonicalParticipantName(updatedBy)
+	app.mu.Lock()
+	changed := app.voiceControlActive != active || app.voiceControlUpdatedBy != updatedBy
+	app.voiceControlActive = active
+	app.voiceControlUpdatedAt = time.Now().UTC()
+	app.voiceControlUpdatedBy = updatedBy
+	app.mu.Unlock()
+
+	state := "listening"
+	text := "Realtime 2 voice is listening."
+	if !active {
+		state = "idle"
+		text = "Realtime 2 voice is off."
+	}
+	broadcastAssistantEvent("status", text, map[string]any{
+		"voiceControl": active,
+		"voiceState":   state,
+		"updatedBy":    updatedBy,
+	})
+	if changed {
+		app.refreshRealtimeBoardContext("voice control")
+	}
+}
+
+func (app *kanbanBoardApp) voiceControlEnabled() bool {
+	if app == nil {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.voiceControlActive
+}
+
 func (app *kanbanBoardApp) refreshRealtimeBoardContext(reason string) {
 	if app == nil {
 		return
@@ -1114,12 +1156,15 @@ func transcriptStartsWithScoutWakePhrase(text string) bool {
 }
 
 func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
-	if !transcriptStartsWithScoutWakePhrase(transcript) {
+	transcript = strings.TrimSpace(transcript)
+	wakePhrase := transcriptStartsWithScoutWakePhrase(transcript)
+	voiceControl := app.voiceControlEnabled()
+	if !wakePhrase && !(voiceControl && transcript != "") {
 		// a completed non-wake turn means any armed wake turn is over — unless
 		// the wake turn's own response or tool call is still in flight: on the
 		// single mixed room stream another speaker's segment (or the user's
 		// continuation after a pause) must not silence the armed answer.
-		if strings.TrimSpace(transcript) != "" && !app.scoutTurnInFlight() {
+		if transcript != "" && !app.scoutTurnInFlight() {
 			app.clearScoutVoiceArm()
 		}
 		return
@@ -1148,7 +1193,16 @@ func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
 	}
 	app.mu.Unlock()
 
-	broadcastAssistantEvent("status", "Scout heard the wake phrase.", map[string]any{"wakePhrase": "Hey Scout"})
+	metadata := map[string]any{
+		"voiceControl": voiceControl,
+		"voiceState":   "hearing",
+	}
+	statusText := "Scout heard the voice request."
+	if wakePhrase {
+		metadata["wakePhrase"] = "Hey Scout"
+		statusText = "Scout heard the wake phrase."
+	}
+	broadcastAssistantEvent("status", statusText, metadata)
 	if speakNow {
 		log.Infof("Scout wake transcript arrived after %s tool result; speaking now", lastToolName)
 		app.flushScoutSpokenResponseIfPending()
@@ -1240,6 +1294,9 @@ func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool, 
 	if ok, exists := result["ok"].(bool); exists && !ok {
 		return true
 	}
+	if toolName == "do_nothing" {
+		return armed && doNothingReasonShouldSpeak(asString(result["reason"]))
+	}
 	if armed {
 		// an armed hey-scout turn gets a confirmation even for ok no-ops,
 		// e.g. moving a card that is already in the requested column
@@ -1257,6 +1314,22 @@ func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool, 
 	default:
 		return changed
 	}
+}
+
+func doNothingReasonShouldSpeak(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	if reason == "" {
+		return false
+	}
+	if strings.Contains(reason, "?") {
+		return true
+	}
+	for _, phrase := range []string{"clarify", "which ", "what ", "who ", "say it again", "repeat", "unclear", "not sure", "could not tell", "couldn't tell"} {
+		if strings.Contains(reason, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (app *kanbanBoardApp) flushScoutSpokenResponseIfPending() {
@@ -1333,24 +1406,30 @@ func scoutSpokenResponseInstructions() string {
 }
 
 func (app *kanbanBoardApp) sessionInstructions() string {
+	voiceControlState := "inactive: only clear utterances that start with Hey Scout are addressed to you."
+	if app.voiceControlEnabled() {
+		voiceControlState = "active: every clear user request is addressed to you until the user turns the floating voice island off."
+	}
 	return strings.Join([]string{
-		"# Role and Objective\nYou are Scout, a voice-operated Kanban board operator for live standups and project meetings. Keep the board accurate, compact, and useful with minimal chatter.",
+		"# Role and Objective\nYou are Scout, the Bonfire OS voice operator for live meetings, app navigation, durable artifacts, meeting memory, and the Kanban board. Keep the app useful with minimal chatter.",
 		fmt.Sprintf("# Board\nCurrent Kanban board JSON: %s\nAvailable columns: Backlog, In Progress, Blocked, Done.\nKnown meeting participants: %s.", app.boardContextJSON(), strings.Join(meetingParticipantNames, ", ")),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
 		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
-		"# Preambles\nDo not speak preambles for routine board updates. If a Hey Scout request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the clear user turn started with Hey Scout. Otherwise stay silent and use tools.",
+		"# Voice control mode\n" + voiceControlState + " When active, the waveform island is the user's vocal button for an instant two-way Realtime 2 conversation. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
+		"# Preambles\nDo not speak preambles for routine app or board updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
 		"# Entity capture\nPreserve exact names, brands, owners, card titles, dates, and project terms. For high-precision identifiers or ambiguous names, normalize only what is clear. If multiple interpretations are plausible, call do_nothing with one clarification question.",
 		"# Matching\nUse existing card ids exactly as provided. Match by meaning across title, notes, owner, and tags. Update an existing related card instead of creating a duplicate when the work is already represented. If you are not sure which existing card the user means, call do_nothing with a concise clarification question.",
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
-		"# Tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
-		"# Memory\nMeeting transcripts are saved as durable memory with speaker labels when Scout can attribute the speaker. A scheduled brain worker also writes durable summaries with transcript references. If the user asks what was said, decided, discussed, remembered, mentioned earlier, how a meeting went, or asks any recall question, call answer_memory_question with the user's full question as the query.",
-		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete board operation or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
-		"# Wake phrase\nOnly speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
-		"# Verbosity\nPrefer tools over text replies. Do not narrate board operations aloud unless the utterance started with Hey Scout; then keep any spoken response to one short sentence. For memory answers, give the headline first and only the most useful details.",
+		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
+		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, or grill. Research mode currently creates a durable research brief inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, or external job.",
+		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
+		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
+		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
+		"# Verbosity\nPrefer tools over text replies. Keep spoken responses to one short sentence unless the user asks for a memory answer; for memory answers, give the headline first and only the most useful details.",
 	}, "\n\n")
 }
 
@@ -1402,6 +1481,16 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		"type":        "string",
 		"description": "Responsible participant when the user names an owner or the work clearly belongs to someone.",
 		"enum":        append([]string{"Unassigned"}, meetingParticipantNames...),
+	}
+	appToolProperty := map[string]any{
+		"type":        "string",
+		"description": "Bonfire OS surface to open.",
+		"enum":        []string{"office", "room", "chat", "artifacts", "research", "design", "grill", "board", "memory"},
+	}
+	artifactModeProperty := map[string]any{
+		"type":        "string",
+		"description": "Durable artifact workspace to use.",
+		"enum":        []string{"artifacts", "research", "design", "grill"},
 	}
 
 	return []map[string]any{
@@ -1521,6 +1610,35 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "control_app",
+			"description": "Open or focus a Bonfire OS surface such as artifacts, memory, chat, research, design, grill, board, room, or office. Use artifact_id when selecting a known saved artifact.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tool":        appToolProperty,
+					"artifact_id": map[string]any{"type": "string", "description": "Optional saved artifact id to select after opening artifacts."},
+				},
+				"required":             []string{"tool"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "create_artifact",
+			"description": "Create a durable Bonfire OS artifact, research brief, design kickoff, or grill scorecard from a clear user request. If content is omitted, the app will scaffold the artifact from board and memory context.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":    artifactModeProperty,
+					"query":   map[string]any{"type": "string", "description": "The user's artifact, research, design, or grill request."},
+					"content": map[string]any{"type": "string", "description": "Optional final artifact content to save. Omit when the app should scaffold it from current board and memory context."},
+				},
+				"required":             []string{"mode", "query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "answer_memory_question",
 			"description": "Answer a user question by recalling the saved speaker-attributed transcript, brain write-ups, archives, and meeting memory.",
 			"parameters": map[string]any{
@@ -1593,25 +1711,26 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStarted()
 		}
-		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type})
+		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type, "voiceState": "hearing"})
 	case "input_audio_buffer.speech_stopped":
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStopped()
 		}
-		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type})
+		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type, "voiceState": "listening"})
 	case "input_audio_buffer.committed":
-		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type})
+		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
 	case "response.created":
 		app.markRealtimeResponseActive(true)
+		broadcastAssistantEvent("audio", "Scout is thinking", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
 	case "response.output_audio_transcript.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
 			app.markScoutSpokenResponseDelivered()
-			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
+			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type, "voiceState": "talking"})
 		}
 	case "response.output_text.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Text, event.Transcript)); text != "" {
 			app.markScoutSpokenResponseDelivered()
-			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
+			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type, "voiceState": "talking"})
 		}
 	case "response.output_item.done":
 		if event.Item != nil && event.Item.Type == "function_call" {
@@ -1644,6 +1763,7 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			app.markScoutSpokenResponseDelivered()
 		}
 		app.flushScoutSpokenResponseIfPending()
+		broadcastAssistantEvent("audio", "Scout is listening", map[string]any{"eventType": event.Type, "voiceState": "listening"})
 	default:
 		if text := strings.TrimSpace(event.Text); text != "" && strings.Contains(event.Type, "text") {
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})
@@ -1757,7 +1877,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		app.finishToolCall(outputItem, args, parseErr, armedAtStart)
 	}
 
-	if outputItem.Name == "answer_memory_question" {
+	if realtimeToolRunsAsync(outputItem.Name) {
 		// Memory answers block on a model call for up to 45s; run off the
 		// datachannel event loop so realtime event processing keeps flowing.
 		// The call id is already marked handled, so it can never run twice.
@@ -1765,6 +1885,15 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 		return
 	}
 	finish()
+}
+
+func realtimeToolRunsAsync(name string) bool {
+	switch name {
+	case "answer_memory_question", "create_artifact":
+		return true
+	default:
+		return false
+	}
 }
 
 func (app *kanbanBoardApp) finishToolCall(outputItem kanbanRealtimeOutputItem, args map[string]any, parseErr error, armedAtStart bool) {
@@ -1921,6 +2050,10 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.updateTicket(args)
 	case "delete_ticket":
 		return app.deleteTicket(args)
+	case "control_app":
+		return app.controlApp(args)
+	case "create_artifact":
+		return app.createRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
 	case "do_nothing":
@@ -1934,6 +2067,125 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		}, false, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported function %q", toolName)
+	}
+}
+
+func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool, error) {
+	tool := normalizeOSControlTool(asString(args["tool"]))
+	if tool == "" {
+		return nil, false, fmt.Errorf("tool is required")
+	}
+	artifactID := firstNonEmptyString(asString(args["artifact_id"]), asString(args["artifactId"]))
+	actions := osAssistantActionsForTool(tool, artifactID)
+	broadcastAssistantEvent("action", "Opened "+assistantToolLabel(tool), map[string]any{
+		"tool":       "control_app",
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":         true,
+		"tool":       tool,
+		"artifactId": artifactID,
+		"actions":    actions,
+	}, false, nil
+}
+
+func normalizeOSControlTool(tool string) string {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "office", "room", "chat", "artifacts", "research", "design", "grill", "board", "memory":
+		return strings.ToLower(strings.TrimSpace(tool))
+	case "artifact":
+		return "artifacts"
+	default:
+		return ""
+	}
+}
+
+func osAssistantActionsForTool(tool string, artifactID string) []osAssistantAction {
+	tool = normalizeOSControlTool(tool)
+	artifactID = strings.TrimSpace(artifactID)
+	if tool == "" {
+		return nil
+	}
+	actions := []osAssistantAction{{
+		Type:       "open_tool",
+		Tool:       tool,
+		Mode:       normalizeOSAssistantMode(tool),
+		ArtifactID: artifactID,
+		Label:      "Opened " + assistantToolLabel(tool),
+	}}
+	if tool == "artifacts" && artifactID != "" {
+		actions = append(actions, osAssistantAction{
+			Type:       "select_artifact",
+			Tool:       "artifacts",
+			ArtifactID: artifactID,
+			Label:      "Selected artifact",
+		})
+	}
+	return actions
+}
+
+func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
+	mode := normalizeRealtimeArtifactMode(asString(args["mode"]))
+	if mode == "" {
+		return nil, false, fmt.Errorf("mode is required")
+	}
+	query := canonicalizeBoardText(asString(args["query"]))
+	if query == "" {
+		return nil, false, fmt.Errorf("query is required")
+	}
+	content := strings.TrimSpace(asString(args["content"]))
+	if content == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), assistantQueryRequestTimeout)
+		defer cancel()
+		result, err := app.resolveAssistantQueryContext(ctx, query, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		result = buildOSAssistantModeAnswer(mode, result, app.snapshotState(), app.memorySnapshotForClients(12))
+		content = strings.TrimSpace(result.answer)
+	}
+	if content == "" {
+		return nil, false, fmt.Errorf("artifact content is empty")
+	}
+
+	artifact, appended, err := app.createOSArtifact(mode, query, content, scoutParticipantName)
+	if err != nil {
+		return nil, false, err
+	}
+	if artifact.ID == "" {
+		return nil, false, fmt.Errorf("artifact was not saved")
+	}
+
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	actions := app.osAssistantActions(query, mode, artifact)
+	broadcastAssistantEvent("action", assistantToolLabel(mode)+" artifact saved", map[string]any{
+		"tool":       "create_artifact",
+		"mode":       mode,
+		"artifact":   artifact,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":       true,
+		"mode":     mode,
+		"query":    query,
+		"artifact": artifact,
+		"appended": appended,
+		"actions":  actions,
+	}, false, nil
+}
+
+func normalizeRealtimeArtifactMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "artifact", "artifacts":
+		return "artifacts"
+	case "research", "design", "grill":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return ""
 	}
 }
 

@@ -3863,6 +3863,121 @@
         transform: scale(var(--press-scale));
       }
 
+      .voice-island {
+        position: fixed;
+        left: 50%;
+        bottom: max(22px, env(safe-area-inset-bottom));
+        z-index: 1350;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: min(340px, calc(100vw - 28px));
+        max-width: calc(100vw - 28px);
+        min-height: 66px;
+        padding: 9px 10px 9px 12px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        transform: translateX(-50%);
+        pointer-events: auto;
+        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .voice-island[hidden] {
+        display: none;
+      }
+
+      .voice-island[data-state="hearing"],
+      .voice-island[data-state="talking"] {
+        border-color: var(--line-2);
+        box-shadow: var(--glass-highlight), var(--glass-shadow), 0 0 0 4px var(--live-soft);
+      }
+
+      .voice-island[data-state="error"] {
+        border-color: rgba(255, 69, 58, 0.42);
+      }
+
+      .voice-island__main {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .voice-island__main:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .voice-island[data-state="listening"] .os-wave,
+      .voice-island[data-state="hearing"] .os-wave,
+      .voice-island[data-state="thinking"] .os-wave,
+      .voice-island[data-state="talking"] .os-wave {
+        border-color: transparent;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(48, 209, 88, 0.26), transparent 62%),
+          var(--live-soft);
+        box-shadow: 0 0 0 4px var(--live-soft);
+      }
+
+      .voice-island[data-state="thinking"] .os-wave span {
+        color: var(--text-1);
+        animation-duration: 850ms;
+      }
+
+      .voice-island[data-state="talking"] .os-wave span {
+        color: var(--live);
+        animation-duration: 620ms;
+      }
+
+      .voice-island__copy {
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+      }
+
+      .voice-island__label {
+        overflow: hidden;
+        color: var(--text-1);
+        font: 650 13px/1.2 var(--font-sans);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .voice-island__meta {
+        overflow: hidden;
+        color: var(--text-2);
+        font: 12px/1.25 var(--font-sans);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .voice-island__close {
+        width: 40px;
+        height: 40px;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-lg);
+        color: var(--text-3);
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+      }
+
+      .voice-island__close:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .voice-island__close:active {
+        transform: scale(var(--press-scale));
+      }
+
       .os-assistant__close {
         width: 34px;
         height: 34px;
@@ -4031,6 +4146,11 @@
         .os-assistant__toggle {
           width: 60px;
           height: 60px;
+        }
+
+        .voice-island {
+          bottom: max(12px, env(safe-area-inset-bottom));
+          min-width: calc(100vw - 24px);
         }
       }
 
@@ -8921,6 +9041,18 @@
         <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
       </button>
     </aside>
+    <aside id="voiceIsland" class="voice-island" data-state="idle" hidden aria-label="Realtime voice" aria-live="polite">
+      <button id="voiceIslandMain" class="voice-island__main" type="button" aria-label="Realtime voice is active" title="Realtime voice">
+        <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="voice-island__copy">
+          <span id="voiceIslandLabel" class="voice-island__label">Scout voice</span>
+          <span id="voiceIslandMeta" class="voice-island__meta">realtime 2 · listening</span>
+        </span>
+      </button>
+      <button id="voiceIslandClose" class="voice-island__close" type="button" aria-label="Turn off Realtime voice" title="Turn off Realtime voice">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+      </button>
+    </aside>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
@@ -9243,6 +9375,11 @@
       const osAssistantLog = document.getElementById('osAssistantLog')
       const osAssistantModeLabel = document.getElementById('osAssistantModeLabel')
       const osAssistantModeButtons = Array.from(document.querySelectorAll('[data-assistant-mode]'))
+      const voiceIsland = document.getElementById('voiceIsland')
+      const voiceIslandMain = document.getElementById('voiceIslandMain')
+      const voiceIslandClose = document.getElementById('voiceIslandClose')
+      const voiceIslandLabel = document.getElementById('voiceIslandLabel')
+      const voiceIslandMeta = document.getElementById('voiceIslandMeta')
       const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       const agentToolIds = ['research', 'design', 'grill']
       const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
@@ -9275,6 +9412,11 @@
       let osAssistantVoiceRecognizer = null
       let osAssistantVoiceRestartTimer = 0
       let osAssistantVoiceQueue = Promise.resolve()
+      let realtimeVoiceActive = false
+      let realtimeVoiceOnlyPending = false
+      let realtimeVoiceStartedRoom = false
+      let realtimeVoiceReturnTool = 'office'
+      let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
       const pipVideoTilesByParticipant = new Map()
@@ -9507,11 +9649,13 @@
       assistantModeOpeners.forEach(button => {
         button.addEventListener('click', () => openOSAssistant(button.dataset.openAssistantMode || 'chat'))
       })
-      osAssistantToggle.addEventListener('click', () => setOSAssistantOpen(!osAssistant.classList.contains('is-open')))
+      osAssistantToggle.addEventListener('click', startRealtimeVoiceConversation)
       osAssistantClose.addEventListener('click', () => {
         stopOSAssistantVoice()
         setOSAssistantOpen(false)
       })
+      voiceIslandMain.addEventListener('click', () => setActiveTool(appShell.dataset.tool || 'room'))
+      voiceIslandClose.addEventListener('click', stopRealtimeVoiceConversation)
       osAssistantModeButtons.forEach(button => {
         button.addEventListener('click', () => setOSAssistantMode(button.dataset.assistantMode || 'chat'))
       })
@@ -11037,6 +11181,108 @@
         list.replaceChildren(...artifacts.slice(0, 4).map(renderAgentArtifactLink))
       }
 
+      async function startRealtimeVoiceConversation(event) {
+        event?.preventDefault?.()
+        if (realtimeVoiceActive) {
+          setVoiceIslandState('listening', 'realtime 2 · listening')
+          return
+        }
+        stopOSAssistantVoice()
+        realtimeVoiceActive = true
+        realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
+        realtimeVoiceStartedRoom = !appShell.classList.contains('is-in-room')
+        realtimeVoiceOnlyPending = realtimeVoiceStartedRoom
+        setVoiceIslandState('connecting', 'realtime 2 · starting')
+        unlockRoomAudioPlayback()
+
+        if (appShell.classList.contains('is-in-room')) {
+          if (localStream && isMicMuted) {
+            setLocalMute(false, { announce: true })
+          }
+          sendVoiceControlState(true)
+          setVoiceIslandState('listening', 'realtime 2 · listening')
+          return
+        }
+
+        try {
+          await joinRoom({ voiceOnly: true })
+        } catch (error) {
+          realtimeVoiceActive = false
+          realtimeVoiceOnlyPending = false
+          realtimeVoiceStartedRoom = false
+          setVoiceIslandState('error', error.message || 'voice could not start')
+          showToast({ text: error.message || 'voice could not start', kind: 'error' })
+        }
+      }
+
+      function stopRealtimeVoiceConversation() {
+        if (!realtimeVoiceActive && !realtimeVoiceOnlyPending) {
+          setVoiceIslandState('idle')
+          return
+        }
+        const shouldLeaveVoiceRoom = realtimeVoiceStartedRoom && appShell.classList.contains('is-in-room')
+        sendVoiceControlState(false)
+        realtimeVoiceActive = false
+        realtimeVoiceOnlyPending = false
+        realtimeVoiceStartedRoom = false
+        setVoiceIslandState('idle')
+        if (shouldLeaveVoiceRoom) {
+          leaveRoom()
+        }
+      }
+
+      function sendVoiceControlState(enabled) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        ws.send(JSON.stringify({
+          event: 'voice_control',
+          data: JSON.stringify({ enabled: Boolean(enabled) })
+        }))
+      }
+
+      function setVoiceIslandState(state, detail = '') {
+        if (!voiceIsland) {
+          return
+        }
+        window.clearTimeout(voiceIslandClearTimer)
+        voiceIslandClearTimer = 0
+        const next = ['connecting', 'listening', 'hearing', 'thinking', 'talking', 'error'].includes(state) ? state : 'idle'
+        voiceIsland.dataset.state = next
+        voiceIsland.hidden = next === 'idle' || (!realtimeVoiceActive && next !== 'error')
+        if (voiceIsland.hidden) {
+          return
+        }
+        const labels = {
+          connecting: 'Scout voice',
+          listening: 'Scout voice',
+          hearing: 'Scout heard you',
+          thinking: 'Scout is thinking',
+          talking: 'Scout is talking',
+          error: 'Scout voice'
+        }
+        const details = {
+          connecting: 'realtime 2 · connecting',
+          listening: 'realtime 2 · listening',
+          hearing: 'realtime 2 · hearing',
+          thinking: 'realtime 2 · thinking',
+          talking: 'realtime 2 · talking',
+          error: 'voice needs attention'
+        }
+        voiceIslandLabel.textContent = labels[next] || labels.listening
+        voiceIslandMeta.textContent = String(detail || details[next] || '').trim()
+        voiceIslandMain.setAttribute('aria-label', `${voiceIslandLabel.textContent}: ${voiceIslandMeta.textContent}`)
+        if (next === 'talking' || next === 'error') {
+          voiceIslandClearTimer = window.setTimeout(() => {
+            if (realtimeVoiceActive) {
+              setVoiceIslandState('listening', 'realtime 2 · listening')
+            } else {
+              setVoiceIslandState('idle')
+            }
+          }, next === 'talking' ? 2200 : 3600)
+        }
+      }
+
       function renderAgentArtifactLink(entry) {
         const button = document.createElement('button')
         button.type = 'button'
@@ -11088,6 +11334,8 @@
         const available = osAssistantAvailable()
         osAssistant.hidden = !available
         osAssistantToggle.disabled = !available
+        osAssistantToggle.setAttribute('aria-label', available ? 'Start Realtime voice' : 'Sign in to start Realtime voice')
+        osAssistantToggle.title = available ? 'Start Realtime voice' : 'Sign in to start Realtime voice'
         osAssistantInput.disabled = !available
         osAssistantSend.disabled = !available
         if (!available) {
@@ -11946,9 +12194,25 @@
         }
       }
 
-      async function joinRoom() {
+      async function joinRoom(options = {}) {
+        if (options?.preventDefault) {
+          options = {}
+        }
+        const voiceOnly = Boolean(options.voiceOnly)
+        if (voiceOnly) {
+          realtimeVoiceActive = true
+          realtimeVoiceOnlyPending = true
+          realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
+          setVoiceIslandState('connecting', 'realtime 2 · connecting')
+        }
         if (!validateAccess()) {
           setLog('enter your work email and password')
+          if (voiceOnly) {
+            realtimeVoiceActive = false
+            realtimeVoiceOnlyPending = false
+            realtimeVoiceStartedRoom = false
+            setVoiceIslandState('idle')
+          }
           if (!loginEmailInput.value.trim().includes('@')) {
             loginEmailInput.focus()
           } else {
@@ -11983,6 +12247,12 @@
             accessState.textContent = 'locked'
             accessHint.textContent = error.message || 'sign-in failed.'
             setLog(error.message || 'sign-in failed')
+            if (voiceOnly) {
+              realtimeVoiceActive = false
+              realtimeVoiceOnlyPending = false
+              realtimeVoiceStartedRoom = false
+              setVoiceIslandState('error', error.message || 'sign-in failed')
+            }
             joinButton.disabled = false
             joinAccessButton.disabled = false
             updatePasskeyButton()
@@ -12205,18 +12475,19 @@
         return rtcConfiguration && typeof rtcConfiguration === 'object' ? rtcConfiguration : {}
       }
 
-      async function beginMediaSession() {
+      async function beginMediaSession(options = {}) {
         if (!ws || ws.readyState !== WebSocket.OPEN || pc) {
           return
         }
 
-        setLog('requesting camera and microphone')
+        const voiceOnly = Boolean(options.voiceOnly)
+        setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
         isMicMuted = false
-        isCameraOff = false
-        const captureStream = await getPreferredUserMedia()
+        isCameraOff = voiceOnly
+        const captureStream = voiceOnly ? await getPreferredAudioOnlyUserMedia() : await getPreferredUserMedia()
         localStream = await createLocalMediaStream(captureStream)
         isMicMuted = localStream.getAudioTracks().length === 0
-        isCameraOff = localStream.getVideoTracks().length === 0
+        isCameraOff = voiceOnly || localStream.getVideoTracks().length === 0
         localVideo.srcObject = localStream
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
@@ -12721,6 +12992,26 @@
           return new MediaStream([...stream.getVideoTracks(), preferredAudioTrack])
         } catch (error) {
           console.warn('Could not switch away from continuity microphone', error)
+          return stream
+        }
+      }
+
+      async function getPreferredAudioOnlyUserMedia() {
+        const stream = await getAudioStreamWithFallback('')
+        const preferredAudioDeviceId = await preferredAudioInputDeviceId(stream)
+        if (!preferredAudioDeviceId) {
+          return stream
+        }
+        const currentAudioTrack = stream.getAudioTracks()[0]
+        if (currentAudioTrack?.getSettings?.().deviceId === preferredAudioDeviceId) {
+          return stream
+        }
+        try {
+          const preferredStream = await getAudioStreamWithFallback(preferredAudioDeviceId)
+          currentAudioTrack?.stop()
+          return preferredStream
+        } catch (error) {
+          console.warn('Could not switch microphone for voice island', error)
           return stream
         }
       }
@@ -14116,17 +14407,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const normalized = message.toLowerCase()
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
+          if (realtimeVoiceActive) setVoiceIslandState('listening', 'realtime 2 · listening')
         } else if (normalized.includes('connected to conference room')) {
           setConnectionState('room', 'the room is listening')
+          if (realtimeVoiceActive) setVoiceIslandState('listening', 'realtime 2 · listening')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
+          if (realtimeVoiceActive) setVoiceIslandState('connecting', 'realtime 2 · connecting')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
           setConnectionState('offline', 'assistant offline')
+          if (realtimeVoiceActive) setVoiceIslandState('error', message)
         }
       }
 
       function handleAssistantEvent(event) {
         const text = String(event?.text || event?.message || '').trim()
+        if (event?.artifact) {
+          addArtifactEntry(event.artifact)
+        }
+        if (Array.isArray(event?.actions)) {
+          handleOSAssistantActions(event.actions)
+        }
+        const voiceState = String(event?.voiceState || '').trim()
+        if (voiceState && realtimeVoiceActive) {
+          setVoiceIslandState(voiceState, voiceIslandDetailForEvent(voiceState, text))
+        }
         if (!text) {
           return
         }
@@ -14146,6 +14451,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (event?.kind === 'transcript') {
+          if (realtimeVoiceActive) {
+            setVoiceIslandState('hearing', 'realtime 2 · hearing')
+          }
           setActiveSpeakerFromText(text)
           // Assistant recognized speech — fire the hot-ember handshake.
           // Auto-throttled inside triggerHotEmber so a stream of partials
@@ -14154,8 +14462,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (event?.kind === 'error') {
+          if (realtimeVoiceActive) {
+            setVoiceIslandState('error', text)
+          }
           showToast({ text, kind: 'error' })
+        } else if (event?.kind === 'answer' && realtimeVoiceActive) {
+          setVoiceIslandState('talking', 'realtime 2 · talking')
         }
+      }
+
+      function voiceIslandDetailForEvent(state, text) {
+        const cleanText = String(text || '').trim()
+        if (state === 'error' && cleanText) {
+          return cleanText
+        }
+        if (state === 'hearing' && cleanText.toLowerCase().startsWith('hearing:')) {
+          return 'realtime 2 · hearing'
+        }
+        return ''
       }
 
       function handleParticipants(participants) {
@@ -15220,6 +15544,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
+        const voiceOnly = Boolean(realtimeVoiceOnlyPending)
         currentParticipantName = name
         saveCachedIdentity(name)
         railAvatarEl.textContent = participantInitials(name)
@@ -15228,19 +15553,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         setRoomView(true)
         accessState.textContent = 'verified'
-        accessHint.textContent = `${name} is verified. Starting camera and microphone.`
+        accessHint.textContent = `${name} is verified. Starting ${voiceOnly ? 'microphone' : 'camera and microphone'}.`
         setConnectionState('room', 'the room is listening')
         setLog(`${name} is verified`)
         try {
-          await beginMediaSession()
+          await beginMediaSession({ voiceOnly })
           accessHint.textContent = `${name} is in the room.`
           setLog(`${name} is in the room`)
+          if (voiceOnly && realtimeVoiceReturnTool && realtimeVoiceReturnTool !== 'room') {
+            setActiveTool(realtimeVoiceReturnTool)
+          }
+          if (realtimeVoiceActive) {
+            realtimeVoiceOnlyPending = false
+            sendVoiceControlState(true)
+            setVoiceIslandState('listening', 'realtime 2 · listening')
+          }
         } catch (error) {
           const message = error.message || String(error)
           reportClientMediaError('begin_media_session', error)
           accessHint.textContent = message
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
+          if (realtimeVoiceActive || voiceOnly) {
+            realtimeVoiceActive = false
+            realtimeVoiceOnlyPending = false
+            realtimeVoiceStartedRoom = false
+            setVoiceIslandState('error', message)
+          }
           leaveRoom()
         }
       }
@@ -18794,6 +19133,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         closeAudioSettings({ restoreFocus: false })
         updateRoomRecordingControls()
         updateBoardDockControls()
+
+        if (realtimeVoiceActive) {
+          sendVoiceControlState(false)
+        }
+        realtimeVoiceActive = false
+        realtimeVoiceOnlyPending = false
+        realtimeVoiceStartedRoom = false
+        realtimeVoiceReturnTool = 'office'
+        setVoiceIslandState('idle')
 
         const socket = ws
         ws = undefined

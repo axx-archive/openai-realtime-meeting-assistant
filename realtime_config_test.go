@@ -166,6 +166,76 @@ func TestRealtimeToolsExposeKeyDateMutations(t *testing.T) {
 	}
 }
 
+func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	rawTools, err := json.Marshal(app.kanbanTools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	toolsJSON := string(rawTools)
+	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"memory"`} {
+		if !strings.Contains(toolsJSON, want) {
+			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
+		}
+	}
+	instructions := app.sessionInstructions()
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "Codex runner", "Voice control mode"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("session instructions missing %q: %s", want, instructions)
+		}
+	}
+}
+
+func TestRealtimeControlAppReturnsOSActions(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.applyToolCallArgs("control_app", map[string]any{
+		"tool":        "artifacts",
+		"artifact_id": "os-artifact-research-1",
+	})
+	if err != nil {
+		t.Fatalf("control_app: %v", err)
+	}
+	if changed {
+		t.Fatal("control_app changed board state")
+	}
+	actions, ok := result["actions"].([]osAssistantAction)
+	if !ok {
+		t.Fatalf("actions type=%T, want []osAssistantAction", result["actions"])
+	}
+	if !hasAssistantAction(actions, "open_tool", "artifacts", "os-artifact-research-1") ||
+		!hasAssistantAction(actions, "select_artifact", "artifacts", "os-artifact-research-1") {
+		t.Fatalf("actions=%#v, want artifact navigation", actions)
+	}
+}
+
+func TestRealtimeCreateArtifactSavesOSArtifact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.applyToolCallArgs("create_artifact", map[string]any{
+		"mode":    "research",
+		"query":   "summarize the pilot evidence",
+		"content": "Research brief\n\nPilot evidence goes here.",
+	})
+	if err != nil {
+		t.Fatalf("create_artifact: %v", err)
+	}
+	if changed {
+		t.Fatal("create_artifact changed board state")
+	}
+	artifact, ok := result["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact type=%T, want meetingMemoryEntry", result["artifact"])
+	}
+	if artifact.Kind != meetingMemoryKindOSArtifact || artifact.Metadata["mode"] != "research" {
+		t.Fatalf("artifact kind/mode=%q/%q, want os_artifact/research", artifact.Kind, artifact.Metadata["mode"])
+	}
+	if !strings.Contains(artifact.Text, "Pilot evidence") {
+		t.Fatalf("artifact text=%q, want saved content", artifact.Text)
+	}
+}
+
 func TestRealtimeReasoningEffortAcceptsMinimal(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "minimal")
 

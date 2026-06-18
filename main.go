@@ -2151,6 +2151,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			broadcastKanbanEvent("participants", snapshot)
+		case "voice_control":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "Enter the room before changing voice control.")
+				continue
+			}
+			payload := struct {
+				Enabled bool `json:"enabled"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
+				log.Errorf("Failed to unmarshal voice control state: %v", err)
+				continue
+			}
+			kanbanApp.setVoiceControlActive(payload.Enabled, currentParticipantName())
 		case "media_quality":
 			if !participantAccepted {
 				continue

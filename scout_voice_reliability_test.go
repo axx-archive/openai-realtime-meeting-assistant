@@ -87,6 +87,29 @@ func TestSpeechStartedDoesNotDisarmScoutWake(t *testing.T) {
 	}
 }
 
+func TestVoiceControlArmsSpeechWithoutWakePhrase(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.setVoiceControlActive(true, "AJ")
+
+	app.handleRealtimeEvent([]byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"transcript": "Open the artifacts app and summarize the last meeting."
+	}`))
+	if !app.scoutVoiceArmed() {
+		t.Fatal("active voice control should arm clear speech without the wake phrase")
+	}
+
+	app.setVoiceControlActive(false, "AJ")
+	app.clearScoutVoiceArm()
+	app.handleRealtimeEvent([]byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"transcript": "Open the artifacts app again."
+	}`))
+	if app.scoutVoiceArmed() {
+		t.Fatal("inactive voice control should preserve the wake phrase requirement")
+	}
+}
+
 // TestCrosstalkTranscriptDoesNotDisarmDuringActiveResponse covers the
 // crosstalk ordering on the single mixed room stream: arm -> another
 // speaker's non-wake transcript completes while the wake turn's response is
