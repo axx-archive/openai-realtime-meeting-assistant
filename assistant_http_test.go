@@ -119,6 +119,60 @@ func TestAssistantQueryShapesOSModesWithoutModelKey(t *testing.T) {
 	}
 }
 
+func TestAssistantQueryCreatesCodexWorkflowArtifact(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/query", strings.NewReader(`{
+		"query":"Turn this objective into a multi-agent Codex loop for research, design, implementation, review, gate, and completion.",
+		"mode":"workflow"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantQueryHandler(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+	var payload struct {
+		Answer   string              `json:"answer"`
+		Source   string              `json:"source"`
+		Mode     string              `json:"mode"`
+		Actions  []osAssistantAction `json:"actions"`
+		Artifact meetingMemoryEntry  `json:"artifact"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Mode != "workflow" || payload.Source != "workflow" {
+		t.Fatalf("payload mode/source=%q/%q, want workflow/workflow", payload.Mode, payload.Source)
+	}
+	for _, want := range []string{"Codex goal workflow", "Identify and set goal", "Gate before shipping", "Codex handoff"} {
+		if !strings.Contains(payload.Answer, want) {
+			t.Fatalf("workflow answer missing %q: %s", want, payload.Answer)
+		}
+	}
+	if payload.Artifact.ID == "" || payload.Artifact.Metadata["mode"] != "workflow" {
+		t.Fatalf("response artifact=%#v, want saved workflow artifact", payload.Artifact)
+	}
+	if payload.Artifact.Metadata["workflow"] != "codex_goal_loop" || payload.Artifact.Metadata["codexRunner"] != "not_connected" {
+		t.Fatalf("workflow metadata=%v, want codex workflow scaffold", payload.Artifact.Metadata)
+	}
+	if !strings.Contains(payload.Artifact.Metadata["workflowStages"], "verify_goal_completed") {
+		t.Fatalf("workflowStages=%q, want verify stage", payload.Artifact.Metadata["workflowStages"])
+	}
+	if !hasAssistantAction(payload.Actions, "open_tool", "artifacts", payload.Artifact.ID) ||
+		!hasAssistantAction(payload.Actions, "select_artifact", "artifacts", payload.Artifact.ID) {
+		t.Fatalf("actions=%#v, want artifacts open/select for workflow artifact %q", payload.Actions, payload.Artifact.ID)
+	}
+}
+
 func TestAssistantQueryInfersOSNavigationActions(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

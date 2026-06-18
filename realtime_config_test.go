@@ -193,13 +193,13 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"memory"`} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, `"memory"`} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "Codex runner", "Voice control mode"} {
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "goal workflow", "Codex runner", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
@@ -252,6 +252,36 @@ func TestRealtimeCreateArtifactSavesOSArtifact(t *testing.T) {
 	}
 	if !strings.Contains(artifact.Text, "Pilot evidence") {
 		t.Fatalf("artifact text=%q, want saved content", artifact.Text)
+	}
+}
+
+func TestRealtimeCreateArtifactScaffoldsWorkflow(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.applyToolCallArgs("create_artifact", map[string]any{
+		"mode":  "workflow",
+		"query": "turn this into a Codex goal loop with review and shipping gates",
+	})
+	if err != nil {
+		t.Fatalf("create_artifact workflow: %v", err)
+	}
+	if changed {
+		t.Fatal("create_artifact workflow changed board state")
+	}
+	artifact, ok := result["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact type=%T, want meetingMemoryEntry", result["artifact"])
+	}
+	if artifact.Kind != meetingMemoryKindOSArtifact || artifact.Metadata["mode"] != "workflow" {
+		t.Fatalf("artifact kind/mode=%q/%q, want os_artifact/workflow", artifact.Kind, artifact.Metadata["mode"])
+	}
+	if artifact.Metadata["workflow"] != "codex_goal_loop" || artifact.Metadata["codexRunner"] != "not_connected" {
+		t.Fatalf("workflow metadata=%v, want codex workflow scaffold", artifact.Metadata)
+	}
+	for _, want := range []string{"Codex goal workflow", "Review against the original goal", "Verify goal as completed"} {
+		if !strings.Contains(artifact.Text, want) {
+			t.Fatalf("artifact text missing %q: %s", want, artifact.Text)
+		}
 	}
 }
 

@@ -1433,7 +1433,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
-		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, or grill. Research mode currently creates a durable research brief inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, or external job.",
+		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, grill, or workflow. Use workflow when the user asks for a Codex goal, reusable goal workflow, multi-agent loop, research/design execution plan, or gated shipping loop. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, SSH work, or external job.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -1498,7 +1498,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 	artifactModeProperty := map[string]any{
 		"type":        "string",
 		"description": "Durable artifact workspace to use.",
-		"enum":        []string{"artifacts", "research", "design", "grill"},
+		"enum":        []string{"artifacts", "research", "design", "grill", "workflow"},
 	}
 
 	return []map[string]any{
@@ -1633,12 +1633,12 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "create_artifact",
-			"description": "Create a durable Bonfire OS artifact, research brief, design kickoff, or grill scorecard from a clear user request. If content is omitted, the app will scaffold the artifact from board and memory context.",
+			"description": "Create a durable Bonfire OS artifact, research brief, design kickoff, grill scorecard, or Codex goal workflow from a clear user request. If content is omitted, the app will scaffold the artifact from board and memory context.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"mode":    artifactModeProperty,
-					"query":   map[string]any{"type": "string", "description": "The user's artifact, research, design, or grill request."},
+					"query":   map[string]any{"type": "string", "description": "The user's artifact, research, design, grill, or workflow request."},
 					"content": map[string]any{"type": "string", "description": "Optional final artifact content to save. Omit when the app should scaffold it from current board and memory context."},
 				},
 				"required":             []string{"mode", "query"},
@@ -2190,7 +2190,7 @@ func normalizeRealtimeArtifactMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "artifact", "artifacts":
 		return "artifacts"
-	case "research", "design", "grill":
+	case "research", "design", "grill", "workflow":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return ""

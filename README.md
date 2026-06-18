@@ -98,6 +98,12 @@ Scout listens continuously for board updates, but spoken answers are wake-phrase
 
 Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-realtime-whisper` transcription-only lane records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript. A second board worker analyzes those brain summaries, applies grounded card updates through the same Kanban tool path as live Scout, and writes durable `board_update` artifacts so conversations compound into auditable board state instead of disappearing after the call.
 
+### Codex goal workflows
+
+Scout can scaffold a reusable goal workflow artifact from text or Realtime voice by using workflow mode. The saved artifact follows the loop: identify the goal, decompose work, assign agents, coordinate dependencies, execute in order, review, gate, save learnings, report what matters, and verify completion.
+
+This first slice saves the workflow inside Bonfire OS. It does not start an external Codex job yet. Longer research, design, browser, SSH, code, test, and deploy work should run through a separate Codex SDK or `codex exec` worker that writes status and evidence back to artifacts.
+
 ### Configured interactions
 
 The assistant is configured as a voice-operated Kanban board operator. It can:

@@ -9020,12 +9020,13 @@
         <div class="os-assistant__modes" role="group" aria-label="Assistant mode">
           <button class="os-assistant__mode" type="button" data-assistant-mode="chat" aria-pressed="true">chat</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="artifacts" aria-pressed="false">artifacts</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="workflow" aria-pressed="false">workflow</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false">research</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false">design</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false">grill</button>
         </div>
         <div id="osAssistantLog" class="os-assistant__log" role="log" aria-live="polite">
-          <p class="os-assistant__msg"><b>ready</b><span>ask about the board, prior meetings, artifacts, research, design work, or pitch feedback.</span></p>
+          <p class="os-assistant__msg"><b>ready</b><span>ask about the board, prior meetings, artifacts, goal workflows, research, design work, or pitch feedback.</span></p>
         </div>
         <form id="osAssistantForm" class="os-assistant__form">
           <textarea id="osAssistantInput" class="os-assistant__input" rows="1" autocomplete="off" placeholder="ask the office..." aria-label="Ask Bonfire assistant"></textarea>
@@ -11052,7 +11053,7 @@
             selectedArtifactChanged = true
           } else if (type === 'assistant_mode') {
             const mode = String(action.mode || '').trim()
-            if (['chat', 'artifacts', ...agentToolIds].includes(mode)) {
+            if (['chat', 'artifacts', 'workflow', ...agentToolIds].includes(mode)) {
               setOSAssistantMode(mode)
             }
           }
@@ -11346,7 +11347,7 @@
       }
 
       function setOSAssistantMode(mode) {
-        const next = ['chat', 'artifacts', 'research', 'design', 'grill'].includes(mode) ? mode : 'chat'
+        const next = ['chat', 'artifacts', 'workflow', 'research', 'design', 'grill'].includes(mode) ? mode : 'chat'
         osAssistantMode = next
         osAssistantModeButtons.forEach(button => {
           button.setAttribute('aria-pressed', button.dataset.assistantMode === next ? 'true' : 'false')
@@ -11355,6 +11356,7 @@
         const placeholders = {
           chat: 'ask the office...',
           artifacts: 'turn this into an artifact...',
+          workflow: 'turn this into a goal workflow...',
           research: 'research this question...',
           design: 'kick off design work...',
           grill: 'paste the pitch or ask for the first question...'
@@ -11366,6 +11368,7 @@
         const labels = {
           chat: 'chat mode',
           artifacts: 'artifact mode',
+          workflow: 'goal workflow',
           research: 'research mode',
           design: 'design studio',
           grill: 'grill mode'
@@ -17625,6 +17628,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function artifactModeLabel(entry) {
         const mode = String(entry?.metadata?.mode || '').trim()
+        if (mode === 'workflow') {
+          return 'goal workflow'
+        }
         return mode ? `${mode} artifact` : 'artifact'
       }
 

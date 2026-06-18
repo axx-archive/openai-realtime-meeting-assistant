@@ -17,6 +17,7 @@ const (
 	memoryQuestionRequestTimeout      = 45 * time.Second
 	assistantQueryRequestTimeout      = 25 * time.Second
 	defaultMeetingTimeZone            = "America/Los_Angeles"
+	goalWorkflowStageMetadata         = "identify_and_set_goal,decompose_work,assign_right_agent,coordinate_dependencies,execute_in_order,review_against_original_goal,gate_before_shipping,save_what_worked,report_only_what_matters,verify_goal_completed"
 )
 
 var (
@@ -152,7 +153,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 
 func normalizeOSAssistantMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "artifacts", "research", "design", "grill":
+	case "artifacts", "research", "design", "grill", "workflow":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
 		return "chat"
@@ -184,6 +185,8 @@ func buildOSAssistantModeAnswer(mode string, result assistantQueryResult, board 
 		output = buildDesignModeAnswer(query, contextAnswer, board)
 	case "grill":
 		output = buildGrillModeAnswer(query, contextAnswer)
+	case "workflow":
+		output = buildWorkflowModeAnswer(query, contextAnswer, board, memory)
 	}
 	if strings.TrimSpace(output) == "" {
 		output = contextAnswer
@@ -213,6 +216,12 @@ func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer st
 		"mode":  mode,
 		"query": strings.TrimSpace(query),
 		"title": osArtifactTitle(mode, query, answer),
+	}
+	if osAssistantModeUsesGoalWorkflow(mode) {
+		metadata["workflow"] = "codex_goal_loop"
+		metadata["workflowStages"] = goalWorkflowStageMetadata
+		metadata["codexRunner"] = "not_connected"
+		metadata["status"] = "saved"
 	}
 	if createdBy = canonicalParticipantName(createdBy); createdBy != "" {
 		metadata["createdBy"] = createdBy
@@ -300,6 +309,9 @@ func (app *kanbanBoardApp) osAssistantActions(query string, mode string, artifac
 	case "research", "design", "grill":
 		addTool(mode, "Opened "+assistantToolLabel(mode), artifactID)
 		return actions
+	case "workflow":
+		addArtifactTool(artifactID)
+		return actions
 	case "artifacts":
 		addArtifactTool(artifactID)
 		return actions
@@ -315,6 +327,13 @@ func (app *kanbanBoardApp) osAssistantActions(query string, mode string, artifac
 	}
 	if hasAssistantPhrase(lower, "grill", "pitch", "score", "pressure test", "tough question", "objection", "evaluate my delivery", "scorecard") {
 		addTool("grill", "Opened grill mode", "")
+		return actions
+	}
+	if hasAssistantPhrase(lower, "workflow", "goal loop", "goal workflow", "multi-agent loop", "codex goal", "codex workflow") {
+		if artifactID == "" {
+			artifactID = app.latestOSArtifactID()
+		}
+		addArtifactTool(artifactID)
 		return actions
 	}
 	if hasAssistantPhrase(lower, "artifact", "artifacts", "memo", "notes", "summary", "summarize", "output", "draft") {
@@ -374,8 +393,19 @@ func assistantToolLabel(tool string) string {
 		return "design studio"
 	case "grill":
 		return "grill mode"
+	case "workflow":
+		return "goal workflow"
 	default:
 		return tool
+	}
+}
+
+func osAssistantModeUsesGoalWorkflow(mode string) bool {
+	switch normalizeOSAssistantMode(mode) {
+	case "artifacts", "research", "design", "grill", "workflow":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -397,7 +427,7 @@ func osArtifactTitle(mode string, query string, answer string) string {
 
 func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
 	artifactType := inferArtifactType(query)
-	return strings.Join([]string{
+	lines := []string{
 		"Artifact draft",
 		"",
 		"Type: " + artifactType,
@@ -410,11 +440,13 @@ func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoa
 		"4. Next move: assign one owner and one date before sending.",
 		"",
 		"Workspace context: " + boardAndMemoryContextLine(board, memory),
-	}, "\n")
+	}
+	lines = appendGoalWorkflow(lines, "artifacts", query, contextAnswer, "durable operating artifact", boardAndMemoryContextLine(board, memory))
+	return strings.Join(lines, "\n")
 }
 
 func buildResearchModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
-	return strings.Join([]string{
+	lines := []string{
 		"Research brief",
 		"",
 		"Question: " + query,
@@ -427,11 +459,13 @@ func buildResearchModeAnswer(query string, contextAnswer string, board kanbanBoa
 		"",
 		"Deliverable: a one-page brief with claim, evidence, counterargument, and recommendation.",
 		"Workspace context: " + boardAndMemoryContextLine(board, memory),
-	}, "\n")
+	}
+	lines = appendGoalWorkflow(lines, "research", query, contextAnswer, "source-backed research brief", boardAndMemoryContextLine(board, memory))
+	return strings.Join(lines, "\n")
 }
 
 func buildDesignModeAnswer(query string, contextAnswer string, board kanbanBoardState) string {
-	return strings.Join([]string{
+	lines := []string{
 		"Design kickoff",
 		"",
 		"Intent: " + query,
@@ -445,12 +479,14 @@ func buildDesignModeAnswer(query string, contextAnswer string, board kanbanBoard
 		"",
 		"First pass: sketch states for empty, active, evidence-rich, and decision-ready.",
 		"Board context: " + boardContextLine(board),
-	}, "\n")
+	}
+	lines = appendGoalWorkflow(lines, "design", query, contextAnswer, "design kickoff and implementation handoff", boardContextLine(board))
+	return strings.Join(lines, "\n")
 }
 
 func buildGrillModeAnswer(query string, contextAnswer string) string {
 	score := grillScore(query)
-	return strings.Join([]string{
+	lines := []string{
 		"Grill mode scorecard",
 		"",
 		fmt.Sprintf("Final score: %d/100", score),
@@ -466,7 +502,71 @@ func buildGrillModeAnswer(query string, contextAnswer string) string {
 		"4. Which competitor, spreadsheet, or status quo wins if the story is vague?",
 		"",
 		"Delivery note: answer with one crisp claim, one concrete proof point, and one ask.",
-	}, "\n")
+	}
+	lines = appendGoalWorkflow(lines, "grill", query, contextAnswer, "pressure-test scorecard and follow-up questions", "pitch text and current Bonfire context")
+	return strings.Join(lines, "\n")
+}
+
+func buildWorkflowModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+	lines := []string{
+		"Codex goal workflow",
+		"",
+		"Objective: " + compactAssistantLine(query),
+		"Current signal: " + compactAssistantLine(contextAnswer),
+		"Workspace context: " + boardAndMemoryContextLine(board, memory),
+		"",
+		"Worker boundary",
+		"Realtime 2 can start this workflow, control Bonfire apps, answer from memory, and save the scaffold.",
+		"Codex workers should execute long-running research, design, code, browser, SSH, tests, diffs, and review steps outside the live voice loop.",
+	}
+	lines = appendGoalWorkflow(lines, "workflow", query, contextAnswer, "goal-tracked multi-agent workflow artifact", boardAndMemoryContextLine(board, memory))
+	return strings.Join(lines, "\n")
+}
+
+func appendGoalWorkflow(lines []string, mode string, query string, contextAnswer string, deliverable string, contextLine string) []string {
+	lines = append(lines, "")
+	return append(lines, goalWorkflowSection(mode, query, contextAnswer, deliverable, contextLine)...)
+}
+
+func goalWorkflowSection(mode string, query string, contextAnswer string, deliverable string, contextLine string) []string {
+	goal := compactAssistantLine(query)
+	if goal == "no direct context yet" {
+		goal = compactAssistantLine(contextAnswer)
+	}
+	contextLine = compactAssistantLine(contextLine)
+	return []string{
+		"Goal workflow",
+		"1. Identify and set goal: " + goal,
+		"2. Decompose the work: turn the request into scoped research, design, evidence, implementation, review, and verification steps.",
+		"3. Assign the right agent: " + goalWorkflowAgentLine(mode),
+		"4. Coordinate dependencies: use Bonfire board state, prior meetings, saved artifacts, and any required external Codex worker inputs as the shared context.",
+		"5. Execute in order: save this scaffold now, run the assigned worker when connected, attach evidence, then update the artifact.",
+		"6. Review against the original goal: compare the output to the request before treating it as done.",
+		"7. Gate before shipping: require source-backed evidence, passing checks, and explicit approval before deploy, publish, or push.",
+		"8. Save what worked: preserve the prompt, useful evidence, files changed, tests run, and decisions in the artifact.",
+		"9. Report only what matters: summarize outcome, proof, risks, and next action.",
+		"10. Verify goal as completed: mark complete only when the original objective and acceptance checks are satisfied.",
+		"Deliverable: " + deliverable + ".",
+		"Context: " + contextLine + ".",
+		"Codex handoff: no external Codex job has started; this artifact is ready for a server-side Codex SDK or MCP worker.",
+	}
+}
+
+func goalWorkflowAgentLine(mode string) string {
+	switch normalizeOSAssistantMode(mode) {
+	case "research":
+		return "research agent first, with a Codex research or code worker when external execution is connected."
+	case "design":
+		return "design agent first, with a Codex implementation worker when the brief becomes a build task."
+	case "grill":
+		return "grill agent first, with a Codex worker only for follow-up research, tasks, or code changes."
+	case "artifacts":
+		return "artifact agent first, with a Codex worker when the artifact requires external research or repo edits."
+	case "workflow":
+		return "goal coordinator first, then specialized research, design, implementation, reviewer, and shipping-gate agents as needed."
+	default:
+		return "Scout scopes locally first, then hands off to Codex only when the task needs longer execution."
+	}
 }
 
 func inferArtifactType(query string) string {
