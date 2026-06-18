@@ -42,6 +42,11 @@ const (
 	scoutVoiceRecentToolGrace = 6 * time.Second
 )
 
+func durableTimestampID(prefix string, at time.Time) string {
+	at = at.UTC()
+	return fmt.Sprintf("%s-%s-%09d", strings.TrimSpace(prefix), at.Format("20060102-150405"), at.Nanosecond())
+}
+
 type kanbanStatus string
 
 const (
@@ -96,6 +101,7 @@ type roomRecordingState struct {
 
 type meetingArchive struct {
 	ID           string               `json:"id"`
+	MeetingID    string               `json:"meetingId,omitempty"`
 	ArchivedAt   time.Time            `json:"archivedAt"`
 	ArchivedBy   string               `json:"archivedBy,omitempty"`
 	Board        kanbanBoardState     `json:"board"`
@@ -107,6 +113,7 @@ type meetingArchive struct {
 
 type meetingArchiveResult struct {
 	ID          string              `json:"id"`
+	MeetingID   string              `json:"meetingId,omitempty"`
 	ArchivedAt  string              `json:"archivedAt"`
 	ArchivedBy  string              `json:"archivedBy,omitempty"`
 	DownloadURL string              `json:"downloadUrl"`
@@ -2460,6 +2467,14 @@ func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 	return app.memory.snapshot(limit)
 }
 
+func (app *kanbanBoardApp) memorySnapshotForMeeting(meetingID string, limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+
+	return app.memory.snapshotForMeeting(meetingID, limit)
+}
+
 // memorySnapshotForClients decorates archive entries with a keyed download
 // URL at serve time so archive links keep working behind the archives auth
 // gate without persisting the room password into the store.
@@ -3244,9 +3259,13 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 
 	archivedBy = canonicalRoomActorName(archivedBy)
 	archivedAt := time.Now().UTC()
-	archiveID := fmt.Sprintf("meeting-%s", archivedAt.Format("20060102-150405-000000000"))
+	archiveID := durableTimestampID("meeting", archivedAt)
+	meetingID := ""
+	if app.memory != nil {
+		meetingID = app.memory.currentMeetingID()
+	}
 	board := app.snapshotState()
-	memory := app.memorySnapshot(2000)
+	memory := app.memorySnapshotForMeeting(meetingID, 2000)
 	participants := app.participantSnapshot()
 	if len(participants) == 0 && archivedBy != "" {
 		participants = []string{archivedBy}
@@ -3259,6 +3278,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	}
 	archive := meetingArchive{
 		ID:           archiveID,
+		MeetingID:    meetingID,
 		ArchivedAt:   archivedAt,
 		ArchivedBy:   archivedBy,
 		Board:        board,
@@ -3302,6 +3322,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 			"archiveId":   archiveID,
 			"downloadUrl": meetingArchiveDownloadURL(archiveID),
 			"archivedBy":  archivedBy,
+			"meetingId":   meetingID,
 		})
 		if err != nil {
 			return meetingArchiveResult{}, fmt.Errorf("remember meeting archive: %w", err)
@@ -3312,6 +3333,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 			"archiveId":   archiveID,
 			"downloadUrl": meetingArchiveDownloadURL(archiveID),
 			"createdBy":   archivedBy,
+			"meetingId":   meetingID,
 		})
 		if err != nil {
 			return meetingArchiveResult{}, fmt.Errorf("remember meeting artifact: %w", err)
@@ -3324,6 +3346,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 
 	return meetingArchiveResult{
 		ID:          archiveID,
+		MeetingID:   meetingID,
 		ArchivedAt:  archivedAt.Format(time.RFC3339Nano),
 		ArchivedBy:  archivedBy,
 		DownloadURL: meetingArchiveDownloadURLWithKey(archiveID),

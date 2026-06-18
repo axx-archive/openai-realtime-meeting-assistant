@@ -151,6 +151,56 @@ func TestCrossOriginAuthPostRejected(t *testing.T) {
 	}
 }
 
+func TestParticipantsEndpointRequiresSession(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/participants", nil)
+	recorder := httptest.NewRecorder()
+	participantsHandler(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected /participants without session to return 401, got %d", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	req = httptest.NewRequest(http.MethodGet, "/participants", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	participantsHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /participants with session to return 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestClientConfigEndpointRequiresSession(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/client-config", nil)
+	recorder := httptest.NewRecorder()
+	clientConfigHandler(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected /client-config without session to return 401, got %d", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	req = httptest.NewRequest(http.MethodGet, "/client-config", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	clientConfigHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /client-config with session to return 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestChangePasswordEndpoint(t *testing.T) {
 	setupAuthTestEnv(t)
 

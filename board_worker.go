@@ -118,7 +118,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		metadata["throughTranscriptId"] = throughTranscriptID
 	}
 
-	id := fmt.Sprintf("board-update-%s", time.Now().UTC().Format("20060102-150405-000000000"))
+	id := durableTimestampID("board-update", time.Now())
 	entry, appended, err := app.memory.appendBoardUpdate(id, renderMeetingBoardUpdateArtifact(summaries, runResult), metadata)
 	if err != nil || !appended {
 		return entry, err

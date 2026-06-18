@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMeetingMemoryPersistsAndSearchesTranscripts(t *testing.T) {
@@ -53,6 +54,56 @@ func TestMeetingMemoryDedupesEventIDs(t *testing.T) {
 	entries := store.snapshot(10)
 	if len(entries) != 1 {
 		t.Fatalf("entries=%d, want 1", len(entries))
+	}
+}
+
+func TestMeetingMemorySnapshotsOnlyRequestedMeeting(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	oldEntry, _, err := store.appendTranscript("event-old", "item-old", "Old meeting decision should stay out.")
+	if err != nil {
+		t.Fatalf("append old transcript: %v", err)
+	}
+	oldMeetingID := oldEntry.Metadata["meetingId"]
+	store.rotateMeetingID()
+	currentEntry, _, err := store.appendTranscript("event-current", "item-current", "Current meeting decision belongs here.")
+	if err != nil {
+		t.Fatalf("append current transcript: %v", err)
+	}
+	currentMeetingID := currentEntry.Metadata["meetingId"]
+	if currentMeetingID == "" || currentMeetingID == oldMeetingID {
+		t.Fatalf("current meetingId=%q old=%q, want distinct ids", currentMeetingID, oldMeetingID)
+	}
+
+	entries := store.snapshotForMeeting(currentMeetingID, 10)
+	if len(entries) != 1 {
+		t.Fatalf("meeting snapshot entries=%d, want 1", len(entries))
+	}
+	if entries[0].ID != currentEntry.ID {
+		t.Fatalf("meeting snapshot entry=%q, want %q", entries[0].ID, currentEntry.ID)
+	}
+	if leaked := store.snapshotForMeeting(oldMeetingID, 10); len(leaked) != 1 || leaked[0].ID != oldEntry.ID {
+		t.Fatalf("old meeting snapshot=%v, want old entry only", leaked)
+	}
+	if empty := store.snapshotForMeeting("", 10); len(empty) != 0 {
+		t.Fatalf("empty meeting snapshot=%v, want none", empty)
+	}
+}
+
+func TestDurableTimestampIDDifferentiatesSameSecondEvents(t *testing.T) {
+	first := time.Date(2026, 6, 17, 12, 34, 56, 123, time.UTC)
+	second := time.Date(2026, 6, 17, 12, 34, 56, 456, time.UTC)
+
+	firstID := durableTimestampID("brain", first)
+	secondID := durableTimestampID("brain", second)
+	if firstID == secondID {
+		t.Fatalf("same-second durable ids collided: %q", firstID)
+	}
+	if !strings.HasSuffix(firstID, "-000000123") || !strings.HasSuffix(secondID, "-000000456") {
+		t.Fatalf("durable ids do not include nanoseconds: %q %q", firstID, secondID)
 	}
 }
 

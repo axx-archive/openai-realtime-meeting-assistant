@@ -409,6 +409,29 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 	return cloneMemoryEntries(tailMemoryEntries(store.entries, limit))
 }
 
+func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int) []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+	meetingID = strings.TrimSpace(meetingID)
+	if meetingID == "" {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	entries := make([]meetingMemoryEntry, 0, len(store.entries))
+	for _, entry := range store.entries {
+		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return cloneMemoryEntries(tailMemoryEntries(entries, limit))
+}
+
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
 	if store == nil || limit <= 0 {
 		return nil

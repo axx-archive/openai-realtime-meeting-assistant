@@ -254,6 +254,8 @@ func main() {
 	}
 
 	// websocket handler
+	http.HandleFunc("/healthz", healthHandler)
+	http.HandleFunc("/readyz", readinessHandler)
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
@@ -291,6 +293,139 @@ func main() {
 	}
 	if err = srv.ListenAndServe(); err != nil {
 		log.Errorf("Failed to start http server: %v", err)
+	}
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
+		"ok":      true,
+		"service": "meetingassist",
+		"time":    time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func readinessHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	appAvailable := kanbanApp != nil
+	memoryAvailable := appAvailable && kanbanApp.memory != nil
+	memoryCheck := readinessStateFileCheck(meetingMemoryPath())
+	boardCheck := readinessStateFileCheck(kanbanBoardPath())
+	realtime := map[string]any{"connected": false, "voiceControl": false}
+	if appAvailable {
+		kanbanApp.mu.Lock()
+		realtime["connected"] = kanbanApp.connected
+		realtime["voiceControl"] = kanbanApp.voiceControlActive
+		kanbanApp.mu.Unlock()
+	}
+
+	ready := appAvailable && memoryAvailable && readinessCheckOK(memoryCheck) && readinessCheckOK(boardCheck)
+	status := http.StatusOK
+	if !ready {
+		status = http.StatusServiceUnavailable
+	}
+
+	degraded := []string{}
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+		degraded = append(degraded, "openai_api_key_missing")
+	}
+
+	writeSystemStatusJSON(w, r, status, map[string]any{
+		"ok":       ready,
+		"service":  "meetingassist",
+		"time":     time.Now().UTC().Format(time.RFC3339Nano),
+		"degraded": degraded,
+		"checks": map[string]any{
+			"app":         appAvailable,
+			"memoryStore": memoryAvailable,
+			"memoryFile":  memoryCheck,
+			"boardFile":   boardCheck,
+			"realtime":    realtime,
+			"agents": map[string]any{
+				"brain": readinessAgentSnapshot(meetingBrainAgent()),
+				"board": readinessAgentSnapshot(meetingBoardAgent()),
+			},
+		},
+	})
+}
+
+func writeSystemStatusJSON(w http.ResponseWriter, r *http.Request, status int, payload map[string]any) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if r.Method == http.MethodHead {
+		return
+	}
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Errorf("Failed to encode system status: %v", err)
+	}
+}
+
+func readinessStateFileCheck(path string) map[string]any {
+	result := map[string]any{
+		"ok":       false,
+		"writable": false,
+	}
+	dir := filepath.Dir(strings.TrimSpace(path))
+	if dir == "" || dir == "." {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		result["error"] = "create_directory_failed"
+		return result
+	}
+	tempFile, err := os.CreateTemp(dir, ".readyz-*")
+	if err != nil {
+		result["error"] = "create_temp_file_failed"
+		return result
+	}
+	tempPath := tempFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := tempFile.Write([]byte("ok")); err != nil {
+		_ = tempFile.Close()
+		result["error"] = "write_temp_file_failed"
+		return result
+	}
+	if err := tempFile.Close(); err != nil {
+		result["error"] = "close_temp_file_failed"
+		return result
+	}
+	if err := os.Remove(tempPath); err != nil {
+		result["error"] = "remove_temp_file_failed"
+		return result
+	}
+	cleanup = false
+	result["ok"] = true
+	result["writable"] = true
+	return result
+}
+
+func readinessCheckOK(check map[string]any) bool {
+	ok, _ := check["ok"].(bool)
+	return ok
+}
+
+func readinessAgentSnapshot(agent ambientAgentConfig) map[string]any {
+	interval := agent.interval()
+	enabled := interval > 0 && !boolEnv(agent.disabledEnv)
+	return map[string]any{
+		"enabled":         enabled,
+		"intervalSeconds": int(interval.Seconds()),
+		"minBatch":        agent.minBatch(),
+		"maxBatch":        agent.maxBatch(),
 	}
 }
 
@@ -333,6 +468,14 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "room state is unavailable")
+		return
+	}
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -344,6 +487,10 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
 

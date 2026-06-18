@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -75,7 +74,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		"throughTranscriptCreatedAt": lastTranscript.CreatedAt.Format(time.RFC3339Nano),
 		"transcriptCount":            strconv.Itoa(len(transcripts)),
 	}
-	id := fmt.Sprintf("brain-%s", time.Now().UTC().Format("20060102-150405-000000000"))
+	id := durableTimestampID("brain", time.Now())
 	entry, appended, err := app.memory.appendBrainWriteUp(id, text, metadata)
 	if err != nil || !appended {
 		return entry, err

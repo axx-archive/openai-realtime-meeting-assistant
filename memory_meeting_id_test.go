@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,6 +126,58 @@ func TestArchiveMeetingRotatesMeetingID(t *testing.T) {
 	}
 	if next.Metadata["meetingId"] == first.Metadata["meetingId"] {
 		t.Fatalf("post-archive meetingId=%q, want a new meeting id", next.Metadata["meetingId"])
+	}
+}
+
+func TestArchiveMeetingIncludesOnlyCurrentMeetingMemory(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	old, _, err := app.memory.appendTranscript("event-old", "item-old", "AJ: We decided the old archive should not leak.")
+	if err != nil {
+		t.Fatalf("append old transcript: %v", err)
+	}
+	app.memory.rotateMeetingID()
+	current, _, err := app.memory.appendTranscript("event-current", "item-current", "AJ: We decided the current archive should be scoped.")
+	if err != nil {
+		t.Fatalf("append current transcript: %v", err)
+	}
+	if current.Metadata["meetingId"] == "" || current.Metadata["meetingId"] == old.Metadata["meetingId"] {
+		t.Fatalf("meeting ids old=%q current=%q, want distinct non-empty ids", old.Metadata["meetingId"], current.Metadata["meetingId"])
+	}
+
+	result, err := app.archiveMeeting("AJ")
+	if err != nil {
+		t.Fatalf("archiveMeeting: %v", err)
+	}
+	if result.MeetingID != current.Metadata["meetingId"] {
+		t.Fatalf("result meetingId=%q, want %q", result.MeetingID, current.Metadata["meetingId"])
+	}
+
+	archivePath, err := meetingArchivePath(result.ID)
+	if err != nil {
+		t.Fatalf("meetingArchivePath: %v", err)
+	}
+	rawArchive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	var archive meetingArchive
+	if err := json.Unmarshal(rawArchive, &archive); err != nil {
+		t.Fatalf("decode archive: %v", err)
+	}
+	if archive.MeetingID != current.Metadata["meetingId"] {
+		t.Fatalf("archive meetingId=%q, want %q", archive.MeetingID, current.Metadata["meetingId"])
+	}
+	if len(archive.Memory) != 1 {
+		t.Fatalf("archive memory entries=%d, want 1: %#v", len(archive.Memory), archive.Memory)
+	}
+	if archive.Memory[0].ID != current.ID {
+		t.Fatalf("archive memory id=%q, want current %q", archive.Memory[0].ID, current.ID)
+	}
+	if strings.Contains(archive.Notes.Text, old.Text) {
+		t.Fatalf("notes leaked old meeting decision: %s", archive.Notes.Text)
+	}
+	if !strings.Contains(archive.Notes.Text, current.Text) {
+		t.Fatalf("notes missing current meeting decision: %s", archive.Notes.Text)
 	}
 }
 
