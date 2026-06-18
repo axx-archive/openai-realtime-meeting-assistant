@@ -23,7 +23,7 @@ import (
 const (
 	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
-	defaultReasoningEffort    = "low"
+	defaultReasoningEffort    = "high"
 	defaultRealtimeVADType    = "server_vad"
 	defaultVADEagerness       = "high"
 	defaultRealtimeVoice      = "marin"
@@ -960,7 +960,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 		},
 		"instructions": app.sessionInstructions(),
 		"tools":        app.kanbanTools(),
-		"tool_choice":  "required",
+		"tool_choice":  app.realtimeToolChoice(),
 	}
 
 	if usesAdvancedCommandProfile(model) {
@@ -970,6 +970,14 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 	}
 
 	return session
+}
+
+func (app *kanbanBoardApp) realtimeToolChoice() string {
+	if app.voiceControlEnabled() {
+		return "auto"
+	}
+
+	return "required"
 }
 
 func (app *kanbanBoardApp) sessionUpdateEvent() map[string]any {
@@ -1416,7 +1424,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
 		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
-		"# Voice control mode\n" + voiceControlState + " When active, the waveform island is the user's vocal button for an instant two-way Realtime 2 conversation. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
+		"# Voice control mode\n" + voiceControlState + " When active, the waveform island is the user's vocal button for an instant two-way Realtime 2 conversation: answer simple capability, help, navigation, and status questions directly unless a listed tool is needed. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
 		"# Preambles\nDo not speak preambles for routine app or board updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",

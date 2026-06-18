@@ -20,8 +20,8 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	if !ok {
 		t.Fatal("session reasoning config missing")
 	}
-	if effort := reasoning["effort"]; effort != defaultReasoningEffort {
-		t.Fatalf("reasoning effort=%v, want %s", effort, defaultReasoningEffort)
+	if effort := reasoning["effort"]; effort != "high" {
+		t.Fatalf("reasoning effort=%v, want high", effort)
 	}
 
 	audio := session["audio"].(map[string]any)
@@ -36,6 +36,9 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	}
 	if got, want := session["output_modalities"], []string{"audio"}; !sameStringSlice(got.([]string), want) {
 		t.Fatalf("output_modalities=%v, want %v", got, want)
+	}
+	if toolChoice := session["tool_choice"]; toolChoice != "required" {
+		t.Fatalf("tool_choice=%v, want required while voice control is inactive", toolChoice)
 	}
 	transcription := input["transcription"].(map[string]any)
 	if model := transcription["model"]; model != defaultRealtimeTranscriptionModel {
@@ -54,6 +57,22 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	}
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("turn_detection.interrupt_response=%v, want true", interrupt)
+	}
+}
+
+func TestRealtimeVoiceControlSessionAllowsDirectAnswers(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.setVoiceControlActive(true, "AJ")
+
+	session := app.sessionConfig("gpt-realtime-2")
+	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
+		t.Fatalf("tool_choice=%v, want auto while voice control is active", toolChoice)
+	}
+	instructions := session["instructions"].(string)
+	for _, want := range []string{"instant two-way Realtime 2 conversation", "answer simple capability", "directly unless a listed tool is needed"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("voice-control instructions missing %q: %s", want, instructions)
+		}
 	}
 }
 

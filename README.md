@@ -122,7 +122,7 @@ You can update:
 - The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
 - The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. Set `OPENAI_TRANSCRIPT_MODEL` to change the transcript-only model from `gpt-realtime-whisper`.
 - The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
-- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `minimal` for lower-latency board commands on `gpt-realtime-2`.
+- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `high` for stronger orchestration across company context, meeting memory, app tools, and artifact workflows on `gpt-realtime-2`.
 - The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`server_vad` or `semantic_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto` for semantic VAD); the default is `server_vad` with a 300 ms silence window for faster turn endings.
 - The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
 - The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
