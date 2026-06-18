@@ -760,3 +760,22 @@ func TestIndexRoomEntryChoreographyHoldsFinalVisibleState(t *testing.T) {
 		t.Fatal("index.html uses a bare backwards animation fill; over an opacity-0 base state the element vanishes when the animation ends — use both")
 	}
 }
+
+func TestRealtimeVoiceActionCanCloseVoiceIsland(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"type === 'set_voice_control'",
+		"stopRealtimeVoiceConversation({ notifyServer: false })",
+		"const notifyServer = options?.notifyServer !== false",
+		"if (notifyServer) {\n          sendVoiceControlState(false)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing realtime voice close action %q", want)
+		}
+	}
+}

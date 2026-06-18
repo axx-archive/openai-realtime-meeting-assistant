@@ -11056,6 +11056,15 @@
             if (['chat', 'artifacts', 'workflow', ...agentToolIds].includes(mode)) {
               setOSAssistantMode(mode)
             }
+          } else if (type === 'set_voice_control') {
+            const enabled = Boolean(action.enabled)
+            if (enabled) {
+              realtimeVoiceActive = true
+              realtimeVoiceOnlyPending = false
+              setVoiceIslandState('listening', 'realtime 2 · listening')
+            } else {
+              stopRealtimeVoiceConversation({ notifyServer: false })
+            }
           }
         }
 
@@ -11216,13 +11225,16 @@
         }
       }
 
-      function stopRealtimeVoiceConversation() {
+      function stopRealtimeVoiceConversation(options = {}) {
         if (!realtimeVoiceActive && !realtimeVoiceOnlyPending) {
           setVoiceIslandState('idle')
           return
         }
+        const notifyServer = options?.notifyServer !== false
         const shouldLeaveVoiceRoom = realtimeVoiceStartedRoom && appShell.classList.contains('is-in-room')
-        sendVoiceControlState(false)
+        if (notifyServer) {
+          sendVoiceControlState(false)
+        }
         realtimeVoiceActive = false
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false

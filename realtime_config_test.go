@@ -193,16 +193,19 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"create_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", `"memory"`} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"update_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", `"memory"`, "local mic"} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "create_artifact", "goal workflow", "start a thread", "Codex runner", "Voice control mode"} {
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "goal workflow", "start a thread", "Codex runner", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
+	}
+	if !realtimeToolRunsAsync("archive_meeting") {
+		t.Fatal("archive_meeting should run async because it writes archives and artifacts")
 	}
 }
 
@@ -246,6 +249,203 @@ func TestRealtimeControlAppReturnsOSActions(t *testing.T) {
 	}
 }
 
+func TestRealtimeVoiceControlCanStopListening(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.setVoiceControlActive(true, "AJ")
+
+	result, changed, err := app.applyToolCallArgs("set_voice_control", map[string]any{
+		"enabled": false,
+	})
+	if err != nil {
+		t.Fatalf("set_voice_control false: %v", err)
+	}
+	if changed {
+		t.Fatal("set_voice_control changed board state")
+	}
+	if app.voiceControlEnabled() {
+		t.Fatal("voice control still active after realtime stop")
+	}
+	actions, ok := result["actions"].([]osAssistantAction)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("actions=%#v, want one set_voice_control action", result["actions"])
+	}
+	if actions[0].Type != "set_voice_control" || actions[0].Enabled == nil || *actions[0].Enabled {
+		t.Fatalf("action=%#v, want set_voice_control enabled=false", actions[0])
+	}
+}
+
+func TestRealtimeSetRecordingControlsTranscriptCapture(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.applyToolCallArgs("set_recording", map[string]any{
+		"enabled": false,
+	})
+	if err != nil {
+		t.Fatalf("set_recording false: %v", err)
+	}
+	if changed {
+		t.Fatal("set_recording changed board state")
+	}
+	if ok, _ := result["ok"].(bool); !ok {
+		t.Fatalf("ok=%v, want true", result["ok"])
+	}
+	recording, ok := result["recording"].(roomRecordingState)
+	if !ok {
+		t.Fatalf("recording type=%T, want roomRecordingState", result["recording"])
+	}
+	if recording.Enabled {
+		t.Fatal("recording enabled=true, want false")
+	}
+	if recording.UpdatedBy != scoutParticipantName {
+		t.Fatalf("recording updatedBy=%q, want %q", recording.UpdatedBy, scoutParticipantName)
+	}
+	if app.transcriptRecordingActive() {
+		t.Fatal("transcript recording still active after realtime pause")
+	}
+
+	result, _, err = app.applyToolCallArgs("set_recording", map[string]any{
+		"enabled": true,
+	})
+	if err != nil {
+		t.Fatalf("set_recording true: %v", err)
+	}
+	recording, ok = result["recording"].(roomRecordingState)
+	if !ok || !recording.Enabled {
+		t.Fatalf("recording=%#v, want enabled roomRecordingState", result["recording"])
+	}
+	if !app.transcriptRecordingActive() {
+		t.Fatal("transcript recording inactive after realtime resume")
+	}
+}
+
+func TestRealtimeUndoDeleteRestoresLastDeletedCard(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	created, changed, err := app.applyToolCallArgs("create_ticket", map[string]any{
+		"title":  "Restore me",
+		"notes":  "Card to delete and restore.",
+		"owner":  "AJ",
+		"tags":   []any{"qa"},
+		"status": "Backlog",
+	})
+	if err != nil {
+		t.Fatalf("create_ticket: %v", err)
+	}
+	if !changed {
+		t.Fatal("create_ticket changed=false, want true")
+	}
+	card, ok := created["card"].(kanbanCard)
+	if !ok || card.ID == "" {
+		t.Fatalf("created card missing: %#v", created)
+	}
+	if _, changed, err = app.applyToolCallArgs("delete_ticket", map[string]any{"card_id": card.ID}); err != nil || !changed {
+		t.Fatalf("delete_ticket changed=%v err=%v, want changed nil err", changed, err)
+	}
+
+	result, changed, err := app.applyToolCallArgs("undo_delete_ticket", map[string]any{})
+	if err != nil {
+		t.Fatalf("undo_delete_ticket: %v", err)
+	}
+	if !changed {
+		t.Fatal("undo_delete_ticket changed=false, want true")
+	}
+	if restored, _ := result["restored"].(bool); !restored {
+		t.Fatalf("restored=%v, want true", result["restored"])
+	}
+	foundRestored := false
+	for _, candidate := range app.snapshotState().Cards {
+		if candidate.ID == card.ID && candidate.Title == card.Title {
+			foundRestored = true
+			break
+		}
+	}
+	if !foundRestored {
+		t.Fatalf("restored card %q not found in board", card.ID)
+	}
+}
+
+func TestRealtimeArchiveMeetingCreatesMeetingArtifact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "event-1", "Decision: pilot the executive weekly review workflow first.")
+
+	result, changed, err := app.applyToolCallArgs("archive_meeting", map[string]any{})
+	if err != nil {
+		t.Fatalf("archive_meeting: %v", err)
+	}
+	if changed {
+		t.Fatal("archive_meeting changed board state")
+	}
+	if ok, _ := result["ok"].(bool); !ok {
+		t.Fatalf("ok=%v, want true", result["ok"])
+	}
+	archive, ok := result["archive"].(meetingArchiveResult)
+	if !ok {
+		t.Fatalf("archive type=%T, want meetingArchiveResult", result["archive"])
+	}
+	if archive.ID == "" || archive.DownloadURL == "" {
+		t.Fatalf("archive missing id/download URL: %#v", archive)
+	}
+	if archive.Artifact == nil {
+		t.Fatalf("archive artifact=nil, want saved meeting artifact")
+	}
+	if archive.Artifact.Kind != meetingMemoryKindOSArtifact || archive.Artifact.Metadata["mode"] != "meeting" {
+		t.Fatalf("artifact kind/mode=%q/%q, want os_artifact/meeting", archive.Artifact.Kind, archive.Artifact.Metadata["mode"])
+	}
+	actions, ok := result["actions"].([]osAssistantAction)
+	if !ok {
+		t.Fatalf("actions type=%T, want []osAssistantAction", result["actions"])
+	}
+	if !hasAssistantAction(actions, "open_tool", "artifacts", archive.Artifact.ID) ||
+		!hasAssistantAction(actions, "select_artifact", "artifacts", archive.Artifact.ID) {
+		t.Fatalf("actions=%#v, want artifact selection for %q", actions, archive.Artifact.ID)
+	}
+}
+
+func TestRealtimeUpdateArtifactRenamesKnownArtifact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	created, _, err := app.applyToolCallArgs("create_artifact", map[string]any{
+		"mode":    "artifacts",
+		"query":   "save pilot notes",
+		"content": "Pilot notes body.",
+	})
+	if err != nil {
+		t.Fatalf("create_artifact: %v", err)
+	}
+	artifact := created["artifact"].(meetingMemoryEntry)
+
+	result, changed, err := app.applyToolCallArgs("update_artifact", map[string]any{
+		"artifact_id": artifact.ID,
+		"title":       "Renamed pilot notes",
+	})
+	if err != nil {
+		t.Fatalf("update_artifact: %v", err)
+	}
+	if changed {
+		t.Fatal("update_artifact changed board state")
+	}
+	updated, ok := result["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact type=%T, want meetingMemoryEntry", result["artifact"])
+	}
+	if updated.Metadata["title"] != "Renamed pilot notes" {
+		t.Fatalf("title=%q, want renamed title", updated.Metadata["title"])
+	}
+	if updated.Text != artifact.Text {
+		t.Fatalf("text=%q, want preserved %q", updated.Text, artifact.Text)
+	}
+	if updated.Metadata["updatedBy"] != scoutParticipantName {
+		t.Fatalf("updatedBy=%q, want %q", updated.Metadata["updatedBy"], scoutParticipantName)
+	}
+	actions, ok := result["actions"].([]osAssistantAction)
+	if !ok {
+		t.Fatalf("actions type=%T, want []osAssistantAction", result["actions"])
+	}
+	if !hasAssistantAction(actions, "open_tool", "artifacts", updated.ID) ||
+		!hasAssistantAction(actions, "select_artifact", "artifacts", updated.ID) {
+		t.Fatalf("actions=%#v, want artifact selection for %q", actions, updated.ID)
+	}
+}
+
 func TestRealtimeCreateArtifactSavesOSArtifact(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -266,6 +466,9 @@ func TestRealtimeCreateArtifactSavesOSArtifact(t *testing.T) {
 	}
 	if artifact.Kind != meetingMemoryKindOSArtifact || artifact.Metadata["mode"] != "research" {
 		t.Fatalf("artifact kind/mode=%q/%q, want os_artifact/research", artifact.Kind, artifact.Metadata["mode"])
+	}
+	if artifact.Metadata["createdBy"] != scoutParticipantName {
+		t.Fatalf("artifact createdBy=%q, want %q", artifact.Metadata["createdBy"], scoutParticipantName)
 	}
 	if !strings.Contains(artifact.Text, "Pilot evidence") {
 		t.Fatalf("artifact text=%q, want saved content", artifact.Text)

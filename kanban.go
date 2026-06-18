@@ -991,7 +991,7 @@ func (app *kanbanBoardApp) setVoiceControlActive(active bool, updatedBy string) 
 	if app == nil {
 		return
 	}
-	updatedBy = canonicalParticipantName(updatedBy)
+	updatedBy = canonicalRoomActorName(updatedBy)
 	app.mu.Lock()
 	changed := app.voiceControlActive != active || app.voiceControlUpdatedBy != updatedBy
 	app.voiceControlActive = active
@@ -1433,8 +1433,9 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a thread, start a thread, or talk to Scout privately, call control_app with tool chat. The Chat app currently has one private Scout thread; opening Chat starts or focuses that thread. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
-		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, grill, or workflow. Use workflow when the user asks for a Codex goal, reusable goal workflow, multi-agent loop, research/design execution plan, or gated shipping loop. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, SSH work, or external job.",
-		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
+		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening, turn off voice, end the vocal conversation, close the waveform island, or stop Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
+		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use workflow when the user asks for a Codex goal, reusable goal workflow, multi-agent loop, research/design execution plan, or gated shipping loop. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, SSH work, or external job.",
+		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
 		"# Verbosity\nPrefer tools over text replies. Keep spoken responses to one short sentence unless the user asks for a memory answer; for memory answers, give the headline first and only the most useful details.",
@@ -1618,6 +1619,16 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "undo_delete_ticket",
+			"description": "Restore the most recently deleted Kanban ticket/card. Use when the user asks to undo a deletion or restore the last deleted card.",
+			"parameters": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "control_app",
 			"description": "Open or focus a Bonfire OS surface such as artifacts, memory, chat, research, design, grill, board, room, or office. For requests to open chat, start a chat, start a thread, begin a thread, or talk privately to Scout, open chat; the current Chat app has one private Scout thread. Use artifact_id when selecting a known saved artifact.",
 			"parameters": map[string]any{
@@ -1627,6 +1638,42 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"artifact_id": map[string]any{"type": "string", "description": "Optional saved artifact id to select after opening artifacts."},
 				},
 				"required":             []string{"tool"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "set_voice_control",
+			"description": "Turn the floating Realtime 2 voice island on or off. Use enabled=false for requests like stop listening, turn off voice, end the vocal conversation, close the waveform island, or stop Realtime.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"enabled": map[string]any{"type": "boolean", "description": "false to stop Realtime voice listening and close the voice island; true to keep voice control active."},
+				},
+				"required":             []string{"enabled"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "set_recording",
+			"description": "Pause or resume the shared room transcript recording and meeting notes capture. Use this for requests like pause recording, resume recording, turn notes capture on, or stop the transcript. This is not local mic, camera, or screen-share control.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"enabled": map[string]any{"type": "boolean", "description": "true to resume or turn on transcript recording; false to pause or turn it off."},
+				},
+				"required":             []string{"enabled"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "archive_meeting",
+			"description": "Generate and save meeting notes plus a meeting artifact, equivalent to the Send notes action. Use when the user asks to send notes, generate notes, archive the meeting, save meeting notes, or create the meeting artifact.",
+			"parameters": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
 				"additionalProperties": false,
 			},
 		},
@@ -1642,6 +1689,21 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"content": map[string]any{"type": "string", "description": "Optional final artifact content to save. Omit when the app should scaffold it from current board and memory context."},
 				},
 				"required":             []string{"mode", "query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "update_artifact",
+			"description": "Update an existing saved Bonfire OS artifact when the artifact_id is known. Use for requests to rename, revise, edit, or overwrite a specific saved artifact. If the artifact_id is unknown, open artifacts or ask which artifact instead of creating a duplicate.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"artifact_id": map[string]any{"type": "string", "description": "Existing saved artifact id to update."},
+					"title":       map[string]any{"type": "string", "description": "Optional replacement artifact title."},
+					"content":     map[string]any{"type": "string", "description": "Optional full replacement artifact content. Omit only for title-only renames."},
+				},
+				"required":             []string{"artifact_id"},
 				"additionalProperties": false,
 			},
 		},
@@ -1897,7 +1959,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact":
+	case "answer_memory_question", "create_artifact", "archive_meeting":
 		return true
 	default:
 		return false
@@ -2058,10 +2120,20 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.updateTicket(args)
 	case "delete_ticket":
 		return app.deleteTicket(args)
+	case "undo_delete_ticket":
+		return app.restoreLastDeletedTicket()
 	case "control_app":
 		return app.controlApp(args)
+	case "set_voice_control":
+		return app.setRealtimeVoiceControl(args)
+	case "set_recording":
+		return app.setRealtimeRecording(args)
+	case "archive_meeting":
+		return app.archiveRealtimeMeeting(args)
 	case "create_artifact":
 		return app.createRealtimeArtifact(args)
+	case "update_artifact":
+		return app.updateRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
 	case "do_nothing":
@@ -2097,6 +2169,162 @@ func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool
 		"artifactId": artifactID,
 		"actions":    actions,
 	}, false, nil
+}
+
+func (app *kanbanBoardApp) setRealtimeVoiceControl(args map[string]any) (map[string]any, bool, error) {
+	rawEnabled, exists := args["enabled"]
+	if !exists {
+		return nil, false, fmt.Errorf("enabled is required")
+	}
+	enabled, ok := rawEnabled.(bool)
+	if !ok {
+		return nil, false, fmt.Errorf("enabled must be a boolean")
+	}
+
+	app.setVoiceControlActive(enabled, scoutParticipantName)
+	message := "Realtime voice is still listening"
+	voiceState := "listening"
+	if !enabled {
+		message = "Realtime voice is off"
+		voiceState = "idle"
+	}
+	actions := []osAssistantAction{{
+		Type:    "set_voice_control",
+		Enabled: boolPtr(enabled),
+		Label:   message,
+	}}
+	broadcastAssistantEvent("action", message, map[string]any{
+		"tool":         "set_voice_control",
+		"voiceControl": enabled,
+		"voiceState":   voiceState,
+		"actions":      actions,
+	})
+
+	return map[string]any{
+		"ok":           true,
+		"enabled":      enabled,
+		"voiceControl": enabled,
+		"actions":      actions,
+		"message":      message,
+	}, false, nil
+}
+
+func (app *kanbanBoardApp) setRealtimeRecording(args map[string]any) (map[string]any, bool, error) {
+	rawEnabled, exists := args["enabled"]
+	if !exists {
+		return nil, false, fmt.Errorf("enabled is required")
+	}
+	enabled, ok := rawEnabled.(bool)
+	if !ok {
+		return nil, false, fmt.Errorf("enabled must be a boolean")
+	}
+
+	snapshot := app.setTranscriptRecording(enabled, scoutParticipantName)
+	recording, _ := snapshot["recording"].(roomRecordingState)
+	message := "Transcript recording resumed"
+	if !enabled {
+		message = "Transcript recording paused"
+	}
+	broadcastKanbanEvent("participants", snapshot)
+	broadcastAssistantEvent("action", message, map[string]any{
+		"tool":       "set_recording",
+		"recording":  recording,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":        true,
+		"enabled":   enabled,
+		"recording": recording,
+		"room":      snapshot,
+		"message":   message,
+	}, false, nil
+}
+
+func (app *kanbanBoardApp) archiveRealtimeMeeting(_ map[string]any) (map[string]any, bool, error) {
+	result, err := app.archiveMeeting(scoutParticipantName)
+	if err != nil {
+		return nil, false, err
+	}
+
+	broadcastKanbanEvent("meeting_archived", result)
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	var actions []osAssistantAction
+	if result.Artifact != nil {
+		actions = app.osAssistantActions(result.Summary, "artifacts", *result.Artifact)
+	}
+	broadcastAssistantEvent("action", "Meeting notes saved", map[string]any{
+		"tool":       "archive_meeting",
+		"archive":    result,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":      true,
+		"archive": result,
+		"actions": actions,
+		"message": result.Summary,
+	}, false, nil
+}
+
+func (app *kanbanBoardApp) updateRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
+	artifactID := firstNonEmptyString(asString(args["artifact_id"]), asString(args["artifactId"]))
+	if artifactID == "" {
+		return nil, false, fmt.Errorf("artifact_id is required")
+	}
+	title := canonicalizeBoardText(asString(args["title"]))
+	content := strings.TrimSpace(firstNonEmptyString(asString(args["content"]), asString(args["text"])))
+	if title == "" && content == "" {
+		return nil, false, fmt.Errorf("title or content is required")
+	}
+
+	existing, exists := app.osArtifactByID(artifactID)
+	if !exists {
+		return nil, false, fmt.Errorf("artifact not found")
+	}
+	if content == "" {
+		content = existing.Text
+	}
+
+	artifact, updated, err := app.updateOSArtifact(artifactID, title, content, scoutParticipantName)
+	if err != nil {
+		return nil, false, err
+	}
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	actions := app.osAssistantActions(title, "artifacts", artifact)
+	broadcastAssistantEvent("action", "Artifact updated", map[string]any{
+		"tool":       "update_artifact",
+		"artifact":   artifact,
+		"updated":    updated,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":       true,
+		"artifact": artifact,
+		"updated":  updated,
+		"actions":  actions,
+	}, false, nil
+}
+
+func (app *kanbanBoardApp) osArtifactByID(id string) (meetingMemoryEntry, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, false
+	}
+	for _, artifact := range app.osArtifactsSnapshot(0) {
+		if artifact.ID == id {
+			return artifact, true
+		}
+	}
+
+	return meetingMemoryEntry{}, false
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func normalizeOSControlTool(tool string) string {
@@ -2960,7 +3188,7 @@ func (app *kanbanBoardApp) transcriptRecordingActive() bool {
 }
 
 func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string) map[string]any {
-	updatedBy = canonicalParticipantName(updatedBy)
+	updatedBy = canonicalRoomActorName(updatedBy)
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -3014,7 +3242,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	// summarized and applied to the board before the snapshot is taken.
 	app.flushAmbientAgentsForArchive()
 
-	archivedBy = canonicalParticipantName(archivedBy)
+	archivedBy = canonicalRoomActorName(archivedBy)
 	archivedAt := time.Now().UTC()
 	archiveID := fmt.Sprintf("meeting-%s", archivedAt.Format("20060102-150405-000000000"))
 	board := app.snapshotState()
@@ -3281,6 +3509,17 @@ func normalizeCardOwner(value any) string {
 	}
 	if canonicalOwner := canonicalParticipantName(owner); canonicalOwner != "" {
 		return canonicalOwner
+	}
+
+	return ""
+}
+
+func canonicalRoomActorName(name string) string {
+	if participant := canonicalParticipantName(name); participant != "" {
+		return participant
+	}
+	if strings.EqualFold(strings.TrimSpace(name), scoutParticipantName) {
+		return scoutParticipantName
 	}
 
 	return ""

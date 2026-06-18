@@ -41,6 +41,7 @@ type osAssistantAction struct {
 	Tool       string `json:"tool,omitempty"`
 	Mode       string `json:"mode,omitempty"`
 	ArtifactID string `json:"artifactId,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
 	Label      string `json:"label,omitempty"`
 }
 
@@ -223,7 +224,7 @@ func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer st
 		metadata["codexRunner"] = "not_connected"
 		metadata["status"] = "saved"
 	}
-	if createdBy = canonicalParticipantName(createdBy); createdBy != "" {
+	if createdBy = canonicalRoomActorName(createdBy); createdBy != "" {
 		metadata["createdBy"] = createdBy
 	}
 
