@@ -201,9 +201,13 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		"turn this into a goal workflow",
 		"goal workflow",
 		"#appShell.is-in-room ~ .os-assistant",
+		"--shell-topbar-height: 62px;",
+		`"topbar topbar"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
 		`id="accountMenuButton" class="topbar__account-button"`,
+		`id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`,
 		`id="profileDisplayName" type="text" autocomplete="name"`,
 		`id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden`,
 		"async function saveAccountProfile(event)",
@@ -213,7 +217,6 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		"function updateRoomRecordingControls()",
 		"roomRecordingEnabled = recording.enabled !== false",
 		".tool-rail__slot[hidden]",
-		".tool-rail__theme[hidden]",
 		".tool-rail__avatar[hidden]",
 		"display: none !important;",
 		"const agentToolIds = ['research', 'design', 'grill']",
@@ -242,11 +245,20 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
           <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board"`) {
 		t.Fatal("left rail board tool should be hidden for the simplified rail")
 	}
-	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden`) {
-		t.Fatal("left rail theme toggle should be hidden for the simplified rail")
+	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`) {
+		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
+	}
+	if strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden`) {
+		t.Fatal("left rail theme toggle should not be hidden")
 	}
 	if !strings.Contains(html, `id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out" hidden`) {
 		t.Fatal("left rail avatar should be hidden for the simplified rail")
+	}
+	if strings.Contains(html, `class="tool-rail__flame"`) {
+		t.Fatal("brand flame should live in the topbar, not inside the expanding rail")
+	}
+	if strings.Contains(html, `id="topbarAccountEmail"`) || strings.Contains(html, `class="topbar__account-email"`) {
+		t.Fatal("topbar account trigger should show the display name and avatar without the email line")
 	}
 
 	for _, unwanted := range []string{
@@ -295,10 +307,20 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
+		`"topbar topbar"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
+		"position: sticky;",
+		"top: var(--shell-topbar-height);",
+		"height: calc(100svh - var(--shell-topbar-height));",
+		"align-self: flex-start;",
+		"width: 68px;",
+		"padding: 0 20px 0 0;",
 		".tool-rail:hover,",
 		".tool-rail:focus-within",
 		"width: 228px;",
 		"max-width: 140px;",
+		".tool-rail:hover .tool-rail__theme,",
+		".tool-rail:focus-within .tool-rail__theme",
 		`<span class="tool-rail__label">home</span>`,
 		`<span class="tool-rail__label">room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
@@ -311,14 +333,23 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 		"openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })",
 		"accountMenuSignOut.addEventListener('click', signOutOfAccount)",
 		"#appShell:has(#accountMenuButton[aria-expanded=\"true\"]) .topbar",
+		"max-width: min(220px, 26vw);",
+		"display: block;",
 		"width: min(340px, calc(100vw - 28px));",
 		"max-width: 44px;",
+		"padding: 0 12px 0 0;",
 		"width: min(204px, 78vw);",
 		"width: min(340px, calc(100vw - 76px));",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing account menu or rail interaction marker %q", want)
 		}
+	}
+	if strings.Contains(html, `class="tool-rail__flame"`) {
+		t.Fatal("brand flame should stay anchored in the topbar above the rail")
+	}
+	if strings.Contains(html, `id="topbarAccountEmail"`) || strings.Contains(html, `class="topbar__account-email"`) {
+		t.Fatal("topbar account trigger should not render an email line")
 	}
 	linkBlock := functionBody(html, ".account-menu__link")
 	if !strings.Contains(linkBlock, "min-height: 44px;") {
@@ -899,7 +930,7 @@ func TestRealtimeVoiceActionCanCloseVoiceIsland(t *testing.T) {
 	}
 }
 
-func TestPrivateScoutWaveformDoesNotJoinRoom(t *testing.T) {
+func TestRealtimeWaveformLaunchersUseSharedVoiceIsland(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -907,22 +938,29 @@ func TestPrivateScoutWaveformDoesNotJoinRoom(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		"osAssistantToggle.addEventListener('click', startScoutVoiceFromWaveform)",
-		"function startScoutVoiceFromWaveform(event)",
+		`data-start-realtime-voice`,
+		"const realtimeVoiceOpeners = Array.from(document.querySelectorAll('[data-start-realtime-voice]'))",
+		"realtimeVoiceOpeners.forEach(button => {\n        button.addEventListener('click', startRealtimeVoiceFromWaveform)",
+		"osAssistantToggle.addEventListener('click', startRealtimeVoiceFromWaveform)",
+		"function startRealtimeVoiceFromWaveform(event)",
 		"if (appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceConversation(event)",
-		"setOSAssistantMode('chat')",
-		"startOSAssistantVoice()",
-		"if (!appShell.classList.contains('is-in-room')) {\n          startScoutVoiceFromWaveform(event)",
-		"Start private Scout voice",
+		"if (!appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceFromWaveform(event)",
+		"joinRoom({ voiceOnly: true })",
+		"setVoiceIslandState('connecting', 'connecting...')",
+		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",
+		"background: rgba(32, 33, 37, 0.94);",
+		"border-radius: var(--r-full);",
+		"voiceIslandDetailForEvent('hearing', text)",
+		"Start Realtime 2 voice",
 		"let osAssistantConversationTurns = []",
 		"const history = osAssistantConversationTurns.slice(-12)",
 		"body: JSON.stringify({ query, mode: osAssistantMode, history })",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing private Scout voice boundary %q", want)
+			t.Fatalf("index.html missing Realtime 2 voice island marker %q", want)
 		}
 	}
-	if strings.Contains(html, "await joinRoom({ voiceOnly: true })") {
-		t.Fatal("private Scout waveform must not enter the shared room voiceOnly path")
+	if strings.Contains(html, "function startScoutVoiceFromWaveform(event)") {
+		t.Fatal("visible waveform launchers should use the Realtime 2 voice island path")
 	}
 }

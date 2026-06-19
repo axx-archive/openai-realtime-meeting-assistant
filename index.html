@@ -292,11 +292,12 @@
       }
 
       main {
+        --shell-topbar-height: 62px;
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr) auto;
         grid-template-areas:
-          "rail topbar"
+          "topbar topbar"
           "rail workspace"
           "rail dock";
         min-height: 100vh;
@@ -316,13 +317,17 @@
       /* ---------- Tool rail (the OS's left edge) ---------- */
       .tool-rail {
         grid-area: rail;
-        position: relative;
+        position: sticky;
+        top: var(--shell-topbar-height);
         z-index: 60;
         display: flex;
         flex-direction: column;
         align-items: stretch;
         gap: 4px;
         width: 68px;
+        height: calc(100vh - var(--shell-topbar-height));
+        height: calc(100svh - var(--shell-topbar-height));
+        align-self: start;
         flex: none;
         padding: 14px 11px;
         padding-bottom: max(14px, env(safe-area-inset-bottom));
@@ -338,13 +343,6 @@
       .tool-rail:hover,
       .tool-rail:focus-within {
         width: 228px;
-      }
-
-      .tool-rail__flame {
-        flex: none;
-        align-self: center;
-        margin-bottom: 14px;
-        color: var(--accent);
       }
 
       .tool-rail__slot {
@@ -451,11 +449,15 @@
         margin-top: 8px;
         width: 40px;
         height: 40px;
-        align-self: center;
+        align-self: flex-start;
         border: 1px solid var(--line-1);
         background: var(--surface-3);
         color: var(--text-2);
         border-radius: var(--r-full);
+      }
+      .tool-rail:hover .tool-rail__theme,
+      .tool-rail:focus-within .tool-rail__theme {
+        width: 40px;
       }
       .tool-rail__theme .tool-rail__icon--sun { display: none; }
       [data-theme="dark"] .tool-rail__theme .tool-rail__icon--sun { display: block; }
@@ -493,13 +495,14 @@
       /* ---------- Topbar (kit chrome glass) ---------- */
       .topbar {
         grid-area: topbar;
-        position: relative;
-        z-index: 50;
+        position: sticky;
+        top: 0;
+        z-index: 70;
         display: flex;
         align-items: center;
-        gap: 14px;
-        min-height: 62px;
-        padding: 0 20px;
+        gap: 20px;
+        min-height: var(--shell-topbar-height);
+        padding: 0 20px 0 0;
         border: 0;
         border-radius: 0;
         background: var(--glass-chrome);
@@ -510,16 +513,14 @@
       }
 
       .topbar__mark {
-        /* reference anatomy: the rail flame is the sole brand mark; this node
-           stays in the DOM as the is-listening state carrier for the
-           #appShell:has() breathe switch above */
-        display: none;
+        display: inline-grid;
         position: relative;
         place-items: center;
-        width: 26px;
-        height: 26px;
+        align-self: stretch;
+        width: 68px;
+        height: auto;
         flex: 0 0 auto;
-        color: var(--text-2);
+        color: var(--accent);
         transition: color var(--dur-med) var(--ease);
       }
       .topbar__mark svg {
@@ -646,7 +647,7 @@
         align-items: center;
         gap: 10px;
         min-width: 0;
-        max-width: min(260px, 28vw);
+        max-width: min(220px, 26vw);
         min-height: 40px;
         padding: 4px 10px 4px 5px;
         border: 1px solid var(--line-1);
@@ -712,7 +713,7 @@
       }
 
       .topbar__account-copy {
-        display: grid;
+        display: block;
         min-width: 0;
         text-align: right;
       }
@@ -728,7 +729,6 @@
         letter-spacing: var(--track-text);
       }
 
-      .topbar__account-email,
       .account-menu__email {
         min-width: 0;
         overflow: hidden;
@@ -4360,21 +4360,23 @@
       .voice-island {
         position: fixed;
         left: 50%;
-        bottom: max(22px, env(safe-area-inset-bottom));
+        top: max(82px, calc(env(safe-area-inset-top) + 72px));
         z-index: 1350;
         display: flex;
         align-items: center;
-        gap: 8px;
-        min-width: min(340px, calc(100vw - 28px));
-        max-width: calc(100vw - 28px);
-        min-height: 66px;
-        padding: 9px 10px 9px 12px;
-        border: 1px solid var(--glass-border);
-        border-radius: var(--r-2xl);
-        background: var(--glass-chrome);
+        gap: 10px;
+        width: min(430px, calc(100vw - 32px));
+        min-height: 54px;
+        padding: 8px 8px 8px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: var(--r-full);
+        background: rgba(32, 33, 37, 0.94);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
-        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          0 18px 44px rgba(15, 16, 18, 0.28),
+          0 2px 8px rgba(15, 16, 18, 0.2);
         transform: translateX(-50%);
         pointer-events: auto;
         transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -4386,8 +4388,11 @@
 
       .voice-island[data-state="hearing"],
       .voice-island[data-state="talking"] {
-        border-color: var(--line-2);
-        box-shadow: var(--glass-highlight), var(--glass-shadow), 0 0 0 4px var(--live-soft);
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 20px 48px rgba(15, 16, 18, 0.34),
+          0 3px 12px rgba(15, 16, 18, 0.22);
       }
 
       .voice-island[data-state="error"] {
@@ -4397,10 +4402,11 @@
       .voice-island__main {
         min-width: 0;
         display: grid;
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-template-columns: 62px minmax(0, 1fr);
         align-items: center;
-        gap: 10px;
-        color: var(--text-1);
+        gap: 12px;
+        flex: 1;
+        color: rgba(255, 255, 255, 0.94);
         text-align: left;
       }
 
@@ -4413,20 +4419,33 @@
       .voice-island[data-state="thinking"] .os-wave,
       .voice-island[data-state="talking"] .os-wave {
         border-color: transparent;
-        background:
-          radial-gradient(circle at 50% 42%, rgba(48, 209, 88, 0.26), transparent 62%),
-          var(--live-soft);
-        box-shadow: 0 0 0 4px var(--live-soft);
+        background: transparent;
+        box-shadow: none;
       }
 
+      .voice-island .os-wave {
+        width: 62px;
+        height: 30px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        color: rgba(255, 255, 255, 0.94);
+      }
+
+      .voice-island .bf-wave-bar {
+        width: 3px;
+        border-radius: 3px;
+        opacity: 0.9;
+      }
 
       .voice-island__copy {
         min-width: 0;
-        display: grid;
-        gap: 2px;
+        display: block;
       }
 
       .voice-island__label {
+        display: none;
         overflow: hidden;
         color: var(--text-1);
         font: 650 13px/1.2 var(--font-sans);
@@ -4436,27 +4455,28 @@
 
       .voice-island__meta {
         overflow: hidden;
-        color: var(--text-2);
-        font: 12px/1.25 var(--font-sans);
+        color: rgba(255, 255, 255, 0.9);
+        font: 650 13px/1.25 var(--font-sans);
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
       .voice-island__close {
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
         flex: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--r-lg);
-        color: var(--text-3);
+        border-radius: var(--r-full);
+        background: rgba(255, 255, 255, 0.94);
+        color: rgba(28, 29, 33, 0.92);
         transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
       }
 
       .voice-island__close:hover {
-        background: var(--surface-3);
-        color: var(--text-1);
+        background: #fff;
+        color: #111;
       }
 
       .voice-island__close:active {
@@ -4634,8 +4654,9 @@
         }
 
         .voice-island {
-          bottom: max(12px, env(safe-area-inset-bottom));
-          min-width: calc(100vw - 24px);
+          top: max(68px, calc(env(safe-area-inset-top) + 62px));
+          width: calc(100vw - 24px);
+          padding-left: 12px;
         }
       }
 
@@ -8526,6 +8547,10 @@
       }
 
       @media (max-width: 640px) {
+        main {
+          --shell-topbar-height: 52px;
+        }
+
         .workspace {
           gap: var(--sp-2);
           padding: var(--sp-2) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
@@ -8545,7 +8570,11 @@
         .topbar {
           min-height: 52px;
           gap: var(--sp-2);
-          padding: 0 12px;
+          padding: 0 12px 0 0;
+        }
+
+        .topbar__mark {
+          width: 56px;
         }
 
         .topbar__heading {
@@ -9551,9 +9580,6 @@
   <body>
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail mount-stagger" aria-label="Tools">
-        <svg class="tool-rail__flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
-          <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
-        </svg>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
@@ -9610,14 +9636,14 @@
           </button>
         </span>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
-        <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden>
+        <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
         <button id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out" hidden>TC</button>
       </nav>
       <header class="topbar mount-stagger">
-        <span id="brandMark" class="topbar__mark" aria-hidden="true">
+        <span id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire">
           <svg viewBox="0 0 64 64">
             <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
           </svg>
@@ -9655,7 +9681,6 @@
             </span>
             <span class="topbar__account-copy">
               <span id="topbarAccountName" class="topbar__account-name">team captain</span>
-              <span id="topbarAccountEmail" class="topbar__account-email">signed in</span>
             </span>
             <svg class="topbar__account-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
           </button>
@@ -9708,7 +9733,7 @@
                 <svg viewBox="0 0 64 64" aria-hidden="true" style="position:absolute; width:320px; height:320px; right:-72px; top:-86px; opacity:0.05; pointer-events:none;"><path fill="var(--text-1)" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>
                 <h2 id="officeGreeting" style="margin:0 0 8px; font:var(--type-title-1); letter-spacing:var(--track-title-1); color:var(--text-1);">welcome back.</h2>
                 <p style="margin:0 0 22px; font:var(--type-body); color:var(--text-2); max-width:50ch;">Scout is listening. ask for research, a deck, a recap, or to ping the team — then get back to the work only you can do.</p>
-                <button type="button" aria-label="talk to Scout" data-open-assistant-mode="chat" class="bf-card-hover" style="display:flex; align-items:center; gap:14px; width:100%; text-align:left; padding:13px 14px 13px 18px; border-radius:var(--r-lg); border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; margin-bottom:16px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <button type="button" aria-label="talk to Scout with Realtime 2" data-start-realtime-voice class="bf-card-hover" style="display:flex; align-items:center; gap:14px; width:100%; text-align:left; padding:13px 14px 13px 18px; border-radius:var(--r-lg); border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; margin-bottom:16px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
                   <span class="bf-fab is-speaking" style="display:flex; align-items:center; gap:3px; height:22px; flex:none; color:var(--accent);">
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:0ms;"></span>
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:120ms;"></span>
@@ -10469,7 +10494,7 @@
         <span class="os-wave bf-island" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
         <span class="voice-island__copy">
           <span id="voiceIslandLabel" class="voice-island__label">Scout voice</span>
-          <span id="voiceIslandMeta" class="voice-island__meta">realtime 2 · listening</span>
+          <span id="voiceIslandMeta" class="voice-island__meta">listening...</span>
         </span>
       </button>
       <button id="voiceIslandClose" class="voice-island__close" type="button" aria-label="Turn off Realtime voice" title="Turn off Realtime voice">
@@ -10787,7 +10812,6 @@
       const accountMenuButton = document.getElementById('accountMenuButton')
       const accountMenu = document.getElementById('accountMenu')
       const topbarAccountName = document.getElementById('topbarAccountName')
-      const topbarAccountEmail = document.getElementById('topbarAccountEmail')
       const topbarAvatarImage = document.getElementById('topbarAvatarImage')
       const topbarAvatarInitials = document.getElementById('topbarAvatarInitials')
       const accountMenuName = document.getElementById('accountMenuName')
@@ -10830,6 +10854,7 @@
       const officeRecentThreads = document.getElementById('officeRecentThreads')
       const officeToolButtons = Array.from(document.querySelectorAll('[data-office-tool]'))
       const assistantModeOpeners = Array.from(document.querySelectorAll('[data-open-assistant-mode]'))
+      const realtimeVoiceOpeners = Array.from(document.querySelectorAll('[data-start-realtime-voice]'))
       const osAssistant = document.getElementById('osAssistant')
       const osAssistantToggle = document.getElementById('osAssistantToggle')
       const osAssistantClose = document.getElementById('osAssistantClose')
@@ -11119,7 +11144,10 @@
       assistantModeOpeners.forEach(button => {
         button.addEventListener('click', () => openOSAssistant(button.dataset.openAssistantMode || 'chat'))
       })
-      osAssistantToggle.addEventListener('click', startScoutVoiceFromWaveform)
+      realtimeVoiceOpeners.forEach(button => {
+        button.addEventListener('click', startRealtimeVoiceFromWaveform)
+      })
+      osAssistantToggle.addEventListener('click', startRealtimeVoiceFromWaveform)
       osAssistantClose.addEventListener('click', () => {
         stopOSAssistantVoice()
         setOSAssistantOpen(false)
@@ -11897,7 +11925,6 @@
         const name = authedUser.name || authedUser.email || 'signed in'
         const email = authedUser.email || ''
         topbarAccountName.textContent = name
-        topbarAccountEmail.textContent = email
         accountMenuName.textContent = name
         accountMenuEmail.textContent = email
         renderAvatarImage(topbarAvatarImage, topbarAvatarInitials)
@@ -12699,7 +12726,7 @@
             if (enabled) {
               realtimeVoiceActive = true
               realtimeVoiceOnlyPending = false
-              setVoiceIslandState('listening', 'realtime 2 · listening')
+              setVoiceIslandState('listening', 'listening...')
             } else {
               stopRealtimeVoiceConversation({ notifyServer: false })
             }
@@ -13188,11 +13215,11 @@
       async function startRealtimeVoiceConversation(event) {
         event?.preventDefault?.()
         if (!appShell.classList.contains('is-in-room')) {
-          startScoutVoiceFromWaveform(event)
+          startRealtimeVoiceFromWaveform(event)
           return
         }
         if (realtimeVoiceActive) {
-          setVoiceIslandState('listening', 'room realtime 2 · listening')
+          setVoiceIslandState('listening', 'listening...')
           return
         }
         stopOSAssistantVoice()
@@ -13200,29 +13227,28 @@
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         realtimeVoiceStartedRoom = false
         realtimeVoiceOnlyPending = false
-        setVoiceIslandState('connecting', 'room realtime 2 · starting')
+        setVoiceIslandState('connecting', 'connecting...')
         unlockRoomAudioPlayback()
 
         if (localStream && isMicMuted) {
           setLocalMute(false, { announce: true })
         }
         sendVoiceControlState(true)
-        setVoiceIslandState('listening', 'room realtime 2 · listening')
+        setVoiceIslandState('listening', 'listening...')
       }
 
-      function startScoutVoiceFromWaveform(event) {
+      function startRealtimeVoiceFromWaveform(event) {
         event?.preventDefault?.()
         if (appShell.classList.contains('is-in-room')) {
           startRealtimeVoiceConversation(event)
           return
         }
         if (!osAssistantAvailable()) {
-          showToast({ text: 'sign in to start private Scout voice', kind: 'note' })
+          showToast({ text: 'sign in to start Realtime 2 voice', kind: 'note' })
           return
         }
-        setOSAssistantMode('chat')
-        setOSAssistantOpen(true)
-        startOSAssistantVoice()
+        setOSAssistantOpen(false)
+        joinRoom({ voiceOnly: true })
       }
 
       function stopRealtimeVoiceConversation(options = {}) {
@@ -13267,19 +13293,19 @@
           return
         }
         const labels = {
-          connecting: 'Scout voice',
-          listening: 'Scout voice',
-          hearing: 'Scout heard you',
-          thinking: 'Scout is thinking',
-          talking: 'Scout is talking',
-          error: 'Scout voice'
+          connecting: 'Realtime 2',
+          listening: 'Realtime 2',
+          hearing: 'Realtime 2',
+          thinking: 'Realtime 2',
+          talking: 'Realtime 2',
+          error: 'Realtime 2'
         }
         const details = {
-          connecting: 'realtime 2 · connecting',
-          listening: 'realtime 2 · listening',
-          hearing: 'realtime 2 · hearing',
-          thinking: 'realtime 2 · thinking',
-          talking: 'realtime 2 · talking',
+          connecting: 'connecting...',
+          listening: 'listening...',
+          hearing: 'listening...',
+          thinking: 'thinking...',
+          talking: 'answering...',
           error: 'voice needs attention'
         }
         voiceIslandLabel.textContent = labels[next] || labels.listening
@@ -13288,7 +13314,7 @@
         if (next === 'talking' || next === 'error') {
           voiceIslandClearTimer = window.setTimeout(() => {
             if (realtimeVoiceActive) {
-              setVoiceIslandState('listening', 'realtime 2 · listening')
+              setVoiceIslandState('listening', 'listening...')
             } else {
               setVoiceIslandState('idle')
             }
@@ -13347,8 +13373,8 @@
         const available = osAssistantAvailable()
         osAssistant.hidden = !available
         osAssistantToggle.disabled = !available
-        osAssistantToggle.setAttribute('aria-label', available ? 'Start private Scout voice' : 'Sign in to start private Scout voice')
-        osAssistantToggle.title = available ? 'Start private Scout voice' : 'Sign in to start private Scout voice'
+        osAssistantToggle.setAttribute('aria-label', available ? 'Start Realtime 2 voice' : 'Sign in to start Realtime 2 voice')
+        osAssistantToggle.title = available ? 'Start Realtime 2 voice' : 'Sign in to start Realtime 2 voice'
         osAssistantInput.disabled = !available
         osAssistantSend.disabled = !available
         if (!available) {
@@ -14225,7 +14251,7 @@
           realtimeVoiceActive = true
           realtimeVoiceOnlyPending = true
           realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
-          setVoiceIslandState('connecting', 'realtime 2 · connecting')
+          setVoiceIslandState('connecting', 'connecting...')
         }
         if (!validateAccess()) {
           setLog('enter your work email and password')
@@ -16429,13 +16455,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const normalized = message.toLowerCase()
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
-          if (realtimeVoiceActive) setVoiceIslandState('listening', 'realtime 2 · listening')
+          if (realtimeVoiceActive) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('connected to conference room')) {
           setConnectionState('room', 'the room is listening')
-          if (realtimeVoiceActive) setVoiceIslandState('listening', 'realtime 2 · listening')
+          if (realtimeVoiceActive) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
-          if (realtimeVoiceActive) setVoiceIslandState('connecting', 'realtime 2 · connecting')
+          if (realtimeVoiceActive) setVoiceIslandState('connecting', 'connecting...')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
           setConnectionState('offline', 'assistant offline')
           if (realtimeVoiceActive) setVoiceIslandState('error', message)
@@ -16474,7 +16500,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         if (event?.kind === 'transcript') {
           if (realtimeVoiceActive) {
-            setVoiceIslandState('hearing', 'realtime 2 · hearing')
+            setVoiceIslandState('hearing', voiceIslandDetailForEvent('hearing', text))
           }
           setActiveSpeakerFromText(text)
           // Assistant recognized speech — fire the hot-ember handshake.
@@ -16489,7 +16515,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           showToast({ text, kind: 'error' })
         } else if (event?.kind === 'answer' && realtimeVoiceActive) {
-          setVoiceIslandState('talking', 'realtime 2 · talking')
+          setVoiceIslandState('talking', voiceIslandDetailForEvent('talking', text))
         }
       }
 
@@ -16498,8 +16524,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (state === 'error' && cleanText) {
           return cleanText
         }
-        if (state === 'hearing' && cleanText.toLowerCase().startsWith('hearing:')) {
-          return 'realtime 2 · hearing'
+        if (state === 'hearing' && cleanText) {
+          return cleanText
+            .replace(/^hearing:\\s*/i, '')
+            .replace(/^heard:\\s*/i, '')
+            .trim() || 'listening...'
+        }
+        if (state === 'talking' && cleanText) {
+          return cleanText
+            .replace(/^scout:\\s*/i, '')
+            .trim() || 'answering...'
         }
         return ''
       }
@@ -17588,7 +17622,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (realtimeVoiceActive) {
             realtimeVoiceOnlyPending = false
             sendVoiceControlState(true)
-            setVoiceIslandState('listening', 'realtime 2 · listening')
+            setVoiceIslandState('listening', 'listening...')
           }
         } catch (error) {
           const message = error.message || String(error)
