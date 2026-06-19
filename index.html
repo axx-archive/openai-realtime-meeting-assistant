@@ -321,8 +321,8 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: var(--sp-2);
-        width: 64px;
+        gap: 4px;
+        width: 68px;
         flex: none;
         padding: 14px 0;
         padding-bottom: max(14px, env(safe-area-inset-bottom));
@@ -335,7 +335,7 @@
 
       .tool-rail__flame {
         flex: none;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
         color: var(--accent);
       }
 
@@ -401,6 +401,15 @@
       }
 
       /* theme toggle — moon offers dark, sun offers light */
+      .tool-rail__theme {
+        margin-top: 8px;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+        border-radius: var(--r-full);
+      }
       .tool-rail__theme .tool-rail__icon--sun { display: none; }
       [data-theme="dark"] .tool-rail__theme .tool-rail__icon--sun { display: block; }
       [data-theme="dark"] .tool-rail__theme .tool-rail__icon--moon { display: none; }
@@ -409,16 +418,29 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 32px;
-        height: 32px;
+        width: 40px;
+        height: 40px;
         flex: none;
+        margin-top: 6px;
+        padding: 0;
         border-radius: var(--r-full);
         background: var(--surface-3);
         border: 1px solid var(--line-1);
-        font: 500 10px/1 var(--font-sans);
+        font: 500 13px/1 var(--font-sans);
         color: var(--text-2);
         text-transform: uppercase;
         user-select: none;
+        cursor: pointer;
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease);
+      }
+      .tool-rail__avatar:hover {
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+      .tool-rail__avatar:active {
+        transform: scale(var(--press-scale));
       }
 
       /* ---------- Topbar (kit chrome glass) ---------- */
@@ -428,8 +450,8 @@
         z-index: 50;
         display: flex;
         align-items: center;
-        gap: var(--sp-4);
-        min-height: 60px;
+        gap: 14px;
+        min-height: 62px;
         padding: 0 20px;
         border: 0;
         border-radius: 0;
@@ -592,7 +614,8 @@
         background: var(--live-soft);
         color: var(--live);
       }
-      .pill--listening .pill__dot {
+      .pill--listening .pill__dot,
+      .pill--breathe .pill__dot {
         animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
       }
       .pill--idle {
@@ -644,9 +667,9 @@
         position: relative;
         overflow: hidden;
         border-radius: var(--r-xl);
-        background: var(--bg-stage);
+        background: var(--ink-900);
         border: 0;
-        box-shadow: inset 0 0 0 1px var(--line-1);
+        box-shadow: inset 0 0 0 1px var(--line-2);
         aspect-ratio: 16 / 10;
         cursor: grab;
         user-select: none;
@@ -786,8 +809,8 @@
       }
 
       .tile-avatar .owner-avatar {
-        width: 56px;
-        height: 56px;
+        width: 64px;
+        height: 64px;
         border: 0;
         box-shadow: none;
       }
@@ -795,11 +818,18 @@
       .tile-avatar .monogram {
         width: 100%;
         height: 100%;
-        font-size: 18px;
+        font-size: 22px;
       }
 
-      /* avatars are monochrome — never colorful per-user */
-      .tile-avatar .monogram,
+      /* avatars are monochrome — never colorful per-user.
+         in the dark tile the resting avatar is the canon ink chip */
+      .tile-avatar .monogram {
+        background: var(--ink-800);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.82);
+        border-radius: var(--r-full);
+      }
+
       .speaker-avatar .monogram {
         background: var(--surface-3);
         border: 1px solid var(--line-1);
@@ -915,20 +945,27 @@
 
       .login-flame {
         flex: none;
-        color: var(--text-1);
+        color: var(--accent);
       }
 
-      .login-head h2 {
+      .login-head h2.login-wordmark {
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        color: var(--text-2);
+      }
+
+      .login-welcome {
+        margin: 0 0 6px;
         font: var(--type-title-1);
         letter-spacing: var(--track-title-1);
         color: var(--text-1);
       }
 
       .login-subline {
-        margin: 8px 0 0;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
+        margin: 0 0 26px;
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        color: var(--text-2);
       }
 
       .access-state {
@@ -970,7 +1007,7 @@
         align-self: stretch;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 12px;
         background: var(--glass-panel);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
@@ -984,6 +1021,14 @@
         display: grid;
         gap: 8px;
         min-width: 0;
+      }
+
+      .login-card .field {
+        gap: 14px;
+      }
+
+      .login-card .field input {
+        height: 72px;
       }
 
       .field[hidden] {
@@ -1056,6 +1101,7 @@
         gap: 8px;
         width: 100%;
         height: 48px;
+        margin-top: 24px;
         padding: 0 22px;
         border: 1px solid transparent;
         border-radius: var(--r-md);
@@ -1079,7 +1125,8 @@
       }
 
       .login-divider {
-        display: flex;
+        /* canon 2-button stack — divider stays out of the flow */
+        display: none;
         align-items: center;
         gap: 12px;
       }
@@ -1260,54 +1307,87 @@
       }
 
       .board {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(180px, 1fr));
-        gap: var(--sp-3);
-        align-items: start;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
         min-width: 768px;
       }
 
-      /* kit columns are unboxed — hairlines and space do the separating */
+      /* canon columns are boxed — surface-1, hairline, r-xl, bordered header */
       .column {
-        display: grid;
+        display: flex;
+        flex-direction: column;
+        flex: none;
+        width: 300px;
         align-content: start;
-        gap: var(--sp-2);
-        background: transparent;
-        border: 0;
-        border-radius: 0;
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-xl);
         padding: 0;
+        overflow: hidden;
         min-width: 0;
       }
 
       .column header {
         display: flex;
-        align-items: baseline;
+        align-items: center;
+        justify-content: space-between;
         gap: 8px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line-1);
       }
 
       .column h2 {
-        font: var(--type-caption-medium);
-        letter-spacing: var(--track-text);
-        color: var(--text-1);
+        margin: 0;
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        color: var(--text-2);
         display: inline-flex;
-        align-items: baseline;
+        align-items: center;
         gap: 8px;
       }
 
+      /* canon count is a Badge — toned per column */
       .count {
-        display: inline-grid;
-        place-items: center;
-        min-width: 0;
-        padding: 0;
-        border-radius: 0;
-        background: transparent;
-        color: var(--text-3);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 22px;
+        min-width: 22px;
+        padding: 0 7px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--text-2);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         font-variant-numeric: tabular-nums;
       }
 
-      .stack { display: grid; gap: var(--sp-2); }
+      .column--in-progress .count {
+        border-color: transparent;
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+
+      .column--blocked .count {
+        border-color: transparent;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .column--done .count {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+      }
 
       .empty {
         font: var(--type-label);
@@ -1332,16 +1412,16 @@
       .board-surface.is-empty .board { opacity: 0.42; }
       .board-surface.is-empty .board { transition: opacity var(--dur-med) var(--ease); }
 
-      /* kit Card — surface-2, hairline, radius 16, no shadow at rest */
+      /* canon Card — surface-2, hairline, radius 16, grab cursor, soft shadow */
       .card {
         display: grid;
-        gap: 8px;
+        gap: 12px;
         background: var(--surface-2);
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg);
-        padding: 12px 14px;
-        cursor: pointer;
-        box-shadow: none;
+        padding: 14px;
+        cursor: grab;
+        box-shadow: var(--shadow-1);
         transition: background var(--dur-fast) var(--ease),
                     border-color var(--dur-fast) var(--ease),
                     box-shadow var(--dur-med) var(--ease),
@@ -1355,7 +1435,7 @@
         outline: 2px solid var(--accent);
         outline-offset: 2px;
       }
-      .card:active { transform: scale(var(--press-scale)); }
+      .card:active { cursor: grabbing; transform: scale(var(--press-scale)); }
 
       .card-heading {
         display: grid;
@@ -1364,8 +1444,9 @@
         gap: var(--sp-2);
       }
 
-      .card-heading strong {
-        font: var(--type-caption-medium);
+      /* canon title — body-medium, not bold */
+      .card-heading .card-title {
+        font: var(--type-body-medium);
         letter-spacing: var(--track-text);
         color: var(--text-1);
         min-width: 0;
@@ -1388,16 +1469,35 @@
         font: var(--type-caption);
       }
 
-      /* kit Badge row — owner · name, then the date badge with its tone */
+      /* canon footer — owner · name label (left), optional date pill (right) */
       .card-badges {
         display: flex;
         align-items: center;
-        gap: 6px;
-        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 8px;
         min-width: 0;
       }
 
-      .card-badge,
+      /* owner reads as a quiet label, not a boxed badge, per canon */
+      .card-badge {
+        min-width: 0;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* canon tag badges — small boxed badges in their own row */
+      .card-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .card-tag,
       .card-date {
         display: inline-flex;
         align-items: center;
@@ -1490,50 +1590,113 @@
          transcripts/summaries read like a clean log; hairlines do the
          separating, the mono meta line carries the system voice */
       .memory-list {
-        display: grid;
+        display: flex;
+        flex-direction: column;
         gap: 0;
         min-height: 0;
       }
 
+      /* canon timeline row — ~70px time column + content column */
       .memory-item {
-        display: grid;
-        gap: 4px;
-        padding: 14px 2px;
+        display: flex;
+        gap: 16px;
+        padding: 16px 0;
         background: transparent;
         border: 0;
         border-bottom: 1px solid var(--line-1);
         border-radius: 0;
         box-shadow: none;
-        color: var(--text-2);
-        font: var(--type-caption);
-        letter-spacing: var(--track-text);
+        color: var(--text-1);
       }
 
       .memory-item:last-child {
         border-bottom: 0;
       }
 
-      .memory-item span:last-child {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-
-      .memory-meta {
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+      .memory-item__time {
+        flex: none;
+        width: 70px;
+        text-align: right;
+        padding-top: 2px;
+        font: var(--type-numeric);
         color: var(--text-3);
         font-variant-numeric: tabular-nums;
       }
 
-      /* memory entries are quiet log lines — green stays reserved for live state */
-      .memory-item.archive .memory-meta,
-      .memory-item.board_update .memory-meta {
-        color: var(--text-2);
+      .memory-item__content {
+        flex: 1;
+        min-width: 0;
       }
 
-      .memory-item.answer .memory-meta,
-      .memory-item.brain .memory-meta {
+      .memory-item__head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      /* canon pill — tone by kind */
+      .memory-pill {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 9px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
         color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        text-transform: none;
+      }
+
+      .memory-pill[data-kind="answer"],
+      .memory-pill[data-kind="brain"] {
+        border-color: transparent;
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+
+      .memory-pill[data-kind="archive"],
+      .memory-pill[data-kind="board_update"] {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .memory-pill[data-kind="os_artifact"] {
+        border-color: transparent;
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+
+      .memory-item__who {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .memory-item__text {
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      /* canon empty state — centered, quiet */
+      .memory-empty {
+        display: block;
+        padding: 60px 0;
+        text-align: center;
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        color: var(--text-3);
       }
 
       /* ---------- Assistant panel (room scout rail · ambient feed) ---------- */
@@ -2332,6 +2495,22 @@
       @keyframes bf-fade {
         from { opacity: 0; }
       }
+
+      /* Bonfire OS canon motion + waveform primitives (additive; used by redesigned surfaces) */
+      @keyframes bf-ringpulse { 0%, 100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.25); opacity: 0.1; } }
+      @keyframes bf-flamebreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.93); opacity: 0.74; } }
+      @keyframes bf-toastin { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      @keyframes bf-sheetin { from { transform: translateY(26px) scale(0.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+      @keyframes bf-islandin { from { transform: translateY(20px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+      @keyframes bf-fadein { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      @keyframes bf-wave { 0%, 100% { transform: scaleY(0.26); } 50% { transform: scaleY(1); } }
+      .bf-view { animation: bf-fadein var(--dur-med) var(--ease); }
+      .bf-wave-bar { width: 3px; background: currentColor; border-radius: 2px; transform-origin: center; animation: bf-wave 1150ms var(--ease) infinite; opacity: 0.4; }
+      .bf-island.is-speaking .bf-wave-bar, .bf-fab.is-speaking .bf-wave-bar { animation-duration: 430ms; opacity: 1; }
+      .bf-fab .bf-wave-bar { opacity: 0.85; }
+      .bf-nav-btn:hover { background: var(--surface-3) !important; }
+      .bf-chip:hover { filter: brightness(1.06); }
+      .bf-card-hover:hover { background: var(--surface-3) !important; box-shadow: var(--shadow-2) !important; }
 
       .audio-settings-panel {
         width: min(480px, calc(100vw - 48px));
@@ -3292,6 +3471,12 @@
         display: none;
       }
 
+      /* kit Room — keep the stage mounted to host the canon "not connected"
+         empty state in the authed pre-join window (room tool, not yet live) */
+      #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
+        display: grid;
+      }
+
       #appShell.is-authed .access-panel,
       #appShell.is-in-room .access-panel,
       #appShell.is-board-expanded .access-panel,
@@ -3837,9 +4022,11 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 3px;
         width: 44px;
         height: 44px;
         flex: none;
+        color: var(--accent);
         border-radius: var(--r-full);
         background:
           radial-gradient(circle at 50% 38%, rgba(255, 122, 43, 0.22), transparent 58%),
@@ -3861,24 +4048,27 @@
         transform: scale(1.05);
       }
 
-      .os-wave span {
-        width: 3px;
-        height: 16px;
-        margin: 0 2px;
-        border-radius: 99px;
-        background: currentColor;
-        color: var(--accent);
-        opacity: 0.82;
-        animation: os-wave 1200ms var(--ease) infinite;
+      .os-wave .bf-wave-bar {
+        height: 22px;
       }
 
-      .os-wave span:nth-child(2) { animation-delay: 120ms; height: 24px; }
-      .os-wave span:nth-child(3) { animation-delay: 240ms; height: 12px; }
-      .os-wave span:nth-child(4) { animation-delay: 360ms; height: 20px; }
+      /* Map the existing voice-assistant active states to the canon "is-speaking"
+         waveform (430ms / full opacity) without touching the JS state machine. */
+      .os-assistant.is-listening .os-wave .bf-wave-bar,
+      .voice-island[data-state="listening"] .bf-wave-bar,
+      .voice-island[data-state="hearing"] .bf-wave-bar,
+      .voice-island[data-state="thinking"] .bf-wave-bar,
+      .voice-island[data-state="talking"] .bf-wave-bar {
+        animation-duration: 430ms;
+        opacity: 1;
+      }
 
-      @keyframes os-wave {
-        0%, 100% { transform: scaleY(0.55); opacity: 0.48; }
-        50% { transform: scaleY(1); opacity: 1; }
+      .voice-island[data-state="thinking"] .os-wave {
+        color: var(--text-1);
+      }
+
+      .voice-island[data-state="talking"] .os-wave {
+        color: var(--live);
       }
 
       .os-assistant__toggle {
@@ -3969,15 +4159,6 @@
         box-shadow: 0 0 0 4px var(--live-soft);
       }
 
-      .voice-island[data-state="thinking"] .os-wave span {
-        color: var(--text-1);
-        animation-duration: 850ms;
-      }
-
-      .voice-island[data-state="talking"] .os-wave span {
-        color: var(--live);
-        animation-duration: 620ms;
-      }
 
       .voice-island__copy {
         min-width: 0;
@@ -4493,7 +4674,7 @@
       }
 
       .chat-threads {
-        width: 280px;
+        width: 300px;
         flex: none;
         display: flex;
         flex-direction: column;
@@ -4505,6 +4686,83 @@
         -webkit-backdrop-filter: var(--glass-blur);
         border-right: 1px solid var(--glass-border);
         box-shadow: var(--glass-highlight);
+      }
+
+      /* kit: search + new-thread row pinned to the top of the sidebar */
+      .chat-threads__head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 2px 10px;
+        flex: none;
+      }
+
+      .chat-threads__search {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 12px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        color: var(--text-3);
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .chat-threads__search:focus-within {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .chat-threads__search svg {
+        flex: none;
+      }
+
+      .chat-threads__search-input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        font-family: var(--font-sans);
+        outline: 0;
+      }
+
+      .chat-threads__search-input::placeholder {
+        color: var(--text-3);
+      }
+
+      .chat-threads__new {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: none;
+        border-radius: var(--r-md);
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+        transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .chat-threads__new:hover {
+        filter: brightness(1.06);
+      }
+
+      .chat-threads__new:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .chat-thread-item--hidden {
+        display: none;
       }
 
       .chat-threads__label {
@@ -4539,6 +4797,7 @@
         background: var(--accent-soft);
       }
 
+      /* kit ThreadItem leading tile — rounded-square (r-md), accent glyph */
       .chat-thread-item__icon {
         display: inline-flex;
         align-items: center;
@@ -4546,7 +4805,7 @@
         width: 32px;
         height: 32px;
         flex: none;
-        border-radius: var(--r-full);
+        border-radius: var(--r-md);
         background: var(--surface-3);
         border: 1px solid var(--line-1);
         color: var(--text-2);
@@ -4714,6 +4973,162 @@
         border-radius: 18px 18px 18px 6px;
       }
 
+      /* kit: file-attachment chips above a user message bubble */
+      .scout-chat-files {
+        order: 0;
+        align-self: flex-end;
+        max-width: 78%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 2px;
+      }
+
+      .scout-chat-file {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border-radius: 14px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+      }
+
+      .scout-chat-file__icon {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        border-radius: 9px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-2);
+      }
+
+      .scout-chat-file__body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .scout-chat-file__name {
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        color: var(--text-1);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px;
+      }
+
+      .scout-chat-file__meta {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* kit: research / tool-progress card — a left-aligned run report */
+      .scout-chat-research {
+        align-self: flex-start;
+        width: 100%;
+        max-width: 420px;
+        background: var(--surface-1);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow-1);
+      }
+
+      .scout-chat-research__head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .scout-chat-research__icon {
+        width: 30px;
+        height: 30px;
+        flex: none;
+        border-radius: var(--r-md);
+        background: var(--accent);
+        color: var(--on-accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .scout-chat-research__titles {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+
+      .scout-chat-research__title {
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .scout-chat-research__tool {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .scout-chat-research__body {
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .scout-chat-research__progress {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .scout-chat-research__agents {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+      }
+
+      .scout-chat-research__track {
+        flex: 1;
+        height: 5px;
+        background: var(--surface-3);
+        border-radius: 999px;
+        overflow: hidden;
+        min-width: 40px;
+      }
+
+      .scout-chat-research__fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 999px;
+        transition: width 0.2s linear;
+      }
+
+      .scout-chat-research__pct {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        font-variant-numeric: tabular-nums;
+        min-width: 34px;
+        text-align: right;
+      }
+
       .scout-chat-meta {
         order: 2;
         display: inline-flex;
@@ -4868,83 +5283,88 @@
         padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
       }
 
+      /* canon Artifacts — 320px list sidebar + detail editor, full height */
       #artifactsTool {
         grid-template-rows: minmax(0, 1fr);
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+        overflow: hidden;
+        padding: 0;
       }
 
-      .artifacts-tool__inner {
-        width: min(920px, 100%);
-        margin: 0 auto;
-        align-self: start;
-        display: grid;
-        gap: var(--sp-4);
-      }
-
-      .artifacts-tool__head {
+      .artifacts-workspace {
         display: flex;
-        align-items: flex-end;
+        min-height: 0;
+        min-width: 0;
+      }
+
+      .artifacts-sidebar {
+        width: 320px;
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-right: 1px solid var(--line-1);
+      }
+
+      .artifacts-sidebar__head {
+        flex: none;
+        display: flex;
+        align-items: flex-start;
         justify-content: space-between;
-        gap: var(--sp-3);
-        padding: 0 2px;
+        gap: var(--sp-2);
+        padding: 18px 18px 10px;
+      }
+
+      .artifacts-sidebar__new {
+        flex: none;
       }
 
       .artifacts-tool__title {
-        margin: 0;
+        margin: 0 0 4px;
         color: var(--text-1);
         font: var(--type-title-2);
         letter-spacing: var(--track-title-2);
       }
 
       .artifacts-tool__meta {
-        margin-top: 4px;
+        margin: 0;
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
 
       .artifacts-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: var(--sp-3);
-      }
-
-      .artifacts-workspace {
-        display: grid;
-        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.8fr);
-        gap: var(--sp-4);
-        align-items: start;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 6px 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
 
       .artifact-item {
-        display: grid;
-        gap: var(--sp-3);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
         min-width: 0;
-        padding: var(--sp-4);
+        padding: 14px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg);
-        background: var(--surface-1);
+        background: var(--surface-2);
         color: inherit;
-        box-shadow: var(--shadow-1);
         text-align: left;
         cursor: pointer;
-        transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease), border-color var(--dur-fast) var(--ease);
       }
 
-      .artifact-item:hover {
-        background: var(--surface-2);
-        box-shadow: var(--shadow-2);
-      }
-
-      .artifact-item:active {
-        transform: scale(var(--press-scale));
+      .artifact-item--empty {
+        cursor: default;
+        background: var(--surface-1);
       }
 
       .artifact-item.is-selected {
+        border-color: var(--line-2);
         background: var(--accent-soft);
-        box-shadow: 0 0 0 1px var(--line-2), var(--shadow-1);
       }
 
       .artifact-item__top {
@@ -4954,124 +5374,196 @@
         gap: var(--sp-2);
       }
 
+      .artifact-item__lead {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+      }
+
       .artifact-item__mode,
-      .artifact-item__state,
       .artifact-item__time {
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
 
-      .artifact-item__state {
-        padding: 3px 7px;
-        border-radius: var(--r-full);
-        background: var(--surface-3);
+      /* canon list Badge — tone by state */
+      .artifact-item__badge {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
         border: 1px solid var(--line-1);
+        background: var(--surface-3);
         color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         white-space: nowrap;
       }
 
-      .artifact-item__state--published {
+      .artifact-item__badge--published {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .artifact-item__badge--running {
+        border-color: transparent;
         background: var(--accent-soft);
-        border-color: var(--line-2);
         color: var(--text-1);
       }
 
-      .artifact-item__state--running {
-        color: var(--accent);
+      .artifact-item__badge--error {
+        border-color: transparent;
+        background: var(--danger-soft);
+        color: var(--danger);
       }
 
-      .artifact-item__state--error {
-        color: var(--danger);
+      /* canon live indicator — icon + text in live color when published */
+      .artifact-item__live {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--live);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       .artifact-item__title {
         margin: 0;
         color: var(--text-1);
-        font: var(--type-label-lg);
-        letter-spacing: var(--track-label);
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
         overflow-wrap: anywhere;
       }
 
       .artifact-item__body {
         color: var(--text-2);
-        font: 13px/1.45 var(--font-sans);
-        white-space: pre-wrap;
+        font: var(--type-caption);
+        white-space: normal;
         overflow-wrap: anywhere;
         display: -webkit-box;
-        -webkit-line-clamp: 9;
+        -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
 
-      .artifact-detail {
-        position: sticky;
-        top: 84px;
-        display: grid;
-        gap: var(--sp-3);
-        padding: var(--sp-4);
-        border-radius: var(--r-xl);
-        background: var(--glass-panel);
-        border: 1px solid var(--glass-border);
-        box-shadow: var(--glass-highlight), var(--shadow-2);
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+      .artifact-item--empty .artifact-item__body {
+        -webkit-line-clamp: 9;
       }
 
-      .artifact-detail__top,
-      .artifact-detail__actions {
+      /* canon detail editor — header / title / body / footer, full height */
+      .artifact-detail {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .artifact-detail__top {
+        flex: none;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: var(--sp-2);
+        gap: 10px;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--line-1);
       }
 
-      .artifact-detail__mode,
+      .artifact-detail__spacer {
+        flex: 1;
+      }
+
+      .artifact-detail__mode {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifact-detail__published {
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: var(--live-soft);
+        color: var(--live);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .artifact-detail__published[hidden] {
+        display: none;
+      }
+
       .artifact-detail__status {
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
 
-      .artifact-detail__field {
-        display: grid;
-        gap: 6px;
+      .artifact-detail__input {
+        flex: none;
+        margin: 22px 22px 0;
+        width: calc(100% - 44px);
+        border: none;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        padding: 0;
+        outline: 0;
       }
 
-      .artifact-detail__label {
-        color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-      }
-
-      .artifact-detail__input,
       .artifact-detail__body {
-        width: 100%;
-        min-width: 0;
+        flex: 1;
+        min-height: 240px;
+        margin: 16px 22px;
+        width: calc(100% - 44px);
+        resize: none;
         border: 1px solid var(--line-1);
         border-radius: var(--r-md);
         background: var(--surface-3);
         color: var(--text-1);
         font: var(--type-body);
-        padding: 10px 12px;
+        line-height: 1.65;
+        letter-spacing: var(--track-text);
+        padding: 16px;
+        white-space: pre-wrap;
         outline: 0;
       }
 
-      .artifact-detail__body {
-        min-height: 320px;
-        resize: vertical;
-        white-space: pre-wrap;
-      }
-
-      .artifact-detail__input:focus,
       .artifact-detail__body:focus {
         border-color: var(--line-2);
-        box-shadow: 0 0 0 3px var(--accent-soft);
       }
 
       .artifact-detail__input[disabled],
       .artifact-detail__body[disabled] {
         opacity: 0.55;
+      }
+
+      .artifact-detail__actions {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 22px;
+        border-top: 1px solid var(--line-1);
+      }
+
+      .artifact-detail__hint {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       #researchTool,
@@ -5295,13 +5787,386 @@
         font-variant-numeric: tabular-nums;
       }
 
+      /* ── Research staged flow (rVision / rPlanning / rRunning / rComplete) ── */
+      .research-stage {
+        display: grid;
+        gap: var(--sp-4);
+        min-width: 0;
+      }
+
+      /* rVision + rPlanning share a centered empty-state column */
+      .research-empty {
+        display: grid;
+        justify-items: center;
+        align-content: center;
+        gap: var(--sp-3);
+        min-height: 56vh;
+        padding: var(--sp-5) var(--sp-4);
+        text-align: center;
+      }
+
+      .research-empty__chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 60px;
+        height: 60px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--accent);
+      }
+
+      .research-empty__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+      }
+
+      .research-empty__body {
+        max-width: 48ch;
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        text-wrap: pretty;
+      }
+
+      .research-empty__goal {
+        max-width: 52ch;
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        text-wrap: pretty;
+      }
+
+      /* rPlanning pulsing ring behind an accent bonfire chip */
+      .research-ring {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+      }
+
+      .research-ring__pulse {
+        position: absolute;
+        inset: 0;
+        border-radius: var(--r-full);
+        border: 2px solid var(--live);
+        animation: bf-ringpulse 1600ms var(--ease) infinite;
+      }
+
+      .research-ring__chip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      /* rRunning header + criteria */
+      .research-run {
+        display: grid;
+        gap: var(--sp-4);
+        min-width: 0;
+      }
+
+      .research-run__goal {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        text-wrap: balance;
+      }
+
+      .research-criteria {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+      }
+
+      .research-criteria__tag {
+        padding: 5px 11px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .research-overall {
+        display: grid;
+        gap: 10px;
+        padding: var(--sp-4);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--shadow-1);
+      }
+
+      .research-overall__row {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .research-overall__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        flex: none;
+        animation: bf-flamebreathe 1200ms var(--ease) infinite;
+      }
+
+      .research-overall__pct {
+        margin-left: auto;
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .research-bar {
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        overflow: hidden;
+      }
+
+      .research-bar__fill {
+        height: 100%;
+        border-radius: inherit;
+        background: var(--accent);
+        transition: width var(--dur-med) var(--ease);
+      }
+
+      .research-agents {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+        gap: var(--sp-3);
+      }
+
+      .research-agent {
+        display: grid;
+        gap: 10px;
+        padding: var(--sp-3);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
+      }
+
+      .research-agent__top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .research-agent__avatar {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font: 600 13px/1 var(--font-sans);
+      }
+
+      .research-agent__id {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+
+      .research-agent__role {
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .research-agent__task {
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-wrap: pretty;
+      }
+
+      .research-agent__meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* rComplete */
+      .research-complete {
+        display: grid;
+        gap: var(--sp-4);
+        min-width: 0;
+      }
+
+      .research-complete__head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        flex-wrap: wrap;
+      }
+
+      .research-complete__titles {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .research-complete__counts {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .research-complete__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        text-wrap: balance;
+      }
+
+      .research-complete__actions {
+        display: flex;
+        gap: var(--sp-2);
+        flex: none;
+      }
+
+      .research-complete__cols {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: var(--sp-4);
+        align-items: start;
+      }
+
+      .research-complete__main {
+        display: grid;
+        gap: var(--sp-4);
+        min-width: 0;
+      }
+
+      .research-section {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .research-section__h {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+      }
+
+      .research-section__body {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .research-sources {
+        display: grid;
+        gap: var(--sp-2);
+        align-content: start;
+        position: sticky;
+        top: 84px;
+      }
+
+      .research-sources__title {
+        margin: 0 0 2px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .research-source {
+        display: flex;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .research-source__icon {
+        flex: none;
+        color: var(--accent);
+      }
+
+      .research-source__id {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .research-source__name {
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .research-source__url {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
       @media (max-width: 980px) {
-        .artifacts-workspace {
+        .research-complete__cols {
           grid-template-columns: minmax(0, 1fr);
         }
 
-        .artifact-detail {
+        .research-sources {
           position: static;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .artifacts-workspace {
+          flex-direction: column;
+          overflow: auto;
+        }
+
+        .artifacts-sidebar {
+          width: 100%;
+          border-right: 0;
+          border-bottom: 1px solid var(--line-1);
         }
 
         .agent-workspace {
@@ -5325,25 +6190,47 @@
       }
 
       .memory-tool__inner {
-        width: min(640px, 100%);
+        width: min(760px, 100%);
         margin: 0 auto;
         align-self: start;
       }
 
-      .memory-tool__head {
+      /* canon search — icon + live filter input above the timeline */
+      .memory-tool__search {
+        position: relative;
         display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 0 2px 12px;
+        align-items: center;
+        margin-bottom: 20px;
       }
 
-      .memory-tool__title {
-        margin: 0;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+      .memory-tool__search-icon {
+        position: absolute;
+        left: 14px;
+        display: inline-flex;
         color: var(--text-3);
-        font-weight: 500;
+        pointer-events: none;
+      }
+
+      .memory-tool__search-input {
+        width: 100%;
+        height: 44px;
+        padding: 0 14px 0 40px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        outline: none;
+        transition: border-color var(--dur-fast) var(--ease);
+      }
+
+      .memory-tool__search-input::placeholder {
+        color: var(--text-3);
+      }
+
+      .memory-tool__search-input:focus {
+        border-color: var(--line-2);
       }
 
       .memory-tool__count {
@@ -5351,6 +6238,10 @@
         letter-spacing: var(--track-label);
         color: var(--text-3);
         font-variant-numeric: tabular-nums;
+      }
+
+      .memory-tool__count[hidden] {
+        display: none;
       }
 
       /* ---------- PiP meeting — the room follows you (kit meeting/PiPMeeting) ---------- */
@@ -5648,13 +6539,80 @@
         min-height: 0;
       }
 
-      /* stage layout chrome lives in the TopBar now (kit Room instance) */
-      .stage-toolbar {
+      /* kit Room — canon "not connected" empty state. Hidden unless the stage
+         is mounted but no live connection is up; reuses the live join flow. */
+      .room-empty {
+        display: none;
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 24px;
+        text-align: center;
+        background: var(--bg-stage);
+        border-radius: var(--r-xl);
+      }
+
+      /* shown in the authed pre-connection window for the room tool, before
+         .is-in-room flips. uses only existing shell state — no new signal. */
+      #appShell.is-authed[data-tool="room"]:not(.is-in-room) #hearthStage .room-empty {
+        display: flex;
+      }
+
+      #appShell.is-authed[data-tool="room"]:not(.is-in-room) #hearthStage .hearth-center {
+        visibility: hidden;
+      }
+
+      .room-empty__mark {
+        position: relative;
+        width: 84px;
+        height: 84px;
         display: flex;
         align-items: center;
+        justify-content: center;
+      }
+
+      .room-empty__mark::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .room-empty__mark svg {
+        position: relative;
+      }
+
+      .room-empty__title {
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: #fff;
+        margin-bottom: 6px;
+      }
+
+      .room-empty__meta {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      /* kit Room — the Segmented view control floats centered at the top of
+         the stage (canon), no longer in the TopBar */
+      .stage-toolbar {
+        position: relative;
+        z-index: 5;
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         gap: var(--sp-2);
         flex: none;
         min-width: 0;
+        padding: 14px;
       }
 
       #appShell:not(.is-in-room) .stage-toolbar {
@@ -7055,9 +8013,12 @@
           margin: 8px 16px 12px;
         }
 
-        #memoryTool,
-        #artifactsTool {
+        #memoryTool {
           padding: 20px 16px 36px;
+        }
+
+        #artifactsTool {
+          padding: 0;
         }
 
         .pip-meeting {
@@ -8279,7 +9240,7 @@
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
-        <span id="railAvatar" class="tool-rail__avatar" aria-hidden="true">·</span>
+        <button id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out">TC</button>
       </nav>
       <header class="topbar mount-stagger">
         <span id="brandMark" class="topbar__mark" aria-hidden="true">
@@ -8300,13 +9261,6 @@
           <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
         <span class="topbar__spacer" aria-hidden="true"></span>
-        <div class="stage-toolbar" aria-label="Stage layout">
-          <div class="stage-segmented" role="group" aria-label="Video layout">
-            <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
-            <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
-          </div>
-          <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
-        </div>
         <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
           Board
@@ -8323,136 +9277,117 @@
 
       <div class="workspace">
         <section id="officeTool" class="office-tool" aria-label="Office dashboard">
-          <div class="office-hero">
-            <section class="office-panel" aria-label="Operating dashboard">
-              <p class="office-kicker">business intelligence operating system</p>
-              <h2 class="office-title">your office is awake, and the room is just one app.</h2>
-              <p class="office-subtitle">Ask across meetings, open artifacts, launch research or design work, and enter the live room only when you want camera and microphone on.</p>
-              <div class="office-actions">
-                <button class="btn btn--primary" type="button" data-office-tool="room">Enter room</button>
-                <button class="btn btn--ghost" type="button" data-open-assistant-mode="chat">Ask assistant</button>
-                <button class="btn btn--ghost" type="button" data-office-tool="grill">Start grill mode</button>
+          <div class="bf-view" style="width:100%; max-width:1120px; margin:0 auto; padding:30px 24px 130px;">
+            <p style="margin:0 0 16px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);"><span id="officeTodayLabel">today</span> · business intelligence operating system</p>
+
+            <div style="display:flex; flex-wrap:wrap; gap:18px; margin-bottom:18px;">
+              <div style="flex:2 1 400px; min-width:0; position:relative; overflow:hidden; border-radius:var(--r-xl); background:var(--glass-panel); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); border:1px solid var(--glass-border); box-shadow:var(--glass-highlight), var(--glass-shadow); padding:28px; display:flex; flex-direction:column;">
+                <svg viewBox="0 0 64 64" aria-hidden="true" style="position:absolute; width:320px; height:320px; right:-72px; top:-86px; opacity:0.05; pointer-events:none;"><path fill="var(--text-1)" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>
+                <h2 id="officeGreeting" style="margin:0 0 8px; font:var(--type-title-1); letter-spacing:var(--track-title-1); color:var(--text-1);">welcome back.</h2>
+                <p style="margin:0 0 22px; font:var(--type-body); color:var(--text-2); max-width:50ch;">Scout is listening. ask for research, a deck, a recap, or to ping the team — then get back to the work only you can do.</p>
+                <button type="button" aria-label="talk to Scout" data-open-assistant-mode="chat" class="bf-card-hover" style="display:flex; align-items:center; gap:14px; width:100%; text-align:left; padding:13px 14px 13px 18px; border-radius:var(--r-lg); border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; margin-bottom:16px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                  <span class="bf-fab is-speaking" style="display:flex; align-items:center; gap:3px; height:22px; flex:none; color:var(--accent);">
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:0ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:120ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:240ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:80ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:300ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:160ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:60ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:220ms;"></span>
+                  </span>
+                  <span style="flex:1; min-width:0; font:var(--type-body-medium); color:var(--text-1);">ask Scout anything…</span>
+                  <span style="width:36px; height:36px; flex:none; border-radius:50%; background:var(--accent); color:var(--on-accent); display:inline-flex; align-items:center; justify-content:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><path d="M12 18v4"></path></svg></span>
+                </button>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3); margin-right:2px;">try</span>
+                  <button type="button" class="bf-chip" data-office-tool="research" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">research a question</button>
+                  <button type="button" class="bf-chip" data-office-tool="design" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">draft a deck</button>
+                  <button type="button" class="bf-chip" data-office-tool="grill" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">grill my pitch</button>
+                  <button type="button" class="bf-chip" data-open-assistant-mode="chat" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">recap the last meeting</button>
+                </div>
               </div>
+
+              <div style="flex:1 1 300px; min-width:0; display:flex; flex-direction:column; gap:18px;">
+                <div style="border-radius:var(--r-xl); background:var(--surface-1); border:1px solid var(--line-1); padding:20px; display:flex; flex-direction:column; gap:14px;">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">the room</span>
+                    <span id="officeRoomStatusPill" class="pill pill--idle" style="flex:none;">not connected</span>
+                  </div>
+                  <div id="officeRoomName" style="font:var(--type-headline); letter-spacing:var(--track-headline); color:var(--text-1);">platform standup</div>
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <div id="officeRoomAvatars" class="stack-avatars" aria-hidden="true"></div>
+                    <span id="officeRoomInvited" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">room ready</span>
+                  </div>
+                  <button id="officeRoomJoin" type="button" class="btn btn--primary" data-office-tool="room" style="width:100%;">Join the room</button>
+                </div>
+                <div style="flex:1; border-radius:var(--r-xl); background:var(--surface-1); border:1px solid var(--line-1); padding:20px;">
+                  <div style="margin-bottom:8px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">today</div>
+                  <div id="officeAgenda" style="display:flex; flex-direction:column;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div id="officeStats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:1px; background:var(--line-1); border:1px solid var(--line-1); border-radius:var(--r-lg); overflow:hidden; margin-bottom:30px;">
+              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
+                <span id="officeArtifactStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
+                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">artifacts saved</span>
+              </div>
+              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
+                <span id="officeMemoryStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
+                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">memories saved</span>
+              </div>
+              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
+                <span id="officeBoardStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
+                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">active cards</span>
+              </div>
+              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
+                <span id="officeRoomStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">ready</span>
+                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">room agent</span>
+              </div>
+            </div>
+
+            <section id="officePublishedSection" aria-label="Latest published" style="display:none;">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+                <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">latest from the team</h3>
+                <span id="officePublishedCount" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">0 published</span>
+              </div>
+              <div id="officePublishedArtifacts" class="office-published" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(264px, 1fr)); gap:14px; margin-bottom:30px;"></div>
             </section>
-            <section class="office-panel office-meter" aria-label="Office status">
-              <div class="office-stat">
-                <span id="officeArtifactStat" class="office-stat__value">0</span>
-                <span class="office-stat__label">artifacts saved</span>
-              </div>
-              <div class="office-stat">
-                <span id="officeMemoryStat" class="office-stat__value">0</span>
-                <span class="office-stat__label">memories saved</span>
-              </div>
-              <div class="office-stat">
-                <span id="officeBoardStat" class="office-stat__value">0</span>
-                <span class="office-stat__label">active cards</span>
-              </div>
-              <div class="office-stat">
-                <span id="officeRoomStat" class="office-stat__value">ready</span>
-                <span class="office-stat__label">room agent</span>
-              </div>
-            </section>
+
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+              <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">jump back in</h3>
+              <button type="button" data-office-tool="chat" style="border:none; background:transparent; color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">all threads</button>
+            </div>
+            <div id="officeRecentThreads" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; margin-bottom:30px;"></div>
+
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
+              <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">open an app</h3>
+              <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">apps</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(178px, 1fr)); gap:12px;">
+              <button type="button" class="bf-card-hover" data-office-tool="room" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg></span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Room</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">live</span></span>
+              </button>
+              <button type="button" class="bf-card-hover" data-office-tool="chat" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg></span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Chat</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">private</span></span>
+              </button>
+              <button type="button" class="bf-card-hover" data-office-tool="artifacts" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Artifacts</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">outputs</span></span>
+              </button>
+              <button type="button" class="bf-card-hover" data-office-tool="board" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg></span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Board</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">shared</span></span>
+              </button>
+              <button type="button" class="bf-card-hover" data-office-tool="memory" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
+                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg></span>
+                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Memory</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">durable</span></span>
+              </button>
+            </div>
           </div>
-
-          <section class="office-section" aria-label="Apps">
-            <div class="office-section__head">
-              <div>
-                <p class="office-label">apps</p>
-                <h2>launch work</h2>
-              </div>
-            </div>
-            <div class="office-app-grid">
-              <button class="office-app-card" type="button" data-office-tool="room">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg></span>
-                  <span class="office-app-card__label">live</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Room</span><span class="office-app-card__copy">camera, board, shared transcript agent, and notes.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="chat">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg></span>
-                  <span class="office-app-card__label">private</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Chat</span><span class="office-app-card__copy">ask Scout across board state and remembered meetings.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="memory">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg></span>
-                  <span class="office-app-card__label">durable</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Memory</span><span class="office-app-card__copy">transcripts, brain summaries, board updates, and archives.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="artifacts">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span>
-                  <span class="office-app-card__label">outputs</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Artifacts</span><span class="office-app-card__copy">summaries, action plans, scorecards, and briefs.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="research">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg></span>
-                  <span class="office-app-card__label">scout</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Research</span><span class="office-app-card__copy">open a research lane and turn findings into saved work.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="design">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg></span>
-                  <span class="office-app-card__label">studio</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Design</span><span class="office-app-card__copy">kick off product, UX, and creative direction work.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="grill">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg></span>
-                  <span class="office-app-card__label">practice</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Grill mode</span><span class="office-app-card__copy">hear a pitch, pressure-test it, and score delivery.</span></span>
-              </button>
-              <button class="office-app-card" type="button" data-office-tool="board">
-                <span class="office-app-card__top">
-                  <span class="office-app-card__icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg></span>
-                  <span class="office-app-card__label">shared</span>
-                </span>
-                <span class="office-app-card__body"><span class="office-app-card__title">Board</span><span class="office-app-card__copy">open the live board once the room is running.</span></span>
-              </button>
-            </div>
-          </section>
-
-          <section class="office-section" aria-label="Insights">
-            <div class="office-section__head">
-              <div>
-                <p class="office-label">insights</p>
-                <h2>what the office knows</h2>
-              </div>
-            </div>
-            <div class="office-insights">
-              <article class="office-insight">
-                <span class="office-insight__label">meeting truth</span>
-                <strong>room transcript is the shared source.</strong>
-                <span>private assistants stay explicit; the room agent owns meeting artifacts.</span>
-              </article>
-              <article class="office-insight">
-                <span class="office-insight__label">next artifact</span>
-                <strong>turn the last conversation into a decision record.</strong>
-                <span>ask the assistant to summarize decisions, risks, asks, and owners.</span>
-              </article>
-              <article class="office-insight">
-                <span class="office-insight__label">operator mode</span>
-                <strong>grill mode can score clarity, conviction, and evidence.</strong>
-                <span>open the assistant, choose grill, then pitch like it matters.</span>
-              </article>
-            </div>
-            <div id="officePublishedArtifacts" class="office-published" aria-label="Latest published artifacts">
-              <article class="office-published__empty">
-                <span class="office-insight__label">latest published</span>
-                <strong>no published artifacts yet.</strong>
-                <span>publish an artifact to make it visible from the dashboard.</span>
-              </article>
-            </div>
-          </section>
         </section>
 
         <section id="accessPanel" class="access-panel" aria-label="Sign in">
@@ -8461,12 +9396,13 @@
             <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
           </button>
           <header class="login-head login-rise">
-            <svg class="login-flame" width="36" height="36" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
+            <svg class="login-flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
               <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
             </svg>
             <div class="login-head__text">
-              <h2>Bonfire</h2>
-              <p class="login-subline">sign in to your office</p>
+              <h2 class="login-wordmark">bonfire</h2>
+              <h1 class="login-welcome">welcome back</h1>
+              <p class="login-subline">sign in to your office.</p>
             </div>
             <span id="accessState" class="access-state" hidden>locked</span>
           </header>
@@ -8493,7 +9429,7 @@
             </label>
             <label class="field" id="passwordField">
               <span>password</span>
-              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="password">
+              <input id="roomPassword" type="password" autocomplete="current-password" placeholder="••••••••">
             </label>
             <label class="field" id="resetPasswordField" hidden>
               <span>new password</span>
@@ -8513,9 +9449,10 @@
             </div>
             <button id="passkeySignIn" class="login-passkey" type="button" disabled title="sign in with your password once first.">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path></svg>
-              Sign in with passkey
+              Use Face ID
             </button>
             <p id="accessHint" class="access-hint" aria-live="polite"></p>
+            <div style="margin-top:26px; display:flex; justify-content:center;"><span class="pill">not connected</span></div>
           </form>
           <p class="login-foot login-rise login-rise--foot">sessions stay signed in on this device.</p>
           <div class="inside-row" hidden>
@@ -8578,6 +9515,13 @@
         </aside>
 
         <section id="presentationTile" class="presentation-tile hearth-presentation mount-stagger" aria-label="Shared workspace">
+          <div class="stage-toolbar" aria-label="Stage layout">
+            <div class="stage-segmented" role="group" aria-label="Video layout">
+              <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
+              <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
+            </div>
+            <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
+          </div>
           <div id="screenStage" class="screen-stage" aria-label="Shared screen">
             <video id="screenStageVideo" autoplay muted playsinline></video>
             <span id="screenStageLabel" class="screen-stage__label">screen share</span>
@@ -8589,6 +9533,21 @@
           </div>
 
           <div id="hearthStage" class="hearth-stage" aria-label="Room videos">
+            <!-- kit Room — canon empty state; appears only while the stage is
+                 mounted but not yet connected. Join reuses the live join flow
+                 (data-office-tool="room" -> joinRoom()). -->
+            <div id="roomNotConnected" class="room-empty" aria-label="Not connected">
+              <span class="room-empty__mark" aria-hidden="true">
+                <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true">
+                  <path fill="rgba(255,255,255,0.85)" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
+                </svg>
+              </span>
+              <div class="room-empty__text">
+                <div id="roomEmptyName" class="room-empty__title">platform standup</div>
+                <div id="roomEmptyMeta" class="room-empty__meta">not connected · 4 invited</div>
+              </div>
+              <button id="roomEmptyJoin" type="button" class="btn btn--primary" data-office-tool="room">Join the room</button>
+            </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
                 <video id="activeSpeakerVideo" autoplay muted playsinline></video>
@@ -8646,6 +9605,21 @@
         <!-- Chat tool — the private Scout thread, first-class (kit ui_kits/chat) -->
         <section id="chatTool" class="chat-tool" aria-label="Chat with Scout">
           <aside class="chat-threads" aria-label="Threads">
+            <div class="chat-threads__head">
+              <div class="chat-threads__search">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="m21 21-4.3-4.3"></path>
+                </svg>
+                <input id="chatThreadSearch" class="chat-threads__search-input" type="search" autocomplete="off" placeholder="search threads…" aria-label="Search threads">
+              </div>
+              <button id="chatNewThread" class="chat-threads__new" type="button" aria-label="new thread" title="new thread">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+              </button>
+            </div>
             <span class="chat-threads__label">threads</span>
             <button class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
@@ -8719,17 +9693,17 @@
 
         <!-- Artifacts tool — durable outputs from OS assistant modes -->
         <section id="artifactsTool" class="artifacts-tool" aria-label="Artifacts">
-          <div class="artifacts-tool__inner">
-            <header class="artifacts-tool__head">
-              <div>
-                <h2 class="artifacts-tool__title">Artifacts</h2>
-                <p class="artifacts-tool__meta">briefs, scorecards, design kickoffs, and operating memos saved by the assistant</p>
-              </div>
-              <button class="btn btn--ghost" type="button" data-open-assistant-mode="artifacts">New artifact</button>
-            </header>
-            <div class="artifacts-workspace">
-              <div id="artifactList" class="artifacts-list" aria-label="Saved artifacts">
-                <article class="artifact-item">
+          <div class="artifacts-workspace">
+            <aside class="artifacts-sidebar" aria-label="Saved artifacts">
+              <header class="artifacts-sidebar__head">
+                <div>
+                  <h2 class="artifacts-tool__title">Artifacts</h2>
+                  <p class="artifacts-tool__meta" id="artifactCountLabel">no artifacts yet</p>
+                </div>
+                <button class="btn btn--ghost artifacts-sidebar__new" type="button" data-open-assistant-mode="artifacts">New artifact</button>
+              </header>
+              <div id="artifactList" class="artifacts-list">
+                <article class="artifact-item artifact-item--empty">
                   <div class="artifact-item__top">
                     <span class="artifact-item__mode">ready</span>
                     <span class="artifact-item__time">now</span>
@@ -8738,26 +9712,24 @@
                   <p class="artifact-item__body">Use artifact, research, design, or grill mode in the assistant to create durable operating outputs.</p>
                 </article>
               </div>
-              <form id="artifactDetailForm" class="artifact-detail" aria-label="Artifact editor">
-                <div class="artifact-detail__top">
-                  <span id="artifactDetailMode" class="artifact-detail__mode">artifact</span>
-                  <span id="artifactDetailStatus" class="artifact-detail__status">no selection</span>
-                </div>
-                <label class="artifact-detail__field">
-                  <span class="artifact-detail__label">title</span>
-                  <input id="artifactTitleInput" class="artifact-detail__input" type="text" autocomplete="off" disabled>
-                </label>
-                <label class="artifact-detail__field">
-                  <span class="artifact-detail__label">body</span>
-                  <textarea id="artifactBodyInput" class="artifact-detail__body" rows="14" disabled></textarea>
-                </label>
-                <div class="artifact-detail__actions">
-                  <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
-                  <button id="artifactPublishButton" class="btn btn--ghost" type="button" disabled>Publish</button>
-                  <button id="artifactSaveButton" class="btn btn--primary" type="submit" disabled>Save</button>
-                </div>
-              </form>
-            </div>
+            </aside>
+            <form id="artifactDetailForm" class="artifact-detail" aria-label="Artifact editor">
+              <div class="artifact-detail__top">
+                <span id="artifactDetailMode" class="artifact-detail__mode">artifact</span>
+                <span id="artifactDetailPublished" class="artifact-detail__published" hidden>published</span>
+                <span class="artifact-detail__spacer"></span>
+                <span id="artifactDetailStatus" class="artifact-detail__status">no selection</span>
+              </div>
+              <input id="artifactTitleInput" class="artifact-detail__input" type="text" autocomplete="off" placeholder="untitled artifact" aria-label="artifact title" disabled>
+              <textarea id="artifactBodyInput" class="artifact-detail__body" rows="16" aria-label="artifact body" disabled></textarea>
+              <div class="artifact-detail__actions">
+                <span class="artifact-detail__hint">published artifacts appear on the team dashboard</span>
+                <span class="artifact-detail__spacer"></span>
+                <button id="artifactSaveButton" class="btn btn--ghost" type="submit" disabled>Save</button>
+                <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
+                <button id="artifactPublishButton" class="btn btn--primary" type="button" disabled>Publish to team</button>
+              </div>
+            </form>
           </div>
         </section>
 
@@ -8772,34 +9744,16 @@
               </div>
               <button class="btn btn--ghost" type="button" data-open-assistant-mode="research">Open assistant</button>
             </header>
-            <div class="agent-workspace">
-              <form class="agent-composer" data-agent-tool-form="research">
-                <div class="agent-composer__top">
-                  <span class="agent-composer__mode">research lane</span>
-                  <span class="agent-composer__status" data-agent-status="research">ready</span>
-                </div>
-                <label class="agent-composer__field">
-                  <span class="agent-composer__label">question</span>
-                  <textarea class="agent-composer__input" data-agent-input="research" rows="10" autocomplete="off" aria-label="Research question">Research whether a business intelligence OS for meetings should start with executive weekly reviews, product leadership standups, or sales pipeline calls. Include buyer urgency, proof needed, failure modes, and a recommendation.</textarea>
-                </label>
-                <div class="agent-template-grid" aria-label="Research starters">
-                  <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS. Compare executive weekly reviews, product leadership standups, and sales pipeline calls. Include buying trigger, data needed, proof plan, risks, and recommendation.">First segment</button>
-                  <button type="button" data-agent-template="research" data-template-text="Create a research brief for the competitive landscape around meeting-to-artifact operating systems. Include comparable products, differentiation, commodity risk, customer proof to collect, and a recommended wedge.">Competitive wedge</button>
-                  <button type="button" data-agent-template="research" data-template-text="Build an interview guide for three operators evaluating a meeting intelligence OS. Include discovery questions, signals of urgency, success metrics, objections, and a synthesis format.">Interview guide</button>
-                </div>
-                <div class="agent-composer__actions">
-                  <button class="btn btn--primary" type="submit" data-agent-submit="research">Create research brief</button>
-                </div>
-              </form>
-              <aside class="agent-output" aria-label="Research artifacts">
-                <div class="agent-output__head">
-                  <span>saved research</span>
-                  <button class="agent-output__link" type="button" data-office-tool="artifacts">All artifacts</button>
-                </div>
-                <div class="agent-output__latest" data-agent-output="research">No research artifact yet.</div>
-                <div class="agent-output__list" data-agent-artifacts="research"></div>
-              </aside>
-            </div>
+            <!-- Research is a staged team run, driven by the real agent thread/artifact
+                 state. The launcher form below carries the pinned data-agent-tool-form
+                 marker and feeds Scout, but the visible surface is the 4-stage flow. -->
+            <form class="research-launcher" data-agent-tool-form="research" hidden aria-hidden="true">
+              <span class="agent-composer__status" data-agent-status="research">ready</span>
+              <textarea class="agent-composer__input" data-agent-input="research" rows="2" autocomplete="off" aria-label="Research question" hidden></textarea>
+              <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS. Compare executive weekly reviews, product leadership standups, and sales pipeline calls. Include buying trigger, data needed, proof plan, risks, and recommendation." hidden>First segment</button>
+              <button class="btn btn--primary" type="submit" data-agent-submit="research" hidden>Create research brief</button>
+            </form>
+            <div class="research-stage" data-research-stage></div>
           </div>
         </section>
 
@@ -8888,15 +9842,15 @@
         <!-- Memory tool — the durable archive as quiet log entries -->
         <section id="memoryTool" class="memory-tool" aria-label="Memory">
           <div class="memory-tool__inner">
-            <header class="memory-tool__head">
-              <h2 class="memory-tool__title">room memory</h2>
-              <span id="memoryCount" class="memory-tool__count">0 saved</span>
-            </header>
+            <div class="memory-tool__search">
+              <span class="memory-tool__search-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+              </span>
+              <input id="memorySearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="search the room’s memory…" aria-label="search the room’s memory">
+              <span id="memoryCount" class="memory-tool__count" hidden>0 saved</span>
+            </div>
             <div id="memoryList" class="memory-list" role="log" aria-label="meeting memory">
-              <article class="memory-item">
-                <span class="memory-meta">ready</span>
-                <span>memory starts when the room speaks.</span>
-              </article>
+              <article class="memory-empty">memory starts when the room speaks.</article>
             </div>
           </div>
         </section>
@@ -9083,7 +10037,7 @@
       <section class="os-assistant__panel" aria-label="Assistant conversation">
         <header class="os-assistant__head">
           <div class="os-assistant__title">
-            <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+            <span class="os-wave bf-fab" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
             <div>
               <span>Bonfire assistant</span>
               <p id="osAssistantModeLabel" class="os-assistant__mode-label">chat mode</p>
@@ -9115,12 +10069,12 @@
         </form>
       </section>
       <button id="osAssistantToggle" class="os-assistant__toggle" type="button" aria-label="Open assistant" title="Open assistant" aria-expanded="false">
-        <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="os-wave bf-fab" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
       </button>
     </aside>
     <aside id="voiceIsland" class="voice-island" data-state="idle" hidden aria-label="Realtime voice" aria-live="polite">
       <button id="voiceIslandMain" class="voice-island__main" type="button" aria-label="Realtime voice is active" title="Realtime voice">
-        <span class="os-wave" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="os-wave bf-island" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
         <span class="voice-island__copy">
           <span id="voiceIslandLabel" class="voice-island__label">Scout voice</span>
           <span id="voiceIslandMeta" class="voice-island__meta">realtime 2 · listening</span>
@@ -9402,7 +10356,9 @@
       const artifactList = document.getElementById('artifactList')
       const artifactDetailForm = document.getElementById('artifactDetailForm')
       const artifactDetailMode = document.getElementById('artifactDetailMode')
+      const artifactDetailPublished = document.getElementById('artifactDetailPublished')
       const artifactDetailStatus = document.getElementById('artifactDetailStatus')
+      const artifactCountLabel = document.getElementById('artifactCountLabel')
       const artifactTitleInput = document.getElementById('artifactTitleInput')
       const artifactBodyInput = document.getElementById('artifactBodyInput')
       const artifactCopyButton = document.getElementById('artifactCopyButton')
@@ -9410,6 +10366,8 @@
       const artifactSaveButton = document.getElementById('artifactSaveButton')
       const memoryList = document.getElementById('memoryList')
       const memoryCount = document.getElementById('memoryCount')
+      const memorySearch = document.getElementById('memorySearch')
+      let memoryQuery = ''
       const assistantFeed = document.getElementById('assistantFeed')
       const assistantState = document.getElementById('assistantState')
       const assistantForm = document.getElementById('assistantForm')
@@ -9425,6 +10383,8 @@
       const scoutChatInput = document.getElementById('scoutChatInput')
       const scoutChatSend = document.getElementById('scoutChatSend')
       const scoutChatHint = document.getElementById('scoutChatHint')
+      const chatThreadSearch = document.getElementById('chatThreadSearch')
+      const chatNewThread = document.getElementById('chatNewThread')
       const topbarProjectEl = document.getElementById('topbarProject')
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
@@ -9442,6 +10402,19 @@
       const officeBoardStat = document.getElementById('officeBoardStat')
       const officeRoomStat = document.getElementById('officeRoomStat')
       const officePublishedArtifacts = document.getElementById('officePublishedArtifacts')
+      const officePublishedSection = document.getElementById('officePublishedSection')
+      const officePublishedCount = document.getElementById('officePublishedCount')
+      const officeGreetingEl = document.getElementById('officeGreeting')
+      const officeTodayLabelEl = document.getElementById('officeTodayLabel')
+      const officeRoomStatusPill = document.getElementById('officeRoomStatusPill')
+      const officeRoomName = document.getElementById('officeRoomName')
+      const officeRoomAvatars = document.getElementById('officeRoomAvatars')
+      const officeRoomInvited = document.getElementById('officeRoomInvited')
+      const officeRoomJoin = document.getElementById('officeRoomJoin')
+      const roomEmptyName = document.getElementById('roomEmptyName')
+      const roomEmptyMeta = document.getElementById('roomEmptyMeta')
+      const officeAgenda = document.getElementById('officeAgenda')
+      const officeRecentThreads = document.getElementById('officeRecentThreads')
       const officeToolButtons = Array.from(document.querySelectorAll('[data-office-tool]'))
       const assistantModeOpeners = Array.from(document.querySelectorAll('[data-open-assistant-mode]'))
       const osAssistant = document.getElementById('osAssistant')
@@ -9699,7 +10672,8 @@
       toggleCameraButton.addEventListener('click', toggleLocalCamera)
       audioSettingsButton.addEventListener('click', openAudioSettings)
       document.getElementById('dockScoutState')?.addEventListener('click', () => {
-        document.querySelector('.scout-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Scout now lives in the chat tool under the Bonfire OS design; jump there.
+        setActiveTool('chat')
       })
       audioSettingsClose.addEventListener('click', closeAudioSettings)
       audioSettingsDone.addEventListener('click', closeAudioSettings)
@@ -9797,11 +10771,22 @@
       passkeySignInButton.addEventListener('click', signInWithPasskey)
       forgotPasswordButton.addEventListener('click', requestPasswordReset)
       loginSignOutButton.addEventListener('click', signOutOfAccount)
+      if (railAvatarEl) {
+        railAvatarEl.addEventListener('click', () => {
+          if (authedUser) signOutOfAccount()
+        })
+      }
       assistantForm.addEventListener('submit', sendAssistantQuery)
       scoutTabButtons.forEach(button => {
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
       })
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
+      chatThreadSearch?.addEventListener('input', filterChatThreads)
+      chatNewThread?.addEventListener('click', startNewScoutThread)
+      memorySearch?.addEventListener('input', event => {
+        memoryQuery = event.target.value || ''
+        renderMemory()
+      })
       artifactDetailForm.addEventListener('submit', saveSelectedArtifact)
       artifactCopyButton.addEventListener('click', copySelectedArtifact)
       artifactPublishButton.addEventListener('click', toggleSelectedArtifactPublished)
@@ -10335,7 +11320,7 @@
           }
         }
         if (loginSublineEl) {
-          loginSublineEl.textContent = mode === 'reset' ? 'set a new password' : 'sign in to your office'
+          loginSublineEl.textContent = mode === 'reset' ? 'set a new password' : 'sign in to your office.'
         }
         joinAccessButton.textContent = mode === 'reset'
           ? 'Set new password'
@@ -10442,7 +11427,7 @@
         appShell.classList.toggle('is-authed', authed)
         syncOSAssistantAvailability()
         if (railAvatarEl) {
-          railAvatarEl.textContent = authed ? initialsForName(authedUser.name || authedUser.email) : '·'
+          railAvatarEl.textContent = authed ? initialsForName(authedUser.name || authedUser.email) : 'TC'
         }
         if (authed && !appShell.classList.contains('is-in-room') && (appShell.dataset.tool || 'office') === 'room') {
           applyToolState('office')
@@ -10941,6 +11926,10 @@
       }
 
       function updateParticipantPreviewText() {
+        // keep the office room card's avatar stack + status in sync with the roster
+        if (appShell.dataset.tool === 'office') {
+          renderOfficeRoomCard()
+        }
         if (!waitingParticipants) {
           return
         }
@@ -10996,7 +11985,9 @@
         syncToolTopbar()
         applyStatusPillForTool()
         renderPipMeeting()
-        if (tool === 'chat') {
+        if (tool === 'office') {
+          updateOfficeDashboard()
+        } else if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
           loadArtifacts()
@@ -11261,6 +12252,346 @@
         for (const mode of agentToolIds) {
           renderAgentWorkspace(mode)
         }
+        renderResearchTool()
+      }
+
+      // The active research run is the most recent research thread artifact.
+      // pending/launching → rPlanning, running → rRunning, complete → rComplete,
+      // nothing → rVision. Driven entirely by real artifact metadata.
+      function activeResearchArtifact() {
+        const research = agentArtifacts('research')
+        if (!research.length) {
+          return null
+        }
+        return research[research.length - 1]
+      }
+
+      function researchArtifactSources(entry) {
+        // The backend stores artifact bodies as plain text; there is no structured
+        // sources field. Honestly surface only URLs the worker actually wrote into
+        // the brief — never fabricate citations.
+        const text = String(entry?.text || '')
+        const seen = new Set()
+        const sources = []
+        const matches = text.match(/https?:\/\/[^\s)>\]]+/g) || []
+        for (const raw of matches) {
+          const url = raw.replace(/[.,;]+$/, '')
+          if (seen.has(url)) {
+            continue
+          }
+          seen.add(url)
+          let host = url
+          try {
+            host = new URL(url).hostname.replace(/^www\./, '')
+          } catch {
+            host = url
+          }
+          sources.push({ url, name: host })
+        }
+        return sources
+      }
+
+      // Split the plain-text brief into {h, body} sections on its headings. The
+      // worker emits "Label: value" lines and ALL-CAPS / "## " headers; everything
+      // before the first heading becomes the objective.
+      function researchArtifactSections(entry) {
+        const text = String(entry?.text || '').trim()
+        if (!text) {
+          return { objective: '', sections: [] }
+        }
+        const lines = text.split('\n')
+        const sections = []
+        let objective = []
+        let current = null
+        const isHeading = line => {
+          const t = line.trim()
+          if (!t) return false
+          if (/^#{1,6}\s+/.test(t)) return true
+          // "Recommendation:" style label headers (short, ends with colon or is a label line)
+          const labelMatch = /^([A-Z][A-Za-z0-9 /&'-]{1,40}):\s*$/.exec(t)
+          if (labelMatch) return true
+          return false
+        }
+        const headingText = line => line.trim().replace(/^#{1,6}\s+/, '').replace(/:\s*$/, '')
+        for (const line of lines) {
+          if (isHeading(line)) {
+            if (current) sections.push(current)
+            current = { h: headingText(line), body: [] }
+          } else if (current) {
+            current.body.push(line)
+          } else {
+            objective.push(line)
+          }
+        }
+        if (current) sections.push(current)
+        return {
+          objective: objective.join('\n').trim(),
+          sections: sections
+            .map(s => ({ h: s.h, body: s.body.join('\n').trim() }))
+            .filter(s => s.h || s.body)
+        }
+      }
+
+      function researchDownloadArtifact(entry) {
+        if (!entry) {
+          return
+        }
+        const title = entry.metadata?.title || 'research-brief'
+        const md = (title ? `# ${title}\n\n` : '') + String(entry.text || '')
+        try {
+          const blob = new Blob([md], { type: 'text/markdown' })
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'research-brief'}.md`
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+          showToast({ text: 'research brief downloaded', kind: 'done' })
+        } catch {
+          showToast({ text: 'download failed', kind: 'error' })
+        }
+      }
+
+      function renderResearchTool() {
+        const stage = document.querySelector('[data-research-stage]')
+        if (!stage) {
+          return
+        }
+        const entry = activeResearchArtifact()
+        const status = entry ? artifactStatusValue(entry) : ''
+
+        if (!entry) {
+          stage.replaceChildren(researchVisionStage())
+          return
+        }
+        if (status === 'running') {
+          // The launch path stamps running immediately; treat a freshly-created run
+          // (no completedAt, scout_thread source) the same — it is still the work.
+          stage.replaceChildren(researchRunningStage(entry))
+          scheduleArtifactRefresh()
+          return
+        }
+        if (status === 'complete' || status === 'published') {
+          stage.replaceChildren(researchCompleteStage(entry))
+          return
+        }
+        if (status === 'error') {
+          stage.replaceChildren(researchCompleteStage(entry, { error: true }))
+          return
+        }
+        // draft / pending / launching → planning
+        stage.replaceChildren(researchPlanningStage(entry))
+      }
+
+      function researchBonfireIcon() { return '<svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>'; }
+
+      function researchVisionStage() {
+        const wrap = document.createElement('div')
+        wrap.className = 'research-empty bf-view'
+        wrap.innerHTML = `
+          <span class="research-empty__chip">${researchBonfireIcon()}</span>
+          <h3 class="research-empty__title">no research running</h3>
+          <p class="research-empty__body">research is something you ask Scout to do. open the voice island and say &ldquo;research&hellip;&rdquo; — the team spins up here and the brief lands in Artifacts.</p>`
+        const cta = document.createElement('button')
+        cta.type = 'button'
+        cta.className = 'btn btn--primary'
+        cta.textContent = 'Talk to Scout'
+        cta.addEventListener('click', () => openOSAssistant('research'))
+        wrap.appendChild(cta)
+        return wrap
+      }
+
+      function researchPlanningStage(entry) {
+        const goal = entry?.metadata?.query || entry?.metadata?.title || 'your research question'
+        const wrap = document.createElement('div')
+        wrap.className = 'research-empty bf-view'
+        wrap.innerHTML = `
+          <span class="research-ring">
+            <span class="research-ring__pulse" aria-hidden="true"></span>
+            <span class="research-ring__chip">${researchBonfireIcon()}</span>
+          </span>
+          <h3 class="research-empty__title">planning the work&hellip;</h3>`
+        const goalEl = document.createElement('p')
+        goalEl.className = 'research-empty__goal'
+        goalEl.textContent = goal
+        wrap.appendChild(goalEl)
+        return wrap
+      }
+
+      function researchRunningStage(entry) {
+        const goal = entry?.metadata?.query || entry?.metadata?.title || 'research run'
+        const sources = researchArtifactSources(entry)
+        // Honest derivation: the backend exposes a single thread status, not a
+        // multi-agent breakdown, so render ONE agent row and 1-of-1 counts. Sources
+        // come from the artifact body when present, otherwise the count is omitted.
+        const working = 0
+        const count = 1
+        const pct = 0
+
+        const wrap = document.createElement('div')
+        wrap.className = 'research-run bf-view'
+
+        const heading = document.createElement('h3')
+        heading.className = 'research-run__goal'
+        heading.textContent = goal
+        wrap.appendChild(heading)
+
+        const criteria = document.createElement('div')
+        criteria.className = 'research-criteria'
+        for (const tag of ['claim', 'evidence', 'counterargument', 'recommendation']) {
+          const t = document.createElement('span')
+          t.className = 'research-criteria__tag'
+          t.textContent = tag
+          criteria.appendChild(t)
+        }
+        wrap.appendChild(criteria)
+
+        const overall = document.createElement('div')
+        overall.className = 'research-overall'
+        const sourceLabel = sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''
+        overall.innerHTML = `
+          <div class="research-overall__row">
+            <span class="research-overall__dot" aria-hidden="true"></span>
+            <span>${working} of ${count} working${escapeHtml(sourceLabel)}</span>
+            <span class="research-overall__pct">${pct}%</span>
+          </div>
+          <div class="research-bar"><span class="research-bar__fill" style="width:${pct}%"></span></div>`
+        wrap.appendChild(overall)
+
+        const agents = document.createElement('div')
+        agents.className = 'research-agents'
+        agents.appendChild(researchAgentCard({
+          initials: 'SC',
+          role: 'Scout · lead researcher',
+          status: 'working',
+          task: `Investigating: ${goal}`,
+          pct
+        }))
+        wrap.appendChild(agents)
+        return wrap
+      }
+
+      function researchAgentCard(agent) {
+        const card = document.createElement('div')
+        card.className = 'research-agent'
+        card.innerHTML = `
+          <div class="research-agent__top">
+            <span class="research-agent__avatar">${escapeHtml(agent.initials)}</span>
+            <span class="research-agent__id">
+              <span class="research-agent__role">${escapeHtml(agent.role)}</span>
+              <span class="pill pill--connecting pill--breathe" style="align-self:start;"><span class="pill__dot" aria-hidden="true"></span>${escapeHtml(agent.status)}</span>
+            </span>
+          </div>
+          <p class="research-agent__task">${escapeHtml(agent.task)}</p>
+          <div class="research-bar"><span class="research-bar__fill" style="width:${agent.pct}%"></span></div>
+          <div class="research-agent__meta"><span>progress</span><span>${agent.pct}%</span></div>`
+        return card
+      }
+
+      function researchCompleteStage(entry, options = {}) {
+        const error = Boolean(options.error)
+        const title = entry?.metadata?.title || 'Research brief'
+        const { objective, sections } = researchArtifactSections(entry)
+        const sources = researchArtifactSources(entry)
+
+        const wrap = document.createElement('div')
+        wrap.className = 'research-complete bf-view'
+
+        const head = document.createElement('div')
+        head.className = 'research-complete__head'
+
+        const titles = document.createElement('div')
+        titles.className = 'research-complete__titles'
+        const counts = document.createElement('div')
+        counts.className = 'research-complete__counts'
+        const pill = document.createElement('span')
+        pill.className = 'pill ' + (error ? 'pill--offline' : 'pill--listening')
+        pill.innerHTML = `<span class="pill__dot" aria-hidden="true"></span>${error ? 'needs attention' : 'complete'}`
+        counts.appendChild(pill)
+        const meta = document.createElement('span')
+        const sourceCount = sources.length
+        meta.textContent = `1 agent${sourceCount ? ` · ${sourceCount} source${sourceCount === 1 ? '' : 's'}` : ''}`
+        counts.appendChild(meta)
+        const titleEl = document.createElement('h3')
+        titleEl.className = 'research-complete__title'
+        titleEl.textContent = title
+        titles.append(counts, titleEl)
+
+        const actions = document.createElement('div')
+        actions.className = 'research-complete__actions'
+        const download = document.createElement('button')
+        download.type = 'button'
+        download.className = 'btn btn--secondary'
+        download.textContent = 'Download'
+        download.addEventListener('click', () => researchDownloadArtifact(entry))
+        actions.appendChild(download)
+        // No artifact delete endpoint exists on the backend, so Delete is hidden
+        // rather than rendering a dead control.
+
+        head.append(titles, actions)
+        wrap.appendChild(head)
+
+        const cols = document.createElement('div')
+        cols.className = 'research-complete__cols'
+
+        const main = document.createElement('div')
+        main.className = 'research-complete__main'
+        if (objective) {
+          main.appendChild(researchSection('Objective', objective))
+        }
+        for (const section of sections) {
+          main.appendChild(researchSection(section.h, section.body))
+        }
+        if (!objective && !sections.length) {
+          main.appendChild(researchSection('Brief', String(entry?.text || '')))
+        }
+        cols.appendChild(main)
+
+        const aside = document.createElement('aside')
+        aside.className = 'research-sources'
+        const sourcesTitle = document.createElement('p')
+        sourcesTitle.className = 'research-sources__title'
+        sourcesTitle.textContent = sources.length ? 'sources' : 'no linked sources'
+        aside.appendChild(sourcesTitle)
+        for (const source of sources) {
+          aside.appendChild(researchSourceLink(source))
+        }
+        cols.appendChild(aside)
+
+        wrap.appendChild(cols)
+        return wrap
+      }
+
+      function researchSection(heading, body) {
+        const section = document.createElement('div')
+        section.className = 'research-section'
+        const h = document.createElement('h4')
+        h.className = 'research-section__h'
+        h.textContent = heading
+        const p = document.createElement('p')
+        p.className = 'research-section__body'
+        p.textContent = body
+        section.append(h, p)
+        return section
+      }
+
+      function researchSourceLink(source) {
+        const link = document.createElement('a')
+        link.className = 'research-source'
+        link.href = source.url
+        link.target = '_blank'
+        link.rel = 'noreferrer noopener'
+        link.innerHTML = `
+          <span class="research-source__icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"></path></svg></span>
+          <span class="research-source__id">
+            <span class="research-source__name"></span>
+            <span class="research-source__url"></span>
+          </span>`
+        link.querySelector('.research-source__name').textContent = source.name
+        link.querySelector('.research-source__url').textContent = source.url
+        return link
       }
 
       function renderAgentWorkspace(mode) {
@@ -15906,11 +17237,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             addArtifactEntry(payload.artifact, { select: false })
             scheduleArtifactRefresh()
           }
-          const answer = threadMode
-            ? `${assistantModeTitle(threadMode)} thread launched — artifact is running.`
-            : scoutVoice(payload.answer || 'no answer yet')
-          appendScoutChatNode(scoutChatMessageNode('scout', answer, new Date().toISOString()))
-          updateChatThreadItem(answer, new Date().toISOString())
+          if (threadMode) {
+            // Real tool-run: render the progress card wired to the launched
+            // thread, then track its artifact so a refresh flips it terminal.
+            const thread = payload.thread || { mode: threadMode, query: text, status: payload.artifact ? 'running' : 'running', artifact: payload.artifact }
+            appendScoutChatNode(scoutChatResearchNode(thread))
+            const preview = `${assistantModeTitle(threadMode)} thread launched`
+            updateChatThreadItem(preview, new Date().toISOString())
+          } else {
+            const answer = scoutVoice(payload.answer || 'no answer yet')
+            appendScoutChatNode(scoutChatMessageNode('scout', answer, new Date().toISOString()))
+            updateChatThreadItem(answer, new Date().toISOString())
+          }
         } catch (error) {
           hideScoutChatThinking()
           const message = error.message || 'assistant query failed'
@@ -15978,6 +17316,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      // kit: live, case-insensitive filter over the thread rows by title + preview
+      function filterChatThreads() {
+        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
+        document.querySelectorAll('#chatTool .chat-thread-item').forEach(item => {
+          if (!q) {
+            item.classList.remove('chat-thread-item--hidden')
+            return
+          }
+          const title = item.querySelector('.chat-thread-item__title')?.textContent?.toLowerCase() || ''
+          const preview = item.querySelector('.chat-thread-item__preview')?.textContent?.toLowerCase() || ''
+          item.classList.toggle('chat-thread-item--hidden', !title.includes(q) && !preview.includes(q))
+        })
+      }
+
+      // kit: the "+" button starts a fresh Scout conversation. There is no
+      // multi-thread backend, so this clears the live Scout thread back to its
+      // empty state and focuses the composer — the least-surprising "new thread".
+      function startNewScoutThread() {
+        hideScoutChatThinking()
+        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system').forEach(node => node.remove())
+        if (!scoutChatThread.querySelector('.scout-chat-empty')) {
+          const empty = document.createElement('p')
+          empty.className = 'scout-chat-empty'
+          empty.textContent = 'ask Scout about any meeting — only you can see this'
+          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
+        }
+        scoutChatSessionSeen = false
+        const preview = document.getElementById('chatThreadPreview')
+        const time = document.getElementById('chatThreadTime')
+        if (preview) {
+          preview.textContent = 'ask about any meeting'
+        }
+        if (time) {
+          time.hidden = true
+          time.textContent = ''
+        }
+        if (chatThreadSearch) {
+          chatThreadSearch.value = ''
+          filterChatThreads()
+        }
+        if (!scoutChatInput.disabled) {
+          scoutChatInput.focus()
+        }
+      }
+
       // kit ThreadItem: the row mirrors the last message — preview text plus
       // a right-aligned HH:MM timestamp on the title row
       function updateChatThreadItem(text, ts) {
@@ -15992,7 +17375,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function scoutChatMessageNode(kind, text, ts) {
+      function scoutChatMessageNode(kind, text, ts, files) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
 
@@ -16007,12 +17390,156 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const label = kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : 'error'
         meta.appendChild(document.createTextNode(`${label} · ${scoutChatTimeLabel(ts)}`))
 
-        const body = document.createElement('span')
-        body.className = 'scout-chat-text'
-        body.textContent = text
+        item.append(meta)
 
-        item.append(meta, body)
+        // kit: attachment chips render above the bubble (inert until a message
+        // carries a files array — existing messages pass none)
+        if (Array.isArray(files) && files.length) {
+          item.appendChild(scoutChatFilesNode(files))
+        }
+
+        if (text) {
+          const body = document.createElement('span')
+          body.className = 'scout-chat-text'
+          body.textContent = text
+          item.appendChild(body)
+        }
+
         return item
+      }
+
+      function scoutChatFilesNode(files) {
+        const wrap = document.createElement('div')
+        wrap.className = 'scout-chat-files'
+        files.forEach(file => {
+          const chip = document.createElement('div')
+          chip.className = 'scout-chat-file'
+
+          const icon = document.createElement('span')
+          icon.className = 'scout-chat-file__icon'
+          icon.setAttribute('aria-hidden', 'true')
+          icon.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
+
+          const body = document.createElement('span')
+          body.className = 'scout-chat-file__body'
+          const name = document.createElement('span')
+          name.className = 'scout-chat-file__name'
+          name.textContent = file.name || 'file'
+          const m = document.createElement('span')
+          m.className = 'scout-chat-file__meta'
+          m.textContent = [file.kind, file.size].filter(Boolean).join(' · ')
+
+          body.append(name, m)
+          chip.append(icon, body)
+          wrap.appendChild(chip)
+        })
+        return wrap
+      }
+
+      // kit: research / tool-progress card for a launched Scout work thread.
+      // Wired to real thread state — status reflects the server worker
+      // (running → breathe pill, complete/error → terminal), and the artifact
+      // id lets a later artifact refresh flip the card in place.
+      function scoutChatResearchNode(thread) {
+        const card = document.createElement('article')
+        card.className = 'scout-chat-research'
+        const artifactId = String(thread?.artifact?.id || thread?.artifactId || '')
+        if (artifactId) {
+          card.dataset.threadArtifactId = artifactId
+        }
+        const mode = String(thread?.mode || 'research')
+        const title = `${assistantModeTitle(mode)} · ${String(thread?.query || '').trim() || 'Scout work thread'}`
+
+        card.innerHTML = `
+          <div class="scout-chat-research__head">
+            <span class="scout-chat-research__icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 64 64"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>
+            </span>
+            <span class="scout-chat-research__titles">
+              <span class="scout-chat-research__title"></span>
+              <span class="scout-chat-research__tool">tool · ${escapeHtml(assistantToolLabelText(mode))}</span>
+            </span>
+            <span class="pill" data-research-pill><span class="pill__dot" aria-hidden="true"></span><span data-research-status></span></span>
+          </div>
+          <div class="scout-chat-research__body">
+            <div class="scout-chat-research__progress">
+              <span class="scout-chat-research__agents" data-research-agents></span>
+              <span class="scout-chat-research__track"><span class="scout-chat-research__fill" data-research-fill></span></span>
+              <span class="scout-chat-research__pct" data-research-pct></span>
+            </div>
+          </div>`
+
+        card.querySelector('.scout-chat-research__title').textContent = title
+        updateScoutChatResearchNode(card, String(thread?.status || 'running'))
+        return card
+      }
+
+      // running → 0% breathe; complete → 100%; error → terminal danger
+      function updateScoutChatResearchNode(card, status) {
+        const value = String(status || 'running').toLowerCase()
+        const running = value === 'running'
+        const error = value === 'error'
+        const done = value === 'complete' || value === 'published'
+        const pct = done ? 100 : error ? 100 : 0
+        const working = done ? 1 : 0
+
+        const pill = card.querySelector('[data-research-pill]')
+        const statusText = card.querySelector('[data-research-status]')
+        const agents = card.querySelector('[data-research-agents]')
+        const fill = card.querySelector('[data-research-fill]')
+        const pctEl = card.querySelector('[data-research-pct]')
+
+        if (pill) {
+          pill.className = 'pill ' + (running ? 'pill--connecting pill--breathe' : error ? 'pill--offline' : 'pill--listening')
+        }
+        if (statusText) {
+          statusText.textContent = running ? 'running' : error ? 'needs attention' : 'complete'
+        }
+        if (agents) {
+          agents.textContent = `${working} of 1 agents`
+        }
+        if (fill) {
+          fill.style.width = `${pct}%`
+        }
+        if (pctEl) {
+          pctEl.textContent = `${pct}%`
+        }
+      }
+
+      // Flip any rendered research cards to match their artifact's live status
+      // once an artifact refresh lands (the server worker runs async).
+      function syncScoutChatResearchCards() {
+        const cards = scoutChatThread?.querySelectorAll('.scout-chat-research[data-thread-artifact-id]')
+        if (!cards || !cards.length) {
+          return
+        }
+        cards.forEach(card => {
+          const id = card.dataset.threadArtifactId
+          const entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
+          if (entry) {
+            updateScoutChatResearchNode(card, artifactStatusValue(entry))
+          }
+        })
+      }
+
+      function assistantToolLabelText(mode) {
+        switch (String(mode || '').toLowerCase()) {
+          case 'design':
+            return 'design'
+          case 'grill':
+            return 'pressure test'
+          case 'workflow':
+            return 'goal workflow'
+          case 'research':
+          default:
+            return 'research'
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[ch])
       }
 
       function scoutChatSystemNode(text) {
@@ -17562,6 +19089,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           artifactEntries = Array.isArray(payload?.artifacts) ? payload.artifacts : []
           ensureSelectedArtifact()
           renderArtifacts()
+          syncScoutChatResearchCards()
           if (artifactEntries.some(entry => artifactStatusValue(entry) === 'running')) {
             scheduleArtifactRefresh()
           }
@@ -17644,9 +19172,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!artifactList) {
           return
         }
+        if (artifactCountLabel) {
+          const count = artifactEntries.length
+          artifactCountLabel.textContent = count
+            ? `${count} artifact${count === 1 ? '' : 's'}`
+            : 'no artifacts yet'
+        }
         if (!artifactEntries.length) {
           const empty = document.createElement('article')
-          empty.className = 'artifact-item'
+          empty.className = 'artifact-item artifact-item--empty'
           const top = document.createElement('div')
           top.className = 'artifact-item__top'
           const mode = document.createElement('span')
@@ -17671,25 +19205,37 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderArtifactDetail()
       }
 
+      // canon list card — Badge(tone) + conditional live indicator + time,
+      // a body-medium title, a 2-line-clamped caption preview
       function renderArtifactEntry(entry) {
         const item = document.createElement('button')
         item.type = 'button'
-        item.className = 'artifact-item'
+        item.className = 'artifact-item bf-card-hover'
         item.classList.toggle('is-selected', entry.id === selectedArtifactId)
         item.addEventListener('click', () => selectArtifact(entry.id))
 
         const top = document.createElement('div')
         top.className = 'artifact-item__top'
-        const mode = document.createElement('span')
-        mode.className = 'artifact-item__mode'
-        mode.textContent = artifactModeLabel(entry)
+
+        const lead = document.createElement('span')
+        lead.className = 'artifact-item__lead'
+
+        const badge = document.createElement('span')
+        badge.className = `artifact-item__badge artifact-item__badge--${artifactStatusValue(entry)}`
+        badge.textContent = artifactModeLabel(entry)
+        lead.appendChild(badge)
+
+        if (artifactPublished(entry)) {
+          const live = document.createElement('span')
+          live.className = 'artifact-item__live'
+          live.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>live'
+          lead.appendChild(live)
+        }
+
         const time = document.createElement('span')
         time.className = 'artifact-item__time'
         time.textContent = artifactTimeLabel(entry)
-        const state = document.createElement('span')
-        state.className = `artifact-item__state artifact-item__state--${artifactStatusValue(entry)}`
-        state.textContent = artifactStatusLabel(entry)
-        top.append(mode, state, time)
+        top.append(lead, time)
 
         const title = document.createElement('h3')
         title.className = 'artifact-item__title'
@@ -17706,16 +19252,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renderArtifactDetail() {
         const artifact = selectedArtifact()
         const disabled = !artifact
+        const published = artifactPublished(artifact)
         artifactTitleInput.disabled = disabled
         artifactBodyInput.disabled = disabled
         artifactCopyButton.disabled = disabled
         artifactPublishButton.disabled = disabled
         artifactSaveButton.disabled = disabled
         artifactDetailMode.textContent = artifact ? artifactModeLabel(artifact) : 'artifact'
+        if (artifactDetailPublished) {
+          artifactDetailPublished.hidden = !artifact || !published
+        }
         artifactDetailStatus.textContent = artifact ? `${artifactStatusLabel(artifact)} · ${artifactTimeLabel(artifact)}` : 'no selection'
         artifactTitleInput.value = artifact?.metadata?.title || ''
         artifactBodyInput.value = artifact?.text || ''
-        artifactPublishButton.textContent = artifactPublished(artifact) ? 'Unpublish' : 'Publish'
+        // canon publish affordance — primary when unpublished, secondary when live
+        artifactPublishButton.textContent = published ? 'Published ✓' : 'Publish to team'
+        artifactPublishButton.classList.toggle('btn--primary', !published)
+        artifactPublishButton.classList.toggle('btn--secondary', published)
       }
 
       function setArtifactDetailStatus(text, transient = false) {
@@ -17902,36 +19455,116 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         updateOfficeDashboard()
         syncToolTopbar()
+
+        // canon empty state — no entries at all
         if (memoryEntries.length === 0) {
           const empty = document.createElement('article')
-          empty.className = 'memory-item'
-          const meta = document.createElement('span')
-          meta.className = 'memory-meta'
-          meta.textContent = 'ready'
-          const text = document.createElement('span')
-          text.textContent = 'memory starts when the room speaks.'
-          empty.append(meta, text)
+          empty.className = 'memory-empty'
+          empty.textContent = 'memory starts when the room speaks.'
           memoryList.replaceChildren(empty)
           return
         }
 
-        memoryList.replaceChildren(...memoryEntries.slice().reverse().map(renderMemoryEntry))
+        // newest-first timeline, live-filtered by the search box
+        const visible = memoryEntries
+          .slice()
+          .reverse()
+          .filter(memoryEntryMatchesQuery)
+
+        if (visible.length === 0) {
+          const empty = document.createElement('article')
+          empty.className = 'memory-empty'
+          empty.textContent = memoryQuery
+            ? 'no memory matches that search.'
+            : 'memory starts when the room speaks.'
+          memoryList.replaceChildren(empty)
+          return
+        }
+
+        memoryList.replaceChildren(...visible.map(renderMemoryEntry))
+      }
+
+      function memoryEntryMatchesQuery(entry) {
+        const query = memoryQuery.trim().toLowerCase()
+        if (!query) {
+          return true
+        }
+        const haystack = [
+          memoryEntryText(entry),
+          memoryEntryKindLabel(entry),
+          memoryEntryWho(entry)
+        ].join(' ').toLowerCase()
+        return haystack.includes(query)
       }
 
       function renderMemoryEntry(entry) {
+        // canon timeline row — ~70px time column + content column
         const item = document.createElement('article')
         const kindClass = ['answer', 'archive', 'brain', 'board_update', 'os_artifact'].includes(entry.kind) ? entry.kind : ''
         item.className = `memory-item ${kindClass}`.trim()
 
-        const meta = document.createElement('span')
-        meta.className = 'memory-meta'
-        meta.textContent = memoryEntryLabel(entry)
+        const time = document.createElement('div')
+        time.className = 'memory-item__time'
+        time.textContent = memoryEntryTime(entry)
 
-        const text = document.createElement('span')
+        const content = document.createElement('div')
+        content.className = 'memory-item__content'
+
+        const head = document.createElement('div')
+        head.className = 'memory-item__head'
+
+        const pill = document.createElement('span')
+        pill.className = 'memory-pill'
+        pill.dataset.kind = kindClass || 'transcript'
+        pill.textContent = memoryEntryKindLabel(entry)
+        head.appendChild(pill)
+
+        const who = memoryEntryWho(entry)
+        if (who) {
+          const whoEl = document.createElement('span')
+          whoEl.className = 'memory-item__who'
+          whoEl.textContent = who
+          head.appendChild(whoEl)
+        }
+
+        const text = document.createElement('div')
+        text.className = 'memory-item__text'
         text.textContent = memoryEntryText(entry)
 
-        item.append(meta, text)
+        content.append(head, text)
+        item.append(time, content)
         return item
+      }
+
+      function memoryEntryTime(entry) {
+        const createdAt = entry.createdAt ? new Date(entry.createdAt) : null
+        if (!createdAt || Number.isNaN(createdAt.valueOf())) {
+          return 'now'
+        }
+        return `${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`
+      }
+
+      function memoryEntryKindLabel(entry) {
+        switch (entry.kind) {
+          case 'answer':
+            return 'answer'
+          case 'archive':
+            return 'archive'
+          case 'brain':
+            return 'brain'
+          case 'board_update':
+            return 'board'
+          case 'os_artifact':
+            return 'artifact'
+          default:
+            return 'transcript'
+        }
+      }
+
+      function memoryEntryWho(entry) {
+        // transcript entries carry the speaker in metadata; omit gracefully
+        // for kinds without a "who"
+        return String(entry?.metadata?.speaker || '').trim()
       }
 
       function memoryEntryText(entry) {
@@ -18422,12 +20055,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const heading = document.createElement('div')
         heading.className = 'card-heading'
 
-        const title = document.createElement('strong')
+        // canon title — body-medium, not bold
+        const title = document.createElement('div')
+        title.className = 'card-title'
         title.textContent = card.title
         heading.append(title)
         article.appendChild(heading)
 
-        // kit badge row — owner · name, then the toned date badge
+        // canon optional tags row — small boxed badges
+        const tags = Array.isArray(card.tags) ? card.tags.filter(Boolean) : []
+        if (tags.length) {
+          const tagRow = document.createElement('div')
+          tagRow.className = 'card-tags'
+          tags.forEach(tag => {
+            const chip = document.createElement('span')
+            chip.className = 'card-tag'
+            chip.textContent = tag
+            tagRow.appendChild(chip)
+          })
+          article.appendChild(tagRow)
+        }
+
+        // canon footer — owner · name (left), optional toned date pill (right)
         const badges = document.createElement('div')
         badges.className = 'card-badges'
         badges.appendChild(renderCardBadge(`owner · ${cardOwner(card).name}`))
@@ -19514,7 +21163,121 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ? 'live'
             : authedUser ? 'ready' : 'locked'
         }
+        renderOfficeGreeting()
+        renderOfficeRoomCard()
+        renderOfficeAgenda()
         renderPublishedArtifactsDashboard()
+        renderOfficeRecentThreads()
+      }
+
+      function officeGreetingWord() {
+        const hour = new Date().getHours()
+        if (hour < 5) return 'still up'
+        if (hour < 12) return 'good morning'
+        if (hour < 18) return 'good afternoon'
+        return 'good evening'
+      }
+
+      function renderOfficeGreeting() {
+        if (officeTodayLabelEl) {
+          officeTodayLabelEl.textContent = new Date().toLocaleDateString(undefined, {
+            weekday: 'long', month: 'long', day: 'numeric'
+          }).toLowerCase()
+        }
+        if (officeGreetingEl) {
+          const firstName = String(authedUser?.name || '').trim().split(/\s+/)[0]
+          officeGreetingEl.textContent = firstName
+            ? `${officeGreetingWord()}, ${firstName}.`
+            : `${officeGreetingWord()}.`
+        }
+      }
+
+      function renderOfficeRoomCard() {
+        const inRoom = appShell.classList.contains('is-in-room')
+        if (officeRoomName) {
+          officeRoomName.textContent = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
+        }
+        // the room card mirrors the honest connection pill the rest of the app uses
+        if (officeRoomStatusPill) {
+          officeRoomStatusPill.className = `pill pill--${lastConnectionState}`
+          officeRoomStatusPill.textContent = inRoom ? (lastConnectionLabel || 'live') : 'not connected'
+        }
+        const names = inRoom ? participantsInRoom : participantPreview
+        if (officeRoomAvatars) {
+          renderAvatarStack(officeRoomAvatars, names, { max: 5, markCurrent: true })
+        }
+        if (officeRoomInvited) {
+          const seatCount = Math.max(occupiedSeats, names.length)
+          officeRoomInvited.textContent = seatCount > 0
+            ? `${seatCount} ${inRoom ? 'inside' : 'invited'}`
+            : 'room ready'
+        }
+        if (officeRoomJoin) {
+          officeRoomJoin.textContent = inRoom ? 'Return to the room' : 'Join the room'
+        }
+        // mirror the canon in-stage empty state from the same honest signals
+        if (roomEmptyName) {
+          roomEmptyName.textContent = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
+        }
+        if (roomEmptyMeta) {
+          const seatCount = Math.max(occupiedSeats, (inRoom ? participantsInRoom : participantPreview).length)
+          roomEmptyMeta.textContent = seatCount > 0 ? `not connected · ${seatCount} invited` : 'not connected'
+        }
+      }
+
+      function renderOfficeAgenda() {
+        if (!officeAgenda) {
+          return
+        }
+        // there is no calendar source — derive a minimal, honest "today" list
+        // from real signals: the standup room plus the most recent published work.
+        const rows = []
+        const roomName = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
+        const inRoom = appShell.classList.contains('is-in-room')
+        const names = inRoom ? participantsInRoom : participantPreview
+        rows.push({
+          time: nowTimeLabel(),
+          title: roomName,
+          who: names.length ? `${Math.max(occupiedSeats, names.length)} in the room` : 'the team',
+          state: inRoom ? 'live' : 'standby',
+          tone: inRoom ? 'live' : 'neutral'
+        })
+        for (const entry of latestPublishedArtifacts(2)) {
+          rows.push({
+            time: artifactTimeLabel(entry),
+            title: entry.metadata?.title || artifactModeLabel(entry),
+            who: `published${entry.metadata?.author ? ` by ${entry.metadata.author}` : ''}`,
+            state: 'review',
+            tone: 'neutral'
+          })
+        }
+        officeAgenda.replaceChildren(...rows.map(row => {
+          const wrap = document.createElement('div')
+          wrap.style.cssText = 'display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--line-1);'
+          const time = document.createElement('span')
+          time.style.cssText = 'width:46px; flex:none; font:var(--type-numeric); color:var(--text-2);'
+          time.textContent = row.time
+          const mid = document.createElement('span')
+          mid.style.cssText = 'flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;'
+          const title = document.createElement('span')
+          title.style.cssText = 'font:var(--type-caption-medium); color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+          title.textContent = row.title
+          const who = document.createElement('span')
+          who.style.cssText = 'font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);'
+          who.textContent = row.who
+          mid.append(title, who)
+          const pill = document.createElement('span')
+          pill.className = `pill pill--${row.tone === 'live' ? 'room' : 'idle'}`
+          pill.style.flex = 'none'
+          pill.textContent = row.state
+          wrap.append(time, mid, pill)
+          return wrap
+        }))
+      }
+
+      function nowTimeLabel() {
+        const now = new Date()
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
       }
 
       function renderPublishedArtifactsDashboard() {
@@ -19522,37 +21285,112 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const published = latestPublishedArtifacts(3)
+        // section is only shown when there is published work
+        if (officePublishedSection) {
+          officePublishedSection.style.display = published.length ? '' : 'none'
+        }
+        if (officePublishedCount) {
+          officePublishedCount.textContent = `${published.length} published`
+        }
         if (!published.length) {
-          const empty = document.createElement('article')
-          empty.className = 'office-published__empty'
-          const label = document.createElement('span')
-          label.className = 'office-insight__label'
-          label.textContent = 'latest published'
-          const title = document.createElement('strong')
-          title.textContent = 'no published artifacts yet.'
-          const body = document.createElement('span')
-          body.textContent = 'publish an artifact to make it visible from the dashboard.'
-          empty.append(label, title, body)
-          officePublishedArtifacts.replaceChildren(empty)
+          officePublishedArtifacts.replaceChildren()
           return
         }
 
         officePublishedArtifacts.replaceChildren(...published.map(entry => {
           const item = document.createElement('button')
           item.type = 'button'
-          item.className = 'office-published__item'
+          item.className = 'bf-card-hover'
+          item.style.cssText = 'text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);'
           item.addEventListener('click', () => {
             selectArtifact(entry.id)
             openOfficeTool('artifacts')
           })
-          const label = document.createElement('span')
-          label.className = 'office-insight__label'
-          label.textContent = `${artifactModeLabel(entry)} · ${artifactTimeLabel(entry)}`
-          const title = document.createElement('strong')
+
+          const top = document.createElement('span')
+          top.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;'
+          const badge = document.createElement('span')
+          badge.className = 'pill pill--idle'
+          badge.style.flex = 'none'
+          badge.textContent = artifactModeLabel(entry)
+          const time = document.createElement('span')
+          time.style.cssText = 'font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);'
+          time.textContent = artifactTimeLabel(entry)
+          top.append(badge, time)
+
+          const title = document.createElement('span')
+          title.style.cssText = 'font:var(--type-body-medium); color:var(--text-1); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;'
           title.textContent = entry.metadata?.title || artifactModeLabel(entry)
-          const body = document.createElement('span')
-          body.textContent = compactArtifactPreview(entry.text || '')
-          item.append(label, title, body)
+
+          const author = String(entry.metadata?.author || authedUser?.name || 'the team').trim()
+          const byline = document.createElement('span')
+          byline.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:2px;'
+          const initials = document.createElement('span')
+          initials.style.cssText = 'width:24px; height:24px; flex:none; border-radius:50%; background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-2); font:600 10px/1 var(--font-sans);'
+          initials.textContent = initialsForName(author)
+          const authorLabel = document.createElement('span')
+          authorLabel.style.cssText = 'font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);'
+          authorLabel.textContent = `published by ${author}`
+          byline.append(initials, authorLabel)
+
+          item.append(top, title, byline)
+          return item
+        }))
+      }
+
+      function renderOfficeRecentThreads() {
+        if (!officeRecentThreads) {
+          return
+        }
+        // no thread index exists; the durable threads we have are the agent
+        // artifact threads (research/design/grill) — surface the most recent.
+        const threads = artifactEntries
+          .filter(entry => agentToolIds.includes(String(entry?.metadata?.mode || '').trim()))
+          .slice()
+          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
+          .slice(0, 6)
+          .map(entry => ({
+            title: entry.metadata?.title || artifactModeLabel(entry),
+            meta: artifactTimeLabel(entry),
+            preview: compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`),
+            onOpen: () => { selectArtifact(entry.id); openOfficeTool('artifacts') }
+          }))
+
+        if (!threads.length) {
+          // fall back to the always-present private Scout chat thread
+          threads.push({
+            title: 'Scout',
+            meta: 'private',
+            preview: 'ask Scout about any meeting — only you can see this.',
+            onOpen: () => openOfficeTool('chat')
+          })
+        }
+
+        officeRecentThreads.replaceChildren(...threads.map(thread => {
+          const item = document.createElement('button')
+          item.type = 'button'
+          item.className = 'bf-card-hover'
+          item.style.cssText = 'text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:15px; cursor:pointer; display:flex; flex-direction:column; gap:8px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);'
+          item.addEventListener('click', thread.onOpen)
+
+          const row = document.createElement('span')
+          row.style.cssText = 'display:flex; align-items:center; gap:10px;'
+          const icon = document.createElement('span')
+          icon.style.cssText = 'width:30px; height:30px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--accent);'
+          icon.innerHTML = '<svg width="15" height="15" viewBox="0 0 64 64" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>'
+          const titleEl = document.createElement('span')
+          titleEl.style.cssText = 'flex:1; min-width:0; font:var(--type-body-medium); color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'
+          titleEl.textContent = thread.title
+          const metaEl = document.createElement('span')
+          metaEl.style.cssText = 'font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3); flex:none;'
+          metaEl.textContent = thread.meta
+          row.append(icon, titleEl, metaEl)
+
+          const preview = document.createElement('span')
+          preview.style.cssText = 'font:var(--type-caption); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;'
+          preview.textContent = thread.preview
+
+          item.append(row, preview)
           return item
         }))
       }
