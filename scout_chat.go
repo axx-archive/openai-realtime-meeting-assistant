@@ -8,7 +8,7 @@ package main
 // Wire protocol (kanban envelope, sent only to the requesting connection):
 //   client -> server  ws event "scout_chat" with data {"text": "..."}
 //   server -> client  kanban event "scout_chat" with data
-//                     {"kind":"query"|"status"|"answer"|"error","text":...,"ts":RFC3339Nano}
+//                     {"kind":"query"|"status"|"answer"|"thread"|"error","text":...,"ts":RFC3339Nano}
 //
 // Lifecycle: submit runs on the websocket read goroutine and echoes the query
 // immediately (a message must never look dropped while an earlier turn is
@@ -76,7 +76,7 @@ func (session *scoutChatSession) close() {
 // submit accepts one private chat message on the websocket read goroutine:
 // it echoes the query and a thinking status synchronously (before any model
 // work), then queues the message for the FIFO worker.
-func (session *scoutChatSession) submit(app *kanbanBoardApp, text string) {
+func (session *scoutChatSession) submit(app *kanbanBoardApp, text string, actor string) {
 	if session == nil {
 		return
 	}
@@ -84,6 +84,13 @@ func (session *scoutChatSession) submit(app *kanbanBoardApp, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		session.sendEvent("error", "say something first")
+		return
+	}
+
+	if mode := scoutChatThreadModeForText(text); mode != "" {
+		session.sendEvent("query", text)
+		session.sendEvent("status", "launching "+assistantToolLabel(mode)+" thread...")
+		session.launchThread(app, mode, text, actor)
 		return
 	}
 
@@ -99,6 +106,32 @@ func (session *scoutChatSession) submit(app *kanbanBoardApp, text string) {
 	default:
 		session.sendEvent("error", "Scout is still answering — try again in a moment")
 	}
+}
+
+func (session *scoutChatSession) launchThread(app *kanbanBoardApp, mode string, text string, actor string) {
+	if app == nil {
+		session.sendEvent("error", "assistant is unavailable")
+		return
+	}
+
+	thread, err := app.launchAgentThread(mode, text, actor)
+	if err != nil {
+		session.sendEvent("error", err.Error())
+		return
+	}
+
+	summary := assistantToolLabel(thread.Mode) + " thread launched"
+	session.mu.Lock()
+	session.turns = append(session.turns,
+		scoutChatTurn{role: "user", text: thread.Query},
+		scoutChatTurn{role: "scout", text: summary},
+	)
+	if len(session.turns) > scoutChatMaxHistoryTurns {
+		session.turns = session.turns[len(session.turns)-scoutChatMaxHistoryTurns:]
+	}
+	session.mu.Unlock()
+
+	session.sendThreadEvent(thread, summary)
 }
 
 // runWorker answers queued messages strictly FIFO until the session closes.
@@ -147,6 +180,23 @@ func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
 	session.sendEvent("answer", result.answer)
 }
 
+func scoutChatThreadModeForText(text string) string {
+	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	if hasAssistantPhrase(lower, "multi-agent", "codex", "goal loop", "goal workflow", "workflow", "shipping gate", "gate before shipping") {
+		return "workflow"
+	}
+	if hasAssistantPhrase(lower, "design", "wireframe", "prototype", "ux", "interface", "screen", "mockup") {
+		return "design"
+	}
+	if hasAssistantPhrase(lower, "grill", "pitch", "pressure-test", "pressure test", "scorecard", "objection", "tough questions") {
+		return "grill"
+	}
+	if hasAssistantPhrase(lower, "research", "investigate", "source", "market", "competitive", "brief", "dig into") {
+		return "research"
+	}
+	return ""
+}
+
 func (session *scoutChatSession) sendEvent(kind string, text string) {
 	if session.send == nil {
 		return
@@ -157,5 +207,21 @@ func (session *scoutChatSession) sendEvent(kind string, text string) {
 		"ts":   time.Now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
 		log.Errorf("Failed to send scout chat event: %v", err)
+	}
+}
+
+func (session *scoutChatSession) sendThreadEvent(thread scoutAgentThread, text string) {
+	if session == nil || session.send == nil {
+		return
+	}
+	if err := session.send("scout_chat", map[string]any{
+		"kind":     "thread",
+		"text":     text,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
+		"ts":       time.Now().UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		log.Errorf("Failed to send scout chat thread event: %v", err)
 	}
 }

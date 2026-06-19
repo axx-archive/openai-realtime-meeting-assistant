@@ -193,13 +193,13 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"launch_agent_thread"`, `"name":"update_artifact"`, `"name":"publish_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", "latest published", `"memory"`, "local mic"} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"launch_agent_thread"`, `"name":"update_artifact"`, `"name":"publish_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "conversational thread", "agent-workforce thread", "latest published", `"memory"`, "local mic"} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "start a thread", "vision", "Latest published artifacts", "Voice control mode"} {
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "conversational thread", "agent workforce", "vision", "Latest published artifacts", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
@@ -537,6 +537,9 @@ func TestRealtimeLaunchAgentThreadCreatesRunningArtifact(t *testing.T) {
 	}
 	if artifact.Kind != meetingMemoryKindOSArtifact || artifact.Metadata["source"] != "scout_thread" || artifact.Metadata["status"] != "running" {
 		t.Fatalf("artifact=%#v, want running scout thread artifact", artifact)
+	}
+	if artifact.Metadata["agentLoop"] != "realtime_controlled_workforce" || artifact.Metadata["goalStatus"] != "running" || artifact.Metadata["reviewGate"] != "pending" {
+		t.Fatalf("artifact metadata=%v, want realtime workforce loop metadata", artifact.Metadata)
 	}
 	if !strings.Contains(artifact.Text, "Scout work thread") || !strings.Contains(artifact.Text, "Goal workflow") {
 		t.Fatalf("artifact text=%q, want thread scaffold", artifact.Text)

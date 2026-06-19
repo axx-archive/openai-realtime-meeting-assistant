@@ -4765,6 +4765,15 @@
         display: none;
       }
 
+      .chat-agent-threads {
+        display: grid;
+        gap: 8px;
+      }
+
+      .chat-agent-threads:empty {
+        display: none;
+      }
+
       .chat-threads__label {
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -5034,7 +5043,7 @@
       .scout-chat-research {
         align-self: flex-start;
         width: 100%;
-        max-width: 420px;
+        max-width: 520px;
         background: var(--surface-1);
         border: 1px solid var(--line-2);
         border-radius: var(--r-lg);
@@ -5088,7 +5097,79 @@
         padding: 12px 14px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 12px;
+      }
+
+      .scout-chat-research__flow {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .scout-chat-research__step {
+        min-width: 0;
+        display: grid;
+        gap: 5px;
+      }
+
+      .scout-chat-research__step-dot {
+        width: 100%;
+        height: 4px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        box-shadow: inset 0 0 0 1px var(--line-1);
+      }
+
+      .scout-chat-research__step-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-research__step.is-done .scout-chat-research__step-dot {
+        background: var(--accent);
+        box-shadow: none;
+      }
+
+      .scout-chat-research__step.is-active .scout-chat-research__step-dot {
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent-soft), 0 0 18px var(--accent-soft);
+        animation: bf-think var(--pulse-cycle) var(--ease) infinite;
+      }
+
+      .scout-chat-research__step.is-error .scout-chat-research__step-dot {
+        background: var(--danger);
+        box-shadow: none;
+      }
+
+      .scout-chat-research__artifact {
+        align-self: flex-start;
+        min-height: 32px;
+        padding: 0 11px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .scout-chat-research__artifact:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+      }
+
+      .scout-chat-research__artifact:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .scout-chat-research__artifact[hidden] {
+        display: none;
       }
 
       .scout-chat-research__progress {
@@ -9636,38 +9717,7 @@
                 <span id="chatThreadPreview" class="chat-thread-item__preview">ask about any meeting</span>
               </span>
             </button>
-            <button class="chat-thread-item" type="button" aria-pressed="false">
-              <span class="chat-thread-item__icon" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="9"></circle>
-                  <path d="M12 7v5l3.5 2"></path>
-                </svg>
-              </span>
-              <span class="chat-thread-item__body">
-                <span class="chat-thread-item__row">
-                  <span class="chat-thread-item__title">standup follow-ups</span>
-                  <span class="chat-thread-item__time">tue</span>
-                </span>
-                <span class="chat-thread-item__preview">what did we decide on simulcast?</span>
-              </span>
-              <span class="chat-thread-item__unread">2</span>
-            </button>
-            <button class="chat-thread-item" type="button" aria-pressed="false">
-              <span class="chat-thread-item__icon" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="2" y="3" width="20" height="5" rx="1"></rect>
-                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
-                  <path d="M10 12h4"></path>
-                </svg>
-              </span>
-              <span class="chat-thread-item__body">
-                <span class="chat-thread-item__row">
-                  <span class="chat-thread-item__title">notes archive</span>
-                  <span class="chat-thread-item__time">mon</span>
-                </span>
-                <span class="chat-thread-item__preview">meeting archive ready</span>
-              </span>
-            </button>
+            <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Agent work threads"></div>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
             <p class="scout-private-caption">private · only you can see this</p>
@@ -10385,6 +10435,7 @@
       const scoutChatHint = document.getElementById('scoutChatHint')
       const chatThreadSearch = document.getElementById('chatThreadSearch')
       const chatNewThread = document.getElementById('chatNewThread')
+      const chatAgentThreads = document.getElementById('chatAgentThreads')
       const topbarProjectEl = document.getElementById('topbarProject')
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
@@ -17298,6 +17349,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           showScoutChatThinking(text || 'searching memory…')
           return
         }
+        if (kind === 'reset') {
+          hideScoutChatThinking()
+          if (text) {
+            appendScoutChatNode(scoutChatSystemNode(text))
+            updateChatThreadItem(text, ts)
+          }
+          return
+        }
+        if (kind === 'thread') {
+          hideScoutChatThinking()
+          if (payload?.artifact) {
+            addArtifactEntry(payload.artifact, { select: false })
+            scheduleArtifactRefresh()
+          }
+          const thread = payload?.thread || {
+            mode: payload?.artifact?.metadata?.mode || scoutThreadModeForText(text) || 'research',
+            query: payload?.artifact?.metadata?.query || text,
+            status: payload?.artifact ? artifactStatusValue(payload.artifact) : 'running',
+            artifact: payload?.artifact
+          }
+          appendScoutChatNode(scoutChatResearchNode(thread))
+          updateChatThreadItem(text || `${assistantModeTitle(thread.mode)} thread launched`, ts || new Date().toISOString())
+          return
+        }
         if (!text) {
           return
         }
@@ -17335,7 +17410,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // empty state and focuses the composer — the least-surprising "new thread".
       function startNewScoutThread() {
         hideScoutChatThinking()
-        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system').forEach(node => node.remove())
+        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research').forEach(node => node.remove())
         if (!scoutChatThread.querySelector('.scout-chat-empty')) {
           const empty = document.createElement('p')
           empty.className = 'scout-chat-empty'
@@ -17356,6 +17431,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           chatThreadSearch.value = ''
           filterChatThreads()
         }
+        if (ws?.readyState === WebSocket.OPEN && appShell.classList.contains('is-in-room')) {
+          ws.send(JSON.stringify({ event: 'scout_chat_reset', data: '{}' }))
+        }
         if (!scoutChatInput.disabled) {
           scoutChatInput.focus()
         }
@@ -17373,6 +17451,56 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           time.hidden = false
           time.textContent = scoutChatTimeLabel(ts)
         }
+      }
+
+      function renderChatAgentThreads() {
+        if (!chatAgentThreads) {
+          return
+        }
+        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
+        const entries = artifactEntries
+          .filter(entry => String(entry?.metadata?.source || '') === 'scout_thread')
+          .slice()
+          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
+          .slice(0, 8)
+
+        chatAgentThreads.replaceChildren(...entries.map(entry => {
+          const title = entry.metadata?.title || artifactModeLabel(entry)
+          const preview = compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`)
+          const haystack = `${title} ${preview} ${entry.metadata?.mode || ''}`.toLowerCase()
+          const item = document.createElement('button')
+          item.type = 'button'
+          item.className = 'chat-thread-item'
+          item.setAttribute('aria-pressed', 'false')
+          item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
+          item.addEventListener('click', () => {
+            selectArtifact(entry.id)
+            openOfficeTool('artifacts')
+          })
+
+          const icon = document.createElement('span')
+          icon.className = 'chat-thread-item__icon'
+          icon.setAttribute('aria-hidden', 'true')
+          icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 64 64"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>'
+
+          const body = document.createElement('span')
+          body.className = 'chat-thread-item__body'
+          const row = document.createElement('span')
+          row.className = 'chat-thread-item__row'
+          const titleEl = document.createElement('span')
+          titleEl.className = 'chat-thread-item__title'
+          titleEl.textContent = title
+          const time = document.createElement('span')
+          time.className = 'chat-thread-item__time'
+          time.textContent = artifactTimeLabel(entry)
+          row.append(titleEl, time)
+          const previewEl = document.createElement('span')
+          previewEl.className = 'chat-thread-item__preview'
+          previewEl.textContent = `${artifactStatusLabel(entry)} · ${preview}`
+          body.append(row, previewEl)
+          item.append(icon, body)
+          return item
+        }))
       }
 
       function scoutChatMessageNode(kind, text, ts, files) {
@@ -17448,6 +17576,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           card.dataset.threadArtifactId = artifactId
         }
         const mode = String(thread?.mode || 'research')
+        card.dataset.threadMode = mode
         const title = `${assistantModeTitle(mode)} · ${String(thread?.query || '').trim() || 'Scout work thread'}`
 
         card.innerHTML = `
@@ -17462,32 +17591,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             <span class="pill" data-research-pill><span class="pill__dot" aria-hidden="true"></span><span data-research-status></span></span>
           </div>
           <div class="scout-chat-research__body">
+            <div class="scout-chat-research__flow" data-research-flow aria-label="agent work progress"></div>
             <div class="scout-chat-research__progress">
               <span class="scout-chat-research__agents" data-research-agents></span>
               <span class="scout-chat-research__track"><span class="scout-chat-research__fill" data-research-fill></span></span>
               <span class="scout-chat-research__pct" data-research-pct></span>
             </div>
+            <button class="scout-chat-research__artifact" type="button" data-research-artifact hidden>open artifact</button>
           </div>`
 
         card.querySelector('.scout-chat-research__title').textContent = title
-        updateScoutChatResearchNode(card, String(thread?.status || 'running'))
+        const artifactButton = card.querySelector('[data-research-artifact]')
+        artifactButton?.addEventListener('click', () => {
+          const id = card.dataset.threadArtifactId
+          if (id) {
+            selectArtifact(id)
+            openOfficeTool('artifacts')
+          }
+        })
+        updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
         return card
       }
 
-      // running → 0% breathe; complete → 100%; error → terminal danger
-      function updateScoutChatResearchNode(card, status) {
-        const value = String(status || 'running').toLowerCase()
+      const scoutChatThreadStages = [
+        ['identify_and_set_goal', 'goal'],
+        ['decompose_work', 'split'],
+        ['assign_right_agent', 'agents'],
+        ['execute_in_order', 'execute'],
+        ['gate_before_shipping', 'gate'],
+        ['verify_goal_completed', 'artifact']
+      ]
+
+      function updateScoutChatResearchNode(card, status, artifact) {
+        const value = String(status || artifact?.metadata?.threadStatus || artifact?.metadata?.status || 'running').toLowerCase()
         const running = value === 'running'
         const error = value === 'error'
         const done = value === 'complete' || value === 'published'
-        const pct = done ? 100 : error ? 100 : 0
-        const working = done ? 1 : 0
+        const metadataPct = Number(artifact?.metadata?.progressPercent)
+        const pct = Number.isFinite(metadataPct) ? metadataPct : done ? 100 : error ? 72 : 35
+        const stageIndex = done ? scoutChatThreadStages.length - 1 : error ? 4 : 3
 
         const pill = card.querySelector('[data-research-pill]')
         const statusText = card.querySelector('[data-research-status]')
         const agents = card.querySelector('[data-research-agents]')
         const fill = card.querySelector('[data-research-fill]')
         const pctEl = card.querySelector('[data-research-pct]')
+        const flow = card.querySelector('[data-research-flow]')
+        const artifactButton = card.querySelector('[data-research-artifact]')
 
         if (pill) {
           pill.className = 'pill ' + (running ? 'pill--connecting pill--breathe' : error ? 'pill--offline' : 'pill--listening')
@@ -17496,13 +17646,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           statusText.textContent = running ? 'running' : error ? 'needs attention' : 'complete'
         }
         if (agents) {
-          agents.textContent = `${working} of 1 agents`
+          agents.textContent = running ? 'worker running' : error ? 'gate blocked' : 'artifact ready'
         }
         if (fill) {
-          fill.style.width = `${pct}%`
+          fill.style.width = `${Math.max(0, Math.min(100, pct))}%`
         }
         if (pctEl) {
-          pctEl.textContent = `${pct}%`
+          pctEl.textContent = `${Math.round(Math.max(0, Math.min(100, pct)))}%`
+        }
+        if (flow) {
+          flow.replaceChildren(...scoutChatThreadStages.map(([stage, label], index) => {
+            const step = document.createElement('span')
+            step.className = 'scout-chat-research__step'
+            if (error && index === stageIndex) {
+              step.classList.add('is-error')
+            } else if (index < stageIndex || done) {
+              step.classList.add('is-done')
+            } else if (running && index === stageIndex) {
+              step.classList.add('is-active')
+            }
+            step.dataset.stage = stage
+            const dot = document.createElement('span')
+            dot.className = 'scout-chat-research__step-dot'
+            dot.setAttribute('aria-hidden', 'true')
+            const text = document.createElement('span')
+            text.className = 'scout-chat-research__step-label'
+            text.textContent = label
+            step.append(dot, text)
+            return step
+          }))
+        }
+        if (artifactButton) {
+          const hasArtifact = Boolean(card.dataset.threadArtifactId)
+          artifactButton.hidden = !hasArtifact
+          artifactButton.textContent = done ? 'open artifact' : error ? 'inspect artifact' : 'watch artifact'
         }
       }
 
@@ -17517,7 +17694,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const id = card.dataset.threadArtifactId
           const entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
           if (entry) {
-            updateScoutChatResearchNode(card, artifactStatusValue(entry))
+            updateScoutChatResearchNode(card, artifactStatusValue(entry), entry)
           }
         })
       }
@@ -19107,7 +19284,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (/(design|wireframe|prototype|ux|interface|screen|mockup)/.test(value)) {
           return 'design'
         }
-        if (/(grill|pitch|pressure[- ]test|scorecard|objection)/.test(value)) {
+        if (/(grill|pitch|pressure[- ]test|scorecard|objection|tough questions)/.test(value)) {
           return 'grill'
         }
         if (/(research|investigate|source|market|competitive|brief|dig into)/.test(value)) {
@@ -19169,6 +19346,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         syncToolTopbar()
         updateOfficeDashboard()
         renderAgentWorkspaces()
+        renderChatAgentThreads()
         if (!artifactList) {
           return
         }

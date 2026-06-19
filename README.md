@@ -102,7 +102,9 @@ Scout also saves speaker-attributed transcripts as meeting memory. By default, a
 
 Scout can scaffold a reusable goal workflow artifact from text or Realtime voice by using workflow mode. The saved artifact follows the loop: identify the goal, decompose work, assign agents, coordinate dependencies, execute in order, review, gate, save learnings, report what matters, and verify completion.
 
-This first slice saves the workflow inside Bonfire OS. It does not start an external Codex job yet. Longer research, design, browser, SSH, code, test, and deploy work should run through a separate Codex SDK or `codex exec` worker that writes status and evidence back to artifacts.
+Realtime 2 and the private Scout chat can also launch research, design, grill, and workflow work threads. A thread creates a running artifact immediately, shows progress in Chat, updates the artifact when the server-side worker completes, and can then be opened, copied, published, or shared from the Artifacts app.
+
+This slice saves and updates the workflow inside Bonfire OS. It does not start an external Codex job yet. Longer browser, SSH, code, test, and deploy work should run through a separate Codex SDK or `codex exec` worker that writes status and evidence back to artifacts.
 
 ### Configured interactions
 

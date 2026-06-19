@@ -276,6 +276,9 @@ func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	if payload.Artifact.Kind != meetingMemoryKindOSArtifact || payload.Artifact.Metadata["source"] != "scout_thread" || payload.Artifact.Metadata["status"] != "running" {
 		t.Fatalf("artifact=%#v, want running scout thread artifact", payload.Artifact)
 	}
+	if payload.Artifact.Metadata["agentLoop"] != "realtime_controlled_workforce" || payload.Artifact.Metadata["progressPercent"] != "35" {
+		t.Fatalf("artifact metadata=%v, want realtime workforce progress metadata", payload.Artifact.Metadata)
+	}
 	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Artifact.Text, "Goal workflow") {
 		t.Fatalf("artifact text=%q, want thread scaffold", payload.Artifact.Text)
 	}

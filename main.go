@@ -1794,7 +1794,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	scoutChat := newScoutChatSession(c)
 	// Stop the chat worker and cancel any queued/in-flight model calls as
 	// soon as this connection ends.
-	defer scoutChat.close()
+	defer func() { scoutChat.close() }()
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
@@ -2235,6 +2235,18 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			broadcastAssistantEvent("query", assistantQuery, nil)
 			broadcastAssistantEvent("status", "Scout is checking the board and memory.", nil)
 			go answerAssistantQueryForClient(c, assistantQuery)
+		case "scout_chat_reset":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before starting a Scout thread")
+				continue
+			}
+			scoutChat.close()
+			scoutChat = newScoutChatSession(c)
+			_ = sendKanbanEvent(c, "scout_chat", map[string]any{
+				"kind": "reset",
+				"text": "new Scout thread started",
+				"ts":   time.Now().UTC().Format(time.RFC3339Nano),
+			})
 		case "scout_chat":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before chatting with Scout")
@@ -2255,7 +2267,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// echo synchronously on this read loop (so the message visibly
 			// lands in send order), then hand off to the session's FIFO
 			// worker; model calls never block the websocket read path.
-			scoutChat.submit(kanbanApp, chat.Text)
+			scoutChat.submit(kanbanApp, chat.Text, currentParticipantName())
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")

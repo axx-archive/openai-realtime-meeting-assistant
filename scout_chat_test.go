@@ -99,7 +99,7 @@ func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
 	session := newCapturedChatSession(recorder)
 	defer session.close()
 
-	session.submit(app, "when is the boot barn shoot?")
+	session.submit(app, "when is the boot barn shoot?", "AJ")
 	recorder.waitForKindCount(t, "answer", 1)
 	events := recorder.snapshot()
 	if got, want := strings.Join(recorder.kinds(), ","), "query,status,answer"; got != want {
@@ -117,7 +117,7 @@ func TestScoutChatAnswersOnSessionAndThreadsHistory(t *testing.T) {
 		t.Fatalf("answer=%q, want model answer", got)
 	}
 
-	session.submit(app, "what time does it start?")
+	session.submit(app, "what time does it start?", "AJ")
 	recorder.waitForKindCount(t, "answer", 2)
 	inputsMu.Lock()
 	defer inputsMu.Unlock()
@@ -148,7 +148,7 @@ func TestScoutChatHistoryStaysBounded(t *testing.T) {
 	session := newCapturedChatSession(recorder)
 	defer session.close()
 	for index := 0; index < scoutChatMaxHistoryTurns; index++ {
-		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index))
+		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index), "AJ")
 		recorder.waitForKindCount(t, "answer", index+1)
 	}
 
@@ -163,13 +163,51 @@ func TestScoutChatHistoryStaysBounded(t *testing.T) {
 	}
 }
 
+func TestScoutChatLaunchesAgentThreadForWorkRequest(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	recorder := &chatEventRecorder{}
+	session := newCapturedChatSession(recorder)
+	defer session.close()
+
+	session.submit(app, "research the buyer proof for Realtime 2 as the UI", "AJ")
+
+	events := recorder.snapshot()
+	if got, want := strings.Join(recorder.kinds(), ","), "query,status,thread"; got != want {
+		t.Fatalf("event kinds=%q, want %q", got, want)
+	}
+	thread, ok := events[2].payload["thread"].(scoutAgentThread)
+	if !ok {
+		t.Fatalf("thread payload type=%T, want scoutAgentThread", events[2].payload["thread"])
+	}
+	if thread.Mode != "research" || thread.Status != "running" || thread.Artifact.ID == "" {
+		t.Fatalf("thread=%#v, want running research artifact thread", thread)
+	}
+	artifact, ok := events[2].payload["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact payload type=%T, want meetingMemoryEntry", events[2].payload["artifact"])
+	}
+	if artifact.Metadata["source"] != "scout_thread" || artifact.Metadata["threadStatus"] != "running" {
+		t.Fatalf("artifact metadata=%v, want running scout thread metadata", artifact.Metadata)
+	}
+	if events[2].payload["text"] != "research thread launched" {
+		t.Fatalf("thread text=%q, want launched summary", events[2].payload["text"])
+	}
+	if got := recorder.countKind("answer"); got != 0 {
+		t.Fatalf("answers=%d, want work thread launch instead of normal chat answer", got)
+	}
+}
+
 func TestScoutChatRejectsEmptyMessage(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	recorder := &chatEventRecorder{}
 	session := newCapturedChatSession(recorder)
 	defer session.close()
-	session.submit(app, "   ")
+	session.submit(app, "   ", "AJ")
 
 	if got, want := strings.Join(recorder.kinds(), ","), "error"; got != want {
 		t.Fatalf("event kinds=%q, want %q", got, want)
@@ -202,8 +240,8 @@ func TestScoutChatEchoesQueryBeforeModelWork(t *testing.T) {
 	session := newCapturedChatSession(recorder)
 	defer session.close()
 
-	session.submit(app, "when is the boot barn shoot?")
-	session.submit(app, "and who owns the login card work?")
+	session.submit(app, "when is the boot barn shoot?", "AJ")
+	session.submit(app, "and who owns the login card work?", "AJ")
 
 	// both queries are echoed immediately, before any model call returns.
 	if got := recorder.countKind("query"); got != 2 {
@@ -252,17 +290,17 @@ func TestScoutChatQueueOverflowSendsError(t *testing.T) {
 	session := newCapturedChatSession(recorder)
 	defer session.close()
 
-	session.submit(app, "question 0 about the boot barn shoot")
+	session.submit(app, "question 0 about the boot barn shoot", "AJ")
 	<-started // worker is now blocked in the model call; the queue is empty
 
 	for index := 1; index <= scoutChatMaxQueuedTurns; index++ {
-		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index))
+		session.submit(app, fmt.Sprintf("question %d about the boot barn shoot", index), "AJ")
 	}
 	if got := recorder.countKind("error"); got != 0 {
 		t.Fatalf("errors=%d before the queue filled; kinds=%v", got, recorder.kinds())
 	}
 
-	session.submit(app, "one question too many")
+	session.submit(app, "one question too many", "AJ")
 	if got := recorder.countKind("error"); got != 1 {
 		t.Fatalf("errors=%d, want 1 overflow error; kinds=%v", got, recorder.kinds())
 	}
@@ -309,7 +347,7 @@ func TestScoutChatCancelsModelCallOnClose(t *testing.T) {
 	recorder := &chatEventRecorder{}
 	session := newCapturedChatSession(recorder)
 
-	session.submit(app, "when is the boot barn shoot?")
+	session.submit(app, "when is the boot barn shoot?", "AJ")
 	<-started
 	session.close()
 

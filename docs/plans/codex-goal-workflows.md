@@ -48,6 +48,16 @@ Bonfire stores goal workflows as `os_artifact` entries with `mode=workflow` and 
 
 Research, design, grill, and artifact modes also include the same goal workflow section so the pattern is reusable across app workspaces.
 
+## Realtime-Controlled Workforce Slice
+
+Realtime 2 and private Scout chat now treat chat as the control surface and artifacts as the work record:
+
+- Opening Chat focuses the user's current private Scout conversation; starting a new chat thread resets that private conversation unless the user intentionally keeps context.
+- Longer research, design, grill, and workflow asks launch `launch_agent_thread` instead of becoming ordinary chat replies.
+- Each launched thread writes a running `os_artifact` with `source=scout_thread`, `agentLoop=realtime_controlled_workforce`, explicit workflow stages, progress, review gate, and goal status metadata.
+- Chat renders the launched work as a staged progress card and syncs terminal state from `/artifacts`.
+- The resulting artifact can be opened, edited, copied, published, and surfaced on the Office dashboard.
+
 ## Codex Runner Path
 
 The safest near-term runner is a server-side Codex SDK or `codex exec` worker beside the existing ambient agents. The worker can claim a saved workflow artifact, run with explicit sandbox/profile settings, then append status, evidence, final output, tests, screenshots, or errors back to memory.

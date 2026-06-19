@@ -39,8 +39,14 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, map[string]string{
 		"source":          "scout_thread",
 		"threadId":        threadID,
+		"agentLoop":       "realtime_controlled_workforce",
 		"status":          "running",
 		"threadStatus":    "running",
+		"goalStatus":      "running",
+		"currentStage":    "execute_in_order",
+		"progressPercent": "35",
+		"workflowStages":  goalWorkflowStageMetadata,
+		"reviewGate":      "pending",
 		"queuedAt":        now,
 		"startedAt":       now,
 		"published":       "false",
@@ -97,6 +103,10 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 	metadata := map[string]string{
 		"status":          "complete",
 		"threadStatus":    "complete",
+		"goalStatus":      "verified",
+		"currentStage":    "verify_goal_completed",
+		"progressPercent": "100",
+		"reviewGate":      "passed",
 		"completedAt":     time.Now().UTC().Format(time.RFC3339Nano),
 		"latestThreadRun": thread.ID,
 	}
@@ -106,6 +116,10 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		output = buildAgentThreadError(thread, err)
 		metadata["status"] = "error"
 		metadata["threadStatus"] = "error"
+		metadata["goalStatus"] = "needs_attention"
+		metadata["currentStage"] = "gate_before_shipping"
+		metadata["progressPercent"] = "72"
+		metadata["reviewGate"] = "blocked"
 		metadata["error"] = err.Error()
 	}
 

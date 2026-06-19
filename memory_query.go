@@ -769,6 +769,7 @@ func assistantQueryInstructions() string {
 		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
+		"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be launched as artifact-backed work threads.",
 		"Keep the answer concise and practical.",
 	}, " ")
 }
