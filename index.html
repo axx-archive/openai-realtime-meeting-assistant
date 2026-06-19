@@ -11733,13 +11733,11 @@
       /* the work-email local-part derives the canonical participant name —
          the reverse of the server's participantEmail(). Any domain is fine;
          the office roster lives in the hidden #participantName select. */
-      function participantNameFromEmail(value) {
-        const email = String(value || '').trim()
-        const at = email.indexOf('@')
-        if (at <= 0) {
+      function participantNameFromRosterValue(value) {
+        const compact = String(value || '').trim().toLowerCase().replace(/[\s._-]+/g, '')
+        if (!compact) {
           return ''
         }
-        const compact = email.slice(0, at).toLowerCase().replace(/[\s._-]+/g, '')
         if (compact === 'e') {
           return 'Erick'
         }
@@ -11747,9 +11745,25 @@
         return roster.find(name => name && name.toLowerCase().replace(/\s+/g, '') === compact) || ''
       }
 
+      function participantNameFromEmail(value) {
+        const email = String(value || '').trim()
+        const at = email.indexOf('@')
+        if (at <= 0) {
+          return ''
+        }
+        return participantNameFromRosterValue(email.slice(0, at))
+      }
+
+      function participantNameFromAccount(user) {
+        if (!user) {
+          return ''
+        }
+        return participantNameFromEmail(user.email) || participantNameFromRosterValue(user.name) || ''
+      }
+
       function validateAccess() {
         const email = (authedUser?.email || loginEmailInput.value).trim()
-        participantNameInput.value = authedUser?.name || participantNameFromEmail(email)
+        participantNameInput.value = authedUser ? participantNameFromAccount(authedUser) : participantNameFromEmail(email)
         const verified = hasValidAccess()
         joinButton.disabled = !verified || Boolean(ws || pc)
         joinAccessButton.disabled = joinButton.disabled
@@ -13311,14 +13325,14 @@
         voiceIslandLabel.textContent = labels[next] || labels.listening
         voiceIslandMeta.textContent = String(detail || details[next] || '').trim()
         voiceIslandMain.setAttribute('aria-label', `${voiceIslandLabel.textContent}: ${voiceIslandMeta.textContent}`)
-        if (next === 'talking' || next === 'error') {
+        if (next === 'talking') {
           voiceIslandClearTimer = window.setTimeout(() => {
             if (realtimeVoiceActive) {
               setVoiceIslandState('listening', 'listening...')
             } else {
               setVoiceIslandState('idle')
             }
-          }, next === 'talking' ? 2200 : 3600)
+          }, 2200)
         }
       }
 
@@ -17577,10 +17591,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleAccessDenied(message) {
+        const wasRealtimeVoice = realtimeVoiceActive || realtimeVoiceOnlyPending
         if (ws) {
           ws.onclose = null
         }
         leaveRoom()
+        if (wasRealtimeVoice) {
+          setVoiceIslandState('error', message)
+        }
         accessPanel.classList.remove('is-verified')
         accessState.textContent = 'locked'
         accessHint.textContent = message

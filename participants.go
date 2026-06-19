@@ -142,6 +142,29 @@ func participantEmail(name string) string {
 	return strings.ToLower(name) + "@shareability.com"
 }
 
+func participantNameForEmail(email string) string {
+	normalizedEmail := normalizeAccountEmail(email)
+	if normalizedEmail == "" {
+		return ""
+	}
+	for _, seed := range seededAccounts {
+		if normalizeAccountEmail(seed.Email) == normalizedEmail {
+			return canonicalParticipantName(seed.Name)
+		}
+	}
+	return ""
+}
+
+func participantNameForAccount(user *userAccount) string {
+	if user == nil {
+		return ""
+	}
+	if name := participantNameForEmail(user.Email); name != "" {
+		return name
+	}
+	return canonicalParticipantName(user.Name)
+}
+
 func participantEmails(names []string) []string {
 	emails := make([]string, 0, len(names))
 	seen := map[string]struct{}{}

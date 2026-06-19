@@ -105,3 +105,77 @@ func TestWebsocketAdmitsSessionIdentity(t *testing.T) {
 		return
 	}
 }
+
+func TestWebsocketAdmitsAccountEmailWhenDisplayNameChanges(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
+	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+
+	previousApp := kanbanApp
+	kanbanApp = newKanbanBoardApp()
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+	})
+
+	if _, err := accountStore().updateProfile("aj@shareability.com", "// aj", ""); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	token, err := userSessionStore().create("aj@shareability.com")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/websocket"
+	header := http.Header{}
+	header.Set("Cookie", sessionCookieName+"="+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("dial with session cookie: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]string{"event": "participant", "data": `{}`}); err != nil {
+		t.Fatalf("send participant event: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket message: %v", err)
+		}
+		if message.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string          `json:"event"`
+			Data  json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+			t.Fatalf("decode kanban envelope: %v", err)
+		}
+		if inner.Event == "access_denied" {
+			t.Fatalf("expected admission from account email, got access_denied: %s", inner.Data)
+		}
+		if inner.Event != "access_granted" {
+			continue
+		}
+		var grant struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(inner.Data, &grant); err != nil {
+			t.Fatalf("decode access grant: %v", err)
+		}
+		if grant.Name != "AJ" {
+			t.Fatalf("expected email-derived room identity AJ, got %q", grant.Name)
+		}
+		return
+	}
+}

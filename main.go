@@ -2062,7 +2062,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		case "participant":
 			// Identity comes from the authenticated session, never from the
 			// payload: a client cannot join as anyone but their own account.
-			name := sessionUser.Name
+			name := participantNameForAccount(sessionUser)
 			if participantAccepted {
 				continue
 			}
