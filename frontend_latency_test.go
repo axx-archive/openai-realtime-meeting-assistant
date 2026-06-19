@@ -201,6 +201,13 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		"turn this into a goal workflow",
 		"goal workflow",
 		"#appShell.is-in-room ~ .os-assistant",
+		".tool-rail:hover,",
+		".tool-rail__label",
+		`id="accountMenuButton" class="topbar__account-button"`,
+		`id="profileDisplayName" type="text" autocomplete="name"`,
+		`id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden`,
+		"async function saveAccountProfile(event)",
+		"postAuthJSON('/auth/profile'",
 		`id="recordMeeting" class="btn btn--ghost btn--recording is-recording"`,
 		"event: 'set_recording'",
 		"function updateRoomRecordingControls()",
@@ -249,6 +256,73 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("index.html still couples sign-in directly to room entry via %q", unwanted)
 		}
+	}
+}
+
+func TestIndexAccountMenuPreservesDraftNameDuringAvatarPreview(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	syncBody := functionBody(html, "function syncAccountChrome()")
+	if syncBody == "" {
+		t.Fatal("missing syncAccountChrome")
+	}
+	if strings.Contains(syncBody, "profileDisplayName.value") {
+		t.Fatal("syncAccountChrome must not overwrite an unsaved typed display name during avatar preview/clear")
+	}
+
+	openBody := functionBody(html, "function setAccountMenuOpen(open)")
+	if !strings.Contains(openBody, "profileDisplayName.value = authedUser.name || authedUser.email || ''") {
+		t.Fatal("account menu open should initialize the display-name form once")
+	}
+	saveBody := functionBody(html, "async function saveAccountProfile(event)")
+	if !strings.Contains(saveBody, "profileDisplayName.value = authedUser.name || ''") {
+		t.Fatal("successful profile save should reinitialize the form from the persisted identity")
+	}
+	if !strings.Contains(html, "profileAvatarDraft = ''") || !strings.Contains(html, "avatar cleared. save profile to keep it.") {
+		t.Fatal("avatar clear should mark a draft clear without resetting the typed display name")
+	}
+}
+
+func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		".tool-rail:hover,",
+		".tool-rail:focus-within",
+		"width: 228px;",
+		"max-width: 140px;",
+		`<span class="tool-rail__label">home</span>`,
+		`<span class="tool-rail__label">room</span>`,
+		`<span class="tool-rail__label">chat</span>`,
+		`aria-haspopup="dialog"`,
+		`role="dialog" aria-label="Account menu"`,
+		"accountMenuButton.addEventListener('click'",
+		"setAccountMenuOpen(accountMenu.hidden)",
+		"if (!accountMenu.hidden && !topbarAccount.contains(event.target))",
+		"if (!accountMenu.hidden) {\n            setAccountMenuOpen(false)",
+		"openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })",
+		"accountMenuSignOut.addEventListener('click', signOutOfAccount)",
+		"#appShell:has(#accountMenuButton[aria-expanded=\"true\"]) .topbar",
+		"width: min(340px, calc(100vw - 28px));",
+		"max-width: 44px;",
+		"width: min(204px, 78vw);",
+		"width: min(340px, calc(100vw - 76px));",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing account menu or rail interaction marker %q", want)
+		}
+	}
+	linkBlock := functionBody(html, ".account-menu__link")
+	if !strings.Contains(linkBlock, "min-height: 44px;") {
+		t.Fatal("account menu settings/sign-out rows must keep a 44px touch target")
 	}
 }
 

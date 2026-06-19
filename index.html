@@ -320,21 +320,29 @@
         z-index: 60;
         display: flex;
         flex-direction: column;
-        align-items: center;
+        align-items: stretch;
         gap: 4px;
         width: 68px;
         flex: none;
-        padding: 14px 0;
+        padding: 14px 11px;
         padding-bottom: max(14px, env(safe-area-inset-bottom));
+        overflow: hidden;
         background: var(--glass-chrome);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
         border-right: 1px solid var(--glass-border);
         box-shadow: var(--glass-highlight);
+        transition: width var(--dur-med) var(--ease);
+      }
+
+      .tool-rail:hover,
+      .tool-rail:focus-within {
+        width: 228px;
       }
 
       .tool-rail__flame {
         flex: none;
+        align-self: center;
         margin-bottom: 14px;
         color: var(--accent);
       }
@@ -343,6 +351,7 @@
         position: relative;
         display: flex;
         flex: none;
+        width: 100%;
       }
       .tool-rail__slot[hidden],
       .tool-rail__theme[hidden],
@@ -353,17 +362,49 @@
       .tool-rail__tool {
         display: inline-flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
+        gap: 12px;
         width: 44px;
         height: 44px;
+        padding: 0 13px;
         border: 1px solid transparent;
         border-radius: var(--r-md);
         background: transparent;
         color: var(--text-3);
+        overflow: hidden;
+        white-space: nowrap;
         transition:
+          width var(--dur-med) var(--ease),
           background var(--dur-fast) var(--ease),
           color var(--dur-fast) var(--ease),
-          border-color var(--dur-fast) var(--ease);
+          border-color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+      .tool-rail:hover .tool-rail__tool,
+      .tool-rail:focus-within .tool-rail__tool {
+        width: 100%;
+      }
+      .tool-rail__tool svg {
+        flex: 0 0 auto;
+      }
+      .tool-rail__label {
+        min-width: 0;
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: inherit;
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-transform: lowercase;
+        transition:
+          max-width var(--dur-med) var(--ease),
+          opacity var(--dur-med) var(--ease);
+      }
+      .tool-rail:hover .tool-rail__label,
+      .tool-rail:focus-within .tool-rail__label {
+        max-width: 140px;
+        opacity: 1;
       }
       .tool-rail__tool:hover {
         background: var(--accent-soft);
@@ -387,7 +428,7 @@
       .tool-rail__live {
         position: absolute;
         top: 3px;
-        right: 3px;
+        left: 33px;
         width: 7px;
         height: 7px;
         border-radius: 50%;
@@ -410,6 +451,7 @@
         margin-top: 8px;
         width: 40px;
         height: 40px;
+        align-self: center;
         border: 1px solid var(--line-1);
         background: var(--surface-3);
         color: var(--text-2);
@@ -587,6 +629,219 @@
       #appShell[data-tool="memory"] .topbar__copy-link,
       #appShell[data-tool="artifacts"] .topbar__copy-link {
         display: none;
+      }
+
+      .topbar__account {
+        position: relative;
+        flex: none;
+        z-index: 90;
+      }
+
+      .topbar__account[hidden] {
+        display: none !important;
+      }
+
+      .topbar__account-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        max-width: min(260px, 28vw);
+        min-height: 40px;
+        padding: 4px 10px 4px 5px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-1);
+        transition:
+          background var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .topbar__account-button:hover,
+      .topbar__account-button[aria-expanded="true"] {
+        background: var(--surface-2);
+        border-color: var(--line-2);
+      }
+
+      .topbar__account-button:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .topbar__avatar,
+      .account-menu__avatar {
+        position: relative;
+        display: inline-grid;
+        place-items: center;
+        flex: 0 0 auto;
+        overflow: hidden;
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .topbar__avatar {
+        width: 30px;
+        height: 30px;
+      }
+
+      .account-menu__avatar {
+        width: 44px;
+        height: 44px;
+      }
+
+      .topbar__avatar img,
+      .account-menu__avatar img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline-offset: -1px;
+      }
+
+      .topbar__avatar img[hidden],
+      .account-menu__avatar img[hidden] {
+        display: none;
+      }
+
+      .topbar__account-copy {
+        display: grid;
+        min-width: 0;
+        text-align: right;
+      }
+
+      .topbar__account-name,
+      .account-menu__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+      }
+
+      .topbar__account-email,
+      .account-menu__email {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .topbar__account-chevron {
+        flex: 0 0 auto;
+        color: var(--text-3);
+        transition: transform var(--dur-fast) var(--ease);
+      }
+
+      .topbar__account-button[aria-expanded="true"] .topbar__account-chevron {
+        transform: rotate(180deg);
+      }
+
+      #appShell:has(#accountMenuButton[aria-expanded="true"]) .topbar {
+        z-index: 90;
+      }
+
+      .account-menu {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        z-index: 80;
+        display: grid;
+        gap: var(--sp-3);
+        width: min(340px, calc(100vw - 28px));
+        padding: var(--sp-3);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-xl);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-3);
+        color: var(--text-1);
+      }
+
+      .account-menu[hidden] {
+        display: none !important;
+      }
+
+      .account-menu__identity {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: var(--sp-3);
+      }
+
+      .account-menu__details {
+        display: grid;
+        min-width: 0;
+        gap: 2px;
+      }
+
+      .account-menu__form {
+        display: grid;
+        gap: var(--sp-3);
+      }
+
+      .account-menu__upload {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        flex-wrap: wrap;
+      }
+
+      .account-menu__actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--sp-2);
+      }
+
+      .account-menu__status {
+        min-height: 16px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .account-menu__divider {
+        height: 1px;
+        background: var(--line-1);
+      }
+
+      .account-menu__link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: var(--sp-2);
+        min-height: 44px;
+        padding: 0 10px;
+        border-radius: var(--r-md);
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-align: left;
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .account-menu__link:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .account-menu__link:active {
+        transform: scale(var(--press-scale));
       }
 
       /* ---------- Pills (kit display/Pill) ---------- */
@@ -8278,6 +8533,12 @@
 
         .tool-rail {
           width: 56px;
+          padding-inline: 6px;
+        }
+
+        .tool-rail:hover,
+        .tool-rail:focus-within {
+          width: min(204px, 78vw);
         }
 
         /* the live clock can never be squeezed */
@@ -8324,6 +8585,23 @@
           min-width: 0;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+
+        .topbar__account-button {
+          min-width: 44px;
+          min-height: 44px;
+          max-width: 44px;
+          padding-right: 5px;
+        }
+
+        .topbar__account-copy,
+        .topbar__account-chevron {
+          display: none;
+        }
+
+        .account-menu {
+          right: 0;
+          width: min(340px, calc(100vw - 76px));
         }
 
         .pill {
@@ -9125,6 +9403,7 @@
         .card-detail-edit-button,
         .board-collapse,
         .device-select,
+        .topbar__account-button,
         .scout-activity summary {
           min-height: var(--hit-min);
         }
@@ -9278,47 +9557,56 @@
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+            <span class="tool-rail__label">home</span>
           </button>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="room" aria-label="Room" title="Room" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
+            <span class="tool-rail__label">room</span>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" title="Chat" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
+            <span class="tool-rail__label">chat</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+            <span class="tool-rail__label">artifacts</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+            <span class="tool-rail__label">research</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+            <span class="tool-rail__label">design</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" title="Grill mode" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
+            <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
+            <span class="tool-rail__label">board</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" title="Memory" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+            <span class="tool-rail__label">memory</span>
           </button>
         </span>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
@@ -9359,6 +9647,55 @@
           <span class="pill__dot"></span>
           <span id="statusText">not connected</span>
         </span>
+        <div id="topbarAccount" class="topbar__account" hidden>
+          <button id="accountMenuButton" class="topbar__account-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+            <span class="topbar__avatar" aria-hidden="true">
+              <img id="topbarAvatarImage" alt="" hidden>
+              <span id="topbarAvatarInitials">TC</span>
+            </span>
+            <span class="topbar__account-copy">
+              <span id="topbarAccountName" class="topbar__account-name">team captain</span>
+              <span id="topbarAccountEmail" class="topbar__account-email">signed in</span>
+            </span>
+            <svg class="topbar__account-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+          </button>
+          <section id="accountMenu" class="account-menu" role="dialog" aria-label="Account menu" hidden>
+            <div class="account-menu__identity">
+              <span class="account-menu__avatar" aria-hidden="true">
+                <img id="accountMenuAvatarImage" alt="" hidden>
+                <span id="accountMenuAvatarInitials">TC</span>
+              </span>
+              <span class="account-menu__details">
+                <span id="accountMenuName" class="account-menu__name">team captain</span>
+                <span id="accountMenuEmail" class="account-menu__email">signed in</span>
+              </span>
+            </div>
+            <form id="profileForm" class="account-menu__form" novalidate>
+              <label class="field">
+                <span>display name</span>
+                <input id="profileDisplayName" type="text" autocomplete="name" maxlength="80">
+              </label>
+              <div class="account-menu__upload">
+                <input id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                <button id="profileAvatarButton" class="btn btn--ghost" type="button">Upload avatar</button>
+                <button id="profileAvatarClear" class="btn btn--text" type="button">clear</button>
+              </div>
+              <button id="profileSaveButton" class="btn btn--primary" type="submit">Save profile</button>
+              <p id="profileStatus" class="account-menu__status" aria-live="polite"></p>
+            </form>
+            <span class="account-menu__divider" aria-hidden="true"></span>
+            <div class="account-menu__actions">
+              <button id="accountMenuSettings" class="account-menu__link" type="button">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
+                settings
+              </button>
+              <button id="accountMenuSignOut" class="account-menu__link" type="button">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+                sign out
+              </button>
+            </div>
+          </section>
+        </div>
       </header>
 
       <div class="workspace">
@@ -10446,6 +10783,26 @@
       const topbarToolMeta = document.getElementById('topbarToolMeta')
       const topbarElapsedEl = document.getElementById('topbarElapsed')
       const topbarMetaEl = document.getElementById('topbarMeta')
+      const topbarAccount = document.getElementById('topbarAccount')
+      const accountMenuButton = document.getElementById('accountMenuButton')
+      const accountMenu = document.getElementById('accountMenu')
+      const topbarAccountName = document.getElementById('topbarAccountName')
+      const topbarAccountEmail = document.getElementById('topbarAccountEmail')
+      const topbarAvatarImage = document.getElementById('topbarAvatarImage')
+      const topbarAvatarInitials = document.getElementById('topbarAvatarInitials')
+      const accountMenuName = document.getElementById('accountMenuName')
+      const accountMenuEmail = document.getElementById('accountMenuEmail')
+      const accountMenuAvatarImage = document.getElementById('accountMenuAvatarImage')
+      const accountMenuAvatarInitials = document.getElementById('accountMenuAvatarInitials')
+      const profileForm = document.getElementById('profileForm')
+      const profileDisplayName = document.getElementById('profileDisplayName')
+      const profileAvatarInput = document.getElementById('profileAvatarInput')
+      const profileAvatarButton = document.getElementById('profileAvatarButton')
+      const profileAvatarClear = document.getElementById('profileAvatarClear')
+      const profileSaveButton = document.getElementById('profileSaveButton')
+      const profileStatus = document.getElementById('profileStatus')
+      const accountMenuSettings = document.getElementById('accountMenuSettings')
+      const accountMenuSignOut = document.getElementById('accountMenuSignOut')
       const pipMeeting = document.getElementById('pipMeeting')
       const pipTiles = document.getElementById('pipTiles')
       const pipTitle = document.getElementById('pipTitle')
@@ -10543,6 +10900,8 @@
       let roomCapacity = 10
       let occupiedSeats = 0
       let roomRecordingEnabled = true
+      let profileAvatarDraft = null
+      let audioSettingsRestoreFocusEl = audioSettingsButton
       let roomRecordingUpdatedAt = ''
       let roomRecordingUpdatedBy = ''
       let hasBoardSnapshot = false
@@ -10828,6 +11187,23 @@
       passkeySignInButton.addEventListener('click', signInWithPasskey)
       forgotPasswordButton.addEventListener('click', requestPasswordReset)
       loginSignOutButton.addEventListener('click', signOutOfAccount)
+      accountMenuButton.addEventListener('click', event => {
+        event.stopPropagation()
+        setAccountMenuOpen(accountMenu.hidden)
+      })
+      profileForm.addEventListener('submit', saveAccountProfile)
+      profileAvatarButton.addEventListener('click', () => profileAvatarInput.click())
+      profileAvatarClear.addEventListener('click', () => {
+        profileAvatarDraft = ''
+        setProfileStatus('avatar cleared. save profile to keep it.')
+        syncAccountChrome()
+      })
+      profileAvatarInput.addEventListener('change', readProfileAvatar)
+      accountMenuSettings.addEventListener('click', () => {
+        setAccountMenuOpen(false)
+        openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })
+      })
+      accountMenuSignOut.addEventListener('click', signOutOfAccount)
       if (railAvatarEl) {
         railAvatarEl.addEventListener('click', () => {
           if (authedUser) signOutOfAccount()
@@ -10872,6 +11248,9 @@
         if (!boardDockMenu.hidden && !boardDockMenu.contains(event.target) && event.target !== boardDockMenuButton) {
           closeBoardDockMenu()
         }
+        if (!accountMenu.hidden && !topbarAccount.contains(event.target)) {
+          setAccountMenuOpen(false)
+        }
       })
       navigator.mediaDevices?.addEventListener?.('devicechange', () => {
         refreshAudioInputDevices().catch(error => {
@@ -10880,6 +11259,11 @@
       })
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
+          if (!accountMenu.hidden) {
+            setAccountMenuOpen(false)
+            accountMenuButton.focus()
+            return
+          }
           if (audioSettingsRegion.classList.contains('visible')) {
             closeAudioSettings()
             return
@@ -11064,10 +11448,11 @@
         }).format(date).toLowerCase()
       }
 
-      function openAudioSettings() {
-        if (audioSettingsButton.disabled) {
+      function openAudioSettings(options = {}) {
+        if (audioSettingsButton.disabled && !options.allowLocked) {
           return
         }
+        audioSettingsRestoreFocusEl = options.restoreFocusTo || audioSettingsButton
         renderAudioSettings()
         renderAccountSettings()
         audioSettingsRegion.classList.add('visible')
@@ -11079,8 +11464,9 @@
         audioSettingsRegion.classList.remove('visible')
         cancelVoiceFocusTraining()
         if (wasOpen && options.restoreFocus !== false) {
-          audioSettingsButton.focus()
+          ;(audioSettingsRestoreFocusEl || audioSettingsButton).focus()
         }
+        audioSettingsRestoreFocusEl = audioSettingsButton
       }
 
       function setAudioNoiseMode(mode) {
@@ -11479,13 +11865,137 @@
         return { ok: response.ok, status: response.status, data }
       }
 
+      function accountAvatarDataURL() {
+        return profileAvatarDraft === null
+          ? String(authedUser?.avatarDataURL || '')
+          : String(profileAvatarDraft || '')
+      }
+
+      function renderAvatarImage(imageEl, initialsEl, user = authedUser) {
+        const initials = initialsForName(user?.name || user?.email)
+        const avatarDataURL = accountAvatarDataURL()
+        initialsEl.textContent = initials
+        if (avatarDataURL) {
+          imageEl.src = avatarDataURL
+          imageEl.hidden = false
+          initialsEl.hidden = true
+        } else {
+          imageEl.removeAttribute('src')
+          imageEl.hidden = true
+          initialsEl.hidden = false
+        }
+      }
+
+      function syncAccountChrome() {
+        const authed = Boolean(authedUser)
+        topbarAccount.hidden = !authed
+        if (!authed) {
+          setAccountMenuOpen(false)
+          profileAvatarDraft = null
+          return
+        }
+        const name = authedUser.name || authedUser.email || 'signed in'
+        const email = authedUser.email || ''
+        topbarAccountName.textContent = name
+        topbarAccountEmail.textContent = email
+        accountMenuName.textContent = name
+        accountMenuEmail.textContent = email
+        renderAvatarImage(topbarAvatarImage, topbarAvatarInitials)
+        renderAvatarImage(accountMenuAvatarImage, accountMenuAvatarInitials)
+      }
+
+      function setAccountMenuOpen(open) {
+        const next = Boolean(open && authedUser)
+        accountMenu.hidden = !next
+        accountMenuButton.setAttribute('aria-expanded', next ? 'true' : 'false')
+        if (next) {
+          profileAvatarDraft = null
+          profileDisplayName.value = authedUser.name || authedUser.email || ''
+          setProfileStatus('')
+          syncAccountChrome()
+          window.setTimeout(() => profileDisplayName.select(), 0)
+        }
+      }
+
+      function setProfileStatus(message, isError = false) {
+        profileStatus.textContent = message
+        profileStatus.style.color = isError ? 'var(--danger)' : ''
+      }
+
+      function readProfileAvatar() {
+        const file = profileAvatarInput.files?.[0]
+        if (!file) {
+          return
+        }
+        if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+          setProfileStatus('choose a PNG, JPEG, WebP, or GIF image.', true)
+          profileAvatarInput.value = ''
+          return
+        }
+        if (file.size > 144 * 1024) {
+          setProfileStatus('avatar image must be smaller than 144 KB.', true)
+          profileAvatarInput.value = ''
+          return
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          profileAvatarDraft = String(reader.result || '')
+          setProfileStatus('avatar ready. save profile to keep it.')
+          syncAccountChrome()
+        }
+        reader.onerror = () => setProfileStatus('could not read that image.', true)
+        reader.readAsDataURL(file)
+      }
+
+      async function saveAccountProfile(event) {
+        event.preventDefault()
+        if (!authedUser) {
+          setProfileStatus('sign in first.', true)
+          return
+        }
+        const displayName = profileDisplayName.value.trim()
+        if (!displayName) {
+          setProfileStatus('display name is required.', true)
+          profileDisplayName.focus()
+          return
+        }
+        profileSaveButton.disabled = true
+        setProfileStatus('saving.')
+        try {
+          const result = await postAuthJSON('/auth/profile', {
+            displayName,
+            avatarDataURL: accountAvatarDataURL()
+          })
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not save profile')
+          }
+          authedUser = result.data
+          profileAvatarDraft = null
+          profileDisplayName.value = authedUser.name || ''
+          saveCachedIdentity(authedUser.name)
+          renderLoginMode()
+          renderAccountSettings()
+          syncAccountChrome()
+          setProfileStatus(appShell.classList.contains('is-in-room')
+            ? 'profile saved. room name updates next time you enter.'
+            : 'profile saved.')
+        } catch (error) {
+          setProfileStatus(error.message || 'could not save profile.', true)
+        } finally {
+          profileSaveButton.disabled = false
+          profileAvatarInput.value = ''
+        }
+      }
+
       function syncAuthenticatedShell() {
         const authed = Boolean(authedUser)
         appShell.classList.toggle('is-authed', authed)
         syncOSAssistantAvailability()
         if (railAvatarEl) {
           railAvatarEl.textContent = authed ? initialsForName(authedUser.name || authedUser.email) : 'TC'
+          railAvatarEl.title = authed ? (authedUser.name || authedUser.email) : 'Sign out'
         }
+        syncAccountChrome()
         if (authed && !appShell.classList.contains('is-in-room') && (appShell.dataset.tool || 'office') === 'room') {
           applyToolState('office')
         }

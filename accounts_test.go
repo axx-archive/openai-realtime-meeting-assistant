@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -104,6 +105,58 @@ func TestUserStorePersistsAcrossReload(t *testing.T) {
 	}
 	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts) {
 		t.Errorf("expected reload to keep %d accounts, got %d", len(seededAccounts), len(emails))
+	}
+}
+
+func TestUserStoreProfilePersistsAcrossReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	store, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("newUserAccountStore: %v", err)
+	}
+	avatar := "data:image/webp;base64,aGVsbG8="
+	if _, err := store.updateProfile("tim@shareability.com", "Tim Cook", avatar); err != nil {
+		t.Fatalf("updateProfile: %v", err)
+	}
+
+	reloaded, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	user := reloaded.findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("expected Tim account after reload")
+	}
+	if user.Name != "Tim Cook" || user.AvatarDataURL != avatar {
+		t.Fatalf("expected profile to survive reload, got name=%q avatar=%q", user.Name, user.AvatarDataURL)
+	}
+}
+
+func TestUserStoreProfileRollsBackWhenPersistFails(t *testing.T) {
+	dir := t.TempDir()
+	blockedParent := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blockedParent, []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("write blocked parent: %v", err)
+	}
+	store := newTestUserStore(t)
+	store.path = filepath.Join(blockedParent, "users.json")
+
+	before := store.findUser("tim@shareability.com")
+	if before == nil {
+		t.Fatal("expected Tim account")
+	}
+	originalName := before.Name
+	originalAvatar := before.AvatarDataURL
+
+	if _, err := store.updateProfile("tim@shareability.com", "Tim Failed", "data:image/png;base64,aGVsbG8="); err == nil {
+		t.Fatal("expected profile update to fail when users path parent is a file")
+	}
+	after := store.findUser("tim@shareability.com")
+	if after == nil {
+		t.Fatal("expected Tim account after failed update")
+	}
+	if after.Name != originalName || after.AvatarDataURL != originalAvatar {
+		t.Fatalf("expected failed persist to roll back profile, got name=%q avatar=%q", after.Name, after.AvatarDataURL)
 	}
 }
 

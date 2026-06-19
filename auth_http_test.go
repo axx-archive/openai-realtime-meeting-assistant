@@ -224,6 +224,118 @@ func TestChangePasswordEndpoint(t *testing.T) {
 	}
 }
 
+func TestUpdateProfileEndpointPersistsNameAndAvatar(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	avatar := "data:image/png;base64,aGVsbG8="
+	recorder := postAuthJSON(t, "/auth/profile", fmt.Sprintf(`{"displayName":"  AJ Hart  ","avatarDataURL":%q}`, avatar), cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected profile update 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload struct {
+		Email         string `json:"email"`
+		Name          string `json:"name"`
+		AvatarDataURL string `json:"avatarDataURL"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal profile response: %v", err)
+	}
+	if payload.Email != "aj@shareability.com" || payload.Name != "AJ Hart" || payload.AvatarDataURL != avatar {
+		t.Fatalf("unexpected profile payload: %+v", payload)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	after := httptest.NewRecorder()
+	authHandler(after, req)
+	if after.Code != http.StatusOK {
+		t.Fatalf("expected /auth/me after update 200, got %d", after.Code)
+	}
+	payload = struct {
+		Email         string `json:"email"`
+		Name          string `json:"name"`
+		AvatarDataURL string `json:"avatarDataURL"`
+	}{}
+	if err := json.Unmarshal(after.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal /auth/me after update: %v", err)
+	}
+	if payload.Name != "AJ Hart" || payload.AvatarDataURL != avatar {
+		t.Fatalf("expected profile to persist, got %+v", payload)
+	}
+}
+
+func TestUpdateProfileEndpointRejectsInvalidPayload(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	recorder := postAuthJSON(t, "/auth/profile", `{"displayName":"AJ Hart"}`, nil)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected profile update without session to return 401, got %d", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	recorder = postAuthJSON(t, "/auth/profile", `{"displayName":" ","avatarDataURL":""}`, cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected blank display name to return 400, got %d", recorder.Code)
+	}
+
+	recorder = postAuthJSON(t, "/auth/profile", `{"displayName":"AJ Hart","avatarDataURL":"data:text/plain;base64,aGVsbG8="}`, cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected non-image avatar to return 400, got %d", recorder.Code)
+	}
+
+	recorder = postAuthJSON(t, "/auth/profile", `{"displayName":"AJ Hart","avatarDataURL":"data:image/png;base64,not-valid***"}`, cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed avatar data to return 400, got %d", recorder.Code)
+	}
+
+	longName := strings.Repeat("a", 81)
+	recorder = postAuthJSON(t, "/auth/profile", fmt.Sprintf(`{"displayName":%q,"avatarDataURL":""}`, longName), cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected too-long display name to return 400, got %d", recorder.Code)
+	}
+}
+
+func TestUpdateProfileEndpointSupportsAvatarClearingAndLimits(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	avatar := "data:image/gif;base64,aGVsbG8="
+	recorder := postAuthJSON(t, "/auth/profile", fmt.Sprintf(`{"displayName":"AJ Hart","avatarDataURL":%q}`, avatar), cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected initial profile update 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = postAuthJSON(t, "/auth/profile", `{"displayName":"AJ Hart","avatarDataURL":""}`, cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected clearing avatar to return 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		AvatarDataURL string `json:"avatarDataURL"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal cleared profile response: %v", err)
+	}
+	if payload.AvatarDataURL != "" {
+		t.Fatalf("expected avatar to clear, got %q", payload.AvatarDataURL)
+	}
+
+	tooLargeAvatar := "data:image/png;base64," + strings.Repeat("a", avatarDataURLLimit)
+	recorder = postAuthJSON(t, "/auth/profile", fmt.Sprintf(`{"displayName":"AJ Hart","avatarDataURL":%q}`, tooLargeAvatar), cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected oversized avatar to return 400, got %d", recorder.Code)
+	}
+
+	tooLargeBody := fmt.Sprintf(`{"displayName":"AJ Hart","avatarDataURL":"data:image/png;base64,%s"}`, strings.Repeat("a", profileBodyLimit))
+	recorder = postAuthJSON(t, "/auth/profile", tooLargeBody, cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected oversized request body to return 400, got %d", recorder.Code)
+	}
+}
+
 func TestLoginRateLimited(t *testing.T) {
 	setupAuthTestEnv(t)
 

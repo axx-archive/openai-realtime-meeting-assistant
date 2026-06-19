@@ -43,6 +43,7 @@ var seededAccounts = []struct {
 type userAccount struct {
 	Email             string                `json:"email"`
 	Name              string                `json:"name"`
+	AvatarDataURL     string                `json:"avatarDataURL,omitempty"`
 	PasswordHash      []byte                `json:"passwordHash"`
 	WebAuthnHandle    []byte                `json:"webauthnHandle"`
 	Credentials       []webauthn.Credential `json:"credentials,omitempty"`
@@ -253,6 +254,25 @@ func (s *userAccountStore) setPassword(email, newPassword string) error {
 	user.PasswordHash = hash
 	user.PasswordChangedAt = time.Now().UTC()
 	return s.persistLocked()
+}
+
+func (s *userAccountStore) updateProfile(email, name, avatarDataURL string) (*userAccount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[normalizeAccountEmail(email)]
+	if !ok {
+		return nil, errors.New("no such account")
+	}
+	previousName := user.Name
+	previousAvatarDataURL := user.AvatarDataURL
+	user.Name = name
+	user.AvatarDataURL = avatarDataURL
+	if err := s.persistLocked(); err != nil {
+		user.Name = previousName
+		user.AvatarDataURL = previousAvatarDataURL
+		return nil, err
+	}
+	return user, nil
 }
 
 func (s *userAccountStore) updateCredentials(email string, update func(*userAccount)) error {

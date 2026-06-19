@@ -2,9 +2,11 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -20,6 +22,9 @@ const (
 
 	loginAttemptLimit  = 12
 	loginAttemptWindow = 5 * time.Minute
+	authBodyLimit      = 16 * 1024
+	profileBodyLimit   = 256 * 1024
+	avatarDataURLLimit = 192 * 1024
 )
 
 type sessionRecord struct {
@@ -268,7 +273,11 @@ func writeAuthError(w http.ResponseWriter, status int, message string) {
 }
 
 func decodeAuthBody(r *http.Request, dest any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 16*1024))
+	return decodeAuthBodyWithLimit(r, dest, authBodyLimit)
+}
+
+func decodeAuthBodyWithLimit(r *http.Request, dest any, limit int64) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
 	if err := decoder.Decode(dest); err != nil {
 		return errors.New("could not read request body")
 	}
@@ -291,6 +300,8 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		handleAuthLogout(w, r)
 	case r.URL.Path == "/auth/me" && r.Method == http.MethodGet:
 		handleAuthMe(w, r)
+	case r.URL.Path == "/auth/profile" && r.Method == http.MethodPost:
+		handleAuthProfile(w, r)
 	case r.URL.Path == "/auth/change-password" && r.Method == http.MethodPost:
 		handleAuthChangePassword(w, r)
 	case r.URL.Path == "/auth/reset/request" && r.Method == http.MethodPost:
@@ -316,10 +327,11 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 
 func identityPayload(user *userAccount) map[string]any {
 	return map[string]any{
-		"email":       user.Email,
-		"name":        user.Name,
-		"passkeys":    len(user.Credentials),
-		"hasPasskeys": len(user.Credentials) > 0,
+		"email":         user.Email,
+		"name":          user.Name,
+		"avatarDataURL": user.AvatarDataURL,
+		"passkeys":      len(user.Credentials),
+		"hasPasskeys":   len(user.Credentials) > 0,
 	}
 }
 
@@ -375,6 +387,78 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
+}
+
+func handleAuthProfile(w http.ResponseWriter, r *http.Request) {
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+
+	payload := struct {
+		DisplayName   string `json:"displayName"`
+		AvatarDataURL string `json:"avatarDataURL"`
+	}{}
+	if err := decodeAuthBodyWithLimit(r, &payload, profileBodyLimit); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	displayName, err := cleanDisplayName(payload.DisplayName)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	avatarDataURL, err := cleanAvatarDataURL(payload.AvatarDataURL)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	updated, err := accountStore().updateProfile(user.Email, displayName, avatarDataURL)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "could not update profile")
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, identityPayload(updated))
+}
+
+func cleanDisplayName(value string) (string, error) {
+	name := strings.Join(strings.Fields(value), " ")
+	if name == "" {
+		return "", errors.New("display name is required")
+	}
+	if len(name) > 80 {
+		return "", errors.New("display name must be 80 characters or fewer")
+	}
+	return name, nil
+}
+
+func cleanAvatarDataURL(value string) (string, error) {
+	avatar := strings.TrimSpace(value)
+	if avatar == "" {
+		return "", nil
+	}
+	if len(avatar) > avatarDataURLLimit {
+		return "", fmt.Errorf("avatar image must be smaller than %d KB", avatarDataURLLimit/1024)
+	}
+	if !strings.HasPrefix(avatar, "data:image/") {
+		return "", errors.New("avatar must be an image data URL")
+	}
+	parts := strings.SplitN(avatar, ";base64,", 2)
+	if len(parts) != 2 {
+		return "", errors.New("avatar must be base64 encoded")
+	}
+	switch strings.TrimPrefix(parts[0], "data:") {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+	default:
+		return "", errors.New("avatar must be a PNG, JPEG, WebP, or GIF image")
+	}
+	if _, err := base64.StdEncoding.DecodeString(parts[1]); err != nil {
+		return "", errors.New("avatar image data is invalid")
+	}
+	return avatar, nil
 }
 
 // publicBaseURL is where emailed links should point. The request Host header
