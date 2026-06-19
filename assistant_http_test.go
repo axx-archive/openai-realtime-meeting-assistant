@@ -238,6 +238,52 @@ func TestArtifactsHandlerListsSavedArtifactsForSignedInUser(t *testing.T) {
 	}
 }
 
+func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/threads", strings.NewReader(`{
+		"query":"Research the buyer proof for a Realtime 2 as UI workflow.",
+		"mode":"research"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantThreadsHandler(recorder, req)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusAccepted)
+	}
+	var payload struct {
+		Thread   scoutAgentThread    `json:"thread"`
+		Artifact meetingMemoryEntry  `json:"artifact"`
+		Actions  []osAssistantAction `json:"actions"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Thread.ID == "" || payload.Thread.Status != "running" {
+		t.Fatalf("thread=%#v, want running thread", payload.Thread)
+	}
+	if payload.Artifact.Kind != meetingMemoryKindOSArtifact || payload.Artifact.Metadata["source"] != "scout_thread" || payload.Artifact.Metadata["status"] != "running" {
+		t.Fatalf("artifact=%#v, want running scout thread artifact", payload.Artifact)
+	}
+	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Artifact.Text, "Goal workflow") {
+		t.Fatalf("artifact text=%q, want thread scaffold", payload.Artifact.Text)
+	}
+	if !hasAssistantAction(payload.Actions, "open_tool", "research", payload.Artifact.ID) {
+		t.Fatalf("actions=%#v, want research open action", payload.Actions)
+	}
+}
+
 func TestArtifactsHandlerUpdatesSavedArtifactForSignedInUser(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -277,6 +323,49 @@ func TestArtifactsHandlerUpdatesSavedArtifactForSignedInUser(t *testing.T) {
 	}
 	if payload.Artifact.Metadata["title"] != "Edited artifact" || payload.Artifact.Metadata["updatedBy"] != "AJ" {
 		t.Fatalf("artifact metadata=%v, want title and updater", payload.Artifact.Metadata)
+	}
+}
+
+func TestArtifactsHandlerPublishesSavedArtifactForSignedInUser(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	artifact, _, err := kanbanApp.createOSArtifact("workflow", "launch a multi-agent loop", "Codex goal workflow\n\n1. Identify and set goal.", "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"id":%q,"title":"Published workflow","text":"Codex goal workflow\n\nReady.","published":true}`, artifact.ID)
+	req := httptest.NewRequest(http.MethodPatch, "/artifacts", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	artifactsHandler(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+	var payload struct {
+		Updated  bool               `json:"updated"`
+		Artifact meetingMemoryEntry `json:"artifact"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Updated {
+		t.Fatal("updated=false, want true")
+	}
+	if payload.Artifact.Metadata["published"] != "true" || payload.Artifact.Metadata["status"] != "published" || payload.Artifact.Metadata["publishedAt"] == "" {
+		t.Fatalf("artifact metadata=%v, want published status", payload.Artifact.Metadata)
+	}
+	published := kanbanApp.publishedOSArtifactsSnapshot(5)
+	if len(published) != 1 || published[0].ID != artifact.ID {
+		t.Fatalf("published=%#v, want published artifact %q", published, artifact.ID)
 	}
 }
 

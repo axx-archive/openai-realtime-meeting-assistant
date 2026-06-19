@@ -1,0 +1,264 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+const agentThreadRequestTimeout = 60 * time.Second
+
+type scoutAgentThread struct {
+	ID       string              `json:"id"`
+	Mode     string              `json:"mode"`
+	Query    string              `json:"query"`
+	Status   string              `json:"status"`
+	Artifact meetingMemoryEntry  `json:"artifact"`
+	Actions  []osAssistantAction `json:"actions,omitempty"`
+}
+
+var startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+	go app.runAgentThread(thread)
+}
+
+func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdBy string) (scoutAgentThread, error) {
+	mode = normalizeAgentThreadMode(mode)
+	if mode == "" {
+		return scoutAgentThread{}, fmt.Errorf("thread mode is required")
+	}
+	query = canonicalizeBoardText(query)
+	if query == "" {
+		return scoutAgentThread{}, fmt.Errorf("thread query is required")
+	}
+
+	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
+	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.memorySnapshotForClients(12))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, map[string]string{
+		"source":          "scout_thread",
+		"threadId":        threadID,
+		"status":          "running",
+		"threadStatus":    "running",
+		"queuedAt":        now,
+		"startedAt":       now,
+		"published":       "false",
+		"worker":          "openai_text_response",
+		"workerBoundary":  "realtime_launch_async_artifact_update",
+		"latestThreadRun": threadID,
+	})
+	if err != nil {
+		return scoutAgentThread{}, err
+	}
+	if strings.TrimSpace(artifact.ID) == "" {
+		return scoutAgentThread{}, fmt.Errorf("thread artifact was not saved")
+	}
+
+	actions := app.osAssistantActions(query, mode, artifact)
+	thread := scoutAgentThread{
+		ID:       threadID,
+		Mode:     mode,
+		Query:    query,
+		Status:   "running",
+		Artifact: artifact,
+		Actions:  actions,
+	}
+
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastAssistantEvent("action", assistantToolLabel(mode)+" thread launched", map[string]any{
+		"tool":       "launch_agent_thread",
+		"thread":     thread,
+		"artifact":   artifact,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	startAgentThreadAsync(app, thread)
+	return thread, nil
+}
+
+func normalizeAgentThreadMode(mode string) string {
+	switch normalizeRealtimeArtifactMode(mode) {
+	case "artifacts", "research", "design", "grill", "workflow":
+		return normalizeRealtimeArtifactMode(mode)
+	default:
+		return ""
+	}
+}
+
+func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
+	ctx, cancel := context.WithTimeout(context.Background(), agentThreadRequestTimeout)
+	defer cancel()
+
+	output, err := app.produceAgentThreadArtifact(ctx, thread, createOpenAITextResponse)
+	status := "complete"
+	message := assistantToolLabel(thread.Mode) + " thread complete"
+	metadata := map[string]string{
+		"status":          "complete",
+		"threadStatus":    "complete",
+		"completedAt":     time.Now().UTC().Format(time.RFC3339Nano),
+		"latestThreadRun": thread.ID,
+	}
+	if err != nil {
+		status = "error"
+		message = assistantToolLabel(thread.Mode) + " thread needs attention"
+		output = buildAgentThreadError(thread, err)
+		metadata["status"] = "error"
+		metadata["threadStatus"] = "error"
+		metadata["error"] = err.Error()
+	}
+
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, thread.Artifact.Metadata["title"], output, scoutParticipantName, metadata)
+	if updateErr != nil {
+		log.Errorf("Failed to update Scout thread artifact %s: %v", thread.ID, updateErr)
+		broadcastAssistantEvent("error", "Scout thread could not update its artifact", map[string]any{
+			"tool":     "launch_agent_thread",
+			"threadId": thread.ID,
+			"artifact": thread.Artifact,
+		})
+		return
+	}
+
+	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastAssistantEvent("action", message, map[string]any{
+		"tool":       "launch_agent_thread",
+		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
+		"artifact":   artifact,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+}
+
+func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {
+	if app == nil {
+		return "", fmt.Errorf("assistant is unavailable")
+	}
+	if responder == nil {
+		responder = createOpenAITextResponse
+	}
+	apiKey := app.currentOpenAIAPIKey()
+	if strings.TrimSpace(apiKey) == "" {
+		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
+	}
+
+	output, err := responder(ctx, apiKey, openAITextRequest{
+		Model:           meetingBrainModel(),
+		Instructions:    agentThreadInstructions(thread.Mode),
+		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.memorySnapshotForClients(20), time.Now()),
+		ReasoningEffort: "low",
+		Verbosity:       "medium",
+		MaxOutputTokens: 1200,
+	})
+	if err != nil {
+		return "", err
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "", fmt.Errorf("Scout thread produced no artifact text")
+	}
+
+	return output, nil
+}
+
+func (app *kanbanBoardApp) currentOpenAIAPIKey() string {
+	if app == nil {
+		return ""
+	}
+	app.mu.Lock()
+	apiKey := strings.TrimSpace(app.apiKey)
+	app.mu.Unlock()
+	if apiKey != "" {
+		return apiKey
+	}
+	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+}
+
+func buildAgentThreadScaffold(mode string, query string, board kanbanBoardState, memory []meetingMemoryEntry) string {
+	contextLine := boardAndMemoryContextLine(board, memory)
+	lines := []string{
+		"Scout work thread",
+		"",
+		"Vision: " + compactAssistantLine(query),
+		"Status: running",
+		"Thread mode: " + assistantToolLabel(mode),
+		"Workspace context: " + contextLine,
+		"",
+		"Execution log",
+		"- Scout created the artifact and queued a server-side thread.",
+		"- The Realtime 2 voice loop stays free while the worker runs.",
+		"- The artifact will update when the worker completes or hits an error.",
+	}
+	return strings.Join(appendGoalWorkflow(lines, mode, query, contextLine, agentThreadDeliverable(mode), contextLine), "\n")
+}
+
+func buildAgentThreadError(thread scoutAgentThread, err error) string {
+	lines := []string{
+		"Scout work thread",
+		"",
+		"Vision: " + compactAssistantLine(thread.Query),
+		"Status: needs attention",
+		"Thread mode: " + assistantToolLabel(thread.Mode),
+		"",
+		"Execution log",
+		"- Scout created the artifact and attempted the server-side worker.",
+		"- Worker error: " + strings.TrimSpace(err.Error()),
+		"",
+		"Next action: reconnect the worker or run the Codex/MCP handoff from this artifact.",
+	}
+	return strings.Join(appendGoalWorkflow(lines, thread.Mode, thread.Query, err.Error(), agentThreadDeliverable(thread.Mode), "worker error recorded on artifact"), "\n")
+}
+
+func agentThreadInstructions(mode string) string {
+	return strings.Join([]string{
+		"You are Scout's server-side work-thread writer for Bonfire OS.",
+		"Create the artifact requested by the user while preserving the structured goal workflow.",
+		"Start with a one-line Vision, then provide concise sections for Goal, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Shipping gate, What worked, Report, and Verification.",
+		"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
+		"Write in a practical operator voice. Keep it useful as a saved artifact, not a chat reply.",
+		"Mode: " + assistantToolLabel(mode) + ".",
+	}, "\n")
+}
+
+func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memory []meetingMemoryEntry, now time.Time) string {
+	var builder strings.Builder
+	builder.WriteString("Now: ")
+	builder.WriteString(now.Format(time.RFC3339))
+	builder.WriteString("\nThread id: ")
+	builder.WriteString(thread.ID)
+	builder.WriteString("\nMode: ")
+	builder.WriteString(thread.Mode)
+	builder.WriteString("\nUser request: ")
+	builder.WriteString(thread.Query)
+	builder.WriteString("\n\nBoard and memory context: ")
+	builder.WriteString(boardAndMemoryContextLine(board, memory))
+	builder.WriteString("\n\nRecent durable memory:\n")
+	for _, entry := range memory {
+		builder.WriteString("- ")
+		builder.WriteString(entry.Kind)
+		if title := strings.TrimSpace(entry.Metadata["title"]); title != "" {
+			builder.WriteString(" / ")
+			builder.WriteString(title)
+		}
+		builder.WriteString(": ")
+		builder.WriteString(compactAssistantLine(entry.Text))
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func agentThreadDeliverable(mode string) string {
+	switch normalizeAgentThreadMode(mode) {
+	case "research":
+		return "research brief with claims, evidence lanes, counterarguments, and next checks"
+	case "design":
+		return "design brief with user intent, flow, interface direction, risks, and build notes"
+	case "grill":
+		return "pressure-test scorecard with objections, hard questions, and improved ask"
+	case "workflow":
+		return "goal-tracked multi-agent workflow artifact with review and shipping gates"
+	default:
+		return "durable operating artifact with workflow, evidence, and verification notes"
+	}
+}

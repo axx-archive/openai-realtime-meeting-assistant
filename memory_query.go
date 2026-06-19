@@ -199,6 +199,10 @@ func buildOSAssistantModeAnswer(mode string, result assistantQueryResult, board 
 }
 
 func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer string, createdBy string) (meetingMemoryEntry, bool, error) {
+	return app.createOSArtifactWithMetadata(mode, query, answer, createdBy, nil)
+}
+
+func (app *kanbanBoardApp) createOSArtifactWithMetadata(mode string, query string, answer string, createdBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
 	}
@@ -214,18 +218,28 @@ func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer st
 
 	artifactID := fmt.Sprintf("os-artifact-%s-%d", mode, time.Now().UnixNano())
 	metadata := map[string]string{
-		"mode":  mode,
-		"query": strings.TrimSpace(query),
-		"title": osArtifactTitle(mode, query, answer),
+		"mode":      mode,
+		"query":     strings.TrimSpace(query),
+		"title":     osArtifactTitle(mode, query, answer),
+		"status":    "draft",
+		"published": "false",
 	}
 	if osAssistantModeUsesGoalWorkflow(mode) {
 		metadata["workflow"] = "codex_goal_loop"
 		metadata["workflowStages"] = goalWorkflowStageMetadata
 		metadata["codexRunner"] = "not_connected"
-		metadata["status"] = "saved"
+		metadata["goalStatus"] = "scaffolded"
+		metadata["reviewGate"] = "pending"
 	}
 	if createdBy = canonicalRoomActorName(createdBy); createdBy != "" {
 		metadata["createdBy"] = createdBy
+	}
+	for key, value := range metadataUpdates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		metadata[key] = strings.TrimSpace(value)
 	}
 
 	return app.memory.appendOSArtifact(artifactID, answer, metadata)
@@ -241,6 +255,40 @@ func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string
 	}
 
 	return app.memory.updateOSArtifact(id, title, text, updatedBy)
+}
+
+func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
+	}
+	rawUpdatedBy := strings.TrimSpace(updatedBy)
+	if updatedBy = canonicalParticipantName(rawUpdatedBy); updatedBy == "" {
+		updatedBy = rawUpdatedBy
+	}
+
+	return app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, metadataUpdates)
+}
+
+func (app *kanbanBoardApp) publishOSArtifact(id string, published bool, updatedBy string) (meetingMemoryEntry, bool, error) {
+	existing, exists := app.osArtifactByID(id)
+	if !exists {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata := map[string]string{}
+	if published {
+		metadata["published"] = "true"
+		metadata["status"] = "published"
+		metadata["publishedBy"] = canonicalRoomActorName(updatedBy)
+		metadata["publishedAt"] = now
+	} else {
+		metadata["published"] = "false"
+		metadata["status"] = "draft"
+		metadata["unpublishedBy"] = canonicalRoomActorName(updatedBy)
+		metadata["unpublishedAt"] = now
+	}
+
+	return app.updateOSArtifactWithMetadata(existing.ID, existing.Metadata["title"], existing.Text, updatedBy, metadata)
 }
 
 func (app *kanbanBoardApp) osArtifactsSnapshot(limit int) []meetingMemoryEntry {
@@ -260,6 +308,24 @@ func (app *kanbanBoardApp) osArtifactsSnapshot(limit int) []meetingMemoryEntry {
 	}
 
 	return artifacts
+}
+
+func (app *kanbanBoardApp) publishedOSArtifactsSnapshot(limit int) []meetingMemoryEntry {
+	artifacts := app.osArtifactsSnapshot(0)
+	published := make([]meetingMemoryEntry, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifactIsPublished(artifact) {
+			published = append(published, artifact)
+		}
+	}
+	sort.SliceStable(published, func(i, j int) bool {
+		return artifactLatestPublishedTime(published[i]).After(artifactLatestPublishedTime(published[j]))
+	})
+	if limit > 0 && len(published) > limit {
+		published = published[:limit]
+	}
+
+	return published
 }
 
 func (app *kanbanBoardApp) osAssistantActions(query string, mode string, artifact meetingMemoryEntry) []osAssistantAction {
@@ -374,6 +440,21 @@ func (app *kanbanBoardApp) latestOSArtifactID() string {
 		return ""
 	}
 	return strings.TrimSpace(artifacts[len(artifacts)-1].ID)
+}
+
+func artifactIsPublished(entry meetingMemoryEntry) bool {
+	status := strings.ToLower(strings.TrimSpace(entry.Metadata["status"]))
+	published := strings.ToLower(strings.TrimSpace(entry.Metadata["published"]))
+	return published == "true" || status == "published"
+}
+
+func artifactLatestPublishedTime(entry meetingMemoryEntry) time.Time {
+	for _, key := range []string{"publishedAt", "updatedAt"} {
+		if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata[key])); err == nil {
+			return parsed
+		}
+	}
+	return entry.CreatedAt
 }
 
 func hasAssistantPhrase(text string, phrases ...string) bool {

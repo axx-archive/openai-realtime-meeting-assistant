@@ -193,19 +193,22 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		t.Fatalf("marshal tools: %v", err)
 	}
 	toolsJSON := string(rawTools)
-	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"update_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", `"memory"`, "local mic"} {
+	for _, want := range []string{`"name":"control_app"`, `"name":"set_voice_control"`, `"name":"set_recording"`, `"name":"archive_meeting"`, `"name":"undo_delete_ticket"`, `"name":"create_artifact"`, `"name":"launch_agent_thread"`, `"name":"update_artifact"`, `"name":"publish_artifact"`, `"artifacts"`, `"research"`, `"workflow"`, "start a thread", "latest published", `"memory"`, "local mic"} {
 		if !strings.Contains(toolsJSON, want) {
 			t.Fatalf("tools JSON missing %s: %s", want, toolsJSON)
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "goal workflow", "start a thread", "Codex runner", "Voice control mode"} {
+	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "start a thread", "vision", "Latest published artifacts", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}
 	}
 	if !realtimeToolRunsAsync("archive_meeting") {
 		t.Fatal("archive_meeting should run async because it writes archives and artifacts")
+	}
+	if !realtimeToolRunsAsync("launch_agent_thread") {
+		t.Fatal("launch_agent_thread should run async because it creates worker artifacts")
 	}
 }
 
@@ -502,6 +505,70 @@ func TestRealtimeCreateArtifactScaffoldsWorkflow(t *testing.T) {
 		if !strings.Contains(artifact.Text, want) {
 			t.Fatalf("artifact text missing %q: %s", want, artifact.Text)
 		}
+	}
+}
+
+func TestRealtimeLaunchAgentThreadCreatesRunningArtifact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	result, changed, err := app.applyToolCallArgs("launch_agent_thread", map[string]any{
+		"mode":  "design",
+		"query": "turn Realtime 2 into the UI for Scout threads and artifacts",
+	})
+	if err != nil {
+		t.Fatalf("launch_agent_thread: %v", err)
+	}
+	if changed {
+		t.Fatal("launch_agent_thread changed board state")
+	}
+	thread, ok := result["thread"].(scoutAgentThread)
+	if !ok {
+		t.Fatalf("thread type=%T, want scoutAgentThread", result["thread"])
+	}
+	if thread.ID == "" || thread.Status != "running" {
+		t.Fatalf("thread=%#v, want running thread", thread)
+	}
+	artifact, ok := result["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact type=%T, want meetingMemoryEntry", result["artifact"])
+	}
+	if artifact.Kind != meetingMemoryKindOSArtifact || artifact.Metadata["source"] != "scout_thread" || artifact.Metadata["status"] != "running" {
+		t.Fatalf("artifact=%#v, want running scout thread artifact", artifact)
+	}
+	if !strings.Contains(artifact.Text, "Scout work thread") || !strings.Contains(artifact.Text, "Goal workflow") {
+		t.Fatalf("artifact text=%q, want thread scaffold", artifact.Text)
+	}
+}
+
+func TestRealtimePublishArtifactMarksDashboardMetadata(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	artifact, _, err := app.createOSArtifact("workflow", "ship a gated loop", "Codex goal workflow\n\nReady.", "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+
+	result, changed, err := app.applyToolCallArgs("publish_artifact", map[string]any{
+		"artifact_id": artifact.ID,
+		"published":   true,
+	})
+	if err != nil {
+		t.Fatalf("publish_artifact: %v", err)
+	}
+	if changed {
+		t.Fatal("publish_artifact changed board state")
+	}
+	published, ok := result["artifact"].(meetingMemoryEntry)
+	if !ok {
+		t.Fatalf("artifact type=%T, want meetingMemoryEntry", result["artifact"])
+	}
+	if published.Metadata["published"] != "true" || published.Metadata["status"] != "published" || published.Metadata["publishedAt"] == "" {
+		t.Fatalf("published metadata=%v, want dashboard publish status", published.Metadata)
+	}
+	if len(app.publishedOSArtifactsSnapshot(10)) != 1 {
+		t.Fatalf("published snapshot=%#v, want one artifact", app.publishedOSArtifactsSnapshot(10))
 	}
 }
 

@@ -258,3 +258,45 @@ func TestMeetingMemoryUpdatesOSArtifactAndReloads(t *testing.T) {
 		t.Fatalf("reloaded entry=%#v, want edited artifact", entries[0])
 	}
 }
+
+func TestMeetingMemoryUpdatesOSArtifactMetadataAndReloads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, appended, err := store.appendOSArtifact("artifact-1", "Draft body", map[string]string{
+		"mode":      "workflow",
+		"title":     "Draft",
+		"published": "false",
+		"status":    "draft",
+	}); err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	} else if !appended {
+		t.Fatal("appendOSArtifact appended=false, want true")
+	}
+
+	updated, changed, err := store.updateOSArtifactWithMetadata("artifact-1", "Draft", "Draft body", "AJ", map[string]string{
+		"published":   "true",
+		"status":      "published",
+		"publishedBy": "AJ",
+	})
+	if err != nil {
+		t.Fatalf("updateOSArtifactWithMetadata: %v", err)
+	}
+	if !changed {
+		t.Fatal("updateOSArtifactWithMetadata changed=false, want true")
+	}
+	if updated.Text != "Draft body" || updated.Metadata["published"] != "true" || updated.Metadata["status"] != "published" {
+		t.Fatalf("updated entry=%#v, want metadata-only publish", updated)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	entries := reloaded.snapshot(10)
+	if len(entries) != 1 || entries[0].Metadata["published"] != "true" || entries[0].Metadata["publishedBy"] != "AJ" {
+		t.Fatalf("reloaded entries=%#v, want published metadata", entries)
+	}
+}

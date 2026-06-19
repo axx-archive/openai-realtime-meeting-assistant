@@ -1441,7 +1441,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a thread, start a thread, or talk to Scout privately, call control_app with tool chat. The Chat app currently has one private Scout thread; opening Chat starts or focuses that thread. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
 		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening, turn off voice, end the vocal conversation, close the waveform island, or stop Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
-		"# Artifacts and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save an output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use workflow when the user asks for a Codex goal, reusable goal workflow, multi-agent loop, research/design execution plan, or gated shipping loop. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a Codex runner or external research job is not connected yet, so do not claim that you started a Codex goal, browser research, SSH work, or external job.",
+		"# Artifacts, threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created and the worker can update it outside the live voice loop. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a full external Codex/browser/SSH worker is still a handoff boundary unless a launched thread result includes that evidence.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -1701,6 +1701,20 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "launch_agent_thread",
+			"description": "Launch a Scout work thread for longer research, design, grill, artifact, or workflow requests. This creates a running artifact immediately and lets the worker update it outside the live Realtime voice loop.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":  artifactModeProperty,
+					"query": map[string]any{"type": "string", "description": "The user's vision, goal, research/design request, or Codex-style workflow objective."},
+				},
+				"required":             []string{"mode", "query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "update_artifact",
 			"description": "Update an existing saved Bonfire OS artifact when the artifact_id is known. Use for requests to rename, revise, edit, or overwrite a specific saved artifact. If the artifact_id is unknown, open artifacts or ask which artifact instead of creating a duplicate.",
 			"parameters": map[string]any{
@@ -1711,6 +1725,20 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"content":     map[string]any{"type": "string", "description": "Optional full replacement artifact content. Omit only for title-only renames."},
 				},
 				"required":             []string{"artifact_id"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "publish_artifact",
+			"description": "Publish or unpublish a saved artifact so the latest published artifacts can appear on the Office dashboard. Use only after an explicit publish, unpublish, share to dashboard, or remove from dashboard request.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"artifact_id": map[string]any{"type": "string", "description": "Existing saved artifact id to publish or unpublish."},
+					"published":   map[string]any{"type": "boolean", "description": "true to publish to the dashboard; false to remove from published dashboard surfaces."},
+				},
+				"required":             []string{"artifact_id", "published"},
 				"additionalProperties": false,
 			},
 		},
@@ -1966,7 +1994,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact", "archive_meeting":
+	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting":
 		return true
 	default:
 		return false
@@ -2139,8 +2167,12 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.archiveRealtimeMeeting(args)
 	case "create_artifact":
 		return app.createRealtimeArtifact(args)
+	case "launch_agent_thread":
+		return app.launchRealtimeAgentThread(args)
 	case "update_artifact":
 		return app.updateRealtimeArtifact(args)
+	case "publish_artifact":
+		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
 	case "do_nothing":
@@ -2316,6 +2348,47 @@ func (app *kanbanBoardApp) updateRealtimeArtifact(args map[string]any) (map[stri
 	}, false, nil
 }
 
+func (app *kanbanBoardApp) publishRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
+	artifactID := firstNonEmptyString(asString(args["artifact_id"]), asString(args["artifactId"]))
+	if artifactID == "" {
+		return nil, false, fmt.Errorf("artifact_id is required")
+	}
+	rawPublished, ok := args["published"]
+	if !ok {
+		return nil, false, fmt.Errorf("published is required")
+	}
+	publishedValue, ok := rawPublished.(bool)
+	if !ok {
+		return nil, false, fmt.Errorf("published must be a boolean")
+	}
+
+	artifact, updated, err := app.publishOSArtifact(artifactID, publishedValue, scoutParticipantName)
+	if err != nil {
+		return nil, false, err
+	}
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	actions := app.osAssistantActions(artifact.Metadata["title"], "artifacts", artifact)
+	message := "Artifact unpublished"
+	if publishedValue {
+		message = "Artifact published"
+	}
+	broadcastAssistantEvent("action", message, map[string]any{
+		"tool":       "publish_artifact",
+		"artifact":   artifact,
+		"updated":    updated,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+
+	return map[string]any{
+		"ok":        true,
+		"artifact":  artifact,
+		"published": publishedValue,
+		"updated":   updated,
+		"actions":   actions,
+	}, false, nil
+}
+
 func (app *kanbanBoardApp) osArtifactByID(id string) (meetingMemoryEntry, bool) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -2418,6 +2491,31 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 		"artifact": artifact,
 		"appended": appended,
 		"actions":  actions,
+	}, false, nil
+}
+
+func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any) (map[string]any, bool, error) {
+	mode := normalizeAgentThreadMode(asString(args["mode"]))
+	if mode == "" {
+		return nil, false, fmt.Errorf("mode is required")
+	}
+	query := canonicalizeBoardText(asString(args["query"]))
+	if query == "" {
+		return nil, false, fmt.Errorf("query is required")
+	}
+
+	thread, err := app.launchAgentThread(mode, query, scoutParticipantName)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return map[string]any{
+		"ok":       true,
+		"mode":     mode,
+		"query":    query,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
 	}, false, nil
 }
 
@@ -3334,6 +3432,10 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 			"downloadUrl": meetingArchiveDownloadURL(archiveID),
 			"createdBy":   archivedBy,
 			"meetingId":   meetingID,
+			"status":      "published",
+			"published":   "true",
+			"publishedAt": archivedAt.Format(time.RFC3339Nano),
+			"publishedBy": archivedBy,
 		})
 		if err != nil {
 			return meetingArchiveResult{}, fmt.Errorf("remember meeting artifact: %w", err)

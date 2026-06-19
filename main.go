@@ -259,6 +259,7 @@ func main() {
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
+	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
@@ -577,6 +578,49 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 	writeAuthJSON(w, http.StatusOK, response)
 }
 
+func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		Query string `json:"query"`
+		Mode  string `json:"mode"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read assistant thread request")
+		return
+	}
+
+	thread, err := kanbanApp.launchAgentThread(payload.Mode, payload.Query, user.Name)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeAuthJSON(w, http.StatusAccepted, map[string]any{
+		"ok":       true,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
+	})
+}
+
 func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -599,15 +643,30 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPatch {
 		payload := struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-			Text  string `json:"text"`
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Text      string `json:"text"`
+			Published *bool  `json:"published"`
 		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read artifact update")
 			return
 		}
-		artifact, updated, err := kanbanApp.updateOSArtifact(payload.ID, payload.Title, payload.Text, user.Name)
+		metadata := map[string]string{}
+		if payload.Published != nil {
+			if *payload.Published {
+				metadata["published"] = "true"
+				metadata["status"] = "published"
+				metadata["publishedBy"] = user.Name
+				metadata["publishedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+			} else {
+				metadata["published"] = "false"
+				metadata["status"] = "draft"
+				metadata["unpublishedBy"] = user.Name
+				metadata["unpublishedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+		}
+		artifact, updated, err := kanbanApp.updateOSArtifactWithMetadata(payload.ID, payload.Title, payload.Text, user.Name, metadata)
 		if err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "not found") {
@@ -625,8 +684,9 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"artifacts": kanbanApp.osArtifactsSnapshot(100),
+		"ok":                 true,
+		"artifacts":          kanbanApp.osArtifactsSnapshot(100),
+		"publishedArtifacts": kanbanApp.publishedOSArtifactsSnapshot(10),
 	})
 }
 

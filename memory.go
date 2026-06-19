@@ -243,6 +243,10 @@ func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metada
 }
 
 func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadata(id, title, text, updatedBy, nil)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -280,10 +284,25 @@ func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text 
 	}
 	nextUpdatedBy := strings.TrimSpace(updatedBy)
 	changed := entry.Text != text || entry.Metadata["title"] != nextTitle
+	normalizedMetadataUpdates := make(map[string]string, len(metadataUpdates))
+	for key, value := range metadataUpdates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		normalizedMetadataUpdates[key] = value
+		if entry.Metadata[key] != value {
+			changed = true
+		}
+	}
 	if !changed {
 		return cloneMemoryEntry(entry), false, nil
 	}
 	entry.Metadata["title"] = nextTitle
+	for key, value := range normalizedMetadataUpdates {
+		entry.Metadata[key] = value
+	}
 	if nextUpdatedBy != "" {
 		entry.Metadata["updatedBy"] = nextUpdatedBy
 	}
