@@ -23,6 +23,37 @@ func TestAssistantQueryRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	assistantRealtimeOfferHandler(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want %d for unauthenticated private realtime offer", recorder.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+
+	assistantRealtimeOfferHandler(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s, want %d when realtime key is missing", recorder.Code, recorder.Body.String(), http.StatusServiceUnavailable)
+	}
+}
+
 func TestAssistantQueryAnswersFromBoardWithoutRoom(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

@@ -260,6 +260,7 @@ func main() {
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
+	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
@@ -619,6 +620,58 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		"thread":   thread,
 		"artifact": thread.Artifact,
 		"actions":  thread.Actions,
+	})
+}
+
+func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if apiKey == "" {
+		writeAuthError(w, http.StatusServiceUnavailable, "OpenAI Realtime is not configured")
+		return
+	}
+
+	payload := struct {
+		SDP string `json:"sdp"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read realtime offer")
+		return
+	}
+
+	offerSDP := strings.TrimSpace(payload.SDP)
+	if offerSDP == "" {
+		writeAuthError(w, http.StatusBadRequest, "sdp is required")
+		return
+	}
+
+	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP)
+	if err != nil {
+		log.Errorf("Failed to create private Realtime voice call for %s: %v", user.Email, err)
+		writeAuthError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":  true,
+		"sdp": answerSDP,
 	})
 }
 

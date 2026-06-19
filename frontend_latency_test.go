@@ -930,7 +930,7 @@ func TestRealtimeVoiceActionCanCloseVoiceIsland(t *testing.T) {
 	}
 }
 
-func TestRealtimeWaveformLaunchersUseSharedVoiceIsland(t *testing.T) {
+func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -945,7 +945,10 @@ func TestRealtimeWaveformLaunchersUseSharedVoiceIsland(t *testing.T) {
 		"function startRealtimeVoiceFromWaveform(event)",
 		"if (appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceConversation(event)",
 		"if (!appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceFromWaveform(event)",
-		"joinRoom({ voiceOnly: true })",
+		"await startPrivateRealtimeVoiceConversation()",
+		"let privateRealtimeVoicePeer",
+		"postAuthJSON('/assistant/realtime-offer'",
+		"function closePrivateRealtimeVoiceSession()",
 		"setVoiceIslandState('connecting', 'connecting...')",
 		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",
 		"background: rgba(32, 33, 37, 0.94);",
@@ -962,5 +965,8 @@ func TestRealtimeWaveformLaunchersUseSharedVoiceIsland(t *testing.T) {
 	}
 	if strings.Contains(html, "function startScoutVoiceFromWaveform(event)") {
 		t.Fatal("visible waveform launchers should use the Realtime 2 voice island path")
+	}
+	if strings.Contains(html, "joinRoom({ voiceOnly: true })") {
+		t.Fatal("dashboard Realtime voice launchers must not enter the room join path")
 	}
 }

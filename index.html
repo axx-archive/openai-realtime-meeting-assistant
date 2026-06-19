@@ -10908,6 +10908,12 @@
       let realtimeVoiceOnlyPending = false
       let realtimeVoiceStartedRoom = false
       let realtimeVoiceReturnTool = 'office'
+      let privateRealtimeVoicePeer
+      let privateRealtimeVoiceStream
+      let privateRealtimeVoiceProcessor
+      let privateRealtimeVoiceDataChannel
+      let privateRealtimeVoiceAudio
+      let privateRealtimeVoiceStarting = false
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
@@ -13251,7 +13257,7 @@
         setVoiceIslandState('listening', 'listening...')
       }
 
-      function startRealtimeVoiceFromWaveform(event) {
+      async function startRealtimeVoiceFromWaveform(event) {
         event?.preventDefault?.()
         if (appShell.classList.contains('is-in-room')) {
           startRealtimeVoiceConversation(event)
@@ -13262,7 +13268,200 @@
           return
         }
         setOSAssistantOpen(false)
-        joinRoom({ voiceOnly: true })
+        await startPrivateRealtimeVoiceConversation()
+      }
+
+      async function startPrivateRealtimeVoiceConversation() {
+        if (privateRealtimeVoiceStarting) {
+          setVoiceIslandState('connecting', 'connecting...')
+          return
+        }
+        if (privateRealtimeVoicePeer && realtimeVoiceActive) {
+          setVoiceIslandState('listening', 'listening...')
+          return
+        }
+
+        stopOSAssistantVoice()
+        closePrivateRealtimeVoiceSession()
+        realtimeVoiceActive = true
+        realtimeVoiceOnlyPending = false
+        realtimeVoiceStartedRoom = false
+        realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
+        privateRealtimeVoiceStarting = true
+        setVoiceIslandState('connecting', 'connecting...')
+
+        try {
+          await beginPrivateRealtimeVoiceSession()
+          if (realtimeVoiceActive && privateRealtimeVoicePeer) {
+            setVoiceIslandState('listening', 'listening...')
+          }
+        } catch (error) {
+          const message = error.message || 'Realtime 2 voice could not start'
+          console.warn('Private Realtime voice failed', error)
+          closePrivateRealtimeVoiceSession()
+          if (realtimeVoiceActive) {
+            realtimeVoiceActive = false
+            realtimeVoiceOnlyPending = false
+            realtimeVoiceStartedRoom = false
+            setVoiceIslandState('error', message)
+            showToast({ text: message, kind: 'error' })
+          } else {
+            setVoiceIslandState('idle')
+          }
+        } finally {
+          privateRealtimeVoiceStarting = false
+        }
+      }
+
+      async function beginPrivateRealtimeVoiceSession() {
+        isMicMuted = false
+        const captureStream = await getPreferredAudioOnlyUserMedia()
+        const sourceTrack = captureStream.getAudioTracks()[0]
+        if (!sourceTrack) {
+          captureStream.getTracks().forEach(track => track.stop())
+          throw new Error('microphone is unavailable')
+        }
+
+        const audio = await createOutboundAudioForSource(sourceTrack)
+        const outboundTrack = audio.track || sourceTrack
+        outboundTrack.enabled = true
+        privateRealtimeVoiceProcessor = audio.processor
+        privateRealtimeVoiceStream = new MediaStream([outboundTrack])
+
+        const rtcConfiguration = await loadRTCConfiguration()
+        const peer = new RTCPeerConnection(rtcConfiguration)
+        privateRealtimeVoicePeer = peer
+        peer.ontrack = attachPrivateRealtimeVoiceTrack
+        peer.onconnectionstatechange = () => {
+          if (privateRealtimeVoicePeer !== peer) {
+            return
+          }
+          const state = peer.connectionState
+          if (state === 'connected') {
+            setVoiceIslandState('listening', 'listening...')
+          } else if (state === 'connecting' || state === 'new') {
+            setVoiceIslandState('connecting', 'connecting...')
+          } else if (state === 'failed' || state === 'disconnected') {
+            setVoiceIslandState('error', 'voice connection interrupted')
+          } else if (state === 'closed' && realtimeVoiceActive) {
+            setVoiceIslandState('idle')
+          }
+        }
+
+        privateRealtimeVoiceDataChannel = peer.createDataChannel('oai-events')
+        privateRealtimeVoiceDataChannel.onopen = () => setVoiceIslandState('listening', 'listening...')
+        privateRealtimeVoiceDataChannel.onmessage = event => handlePrivateRealtimeVoiceEvent(event.data)
+        privateRealtimeVoiceDataChannel.onerror = () => setVoiceIslandState('error', 'voice needs attention')
+
+        privateRealtimeVoiceStream.getTracks().forEach(track => {
+          peer.addTrack(track, privateRealtimeVoiceStream)
+        })
+
+        const offer = await peer.createOffer()
+        await peer.setLocalDescription(offer)
+        const answerSDP = await exchangePrivateRealtimeOffer(offer.sdp)
+        await peer.setRemoteDescription({ type: 'answer', sdp: answerSDP })
+      }
+
+      async function exchangePrivateRealtimeOffer(offerSDP) {
+        const result = await postAuthJSON('/assistant/realtime-offer', { sdp: offerSDP })
+        if (!result.ok) {
+          throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
+        }
+        const answerSDP = String(result.data?.sdp || '').trim()
+        if (!answerSDP) {
+          throw new Error('Realtime 2 voice did not return an answer')
+        }
+        return answerSDP
+      }
+
+      function attachPrivateRealtimeVoiceTrack(event) {
+        if (event.track?.kind !== 'audio') {
+          return
+        }
+        const stream = event.streams?.[0] || new MediaStream([event.track])
+        if (!privateRealtimeVoiceAudio) {
+          privateRealtimeVoiceAudio = new Audio()
+          privateRealtimeVoiceAudio.autoplay = true
+          privateRealtimeVoiceAudio.playsInline = true
+        }
+        privateRealtimeVoiceAudio.srcObject = stream
+        privateRealtimeVoiceAudio.play?.().catch(error => {
+          console.warn('Could not autoplay private Realtime voice', error)
+          showToast({ text: 'click once to hear Scout', kind: 'note' })
+        })
+        event.track.addEventListener?.('unmute', () => setVoiceIslandState('talking', 'answering...'))
+        event.track.addEventListener?.('mute', () => {
+          if (realtimeVoiceActive) {
+            setVoiceIslandState('listening', 'listening...')
+          }
+        })
+        event.track.addEventListener?.('ended', () => {
+          if (realtimeVoiceActive) {
+            setVoiceIslandState('listening', 'listening...')
+          }
+        }, { once: true })
+      }
+
+      function handlePrivateRealtimeVoiceEvent(raw) {
+        let event
+        try {
+          event = typeof raw === 'string' ? JSON.parse(raw) : raw
+        } catch {
+          return
+        }
+        const type = String(event?.type || '')
+        if (!type) {
+          return
+        }
+        if (type === 'error') {
+          const message = event.error?.message || 'voice needs attention'
+          setVoiceIslandState('error', message)
+        } else if (type.includes('speech_started')) {
+          setVoiceIslandState('hearing', 'listening...')
+        } else if (type.includes('speech_stopped')) {
+          setVoiceIslandState('thinking', 'thinking...')
+        } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
+          setVoiceIslandState('talking', 'answering...')
+        } else if (type.includes('response.done') || type.includes('output_audio_buffer.stopped')) {
+          if (realtimeVoiceActive) {
+            setVoiceIslandState('listening', 'listening...')
+          }
+        }
+      }
+
+      function closePrivateRealtimeVoiceSession() {
+        if (privateRealtimeVoiceDataChannel) {
+          try {
+            privateRealtimeVoiceDataChannel.close()
+          } catch {
+            // Already closed.
+          }
+        }
+        privateRealtimeVoiceDataChannel = undefined
+
+        if (privateRealtimeVoicePeer) {
+          privateRealtimeVoicePeer.ontrack = null
+          privateRealtimeVoicePeer.onconnectionstatechange = null
+          try {
+            privateRealtimeVoicePeer.close()
+          } catch {
+            // Already closed.
+          }
+        }
+        privateRealtimeVoicePeer = undefined
+
+        if (privateRealtimeVoiceAudio) {
+          privateRealtimeVoiceAudio.pause?.()
+          privateRealtimeVoiceAudio.srcObject = null
+        }
+
+        if (privateRealtimeVoiceStream) {
+          privateRealtimeVoiceStream.getTracks().forEach(track => track.stop())
+        }
+        privateRealtimeVoiceStream = undefined
+        cleanupAudioProcessor(privateRealtimeVoiceProcessor, { stopOutput: true, stopSource: true })
+        privateRealtimeVoiceProcessor = undefined
       }
 
       function stopRealtimeVoiceConversation(options = {}) {
@@ -13272,6 +13471,7 @@
         }
         const notifyServer = options?.notifyServer !== false
         const shouldLeaveVoiceRoom = realtimeVoiceStartedRoom && appShell.classList.contains('is-in-room')
+        closePrivateRealtimeVoiceSession()
         if (notifyServer) {
           sendVoiceControlState(false)
         }

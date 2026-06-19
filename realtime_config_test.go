@@ -76,6 +76,24 @@ func TestRealtimeVoiceControlSessionAllowsDirectAnswers(t *testing.T) {
 	}
 }
 
+func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	session := app.privateRealtimeVoiceSessionConfig("gpt-realtime-2")
+
+	if _, ok := session["tools"]; ok {
+		t.Fatal("private dashboard Realtime voice must not inherit shared room tools")
+	}
+	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
+		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)
+	}
+	instructions := session["instructions"].(string)
+	for _, want := range []string{"private Bonfire OS voice assistant", "outside the video room", "Do not describe yourself as the shared room Scout", "do not join the user to the room"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
+		}
+	}
+}
+
 func TestRealtimeConfigEnvironmentOverrides(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "xhigh")
 	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "semantic_vad")

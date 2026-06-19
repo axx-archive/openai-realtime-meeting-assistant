@@ -878,7 +878,15 @@ func drainRTCP(sender *webrtc.RTPSender) {
 }
 
 func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offerSDP string) (string, error) {
-	contentType, body, err := buildRealtimeCallRequest(offerSDP, app.sessionConfig(model))
+	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.sessionConfig(model))
+}
+
+func (app *kanbanBoardApp) createPrivateRealtimeVoiceCall(apiKey string, model string, offerSDP string) (string, error) {
+	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfig(model))
+}
+
+func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP string, session map[string]any) (string, error) {
+	contentType, body, err := buildRealtimeCallRequest(offerSDP, session)
 	if err != nil {
 		return "", err
 	}
@@ -905,6 +913,24 @@ func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offer
 	}
 
 	return string(answerSDP), nil
+}
+
+func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[string]any {
+	session := app.sessionConfig(model)
+	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
+	session["tool_choice"] = "auto"
+	delete(session, "tools")
+	return session
+}
+
+func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
+	return strings.Join([]string{
+		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
+		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not join the user to the room, and do not treat the user as a meeting participant. If the user asks to join, open, control, record, archive, or speak to the room, tell them to use the Room surface.",
+		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
+		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
+		"# Behavior\nAnswer directly and briefly. For app actions, saved artifacts, long-running research, board mutations, or meeting-room controls, explain the next UI surface to use instead of pretending a tool ran. Ask one concise clarifying question when the request is ambiguous.",
+	}, "\n\n")
 }
 
 func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, []byte, error) {
