@@ -69,7 +69,7 @@ func TestRealtimeVoiceControlSessionAllowsDirectAnswers(t *testing.T) {
 		t.Fatalf("tool_choice=%v, want auto while voice control is active", toolChoice)
 	}
 	instructions := session["instructions"].(string)
-	for _, want := range []string{"instant two-way Realtime 2 conversation", "answer simple capability", "directly unless a listed tool is needed"} {
+	for _, want := range []string{"shared room Realtime 2 Scout", "private Scout chat outside the room", "answer simple capability", "directly unless a listed tool is needed"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("voice-control instructions missing %q: %s", want, instructions)
 		}
@@ -302,6 +302,9 @@ func TestRealtimeSetRecordingControlsTranscriptCapture(t *testing.T) {
 	if recording.UpdatedBy != scoutParticipantName {
 		t.Fatalf("recording updatedBy=%q, want %q", recording.UpdatedBy, scoutParticipantName)
 	}
+	if message, _ := result["message"].(string); !strings.Contains(message, "off for the room") {
+		t.Fatalf("message=%q, want room-wide off announcement", message)
+	}
 	if app.transcriptRecordingActive() {
 		t.Fatal("transcript recording still active after realtime pause")
 	}
@@ -318,6 +321,27 @@ func TestRealtimeSetRecordingControlsTranscriptCapture(t *testing.T) {
 	}
 	if !app.transcriptRecordingActive() {
 		t.Fatal("transcript recording inactive after realtime resume")
+	}
+	if message, _ := result["message"].(string); !strings.Contains(message, "on for the room") {
+		t.Fatalf("message=%q, want room-wide on announcement", message)
+	}
+}
+
+func TestRoomRecordingAnnouncementNamesActor(t *testing.T) {
+	manual := roomRecordingAnnouncementText(roomRecordingState{
+		Enabled:   false,
+		UpdatedBy: "AJ",
+	})
+	if manual != "Scout: AJ turned meeting recording off for the room." {
+		t.Fatalf("manual announcement=%q", manual)
+	}
+
+	scout := roomRecordingAnnouncementText(roomRecordingState{
+		Enabled:   true,
+		UpdatedBy: scoutParticipantName,
+	})
+	if scout != "Scout: meeting recording is on for the room." {
+		t.Fatalf("scout announcement=%q", scout)
 	}
 }
 

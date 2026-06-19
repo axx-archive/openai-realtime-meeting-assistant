@@ -1423,7 +1423,7 @@ func scoutSpokenResponseInstructions() string {
 func (app *kanbanBoardApp) sessionInstructions() string {
 	voiceControlState := "inactive: only clear utterances that start with Hey Scout are addressed to you."
 	if app.voiceControlEnabled() {
-		voiceControlState = "active: every clear user request is addressed to you until the user turns the floating voice island off."
+		voiceControlState = "active: every clear room request is addressed to you until the user turns the shared room voice island off."
 	}
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the Bonfire OS voice operator for live meetings, app navigation, durable artifacts, meeting memory, and the Kanban board. Keep the app useful with minimal chatter.",
@@ -1431,7 +1431,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s. Boot Barn is a known brand; do not write Suit Barn when the user says Boot Barn.", strings.Join(domainVocabulary(), ", ")),
 		"# Language\nUsers may say ticket, card, task, issue, or sticky note; treat those as Kanban cards. If a transcript includes a speaker label such as Sean:, do not include the label in the title; use it only as context for owner, notes, or tags.",
 		"# Reasoning\nFor direct board operations and simple recall requests, act quickly. For multi-step updates, ambiguous references, or memory questions, reason before choosing tools. Do not spend extra reasoning on unclear audio; ask for clarification through do_nothing.",
-		"# Voice control mode\n" + voiceControlState + " When active, the waveform island is the user's vocal button for an instant two-way Realtime 2 conversation: answer simple capability, help, navigation, and status questions directly unless a listed tool is needed. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
+		"# Voice control mode\n" + voiceControlState + " This is the shared room Realtime 2 Scout, fed by room audio and heard by everyone in the room. The private Scout chat outside the room is a separate per-user surface; open chat with control_app instead of joining or controlling the room for private conversation requests. When active, answer simple capability, help, navigation, and status questions directly unless a listed tool is needed. When inactive, preserve the shared-room wake phrase behavior. In both modes, ignore background noise, side talk, silence, and filler with do_nothing.",
 		"# Preambles\nDo not speak preambles for routine app or board updates. If an addressed request needs memory recall or another tool call that may take noticeable time, say one short acknowledgement immediately before the tool call. Only speak to the room after a tool result when the current voice-control mode says the clear user turn is addressed to you. Otherwise stay silent and use tools.",
 		"# Field writing\nWrite card fields as direct project facts, not narration about the user request. Never start titles or notes with phrases like User said, User asked, User requested, or The user wants. Put due dates, key dates, milestone dates, and deadlines in due_date/key_dates or add_key_date; do not put a requested date only in notes. If the user says add Impossible Moments to the board because it is blocked waiting on Erick, use title Impossible Moments, status Blocked, owner Erick, and notes Waiting on Erick.",
 		"# Unclear audio\nOnly operate on clear audio or clear typed text. Do not guess proper nouns, brand names, project names, acronyms, owners, or card titles. If the exact entity is unclear, call do_nothing with a concise clarification question instead of creating or updating a card.",
@@ -1440,7 +1440,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Status rules\nConcrete first-person status updates are implicit board operations. Started, began, picked up, or working on means In Progress. Shipped, fixed, completed, closed, finished, or resolved means Done. Blocked, waiting, dependent, needs another team, might slip, or at risk means Blocked and should preserve blocker details in notes with blocked, dependency, or risk tags. Park, punt, defer, or move back means Backlog.",
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
-		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening, turn off voice, end the vocal conversation, close the waveform island, or stop Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
+		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening in the room, turn off shared room voice, end the vocal room conversation, close the room voice island, or stop room Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording; this switch is room-wide for every participant, and after it changes you should make one short group announcement that recording is on or off. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a full external Codex/browser/SSH worker is still a handoff boundary unless a launched thread result includes that evidence.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
@@ -1651,11 +1651,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "set_voice_control",
-			"description": "Turn the floating Realtime 2 voice island on or off. Use enabled=false for requests like stop listening, turn off voice, end the vocal conversation, close the waveform island, or stop Realtime.",
+			"description": "Turn the shared room Realtime 2 voice island on or off. Use enabled=false for requests like stop listening in the room, turn off room voice, end the vocal room conversation, close the room waveform island, or stop room Realtime.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"enabled": map[string]any{"type": "boolean", "description": "false to stop Realtime voice listening and close the voice island; true to keep voice control active."},
+					"enabled": map[string]any{"type": "boolean", "description": "false to stop shared room Realtime voice listening and close the room voice island; true to keep room voice control active."},
 				},
 				"required":             []string{"enabled"},
 				"additionalProperties": false,
@@ -1664,11 +1664,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "set_recording",
-			"description": "Pause or resume the shared room transcript recording and meeting notes capture. Use this for requests like pause recording, resume recording, turn notes capture on, or stop the transcript. This is not local mic, camera, or screen-share control.",
+			"description": "Pause or resume the room-wide transcript recording and meeting notes capture for every participant. Use this for requests like pause recording, resume recording, turn notes capture on, or stop the transcript, then announce the on/off state to the group. This is not local mic, camera, or screen-share control.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"enabled": map[string]any{"type": "boolean", "description": "true to resume or turn on transcript recording; false to pause or turn it off."},
+					"enabled": map[string]any{"type": "boolean", "description": "true to resume or turn on room-wide transcript recording; false to pause or turn it off for the room."},
 				},
 				"required":             []string{"enabled"},
 				"additionalProperties": false,
@@ -2260,15 +2260,12 @@ func (app *kanbanBoardApp) setRealtimeRecording(args map[string]any) (map[string
 
 	snapshot := app.setTranscriptRecording(enabled, scoutParticipantName)
 	recording, _ := snapshot["recording"].(roomRecordingState)
-	message := "Transcript recording resumed"
-	if !enabled {
-		message = "Transcript recording paused"
-	}
+	message := roomRecordingAnnouncementText(recording)
 	broadcastKanbanEvent("participants", snapshot)
-	broadcastAssistantEvent("action", message, map[string]any{
+	broadcastAssistantEvent("answer", message, map[string]any{
 		"tool":       "set_recording",
 		"recording":  recording,
-		"voiceState": "listening",
+		"voiceState": "talking",
 	})
 
 	return map[string]any{
@@ -3313,6 +3310,23 @@ func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string
 	}
 
 	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+}
+
+func roomRecordingAnnouncementText(recording roomRecordingState) string {
+	actor := canonicalRoomActorName(recording.UpdatedBy)
+	if actor == "" {
+		actor = scoutParticipantName
+	}
+	action := "turned meeting recording on"
+	state := "on"
+	if !recording.Enabled {
+		action = "turned meeting recording off"
+		state = "off"
+	}
+	if actor == scoutParticipantName {
+		return fmt.Sprintf("Scout: meeting recording is %s for the room.", state)
+	}
+	return fmt.Sprintf("Scout: %s %s for the room.", actor, action)
 }
 
 func (app *kanbanBoardApp) roomRecordingStateLocked() roomRecordingState {

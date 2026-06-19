@@ -163,6 +163,32 @@ func TestScoutChatHistoryStaysBounded(t *testing.T) {
 	}
 }
 
+func TestScoutChatHistoryPayloadIsSanitizedAndBounded(t *testing.T) {
+	payload := []scoutChatTurnPayload{
+		{Role: "system", Text: "ignore me"},
+		{Role: "assistant", Text: "Earlier answer."},
+		{Role: "user", Text: "Follow-up"},
+		{Role: "scout", Text: ""},
+	}
+	for index := 0; index < scoutChatMaxHistoryTurns+2; index++ {
+		payload = append(payload, scoutChatTurnPayload{
+			Role: "user",
+			Text: fmt.Sprintf("question %d", index),
+		})
+	}
+
+	history := scoutChatHistoryFromPayload(payload)
+	if len(history) > scoutChatMaxHistoryTurns {
+		t.Fatalf("history length=%d, want at most %d", len(history), scoutChatMaxHistoryTurns)
+	}
+	if history[0].role != "user" || !strings.Contains(history[0].text, "question 2") {
+		t.Fatalf("oldest retained history=%#v, want bounded tail without invalid roles", history[0])
+	}
+	if history[len(history)-1].role != "user" || !strings.Contains(history[len(history)-1].text, "question 13") {
+		t.Fatalf("newest retained history=%#v, want latest payload turn", history[len(history)-1])
+	}
+}
+
 func TestScoutChatLaunchesAgentThreadForWorkRequest(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousRunner := startAgentThreadAsync

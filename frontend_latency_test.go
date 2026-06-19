@@ -141,6 +141,9 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 	html := string(rawHTML)
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office">`,
+		`data-tool="office" aria-label="Home" title="Home"`,
+		`data-tool="room" aria-label="Room" title="Room"`,
+		`data-tool="chat" aria-label="Chat" title="Chat"`,
 		`id="officeTool" class="office-tool"`,
 		"business intelligence operating system",
 		"data-open-assistant-mode=\"grill\"",
@@ -210,6 +213,29 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing BI OS dashboard or assistant marker %q", want)
 		}
+	}
+
+	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`} {
+		if strings.Contains(html, `<span class="tool-rail__slot" hidden>
+          <button class="tool-rail__tool" type="button" `+visibleTool) {
+			t.Fatalf("left rail tool %s should remain visible", visibleTool)
+		}
+	}
+	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="memory"`} {
+		if !strings.Contains(html, `<span class="tool-rail__slot" hidden>
+          <button class="tool-rail__tool" type="button" `+hiddenTool) {
+			t.Fatalf("left rail tool %s should be hidden for the simplified rail", hiddenTool)
+		}
+	}
+	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>
+          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board"`) {
+		t.Fatal("left rail board tool should be hidden for the simplified rail")
+	}
+	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden`) {
+		t.Fatal("left rail theme toggle should be hidden for the simplified rail")
+	}
+	if !strings.Contains(html, `id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out" hidden`) {
+		t.Fatal("left rail avatar should be hidden for the simplified rail")
 	}
 
 	for _, unwanted := range []string{
@@ -792,5 +818,33 @@ func TestRealtimeVoiceActionCanCloseVoiceIsland(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing realtime voice close action %q", want)
 		}
+	}
+}
+
+func TestPrivateScoutWaveformDoesNotJoinRoom(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"osAssistantToggle.addEventListener('click', startScoutVoiceFromWaveform)",
+		"function startScoutVoiceFromWaveform(event)",
+		"if (appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceConversation(event)",
+		"setOSAssistantMode('chat')",
+		"startOSAssistantVoice()",
+		"if (!appShell.classList.contains('is-in-room')) {\n          startScoutVoiceFromWaveform(event)",
+		"Start private Scout voice",
+		"let osAssistantConversationTurns = []",
+		"const history = osAssistantConversationTurns.slice(-12)",
+		"body: JSON.stringify({ query, mode: osAssistantMode, history })",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing private Scout voice boundary %q", want)
+		}
+	}
+	if strings.Contains(html, "await joinRoom({ voiceOnly: true })") {
+		t.Fatal("private Scout waveform must not enter the shared room voiceOnly path")
 	}
 }

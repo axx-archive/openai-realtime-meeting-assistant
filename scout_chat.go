@@ -37,6 +37,39 @@ type scoutChatTurn struct {
 	text string
 }
 
+type scoutChatTurnPayload struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+func scoutChatHistoryFromPayload(turns []scoutChatTurnPayload) []scoutChatTurn {
+	if len(turns) == 0 {
+		return nil
+	}
+	start := 0
+	if len(turns) > scoutChatMaxHistoryTurns {
+		start = len(turns) - scoutChatMaxHistoryTurns
+	}
+	history := make([]scoutChatTurn, 0, len(turns)-start)
+	for _, turn := range turns[start:] {
+		role := strings.ToLower(strings.TrimSpace(turn.Role))
+		switch role {
+		case "assistant", "scout":
+			role = "scout"
+		case "user":
+			role = "user"
+		default:
+			continue
+		}
+		text := strings.TrimSpace(turn.Text)
+		if text == "" {
+			continue
+		}
+		history = append(history, scoutChatTurn{role: role, text: text})
+	}
+	return history
+}
+
 type scoutChatSession struct {
 	mu         sync.Mutex
 	send       func(event string, data any) error

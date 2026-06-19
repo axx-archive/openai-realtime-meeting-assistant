@@ -525,8 +525,9 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := struct {
-		Query string `json:"query"`
-		Mode  string `json:"mode"`
+		Query   string                 `json:"query"`
+		Mode    string                 `json:"mode"`
+		History []scoutChatTurnPayload `json:"history"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read assistant query")
@@ -540,7 +541,7 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mode := normalizeOSAssistantMode(payload.Mode)
-	result, err := kanbanApp.resolveAssistantQueryContext(r.Context(), query, nil)
+	result, err := kanbanApp.resolveAssistantQueryContext(r.Context(), query, scoutChatHistoryFromPayload(payload.History))
 	if err != nil {
 		log.Errorf("Failed to answer OS assistant query for %s: %v", user.Email, err)
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
@@ -2345,7 +2346,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			snapshot := kanbanApp.setTranscriptRecording(payload.Enabled, currentParticipantName())
+			recording, _ := snapshot["recording"].(roomRecordingState)
 			broadcastKanbanEvent("participants", snapshot)
+			broadcastAssistantEvent("answer", roomRecordingAnnouncementText(recording), map[string]any{
+				"tool":       "set_recording",
+				"recording":  recording,
+				"voiceState": "talking",
+			})
 		case "participant_media_state":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")
