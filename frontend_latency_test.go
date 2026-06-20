@@ -229,21 +229,16 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		}
 	}
 
-	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`} {
-		if strings.Contains(html, `<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" `+visibleTool) {
-			t.Fatalf("left rail tool %s should remain visible", visibleTool)
+	if strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
+		t.Fatal("Bonfire OS rail tools should remain visible from the home surface")
+	}
+	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`, `data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
+		if !strings.Contains(html, visibleTool) {
+			t.Fatalf("left rail tool %s should be present in the OS rail", visibleTool)
 		}
 	}
-	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="memory"`} {
-		if !strings.Contains(html, `<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" `+hiddenTool) {
-			t.Fatalf("left rail tool %s should be hidden for the simplified rail", hiddenTool)
-		}
-	}
-	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>
-          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board"`) {
-		t.Fatal("left rail board tool should be hidden for the simplified rail")
+	if !strings.Contains(html, `id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled`) {
+		t.Fatal("left rail board tool should stay visible but disabled until the room is ready")
 	}
 	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`) {
 		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
@@ -947,7 +942,12 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"if (!appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceFromWaveform(event)",
 		"await startPrivateRealtimeVoiceConversation()",
 		"let privateRealtimeVoicePeer",
+		"let privateRealtimeVoiceHandledCalls = new Set()",
 		"postAuthJSON('/assistant/realtime-offer'",
+		"postAuthJSON('/assistant/realtime-tool'",
+		"function handlePrivateRealtimeToolCall(item)",
+		"type: 'function_call_output'",
+		"type: 'response.create'",
 		"function closePrivateRealtimeVoiceSession()",
 		"setVoiceIslandState('connecting', 'connecting...')",
 		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",

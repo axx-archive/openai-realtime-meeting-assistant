@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
@@ -28,8 +29,9 @@ import (
 
 // nolint
 var (
-	addr     = flag.String("addr", ":3000", "http service address")
-	upgrader = websocket.Upgrader{
+	addr              = flag.String("addr", ":3000", "http service address")
+	codexRunnerWorker = flag.Bool("codex-runner", false, "run the Codex sidecar queue worker")
+	upgrader          = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
 	}
 
@@ -227,6 +229,13 @@ func main() {
 	// Parse the flags passed to program
 	flag.Parse()
 
+	if *codexRunnerWorker {
+		if err := runCodexRunnerLoop(context.Background()); err != nil {
+			log.Errorf("Codex runner stopped: %v", err)
+		}
+		return
+	}
+
 	// Init other state
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
@@ -261,7 +270,10 @@ func main() {
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
+	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
+	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
+	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
@@ -352,8 +364,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"boardFile":   boardCheck,
 			"realtime":    realtime,
 			"agents": map[string]any{
-				"brain": readinessAgentSnapshot(meetingBrainAgent()),
-				"board": readinessAgentSnapshot(meetingBoardAgent()),
+				"brain":       readinessAgentSnapshot(meetingBrainAgent()),
+				"board":       readinessAgentSnapshot(meetingBoardAgent()),
+				"codexRunner": readinessCodexRunnerSnapshot(),
 			},
 		},
 	})
@@ -672,6 +685,54 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":  true,
 		"sdp": answerSDP,
+	})
+}
+
+func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read realtime tool request")
+		return
+	}
+
+	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceTool(payload.Name, payload.Arguments)
+	ok := err == nil
+	if err != nil {
+		result = map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		}
+		log.Errorf("Private Realtime tool %q failed for %s: %v", payload.Name, user.Email, err)
+	}
+
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":       ok,
+		"changed":  changed,
+		"result":   result,
+		"actions":  result["actions"],
+		"artifact": result["artifact"],
 	})
 }
 

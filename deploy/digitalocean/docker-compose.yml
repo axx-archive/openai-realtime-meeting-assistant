@@ -17,6 +17,36 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  codex-runner:
+    profiles: ["codex"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: codex-runner
+    env_file:
+      - .env
+    environment:
+      BONFIRE_CODEX_CWD: /workspace/meetingassist
+      BONFIRE_CODEX_QUEUE_PATH: /app/data/codex-runner-jobs
+      BONFIRE_RUNNER_CALLBACK_URL: http://meetingassist:3000/internal/codex/jobs/result
+      BONFIRE_CODEX_SANDBOX: workspace-write
+      BONFIRE_CODEX_APPROVAL_POLICY: never
+      BONFIRE_CODEX_REASONING_EFFORT: high
+    volumes:
+      - meeting_data:/app/data
+      - ${BONFIRE_CODEX_WORKSPACE_HOST_PATH:-../..}:/workspace/meetingassist
+      - codex_home:/root/.codex
+      - codex_runner_data:/runner-data
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    depends_on:
+      meetingassist:
+        condition: service_healthy
+    restart: unless-stopped
+
   coturn:
     image: coturn/coturn:4.6
     command:
@@ -56,4 +86,6 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  codex_home:
+  codex_runner_data:
   meeting_data:

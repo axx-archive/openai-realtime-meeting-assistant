@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const agentThreadRequestTimeout = 60 * time.Second
+const defaultAgentThreadRequestTimeout = 60 * time.Second
 
 type scoutAgentThread struct {
 	ID       string              `json:"id"`
@@ -34,11 +34,13 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 	}
 
 	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
+	worker := configuredAgentThreadWorkerName()
 	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.memorySnapshotForClients(12))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, map[string]string{
 		"source":          "scout_thread",
 		"threadId":        threadID,
+		"threadQuery":     query,
 		"agentLoop":       "realtime_controlled_workforce",
 		"status":          "running",
 		"threadStatus":    "running",
@@ -50,8 +52,8 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 		"queuedAt":        now,
 		"startedAt":       now,
 		"published":       "false",
-		"worker":          "openai_text_response",
-		"workerBoundary":  "realtime_launch_async_artifact_update",
+		"worker":          worker,
+		"workerBoundary":  agentThreadWorkerBoundary(worker),
 		"latestThreadRun": threadID,
 	})
 	if err != nil {
@@ -94,10 +96,16 @@ func normalizeAgentThreadMode(mode string) string {
 }
 
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
-	ctx, cancel := context.WithTimeout(context.Background(), agentThreadRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), agentThreadRequestTimeout())
 	defer cancel()
 
-	output, err := app.produceAgentThreadArtifact(ctx, thread, createOpenAITextResponse)
+	workerResult, err := app.produceAgentThreadArtifactWithWorker(ctx, thread, createOpenAITextResponse)
+	output := workerResult.Text
+	if err == nil && !workerResult.Terminal {
+		app.updateQueuedAgentThread(thread, workerResult)
+		return
+	}
+
 	status := "complete"
 	message := assistantToolLabel(thread.Mode) + " thread complete"
 	metadata := map[string]string{
@@ -109,6 +117,11 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		"reviewGate":      "passed",
 		"completedAt":     time.Now().UTC().Format(time.RFC3339Nano),
 		"latestThreadRun": thread.ID,
+	}
+	for key, value := range workerResult.Metadata {
+		if strings.TrimSpace(value) != "" {
+			metadata[key] = value
+		}
 	}
 	if err != nil {
 		status = "error"
@@ -143,6 +156,86 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		"actions":    actions,
 		"voiceState": "listening",
 	})
+}
+
+func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, workerResult agentThreadWorkerResult) {
+	output := strings.TrimSpace(workerResult.Text)
+	if output == "" {
+		output = thread.Artifact.Text
+	}
+
+	status := firstNonEmptyString(workerResult.Metadata["threadStatus"], workerResult.Metadata["status"], "queued")
+	message := assistantToolLabel(thread.Mode) + " thread queued"
+	switch status {
+	case codexJobStatusApprovalRequired:
+		message = assistantToolLabel(thread.Mode) + " thread needs approval"
+	case codexJobStatusRunning:
+		message = assistantToolLabel(thread.Mode) + " thread running"
+	}
+
+	metadata := map[string]string{
+		"latestThreadRun": thread.ID,
+	}
+	for key, value := range workerResult.Metadata {
+		if strings.TrimSpace(value) != "" {
+			metadata[key] = value
+		}
+	}
+
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, thread.Artifact.Metadata["title"], output, scoutParticipantName, metadata)
+	if updateErr != nil {
+		log.Errorf("Failed to update queued Scout thread artifact %s: %v", thread.ID, updateErr)
+		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", map[string]any{
+			"tool":     "launch_agent_thread",
+			"threadId": thread.ID,
+			"artifact": thread.Artifact,
+		})
+		return
+	}
+
+	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
+	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastAssistantEvent("action", message, map[string]any{
+		"tool":       "launch_agent_thread",
+		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
+		"artifact":   artifact,
+		"actions":    actions,
+		"voiceState": "listening",
+	})
+}
+
+func agentThreadRequestTimeout() time.Duration {
+	if configuredAgentThreadWorkerMode() == agentThreadWorkerCodexExec {
+		return codexExecConfigFromEnv().Timeout
+	}
+
+	return defaultAgentThreadRequestTimeout
+}
+
+type agentThreadWorkerResult struct {
+	Text     string
+	Metadata map[string]string
+	Terminal bool
+}
+
+func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (agentThreadWorkerResult, error) {
+	switch configuredAgentThreadWorkerMode() {
+	case agentThreadWorkerCodexExec:
+		if configuredCodexRunnerMode() == codexRunnerModeLocalExec {
+			return app.produceCodexAgentThreadArtifact(ctx, thread)
+		}
+		return app.enqueueCodexAgentThreadArtifact(ctx, thread)
+	default:
+		output, err := app.produceAgentThreadArtifact(ctx, thread, responder)
+		return agentThreadWorkerResult{
+			Text: output,
+			Metadata: map[string]string{
+				"worker":         "openai_text_response",
+				"workerBoundary": "responses_artifact_writer",
+			},
+			Terminal: true,
+		}, err
+	}
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {

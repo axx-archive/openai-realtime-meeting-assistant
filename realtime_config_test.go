@@ -80,14 +80,32 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	session := app.privateRealtimeVoiceSessionConfig("gpt-realtime-2")
 
-	if _, ok := session["tools"]; ok {
-		t.Fatal("private dashboard Realtime voice must not inherit shared room tools")
+	tools, ok := session["tools"].([]map[string]any)
+	if !ok || len(tools) == 0 {
+		t.Fatalf("private dashboard Realtime voice tools=%T, want constrained OS tool list", session["tools"])
+	}
+	allowed := map[string]bool{
+		"control_app":            true,
+		"create_artifact":        true,
+		"launch_agent_thread":    true,
+		"answer_memory_question": true,
+		"do_nothing":             true,
+	}
+	for _, tool := range tools {
+		name, _ := tool["name"].(string)
+		if !allowed[name] {
+			t.Fatalf("private dashboard Realtime voice inherited disallowed tool %q", name)
+		}
+		delete(allowed, name)
+	}
+	for missing := range allowed {
+		t.Fatalf("private dashboard Realtime voice missing OS tool %q", missing)
 	}
 	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
 		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)
 	}
 	instructions := session["instructions"].(string)
-	for _, want := range []string{"private Bonfire OS voice assistant", "outside the video room", "Do not describe yourself as the shared room Scout", "do not join the user to the room"} {
+	for _, want := range []string{"private Bonfire OS voice assistant", "outside the video room", "Do not describe yourself as the shared room Scout", "do not mutate the shared Kanban board", "Use launch_agent_thread"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
 		}

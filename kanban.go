@@ -918,19 +918,38 @@ func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[string]any {
 	session := app.sessionConfig(model)
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
+	session["tools"] = app.privateRealtimeVoiceTools()
 	session["tool_choice"] = "auto"
-	delete(session, "tools")
 	return session
 }
 
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
-		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not join the user to the room, and do not treat the user as a meeting participant. If the user asks to join, open, control, record, archive, or speak to the room, tell them to use the Room surface.",
+		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not treat the user as a meeting participant, and do not mutate the shared Kanban board or room recording from this private surface. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for longer research, design, grill, or workflow goals. Use create_artifact for quick saved artifacts. Use answer_memory_question for recall across saved meetings and artifacts. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly. For app actions, saved artifacts, long-running research, board mutations, or meeting-room controls, explain the next UI surface to use instead of pretending a tool ran. Ask one concise clarifying question when the request is ambiguous.",
+		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Ask one concise clarifying question when the request is ambiguous.",
 	}, "\n\n")
+}
+
+func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
+	allowed := map[string]struct{}{
+		"control_app":            {},
+		"create_artifact":        {},
+		"launch_agent_thread":    {},
+		"answer_memory_question": {},
+		"do_nothing":             {},
+	}
+	tools := []map[string]any{}
+	for _, tool := range app.kanbanTools() {
+		name := asString(tool["name"])
+		if _, ok := allowed[name]; ok {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
 }
 
 func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, []byte, error) {
@@ -1467,7 +1486,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Owner rules\nWhen the speaker names a responsible person, set owner to that exact participant name. Use Unassigned when responsibility is unclear.",
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
 		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening in the room, turn off shared room voice, end the vocal room conversation, close the room voice island, or stop room Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording; this switch is room-wide for every participant, and after it changes you should make one short group announcement that recording is on or off. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
-		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. Workflow mode saves the goal workflow scaffold inside Bonfire OS; a full external Codex/browser/SSH worker is still a handoff boundary unless a launched thread result includes that evidence.",
+		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -2213,6 +2232,26 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	default:
 		return nil, false, fmt.Errorf("unsupported function %q", toolName)
 	}
+}
+
+func privateRealtimeVoiceToolAllowed(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "do_nothing":
+		return true
+	default:
+		return false
+	}
+}
+
+func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(toolName string, args map[string]any) (map[string]any, bool, error) {
+	toolName = strings.TrimSpace(toolName)
+	if !privateRealtimeVoiceToolAllowed(toolName) {
+		return nil, false, fmt.Errorf("private Realtime voice cannot use %q", toolName)
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	return app.applyToolCallArgs(toolName, args)
 }
 
 func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool, error) {

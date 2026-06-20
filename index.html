@@ -4149,6 +4149,261 @@
         text-wrap: pretty;
       }
 
+      .office-command-island {
+        flex: 2 1 430px;
+        min-width: 0;
+        position: relative;
+        overflow: hidden;
+        border-radius: var(--r-2xl);
+        border: 1px solid var(--glass-border);
+        background:
+          radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+          var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        padding: clamp(28px, 4vw, 46px);
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .office-command-island::after {
+        content: "";
+        position: absolute;
+        width: 420px;
+        height: 420px;
+        right: -140px;
+        top: -160px;
+        border-radius: 50%;
+        border: 1px solid color-mix(in srgb, var(--text-1) 9%, transparent);
+        opacity: 0.7;
+        pointer-events: none;
+      }
+
+      .office-command-island__mark,
+      .office-agent-card__meta {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .office-command-island__title {
+        max-width: 12ch;
+        margin: 0;
+        color: var(--text-1);
+        font: 650 clamp(42px, 8vw, 92px)/0.92 var(--font-sans);
+        letter-spacing: 0;
+        text-wrap: balance;
+      }
+
+      .office-command-island__hint {
+        max-width: 42ch;
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        text-wrap: pretty;
+      }
+
+      .office-wave-button {
+        width: 100%;
+        min-height: 112px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        position: relative;
+        z-index: 1;
+        margin: 8px 0 0;
+        padding: 18px 20px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-xl);
+        background: var(--surface-2);
+        color: var(--text-1);
+        cursor: pointer;
+        text-align: left;
+        transition:
+          background var(--dur-fast) var(--ease),
+          box-shadow var(--dur-med) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .office-wave-button:hover {
+        background: var(--surface-3);
+        box-shadow: var(--shadow-2);
+      }
+
+      .office-wave-button:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .office-wave-button .bf-fab {
+        height: 46px;
+      }
+
+      .office-wave-button__copy {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .office-wave-button__title {
+        color: var(--text-1);
+        font: 600 18px/1.2 var(--font-sans);
+      }
+
+      .office-wave-button__meta,
+      .office-command-chip {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .office-wave-button__mic {
+        width: 42px;
+        height: 42px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--on-accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .office-command-try {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        position: relative;
+        z-index: 1;
+      }
+
+      .office-command-try__label {
+        margin-right: 2px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .office-command-chip {
+        padding: 7px 12px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        cursor: pointer;
+      }
+
+      .office-side-stack {
+        flex: 1 1 310px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .office-side-card {
+        border-radius: var(--r-xl);
+        background: var(--surface-1);
+        border: 1px solid var(--line-1);
+        padding: 20px;
+      }
+
+      .office-agent-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+        margin-bottom: 30px;
+      }
+
+      .office-agent-card {
+        min-height: 172px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        text-align: left;
+        padding: 16px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        color: var(--text-1);
+        cursor: pointer;
+        transition:
+          background var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          box-shadow var(--dur-med) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .office-agent-card:hover {
+        background: var(--glass-panel);
+        border-color: var(--line-2);
+        box-shadow: var(--shadow-2);
+        transform: translateY(-1px);
+      }
+
+      .office-agent-card:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .office-agent-card__top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .office-agent-card__icon {
+        width: 34px;
+        height: 34px;
+        flex: none;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+        color: var(--text-1);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .office-agent-card__body {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 7px;
+      }
+
+      .office-agent-card__title {
+        color: var(--text-1);
+        font: 600 15px/1.2 var(--font-sans);
+      }
+
+      .office-agent-card__copy {
+        color: var(--text-2);
+        font: 13px/1.45 var(--font-sans);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .office-agent-card__rail {
+        height: 4px;
+        overflow: hidden;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+      }
+
+      .office-agent-card__bar {
+        display: block;
+        width: var(--agent-progress, 0%);
+        height: 100%;
+        border-radius: inherit;
+        background: var(--accent);
+        transition: width var(--dur-med) var(--ease);
+      }
+
       .office-insights {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4637,6 +4892,20 @@
 
         .office-app-grid {
           grid-template-columns: minmax(0, 1fr);
+        }
+
+        .office-command-island {
+          border-radius: 30px;
+          padding: 28px 22px;
+        }
+
+        .office-command-island__title {
+          font: var(--type-title-1);
+          letter-spacing: var(--track-title-1);
+        }
+
+        .office-wave-button {
+          min-height: 92px;
         }
 
         .office-panel {
@@ -9599,37 +9868,37 @@
             <span class="tool-rail__label">chat</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
             <span class="tool-rail__label">artifacts</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" title="Grill mode" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
             <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
             <span class="tool-rail__label">board</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" title="Memory" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
             <span class="tool-rail__label">memory</span>
@@ -9729,12 +9998,12 @@
             <p style="margin:0 0 16px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);"><span id="officeTodayLabel">today</span> · business intelligence operating system</p>
 
             <div style="display:flex; flex-wrap:wrap; gap:18px; margin-bottom:18px;">
-              <div style="flex:2 1 400px; min-width:0; position:relative; overflow:hidden; border-radius:var(--r-xl); background:var(--glass-panel); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); border:1px solid var(--glass-border); box-shadow:var(--glass-highlight), var(--glass-shadow); padding:28px; display:flex; flex-direction:column;">
-                <svg viewBox="0 0 64 64" aria-hidden="true" style="position:absolute; width:320px; height:320px; right:-72px; top:-86px; opacity:0.05; pointer-events:none;"><path fill="var(--text-1)" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>
-                <h2 id="officeGreeting" style="margin:0 0 8px; font:var(--type-title-1); letter-spacing:var(--track-title-1); color:var(--text-1);">welcome back.</h2>
-                <p style="margin:0 0 22px; font:var(--type-body); color:var(--text-2); max-width:50ch;">Scout is listening. ask for research, a deck, a recap, or to ping the team — then get back to the work only you can do.</p>
-                <button type="button" aria-label="talk to Scout with Realtime 2" data-start-realtime-voice class="bf-card-hover" style="display:flex; align-items:center; gap:14px; width:100%; text-align:left; padding:13px 14px 13px 18px; border-radius:var(--r-lg); border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; margin-bottom:16px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                  <span class="bf-fab is-speaking" style="display:flex; align-items:center; gap:3px; height:22px; flex:none; color:var(--accent);">
+              <div class="office-command-island">
+                <span class="office-command-island__mark">realtime 2 scout</span>
+                <h2 id="officeGreeting" class="office-command-island__title">good morning, Tim.</h2>
+                <p class="office-command-island__hint">hit the waveform and tell Scout what you need. It can open the room, run research, draft artifacts, brief you, or hand work to the agent workforce.</p>
+                <button type="button" aria-label="talk to Scout with Realtime 2" data-start-realtime-voice class="office-wave-button">
+                  <span class="bf-fab is-speaking" style="display:flex; align-items:center; gap:4px; flex:none; color:var(--accent);">
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:0ms;"></span>
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:120ms;"></span>
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:240ms;"></span>
@@ -9743,21 +10012,28 @@
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:160ms;"></span>
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:60ms;"></span>
                     <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:220ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:100ms;"></span>
+                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:280ms;"></span>
                   </span>
-                  <span style="flex:1; min-width:0; font:var(--type-body-medium); color:var(--text-1);">ask Scout anything…</span>
-                  <span style="width:36px; height:36px; flex:none; border-radius:50%; background:var(--accent); color:var(--on-accent); display:inline-flex; align-items:center; justify-content:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><path d="M12 18v4"></path></svg></span>
+                  <span class="office-wave-button__copy">
+                    <span class="office-wave-button__title">talk to Bonfire OS</span>
+                    <span class="office-wave-button__meta">private voice command surface</span>
+                  </span>
+                  <span class="office-wave-button__mic" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><path d="M12 18v4"></path></svg></span>
                 </button>
-                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3); margin-right:2px;">try</span>
-                  <button type="button" class="bf-chip" data-office-tool="research" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">research a question</button>
-                  <button type="button" class="bf-chip" data-office-tool="design" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">draft a deck</button>
-                  <button type="button" class="bf-chip" data-office-tool="grill" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">grill my pitch</button>
-                  <button type="button" class="bf-chip" data-open-assistant-mode="chat" style="padding:7px 12px; border-radius:var(--r-full); border:1px solid var(--line-1); background:var(--surface-3); color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">recap the last meeting</button>
+                <div class="office-command-try">
+                  <span class="office-command-try__label">try</span>
+                  <button type="button" class="office-command-chip" data-office-tool="room">jump into the conference room</button>
+                  <button type="button" class="office-command-chip" data-office-tool="research">research which segment to launch first</button>
+                  <button type="button" class="office-command-chip" data-office-tool="design">draft the launch deck</button>
+                  <button type="button" class="office-command-chip" data-office-tool="grill">grill the strategy</button>
+                  <button type="button" class="office-command-chip" data-open-assistant-mode="chat">summarize this morning's standup</button>
+                  <button type="button" class="office-command-chip" data-office-tool="office">take me to my dashboard</button>
                 </div>
               </div>
 
-              <div style="flex:1 1 300px; min-width:0; display:flex; flex-direction:column; gap:18px;">
-                <div style="border-radius:var(--r-xl); background:var(--surface-1); border:1px solid var(--line-1); padding:20px; display:flex; flex-direction:column; gap:14px;">
+              <div class="office-side-stack">
+                <div class="office-side-card" style="display:flex; flex-direction:column; gap:14px;">
                   <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                     <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">the room</span>
                     <span id="officeRoomStatusPill" class="pill pill--idle" style="flex:none;">not connected</span>
@@ -9769,7 +10045,7 @@
                   </div>
                   <button id="officeRoomJoin" type="button" class="btn btn--primary" data-office-tool="room" style="width:100%;">Join the room</button>
                 </div>
-                <div style="flex:1; border-radius:var(--r-xl); background:var(--surface-1); border:1px solid var(--line-1); padding:20px;">
+                <div class="office-side-card" style="flex:1;">
                   <div style="margin-bottom:8px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">today</div>
                   <div id="officeAgenda" style="display:flex; flex-direction:column;"></div>
                 </div>
@@ -9794,6 +10070,14 @@
                 <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">room agent</span>
               </div>
             </div>
+
+            <section aria-label="Agent workforce">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px;">
+                <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">agent workforce</h3>
+                <span id="officeAgentSummary" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">ready</span>
+              </div>
+              <div id="officeAgentWorkforce" class="office-agent-grid"></div>
+            </section>
 
             <section id="officePublishedSection" aria-label="Latest published" style="display:none;">
               <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
@@ -10142,6 +10426,9 @@
               <div class="artifact-detail__actions">
                 <span class="artifact-detail__hint">published artifacts appear on the team dashboard</span>
                 <span class="artifact-detail__spacer"></span>
+                <button id="artifactApproveButton" class="btn btn--primary" type="button" hidden disabled>Approve</button>
+                <button id="artifactRejectButton" class="btn btn--ghost" type="button" hidden disabled>Reject</button>
+                <button id="artifactRerunButton" class="btn btn--ghost" type="button" hidden disabled>Rerun</button>
                 <button id="artifactSaveButton" class="btn btn--ghost" type="submit" disabled>Save</button>
                 <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
                 <button id="artifactPublishButton" class="btn btn--primary" type="button" disabled>Publish to team</button>
@@ -10778,6 +11065,9 @@
       const artifactCountLabel = document.getElementById('artifactCountLabel')
       const artifactTitleInput = document.getElementById('artifactTitleInput')
       const artifactBodyInput = document.getElementById('artifactBodyInput')
+      const artifactApproveButton = document.getElementById('artifactApproveButton')
+      const artifactRejectButton = document.getElementById('artifactRejectButton')
+      const artifactRerunButton = document.getElementById('artifactRerunButton')
       const artifactCopyButton = document.getElementById('artifactCopyButton')
       const artifactPublishButton = document.getElementById('artifactPublishButton')
       const artifactSaveButton = document.getElementById('artifactSaveButton')
@@ -10852,6 +11142,8 @@
       const roomEmptyMeta = document.getElementById('roomEmptyMeta')
       const officeAgenda = document.getElementById('officeAgenda')
       const officeRecentThreads = document.getElementById('officeRecentThreads')
+      const officeAgentSummary = document.getElementById('officeAgentSummary')
+      const officeAgentWorkforce = document.getElementById('officeAgentWorkforce')
       const officeToolButtons = Array.from(document.querySelectorAll('[data-office-tool]'))
       const assistantModeOpeners = Array.from(document.querySelectorAll('[data-open-assistant-mode]'))
       const realtimeVoiceOpeners = Array.from(document.querySelectorAll('[data-start-realtime-voice]'))
@@ -10914,6 +11206,7 @@
       let privateRealtimeVoiceDataChannel
       let privateRealtimeVoiceAudio
       let privateRealtimeVoiceStarting = false
+      let privateRealtimeVoiceHandledCalls = new Set()
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
@@ -11255,6 +11548,9 @@
         renderMemory()
       })
       artifactDetailForm.addEventListener('submit', saveSelectedArtifact)
+      artifactApproveButton?.addEventListener('click', () => runArtifactRunnerAction('approve'))
+      artifactRejectButton?.addEventListener('click', () => runArtifactRunnerAction('reject'))
+      artifactRerunButton?.addEventListener('click', () => runArtifactRunnerAction('rerun'))
       artifactCopyButton.addEventListener('click', copySelectedArtifact)
       artifactPublishButton.addEventListener('click', toggleSelectedArtifactPublished)
       scoutChatInput.addEventListener('input', resizeScoutChatInput)
@@ -13331,6 +13627,7 @@
         const rtcConfiguration = await loadRTCConfiguration()
         const peer = new RTCPeerConnection(rtcConfiguration)
         privateRealtimeVoicePeer = peer
+        privateRealtimeVoiceHandledCalls = new Set()
         peer.ontrack = attachPrivateRealtimeVoiceTrack
         peer.onconnectionstatechange = () => {
           if (privateRealtimeVoicePeer !== peer) {
@@ -13414,6 +13711,18 @@
         if (!type) {
           return
         }
+        if (type === 'response.output_item.done' && event.item?.type === 'function_call') {
+          handlePrivateRealtimeToolCall(event.item)
+        } else if (type === 'response.function_call_arguments.done') {
+          handlePrivateRealtimeToolCall(privateRealtimeFunctionCallFromEvent(event))
+        } else if (type === 'response.done') {
+          const interrupted = ['cancelled', 'incomplete', 'failed'].includes(String(event.response?.status || '').trim().toLowerCase())
+          for (const item of event.response?.output || []) {
+            if (item?.type === 'function_call' && !interrupted) {
+              handlePrivateRealtimeToolCall(item)
+            }
+          }
+        }
         if (type === 'error') {
           const message = event.error?.message || 'voice needs attention'
           setVoiceIslandState('error', message)
@@ -13430,6 +13739,80 @@
         }
       }
 
+      function privateRealtimeFunctionCallFromEvent(event) {
+        const item = event.item && typeof event.item === 'object' ? { ...event.item } : {}
+        if (!item.type) item.type = 'function_call'
+        if (!item.name) item.name = event.name
+        if (!item.arguments) item.arguments = event.arguments
+        if (!item.call_id) item.call_id = event.call_id || event.callId
+        return item
+      }
+
+      function sendPrivateRealtimeEvent(event) {
+        if (!privateRealtimeVoiceDataChannel || privateRealtimeVoiceDataChannel.readyState !== 'open') {
+          return false
+        }
+        privateRealtimeVoiceDataChannel.send(JSON.stringify(event))
+        return true
+      }
+
+      async function handlePrivateRealtimeToolCall(item) {
+        const callId = String(item?.call_id || item?.callId || '').trim()
+        const name = String(item?.name || '').trim()
+        if (!callId || !name || privateRealtimeVoiceHandledCalls.has(callId)) {
+          return
+        }
+        privateRealtimeVoiceHandledCalls.add(callId)
+        setVoiceIslandState('thinking', 'working...')
+
+        let args = {}
+        try {
+          const rawArgs = typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments || {})
+          args = rawArgs.trim() ? JSON.parse(rawArgs) : {}
+        } catch (error) {
+          sendPrivateRealtimeToolOutput(callId, { ok: false, error: 'could not read tool arguments' })
+          return
+        }
+
+        let output = { ok: false, error: 'tool request failed' }
+        try {
+          const response = await postAuthJSON('/assistant/realtime-tool', { name, arguments: args })
+          output = response.data?.result || { ok: Boolean(response.ok) }
+          if (!response.ok && !output.error) {
+            output.error = response.data?.error || 'tool request failed'
+          }
+          if (response.data?.artifact) {
+            addArtifactEntry(response.data.artifact)
+          }
+          if (Array.isArray(response.data?.actions)) {
+            handleOSAssistantActions(response.data.actions)
+          }
+          const label = output.tool ? `opened ${String(output.tool).replaceAll('_', ' ')}` : name.replaceAll('_', ' ')
+          setVoiceIslandState('thinking', label)
+        } catch (error) {
+          output = { ok: false, error: error.message || 'tool request failed' }
+        }
+        sendPrivateRealtimeToolOutput(callId, output)
+      }
+
+      function sendPrivateRealtimeToolOutput(callId, output) {
+        sendPrivateRealtimeEvent({
+          type: 'conversation.item.create',
+          item: {
+            type: 'function_call_output',
+            call_id: callId,
+            output: JSON.stringify(output || { ok: true })
+          }
+        })
+        sendPrivateRealtimeEvent({
+          type: 'response.create',
+          response: {
+            output_modalities: ['audio'],
+            tool_choice: 'none'
+          }
+        })
+      }
+
       function closePrivateRealtimeVoiceSession() {
         if (privateRealtimeVoiceDataChannel) {
           try {
@@ -13439,6 +13822,7 @@
           }
         }
         privateRealtimeVoiceDataChannel = undefined
+        privateRealtimeVoiceHandledCalls = new Set()
 
         if (privateRealtimeVoicePeer) {
           privateRealtimeVoicePeer.ontrack = null
@@ -18405,12 +18789,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function updateScoutChatResearchNode(card, status, artifact) {
         const value = String(status || artifact?.metadata?.threadStatus || artifact?.metadata?.status || 'running').toLowerCase()
+        const queued = value === 'queued'
         const running = value === 'running'
-        const error = value === 'error'
+        const approvalRequired = value === 'approval_required'
+        const rejected = value === 'rejected'
+        const error = value === 'error' || value === 'failed'
         const done = value === 'complete' || value === 'published'
         const metadataPct = Number(artifact?.metadata?.progressPercent)
-        const pct = Number.isFinite(metadataPct) ? metadataPct : done ? 100 : error ? 72 : 35
-        const stageIndex = done ? scoutChatThreadStages.length - 1 : error ? 4 : 3
+        const pct = Number.isFinite(metadataPct) ? metadataPct : done ? 100 : approvalRequired ? 82 : rejected || error ? 72 : queued ? 12 : 35
+        const stageIndex = done ? scoutChatThreadStages.length - 1 : approvalRequired || rejected || error ? 4 : queued ? 0 : 3
+        const active = queued || running
 
         const pill = card.querySelector('[data-research-pill]')
         const statusText = card.querySelector('[data-research-status]')
@@ -18421,13 +18809,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const artifactButton = card.querySelector('[data-research-artifact]')
 
         if (pill) {
-          pill.className = 'pill ' + (running ? 'pill--connecting pill--breathe' : error ? 'pill--offline' : 'pill--listening')
+          pill.className = 'pill ' + (active ? 'pill--connecting pill--breathe' : approvalRequired || rejected || error ? 'pill--offline' : 'pill--listening')
         }
         if (statusText) {
-          statusText.textContent = running ? 'running' : error ? 'needs attention' : 'complete'
+          statusText.textContent = queued ? 'queued' : running ? 'running' : approvalRequired ? 'needs approval' : rejected ? 'rejected' : error ? 'needs attention' : 'complete'
         }
         if (agents) {
-          agents.textContent = running ? 'worker running' : error ? 'gate blocked' : 'artifact ready'
+          agents.textContent = queued ? 'waiting for Codex' : running ? 'worker running' : approvalRequired ? 'approval gate' : rejected ? 'gate rejected' : error ? 'gate blocked' : 'artifact ready'
         }
         if (fill) {
           fill.style.width = `${Math.max(0, Math.min(100, pct))}%`
@@ -18443,7 +18831,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               step.classList.add('is-error')
             } else if (index < stageIndex || done) {
               step.classList.add('is-done')
-            } else if (running && index === stageIndex) {
+            } else if (active && index === stageIndex) {
               step.classList.add('is-active')
             }
             step.dataset.stage = stage
@@ -18460,7 +18848,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (artifactButton) {
           const hasArtifact = Boolean(card.dataset.threadArtifactId)
           artifactButton.hidden = !hasArtifact
-          artifactButton.textContent = done ? 'open artifact' : error ? 'inspect artifact' : 'watch artifact'
+          artifactButton.textContent = done ? 'open artifact' : approvalRequired || rejected || error ? 'inspect artifact' : 'watch artifact'
         }
       }
 
@@ -20212,11 +20600,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const artifact = selectedArtifact()
         const disabled = !artifact
         const published = artifactPublished(artifact)
+        const statusValue = artifactStatusValue(artifact)
+        const approvalRequired = statusValue === 'approval_required'
+        const runnerArtifact = Boolean(artifact?.metadata?.agentLoop === 'realtime_controlled_workforce' || artifact?.metadata?.worker === 'codex_exec' || artifact?.metadata?.runnerJobId)
         artifactTitleInput.disabled = disabled
         artifactBodyInput.disabled = disabled
         artifactCopyButton.disabled = disabled
         artifactPublishButton.disabled = disabled
         artifactSaveButton.disabled = disabled
+        if (artifactApproveButton) {
+          artifactApproveButton.hidden = !approvalRequired
+          artifactApproveButton.disabled = !approvalRequired
+        }
+        if (artifactRejectButton) {
+          artifactRejectButton.hidden = !approvalRequired
+          artifactRejectButton.disabled = !approvalRequired
+        }
+        if (artifactRerunButton) {
+          artifactRerunButton.hidden = !runnerArtifact
+          artifactRerunButton.disabled = !runnerArtifact
+        }
         artifactDetailMode.textContent = artifact ? artifactModeLabel(artifact) : 'artifact'
         if (artifactDetailPublished) {
           artifactDetailPublished.hidden = !artifact || !published
@@ -20309,6 +20712,48 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      async function runArtifactRunnerAction(action) {
+        const artifact = selectedArtifact()
+        if (!artifact) {
+          return
+        }
+        const label = String(action || '').trim()
+        if (!label) {
+          return
+        }
+        const buttons = [artifactApproveButton, artifactRejectButton, artifactRerunButton].filter(Boolean)
+        buttons.forEach(button => { button.disabled = true })
+        setArtifactDetailStatus(`${label}ing`)
+        try {
+          const response = await fetch('/artifacts/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: artifact.id,
+              action: label
+            })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || `artifact ${label} failed`)
+          }
+          if (payload.artifact) {
+            addArtifactEntry(payload.artifact, { select: true })
+          }
+          if (payload.actions) {
+            handleOSAssistantActions(payload.actions)
+          }
+          const toastText = label === 'approve' ? 'Codex job approved' : label === 'reject' ? 'Codex job rejected' : 'Codex job rerun queued'
+          setArtifactDetailStatus(toastText, true)
+          showToast({ text: toastText, kind: 'done' })
+        } catch (error) {
+          setArtifactDetailStatus(`${label} failed`, true)
+          showToast({ text: error.message || `artifact ${label} failed`, kind: 'error' })
+        } finally {
+          renderArtifactDetail()
+        }
+      }
+
       async function copySelectedArtifact() {
         const artifact = selectedArtifact()
         if (!artifact) {
@@ -20344,8 +20789,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function artifactStatusValue(entry) {
         const status = String(entry?.metadata?.threadStatus || entry?.metadata?.status || '').trim().toLowerCase()
         if (artifactPublished(entry)) return 'published'
+        if (status === 'queued') return 'queued'
         if (status === 'running') return 'running'
-        if (status === 'error') return 'error'
+        if (status === 'approval_required') return 'approval_required'
+        if (status === 'rejected') return 'rejected'
+        if (status === 'error' || status === 'failed') return 'error'
         if (status === 'complete') return 'complete'
         return 'draft'
       }
@@ -20354,8 +20802,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         switch (artifactStatusValue(entry)) {
           case 'published':
             return 'published'
+          case 'queued':
+            return 'queued'
           case 'running':
             return 'running'
+          case 'approval_required':
+            return 'needs approval'
+          case 'rejected':
+            return 'rejected'
           case 'error':
             return 'needs attention'
           case 'complete':
@@ -22126,6 +22580,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderOfficeRoomCard()
         renderOfficeAgenda()
         renderPublishedArtifactsDashboard()
+        renderOfficeAgentWorkforce()
         renderOfficeRecentThreads()
       }
 
@@ -22294,6 +22749,147 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
           item.append(top, title, byline)
           return item
+        }))
+      }
+
+      function latestArtifactForMode(mode) {
+        const targetMode = String(mode || '').trim()
+        return artifactEntries
+          .filter(entry => String(entry?.metadata?.mode || '').trim() === targetMode)
+          .slice()
+          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))[0] || null
+      }
+
+      function agentStatusProgress(statusValue) {
+        switch (statusValue) {
+          case 'queued':
+            return 12
+          case 'running':
+            return 48
+          case 'approval_required':
+            return 82
+          case 'rejected':
+          case 'error':
+            return 72
+          case 'complete':
+          case 'published':
+            return 100
+          default:
+            return 0
+        }
+      }
+
+      function agentStatusClass(statusValue) {
+        switch (statusValue) {
+          case 'queued':
+          case 'running':
+            return 'pill pill--connecting pill--breathe'
+          case 'approval_required':
+          case 'complete':
+          case 'published':
+            return 'pill pill--listening'
+          case 'rejected':
+          case 'error':
+            return 'pill pill--offline'
+          default:
+            return 'pill pill--idle'
+        }
+      }
+
+      function renderOfficeAgentWorkforce() {
+        if (!officeAgentWorkforce) {
+          return
+        }
+        const lanes = [
+          {
+            mode: 'research',
+            title: 'research team',
+            idle: 'ask a market, customer, technical, or competitor question.',
+            open: () => openOfficeTool('research'),
+            icon: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.2-4.2"></path>'
+          },
+          {
+            mode: 'design',
+            title: 'design studio',
+            idle: 'shape a deck, interface, narrative, or decision artifact.',
+            open: () => openOfficeTool('design'),
+            icon: '<path d="M12 20h8"></path><path d="M15.5 4.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>'
+          },
+          {
+            mode: 'grill',
+            title: 'grill mode',
+            idle: 'pressure-test a strategy, pitch, plan, or assumption.',
+            open: () => openOfficeTool('grill'),
+            icon: '<path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path>'
+          },
+          {
+            mode: 'workflow',
+            title: 'goal workflow',
+            idle: 'turn an objective into ordered agent work with review gates.',
+            open: () => openOSAssistant('workflow'),
+            icon: '<path d="M4 7h8"></path><path d="M4 12h12"></path><path d="M4 17h6"></path><path d="M18 14l3 3-3 3"></path>'
+          }
+        ]
+        const activeStates = new Set(['queued', 'running', 'approval_required'])
+        const laneEntries = lanes
+          .map(lane => ({ lane, latest: latestArtifactForMode(lane.mode) }))
+        const activeCount = laneEntries
+          .filter(({ latest }) => latest && activeStates.has(artifactStatusValue(latest))).length
+        if (officeAgentSummary) {
+          officeAgentSummary.textContent = activeCount
+            ? `${activeCount} working · ${artifactEntries.length} artifacts`
+            : `ready · ${artifactEntries.length} artifacts`
+        }
+
+        officeAgentWorkforce.replaceChildren(...laneEntries.map(({ lane, latest }) => {
+          const statusValue = latest ? artifactStatusValue(latest) : 'idle'
+          const card = document.createElement('button')
+          card.type = 'button'
+          card.className = 'office-agent-card'
+          card.style.setProperty('--agent-progress', `${agentStatusProgress(statusValue)}%`)
+          card.addEventListener('click', () => {
+            if (latest) {
+              selectArtifact(latest.id)
+              openOfficeTool('artifacts')
+              return
+            }
+            lane.open()
+          })
+
+          const top = document.createElement('span')
+          top.className = 'office-agent-card__top'
+          const icon = document.createElement('span')
+          icon.className = 'office-agent-card__icon'
+          icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${lane.icon}</svg>`
+          const pill = document.createElement('span')
+          pill.className = agentStatusClass(statusValue)
+          pill.style.flex = 'none'
+          pill.textContent = latest ? artifactStatusLabel(latest) : 'ready'
+          top.append(icon, pill)
+
+          const body = document.createElement('span')
+          body.className = 'office-agent-card__body'
+          const title = document.createElement('span')
+          title.className = 'office-agent-card__title'
+          title.textContent = lane.title
+          const copy = document.createElement('span')
+          copy.className = 'office-agent-card__copy'
+          copy.textContent = latest
+            ? (latest.metadata?.title || compactArtifactPreview(latest.text || artifactModeLabel(latest)))
+            : lane.idle
+          const meta = document.createElement('span')
+          meta.className = 'office-agent-card__meta'
+          meta.textContent = latest ? artifactTimeLabel(latest) : 'on standby'
+          body.append(title, copy, meta)
+
+          const rail = document.createElement('span')
+          rail.className = 'office-agent-card__rail'
+          const bar = document.createElement('span')
+          bar.className = 'office-agent-card__bar'
+          rail.append(bar)
+
+          card.append(top, body, rail)
+          return card
         }))
       }
 

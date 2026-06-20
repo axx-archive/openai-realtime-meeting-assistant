@@ -104,7 +104,9 @@ Scout can scaffold a reusable goal workflow artifact from text or Realtime voice
 
 Realtime 2 and the private Scout chat can also launch research, design, grill, and workflow work threads. A thread creates a running artifact immediately, shows progress in Chat, updates the artifact when the server-side worker completes, and can then be opened, copied, published, or shared from the Artifacts app.
 
-This slice saves and updates the workflow inside Bonfire OS. It does not start an external Codex job yet. Longer browser, SSH, code, test, and deploy work should run through a separate Codex SDK or `codex exec` worker that writes status and evidence back to artifacts.
+By default, this slice saves and updates the workflow inside Bonfire OS with the lightweight Responses artifact writer. To let Scout launch real Codex work from Realtime 2 or private Chat, configure the sidecar Codex runner with `BONFIRE_AGENT_THREAD_WORKER=codex_exec`. The web app enqueues jobs, the private `codex-runner` service claims them one at a time, runs `codex exec` with explicit sandbox and approval settings, and calls the app back with status, final output, and evidence. Browser, SSH, code, test, and deploy claims should only appear when the Codex artifact includes that evidence.
+
+Realtime 2 can launch `read_only` and `workspace_write` work. Anything that looks like commit, push, deploy, SSH, email, external API writes, or production mutation is blocked behind an artifact approval gate. The Artifacts app exposes approve, reject, rerun, and publish controls for runner artifacts.
 
 ### Configured interactions
 
@@ -133,6 +135,10 @@ You can update:
 - The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `high` for stronger orchestration across company context, meeting memory, app tools, and artifact workflows on `gpt-realtime-2`.
 - The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`server_vad` or `semantic_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto` for semantic VAD); the default is `server_vad` with a 300 ms silence window for faster turn endings.
 - The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
+- The long-running Scout work-thread runner by setting `BONFIRE_AGENT_THREAD_WORKER`. The default `openai_text_response` writes structured artifacts only. Set `BONFIRE_AGENT_THREAD_WORKER=codex_exec` (or `BONFIRE_CODEX_AGENT_THREADS=true`) to enqueue sidecar Codex jobs for research/design/grill/workflow threads.
+- The Codex runner mode with `BONFIRE_CODEX_RUNNER_MODE`. The default is `sidecar_queue`; `local_exec` keeps the older in-process `codex exec` path for development.
+- The Codex queue/callback controls with `BONFIRE_CODEX_QUEUE_PATH` (default beside meeting memory), `BONFIRE_RUNNER_TOKEN` (required for sidecar callbacks), and `BONFIRE_RUNNER_CALLBACK_URL` (default `http://meetingassist:3000/internal/codex/jobs/result` inside Compose).
+- The Codex runner command and controls with `BONFIRE_CODEX_COMMAND` (default `codex`), `BONFIRE_CODEX_CWD` (default current repo), `BONFIRE_CODEX_SANDBOX` (`read-only`, `workspace-write`, or `danger-full-access`; default `workspace-write`), `BONFIRE_CODEX_APPROVAL_POLICY` (`never`, `on-request`, or `untrusted`; default `never` for noninteractive runs), `BONFIRE_CODEX_PROFILE`, `BONFIRE_CODEX_MODEL`, `BONFIRE_CODEX_REASONING_EFFORT` (default `high`), `BONFIRE_CODEX_TIMEOUT` (default `20m`), `BONFIRE_CODEX_SEARCH=true` for live web search beyond the automatic research-mode search, `BONFIRE_CODEX_EPHEMERAL=true` for non-persistent Codex sessions, and `BONFIRE_CODEX_SKIP_GIT_REPO_CHECK=true` only for an intentionally prepared non-git runner directory.
 - The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
 - Historical backfill for the brain worker with `MEETING_BRAIN_BACKFILL=true`; by default it starts from the latest transcript at app startup and summarizes new transcript windows only.
 - The summary-to-board worker model by setting `OPENAI_BOARD_MODEL`; otherwise it uses the meeting brain model.
