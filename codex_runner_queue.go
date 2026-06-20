@@ -558,7 +558,20 @@ func codexRunnerCommandEvidence(result codexExecResult, cfg codexExecConfig) str
 }
 
 func codexOutputRequiresExternalApproval(output string) bool {
-	return strings.Contains(strings.ToUpper(output), "EXTERNAL_WRITE_APPROVAL_REQUIRED")
+	const marker = "EXTERNAL_WRITE_APPROVAL_REQUIRED"
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*>` \t")
+		if !strings.HasPrefix(strings.ToUpper(trimmed), marker) {
+			continue
+		}
+		remainder := strings.TrimSpace(trimmed[len(marker):])
+		remainder = strings.TrimLeft(remainder, "*` \t")
+		if remainder == "" || strings.HasPrefix(remainder, ":") || strings.HasPrefix(remainder, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 func codexRunnerID() string {

@@ -250,7 +250,7 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 	builder.WriteString(authority)
 	builder.WriteString(". read_only may inspect and report; workspace_write may edit/check files inside the workspace; external_write is required for commit, push, deploy, SSH, external APIs, email, or production mutations.\n")
 	builder.WriteString("- Do not commit, push, deploy, SSH, send email, call external write APIs, or mutate production systems unless this job has explicit external_write approval for that exact side effect.\n")
-	builder.WriteString("- If an external side effect is needed, stop and include the exact marker EXTERNAL_WRITE_APPROVAL_REQUIRED in the Gate section with the precise command/action you would run after approval.\n")
+	builder.WriteString("- If an external side effect is needed, stop and put a Gate line that starts with EXTERNAL_WRITE_APPROVAL_REQUIRED: followed by the precise command/action you would run after approval.\n")
 	builder.WriteString("- If credentials, access, approvals, network, or sandbox restrictions block the work, leave the artifact useful and mark the gate as blocked.\n\n")
 	builder.WriteString("Bonfire OS context: ")
 	builder.WriteString(contextLine)

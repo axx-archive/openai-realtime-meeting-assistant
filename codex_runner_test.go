@@ -376,3 +376,40 @@ func TestCodexExecEnvironmentMapsOpenAIKeyToCodexKey(t *testing.T) {
 		t.Fatalf("CODEX_API_KEY=%q, want existing codex key preserved", envValue(env, "CODEX_API_KEY"))
 	}
 }
+
+func TestCodexOutputRequiresExternalApprovalMatchesGateMarkerOnly(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name:   "standalone marker",
+			output: "Gate\n\nEXTERNAL_WRITE_APPROVAL_REQUIRED: run deploy after approval",
+			want:   true,
+		},
+		{
+			name:   "bulleted marker",
+			output: "Gate\n\n- **EXTERNAL_WRITE_APPROVAL_REQUIRED:** send email after approval",
+			want:   true,
+		},
+		{
+			name:   "negated prose mention",
+			output: "Gate\n\nNo `EXTERNAL_WRITE_APPROVAL_REQUIRED` action is currently required.",
+			want:   false,
+		},
+		{
+			name:   "instructional mention",
+			output: "Report\n\nThe marker EXTERNAL_WRITE_APPROVAL_REQUIRED is only used for external side effects.",
+			want:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexOutputRequiresExternalApproval(tc.output); got != tc.want {
+				t.Fatalf("codexOutputRequiresExternalApproval()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
