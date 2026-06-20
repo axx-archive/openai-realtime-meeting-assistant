@@ -191,6 +191,12 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"voiceIslandMain.addEventListener('click', () => openOfficeTool('chat'))",
 		"function shouldShowVoiceIsland()",
 		"return (appShell.dataset.tool || 'office') !== 'office'",
+		"let realtimeVoiceMode = 'idle'",
+		"let roomEntryInProgress = false",
+		"function privateRealtimeVoiceSurfaceAvailable()",
+		"function privateRealtimeVoiceActive()",
+		"function roomRealtimeVoiceActive()",
+		"function roomMediaActive()",
 		"function stopPrivateRealtimeVoiceForRoom()",
 		"function assertPrivateRealtimeVoiceSession(sessionToken, cleanup)",
 		"function handleOSAssistantActions(actions)",
@@ -931,10 +937,58 @@ func TestRealtimeVoiceActionCanCloseVoiceIsland(t *testing.T) {
 		"type === 'set_voice_control'",
 		"stopRealtimeVoiceConversation({ notifyServer: false })",
 		"const notifyServer = options?.notifyServer !== false",
-		"if (notifyServer) {\n          sendVoiceControlState(false)",
+		"if (enabled && appShell.classList.contains('is-in-room'))",
+		"if (notifyServer && roomRealtimeVoiceActive()) {\n          sendVoiceControlState(false)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing realtime voice close action %q", want)
+		}
+	}
+}
+
+func TestRoomEntryStopsPrivateRealtimeBeforeRoomVoiceState(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	joinStart := strings.Index(html, "async function joinRoom(options = {})")
+	if joinStart < 0 {
+		t.Fatal("index.html missing joinRoom function")
+	}
+	stopIndex := strings.Index(html[joinStart:], "stopPrivateRealtimeVoiceForRoom()")
+	if stopIndex < 0 {
+		t.Fatal("joinRoom must stop private Realtime voice at the room boundary")
+	}
+	entryIndex := strings.Index(html[joinStart:], "roomEntryInProgress = true")
+	if entryIndex < 0 {
+		t.Fatal("joinRoom must mark room entry in progress before room state starts")
+	}
+	roomModeIndex := strings.Index(html[joinStart:], "if (voiceOnly) {\n          setRealtimeVoiceMode('room')")
+	if roomModeIndex < 0 {
+		t.Fatal("joinRoom must set explicit room voice mode for voice-only joins")
+	}
+	if stopIndex > roomModeIndex {
+		t.Fatal("joinRoom must stop private Realtime voice before setting room voice-only state")
+	}
+	if entryIndex > roomModeIndex {
+		t.Fatal("joinRoom must mark room entry in progress before setting room voice-only state")
+	}
+
+	for _, want := range []string{
+		"if (inRoom) {\n          stopPrivateRealtimeVoiceForRoom()",
+		"if (tool === 'room') {\n          stopPrivateRealtimeVoiceForRoom()",
+		`<span id="topbarRoomState">waiting room</span>`,
+		"const inRoom = appShell.classList.contains('is-in-room') && roomMediaActive()",
+		"waitingParticipants.textContent = `${seatCount} invited",
+		"const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')",
+		"return !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')",
+		"return Boolean(authedUser) && privateRealtimeVoiceSurfaceAvailable()",
+		"who: names.length ? `${Math.max(occupiedSeats, names.length)} ${inRoom ? 'in the room' : 'invited'}` : 'the team'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing private/room boundary marker %q", want)
 		}
 	}
 }
@@ -954,8 +1008,13 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"osAssistantToggle.hidden = true",
 		"function startRealtimeVoiceFromWaveform(event)",
 		"if (appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceConversation(event)",
-		"if (!appShell.classList.contains('is-in-room')) {\n          startRealtimeVoiceFromWaveform(event)",
+		"if (privateRealtimeVoiceSurfaceAvailable()) {\n            startRealtimeVoiceFromWaveform(event)",
 		"await startPrivateRealtimeVoiceConversation()",
+		"setRealtimeVoiceMode('private')",
+		"setRealtimeVoiceMode('room')",
+		"if (!privateRealtimeVoiceActive() && voiceIslandState !== 'error')",
+		"if (roomEntryInProgress || appShell.classList.contains('is-in-room') || roomMediaActive())",
+		"&& privateRealtimeVoiceSurfaceAvailable()",
 		"const localSDP = await waitForRealtimeOfferSDP(peer, offer)",
 		"const current = String(peer.localDescription?.sdp || offer?.sdp || '')",
 		"if (current.trim())",
@@ -997,5 +1056,13 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 	}
 	if strings.Contains(html, "joinRoom({ voiceOnly: true })") {
 		t.Fatal("waveform Realtime voice launchers must not enter the room join path")
+	}
+	privateStart := strings.Index(html, "async function startPrivateRealtimeVoiceConversation()")
+	privateEnd := strings.Index(html, "async function beginPrivateRealtimeVoiceSession(sessionToken)")
+	if privateStart < 0 || privateEnd < 0 || privateEnd <= privateStart {
+		t.Fatal("could not isolate private Realtime voice launcher")
+	}
+	if strings.Contains(html[privateStart:privateEnd], "sendVoiceControlState(true)") {
+		t.Fatal("private Realtime voice must not send room voice_control messages")
 	}
 }

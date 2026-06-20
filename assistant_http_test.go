@@ -175,6 +175,56 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 	}
 }
 
+func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	for _, name := range []string{"set_voice_control", "set_recording"} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool", strings.NewReader(fmt.Sprintf(`{"name":%q,"arguments":{"enabled":true}}`, name)))
+			req.Header.Set("Content-Type", "application/json")
+			for _, cookie := range cookies {
+				req.AddCookie(cookie)
+			}
+			recorder := httptest.NewRecorder()
+
+			assistantRealtimeToolHandler(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+			}
+			var payload struct {
+				OK      bool  `json:"ok"`
+				Changed bool  `json:"changed"`
+				Actions []any `json:"actions"`
+				Result  struct {
+					OK    bool   `json:"ok"`
+					Error string `json:"error"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload.OK || payload.Result.OK {
+				t.Fatalf("payload=%+v, want private realtime tool rejection", payload)
+			}
+			if payload.Changed {
+				t.Fatalf("changed=true for rejected private realtime tool %q", name)
+			}
+			if len(payload.Actions) != 0 {
+				t.Fatalf("actions=%#v, want none for rejected private realtime tool %q", payload.Actions, name)
+			}
+			want := fmt.Sprintf("private Realtime voice cannot use %q", name)
+			if !strings.Contains(payload.Result.Error, want) {
+				t.Fatalf("error=%q, want %q", payload.Result.Error, want)
+			}
+		})
+	}
+}
+
 func TestAssistantQueryAnswersFromBoardWithoutRoom(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

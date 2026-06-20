@@ -10166,7 +10166,7 @@
           <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true">·</span>
           <span id="topbarRoomPill" class="topbar__meta-item" data-state="waiting">
             <span class="pill__dot"></span>
-            <span id="topbarRoomState">in room</span>
+            <span id="topbarRoomState">waiting room</span>
           </span>
           <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
@@ -11366,6 +11366,7 @@
       let pc
       let ws
       let localStream
+      let roomEntryInProgress = false
       let screenShareStream
       let isReplacingLocalAudio = false
       let isMicMuted = false
@@ -11384,6 +11385,7 @@
       let osAssistantVoiceRestartTimer = 0
       let osAssistantVoiceQueue = Promise.resolve()
       let osAssistantConversationTurns = []
+      let realtimeVoiceMode = 'idle'
       let realtimeVoiceActive = false
       let realtimeVoiceOnlyPending = false
       let realtimeVoiceStartedRoom = false
@@ -11964,7 +11966,7 @@
           input.checked = input.value === audioSettings.mode
         })
 
-        const inRoom = Boolean(localStream)
+        const inRoom = roomMediaActive()
         audioSettingsButton.disabled = !inRoom
         audioSettingsButton.classList.toggle('is-voice-focus', voiceFocusEnabled())
         audioSettingsButton.title = audioModeLabel()
@@ -13087,11 +13089,16 @@
         if (!waitingParticipants) {
           return
         }
-        const names = appShell.classList.contains('is-in-room') ? participantsInRoom : participantPreview
+        const inRoom = appShell.classList.contains('is-in-room') && roomMediaActive()
+        const names = inRoom ? participantsInRoom : participantPreview
         const seatCount = Math.max(occupiedSeats, names.length)
         renderAvatarStack(participantAvatarStack, names, { max: 3, markCurrent: true, dark: true })
         if (!names.length) {
           waitingParticipants.textContent = `${roomCapacity} seats ready.`
+          return
+        }
+        if (!inRoom) {
+          waitingParticipants.textContent = `${seatCount} invited · ${names.slice(0, 2).join(', ')}`
           return
         }
         const sharing = names.find(name => participantMediaState(name).screenSharing)
@@ -13280,11 +13287,11 @@
             }
           } else if (type === 'set_voice_control') {
             const enabled = Boolean(action.enabled)
-            if (enabled) {
-              realtimeVoiceActive = true
+            if (enabled && appShell.classList.contains('is-in-room')) {
+              setRealtimeVoiceMode('room')
               realtimeVoiceOnlyPending = false
               setVoiceIslandState('listening', 'listening...')
-            } else {
+            } else if (!enabled) {
               stopRealtimeVoiceConversation({ notifyServer: false })
             }
           }
@@ -13769,18 +13776,43 @@
         list.replaceChildren(...artifacts.slice(0, 4).map(renderAgentArtifactLink))
       }
 
+      function setRealtimeVoiceMode(mode) {
+        realtimeVoiceMode = ['private', 'room'].includes(mode) ? mode : 'idle'
+        realtimeVoiceActive = realtimeVoiceMode !== 'idle'
+      }
+
+      function privateRealtimeVoiceActive() {
+        return realtimeVoiceMode === 'private'
+      }
+
+      function roomRealtimeVoiceActive() {
+        return realtimeVoiceMode === 'room'
+      }
+
+      function roomMediaActive() {
+        return Boolean(localStream)
+      }
+
+      function privateRealtimeVoiceSurfaceAvailable() {
+        return !roomEntryInProgress && !roomMediaActive() && !appShell.classList.contains('is-in-room')
+      }
+
       async function startRealtimeVoiceConversation(event) {
         event?.preventDefault?.()
         if (!appShell.classList.contains('is-in-room')) {
-          startRealtimeVoiceFromWaveform(event)
+          if (privateRealtimeVoiceSurfaceAvailable()) {
+            startRealtimeVoiceFromWaveform(event)
+          } else {
+            showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
+          }
           return
         }
-        if (realtimeVoiceActive) {
+        if (roomRealtimeVoiceActive()) {
           setVoiceIslandState('listening', 'listening...')
           return
         }
         stopOSAssistantVoice()
-        realtimeVoiceActive = true
+        setRealtimeVoiceMode('room')
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         realtimeVoiceStartedRoom = false
         realtimeVoiceOnlyPending = false
@@ -13800,6 +13832,10 @@
           startRealtimeVoiceConversation(event)
           return
         }
+        if (!privateRealtimeVoiceSurfaceAvailable()) {
+          showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
+          return
+        }
         if (!osAssistantAvailable()) {
           showToast({ text: 'sign in to start Realtime 2 voice', kind: 'note' })
           return
@@ -13813,14 +13849,14 @@
           setVoiceIslandState('connecting', 'connecting...')
           return
         }
-        if (privateRealtimeVoicePeer && realtimeVoiceActive) {
+        if (privateRealtimeVoicePeer && privateRealtimeVoiceActive()) {
           setVoiceIslandState('listening', 'listening...')
           return
         }
 
         stopOSAssistantVoice()
         closePrivateRealtimeVoiceSession()
-        realtimeVoiceActive = true
+        setRealtimeVoiceMode('private')
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
@@ -13830,15 +13866,15 @@
 
         try {
           await beginPrivateRealtimeVoiceSession(sessionToken)
-          if (realtimeVoiceActive && privateRealtimeVoicePeer) {
+          if (privateRealtimeVoiceActive() && privateRealtimeVoicePeer) {
             setVoiceIslandState('listening', 'listening...')
           }
         } catch (error) {
           const message = error.message || 'Realtime 2 voice could not start'
           console.warn('Private Realtime voice failed', error)
           closePrivateRealtimeVoiceSession()
-          if (realtimeVoiceActive) {
-            realtimeVoiceActive = false
+          if (privateRealtimeVoiceActive()) {
+            setRealtimeVoiceMode('idle')
             realtimeVoiceOnlyPending = false
             realtimeVoiceStartedRoom = false
             setVoiceIslandState('error', message)
@@ -13891,7 +13927,7 @@
             setVoiceIslandState('connecting', 'connecting...')
           } else if (state === 'failed' || state === 'disconnected') {
             setVoiceIslandState('error', 'voice connection interrupted')
-          } else if (state === 'closed' && realtimeVoiceActive) {
+          } else if (state === 'closed' && privateRealtimeVoiceActive()) {
             setVoiceIslandState('idle')
           }
         }
@@ -13917,8 +13953,8 @@
 
       function privateRealtimeVoiceSessionIsCurrent(sessionToken) {
         return sessionToken === privateRealtimeVoiceSessionToken
-          && realtimeVoiceActive
-          && !appShell.classList.contains('is-in-room')
+          && privateRealtimeVoiceActive()
+          && privateRealtimeVoiceSurfaceAvailable()
       }
 
       function assertPrivateRealtimeVoiceSession(sessionToken, cleanup) {
@@ -14005,12 +14041,12 @@
         })
         event.track.addEventListener?.('unmute', () => setVoiceIslandState('talking', 'answering...'))
         event.track.addEventListener?.('mute', () => {
-          if (realtimeVoiceActive) {
+          if (privateRealtimeVoiceActive()) {
             setVoiceIslandState('listening', 'listening...')
           }
         })
         event.track.addEventListener?.('ended', () => {
-          if (realtimeVoiceActive) {
+          if (privateRealtimeVoiceActive()) {
             setVoiceIslandState('listening', 'listening...')
           }
         }, { once: true })
@@ -14049,7 +14085,7 @@
         } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
           setVoiceIslandState('talking', 'answering...')
         } else if (type.includes('response.done') || type.includes('output_audio_buffer.stopped')) {
-          if (realtimeVoiceActive) {
+          if (privateRealtimeVoiceActive()) {
             setVoiceIslandState('listening', 'listening...')
           }
         }
@@ -14172,7 +14208,7 @@
           || Boolean(privateRealtimeVoiceStream)
           || Boolean(privateRealtimeVoiceDataChannel)
           || Boolean(privateRealtimeVoiceProcessor)
-          || (!appShell.classList.contains('is-in-room') && realtimeVoiceActive)
+          || privateRealtimeVoiceActive()
       }
 
       function stopPrivateRealtimeVoiceForRoom() {
@@ -14183,16 +14219,17 @@
 
       function stopRealtimeVoiceConversation(options = {}) {
         if (!realtimeVoiceActive && !realtimeVoiceOnlyPending) {
+          closePrivateRealtimeVoiceSession()
           setVoiceIslandState('idle')
           return
         }
         const notifyServer = options?.notifyServer !== false
-        const shouldLeaveVoiceRoom = realtimeVoiceStartedRoom && appShell.classList.contains('is-in-room')
+        const shouldLeaveVoiceRoom = realtimeVoiceStartedRoom && roomRealtimeVoiceActive() && appShell.classList.contains('is-in-room')
         closePrivateRealtimeVoiceSession()
-        if (notifyServer) {
+        if (notifyServer && roomRealtimeVoiceActive()) {
           sendVoiceControlState(false)
         }
-        realtimeVoiceActive = false
+        setRealtimeVoiceMode('idle')
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false
         setVoiceIslandState('idle')
@@ -14242,7 +14279,7 @@
         syncVoiceIslandVisibility()
         if (next === 'talking') {
           voiceIslandClearTimer = window.setTimeout(() => {
-            if (realtimeVoiceActive) {
+            if (privateRealtimeVoiceActive() || roomRealtimeVoiceActive()) {
               setVoiceIslandState('listening', 'listening...')
             } else {
               setVoiceIslandState('idle')
@@ -14255,10 +14292,10 @@
         if (!voiceIsland || voiceIslandState === 'idle') {
           return false
         }
-        if (!realtimeVoiceActive && voiceIslandState !== 'error') {
+        if (!privateRealtimeVoiceActive() && voiceIslandState !== 'error') {
           return false
         }
-        if (appShell.classList.contains('is-in-room')) {
+        if (roomEntryInProgress || appShell.classList.contains('is-in-room') || roomMediaActive()) {
           return false
         }
         return (appShell.dataset.tool || 'office') !== 'office'
@@ -14315,7 +14352,7 @@
       }
 
       function osAssistantAvailable() {
-        return Boolean(authedUser) && !appShell.classList.contains('is-in-room')
+        return Boolean(authedUser) && privateRealtimeVoiceSurfaceAvailable()
       }
 
       function syncOSAssistantAvailability() {
@@ -14585,7 +14622,7 @@
          keeps them alive. The Board tool keeps its own dock strip instead. */
       function pipMeetingActive() {
         const tool = appShell.dataset.tool || 'room'
-        return Boolean(localStream) && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || agentToolIds.includes(tool) || tool === 'memory')
+        return roomMediaActive() && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || agentToolIds.includes(tool) || tool === 'memory')
       }
 
       function renderPipMeeting() {
@@ -15198,16 +15235,21 @@
           options = {}
         }
         const voiceOnly = Boolean(options.voiceOnly)
+        stopPrivateRealtimeVoiceForRoom()
+        roomEntryInProgress = true
+        syncOSAssistantAvailability()
         if (voiceOnly) {
-          realtimeVoiceActive = true
+          setRealtimeVoiceMode('room')
           realtimeVoiceOnlyPending = true
           realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
           setVoiceIslandState('connecting', 'connecting...')
         }
         if (!validateAccess()) {
           setLog('enter your work email and password')
+          roomEntryInProgress = false
+          syncOSAssistantAvailability()
           if (voiceOnly) {
-            realtimeVoiceActive = false
+            setRealtimeVoiceMode('idle')
             realtimeVoiceOnlyPending = false
             realtimeVoiceStartedRoom = false
             setVoiceIslandState('idle')
@@ -15246,8 +15288,10 @@
             accessState.textContent = 'locked'
             accessHint.textContent = error.message || 'sign-in failed.'
             setLog(error.message || 'sign-in failed')
+            roomEntryInProgress = false
+            syncOSAssistantAvailability()
             if (voiceOnly) {
-              realtimeVoiceActive = false
+              setRealtimeVoiceMode('idle')
               realtimeVoiceOnlyPending = false
               realtimeVoiceStartedRoom = false
               setVoiceIslandState('error', error.message || 'sign-in failed')
@@ -16859,7 +16903,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           topbarDate.textContent = fmt.format(new Date()).toLowerCase()
         }
         if (topbarRoomPill && topbarRoomState) {
-          const inRoom = Boolean(localStream)
+          const inRoom = roomMediaActive()
           topbarRoomPill.className = 'topbar__meta-item'
           topbarRoomPill.dataset.state = inRoom ? 'room' : 'waiting'
           topbarRoomState.textContent = inRoom
@@ -17406,16 +17450,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const normalized = message.toLowerCase()
         if (normalized.includes('kanban assistant is listening')) {
           setConnectionState('listening', 'the room is listening')
-          if (realtimeVoiceActive) setVoiceIslandState('listening', 'listening...')
+          if (roomRealtimeVoiceActive()) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('connected to conference room')) {
           setConnectionState('room', 'the room is listening')
-          if (realtimeVoiceActive) setVoiceIslandState('listening', 'listening...')
+          if (roomRealtimeVoiceActive()) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
-          if (realtimeVoiceActive) setVoiceIslandState('connecting', 'connecting...')
+          if (roomRealtimeVoiceActive()) setVoiceIslandState('connecting', 'connecting...')
         } else if (normalized.includes('disabled') || normalized.includes('expired')) {
           setConnectionState('offline', 'assistant offline')
-          if (realtimeVoiceActive) setVoiceIslandState('error', message)
+          if (roomRealtimeVoiceActive()) setVoiceIslandState('error', message)
         }
       }
 
@@ -17428,7 +17472,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           handleOSAssistantActions(event.actions)
         }
         const voiceState = String(event?.voiceState || '').trim()
-        if (voiceState && realtimeVoiceActive) {
+        if (voiceState && roomRealtimeVoiceActive()) {
           setVoiceIslandState(voiceState, voiceIslandDetailForEvent(voiceState, text))
         }
         if (!text) {
@@ -17450,7 +17494,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (event?.kind === 'transcript') {
-          if (realtimeVoiceActive) {
+          if (roomRealtimeVoiceActive()) {
             setVoiceIslandState('hearing', voiceIslandDetailForEvent('hearing', text))
           }
           setActiveSpeakerFromText(text)
@@ -17461,11 +17505,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (event?.kind === 'error') {
-          if (realtimeVoiceActive) {
+          if (roomRealtimeVoiceActive()) {
             setVoiceIslandState('error', text)
           }
           showToast({ text, kind: 'error' })
-        } else if (event?.kind === 'answer' && realtimeVoiceActive) {
+        } else if (event?.kind === 'answer' && roomRealtimeVoiceActive()) {
           setVoiceIslandState('talking', voiceIslandDetailForEvent('talking', text))
         }
       }
@@ -18528,7 +18572,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleAccessDenied(message) {
-        const wasRealtimeVoice = realtimeVoiceActive || realtimeVoiceOnlyPending
+        const wasRealtimeVoice = privateRealtimeVoiceActive() || roomRealtimeVoiceActive() || realtimeVoiceOnlyPending
         if (ws) {
           ws.onclose = null
         }
@@ -18562,19 +18606,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         railAvatarEl.setAttribute('aria-label', 'Sign out')
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
-        setRoomView(true)
         accessState.textContent = 'verified'
         accessHint.textContent = `${name} is verified. Starting ${voiceOnly ? 'microphone' : 'camera and microphone'}.`
         setConnectionState('room', 'the room is listening')
         setLog(`${name} is verified`)
         try {
           await beginMediaSession({ voiceOnly })
+          setRoomView(true)
+          roomEntryInProgress = false
+          syncOSAssistantAvailability()
           accessHint.textContent = `${name} is in the room.`
           setLog(`${name} is in the room`)
           if (voiceOnly && realtimeVoiceReturnTool && realtimeVoiceReturnTool !== 'room') {
             setActiveTool(realtimeVoiceReturnTool)
           }
-          if (realtimeVoiceActive) {
+          if (roomRealtimeVoiceActive()) {
             realtimeVoiceOnlyPending = false
             sendVoiceControlState(true)
             setVoiceIslandState('listening', 'listening...')
@@ -18585,8 +18631,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           accessHint.textContent = message
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
-          if (realtimeVoiceActive || voiceOnly) {
-            realtimeVoiceActive = false
+          roomEntryInProgress = false
+          syncOSAssistantAvailability()
+          if (roomRealtimeVoiceActive() || voiceOnly) {
+            setRealtimeVoiceMode('idle')
             realtimeVoiceOnlyPending = false
             realtimeVoiceStartedRoom = false
             setVoiceIslandState('error', message)
@@ -19320,7 +19368,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function updateRoomRecordingControls() {
-        const inRoom = appShell.classList.contains('is-in-room')
+        const inRoom = appShell.classList.contains('is-in-room') && roomMediaActive()
         const connected = Boolean(ws && ws.readyState === WebSocket.OPEN)
         const disabled = !inRoom || !connected
         const label = roomRecordingEnabled ? 'Recording' : 'Record off'
@@ -22772,6 +22820,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function leaveRoom() {
+        roomEntryInProgress = false
         if (isLeavingRoom) {
           return
         }
@@ -22794,10 +22843,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateRoomRecordingControls()
         updateBoardDockControls()
 
-        if (realtimeVoiceActive) {
+        if (roomRealtimeVoiceActive()) {
           sendVoiceControlState(false)
         }
-        realtimeVoiceActive = false
+        setRealtimeVoiceMode('idle')
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false
         realtimeVoiceReturnTool = 'office'
@@ -22938,7 +22987,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderRoomLandingState() {
-        const inRoom = appShell.classList.contains('is-in-room')
+        const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
         const names = inRoom ? participantsInRoom : participantPreview
         // mirror the canon in-stage empty state from the same honest signals
         if (roomEmptyName) {
@@ -22958,12 +23007,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // from real signals: the standup room plus the most recent published work.
         const rows = []
         const roomName = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
-        const inRoom = appShell.classList.contains('is-in-room')
+        const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
         const names = inRoom ? participantsInRoom : participantPreview
         rows.push({
           time: nowTimeLabel(),
           title: roomName,
-          who: names.length ? `${Math.max(occupiedSeats, names.length)} in the room` : 'the team',
+          who: names.length ? `${Math.max(occupiedSeats, names.length)} ${inRoom ? 'in the room' : 'invited'}` : 'the team',
           state: inRoom ? 'live' : 'standby',
           tone: inRoom ? 'live' : 'neutral'
         })
