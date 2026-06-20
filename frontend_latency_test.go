@@ -132,7 +132,7 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	}
 }
 
-func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.T) {
+func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -142,21 +142,18 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office">`,
 		`data-tool="office" aria-label="Home" title="Home"`,
-		`data-tool="room" aria-label="Room" title="Room"`,
+		`data-tool="room" aria-label="The room" title="The room"`,
 		`data-tool="chat" aria-label="Chat" title="Chat"`,
 		`id="officeTool" class="office-tool"`,
-		"business intelligence operating system",
-		"data-open-assistant-mode=\"grill\"",
+		`class="office-launch__wave"`,
+		"tap the waveform and tell Scout what you need",
 		`data-office-tool="research"`,
-		`data-office-tool="design"`,
-		`data-office-tool="grill"`,
 		`data-assistant-mode="workflow"`,
 		`id="osAssistant" class="os-assistant"`,
 		"function signInToOffice()",
 		"fetch('/assistant/query'",
 		"fetch('/assistant/threads'",
 		"fetch('/artifacts'",
-		`id="officePublishedArtifacts" class="office-published"`,
 		`id="artifactsTool" class="artifacts-tool"`,
 		`id="artifactDetailForm" class="artifact-detail"`,
 		`id="artifactPublishButton"`,
@@ -182,7 +179,6 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		"async function toggleSelectedArtifactPublished()",
 		"function artifactPublished(entry)",
 		"function latestPublishedArtifacts(limit = 3)",
-		"function renderPublishedArtifactsDashboard()",
 		"function scheduleArtifactRefresh()",
 		"addArtifactEntry(result.artifact, { select: false })",
 		"meeting artifact saved",
@@ -225,20 +221,28 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 		"setActiveTool('office')",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing BI OS dashboard or assistant marker %q", want)
+			t.Fatalf("index.html missing waveform home or assistant marker %q", want)
 		}
 	}
 
-	if strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
-		t.Fatal("Bonfire OS rail tools should remain visible from the home surface")
+	if strings.Contains(html, `data-office-tool="dashboard"`) || strings.Contains(html, `id="dashboardTool"`) {
+		t.Fatal("waveform home must not retain a separate dashboard route or CTA")
 	}
-	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`, `data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
+	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
+		t.Fatal("non-prototype tools should be retained off-rail, not shown in the prototype rail")
+	}
+	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`, `data-tool="artifacts"`} {
 		if !strings.Contains(html, visibleTool) {
-			t.Fatalf("left rail tool %s should be present in the OS rail", visibleTool)
+			t.Fatalf("prototype rail tool %s should be present in the OS rail", visibleTool)
+		}
+	}
+	for _, hiddenTool := range []string{`data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
+		if !strings.Contains(html, hiddenTool) {
+			t.Fatalf("off-rail tool %s should remain addressable for assistant/tool routing", hiddenTool)
 		}
 	}
 	if !strings.Contains(html, `id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled`) {
-		t.Fatal("left rail board tool should stay visible but disabled until the room is ready")
+		t.Fatal("board tool should remain addressable but disabled until the room is ready")
 	}
 	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`) {
 		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
@@ -246,8 +250,8 @@ func TestIndexProvidesAuthenticatedBIOSDashboardAndFloatingAssistant(t *testing.
 	if strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden`) {
 		t.Fatal("left rail theme toggle should not be hidden")
 	}
-	if !strings.Contains(html, `id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out" hidden`) {
-		t.Fatal("left rail avatar should be hidden for the simplified rail")
+	if !strings.Contains(html, `id="railAvatar" class="tool-rail__tool tool-rail__signout" type="button" aria-label="Sign out" title="Sign out" aria-pressed="false"`) {
+		t.Fatal("prototype rail should expose sign out at the bottom")
 	}
 	if strings.Contains(html, `class="tool-rail__flame"`) {
 		t.Fatal("brand flame should live in the topbar, not inside the expanding rail")
@@ -316,8 +320,8 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 		"max-width: 140px;",
 		".tool-rail:hover .tool-rail__theme,",
 		".tool-rail:focus-within .tool-rail__theme",
-		`<span class="tool-rail__label">home</span>`,
-		`<span class="tool-rail__label">room</span>`,
+		`<span class="tool-rail__label">office</span>`,
+		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
 		`aria-haspopup="dialog"`,
 		`role="dialog" aria-label="Account menu"`,
@@ -967,6 +971,6 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		t.Fatal("visible waveform launchers should use the Realtime 2 voice island path")
 	}
 	if strings.Contains(html, "joinRoom({ voiceOnly: true })") {
-		t.Fatal("dashboard Realtime voice launchers must not enter the room join path")
+		t.Fatal("waveform Realtime voice launchers must not enter the room join path")
 	}
 }

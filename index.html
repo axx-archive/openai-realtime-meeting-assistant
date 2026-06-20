@@ -306,6 +306,18 @@
         isolation: isolate;
       }
 
+      #appShell.is-rail-hidden {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "topbar"
+          "workspace"
+          "dock";
+      }
+
+      #appShell.is-rail-hidden .tool-rail {
+        display: none;
+      }
+
       /* the shell (rail + topbar) only exists once you're signed in;
          pre-auth the gate stands alone on the ambient backdrop. */
       #appShell:not(.is-authed) .tool-rail,
@@ -492,6 +504,10 @@
         transform: scale(var(--press-scale));
       }
 
+      .tool-rail__signout {
+        margin-top: 6px;
+      }
+
       /* ---------- Topbar (kit chrome glass) ---------- */
       .topbar {
         grid-area: topbar;
@@ -588,6 +604,17 @@
 
       .topbar__spacer {
         flex: 1;
+      }
+
+      .topbar__nav-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex: none;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
       }
 
       .topbar > .pill {
@@ -1254,6 +1281,7 @@
       }
 
       .login-forgot {
+        display: none;
         align-self: center;
       }
 
@@ -1287,8 +1315,13 @@
         gap: 14px;
       }
 
-      .login-card .field input {
+      .login-card .field input,
+      .login-card .field select {
         height: 72px;
+      }
+
+      .login-email-field[hidden] {
+        display: none;
       }
 
       .field[hidden] {
@@ -3780,6 +3813,16 @@
         display: grid;
       }
 
+      #appShell.is-authed[data-tool="office"] .topbar {
+        display: none;
+      }
+
+      #appShell.is-authed[data-tool="office"] .tool-rail {
+        top: 0;
+        height: 100vh;
+        height: 100svh;
+      }
+
       #appShell.is-authed[data-tool="office"] .workspace {
         grid-template-columns: minmax(0, 1fr);
         gap: 0;
@@ -3972,13 +4015,188 @@
         box-shadow: none;
       }
 
-      /* ---------- Office dashboard (BI OS home) ---------- */
+      /* ---------- Office home (Scout waveform) ---------- */
       .office-tool {
         width: min(1180px, 100%);
         min-height: 0;
         align-self: stretch;
         justify-self: center;
         gap: var(--sp-4);
+      }
+
+      .office-launch {
+        position: relative;
+        min-height: 100vh;
+        min-height: 100svh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        padding: clamp(24px, 5vw, 56px);
+      }
+
+      .office-launch__nav-toggle {
+        position: absolute;
+        top: 18px;
+        right: 22px;
+        z-index: 5;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .rail-switch {
+        position: relative;
+        width: 44px;
+        height: 26px;
+        flex: none;
+        padding: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--live);
+        cursor: pointer;
+        transition:
+          background var(--dur-med) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .rail-switch:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .rail-switch::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 20px;
+        height: 20px;
+        border-radius: var(--r-full);
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        transform: translateX(18px);
+        transition: transform var(--dur-med) var(--ease);
+      }
+
+      #appShell.is-rail-hidden .rail-switch {
+        background: var(--surface-3);
+      }
+
+      #appShell.is-rail-hidden .rail-switch::after {
+        transform: translateX(0);
+      }
+
+      .office-launch__wrap {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+        width: min(700px, 94vw);
+      }
+
+      .office-launch__glow {
+        position: absolute;
+        inset: auto;
+        width: min(620px, 90vw);
+        height: min(360px, 46vh);
+        border-radius: 60px;
+        background: var(--accent);
+        opacity: 0.07;
+        filter: blur(80px);
+        pointer-events: none;
+      }
+
+      .office-launch__island {
+        position: relative;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 28px;
+        padding: 44px 42px 36px;
+        border-radius: 40px;
+        background: color-mix(in srgb, var(--text-1) 90%, transparent);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid color-mix(in srgb, var(--surface-1) 16%, transparent);
+        box-shadow:
+          inset 0 1px 0 color-mix(in srgb, var(--surface-1) 18%, transparent),
+          0 50px 110px -36px rgba(0, 0, 0, 0.62),
+          0 22px 48px -28px rgba(0, 0, 0, 0.5);
+      }
+
+      .office-launch__mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        opacity: 0.5;
+        color: var(--surface-1);
+        font: var(--type-label);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .office-launch__wave {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--surface-1);
+      }
+
+      .office-launch__bars {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        height: 110px;
+        width: 100%;
+      }
+
+      .office-launch__line {
+        color: var(--surface-1);
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        text-align: center;
+      }
+
+      .office-launch__hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--surface-1);
+        opacity: 0.55;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: center;
+      }
+
+      .office-launch__commands {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 9px;
+        max-width: 560px;
+      }
+
+      .office-launch__command {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 15px;
+        border-radius: var(--r-full);
+        border: 1px solid color-mix(in srgb, var(--surface-1) 26%, transparent);
+        background: color-mix(in srgb, var(--surface-1) 7%, transparent);
+        color: var(--surface-1);
+        font: var(--type-caption-medium);
       }
 
       .office-hero {
@@ -9852,13 +10070,13 @@
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
-            <span class="tool-rail__label">home</span>
+            <span class="tool-rail__label">office</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="Room" title="Room" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="The room" title="The room" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
-            <span class="tool-rail__label">room</span>
+            <span class="tool-rail__label">the room</span>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
         </span>
@@ -9874,31 +10092,31 @@
             <span class="tool-rail__label">artifacts</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" title="Grill mode" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
             <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
             <span class="tool-rail__label">board</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" title="Memory" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
             <span class="tool-rail__label">memory</span>
@@ -9909,7 +10127,10 @@
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
-        <button id="railAvatar" class="tool-rail__avatar" type="button" aria-label="Sign out" title="Sign out" hidden>TC</button>
+        <button id="railAvatar" class="tool-rail__tool tool-rail__signout" type="button" aria-label="Sign out" title="Sign out" aria-pressed="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+          <span class="tool-rail__label">sign out</span>
+        </button>
       </nav>
       <header class="topbar mount-stagger">
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire">
@@ -9930,6 +10151,10 @@
           <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
         <span class="topbar__spacer" aria-hidden="true"></span>
+        <span class="topbar__nav-toggle">
+          <span>nav bar</span>
+          <button id="topbarRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="true"></button>
+        </span>
         <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
           Board
@@ -9993,131 +10218,56 @@
       </header>
 
       <div class="workspace">
-        <section id="officeTool" class="office-tool" aria-label="Office dashboard">
-          <div class="bf-view" style="width:100%; max-width:1120px; margin:0 auto; padding:30px 24px 130px;">
-            <p style="margin:0 0 16px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);"><span id="officeTodayLabel">today</span> · business intelligence operating system</p>
-
-            <div style="display:flex; flex-wrap:wrap; gap:18px; margin-bottom:18px;">
-              <div class="office-command-island">
-                <span class="office-command-island__mark">realtime 2 scout</span>
-                <h2 id="officeGreeting" class="office-command-island__title">good morning, Tim.</h2>
-                <p class="office-command-island__hint">hit the waveform and tell Scout what you need. It can open the room, run research, draft artifacts, brief you, or hand work to the agent workforce.</p>
-                <button type="button" aria-label="talk to Scout with Realtime 2" data-start-realtime-voice class="office-wave-button">
-                  <span class="bf-fab is-speaking" style="display:flex; align-items:center; gap:4px; flex:none; color:var(--accent);">
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:0ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:120ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:240ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:80ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:300ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:160ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:60ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:220ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:100ms;"></span>
-                    <span class="bf-wave-bar" style="width:3px; height:100%; animation-delay:280ms;"></span>
+        <section id="officeTool" class="office-tool" aria-label="Office">
+          <div class="office-launch bf-view">
+            <div class="office-launch__nav-toggle">
+              <span>nav bar</span>
+              <button id="officeRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="true"></button>
+            </div>
+            <span class="office-launch__glow" aria-hidden="true"></span>
+            <div class="office-launch__wrap">
+              <div class="office-launch__island">
+                <div class="office-launch__mark">
+                  <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true">
+                    <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
+                  </svg>
+                  scout
+                </div>
+                <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave">
+                  <span class="office-launch__bars">
+                    <span class="bf-wave-bar" style="width:6px; height:30%; animation-delay:0ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:54%; animation-delay:120ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:78%; animation-delay:240ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:44%; animation-delay:80ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:96%; animation-delay:300ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:62%; animation-delay:160ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:36%; animation-delay:60ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:72%; animation-delay:220ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:100%; animation-delay:340ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:48%; animation-delay:100ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:84%; animation-delay:280ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:28%; animation-delay:40ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:66%; animation-delay:200ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:100%; animation-delay:130ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:52%; animation-delay:260ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:80%; animation-delay:20ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:40%; animation-delay:180ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:90%; animation-delay:320ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:58%; animation-delay:90ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:74%; animation-delay:250ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:34%; animation-delay:150ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:68%; animation-delay:300ms;"></span>
+                    <span class="bf-wave-bar" style="width:6px; height:46%; animation-delay:70ms;"></span>
                   </span>
-                  <span class="office-wave-button__copy">
-                    <span class="office-wave-button__title">talk to Bonfire OS</span>
-                    <span class="office-wave-button__meta">private voice command surface</span>
-                  </span>
-                  <span class="office-wave-button__mic" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><path d="M12 18v4"></path></svg></span>
+                  <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
+                  <span class="office-launch__hint">tap the waveform and tell Scout what you need</span>
                 </button>
-                <div class="office-command-try">
-                  <span class="office-command-try__label">try</span>
-                  <button type="button" class="office-command-chip" data-office-tool="room">jump into the conference room</button>
-                  <button type="button" class="office-command-chip" data-office-tool="research">research which segment to launch first</button>
-                  <button type="button" class="office-command-chip" data-office-tool="design">draft the launch deck</button>
-                  <button type="button" class="office-command-chip" data-office-tool="grill">grill the strategy</button>
-                  <button type="button" class="office-command-chip" data-open-assistant-mode="chat">summarize this morning's standup</button>
-                  <button type="button" class="office-command-chip" data-office-tool="office">take me to my dashboard</button>
+                <div class="office-launch__commands">
+                  <button type="button" class="office-launch__command bf-card-hover" data-join-room>Jump into the conference room</button>
+                  <button type="button" class="office-launch__command bf-card-hover" data-office-tool="research">Research which segment to launch first</button>
+                  <button type="button" class="office-launch__command bf-card-hover" data-open-assistant-mode="chat">Summarize this morning's standup</button>
                 </div>
               </div>
-
-              <div class="office-side-stack">
-                <div class="office-side-card" style="display:flex; flex-direction:column; gap:14px;">
-                  <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">the room</span>
-                    <span id="officeRoomStatusPill" class="pill pill--idle" style="flex:none;">not connected</span>
-                  </div>
-                  <div id="officeRoomName" style="font:var(--type-headline); letter-spacing:var(--track-headline); color:var(--text-1);">platform standup</div>
-                  <div style="display:flex; align-items:center; gap:10px;">
-                    <div id="officeRoomAvatars" class="stack-avatars" aria-hidden="true"></div>
-                    <span id="officeRoomInvited" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">room ready</span>
-                  </div>
-                  <button id="officeRoomJoin" type="button" class="btn btn--primary" data-office-tool="room" style="width:100%;">Join the room</button>
-                </div>
-                <div class="office-side-card" style="flex:1;">
-                  <div style="margin-bottom:8px; font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">today</div>
-                  <div id="officeAgenda" style="display:flex; flex-direction:column;"></div>
-                </div>
-              </div>
-            </div>
-
-            <div id="officeStats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:1px; background:var(--line-1); border:1px solid var(--line-1); border-radius:var(--r-lg); overflow:hidden; margin-bottom:30px;">
-              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
-                <span id="officeArtifactStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
-                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">artifacts saved</span>
-              </div>
-              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
-                <span id="officeMemoryStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
-                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">memories saved</span>
-              </div>
-              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
-                <span id="officeBoardStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">0</span>
-                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">active cards</span>
-              </div>
-              <div style="background:var(--surface-1); padding:16px 18px; display:flex; flex-direction:column; gap:4px;">
-                <span id="officeRoomStat" style="font:600 26px/1 var(--font-sans); letter-spacing:-0.02em; color:var(--text-1);">ready</span>
-                <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">room agent</span>
-              </div>
-            </div>
-
-            <section aria-label="Agent workforce">
-              <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px;">
-                <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">agent workforce</h3>
-                <span id="officeAgentSummary" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">ready</span>
-              </div>
-              <div id="officeAgentWorkforce" class="office-agent-grid"></div>
-            </section>
-
-            <section id="officePublishedSection" aria-label="Latest published" style="display:none;">
-              <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
-                <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">latest from the team</h3>
-                <span id="officePublishedCount" style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">0 published</span>
-              </div>
-              <div id="officePublishedArtifacts" class="office-published" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(264px, 1fr)); gap:14px; margin-bottom:30px;"></div>
-            </section>
-
-            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
-              <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">jump back in</h3>
-              <button type="button" data-office-tool="chat" style="border:none; background:transparent; color:var(--text-2); font:var(--type-label); letter-spacing:var(--track-label); cursor:pointer;">all threads</button>
-            </div>
-            <div id="officeRecentThreads" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; margin-bottom:30px;"></div>
-
-            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;">
-              <h3 style="margin:0; font:var(--type-title-2); letter-spacing:var(--track-title-2); color:var(--text-1);">open an app</h3>
-              <span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">apps</span>
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(178px, 1fr)); gap:12px;">
-              <button type="button" class="bf-card-hover" data-office-tool="room" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg></span>
-                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Room</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">live</span></span>
-              </button>
-              <button type="button" class="bf-card-hover" data-office-tool="chat" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg></span>
-                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Chat</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">private</span></span>
-              </button>
-              <button type="button" class="bf-card-hover" data-office-tool="artifacts" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg></span>
-                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Artifacts</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">outputs</span></span>
-              </button>
-              <button type="button" class="bf-card-hover" data-office-tool="board" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg></span>
-                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Board</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">shared</span></span>
-              </button>
-              <button type="button" class="bf-card-hover" data-office-tool="memory" style="text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:14px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);">
-                <span style="width:38px; height:38px; flex:none; border-radius:var(--r-md); background:var(--surface-3); border:1px solid var(--line-1); display:inline-flex; align-items:center; justify-content:center; color:var(--text-1);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg></span>
-                <span style="display:flex; flex-direction:column; gap:2px; min-width:0;"><span style="font:var(--type-body-medium); color:var(--text-1);">Memory</span><span style="font:var(--type-label); letter-spacing:var(--track-label); color:var(--text-3);">durable</span></span>
-              </button>
             </div>
           </div>
         </section>
@@ -10139,7 +10289,18 @@
             <span id="accessState" class="access-state" hidden>locked</span>
           </header>
           <form id="loginForm" class="login-card login-rise login-rise--card" novalidate>
-            <label class="field">
+            <label class="field" id="loginAccountField">
+              <span>account</span>
+              <select id="loginAccountSelect" autocomplete="username">
+                <option value="tim@shareability.com">Tim Cook</option>
+                <option value="caitlyn@shareability.com">Caitlyn Reyes</option>
+                <option value="__missing_jake">Jake Mercer</option>
+                <option value="joel@shareability.com">Joel Adler</option>
+                <option value="e@shareability.com">Erick Tran</option>
+                <option value="__custom">Custom email</option>
+              </select>
+            </label>
+            <label id="loginEmailField" class="field login-email-field" hidden>
               <span>work email</span>
               <input id="loginEmail" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@company.com">
             </label>
@@ -10186,7 +10347,7 @@
             <p id="accessHint" class="access-hint" aria-live="polite"></p>
             <div style="margin-top:26px; display:flex; justify-content:center;"><span class="pill">not connected</span></div>
           </form>
-          <p class="login-foot login-rise login-rise--foot">sessions stay signed in on this device.</p>
+          <p class="login-foot login-rise login-rise--foot">a voice-first operating system</p>
           <div class="inside-row" hidden>
             <div class="who">
               <div id="participantAvatarStack" class="stack-avatars" aria-hidden="true"></div>
@@ -10278,7 +10439,7 @@
                 <div id="roomEmptyName" class="room-empty__title">platform standup</div>
                 <div id="roomEmptyMeta" class="room-empty__meta">not connected · 4 invited</div>
               </div>
-              <button id="roomEmptyJoin" type="button" class="btn btn--primary" data-office-tool="room">Join the room</button>
+              <button id="roomEmptyJoin" type="button" class="btn btn--primary" data-join-room>Join the room</button>
             </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
@@ -10424,7 +10585,7 @@
               <input id="artifactTitleInput" class="artifact-detail__input" type="text" autocomplete="off" placeholder="untitled artifact" aria-label="artifact title" disabled>
               <textarea id="artifactBodyInput" class="artifact-detail__body" rows="16" aria-label="artifact body" disabled></textarea>
               <div class="artifact-detail__actions">
-                <span class="artifact-detail__hint">published artifacts appear on the team dashboard</span>
+                <span class="artifact-detail__hint">published artifacts appear in team artifacts</span>
                 <span class="artifact-detail__spacer"></span>
                 <button id="artifactApproveButton" class="btn btn--primary" type="button" hidden disabled>Approve</button>
                 <button id="artifactRejectButton" class="btn btn--ghost" type="button" hidden disabled>Reject</button>
@@ -10482,7 +10643,7 @@
                   <textarea class="agent-composer__input" data-agent-input="design" rows="10" autocomplete="off" aria-label="Design brief">Design the artifact workspace for a meeting intelligence OS. Include the core screens, selected-artifact editing state, empty state, saved state, trust boundary with the meeting room, and mobile layout risks.</textarea>
                 </label>
                 <div class="agent-template-grid" aria-label="Design starters">
-                  <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the BI OS dashboard. Include app launcher hierarchy, insight surface, live room entry, assistant affordances, mobile behavior, and risks.">Dashboard</button>
+                  <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the BI OS workspace. Include app launcher hierarchy, insight surface, live room entry, assistant affordances, mobile behavior, and risks.">Workspace</button>
                   <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the artifact workspace. Include list/detail layout, edit/save states, cross-linking to agent apps, empty state, mobile behavior, and implementation risks.">Artifacts</button>
                   <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for grill mode. Include pitch capture, tough-question loop, score presentation, saved evaluation artifact, and privacy expectations.">Grill mode</button>
                 </div>
@@ -10965,6 +11126,8 @@
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
       const toolBoardButton = document.getElementById('toolBoard')
       const themeToggleButton = document.getElementById('themeToggle')
+      const topbarRailToggle = document.getElementById('topbarRailToggle')
+      const officeRailToggle = document.getElementById('officeRailToggle')
       const railAvatarEl = document.getElementById('railAvatar')
       const boardEl = document.getElementById('board')
       const boardSurface = document.getElementById('boardSurface')
@@ -11020,7 +11183,10 @@
       const accessReadyTag = document.getElementById('accessReadyTag')
       const participantNameInput = document.getElementById('participantName')
       const roomPasswordInput = document.getElementById('roomPassword')
+      const loginAccountSelect = document.getElementById('loginAccountSelect')
+      const loginAccountFieldEl = document.getElementById('loginAccountField')
       const loginEmailInput = document.getElementById('loginEmail')
+      const loginEmailFieldEl = document.getElementById('loginEmailField')
       const passkeySignInButton = document.getElementById('passkeySignIn')
       const passwordFieldEl = document.getElementById('passwordField')
       const resetPasswordFieldEl = document.getElementById('resetPasswordField')
@@ -11132,6 +11298,7 @@
       const officePublishedSection = document.getElementById('officePublishedSection')
       const officePublishedCount = document.getElementById('officePublishedCount')
       const officeGreetingEl = document.getElementById('officeGreeting')
+      const officeLaunchGreeting = document.getElementById('officeLaunchGreeting')
       const officeTodayLabelEl = document.getElementById('officeTodayLabel')
       const officeRoomStatusPill = document.getElementById('officeRoomStatusPill')
       const officeRoomName = document.getElementById('officeRoomName')
@@ -11145,6 +11312,7 @@
       const officeAgentSummary = document.getElementById('officeAgentSummary')
       const officeAgentWorkforce = document.getElementById('officeAgentWorkforce')
       const officeToolButtons = Array.from(document.querySelectorAll('[data-office-tool]'))
+      const joinRoomButtons = Array.from(document.querySelectorAll('[data-join-room]'))
       const assistantModeOpeners = Array.from(document.querySelectorAll('[data-open-assistant-mode]'))
       const realtimeVoiceOpeners = Array.from(document.querySelectorAll('[data-start-realtime-voice]'))
       const osAssistant = document.getElementById('osAssistant')
@@ -11210,6 +11378,7 @@
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
+      let railHidden = false
       const pipVideoTilesByParticipant = new Map()
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
@@ -11440,6 +11609,9 @@
       officeToolButtons.forEach(button => {
         button.addEventListener('click', () => openOfficeTool(button.dataset.officeTool))
       })
+      joinRoomButtons.forEach(button => {
+        button.addEventListener('click', joinRoom)
+      })
       assistantModeOpeners.forEach(button => {
         button.addEventListener('click', () => openOSAssistant(button.dataset.openAssistantMode || 'chat'))
       })
@@ -11470,6 +11642,15 @@
       pipMute.addEventListener('click', () => muteMicButton.click())
       pipCamera.addEventListener('click', () => toggleCameraButton.click())
       pipHandle.addEventListener('pointerdown', startPipDrag)
+      topbarRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
+      officeRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
+      function setRailHidden(hidden) {
+        railHidden = Boolean(hidden)
+        appShell.classList.toggle('is-rail-hidden', railHidden)
+        for (const control of [topbarRailToggle, officeRailToggle]) {
+          control.setAttribute('aria-checked', railHidden ? 'false' : 'true')
+        }
+      }
       function syncThemeToggles(theme) {
         const pressed = theme === 'dark' ? 'true' : 'false'
         themeToggleButton.setAttribute('aria-pressed', pressed)
@@ -11508,7 +11689,14 @@
       })
       participantNameInput.addEventListener('change', validateAccess)
       roomPasswordInput.addEventListener('input', validateAccess)
-      loginEmailInput.addEventListener('input', validateAccess)
+      loginAccountSelect.addEventListener('change', () => {
+        syncLoginAccountSelection()
+        validateAccess()
+      })
+      loginEmailInput.addEventListener('input', () => {
+        syncLoginAccountFromEmail()
+        validateAccess()
+      })
       resetPasswordInput.addEventListener('input', validateAccess)
       resetPasswordConfirmInput.addEventListener('input', validateAccess)
       passkeySignInButton.addEventListener('click', signInWithPasskey)
@@ -11639,6 +11827,11 @@
         if (cachedIdentity?.email && !loginEmailInput.value) {
           loginEmailInput.value = cachedIdentity.email
         }
+      }
+      if (loginEmailInput.value.trim()) {
+        syncLoginAccountFromEmail()
+      } else {
+        syncLoginAccountSelection()
       }
       renderLoginMode()
       updateOSAssistantVoiceControls()
@@ -12063,6 +12256,32 @@
         return participantNameFromEmail(user.email) || participantNameFromRosterValue(user.name) || ''
       }
 
+      function selectedLoginAccountEmail() {
+        const value = String(loginAccountSelect.value || '').trim()
+        return value.includes('@') ? value : ''
+      }
+
+      function syncLoginAccountSelection(options = {}) {
+        const selectedEmail = selectedLoginAccountEmail()
+        const preserveTypedEmail = Boolean(options.preserveTypedEmail)
+        if (selectedEmail && (!preserveTypedEmail || !loginEmailInput.value.trim())) {
+          loginEmailInput.value = selectedEmail
+        } else if (!selectedEmail && !preserveTypedEmail) {
+          loginEmailInput.value = ''
+        }
+        const needsEmailField = !selectedEmail || loginEmailInput.value.trim().toLowerCase() !== selectedEmail.toLowerCase()
+        loginEmailFieldEl.hidden = needsEmailField ? false : true
+      }
+
+      function syncLoginAccountFromEmail() {
+        const email = loginEmailInput.value.trim().toLowerCase()
+        const matchingOption = Array.from(loginAccountSelect.options).find(option => {
+          return String(option.value || '').toLowerCase() === email
+        })
+        loginAccountSelect.value = matchingOption ? matchingOption.value : '__custom'
+        syncLoginAccountSelection({ preserveTypedEmail: true })
+      }
+
       function validateAccess() {
         const email = (authedUser?.email || loginEmailInput.value).trim()
         participantNameInput.value = authedUser ? participantNameFromAccount(authedUser) : participantNameFromEmail(email)
@@ -12090,7 +12309,12 @@
          when a session cookie is already live, and the emailed reset flow. */
       function renderLoginMode() {
         const mode = resetToken ? 'reset' : authedUser ? 'authed' : 'login'
-        loginEmailInput.closest('label').hidden = mode === 'reset'
+        loginAccountFieldEl.hidden = mode === 'reset'
+        if (mode !== 'reset') {
+          syncLoginAccountSelection({ preserveTypedEmail: Boolean(loginEmailInput.value.trim()) })
+        } else {
+          loginEmailFieldEl.hidden = true
+        }
         passwordFieldEl.hidden = mode !== 'login'
         resetPasswordFieldEl.hidden = mode !== 'reset'
         resetPasswordConfirmFieldEl.hidden = mode !== 'reset'
@@ -12335,14 +12559,12 @@
         appShell.classList.toggle('is-authed', authed)
         syncOSAssistantAvailability()
         if (railAvatarEl) {
-          railAvatarEl.textContent = authed ? initialsForName(authedUser.name || authedUser.email) : 'TC'
-          railAvatarEl.title = authed ? (authedUser.name || authedUser.email) : 'Sign out'
+          railAvatarEl.title = 'Sign out'
+          railAvatarEl.setAttribute('aria-label', 'Sign out')
         }
         syncAccountChrome()
-        if (authed && !appShell.classList.contains('is-in-room') && (appShell.dataset.tool || 'office') === 'room') {
-          applyToolState('office')
-        }
         if (!authed) {
+          setRailHidden(false)
           appShell.classList.remove('is-in-room', 'is-board-expanded')
           if ((appShell.dataset.tool || 'office') !== 'office') {
             applyToolState('office')
@@ -12836,9 +13058,9 @@
       }
 
       function updateParticipantPreviewText() {
-        // keep the office room card's avatar stack + status in sync with the roster
+        // keep the room prejoin empty state in sync with the roster
         if (appShell.dataset.tool === 'office') {
-          renderOfficeRoomCard()
+          renderRoomLandingState()
         }
         if (!waitingParticipants) {
           return
@@ -12896,7 +13118,7 @@
         applyStatusPillForTool()
         renderPipMeeting()
         if (tool === 'office') {
-          updateOfficeDashboard()
+          updateOfficeHome()
         } else if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
@@ -12930,18 +13152,18 @@
         topbarToolMeta.textContent = tool === 'office'
           ? `${authedUser?.name || 'office'} · ${artifactTotal} artifacts · ${memoryTotal} memories`
           : tool === 'chat'
-            ? `scout · room memory · ${memoryTotal} saved`
-            : tool === 'artifacts'
-              ? `${artifactTotal} saved · assistant modes`
-              : tool === 'research'
-                ? `${agentArtifacts('research').length} briefs · saved artifacts`
-                : tool === 'design'
-                  ? `${agentArtifacts('design').length} kickoffs · saved artifacts`
-                  : tool === 'grill'
-                    ? `${agentArtifacts('grill').length} scorecards · saved artifacts`
-                    : tool === 'memory'
-                      ? `room memory · ${memoryTotal} saved`
-                      : ''
+              ? `scout · room memory · ${memoryTotal} saved`
+              : tool === 'artifacts'
+                ? `${artifactTotal} saved · assistant modes`
+                : tool === 'research'
+                  ? `${agentArtifacts('research').length} briefs · saved artifacts`
+                  : tool === 'design'
+                    ? `${agentArtifacts('design').length} kickoffs · saved artifacts`
+                    : tool === 'grill'
+                      ? `${agentArtifacts('grill').length} scorecards · saved artifacts`
+                      : tool === 'memory'
+                        ? `room memory · ${memoryTotal} saved`
+                        : ''
         // the meeting meta (date · elapsed · in-room pill) leaves the
         // accessibility tree with the visual hide on tool pages
         for (const node of topbarMetaEl.children) {
@@ -12977,12 +13199,8 @@
 
       function setActiveTool(tool) {
         const next = TOOL_IDS.includes(tool) ? tool : 'office'
-        if (next === 'room' && !appShell.classList.contains('is-in-room')) {
-          joinRoom()
-          return
-        }
         if (next === 'board') {
-          // gated on isBoardReady inside; syncs data-tool itself
+          // opens the board surface; editing controls stay gated by board readiness
           setBoardExpanded(true)
           return
         }
@@ -12995,16 +13213,8 @@
 
       function openOfficeTool(tool) {
         const next = String(tool || '').trim()
-        if (next === 'room') {
-          joinRoom()
-          return
-        }
         if (next === 'board') {
-          if (isBoardReady) {
-            setBoardExpanded(true)
-          } else {
-            joinRoom()
-          }
+          setBoardExpanded(true)
           return
         }
         setActiveTool(next)
@@ -14223,13 +14433,13 @@
       }
 
       /* ---------- PiP meeting (kit meeting/PiPMeeting) ----------
-         The meeting follows you into Chat/Memory as a draggable chrome-glass
+         The meeting follows you into Office/Chat/Artifacts/Memory as a draggable chrome-glass
          window. Tiles reuse the board-strip pattern; their <video> elements
          join auxiliaryVideoPlaybackTargets() so the existing repair machinery
          keeps them alive. The Board tool keeps its own dock strip instead. */
       function pipMeetingActive() {
         const tool = appShell.dataset.tool || 'room'
-        return Boolean(localStream) && (tool === 'chat' || tool === 'artifacts' || agentToolIds.includes(tool) || tool === 'memory')
+        return Boolean(localStream) && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || agentToolIds.includes(tool) || tool === 'memory')
       }
 
       function renderPipMeeting() {
@@ -14416,9 +14626,6 @@
       }
 
       function setBoardExpanded(expanded) {
-        if (expanded && !isBoardReady) {
-          return
-        }
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
         applyToolState(expanded
@@ -18205,8 +18412,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const voiceOnly = Boolean(realtimeVoiceOnlyPending)
         currentParticipantName = name
         saveCachedIdentity(name)
-        railAvatarEl.textContent = participantInitials(name)
-        railAvatarEl.title = name
+        railAvatarEl.title = 'Sign out'
+        railAvatarEl.setAttribute('aria-label', 'Sign out')
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         setRoomView(true)
@@ -20513,7 +20720,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renderArtifacts() {
         ensureSelectedArtifact()
         syncToolTopbar()
-        updateOfficeDashboard()
+        updateOfficeHome()
         renderAgentWorkspaces()
         renderChatAgentThreads()
         if (!artifactList) {
@@ -20866,7 +21073,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (memoryCount) {
           memoryCount.textContent = `${memoryEntries.length} saved`
         }
-        updateOfficeDashboard()
+        updateOfficeHome()
         syncToolTopbar()
 
         // canon empty state — no entries at all
@@ -21279,7 +21486,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
         updateBoardEmptyState()
         renderBoardPreview(changes)
-        updateOfficeDashboard()
+        updateOfficeHome()
       }
 
       function renderBoardPreview(changes = { moved: new Set() }) {
@@ -22532,7 +22739,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         lastConnectionState = state
         lastConnectionLabel = label
         applyStatusPillForTool()
-        updateOfficeDashboard()
+        updateOfficeHome()
         if (state === 'listening') {
           brandMarkEl.classList.add('is-listening')
         } else {
@@ -22558,30 +22765,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : 'waiting room'
         boardPreviewState.textContent = boardState.textContent
         updateBoardDockControls()
-        updateOfficeDashboard()
+        updateOfficeHome()
       }
 
-      function updateOfficeDashboard() {
-        if (officeArtifactStat) {
-          officeArtifactStat.textContent = String(artifactEntries.length)
-        }
-        if (officeMemoryStat) {
-          officeMemoryStat.textContent = String(memoryEntries.length)
-        }
-        if (officeBoardStat) {
-          officeBoardStat.textContent = String(cards.length)
-        }
-        if (officeRoomStat) {
-          officeRoomStat.textContent = appShell.classList.contains('is-in-room')
-            ? 'live'
-            : authedUser ? 'ready' : 'locked'
-        }
+      function updateOfficeHome() {
         renderOfficeGreeting()
-        renderOfficeRoomCard()
-        renderOfficeAgenda()
-        renderPublishedArtifactsDashboard()
-        renderOfficeAgentWorkforce()
-        renderOfficeRecentThreads()
+        renderRoomLandingState()
       }
 
       function officeGreetingWord() {
@@ -22593,42 +22782,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderOfficeGreeting() {
-        if (officeTodayLabelEl) {
-          officeTodayLabelEl.textContent = new Date().toLocaleDateString(undefined, {
-            weekday: 'long', month: 'long', day: 'numeric'
-          }).toLowerCase()
-        }
-        if (officeGreetingEl) {
-          const firstName = String(authedUser?.name || '').trim().split(/\s+/)[0]
-          officeGreetingEl.textContent = firstName
-            ? `${officeGreetingWord()}, ${firstName}.`
-            : `${officeGreetingWord()}.`
+        const firstName = String(authedUser?.name || '').trim().split(/\s+/)[0]
+        const greeting = firstName
+          ? `${officeGreetingWord()}, ${firstName}.`
+          : `${officeGreetingWord()}.`
+        if (officeLaunchGreeting) {
+          officeLaunchGreeting.textContent = greeting
         }
       }
 
-      function renderOfficeRoomCard() {
+      function renderRoomLandingState() {
         const inRoom = appShell.classList.contains('is-in-room')
-        if (officeRoomName) {
-          officeRoomName.textContent = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
-        }
-        // the room card mirrors the honest connection pill the rest of the app uses
-        if (officeRoomStatusPill) {
-          officeRoomStatusPill.className = `pill pill--${lastConnectionState}`
-          officeRoomStatusPill.textContent = inRoom ? (lastConnectionLabel || 'live') : 'not connected'
-        }
         const names = inRoom ? participantsInRoom : participantPreview
-        if (officeRoomAvatars) {
-          renderAvatarStack(officeRoomAvatars, names, { max: 5, markCurrent: true })
-        }
-        if (officeRoomInvited) {
-          const seatCount = Math.max(occupiedSeats, names.length)
-          officeRoomInvited.textContent = seatCount > 0
-            ? `${seatCount} ${inRoom ? 'inside' : 'invited'}`
-            : 'room ready'
-        }
-        if (officeRoomJoin) {
-          officeRoomJoin.textContent = inRoom ? 'Return to the room' : 'Join the room'
-        }
         // mirror the canon in-stage empty state from the same honest signals
         if (roomEmptyName) {
           roomEmptyName.textContent = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
@@ -22694,7 +22859,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
       }
 
-      function renderPublishedArtifactsDashboard() {
+      function renderPublishedArtifactsHome() {
         if (!officePublishedArtifacts) {
           return
         }
