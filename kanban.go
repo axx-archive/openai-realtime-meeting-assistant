@@ -917,7 +917,12 @@ func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP
 		return "", apiRequestFailedError("Realtime session failed", response.Status, answerSDP)
 	}
 
-	return string(answerSDP), nil
+	normalizedAnswer, err := normalizeRealtimeSDP(string(answerSDP))
+	if err != nil {
+		log.Errorf("Realtime session returned invalid SDP answer: %v", err)
+		return "", fmt.Errorf("Realtime session returned an invalid answer")
+	}
+	return normalizedAnswer, nil
 }
 
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[string]any {
@@ -958,6 +963,11 @@ func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
 }
 
 func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, []byte, error) {
+	normalizedOffer, err := normalizeRealtimeSDP(offerSDP)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid Realtime SDP offer: %w", err)
+	}
+
 	sessionJSON, err := json.Marshal(session)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal Realtime session: %w", err)
@@ -965,7 +975,7 @@ func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, 
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writeMultipartField(writer, "sdp", "application/sdp", offerSDP); err != nil {
+	if err := writeMultipartField(writer, "sdp", "application/sdp", normalizedOffer); err != nil {
 		return "", nil, fmt.Errorf("write SDP offer: %w", err)
 	}
 	if err := writeMultipartField(writer, "session", "application/json", string(sessionJSON)); err != nil {
@@ -976,6 +986,33 @@ func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, 
 	}
 
 	return writer.FormDataContentType(), body.Bytes(), nil
+}
+
+func normalizeRealtimeSDP(sdp string) (string, error) {
+	normalized := strings.TrimSpace(sdp)
+	if normalized == "" {
+		return "", fmt.Errorf("sdp is required")
+	}
+	normalized = strings.ReplaceAll(normalized, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	lines := strings.Split(normalized, "\n")
+	for index, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		if len(line) < 3 || line[1] != '=' || !isSDPFieldName(line[0]) {
+			return "", fmt.Errorf("invalid SDP line %d", index+1)
+		}
+		lines[index] = line
+	}
+	if lines[0] != "v=0" {
+		return "", fmt.Errorf("sdp must start with v=0")
+	}
+
+	return strings.Join(lines, "\r\n") + "\r\n", nil
+}
+
+func isSDPFieldName(field byte) bool {
+	return strings.ContainsRune("vosiuepcbtrzkam", rune(field))
 }
 
 func writeMultipartField(writer *multipart.Writer, name string, contentType string, value string) error {

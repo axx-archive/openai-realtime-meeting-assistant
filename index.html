@@ -13963,7 +13963,7 @@
       }
 
       async function exchangePrivateRealtimeOffer(offerSDP) {
-        const sdp = String(offerSDP || '')
+        const sdp = normalizeRealtimeSDPForBrowser(offerSDP)
         if (!sdp.trim()) {
           throw new Error('Realtime 2 voice did not create an offer')
         }
@@ -13971,11 +13971,21 @@
         if (!result.ok) {
           throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
         }
-        const answerSDP = String(result.data?.sdp || '').trim()
+        const answerSDP = normalizeRealtimeSDPForBrowser(result.data?.sdp)
         if (!answerSDP) {
           throw new Error('Realtime 2 voice did not return an answer')
         }
         return answerSDP
+      }
+
+      function normalizeRealtimeSDPForBrowser(sdp) {
+        const normalized = String(sdp || '').trim()
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n')
+        if (!normalized) {
+          return ''
+        }
+        return `${normalized.split('\n').map(line => line.trimEnd()).join('\r\n')}\r\n`
       }
 
       function attachPrivateRealtimeVoiceTrack(event) {

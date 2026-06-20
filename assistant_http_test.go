@@ -123,7 +123,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/sdp")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte("v=0\r\n"))
+		_, _ = w.Write([]byte("v=0\n"))
 	}))
 	t.Cleanup(func() {
 		server.Close()
@@ -171,7 +171,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if payload.SDP != "v=0\r\n" {
-		t.Fatalf("response sdp=%q, want mock answer", payload.SDP)
+		t.Fatalf("response sdp=%q, want CRLF-normalized mock answer", payload.SDP)
 	}
 }
 

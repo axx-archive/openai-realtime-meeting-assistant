@@ -117,7 +117,7 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 }
 
 func TestRealtimeCallRequestUsesTypedMultipartParts(t *testing.T) {
-	contentType, body, err := buildRealtimeCallRequest("v=0\r\n", map[string]any{
+	contentType, body, err := buildRealtimeCallRequest("v=0\n", map[string]any{
 		"type":  "realtime",
 		"model": "gpt-realtime-2",
 	})
@@ -163,13 +163,27 @@ func TestRealtimeCallRequestUsesTypedMultipartParts(t *testing.T) {
 		t.Fatalf("sdp content type=%q, want application/sdp", parts["sdp"].contentType)
 	}
 	if parts["sdp"].body != "v=0\r\n" {
-		t.Fatalf("sdp body=%q, want raw offer", parts["sdp"].body)
+		t.Fatalf("sdp body=%q, want CRLF-normalized offer", parts["sdp"].body)
 	}
 	if parts["session"].contentType != "application/json" {
 		t.Fatalf("session content type=%q, want application/json", parts["session"].contentType)
 	}
 	if !strings.Contains(parts["session"].body, `"model":"gpt-realtime-2"`) {
 		t.Fatalf("session body missing realtime model: %s", parts["session"].body)
+	}
+}
+
+func TestNormalizeRealtimeSDPRequiresValidSessionDescription(t *testing.T) {
+	normalized, err := normalizeRealtimeSDP("v=0\no=- 0 0 IN IP4 127.0.0.1\na=ice-pwd:abc1234567890123456789")
+	if err != nil {
+		t.Fatalf("normalize SDP: %v", err)
+	}
+	if normalized != "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\na=ice-pwd:abc1234567890123456789\r\n" {
+		t.Fatalf("normalized SDP=%q", normalized)
+	}
+
+	if _, err := normalizeRealtimeSDP(`{"error":"not sdp"}`); err == nil {
+		t.Fatal("expected non-SDP payload to fail validation")
 	}
 }
 
