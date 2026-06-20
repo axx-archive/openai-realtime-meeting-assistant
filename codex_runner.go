@@ -310,22 +310,23 @@ func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt
 	}
 	defer os.Remove(outputPath)
 
-	args := []string{
+	args := []string{}
+	if cfg.Search {
+		args = append(args, "--search")
+	}
+	args = append(args,
 		"exec",
 		"--cd", cfg.CWD,
 		"--sandbox", cfg.Sandbox,
 		"--output-last-message", outputPath,
 		"-c", fmt.Sprintf("approval_policy=%q", cfg.ApprovalPolicy),
 		"-c", fmt.Sprintf("model_reasoning_effort=%q", cfg.Reasoning),
-	}
+	)
 	if cfg.Profile != "" {
 		args = append(args, "--profile", cfg.Profile)
 	}
 	if cfg.Model != "" {
 		args = append(args, "--model", cfg.Model)
-	}
-	if cfg.Search {
-		args = append(args, "--search")
 	}
 	if cfg.Ephemeral {
 		args = append(args, "--ephemeral")

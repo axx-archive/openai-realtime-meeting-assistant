@@ -333,6 +333,7 @@ done
 		Reasoning:      "high",
 		Timeout:        defaultCodexExecTimeout,
 		MaxOutputBytes: 4096,
+		Search:         true,
 		Ephemeral:      true,
 		SkipGitCheck:   true,
 	}, "hello codex worker")
@@ -347,7 +348,10 @@ done
 		t.Fatalf("read args: %v", err)
 	}
 	args := string(rawArgs)
-	for _, want := range []string{"exec\n", "--cd\n" + dir, "--sandbox\nread-only", "approval_policy=\"never\"", "model_reasoning_effort=\"high\"", "--ephemeral", "--skip-git-repo-check", "-\n"} {
+	if !strings.HasPrefix(args, "--search\nexec\n") {
+		t.Fatalf("args=%q, want top-level --search before exec", args)
+	}
+	for _, want := range []string{"--search\n", "exec\n", "--cd\n" + dir, "--sandbox\nread-only", "approval_policy=\"never\"", "model_reasoning_effort=\"high\"", "--ephemeral", "--skip-git-repo-check", "-\n"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("args missing %q:\n%s", want, args)
 		}
