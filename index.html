@@ -4821,6 +4821,10 @@
         transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
 
+      .os-assistant__toggle[hidden] {
+        display: none !important;
+      }
+
       .os-assistant__toggle:hover {
         border-color: var(--line-2);
         transform: translateY(-1px);
@@ -4853,6 +4857,21 @@
         transform: translateX(-50%);
         pointer-events: auto;
         transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .voice-island.is-visible {
+        animation: voice-island-enter var(--dur-med) var(--ease) both;
+      }
+
+      @keyframes voice-island-enter {
+        from {
+          opacity: 0;
+          transform: translateX(-50%) translateY(-10px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(-50%) translateY(0) scale(1);
+        }
       }
 
       .voice-island[hidden] {
@@ -10061,11 +10080,12 @@
         .toast.is-leaving { animation-duration: 1ms; }
         .scout-chat-thinking__dot,
         .pip-meeting__dot { animation: none; }
+        .voice-island.is-visible { animation: none; }
       }
     </style>
   </head>
   <body>
-    <main id="appShell" data-tool="office">
+    <main id="appShell" class="is-rail-hidden" data-tool="office">
       <nav id="toolRail" class="tool-rail mount-stagger" aria-label="Tools">
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
@@ -10153,7 +10173,7 @@
         <span class="topbar__spacer" aria-hidden="true"></span>
         <span class="topbar__nav-toggle">
           <span>nav bar</span>
-          <button id="topbarRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="true"></button>
+          <button id="topbarRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"></button>
         </span>
         <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
@@ -10222,7 +10242,7 @@
           <div class="office-launch bf-view">
             <div class="office-launch__nav-toggle">
               <span>nav bar</span>
-              <button id="officeRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="true"></button>
+              <button id="officeRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"></button>
             </div>
             <span class="office-launch__glow" aria-hidden="true"></span>
             <div class="office-launch__wrap">
@@ -10933,7 +10953,7 @@
           </button>
         </form>
       </section>
-      <button id="osAssistantToggle" class="os-assistant__toggle" type="button" aria-label="Open assistant" title="Open assistant" aria-expanded="false">
+      <button id="osAssistantToggle" class="os-assistant__toggle" type="button" aria-label="Start Realtime 2 voice" title="Start Realtime 2 voice" aria-expanded="false" hidden>
         <span class="os-wave bf-fab" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
       </button>
     </aside>
@@ -11375,10 +11395,12 @@
       let privateRealtimeVoiceAudio
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
+      let privateRealtimeVoiceSessionToken = 0
+      let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
-      let railHidden = false
+      let railHidden = true
       const pipVideoTilesByParticipant = new Map()
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
@@ -11618,7 +11640,6 @@
       realtimeVoiceOpeners.forEach(button => {
         button.addEventListener('click', startRealtimeVoiceFromWaveform)
       })
-      osAssistantToggle.addEventListener('click', startRealtimeVoiceFromWaveform)
       osAssistantClose.addEventListener('click', () => {
         stopOSAssistantVoice()
         setOSAssistantOpen(false)
@@ -11650,6 +11671,7 @@
         for (const control of [topbarRailToggle, officeRailToggle]) {
           control.setAttribute('aria-checked', railHidden ? 'false' : 'true')
         }
+        syncVoiceIslandVisibility()
       }
       function syncThemeToggles(theme) {
         const pressed = theme === 'dark' ? 'true' : 'false'
@@ -12564,7 +12586,7 @@
         }
         syncAccountChrome()
         if (!authed) {
-          setRailHidden(false)
+          setRailHidden(true)
           appShell.classList.remove('is-in-room', 'is-board-expanded')
           if ((appShell.dataset.tool || 'office') !== 'office') {
             applyToolState('office')
@@ -13088,6 +13110,9 @@
       function setRoomView(inRoom) {
         appShell.classList.toggle('is-in-room', inRoom)
         appShell.classList.toggle('is-authed', Boolean(authedUser))
+        if (inRoom) {
+          stopPrivateRealtimeVoiceForRoom()
+        }
         if (inRoom && (appShell.dataset.tool || 'office') === 'office') {
           setActiveTool('room')
         } else if (!inRoom) {
@@ -13099,6 +13124,7 @@
         updateHearthParticipants()
         updateRoomRecordingControls()
         syncAuthenticatedShell()
+        syncVoiceIslandVisibility()
       }
 
       /* ---------- tool routing (glass & ink shell) ----------
@@ -13126,6 +13152,11 @@
           if (agentToolIds.includes(tool)) {
             renderAgentWorkspaces()
           }
+        }
+        if (tool === 'room') {
+          stopPrivateRealtimeVoiceForRoom()
+        } else {
+          syncVoiceIslandVisibility()
         }
       }
 
@@ -13794,10 +13825,11 @@
         realtimeVoiceStartedRoom = false
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         privateRealtimeVoiceStarting = true
+        const sessionToken = ++privateRealtimeVoiceSessionToken
         setVoiceIslandState('connecting', 'connecting...')
 
         try {
-          await beginPrivateRealtimeVoiceSession()
+          await beginPrivateRealtimeVoiceSession(sessionToken)
           if (realtimeVoiceActive && privateRealtimeVoicePeer) {
             setVoiceIslandState('listening', 'listening...')
           }
@@ -13819,9 +13851,12 @@
         }
       }
 
-      async function beginPrivateRealtimeVoiceSession() {
+      async function beginPrivateRealtimeVoiceSession(sessionToken) {
         isMicMuted = false
         const captureStream = await getPreferredAudioOnlyUserMedia()
+        assertPrivateRealtimeVoiceSession(sessionToken, () => {
+          captureStream.getTracks().forEach(track => track.stop())
+        })
         const sourceTrack = captureStream.getAudioTracks()[0]
         if (!sourceTrack) {
           captureStream.getTracks().forEach(track => track.stop())
@@ -13829,13 +13864,19 @@
         }
 
         const audio = await createOutboundAudioForSource(sourceTrack)
+        assertPrivateRealtimeVoiceSession(sessionToken, () => {
+          cleanupAudioProcessor(audio.processor, { stopOutput: true, stopSource: true })
+          captureStream.getTracks().forEach(track => track.stop())
+        })
         const outboundTrack = audio.track || sourceTrack
         outboundTrack.enabled = true
         privateRealtimeVoiceProcessor = audio.processor
         privateRealtimeVoiceStream = new MediaStream([outboundTrack])
 
         const rtcConfiguration = await loadRTCConfiguration()
+        assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceSession())
         const peer = new RTCPeerConnection(rtcConfiguration)
+        assertPrivateRealtimeVoiceSession(sessionToken, () => peer.close())
         privateRealtimeVoicePeer = peer
         privateRealtimeVoiceHandledCalls = new Set()
         peer.ontrack = attachPrivateRealtimeVoiceTrack
@@ -13865,13 +13906,68 @@
         })
 
         const offer = await peer.createOffer()
+        assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceSession())
         await peer.setLocalDescription(offer)
-        const answerSDP = await exchangePrivateRealtimeOffer(offer.sdp)
+        const localSDP = await waitForRealtimeOfferSDP(peer, offer)
+        assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceSession())
+        const answerSDP = await exchangePrivateRealtimeOffer(localSDP)
+        assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceSession())
         await peer.setRemoteDescription({ type: 'answer', sdp: answerSDP })
       }
 
+      function privateRealtimeVoiceSessionIsCurrent(sessionToken) {
+        return sessionToken === privateRealtimeVoiceSessionToken
+          && realtimeVoiceActive
+          && !appShell.classList.contains('is-in-room')
+      }
+
+      function assertPrivateRealtimeVoiceSession(sessionToken, cleanup) {
+        if (privateRealtimeVoiceSessionIsCurrent(sessionToken)) {
+          return
+        }
+        cleanup?.()
+        throw new Error('Private Realtime voice was stopped')
+      }
+
+      async function waitForRealtimeOfferSDP(peer, offer) {
+        const current = String(peer.localDescription?.sdp || offer?.sdp || '')
+        if (current.trim()) {
+          return current
+        }
+        return new Promise((resolve, reject) => {
+          let settled = false
+          const finish = () => {
+            if (settled) {
+              return
+            }
+            const sdp = String(peer.localDescription?.sdp || '')
+            if (!sdp.trim()) {
+              return
+            }
+            settled = true
+            window.clearTimeout(timeout)
+            peer.removeEventListener?.('icegatheringstatechange', finish)
+            resolve(sdp)
+          }
+          const timeout = window.setTimeout(() => {
+            if (settled) {
+              return
+            }
+            settled = true
+            peer.removeEventListener?.('icegatheringstatechange', finish)
+            reject(new Error('Realtime 2 voice did not create an offer'))
+          }, 1500)
+          peer.addEventListener?.('icegatheringstatechange', finish)
+          finish()
+        })
+      }
+
       async function exchangePrivateRealtimeOffer(offerSDP) {
-        const result = await postAuthJSON('/assistant/realtime-offer', { sdp: offerSDP })
+        const sdp = String(offerSDP || '')
+        if (!sdp.trim()) {
+          throw new Error('Realtime 2 voice did not create an offer')
+        }
+        const result = await postAuthJSON('/assistant/realtime-offer', { sdp })
         if (!result.ok) {
           throw new Error(result.data?.error || 'Realtime 2 voice could not connect')
         }
@@ -14024,6 +14120,8 @@
       }
 
       function closePrivateRealtimeVoiceSession() {
+        privateRealtimeVoiceSessionToken += 1
+        privateRealtimeVoiceStarting = false
         if (privateRealtimeVoiceDataChannel) {
           try {
             privateRealtimeVoiceDataChannel.close()
@@ -14056,6 +14154,21 @@
         privateRealtimeVoiceStream = undefined
         cleanupAudioProcessor(privateRealtimeVoiceProcessor, { stopOutput: true, stopSource: true })
         privateRealtimeVoiceProcessor = undefined
+      }
+
+      function privateRealtimeVoiceInFlight() {
+        return privateRealtimeVoiceStarting
+          || Boolean(privateRealtimeVoicePeer)
+          || Boolean(privateRealtimeVoiceStream)
+          || Boolean(privateRealtimeVoiceDataChannel)
+          || Boolean(privateRealtimeVoiceProcessor)
+          || (!appShell.classList.contains('is-in-room') && realtimeVoiceActive)
+      }
+
+      function stopPrivateRealtimeVoiceForRoom() {
+        if (privateRealtimeVoiceInFlight()) {
+          stopRealtimeVoiceConversation({ notifyServer: false })
+        }
       }
 
       function stopRealtimeVoiceConversation(options = {}) {
@@ -14095,11 +14208,8 @@
         window.clearTimeout(voiceIslandClearTimer)
         voiceIslandClearTimer = 0
         const next = ['connecting', 'listening', 'hearing', 'thinking', 'talking', 'error'].includes(state) ? state : 'idle'
+        voiceIslandState = next
         voiceIsland.dataset.state = next
-        voiceIsland.hidden = next === 'idle' || (!realtimeVoiceActive && next !== 'error')
-        if (voiceIsland.hidden) {
-          return
-        }
         const labels = {
           connecting: 'Realtime 2',
           listening: 'Realtime 2',
@@ -14119,6 +14229,7 @@
         voiceIslandLabel.textContent = labels[next] || labels.listening
         voiceIslandMeta.textContent = String(detail || details[next] || '').trim()
         voiceIslandMain.setAttribute('aria-label', `${voiceIslandLabel.textContent}: ${voiceIslandMeta.textContent}`)
+        syncVoiceIslandVisibility()
         if (next === 'talking') {
           voiceIslandClearTimer = window.setTimeout(() => {
             if (realtimeVoiceActive) {
@@ -14128,6 +14239,28 @@
             }
           }, 2200)
         }
+      }
+
+      function shouldShowVoiceIsland() {
+        if (!voiceIsland || voiceIslandState === 'idle') {
+          return false
+        }
+        if (!realtimeVoiceActive && voiceIslandState !== 'error') {
+          return false
+        }
+        if (appShell.classList.contains('is-in-room')) {
+          return false
+        }
+        return (appShell.dataset.tool || 'office') !== 'office'
+      }
+
+      function syncVoiceIslandVisibility() {
+        if (!voiceIsland) {
+          return
+        }
+        const visible = shouldShowVoiceIsland()
+        voiceIsland.hidden = !visible
+        voiceIsland.classList.toggle('is-visible', visible)
       }
 
       function renderAgentArtifactLink(entry) {
@@ -14163,9 +14296,10 @@
         if (open && !osAssistantAvailable()) {
           return
         }
-        if (!osAssistant || (osAssistant.hidden && open)) {
+        if (!osAssistant) {
           return
         }
+        osAssistant.hidden = !open
         osAssistant.classList.toggle('is-open', Boolean(open))
         osAssistantToggle.setAttribute('aria-expanded', open ? 'true' : 'false')
       }
@@ -14179,8 +14313,10 @@
           return
         }
         const available = osAssistantAvailable()
-        osAssistant.hidden = !available
-        osAssistantToggle.disabled = !available
+        const open = available && osAssistant.classList.contains('is-open')
+        osAssistant.hidden = !open
+        osAssistantToggle.hidden = true
+        osAssistantToggle.disabled = true
         osAssistantToggle.setAttribute('aria-label', available ? 'Start Realtime 2 voice' : 'Sign in to start Realtime 2 voice')
         osAssistantToggle.title = available ? 'Start Realtime 2 voice' : 'Sign in to start Realtime 2 voice'
         osAssistantInput.disabled = !available

@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,7 +22,6 @@ import (
 )
 
 const (
-	realtimeCallsURL          = "https://api.openai.com/v1/realtime/calls"
 	defaultRealtimeModel      = "gpt-realtime-2"
 	defaultReasoningEffort    = "high"
 	defaultRealtimeVADType    = "server_vad"
@@ -40,6 +40,11 @@ const (
 	// a tool result that completed moments earlier: the async ASR transcript
 	// routinely lands after response.done.
 	scoutVoiceRecentToolGrace = 6 * time.Second
+)
+
+var (
+	realtimeCallsURL   = "https://api.openai.com/v1/realtime/calls"
+	realtimeHTTPClient = &http.Client{Timeout: 30 * time.Second}
 )
 
 func durableTimestampID(prefix string, at time.Time) string {
@@ -898,7 +903,7 @@ func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP
 	request.Header.Set("Authorization", "Bearer "+apiKey)
 	request.Header.Set("Content-Type", contentType)
 
-	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	response, err := realtimeHTTPClient.Do(request)
 	if err != nil {
 		return "", fmt.Errorf("create Realtime session: %w", err)
 	}
@@ -960,10 +965,10 @@ func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, 
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("sdp", offerSDP); err != nil {
+	if err := writeMultipartField(writer, "sdp", "application/sdp", offerSDP); err != nil {
 		return "", nil, fmt.Errorf("write SDP offer: %w", err)
 	}
-	if err := writer.WriteField("session", string(sessionJSON)); err != nil {
+	if err := writeMultipartField(writer, "session", "application/json", string(sessionJSON)); err != nil {
 		return "", nil, fmt.Errorf("write session config: %w", err)
 	}
 	if err := writer.Close(); err != nil {
@@ -971,6 +976,18 @@ func buildRealtimeCallRequest(offerSDP string, session map[string]any) (string, 
 	}
 
 	return writer.FormDataContentType(), body.Bytes(), nil
+}
+
+func writeMultipartField(writer *multipart.Writer, name string, contentType string, value string) error {
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, name))
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(part, value)
+	return err
 }
 
 func (app *kanbanBoardApp) SendEvent(payload any) error {

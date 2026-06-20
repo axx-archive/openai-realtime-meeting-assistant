@@ -669,8 +669,8 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	offerSDP := strings.TrimSpace(payload.SDP)
-	if offerSDP == "" {
+	offerSDP := payload.SDP
+	if strings.TrimSpace(offerSDP) == "" {
 		writeAuthError(w, http.StatusBadRequest, "sdp is required")
 		return
 	}

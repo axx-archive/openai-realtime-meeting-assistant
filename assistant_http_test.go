@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,6 +54,124 @@ func TestAssistantRealtimeOfferRequiresAuthAndConfiguredRealtime(t *testing.T) {
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d body=%s, want %d when realtime key is missing", recorder.Code, recorder.Body.String(), http.StatusServiceUnavailable)
+	}
+}
+
+func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousURL := realtimeCallsURL
+	previousClient := realtimeHTTPClient
+	var sawRealtimeRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRealtimeRequest = true
+		if r.Method != http.MethodPost {
+			t.Errorf("method=%s, want POST", r.Method)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-realtime-key" {
+			t.Errorf("authorization=%q, want bearer test key", auth)
+		}
+		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			t.Errorf("parse content type: %v", err)
+		}
+		if mediaType != "multipart/form-data" {
+			t.Errorf("content type=%q, want multipart/form-data", mediaType)
+		}
+		reader := multipart.NewReader(r.Body, params["boundary"])
+		parts := map[string]struct {
+			contentType string
+			body        string
+		}{}
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Errorf("read part: %v", err)
+				break
+			}
+			raw, err := io.ReadAll(part)
+			if err != nil {
+				t.Errorf("read part body: %v", err)
+				break
+			}
+			parts[part.FormName()] = struct {
+				contentType string
+				body        string
+			}{
+				contentType: part.Header.Get("Content-Type"),
+				body:        string(raw),
+			}
+		}
+		if parts["sdp"].contentType != "application/sdp" {
+			t.Errorf("sdp content type=%q, want application/sdp", parts["sdp"].contentType)
+		}
+		if parts["sdp"].body != "v=0\r\n" {
+			t.Errorf("sdp body=%q, want raw offer", parts["sdp"].body)
+		}
+		if parts["session"].contentType != "application/json" {
+			t.Errorf("session content type=%q, want application/json", parts["session"].contentType)
+		}
+		if !strings.Contains(parts["session"].body, `"model":"gpt-realtime-2"`) {
+			t.Errorf("session body missing realtime model: %s", parts["session"].body)
+		}
+		w.Header().Set("Content-Type", "application/sdp")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("v=0\r\n"))
+	}))
+	t.Cleanup(func() {
+		server.Close()
+		realtimeCallsURL = previousURL
+		realtimeHTTPClient = previousClient
+	})
+	realtimeCallsURL = server.URL
+	realtimeHTTPClient = server.Client()
+
+	emptyReq := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"   "}`))
+	emptyReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		emptyReq.AddCookie(cookie)
+	}
+	emptyRecorder := httptest.NewRecorder()
+
+	assistantRealtimeOfferHandler(emptyRecorder, emptyReq)
+
+	if emptyRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("empty sdp status=%d body=%s, want %d", emptyRecorder.Code, emptyRecorder.Body.String(), http.StatusBadRequest)
+	}
+	if sawRealtimeRequest {
+		t.Fatal("empty sdp should not reach mock OpenAI server")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantRealtimeOfferHandler(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+	if !sawRealtimeRequest {
+		t.Fatal("mock OpenAI server did not receive realtime offer")
+	}
+	var payload struct {
+		SDP string `json:"sdp"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.SDP != "v=0\r\n" {
+		t.Fatalf("response sdp=%q, want mock answer", payload.SDP)
 	}
 }
 

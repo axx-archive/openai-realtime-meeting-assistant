@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"mime"
+	"mime/multipart"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,6 +113,63 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
 		}
+	}
+}
+
+func TestRealtimeCallRequestUsesTypedMultipartParts(t *testing.T) {
+	contentType, body, err := buildRealtimeCallRequest("v=0\r\n", map[string]any{
+		"type":  "realtime",
+		"model": "gpt-realtime-2",
+	})
+	if err != nil {
+		t.Fatalf("build realtime request: %v", err)
+	}
+
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatalf("parse content type: %v", err)
+	}
+	if mediaType != "multipart/form-data" {
+		t.Fatalf("content type=%q, want multipart/form-data", mediaType)
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	parts := map[string]struct {
+		contentType string
+		body        string
+	}{}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read part: %v", err)
+		}
+		raw, err := io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("read part body: %v", err)
+		}
+		parts[part.FormName()] = struct {
+			contentType string
+			body        string
+		}{
+			contentType: part.Header.Get("Content-Type"),
+			body:        string(raw),
+		}
+	}
+
+	if parts["sdp"].contentType != "application/sdp" {
+		t.Fatalf("sdp content type=%q, want application/sdp", parts["sdp"].contentType)
+	}
+	if parts["sdp"].body != "v=0\r\n" {
+		t.Fatalf("sdp body=%q, want raw offer", parts["sdp"].body)
+	}
+	if parts["session"].contentType != "application/json" {
+		t.Fatalf("session content type=%q, want application/json", parts["session"].contentType)
+	}
+	if !strings.Contains(parts["session"].body, `"model":"gpt-realtime-2"`) {
+		t.Fatalf("session body missing realtime model: %s", parts["session"].body)
 	}
 }
 
