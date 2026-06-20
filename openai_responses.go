@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,11 +134,40 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	return text, nil
 }
 
+type apiRequestFailure struct {
+	status string
+	body   string
+}
+
+func (failure *apiRequestFailure) Error() string {
+	return fmt.Sprintf("api request failed (%s)", failure.status)
+}
+
 // apiRequestFailedError logs the full upstream error body server-side and
 // returns a short status-only error safe to surface to users.
 func apiRequestFailedError(context string, status string, body []byte) error {
 	log.Errorf("%s: status=%s body=%s", context, status, strings.TrimSpace(string(body)))
-	return fmt.Errorf("api request failed (%s)", status)
+	return &apiRequestFailure{
+		status: status,
+		body:   strings.TrimSpace(string(body)),
+	}
+}
+
+func openAIAPIRequestUserMessage(err error) (string, int, bool) {
+	var failure *apiRequestFailure
+	if !errors.As(err, &failure) {
+		return "", 0, false
+	}
+
+	body := strings.ToLower(failure.body)
+	if strings.Contains(body, "insufficient_quota") || strings.Contains(body, "current quota") || strings.Contains(body, "billing quota") {
+		return "OpenAI API quota is exhausted", http.StatusTooManyRequests, true
+	}
+	if strings.Contains(body, "rate_limit") || strings.Contains(body, "rate limit") || strings.Contains(body, "requests per minute") {
+		return "OpenAI API rate limit reached; try again shortly", http.StatusTooManyRequests, true
+	}
+
+	return "", 0, false
 }
 
 func extractOpenAIResponseText(body openAIResponsesBody) string {

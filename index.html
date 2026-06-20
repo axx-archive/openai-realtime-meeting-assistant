@@ -11333,6 +11333,7 @@
          The pre-paint script in <head> applies the stored/system theme before
          first render; these helpers switch + persist it at runtime. */
       const themeStorageKey = 'bonfire.theme.v1'
+      const railHiddenStorageKey = 'bonfire.rail.hidden.v1'
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       /* auth state — the session itself lives in an HttpOnly cookie the
@@ -11620,7 +11621,7 @@
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
       let lastNonBoardTool = 'office'
-      let railHidden = true
+      let railHidden = loadRailHiddenPreference()
       const pipVideoTilesByParticipant = new Map()
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
@@ -11885,14 +11886,32 @@
       pipHandle.addEventListener('pointerdown', startPipDrag)
       topbarRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
       officeRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
-      function setRailHidden(hidden) {
+      function loadRailHiddenPreference() {
+        try {
+          const saved = window.localStorage?.getItem(railHiddenStorageKey)
+          if (saved === 'visible') return false
+          if (saved === 'hidden') return true
+        } catch (err) { /* private mode */ }
+        return true
+      }
+      function persistRailHiddenPreference(hidden) {
+        try {
+          window.localStorage?.setItem(railHiddenStorageKey, hidden ? 'hidden' : 'visible')
+        } catch (err) { /* private mode */ }
+      }
+      function setRailHidden(hidden, options = {}) {
+        const persist = options.persist !== false
         railHidden = Boolean(hidden)
         appShell.classList.toggle('is-rail-hidden', railHidden)
         for (const control of [topbarRailToggle, officeRailToggle]) {
           control.setAttribute('aria-checked', railHidden ? 'false' : 'true')
         }
+        if (persist) {
+          persistRailHiddenPreference(railHidden)
+        }
         syncVoiceIslandVisibility()
       }
+      setRailHidden(railHidden, { persist: false })
       function syncThemeToggles(theme) {
         const pressed = theme === 'dark' ? 'true' : 'false'
         themeToggleButton.setAttribute('aria-pressed', pressed)
@@ -12805,8 +12824,10 @@
           railAvatarEl.setAttribute('aria-label', 'Sign out')
         }
         syncAccountChrome()
-        if (!authed) {
-          setRailHidden(true)
+        if (authed) {
+          setRailHidden(loadRailHiddenPreference(), { persist: false })
+        } else {
+          setRailHidden(true, { persist: false })
           appShell.classList.remove('is-in-room', 'is-board-expanded')
           if ((appShell.dataset.tool || 'office') !== 'office') {
             applyToolState('office')
@@ -13461,9 +13482,6 @@
           return
         }
         applyToolState(next)
-        if (!railHidden && window.matchMedia?.('(max-width: 640px)').matches) {
-          setRailHidden(true)
-        }
         if (appShell.classList.contains('is-board-expanded')) {
           setBoardExpanded(false)
         }

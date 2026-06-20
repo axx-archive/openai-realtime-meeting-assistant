@@ -678,6 +678,10 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP)
 	if err != nil {
 		log.Errorf("Failed to create private Realtime voice call for %s: %v", user.Email, err)
+		if message, status, ok := openAIAPIRequestUserMessage(err); ok {
+			writeAuthError(w, status, "Scout voice is unavailable: "+message)
+			return
+		}
 		writeAuthError(w, http.StatusBadGateway, err.Error())
 		return
 	}

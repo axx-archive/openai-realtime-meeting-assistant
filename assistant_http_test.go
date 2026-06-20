@@ -175,6 +175,52 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 	}
 }
 
+func TestAssistantRealtimeOfferReportsQuotaBlocker(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousURL := realtimeCallsURL
+	previousClient := realtimeHTTPClient
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`))
+	}))
+	t.Cleanup(func() {
+		server.Close()
+		realtimeCallsURL = previousURL
+		realtimeHTTPClient = previousClient
+	})
+	realtimeCallsURL = server.URL
+	realtimeHTTPClient = server.Client()
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantRealtimeOfferHandler(recorder, req)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusTooManyRequests)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if got := payload["error"]; got != "Scout voice is unavailable: OpenAI API quota is exhausted" {
+		t.Fatalf("error=%q, want quota-specific Scout message", got)
+	}
+	if strings.Contains(recorder.Body.String(), "You exceeded your current quota") || strings.Contains(recorder.Body.String(), "insufficient_quota") {
+		t.Fatalf("response leaked raw OpenAI quota body: %s", recorder.Body.String())
+	}
+}
+
 func TestPrivateRealtimeToolRejectsRoomOnlyControls(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

@@ -146,7 +146,15 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`data-tool="chat" aria-label="Chat" title="Chat"`,
 		`id="topbarRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"`,
 		`id="officeRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"`,
-		"let railHidden = true",
+		"const railHiddenStorageKey = 'bonfire.rail.hidden.v1'",
+		"let railHidden = loadRailHiddenPreference()",
+		"function loadRailHiddenPreference()",
+		"window.localStorage?.getItem(railHiddenStorageKey)",
+		"function persistRailHiddenPreference(hidden)",
+		"window.localStorage?.setItem(railHiddenStorageKey, hidden ? 'hidden' : 'visible')",
+		"function setRailHidden(hidden, options = {})",
+		"setRailHidden(railHidden, { persist: false })",
+		"setRailHidden(true, { persist: false })",
 		`id="officeTool" class="office-tool"`,
 		`class="office-launch__wave"`,
 		`data-assistant-mode="workflow"`,
@@ -233,7 +241,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`data-tool="research" aria-label="Research" title="Research"`,
 		`data-tool="design" aria-label="Design" title="Design"`,
 		".topbar__nav-toggle > span",
-		"if (!railHidden && window.matchMedia?.('(max-width: 640px)').matches)",
 		`id="artifactReadPane" class="artifact-read" aria-label="artifact preview"`,
 		"function artifactSections(entry)",
 		"function renderArtifactRead(container, entry, options = {})",
@@ -253,6 +260,13 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 
 	if strings.Contains(html, `data-office-tool="dashboard"`) || strings.Contains(html, `id="dashboardTool"`) {
 		t.Fatal("waveform home must not retain a separate dashboard route or CTA")
+	}
+	setActiveToolBody := functionBody(html, "function setActiveTool(tool)")
+	if setActiveToolBody == "" {
+		t.Fatal("index.html missing setActiveTool")
+	}
+	if strings.Contains(setActiveToolBody, "setRailHidden(true)") || strings.Contains(setActiveToolBody, "matchMedia?.('(max-width: 640px)')") {
+		t.Fatal("tab navigation should not auto-hide a user-enabled nav bar")
 	}
 	for _, removedDashPrompt := range []string{
 		"tap the waveform and tell Scout what you need",
