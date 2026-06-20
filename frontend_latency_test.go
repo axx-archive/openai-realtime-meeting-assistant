@@ -149,8 +149,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"let railHidden = true",
 		`id="officeTool" class="office-tool"`,
 		`class="office-launch__wave"`,
-		"tap the waveform and tell Scout what you need",
-		`data-office-tool="research"`,
 		`data-assistant-mode="workflow"`,
 		`id="osAssistant" class="os-assistant"`,
 		`.os-assistant__toggle[hidden]`,
@@ -255,6 +253,19 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 
 	if strings.Contains(html, `data-office-tool="dashboard"`) || strings.Contains(html, `id="dashboardTool"`) {
 		t.Fatal("waveform home must not retain a separate dashboard route or CTA")
+	}
+	for _, removedDashPrompt := range []string{
+		"tap the waveform and tell Scout what you need",
+		"Jump into the conference room",
+		"Research which segment to launch first",
+		"Summarize this morning's standup",
+		"office-launch__hint",
+		"office-launch__commands",
+		"office-launch__command",
+	} {
+		if strings.Contains(html, removedDashPrompt) {
+			t.Fatalf("waveform home should not render the old dashboard prompt cluster %q", removedDashPrompt)
+		}
 	}
 	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
 		t.Fatal("non-prototype tools should be retained off-rail, not shown in the prototype rail")
