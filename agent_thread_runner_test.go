@@ -30,12 +30,29 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	if !strings.Contains(output, "Vision: Realtime 2") {
 		t.Fatalf("output=%q, want responder output", output)
 	}
-	for _, want := range []string{"Vision", "Review against the original goal", "Shipping gate", "Do not claim you performed browser"} {
+	for _, want := range []string{"Vision", "Context used", "Review against the original goal", "Gate", "stable headings", "Thesis", "Sources", "Do not claim you performed browser"} {
 		if !strings.Contains(captured.Instructions, want) {
 			t.Fatalf("instructions missing %q: %s", want, captured.Instructions)
 		}
 	}
 	if !strings.Contains(captured.Input, thread.Query) || !strings.Contains(captured.Input, "Board and memory context") {
 		t.Fatalf("input=%q, want thread query and context", captured.Input)
+	}
+}
+
+func TestAgentThreadModeContractsDifferentiateResearchAndDesign(t *testing.T) {
+	for _, tt := range []struct {
+		mode string
+		want []string
+	}{
+		{mode: "research", want: []string{"Thesis", "Evidence", "Sources", "Counterarguments", "Recommendation"}},
+		{mode: "design", want: []string{"Design intent", "Context and research used", "Core screens", "Responsive behavior", "Implementation handoff"}},
+	} {
+		got := agentThreadModeContract(tt.mode)
+		for _, want := range tt.want {
+			if !strings.Contains(got, want) {
+				t.Fatalf("mode %s contract missing %q: %s", tt.mode, want, got)
+			}
+		}
 	}
 }

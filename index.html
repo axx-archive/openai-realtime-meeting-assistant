@@ -6419,6 +6419,159 @@
         opacity: 0.55;
       }
 
+      .artifact-read {
+        flex: 1;
+        min-height: 220px;
+        max-height: min(52vh, 560px);
+        margin: 18px 22px 0;
+        width: calc(100% - 44px);
+        overflow: auto;
+        display: grid;
+        align-content: start;
+        gap: var(--sp-4);
+        padding: 18px;
+        border-radius: var(--r-lg);
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+      }
+
+      .artifact-read[hidden] {
+        display: none;
+      }
+
+      .artifact-read__empty {
+        min-height: 180px;
+        display: grid;
+        place-items: center;
+        color: var(--text-3);
+        font: var(--type-body);
+        text-align: center;
+        text-wrap: pretty;
+      }
+
+      .artifact-read__hero {
+        display: grid;
+        gap: 10px;
+        padding-bottom: var(--sp-3);
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .artifact-read__meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .artifact-read__meta span:not(:last-child)::after {
+        content: "·";
+        margin-left: var(--sp-2);
+        color: var(--text-3);
+      }
+
+      .artifact-read__summary {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        line-height: 1.55;
+        text-wrap: pretty;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-read__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: var(--sp-3);
+      }
+
+      .artifact-read__section {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        padding: var(--sp-3);
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+        background: var(--surface-1);
+      }
+
+      .artifact-read__section--wide {
+        grid-column: 1 / -1;
+      }
+
+      .artifact-read__section h4 {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        text-wrap: balance;
+      }
+
+      .artifact-read__section p {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+        line-height: 1.62;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        text-wrap: pretty;
+      }
+
+      .artifact-read__sources {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .artifact-read__source-list {
+        display: grid;
+        gap: var(--sp-2);
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .artifact-read__source {
+        display: grid;
+        gap: 2px;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        color: inherit;
+        text-decoration: none;
+        border: 1px solid var(--line-1);
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .artifact-read__source:hover {
+        background: var(--surface-3);
+      }
+
+      .artifact-read__source:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .artifact-read__source-name {
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-read__source-url {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-detail__body {
+        flex: none;
+        min-height: 150px;
+        max-height: 28vh;
+      }
+
       .artifact-detail__actions {
         flex: none;
         display: flex;
@@ -6611,6 +6764,81 @@
         font: 13px/1.45 var(--font-sans);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+      }
+
+      .agent-output__latest--rendered {
+        max-height: none;
+        white-space: normal;
+        padding: 0;
+        background: transparent;
+        overflow: visible;
+      }
+
+      .agent-output__latest--rendered.artifact-read,
+      .agent-output__latest--rendered .artifact-read {
+        width: 100%;
+        min-height: 260px;
+        max-height: min(58vh, 640px);
+        margin: 0;
+        background: var(--surface-2);
+        overflow: auto;
+      }
+
+      .agent-context {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .agent-context:empty {
+        display: none;
+      }
+
+      .agent-context__head {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .agent-context__list {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .agent-context__item {
+        min-height: 44px;
+        display: grid;
+        gap: 3px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .agent-context__item:hover {
+        background: var(--surface-2);
+        box-shadow: var(--shadow-1);
+      }
+
+      .agent-context__item:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .agent-context__title {
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        overflow-wrap: anywhere;
+      }
+
+      .agent-context__meta {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
       }
 
       .agent-output__list {
@@ -7054,6 +7282,26 @@
 
         .agent-template-grid {
           grid-template-columns: minmax(0, 1fr);
+        }
+
+        .artifact-read {
+          min-height: 180px;
+          max-height: 45vh;
+          margin: 16px 16px 0;
+          width: calc(100% - 32px);
+          padding: 14px;
+        }
+
+        .artifact-read__grid,
+        .artifact-read__source-list {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .artifact-detail__body {
+          margin: 14px 16px;
+          width: calc(100% - 32px);
+          min-height: 132px;
+          max-height: 22vh;
         }
       }
 
@@ -9079,6 +9327,10 @@
           padding: 0 12px 0 0;
         }
 
+        .topbar__nav-toggle > span {
+          display: none;
+        }
+
         .topbar__mark {
           width: 56px;
         }
@@ -9089,9 +9341,9 @@
         }
 
         .topbar > .pill {
-          max-width: min(148px, 36vw);
+          max-width: min(84px, 22vw);
           overflow: hidden;
-          padding: 0 10px;
+          padding: 0 8px;
           text-overflow: ellipsis;
         }
 
@@ -10112,13 +10364,13 @@
             <span class="tool-rail__label">artifacts</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
+        <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
@@ -10603,6 +10855,7 @@
                 <span id="artifactDetailStatus" class="artifact-detail__status">no selection</span>
               </div>
               <input id="artifactTitleInput" class="artifact-detail__input" type="text" autocomplete="off" placeholder="untitled artifact" aria-label="artifact title" disabled>
+              <div id="artifactReadPane" class="artifact-read" aria-label="artifact preview"></div>
               <textarea id="artifactBodyInput" class="artifact-detail__body" rows="16" aria-label="artifact body" disabled></textarea>
               <div class="artifact-detail__actions">
                 <span class="artifact-detail__hint">published artifacts appear in team artifacts</span>
@@ -10667,6 +10920,7 @@
                   <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for the artifact workspace. Include list/detail layout, edit/save states, cross-linking to agent apps, empty state, mobile behavior, and implementation risks.">Artifacts</button>
                   <button type="button" data-agent-template="design" data-template-text="Create a design kickoff for grill mode. Include pitch capture, tough-question loop, score presentation, saved evaluation artifact, and privacy expectations.">Grill mode</button>
                 </div>
+                <div class="agent-context" data-design-context></div>
                 <div class="agent-composer__actions">
                   <button class="btn btn--primary" type="submit" data-agent-submit="design">Create design kickoff</button>
                 </div>
@@ -11250,6 +11504,7 @@
       const artifactDetailStatus = document.getElementById('artifactDetailStatus')
       const artifactCountLabel = document.getElementById('artifactCountLabel')
       const artifactTitleInput = document.getElementById('artifactTitleInput')
+      const artifactReadPane = document.getElementById('artifactReadPane')
       const artifactBodyInput = document.getElementById('artifactBodyInput')
       const artifactApproveButton = document.getElementById('artifactApproveButton')
       const artifactRejectButton = document.getElementById('artifactRejectButton')
@@ -13243,6 +13498,9 @@
           return
         }
         applyToolState(next)
+        if (!railHidden && window.matchMedia?.('(max-width: 640px)').matches) {
+          setRailHidden(true)
+        }
         if (appShell.classList.contains('is-board-expanded')) {
           setBoardExpanded(false)
         }
@@ -13366,7 +13624,11 @@
 
         if (submit) submit.disabled = true
         setAgentStatus(mode, 'launching thread')
-        if (output) output.textContent = `${mode} thread is launching...`
+        if (output) {
+          output.classList.remove('agent-output__latest--rendered', 'artifact-read')
+          delete output.dataset.generated
+          output.textContent = `${mode} thread is launching…`
+        }
         try {
           const response = await fetch('/assistant/threads', {
             method: 'POST',
@@ -13411,23 +13673,34 @@
           renderAgentWorkspace(mode)
         }
         renderResearchTool()
+        renderDesignTool()
       }
 
-      // The active research run is the most recent research thread artifact.
+      function activeModeArtifact(mode) {
+        mode = normalizeAgentMode(mode)
+        if (!mode) {
+          return null
+        }
+        const selected = selectedArtifact()
+        if (String(selected?.metadata?.mode || '').trim() === mode) {
+          return selected
+        }
+        const artifacts = agentArtifacts(mode)
+        return artifacts.length ? artifacts[artifacts.length - 1] : null
+      }
+
+      // The active research run is the selected research artifact when present,
+      // otherwise the most recent research thread artifact.
       // pending/launching → rPlanning, running → rRunning, complete → rComplete,
       // nothing → rVision. Driven entirely by real artifact metadata.
       function activeResearchArtifact() {
-        const research = agentArtifacts('research')
-        if (!research.length) {
-          return null
-        }
-        return research[research.length - 1]
+        return activeModeArtifact('research')
       }
 
-      function researchArtifactSources(entry) {
+      function artifactSources(entry) {
         // The backend stores artifact bodies as plain text; there is no structured
         // sources field. Honestly surface only URLs the worker actually wrote into
-        // the brief — never fabricate citations.
+        // the artifact — never fabricate citations.
         const text = String(entry?.text || '')
         const seen = new Set()
         const sources = []
@@ -13449,10 +13722,28 @@
         return sources
       }
 
-      // Split the plain-text brief into {h, body} sections on its headings. The
-      // worker emits "Label: value" lines and ALL-CAPS / "## " headers; everything
+      function researchArtifactSources(entry) {
+        return artifactSources(entry)
+      }
+
+      function artifactLineHeading(line) {
+        const t = String(line || '').trim()
+        if (!t) return null
+        const markdown = /^#{1,6}\s+(.+?)\s*$/.exec(t)
+        if (markdown) return { h: markdown[1].replace(/:\s*$/, ''), rest: '' }
+        const bold = /^\*\*([^*]{2,72})\*\*\s*(.*)$/.exec(t)
+        if (bold) return { h: bold[1].replace(/:\s*$/, ''), rest: bold[2].trim() }
+        const labelOnly = /^([A-Z][A-Za-z0-9 /&'().-]{1,52}):\s*$/.exec(t)
+        if (labelOnly) return { h: labelOnly[1], rest: '' }
+        const labelWithValue = /^([A-Z][A-Za-z0-9 /&'().-]{1,44}):\s+(.+)$/.exec(t)
+        if (labelWithValue) return { h: labelWithValue[1], rest: labelWithValue[2].trim() }
+        return null
+      }
+
+      // Split plain-text artifacts into readable sections. The workers emit
+      // Markdown headings, bold labels, and "Label: value" lines; everything
       // before the first heading becomes the objective.
-      function researchArtifactSections(entry) {
+      function artifactSections(entry) {
         const text = String(entry?.text || '').trim()
         if (!text) {
           return { objective: '', sections: [] }
@@ -13461,20 +13752,14 @@
         const sections = []
         let objective = []
         let current = null
-        const isHeading = line => {
-          const t = line.trim()
-          if (!t) return false
-          if (/^#{1,6}\s+/.test(t)) return true
-          // "Recommendation:" style label headers (short, ends with colon or is a label line)
-          const labelMatch = /^([A-Z][A-Za-z0-9 /&'-]{1,40}):\s*$/.exec(t)
-          if (labelMatch) return true
-          return false
-        }
-        const headingText = line => line.trim().replace(/^#{1,6}\s+/, '').replace(/:\s*$/, '')
         for (const line of lines) {
-          if (isHeading(line)) {
+          const heading = artifactLineHeading(line)
+          if (heading) {
             if (current) sections.push(current)
-            current = { h: headingText(line), body: [] }
+            current = { h: heading.h, body: [] }
+            if (heading.rest) {
+              current.body.push(heading.rest)
+            }
           } else if (current) {
             current.body.push(line)
           } else {
@@ -13488,6 +13773,154 @@
             .map(s => ({ h: s.h, body: s.body.join('\n').trim() }))
             .filter(s => s.h || s.body)
         }
+      }
+
+      function researchArtifactSections(entry) {
+        return artifactSections(entry)
+      }
+
+      function normalizedSectionName(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+      }
+
+      function artifactPreferredSection(entry, names) {
+        const parsed = artifactSections(entry)
+        const wanted = new Set(names.map(normalizedSectionName))
+        return parsed.sections.find(section => wanted.has(normalizedSectionName(section.h))) || null
+      }
+
+      function artifactPreviewText(entry) {
+        const parsed = artifactSections(entry)
+        const preferred = artifactPreferredSection(entry, ['Executive summary', 'Summary', 'Thesis', 'Recommendation', 'Report', 'Design intent', 'Vision', 'Goal'])
+        const text = preferred?.body || parsed.objective || parsed.sections[0]?.body || entry?.text || ''
+        return compactArtifactPreview(text)
+      }
+
+      function artifactProgressPercent(entry, fallback = 0) {
+        const raw = Number(entry?.metadata?.progressPercent)
+        const pct = Number.isFinite(raw) ? raw : fallback
+        return Math.max(0, Math.min(100, pct))
+      }
+
+      function artifactWorkerLabel(entry) {
+        const worker = String(entry?.metadata?.worker || '').trim()
+        if (worker === 'codex_exec') return 'Codex worker'
+        if (worker === 'openai_text_response') return 'Scout writer'
+        return worker ? worker.replace(/_/g, ' ') : 'Scout'
+      }
+
+      function renderArtifactRead(container, entry, options = {}) {
+        if (!container) {
+          return
+        }
+        container.replaceChildren()
+        if (!entry) {
+          const empty = document.createElement('div')
+          empty.className = 'artifact-read__empty'
+          empty.textContent = 'select an artifact to read it.'
+          container.appendChild(empty)
+          return
+        }
+
+        const parsed = artifactSections(entry)
+        const sections = parsed.sections.slice()
+        const sources = artifactSources(entry)
+        const status = artifactStatusLabel(entry)
+        const progress = artifactProgressPercent(entry, artifactStatusValue(entry) === 'complete' || artifactStatusValue(entry) === 'published' ? 100 : 35)
+        const summarySection = artifactPreferredSection(entry, ['Executive summary', 'Summary', 'Thesis', 'Recommendation', 'Report', 'Design intent', 'Vision', 'Goal'])
+        const summary = summarySection?.body || parsed.objective || sections[0]?.body || String(entry.text || '')
+
+        const hero = document.createElement('header')
+        hero.className = 'artifact-read__hero'
+        const meta = document.createElement('div')
+        meta.className = 'artifact-read__meta'
+        for (const label of [
+          artifactModeLabel(entry),
+          status,
+          artifactTimeLabel(entry),
+          artifactWorkerLabel(entry),
+          `${Math.round(progress)}%`
+        ]) {
+          if (!label) continue
+          const chip = document.createElement('span')
+          chip.textContent = label
+          meta.appendChild(chip)
+        }
+        const summaryEl = document.createElement('p')
+        summaryEl.className = 'artifact-read__summary'
+        summaryEl.textContent = compactArtifactPreview(summary || 'artifact saved')
+        hero.append(meta, summaryEl)
+        container.appendChild(hero)
+
+        const grid = document.createElement('div')
+        grid.className = 'artifact-read__grid'
+        if (parsed.objective && parsed.objective !== summary) {
+          grid.appendChild(artifactReadSectionNode('objective', parsed.objective, { wide: true }))
+        }
+        const rendered = sections.length ? sections : [{ h: 'artifact', body: String(entry.text || '') }]
+        rendered.forEach((section, index) => {
+          if (!section.body && !section.h) {
+            return
+          }
+          grid.appendChild(artifactReadSectionNode(section.h || `section ${index + 1}`, section.body || '', {
+            wide: shouldArtifactSectionSpan(section.h, section.body)
+          }))
+        })
+        container.appendChild(grid)
+
+        if (sources.length) {
+          const sourceWrap = document.createElement('section')
+          sourceWrap.className = 'artifact-read__sources'
+          sourceWrap.appendChild(artifactReadSectionNode('sources', `${sources.length} linked source${sources.length === 1 ? '' : 's'}`, { wide: true }))
+          const list = document.createElement('div')
+          list.className = 'artifact-read__source-list'
+          sources.forEach(source => list.appendChild(artifactReadSourceNode(source)))
+          sourceWrap.appendChild(list)
+          container.appendChild(sourceWrap)
+        }
+      }
+
+      function shouldArtifactSectionSpan(heading, body) {
+        const name = normalizedSectionName(heading)
+        return ['report', 'execution log', 'codex worker evidence', 'implementation handoff', 'responsive behavior'].includes(name)
+          || String(body || '').length > 520
+      }
+
+      function artifactReadSectionNode(heading, body, options = {}) {
+        const section = document.createElement('section')
+        section.className = 'artifact-read__section'
+        if (options.wide) {
+          section.classList.add('artifact-read__section--wide')
+        }
+        const h = document.createElement('h4')
+        h.textContent = String(heading || 'section').toLowerCase()
+        const p = document.createElement('p')
+        p.textContent = String(body || '').trim() || 'no detail yet.'
+        section.append(h, p)
+        return section
+      }
+
+      function artifactReadSourceNode(source) {
+        const link = document.createElement('a')
+        link.className = 'artifact-read__source'
+        link.href = source.url
+        link.target = '_blank'
+        link.rel = 'noreferrer noopener'
+        const name = document.createElement('span')
+        name.className = 'artifact-read__source-name'
+        name.textContent = source.name
+        const url = document.createElement('span')
+        url.className = 'artifact-read__source-url'
+        url.textContent = source.url
+        link.append(name, url)
+        return link
+      }
+
+      function artifactReadCard(entry, options = {}) {
+        const pane = document.createElement('div')
+        pane.className = 'artifact-read'
+        renderArtifactRead(pane, entry, options)
+        return pane
       }
 
       function researchDownloadArtifact(entry) {
@@ -13582,11 +14015,12 @@
         const goal = entry?.metadata?.query || entry?.metadata?.title || 'research run'
         const sources = researchArtifactSources(entry)
         // Honest derivation: the backend exposes a single thread status, not a
-        // multi-agent breakdown, so render ONE agent row and 1-of-1 counts. Sources
-        // come from the artifact body when present, otherwise the count is omitted.
-        const working = 0
+        // multi-agent breakdown, so render ONE agent row and derive progress from
+        // metadata. Sources come from the artifact body when present.
+        const pct = artifactProgressPercent(entry, 35)
+        const status = artifactStatusValue(entry)
         const count = 1
-        const pct = 0
+        const working = status === 'queued' || status === 'running' ? 1 : 0
 
         const wrap = document.createElement('div')
         wrap.className = 'research-run bf-view'
@@ -13612,7 +14046,7 @@
         overall.innerHTML = `
           <div class="research-overall__row">
             <span class="research-overall__dot" aria-hidden="true"></span>
-            <span>${working} of ${count} working${escapeHtml(sourceLabel)}</span>
+            <span>${working} of ${count} ${working ? 'working' : 'ready'}${escapeHtml(sourceLabel)}</span>
             <span class="research-overall__pct">${pct}%</span>
           </div>
           <div class="research-bar"><span class="research-bar__fill" style="width:${pct}%"></span></div>`
@@ -13622,8 +14056,8 @@
         agents.className = 'research-agents'
         agents.appendChild(researchAgentCard({
           initials: 'SC',
-          role: 'Scout · lead researcher',
-          status: 'working',
+          role: `${artifactWorkerLabel(entry)} · lead researcher`,
+          status: status === 'queued' ? 'queued' : 'working',
           task: `Investigating: ${goal}`,
           pct
         }))
@@ -13750,6 +14184,61 @@
         link.querySelector('.research-source__name').textContent = source.name
         link.querySelector('.research-source__url').textContent = source.url
         return link
+      }
+
+      function renderDesignTool() {
+        const output = agentOutputElement('design')
+        const context = document.querySelector('[data-design-context]')
+        renderDesignContext(context)
+        if (!output) {
+          return
+        }
+        const entry = activeModeArtifact('design')
+        output.dataset.generated = 'true'
+        if (!entry) {
+          output.classList.remove('agent-output__latest--rendered', 'artifact-read')
+          output.textContent = 'No design artifact yet.'
+          return
+        }
+        output.classList.add('agent-output__latest--rendered', 'artifact-read')
+        renderArtifactRead(output, entry, { surface: 'design' })
+      }
+
+      function renderDesignContext(container) {
+        if (!container) {
+          return
+        }
+        const research = agentArtifacts('research')
+          .slice()
+          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
+          .slice(0, 3)
+        container.replaceChildren()
+        if (!research.length) {
+          return
+        }
+        const head = document.createElement('span')
+        head.className = 'agent-context__head'
+        head.textContent = 'research context'
+        const list = document.createElement('div')
+        list.className = 'agent-context__list'
+        research.forEach(entry => {
+          const item = document.createElement('button')
+          item.type = 'button'
+          item.className = 'agent-context__item'
+          item.addEventListener('click', () => {
+            selectArtifact(entry.id)
+            openOfficeTool('research')
+          })
+          const title = document.createElement('span')
+          title.className = 'agent-context__title'
+          title.textContent = entry.metadata?.title || 'research brief'
+          const meta = document.createElement('span')
+          meta.className = 'agent-context__meta'
+          meta.textContent = `${artifactStatusLabel(entry)} · ${artifactTimeLabel(entry)}`
+          item.append(title, meta)
+          list.appendChild(item)
+        })
+        container.append(head, list)
       }
 
       function renderAgentWorkspace(mode) {
@@ -14316,7 +14805,8 @@
         button.className = 'agent-artifact-link'
         button.addEventListener('click', () => {
           selectedArtifactId = entry.id || ''
-          setActiveTool('artifacts')
+          const mode = normalizeAgentMode(entry.metadata?.mode)
+          setActiveTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
         })
 
         const title = document.createElement('span')
@@ -19032,7 +19522,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         chatAgentThreads.replaceChildren(...entries.map(entry => {
           const title = entry.metadata?.title || artifactModeLabel(entry)
-          const preview = compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`)
+          const preview = artifactPreviewText(entry) || compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`)
           const haystack = `${title} ${preview} ${entry.metadata?.mode || ''}`.toLowerCase()
           const item = document.createElement('button')
           item.type = 'button'
@@ -19041,7 +19531,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
           item.addEventListener('click', () => {
             selectArtifact(entry.id)
-            openOfficeTool('artifacts')
+            const mode = normalizeAgentMode(entry.metadata?.mode)
+            openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
           })
 
           const icon = document.createElement('span')
@@ -19172,7 +19663,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const id = card.dataset.threadArtifactId
           if (id) {
             selectArtifact(id)
-            openOfficeTool('artifacts')
+            const mode = normalizeAgentMode(card.dataset.threadMode)
+            openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
           }
         })
         updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
@@ -20991,7 +21483,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const body = document.createElement('p')
         body.className = 'artifact-item__body'
-        body.textContent = entry.text || ''
+        body.textContent = artifactPreviewText(entry)
 
         item.append(top, title, body)
         return item
@@ -21027,6 +21519,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         artifactDetailStatus.textContent = artifact ? `${artifactStatusLabel(artifact)} · ${artifactTimeLabel(artifact)}` : 'no selection'
         artifactTitleInput.value = artifact?.metadata?.title || ''
+        renderArtifactRead(artifactReadPane, artifact)
         artifactBodyInput.value = artifact?.text || ''
         // canon publish affordance — primary when unpublished, secondary when live
         artifactPublishButton.textContent = published ? 'Published ✓' : 'Publish to team'
@@ -21230,7 +21723,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function compactArtifactPreview(text) {
         const compact = String(text || '').replace(/\s+/g, ' ').trim()
-        return compact.length > 142 ? `${compact.slice(0, 139)}...` : compact
+        return compact.length > 142 ? `${compact.slice(0, 139)}…` : compact
       }
 
       function artifactLatestTime(entry) {
@@ -23235,7 +23728,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const copy = document.createElement('span')
           copy.className = 'office-agent-card__copy'
           copy.textContent = latest
-            ? (latest.metadata?.title || compactArtifactPreview(latest.text || artifactModeLabel(latest)))
+            ? (latest.metadata?.title || artifactPreviewText(latest) || compactArtifactPreview(latest.text || artifactModeLabel(latest)))
             : lane.idle
           const meta = document.createElement('span')
           meta.className = 'office-agent-card__meta'
@@ -23267,7 +23760,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           .map(entry => ({
             title: entry.metadata?.title || artifactModeLabel(entry),
             meta: artifactTimeLabel(entry),
-            preview: compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`),
+            preview: artifactPreviewText(entry) || compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`),
             onOpen: () => { selectArtifact(entry.id); openOfficeTool('artifacts') }
           }))
 

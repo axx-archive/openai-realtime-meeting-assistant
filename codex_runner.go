@@ -252,6 +252,9 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 	builder.WriteString("- Do not commit, push, deploy, SSH, send email, call external write APIs, or mutate production systems unless this job has explicit external_write approval for that exact side effect.\n")
 	builder.WriteString("- If an external side effect is needed, stop and put a Gate line that starts with EXTERNAL_WRITE_APPROVAL_REQUIRED: followed by the precise command/action you would run after approval.\n")
 	builder.WriteString("- If credentials, access, approvals, network, or sandbox restrictions block the work, leave the artifact useful and mark the gate as blocked.\n\n")
+	builder.WriteString("Mode-specific artifact contract:\n")
+	builder.WriteString(agentThreadModeContract(thread.Mode))
+	builder.WriteString("\n\n")
 	builder.WriteString("Bonfire OS context: ")
 	builder.WriteString(contextLine)
 	builder.WriteString("\n\nRecent durable memory:\n")
@@ -266,7 +269,7 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 		builder.WriteString(compactAssistantLine(entry.Text))
 		builder.WriteByte('\n')
 	}
-	builder.WriteString("\nReturn a polished Markdown artifact with these sections: Vision, Goal, Work decomposition, Agent assignment, Execution log, Review, Gate, What worked, Report, Verification, and Codex worker evidence.\n")
+	builder.WriteString("\nReturn a polished Markdown artifact with stable headings for: Vision, Goal, Context used, Work decomposition, Agent assignment, Execution log, Review, Gate, What worked, Report, Next moves, Verification, and Codex worker evidence. Keep the output readable in an artifact viewer, with short paragraphs or bullets under each heading.\n")
 
 	return builder.String()
 }

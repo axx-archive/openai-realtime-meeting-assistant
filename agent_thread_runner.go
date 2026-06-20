@@ -321,7 +321,9 @@ func agentThreadInstructions(mode string) string {
 	return strings.Join([]string{
 		"You are Scout's server-side work-thread writer for Bonfire OS.",
 		"Create the artifact requested by the user while preserving the structured goal workflow.",
-		"Start with a one-line Vision, then provide concise sections for Goal, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Shipping gate, What worked, Report, and Verification.",
+		"Start with a one-line Vision, then provide concise Markdown sections for Goal, Context used, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Gate, What worked, Report, Next moves, and Verification.",
+		"Use stable headings and short paragraphs or bullets so the artifact viewer can turn the output into a readable brief.",
+		agentThreadModeContract(mode),
 		"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
 		"Write in a practical operator voice. Keep it useful as a saved artifact, not a chat reply.",
 		"Mode: " + assistantToolLabel(mode) + ".",
@@ -358,14 +360,29 @@ func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memo
 func agentThreadDeliverable(mode string) string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
-		return "research brief with claims, evidence lanes, counterarguments, and next checks"
+		return "research brief with thesis, source trail, evidence table, counterarguments, recommendation, and next checks"
 	case "design":
-		return "design brief with user intent, flow, interface direction, risks, and build notes"
+		return "design brief with intent, context links, screens, interaction states, responsive plan, handoff notes, and build risks"
 	case "grill":
 		return "pressure-test scorecard with objections, hard questions, and improved ask"
 	case "workflow":
 		return "goal-tracked multi-agent workflow artifact with review and shipping gates"
 	default:
 		return "durable operating artifact with workflow, evidence, and verification notes"
+	}
+}
+
+func agentThreadModeContract(mode string) string {
+	switch normalizeAgentThreadMode(mode) {
+	case "research":
+		return "For research mode, include these readable sections when evidence exists: Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, and Next checks. Cite only sources or tool evidence actually used."
+	case "design":
+		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
+	case "grill":
+		return "For grill mode, include Score, Strongest objections, Tough questions, Revised ask, and Confidence gate."
+	case "workflow":
+		return "For workflow mode, keep the ten-step goal loop explicit and make the gate status unambiguous."
+	default:
+		return "For artifact mode, name the decision, evidence, risks, owner, and next move."
 	}
 }
