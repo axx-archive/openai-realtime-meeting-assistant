@@ -10754,7 +10754,7 @@
             <span class="tool-rail__label">chat</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" data-admin-artifacts hidden>
           <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
             <span class="tool-rail__label">artifacts</span>
@@ -11796,6 +11796,7 @@
       const railHiddenStorageKey = 'bonfire.rail.hidden.v1'
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
+      const artifactAdminEmail = 'aj@shareability.com'
       /* auth state — the session itself lives in an HttpOnly cookie the
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
@@ -11822,6 +11823,7 @@
       const appShell = document.getElementById('appShell')
       const toolRail = document.getElementById('toolRail')
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
+      const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))
       const toolBoardButton = document.getElementById('toolBoard')
       const themeToggleButton = document.getElementById('themeToggle')
       const topbarRailToggle = document.getElementById('topbarRailToggle')
@@ -12089,6 +12091,30 @@
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
+
+      function canUseArtifactLibrary() {
+        return Boolean(authedUser) && String(authedUser?.email || '').trim().toLowerCase() === artifactAdminEmail
+      }
+
+      function syncArtifactLibraryAccess() {
+        const allowed = canUseArtifactLibrary()
+        adminArtifactNodes.forEach(node => {
+          node.hidden = !allowed
+        })
+        if (!allowed && (appShell.dataset.tool || 'office') === 'artifacts') {
+          applyToolState(authedUser ? 'chat' : 'office')
+        }
+        if (!allowed) {
+          artifactQuery = ''
+          selectedArtifactId = ''
+          artifactEditMode = false
+        }
+        renderChatAgentThreads()
+        renderOfficeAgentWorkforce()
+        renderOfficeRecentThreads()
+        renderPublishedArtifactsHome()
+      }
+
       let lastNonBoardTool = 'office'
       let railHidden = loadRailHiddenPreference()
       const pipVideoTilesByParticipant = new Map()
@@ -13093,7 +13119,7 @@
           authedUser = null
         }
         renderLoginMode()
-        if (authedUser) {
+        if (canUseArtifactLibrary()) {
           loadArtifacts()
         } else {
           artifactEntries = []
@@ -13303,6 +13329,7 @@
         const authed = Boolean(authedUser)
         appShell.classList.toggle('is-authed', authed)
         syncOSAssistantAvailability()
+        syncArtifactLibraryAccess()
         if (railAvatarEl) {
           railAvatarEl.title = 'Sign out'
           railAvatarEl.setAttribute('aria-label', 'Sign out')
@@ -13357,7 +13384,9 @@
           renderLoginMode()
           saveCachedIdentity(authedUser.name)
           setActiveTool('office')
-          loadArtifacts()
+          if (canUseArtifactLibrary()) {
+            loadArtifacts()
+          }
           setConnectionState('idle', 'office ready')
           setLog('office ready')
           return true
@@ -13413,6 +13442,9 @@
           renderLoginMode()
           saveCachedIdentity(authedUser.name)
           setActiveTool('office')
+          if (canUseArtifactLibrary()) {
+            loadArtifacts()
+          }
           setConnectionState('idle', 'office ready')
           setLog('office ready')
         } catch (error) {
@@ -13863,6 +13895,9 @@
          the Board tool delegates to setBoardExpanded, and every existing
          expand/collapse path syncs the rail through applyToolState. */
       function applyToolState(tool) {
+        if (tool === 'artifacts' && !canUseArtifactLibrary()) {
+          tool = authedUser ? 'chat' : 'office'
+        }
         appShell.dataset.tool = tool
         if (tool !== 'board') {
           lastNonBoardTool = tool
@@ -13877,7 +13912,7 @@
           updateOfficeHome()
         } else if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
-        } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
+        } else if ((tool === 'artifacts' && canUseArtifactLibrary()) || agentToolIds.includes(tool)) {
           loadArtifacts()
           if (agentToolIds.includes(tool)) {
             renderAgentWorkspaces()
@@ -13896,7 +13931,7 @@
         const tool = appShell.dataset.tool || 'office'
         const toolPage = osToolIds.includes(tool)
         const memoryTotal = memoryEntries.length
-        const artifactTotal = artifactEntries.length
+        const artifactTotal = canUseArtifactLibrary() ? artifactEntries.length : 0
         const toolTitles = {
           office: 'Office',
           chat: 'Chat',
@@ -13911,7 +13946,9 @@
         topbarToolTitle.textContent = toolTitles[tool] || ''
         topbarToolMeta.hidden = !toolPage
         topbarToolMeta.textContent = tool === 'office'
-          ? `${authedUser?.name || 'office'} · ${artifactTotal} artifacts · ${memoryTotal} memories`
+          ? canUseArtifactLibrary()
+            ? `${authedUser?.name || 'office'} · ${artifactTotal} artifacts · ${memoryTotal} memories`
+            : `${authedUser?.name || 'office'} · Scout brain · ${memoryTotal} memories`
           : tool === 'chat'
               ? `scout · room memory · ${memoryTotal} saved`
               : tool === 'artifacts'
@@ -13960,6 +13997,10 @@
 
       function setActiveTool(tool) {
         const next = TOOL_IDS.includes(tool) ? tool : 'office'
+        if (next === 'artifacts' && !canUseArtifactLibrary()) {
+          applyToolState(authedUser ? 'chat' : 'office')
+          return
+        }
         if (next === 'board') {
           // opens the board surface; editing controls stay gated by board readiness
           setBoardExpanded(true)
@@ -14015,6 +14056,10 @@
       }
 
       function openAgentArtifact(entry) {
+        if (!canUseArtifactLibrary()) {
+          setActiveTool('chat')
+          return
+        }
         if (entry?.id) {
           selectArtifact(entry.id)
         }
@@ -20372,6 +20417,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!chatAgentThreads) {
           return
         }
+        if (!canUseArtifactLibrary()) {
+          chatAgentThreads.replaceChildren()
+          return
+        }
         const q = (chatThreadSearch?.value || '').trim().toLowerCase()
         const entries = artifactEntries
           .filter(entry => String(entry?.metadata?.source || '') === 'scout_thread')
@@ -20593,7 +20642,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (artifactButton) {
           const hasArtifact = Boolean(card.dataset.threadArtifactId)
-          artifactButton.hidden = !hasArtifact
+          artifactButton.hidden = !hasArtifact || !canUseArtifactLibrary()
           artifactButton.textContent = done ? 'open artifact' : approvalRequired || rejected || error ? 'inspect artifact' : 'watch artifact'
         }
       }
@@ -22167,9 +22216,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function loadArtifacts() {
-        if (!authedUser) {
+        if (!canUseArtifactLibrary()) {
           artifactEntries = []
+          selectedArtifactId = ''
           renderArtifacts()
+          syncScoutChatResearchCards()
           return
         }
         try {
@@ -22209,7 +22260,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function scheduleArtifactRefresh() {
-        if (artifactRefreshTimer || !authedUser) {
+        if (artifactRefreshTimer || !canUseArtifactLibrary()) {
           return
         }
         artifactRefreshTimer = window.setTimeout(async () => {
@@ -22220,6 +22271,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function addArtifactEntry(entry, options = {}) {
         if (!entry?.text || entry.kind !== 'os_artifact') {
+          return
+        }
+        if (!canUseArtifactLibrary()) {
           return
         }
         const id = String(entry.id || '').trim()
@@ -24500,6 +24554,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!officePublishedArtifacts) {
           return
         }
+        if (!canUseArtifactLibrary()) {
+          if (officePublishedSection) {
+            officePublishedSection.style.display = 'none'
+          }
+          if (officePublishedCount) {
+            officePublishedCount.textContent = 'admin only'
+          }
+          officePublishedArtifacts.replaceChildren()
+          return
+        }
         const published = latestPublishedArtifacts(3)
         // section is only shown when there is published work
         if (officePublishedSection) {
@@ -24634,13 +24698,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         ]
         const activeStates = new Set(['queued', 'running', 'approval_required'])
         const laneEntries = lanes
-          .map(lane => ({ lane, latest: latestArtifactForMode(lane.mode) }))
+          .map(lane => ({ lane, latest: canUseArtifactLibrary() ? latestArtifactForMode(lane.mode) : null }))
         const activeCount = laneEntries
           .filter(({ latest }) => latest && activeStates.has(artifactStatusValue(latest))).length
         if (officeAgentSummary) {
           officeAgentSummary.textContent = activeCount
             ? `${activeCount} working · ${artifactEntries.length} artifacts`
-            : `ready · ${artifactEntries.length} artifacts`
+            : canUseArtifactLibrary() ? `ready · ${artifactEntries.length} artifacts` : 'ready · Scout has the company brain'
         }
 
         officeAgentWorkforce.replaceChildren(...laneEntries.map(({ lane, latest }) => {
@@ -24699,6 +24763,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!officeRecentThreads) {
           return
         }
+        if (!canUseArtifactLibrary()) {
+          officeRecentThreads.replaceChildren(renderScoutRecentThreadFallback())
+          return
+        }
         // no thread index exists; the durable threads we have are the agent
         // artifact threads (research/design/grill) — surface the most recent.
         const threads = artifactEntries
@@ -24715,15 +24783,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         if (!threads.length) {
           // fall back to the always-present private Scout chat thread
-          threads.push({
-            title: 'Scout',
-            meta: 'private',
-            preview: 'ask Scout about any meeting — only you can see this.',
-            onOpen: () => openOfficeTool('chat')
-          })
+          threads.push(scoutRecentThreadFallbackData())
         }
 
-        officeRecentThreads.replaceChildren(...threads.map(thread => {
+        officeRecentThreads.replaceChildren(...threads.map(renderOfficeRecentThread))
+      }
+
+      function scoutRecentThreadFallbackData() {
+        return {
+          title: 'Scout',
+          meta: 'private',
+          preview: 'ask Scout about any meeting — only you can see this.',
+          onOpen: () => openOfficeTool('chat')
+        }
+      }
+
+      function renderScoutRecentThreadFallback() {
+        return renderOfficeRecentThread(scoutRecentThreadFallbackData())
+      }
+
+      function renderOfficeRecentThread(thread) {
           const item = document.createElement('button')
           item.type = 'button'
           item.className = 'bf-card-hover'
@@ -24749,7 +24828,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
           item.append(row, preview)
           return item
-        }))
       }
 
       // Recognition flare: a one-shot 1.6s live-green flare + drop-shadow on

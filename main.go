@@ -627,12 +627,13 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	viewerThread := agentThreadForViewer(thread, canAccessArtifactLibrary(user))
 
 	writeAuthJSON(w, http.StatusAccepted, map[string]any{
 		"ok":       true,
-		"thread":   thread,
-		"artifact": thread.Artifact,
-		"actions":  thread.Actions,
+		"thread":   viewerThread,
+		"artifact": viewerThread.Artifact,
+		"actions":  viewerThread.Actions,
 	})
 }
 
@@ -740,6 +741,35 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+const artifactLibraryAdminEmail = "aj@shareability.com"
+
+func canAccessArtifactLibrary(user *userAccount) bool {
+	return user != nil && normalizeAccountEmail(user.Email) == artifactLibraryAdminEmail
+}
+
+func artifactForViewer(entry meetingMemoryEntry, canViewArtifact bool) meetingMemoryEntry {
+	if canViewArtifact {
+		return entry
+	}
+	if entry.Metadata != nil {
+		metadata := make(map[string]string, len(entry.Metadata)+1)
+		for key, value := range entry.Metadata {
+			metadata[key] = value
+		}
+		metadata["restricted"] = "true"
+		entry.Metadata = metadata
+	} else {
+		entry.Metadata = map[string]string{"restricted": "true"}
+	}
+	entry.Text = ""
+	return entry
+}
+
+func agentThreadForViewer(thread scoutAgentThread, canViewArtifact bool) scoutAgentThread {
+	thread.Artifact = artifactForViewer(thread.Artifact, canViewArtifact)
+	return thread
+}
+
 func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -753,6 +783,10 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromRequest(r)
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if !canAccessArtifactLibrary(user) {
+		writeAuthError(w, http.StatusForbidden, "artifacts are admin-only")
 		return
 	}
 	if kanbanApp == nil {
@@ -1910,7 +1944,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
-	scoutChat := newScoutChatSession(c)
+	scoutChat := newScoutChatSession(c, canAccessArtifactLibrary(sessionUser))
 	// Stop the chat worker and cancel any queued/in-flight model calls as
 	// soon as this connection ends.
 	defer func() { scoutChat.close() }()
@@ -2360,7 +2394,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			scoutChat.close()
-			scoutChat = newScoutChatSession(c)
+			scoutChat = newScoutChatSession(c, canAccessArtifactLibrary(sessionUser))
 			_ = sendKanbanEvent(c, "scout_chat", map[string]any{
 				"kind": "reset",
 				"text": "new Scout thread started",

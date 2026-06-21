@@ -165,6 +165,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"fetch('/assistant/query'",
 		"fetch('/assistant/threads'",
 		"fetch('/artifacts'",
+		"const artifactAdminEmail = 'aj@shareability.com'",
+		"const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))",
+		"function canUseArtifactLibrary()",
+		"function syncArtifactLibraryAccess()",
 		`id="artifactsTool" class="artifacts-tool"`,
 		`id="artifactDetailForm" class="artifact-detail"`,
 		`id="artifactSearch" class="artifacts-search__input"`,
@@ -178,7 +182,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="researchArtifactList" class="research-library__list"`,
 		`id="designTool" class="agent-tool" data-agent-tool="design"`,
 		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
-		`data-tool="artifacts"`,
+		`<span class="tool-rail__slot" data-admin-artifacts hidden>
+          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
 		`<div class="scout-work-starters" aria-label="Start Scout work">`,
 		`data-scout-starter="research"`,
@@ -214,6 +219,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function artifactPublished(entry)",
 		"function latestPublishedArtifacts(limit = 3)",
 		"function scheduleArtifactRefresh()",
+		"if (!canUseArtifactLibrary())",
+		"artifactButton.hidden = !hasArtifact || !canUseArtifactLibrary()",
+		"chatAgentThreads.replaceChildren()",
 		"addArtifactEntry(result.artifact, { select: false })",
 		"meeting artifact saved",
 		"method: 'PATCH'",
@@ -313,12 +321,12 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
 		t.Fatal("non-prototype tools should be retained off-rail, not shown in the prototype rail")
 	}
-	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`, `data-tool="artifacts"`} {
+	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`} {
 		if !strings.Contains(html, visibleTool) {
 			t.Fatalf("prototype rail tool %s should be present in the OS rail", visibleTool)
 		}
 	}
-	for _, hiddenTool := range []string{`data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
+	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="board"`, `data-tool="memory"`} {
 		if !strings.Contains(html, hiddenTool) {
 			t.Fatalf("off-rail tool %s should remain addressable for assistant/tool routing", hiddenTool)
 		}
@@ -338,7 +346,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		t.Fatal("assistant mode opens should resolve to the Chat entry surface")
 	}
 	if !strings.Contains(openOSAssistantBody, "requested === 'artifacts'") || !strings.Contains(openOSAssistantBody, "setActiveTool('artifacts')") {
-		t.Fatal("assistant artifact opens should resolve to the Artifacts library surface")
+		t.Fatal("assistant artifact opens should resolve through the admin-gated Artifacts route")
+	}
+	if !strings.Contains(setActiveToolBody, "next === 'artifacts' && !canUseArtifactLibrary()") || !strings.Contains(setActiveToolBody, "applyToolState(authedUser ? 'chat' : 'office')") {
+		t.Fatal("non-admin artifact navigation should fall back to Chat/Office")
 	}
 	if strings.Contains(html, `body.textContent = 'Use artifact, research, design, or grill mode in the assistant`) {
 		t.Fatal("artifact empty state should not teach separate assistant modes")

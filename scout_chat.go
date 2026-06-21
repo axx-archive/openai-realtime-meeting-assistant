@@ -71,29 +71,35 @@ func scoutChatHistoryFromPayload(turns []scoutChatTurnPayload) []scoutChatTurn {
 }
 
 type scoutChatSession struct {
-	mu         sync.Mutex
-	send       func(event string, data any) error
-	turns      []scoutChatTurn
-	queue      chan string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	workerOnce sync.Once
+	mu              sync.Mutex
+	send            func(event string, data any) error
+	canViewArtifact bool
+	turns           []scoutChatTurn
+	queue           chan string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	workerOnce      sync.Once
 }
 
-func newScoutChatSession(conn *threadSafeWriter) *scoutChatSession {
+func newScoutChatSession(conn *threadSafeWriter, canViewArtifact bool) *scoutChatSession {
 	return newScoutChatSessionWithSend(func(event string, data any) error {
 		return sendKanbanEvent(conn, event, data)
-	})
+	}, canViewArtifact)
 }
 
-func newScoutChatSessionWithSend(send func(event string, data any) error) *scoutChatSession {
+func newScoutChatSessionWithSend(send func(event string, data any) error, canViewArtifact ...bool) *scoutChatSession {
 	ctx, cancel := context.WithCancel(context.Background())
+	allowed := false
+	if len(canViewArtifact) > 0 {
+		allowed = canViewArtifact[0]
+	}
 
 	return &scoutChatSession{
-		send:   send,
-		queue:  make(chan string, scoutChatMaxQueuedTurns),
-		ctx:    ctx,
-		cancel: cancel,
+		send:            send,
+		canViewArtifact: allowed,
+		queue:           make(chan string, scoutChatMaxQueuedTurns),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 }
 
@@ -247,12 +253,13 @@ func (session *scoutChatSession) sendThreadEvent(thread scoutAgentThread, text s
 	if session == nil || session.send == nil {
 		return
 	}
+	viewerThread := agentThreadForViewer(thread, session.canViewArtifact)
 	if err := session.send("scout_chat", map[string]any{
 		"kind":     "thread",
 		"text":     text,
-		"thread":   thread,
-		"artifact": thread.Artifact,
-		"actions":  thread.Actions,
+		"thread":   viewerThread,
+		"artifact": viewerThread.Artifact,
+		"actions":  viewerThread.Actions,
 		"ts":       time.Now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
 		log.Errorf("Failed to send scout chat thread event: %v", err)

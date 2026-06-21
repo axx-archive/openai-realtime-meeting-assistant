@@ -797,6 +797,10 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
+	if !canAccessArtifactLibrary(user) {
+		writeAuthError(w, http.StatusForbidden, "artifacts are admin-only")
+		return
+	}
 	if kanbanApp == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
 		return

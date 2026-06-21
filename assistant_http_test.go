@@ -486,6 +486,62 @@ func TestArtifactsHandlerListsSavedArtifactsForSignedInUser(t *testing.T) {
 	}
 }
 
+func TestArtifactsHandlerRejectsNonAdminUser(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	artifact, _, err := kanbanApp.createOSArtifact("research", "restricted brief", "Research brief\n\n1. Interview operators.", "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		handler http.HandlerFunc
+	}{
+		{
+			name:    "list",
+			method:  http.MethodGet,
+			path:    "/artifacts",
+			handler: artifactsHandler,
+		},
+		{
+			name:    "update",
+			method:  http.MethodPatch,
+			path:    "/artifacts",
+			body:    fmt.Sprintf(`{"id":%q,"title":"Nope","text":"Nope"}`, artifact.ID),
+			handler: artifactsHandler,
+		},
+		{
+			name:    "action",
+			method:  http.MethodPost,
+			path:    "/artifacts/action",
+			body:    fmt.Sprintf(`{"id":%q,"action":"approve"}`, artifact.ID),
+			handler: artifactRunnerActionHandler,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+				req.AddCookie(cookie)
+			}
+			recorder := httptest.NewRecorder()
+
+			tc.handler(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusForbidden)
+			}
+		})
+	}
+}
+
 func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousRunner := startAgentThreadAsync
@@ -532,6 +588,48 @@ func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	}
 	if !hasAssistantAction(payload.Actions, "open_tool", "research", payload.Artifact.ID) {
 		t.Fatalf("actions=%#v, want research open action", payload.Actions)
+	}
+}
+
+func TestAssistantThreadsHandlerHidesArtifactBodyForNonAdminUser(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/threads", strings.NewReader(`{
+		"query":"Research the buyer proof for a Realtime 2 as UI workflow.",
+		"mode":"research"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantThreadsHandler(recorder, req)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusAccepted)
+	}
+	var payload struct {
+		Thread   scoutAgentThread   `json:"thread"`
+		Artifact meetingMemoryEntry `json:"artifact"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Artifact.ID == "" || payload.Thread.Artifact.ID == "" {
+		t.Fatalf("artifact ids missing: %#v", payload)
+	}
+	if payload.Artifact.Text != "" || payload.Thread.Artifact.Text != "" {
+		t.Fatalf("non-admin artifact text=%q thread text=%q, want hidden bodies", payload.Artifact.Text, payload.Thread.Artifact.Text)
+	}
+	if payload.Artifact.Metadata["restricted"] != "true" || payload.Thread.Artifact.Metadata["restricted"] != "true" {
+		t.Fatalf("metadata=%v/%v, want restricted marker", payload.Artifact.Metadata, payload.Thread.Artifact.Metadata)
 	}
 }
 
