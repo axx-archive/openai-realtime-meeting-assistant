@@ -458,10 +458,16 @@
 
       /* theme toggle — moon offers dark, sun offers light */
       .tool-rail__theme {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         margin-top: 8px;
         width: 40px;
         height: 40px;
+        padding: 0;
         align-self: flex-start;
+        overflow: hidden;
         border: 1px solid var(--line-1);
         background: var(--surface-3);
         color: var(--text-2);
@@ -471,9 +477,36 @@
       .tool-rail:focus-within .tool-rail__theme {
         width: 40px;
       }
-      .tool-rail__theme .tool-rail__icon--sun { display: none; }
-      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--sun { display: block; }
-      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--moon { display: none; }
+      .tool-rail__theme svg {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(1);
+        transform-origin: center;
+        transition:
+          opacity var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease),
+          filter var(--dur-fast) var(--ease);
+      }
+      .tool-rail__theme .tool-rail__icon--moon {
+        opacity: 1;
+        filter: blur(0);
+      }
+      .tool-rail__theme .tool-rail__icon--sun {
+        opacity: 0;
+        filter: blur(4px);
+        transform: translate(-50%, -50%) scale(0.25);
+      }
+      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--sun {
+        opacity: 1;
+        filter: blur(0);
+        transform: translate(-50%, -50%) scale(1);
+      }
+      [data-theme="dark"] .tool-rail__theme .tool-rail__icon--moon {
+        opacity: 0;
+        filter: blur(4px);
+        transform: translate(-50%, -50%) scale(0.25);
+      }
 
       .tool-rail__avatar {
         display: inline-flex;
@@ -9701,19 +9734,105 @@
           --shell-topbar-height: 52px;
         }
 
+        #appShell {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-areas:
+            "topbar"
+            "workspace"
+            "dock";
+        }
+
         .workspace {
           gap: var(--sp-2);
           padding: var(--sp-2) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
         }
 
+        #appShell:not(.is-rail-hidden) .workspace {
+          padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));
+        }
+
+        #appShell.is-authed[data-tool="office"] .tool-rail,
         .tool-rail {
-          width: 56px;
-          padding-inline: 6px;
+          position: fixed;
+          top: auto;
+          right: auto;
+          bottom: max(12px, env(safe-area-inset-bottom));
+          left: 50%;
+          z-index: 90;
+          flex-direction: row;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          width: auto;
+          max-width: calc(100vw - 24px);
+          height: auto;
+          padding: 7px;
+          border: 1px solid color-mix(in srgb, var(--glass-border) 82%, transparent);
+          border-radius: var(--r-full);
+          background: color-mix(in srgb, var(--glass-chrome) 86%, transparent);
+          box-shadow:
+            var(--glass-highlight),
+            0 18px 42px rgb(0 0 0 / 0.24),
+            inset 0 1px 0 rgb(255 255 255 / 0.18);
+          transform: translateX(-50%);
+          backdrop-filter: blur(22px) saturate(1.45);
+          -webkit-backdrop-filter: blur(22px) saturate(1.45);
+          transition:
+            opacity var(--dur-med) var(--ease),
+            transform var(--dur-med) var(--ease),
+            background var(--dur-med) var(--ease),
+            box-shadow var(--dur-med) var(--ease);
         }
 
         .tool-rail:hover,
         .tool-rail:focus-within {
-          width: min(204px, 78vw);
+          width: auto;
+        }
+
+        .tool-rail__slot {
+          width: auto;
+        }
+
+        .tool-rail__tool {
+          justify-content: center;
+          gap: 0;
+          width: 42px;
+          height: 42px;
+          padding: 0;
+          border-radius: var(--r-full);
+        }
+
+        .tool-rail:hover .tool-rail__tool,
+        .tool-rail:focus-within .tool-rail__tool {
+          width: 42px;
+        }
+
+        .tool-rail__label,
+        .tool-rail__spacer {
+          display: none;
+        }
+
+        .tool-rail__tool[aria-pressed="true"] {
+          background: rgb(255 255 255 / 0.18);
+          border-color: color-mix(in srgb, var(--line-1) 72%, transparent);
+          box-shadow:
+            inset 0 1px 0 rgb(255 255 255 / 0.2),
+            0 8px 18px rgb(0 0 0 / 0.12);
+        }
+
+        .tool-rail__live {
+          top: 4px;
+          left: 29px;
+          border-color: color-mix(in srgb, var(--glass-chrome) 86%, transparent);
+        }
+
+        .tool-rail__theme,
+        .tool-rail__signout,
+        .tool-rail__avatar {
+          align-self: center;
+          width: 42px;
+          height: 42px;
+          margin-top: 0;
         }
 
         /* the live clock can never be squeezed */

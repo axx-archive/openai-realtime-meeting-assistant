@@ -453,7 +453,15 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 		"width: min(340px, calc(100vw - 28px));",
 		"max-width: 44px;",
 		"padding: 0 12px 0 0;",
-		"width: min(204px, 78vw);",
+		"position: fixed;",
+		"bottom: max(12px, env(safe-area-inset-bottom));",
+		"transform: translateX(-50%);",
+		"backdrop-filter: blur(22px) saturate(1.45);",
+		"#appShell:not(.is-rail-hidden) .workspace",
+		"padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
+		".tool-rail__theme svg",
+		"transform: translate(-50%, -50%) scale(0.25);",
+		"filter: blur(4px);",
 		"width: min(340px, calc(100vw - 76px));",
 	} {
 		if !strings.Contains(html, want) {
