@@ -5687,6 +5687,40 @@
         color: var(--text-3);
       }
 
+      .scout-work-starters {
+        flex: none;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 18px 10px;
+      }
+
+      .scout-work-starters button {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .scout-work-starters button:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .scout-work-starters button:active {
+        transform: scale(var(--press-scale));
+      }
+
       /* MessageBubble — you: ink, right; Scout: surface, left; the meta
          line under the bubble is the system's mono voice */
       .scout-chat-msg {
@@ -10726,13 +10760,13 @@
             <span class="tool-rail__label">artifacts</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
-        <span class="tool-rail__slot">
+        <span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
@@ -11160,16 +11194,22 @@
             <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Agent work threads"></div>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
-            <p class="scout-private-caption">private · only you can see this</p>
+            <p class="scout-private-caption">private · voice and chat route Scout work here</p>
             <div id="scoutChatThread" class="scout-chat-thread" role="log" aria-label="Private chat with Scout">
-              <p class="scout-chat-empty">ask Scout about any meeting — only you can see this</p>
+              <p class="scout-chat-empty">ask Scout anything — research, design, grill, and goal work launch from here</p>
               <div id="scoutChatThinking" class="scout-chat-thinking" hidden>
                 <span class="scout-chat-thinking__dot" aria-hidden="true"></span>
                 <span id="scoutChatThinkingText">searching memory…</span>
               </div>
             </div>
+            <div class="scout-work-starters" aria-label="Start Scout work">
+              <button type="button" data-scout-starter="research">research</button>
+              <button type="button" data-scout-starter="design">design</button>
+              <button type="button" data-scout-starter="grill">grill</button>
+              <button type="button" data-scout-starter="workflow">plan</button>
+            </div>
             <form id="scoutChatForm" class="scout-chat-form">
-              <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask about prior meetings…" aria-label="Message Scout privately" disabled></textarea>
+              <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout, or start with research/design/grill/plan…" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 19V5"></path>
@@ -11181,7 +11221,7 @@
           </div>
         </section>
 
-        <!-- Artifacts tool — durable outputs from OS assistant modes -->
+        <!-- Artifacts tool — durable outputs from Scout work -->
         <section id="artifactsTool" class="artifacts-tool" aria-label="Artifacts">
           <div class="artifacts-workspace">
             <aside class="artifacts-sidebar" aria-label="Saved artifacts">
@@ -11206,7 +11246,7 @@
                     <span class="artifact-item__time">now</span>
                   </div>
                   <h3 class="artifact-item__title">No artifacts yet</h3>
-                  <p class="artifact-item__body">Use artifact, research, design, or grill mode in the assistant to create durable operating outputs.</p>
+                  <p class="artifact-item__body">Ask Scout in Chat or voice; research, design, grill, and plans land here as durable outputs.</p>
                 </article>
               </div>
             </aside>
@@ -11573,9 +11613,9 @@
           <button class="os-assistant__mode" type="button" data-assistant-mode="chat" aria-pressed="true">chat</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="artifacts" aria-pressed="false">artifacts</button>
           <button class="os-assistant__mode" type="button" data-assistant-mode="workflow" aria-pressed="false">workflow</button>
-          <button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false">research</button>
-          <button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false">design</button>
-          <button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false">grill</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false" hidden>research</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false" hidden>design</button>
+          <button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false" hidden>grill</button>
         </div>
         <div id="osAssistantLog" class="os-assistant__log" role="log" aria-live="polite">
           <p class="os-assistant__msg"><b>ready</b><span>ask about the board, prior meetings, artifacts, goal workflows, research, design work, or pitch feedback.</span></p>
@@ -11917,6 +11957,7 @@
       const scoutChatInput = document.getElementById('scoutChatInput')
       const scoutChatSend = document.getElementById('scoutChatSend')
       const scoutChatHint = document.getElementById('scoutChatHint')
+      const scoutWorkStarterButtons = Array.from(document.querySelectorAll('[data-scout-starter]'))
       const chatThreadSearch = document.getElementById('chatThreadSearch')
       const chatNewThread = document.getElementById('chatNewThread')
       const chatAgentThreads = document.getElementById('chatAgentThreads')
@@ -12418,6 +12459,9 @@
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
       })
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
+      scoutWorkStarterButtons.forEach(button => {
+        button.addEventListener('click', () => promptScoutForWork(button.dataset.scoutStarter || 'chat'))
+      })
       chatThreadSearch?.addEventListener('input', filterChatThreads)
       chatNewThread?.addEventListener('click', startNewScoutThread)
       memorySearch?.addEventListener('input', event => {
@@ -13871,7 +13915,7 @@
           : tool === 'chat'
               ? `scout · room memory · ${memoryTotal} saved`
               : tool === 'artifacts'
-                ? `${artifactTotal} saved · assistant modes`
+                ? `${artifactTotal} saved · Scout outputs`
                 : tool === 'research'
                   ? `${agentArtifacts('research').length} briefs · saved artifacts`
                   : tool === 'design'
@@ -13930,11 +13974,51 @@
 
       function openOfficeTool(tool) {
         const next = String(tool || '').trim()
+        if (agentToolIds.includes(next) || next === 'workflow') {
+          promptScoutForWork(next)
+          return
+        }
         if (next === 'board') {
           setBoardExpanded(true)
           return
         }
         setActiveTool(next)
+      }
+
+      function scoutStarterText(mode) {
+        switch (String(mode || '').trim()) {
+          case 'workflow':
+            return 'Turn this into a goal workflow: '
+          case 'design':
+            return 'Design '
+          case 'grill':
+            return 'Grill this: '
+          case 'research':
+            return 'Research '
+          default:
+            return ''
+        }
+      }
+
+      function promptScoutForWork(mode, text = '') {
+        setActiveTool('chat')
+        const prompt = String(text || scoutStarterText(mode)).trimStart()
+        if (prompt && scoutChatInput && !scoutChatInput.value.trim()) {
+          scoutChatInput.value = prompt
+          resizeScoutChatInput()
+        }
+        if (!scoutChatInput?.disabled) {
+          scoutChatInput.focus()
+          const end = scoutChatInput.value.length
+          scoutChatInput.setSelectionRange(end, end)
+        }
+      }
+
+      function openAgentArtifact(entry) {
+        if (entry?.id) {
+          selectArtifact(entry.id)
+        }
+        setActiveTool('artifacts')
       }
 
       function handleOSAssistantActions(actions) {
@@ -13955,14 +14039,28 @@
               selectedArtifactId = artifactId
               selectedArtifactChanged = true
             }
-            setActiveTool(tool)
+            if (agentToolIds.includes(tool) || tool === 'workflow') {
+              if (artifactId) {
+                setActiveTool('artifacts')
+              } else {
+                promptScoutForWork(tool)
+              }
+            } else {
+              setActiveTool(tool)
+            }
           } else if (type === 'select_artifact' && artifactId) {
             selectedArtifactId = artifactId
             selectedArtifactChanged = true
           } else if (type === 'assistant_mode') {
             const mode = String(action.mode || '').trim()
             if (['chat', 'artifacts', 'workflow', ...agentToolIds].includes(mode)) {
-              setOSAssistantMode(mode)
+              if (mode === 'chat') {
+                setActiveTool('chat')
+              } else if (mode === 'artifacts') {
+                setActiveTool('artifacts')
+              } else {
+                promptScoutForWork(mode)
+              }
             }
           } else if (type === 'set_voice_control') {
             const enabled = Boolean(action.enabled)
@@ -14977,10 +15075,7 @@
           const item = document.createElement('button')
           item.type = 'button'
           item.className = 'agent-context__item'
-          item.addEventListener('click', () => {
-            selectArtifact(entry.id)
-            openOfficeTool('research')
-          })
+          item.addEventListener('click', () => openAgentArtifact(entry))
           const title = document.createElement('span')
           title.className = 'agent-context__title'
           title.textContent = entry.metadata?.title || 'research brief'
@@ -15555,11 +15650,7 @@
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'agent-artifact-link'
-        button.addEventListener('click', () => {
-          selectedArtifactId = entry.id || ''
-          const mode = normalizeAgentMode(entry.metadata?.mode)
-          setActiveTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
-        })
+        button.addEventListener('click', () => openAgentArtifact(entry))
 
         const title = document.createElement('span')
         title.className = 'agent-artifact-link__title'
@@ -15572,11 +15663,27 @@
       }
 
       function openOSAssistant(mode) {
+        const requested = String(mode || 'chat').trim()
+        if (requested === 'artifacts') {
+          setActiveTool('artifacts')
+          return
+        }
+        if (requested === 'workflow' || agentToolIds.includes(requested)) {
+          promptScoutForWork(requested)
+          return
+        }
+        if (requested === 'chat') {
+          setActiveTool('chat')
+          if (!scoutChatInput?.disabled) {
+            scoutChatInput.focus()
+          }
+          return
+        }
         if (!osAssistantAvailable()) {
           showToast({ text: 'the room uses the shared Scout agent', kind: 'note' })
           return
         }
-        setOSAssistantMode(mode || 'chat')
+        setOSAssistantMode(requested)
         setOSAssistantOpen(true)
         window.requestAnimationFrame(() => osAssistantInput?.focus())
       }
@@ -20281,11 +20388,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.className = 'chat-thread-item'
           item.setAttribute('aria-pressed', 'false')
           item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
-          item.addEventListener('click', () => {
-            selectArtifact(entry.id)
-            const mode = normalizeAgentMode(entry.metadata?.mode)
-            openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
-          })
+          item.addEventListener('click', () => openAgentArtifact(entry))
 
           const icon = document.createElement('span')
           icon.className = 'chat-thread-item__icon'
@@ -20414,9 +20517,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         artifactButton?.addEventListener('click', () => {
           const id = card.dataset.threadArtifactId
           if (id) {
-            selectArtifact(id)
-            const mode = normalizeAgentMode(card.dataset.threadMode)
-            openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')
+            openAgentArtifact({ id })
           }
         })
         updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
@@ -22245,7 +22346,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           title.textContent = 'No artifacts yet'
           const body = document.createElement('p')
           body.className = 'artifact-item__body'
-          body.textContent = 'Use artifact, research, design, or grill mode in the assistant to create durable operating outputs.'
+          body.textContent = 'Ask Scout in Chat or voice; research, design, grill, and plans land here as durable outputs.'
           empty.append(top, title, body)
           artifactList.replaceChildren(empty)
           renderArtifactDetail()
@@ -24506,28 +24607,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             mode: 'research',
             title: 'research team',
             idle: 'ask a market, customer, technical, or competitor question.',
-            open: () => openOfficeTool('research'),
+            open: () => promptScoutForWork('research'),
             icon: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.2-4.2"></path>'
           },
           {
             mode: 'design',
             title: 'design studio',
             idle: 'shape a deck, interface, narrative, or decision artifact.',
-            open: () => openOfficeTool('design'),
+            open: () => promptScoutForWork('design'),
             icon: '<path d="M12 20h8"></path><path d="M15.5 4.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>'
           },
           {
             mode: 'grill',
             title: 'grill mode',
             idle: 'pressure-test a strategy, pitch, plan, or assumption.',
-            open: () => openOfficeTool('grill'),
+            open: () => promptScoutForWork('grill'),
             icon: '<path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path>'
           },
           {
             mode: 'workflow',
             title: 'goal workflow',
             idle: 'turn an objective into ordered agent work with review gates.',
-            open: () => openOSAssistant('workflow'),
+            open: () => promptScoutForWork('workflow'),
             icon: '<path d="M4 7h8"></path><path d="M4 12h12"></path><path d="M4 17h6"></path><path d="M18 14l3 3-3 3"></path>'
           }
         ]

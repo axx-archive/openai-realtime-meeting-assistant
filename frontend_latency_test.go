@@ -179,10 +179,18 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="designTool" class="agent-tool" data-agent-tool="design"`,
 		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
 		`data-tool="artifacts"`,
+		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
+		`<div class="scout-work-starters" aria-label="Start Scout work">`,
+		`data-scout-starter="research"`,
+		`data-scout-starter="design"`,
+		`data-scout-starter="grill"`,
+		`data-scout-starter="workflow"`,
 		"function renderArtifacts()",
 		`id="chatAgentThreads" class="chat-agent-threads"`,
 		"event: 'scout_chat_reset'",
 		"function renderChatAgentThreads()",
+		"function promptScoutForWork(mode, text = '')",
+		"function openAgentArtifact(entry)",
 		"async function runAgentTool(event)",
 		"function renderAgentWorkspaces()",
 		"function renderResearchArtifactList(activeEntry)",
@@ -253,8 +261,13 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"display: none !important;",
 		"const agentToolIds = ['research', 'design', 'grill']",
 		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
-		`data-tool="research" aria-label="Research" title="Research"`,
-		`data-tool="design" aria-label="Design" title="Design"`,
+		`<span class="tool-rail__slot" hidden>
+          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">`,
+		`<span class="tool-rail__slot" hidden>
+          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">`,
+		`<button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false" hidden>research</button>`,
+		`<button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false" hidden>design</button>`,
+		`<button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false" hidden>grill</button>`,
 		".topbar__nav-toggle > span",
 		`id="artifactReadPane" class="artifact-read" aria-label="artifact preview"`,
 		"function artifactSections(entry)",
@@ -263,7 +276,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function renderDesignTool()",
 		"data-design-context",
 		"renderArtifactRead(output, entry, { surface: 'design' })",
-		"openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')",
+		"item.addEventListener('click', () => openAgentArtifact(entry))",
+		"Ask Scout in Chat or voice; research, design, grill, and plans land here as durable outputs.",
 		"appShell.classList.toggle('is-authed', Boolean(authedUser))",
 		"setActiveTool('office')",
 		"stopRealtimeVoiceConversation({ notifyServer: false })",
@@ -308,6 +322,29 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		if !strings.Contains(html, hiddenTool) {
 			t.Fatalf("off-rail tool %s should remain addressable for assistant/tool routing", hiddenTool)
 		}
+	}
+	openOfficeToolBody := functionBody(html, "function openOfficeTool(tool)")
+	if openOfficeToolBody == "" {
+		t.Fatal("index.html missing openOfficeTool")
+	}
+	if !strings.Contains(openOfficeToolBody, "promptScoutForWork(next)") {
+		t.Fatal("agent-mode tool opens should route into Scout Chat instead of separate mode pages")
+	}
+	openOSAssistantBody := functionBody(html, "function openOSAssistant(mode)")
+	if openOSAssistantBody == "" {
+		t.Fatal("index.html missing openOSAssistant")
+	}
+	if !strings.Contains(openOSAssistantBody, "promptScoutForWork(requested)") || !strings.Contains(openOSAssistantBody, "setActiveTool('chat')") {
+		t.Fatal("assistant mode opens should resolve to the Chat entry surface")
+	}
+	if !strings.Contains(openOSAssistantBody, "requested === 'artifacts'") || !strings.Contains(openOSAssistantBody, "setActiveTool('artifacts')") {
+		t.Fatal("assistant artifact opens should resolve to the Artifacts library surface")
+	}
+	if strings.Contains(html, `body.textContent = 'Use artifact, research, design, or grill mode in the assistant`) {
+		t.Fatal("artifact empty state should not teach separate assistant modes")
+	}
+	if strings.Contains(html, "openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')") {
+		t.Fatal("agent thread cards should open Artifacts, not legacy Research/Design pages")
 	}
 	if !strings.Contains(html, `id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled`) {
 		t.Fatal("board tool should remain addressable but disabled until the room is ready")
