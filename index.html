@@ -6169,6 +6169,48 @@
         letter-spacing: var(--track-label);
       }
 
+      .artifacts-search {
+        position: relative;
+        flex: none;
+        min-height: 44px;
+        margin: 0 12px 6px;
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        color: var(--text-2);
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .artifacts-search:focus-within {
+        border-color: var(--line-2);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .artifacts-search__icon {
+        position: absolute;
+        left: 13px;
+        color: var(--text-3);
+        pointer-events: none;
+      }
+
+      .artifacts-search__input {
+        width: 100%;
+        min-height: 42px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 0 12px 0 38px;
+        outline: 0;
+      }
+
+      .artifacts-search__input::placeholder {
+        color: var(--text-3);
+      }
+
       .artifacts-list {
         flex: 1;
         min-height: 0;
@@ -6253,6 +6295,42 @@
       }
 
       .artifact-item__badge--error {
+        border-color: transparent;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .artifact-item__status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--line-1);
+        background: var(--surface-1);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+      }
+
+      .artifact-item__status--published,
+      .artifact-item__status--complete {
+        border-color: transparent;
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .artifact-item__status--queued,
+      .artifact-item__status--running {
+        border-color: transparent;
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+
+      .artifact-item__status--approval_required,
+      .artifact-item__status--rejected,
+      .artifact-item__status--error {
         border-color: transparent;
         background: var(--danger-soft);
         color: var(--danger);
@@ -6379,6 +6457,10 @@
         outline: 0;
       }
 
+      .artifact-detail:not(.is-editing) .artifact-detail__body {
+        display: none;
+      }
+
       .artifact-detail__body:focus {
         border-color: var(--line-2);
       }
@@ -6386,6 +6468,10 @@
       .artifact-detail__input[disabled],
       .artifact-detail__body[disabled] {
         opacity: 0.55;
+      }
+
+      .artifact-detail:not(.is-editing) .artifact-detail__input[disabled] {
+        opacity: 1;
       }
 
       .artifact-read {
@@ -6480,6 +6566,7 @@
         text-wrap: balance;
       }
 
+      .artifact-read__section-body,
       .artifact-read__section p {
         margin: 0;
         color: var(--text-2);
@@ -6488,6 +6575,77 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         text-wrap: pretty;
+      }
+
+      .artifact-read__section-body {
+        display: grid;
+        gap: 10px;
+        white-space: normal;
+      }
+
+      .artifact-read__section-body p {
+        margin: 0;
+      }
+
+      .artifact-read__inline-link {
+        color: var(--text-1);
+        font-weight: 650;
+        text-decoration: underline;
+        text-decoration-color: var(--line-2);
+        text-underline-offset: 3px;
+      }
+
+      .artifact-read__inline-link:hover {
+        text-decoration-color: currentColor;
+      }
+
+      .artifact-read__list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .artifact-read__quote {
+        margin: 0;
+        padding: 2px 0 2px 12px;
+        border-left: 2px solid var(--line-2);
+        color: var(--text-1);
+      }
+
+      .artifact-read__table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+      }
+
+      .artifact-read__table {
+        width: 100%;
+        min-width: 520px;
+        border-collapse: collapse;
+        color: var(--text-2);
+        font: var(--type-caption);
+      }
+
+      .artifact-read__table th,
+      .artifact-read__table td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--line-1);
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-read__table th {
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        background: var(--surface-3);
+      }
+
+      .artifact-read__table tr:last-child td {
+        border-bottom: 0;
       }
 
       .artifact-read__sources {
@@ -6548,6 +6706,10 @@
         gap: 10px;
         padding: 16px 22px;
         border-top: 1px solid var(--line-1);
+      }
+
+      .artifact-detail__actions [hidden] {
+        display: none !important;
       }
 
       .artifact-detail__hint {
@@ -6853,6 +7015,222 @@
       }
 
       /* ── Research staged flow (rVision / rPlanning / rRunning / rComplete) ── */
+      .research-workspace {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+        gap: var(--sp-4);
+        align-items: start;
+        min-width: 0;
+      }
+
+      .research-library {
+        position: sticky;
+        top: 84px;
+        display: grid;
+        gap: var(--sp-3);
+        align-content: start;
+        min-width: 0;
+        max-height: calc(100vh - 140px);
+        padding: var(--sp-4);
+        border-radius: var(--r-xl);
+        background: var(--glass-panel);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--glass-highlight), var(--shadow-1);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+
+      .research-library__head {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: var(--sp-3);
+      }
+
+      .research-library__eyebrow {
+        margin: 0 0 4px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .research-library__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        text-wrap: balance;
+      }
+
+      .research-library__count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 34px;
+        height: 28px;
+        padding: 0 9px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .research-library__search {
+        position: relative;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        color: var(--text-2);
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .research-library__search:focus-within {
+        border-color: var(--line-2);
+        background: var(--surface-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .research-library__search-icon {
+        position: absolute;
+        left: 13px;
+        color: var(--text-3);
+        pointer-events: none;
+      }
+
+      .research-library__search-input {
+        width: 100%;
+        min-height: 42px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 0 12px 0 38px;
+        outline: 0;
+      }
+
+      .research-library__search-input::placeholder {
+        color: var(--text-3);
+      }
+
+      .research-library__list {
+        min-height: 0;
+        overflow: auto;
+        display: grid;
+        gap: var(--sp-2);
+        padding-right: 2px;
+      }
+
+      .research-job {
+        min-height: 96px;
+        display: grid;
+        gap: 8px;
+        padding: var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .research-job:hover {
+        background: var(--surface-2);
+        box-shadow: var(--shadow-1);
+      }
+
+      .research-job:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .research-job.is-selected {
+        border-color: var(--line-2);
+        background: var(--accent-soft);
+      }
+
+      .research-job__top,
+      .research-job__meta {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        min-width: 0;
+      }
+
+      .research-job__top {
+        justify-content: space-between;
+      }
+
+      .research-job__status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+      }
+
+      .research-job__status--complete,
+      .research-job__status--published {
+        background: var(--live-soft);
+        color: var(--live);
+      }
+
+      .research-job__status--queued,
+      .research-job__status--running {
+        background: var(--accent-soft);
+        color: var(--text-1);
+      }
+
+      .research-job__status--approval_required,
+      .research-job__status--error,
+      .research-job__status--rejected {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .research-job__time,
+      .research-job__meta {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .research-job__title {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        line-height: 1.35;
+        text-wrap: pretty;
+        overflow-wrap: anywhere;
+      }
+
+      .research-job__body {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-caption);
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-wrap: pretty;
+      }
+
+      .research-job--empty {
+        cursor: default;
+        color: var(--text-3);
+      }
+
       .research-stage {
         display: grid;
         gap: var(--sp-4);
@@ -7157,8 +7535,14 @@
         margin: 0;
         color: var(--text-2);
         font: var(--type-body);
-        white-space: pre-wrap;
+        display: grid;
+        gap: 10px;
+        white-space: normal;
         overflow-wrap: anywhere;
+      }
+
+      .research-section__body p {
+        margin: 0;
       }
 
       .research-sources {
@@ -7213,6 +7597,15 @@
       }
 
       @media (max-width: 980px) {
+        .research-workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .research-library {
+          position: static;
+          max-height: none;
+        }
+
         .research-complete__cols {
           grid-template-columns: minmax(0, 1fr);
         }
@@ -10799,6 +11192,13 @@
                 </div>
                 <button class="btn btn--ghost artifacts-sidebar__new" type="button" data-open-assistant-mode="artifacts">New artifact</button>
               </header>
+              <label class="artifacts-search" aria-label="Search artifacts">
+                <svg class="artifacts-search__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="m21 21-4.3-4.3"></path>
+                </svg>
+                <input id="artifactSearch" class="artifacts-search__input" type="search" autocomplete="off" placeholder="search artifacts..." aria-label="Search artifacts">
+              </label>
               <div id="artifactList" class="artifacts-list">
                 <article class="artifact-item artifact-item--empty">
                   <div class="artifact-item__top">
@@ -10826,6 +11226,7 @@
                 <button id="artifactApproveButton" class="btn btn--primary" type="button" hidden disabled>Approve</button>
                 <button id="artifactRejectButton" class="btn btn--ghost" type="button" hidden disabled>Reject</button>
                 <button id="artifactRerunButton" class="btn btn--ghost" type="button" hidden disabled>Rerun</button>
+                <button id="artifactEditButton" class="btn btn--ghost" type="button" disabled>Edit</button>
                 <button id="artifactSaveButton" class="btn btn--ghost" type="submit" disabled>Save</button>
                 <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
                 <button id="artifactPublishButton" class="btn btn--primary" type="button" disabled>Publish to team</button>
@@ -10854,7 +11255,26 @@
               <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS. Compare executive weekly reviews, product leadership standups, and sales pipeline calls. Include buying trigger, data needed, proof plan, risks, and recommendation." hidden>First segment</button>
               <button class="btn btn--primary" type="submit" data-agent-submit="research" hidden>Create research brief</button>
             </form>
-            <div class="research-stage" data-research-stage></div>
+            <div class="research-workspace">
+              <aside class="research-library" aria-label="Research jobs">
+                <div class="research-library__head">
+                  <div>
+                    <p class="research-library__eyebrow">research library</p>
+                    <h3 class="research-library__title">saved jobs</h3>
+                  </div>
+                  <span id="researchArtifactCount" class="research-library__count">0</span>
+                </div>
+                <label class="research-library__search" aria-label="Search research jobs">
+                  <svg class="research-library__search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                  </svg>
+                  <input id="researchArtifactSearch" class="research-library__search-input" type="search" autocomplete="off" placeholder="search research..." aria-label="Search research jobs">
+                </label>
+                <div id="researchArtifactList" class="research-library__list"></div>
+              </aside>
+              <div class="research-stage" data-research-stage></div>
+            </div>
           </div>
         </section>
 
@@ -11467,12 +11887,14 @@
       const artifactDetailPublished = document.getElementById('artifactDetailPublished')
       const artifactDetailStatus = document.getElementById('artifactDetailStatus')
       const artifactCountLabel = document.getElementById('artifactCountLabel')
+      const artifactSearch = document.getElementById('artifactSearch')
       const artifactTitleInput = document.getElementById('artifactTitleInput')
       const artifactReadPane = document.getElementById('artifactReadPane')
       const artifactBodyInput = document.getElementById('artifactBodyInput')
       const artifactApproveButton = document.getElementById('artifactApproveButton')
       const artifactRejectButton = document.getElementById('artifactRejectButton')
       const artifactRerunButton = document.getElementById('artifactRerunButton')
+      const artifactEditButton = document.getElementById('artifactEditButton')
       const artifactCopyButton = document.getElementById('artifactCopyButton')
       const artifactPublishButton = document.getElementById('artifactPublishButton')
       const artifactSaveButton = document.getElementById('artifactSaveButton')
@@ -11574,11 +11996,17 @@
       const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
       const agentToolForms = Array.from(document.querySelectorAll('[data-agent-tool-form]'))
       const agentTemplateButtons = Array.from(document.querySelectorAll('[data-agent-template]'))
+      const researchArtifactSearch = document.getElementById('researchArtifactSearch')
+      const researchArtifactList = document.getElementById('researchArtifactList')
+      const researchArtifactCount = document.getElementById('researchArtifactCount')
 
       let cards = []
       let memoryEntries = []
       let artifactEntries = []
+      let artifactQuery = ''
+      let researchQuery = ''
       let selectedArtifactId = ''
+      let artifactEditMode = false
       let artifactStatusTimer = 0
       let artifactRefreshTimer = 0
       let assistantMessages = []
@@ -11996,10 +12424,22 @@
         memoryQuery = event.target.value || ''
         renderMemory()
       })
+      artifactSearch?.addEventListener('input', event => {
+        artifactQuery = event.target.value || ''
+        renderArtifacts()
+      })
+      researchArtifactSearch?.addEventListener('input', event => {
+        researchQuery = event.target.value || ''
+        renderResearchTool()
+      })
       artifactDetailForm.addEventListener('submit', saveSelectedArtifact)
       artifactApproveButton?.addEventListener('click', () => runArtifactRunnerAction('approve'))
       artifactRejectButton?.addEventListener('click', () => runArtifactRunnerAction('reject'))
       artifactRerunButton?.addEventListener('click', () => runArtifactRunnerAction('rerun'))
+      artifactEditButton?.addEventListener('click', () => {
+        artifactEditMode = !artifactEditMode
+        renderArtifactDetail()
+      })
       artifactCopyButton.addEventListener('click', copySelectedArtifact)
       artifactPublishButton.addEventListener('click', toggleSelectedArtifactPublished)
       scoutChatInput.addEventListener('input', resizeScoutChatInput)
@@ -13675,21 +14115,29 @@
       // pending/launching → rPlanning, running → rRunning, complete → rComplete,
       // nothing → rVision. Driven entirely by real artifact metadata.
       function activeResearchArtifact() {
-        return activeModeArtifact('research')
+        const selected = selectedArtifact()
+        if (String(selected?.metadata?.mode || '').trim() === 'research' && artifactMatchesQuery(selected, researchQuery)) {
+          return selected
+        }
+        const visible = visibleResearchArtifacts()
+        if (researchQuery && visible.length) {
+          return visible[0]
+        }
+        const artifacts = sortedResearchArtifacts()
+        return artifacts[0] || null
       }
 
       function artifactSources(entry) {
         // The backend stores artifact bodies as plain text; there is no structured
-        // sources field. Honestly surface only URLs the worker actually wrote into
-        // the artifact — never fabricate citations.
+        // sources field. Honestly surface only links the worker actually wrote
+        // into the artifact — never fabricate citations.
         const text = String(entry?.text || '')
         const seen = new Set()
         const sources = []
-        const matches = text.match(/https?:\/\/[^\s)>\]]+/g) || []
-        for (const raw of matches) {
-          const url = raw.replace(/[.,;]+$/, '')
-          if (seen.has(url)) {
-            continue
+        const addSource = (rawUrl, label = '') => {
+          const url = String(rawUrl || '').replace(/[.,;]+$/, '')
+          if (!url || seen.has(url)) {
+            return
           }
           seen.add(url)
           let host = url
@@ -13698,7 +14146,19 @@
           } catch {
             host = url
           }
-          sources.push({ url, name: host })
+          sources.push({ url, name: String(label || host).trim() || host })
+        }
+        const markdownLinks = text.matchAll(/\[([^\]\n]{2,140})\]\((https?:\/\/[^\s)]+)\)/g)
+        for (const match of markdownLinks) {
+          addSource(match[2], match[1])
+        }
+        const matches = text.match(/https?:\/\/[^\s)>\]]+/g) || []
+        for (const raw of matches) {
+          const url = raw.replace(/[.,;]+$/, '')
+          if (seen.has(url)) {
+            continue
+          }
+          addSource(url)
         }
         return sources
       }
@@ -13707,17 +14167,85 @@
         return artifactSources(entry)
       }
 
+      const ARTIFACT_SECTION_LABELS = new Set([
+        'action plan',
+        'agent assignment',
+        'artifact',
+        'assumptions',
+        'brief',
+        'codex worker evidence',
+        'competitive landscape',
+        'constraints',
+        'context',
+        'context used',
+        'counterarguments',
+        'decision',
+        'dependency coordination',
+        'evidence',
+        'executive summary',
+        'execution log',
+        'findings',
+        'gate',
+        'implications',
+        'key takeaways',
+        'market map',
+        'method',
+        'methodology',
+        'next checks',
+        'next steps',
+        'objective',
+        'open questions',
+        'opportunities',
+        'ordered execution',
+        'recommendation',
+        'report',
+        'review',
+        'risks',
+        'scope',
+        'search tags',
+        'source notes',
+        'sources',
+        'thesis',
+        'verification',
+        'what worked',
+        'work decomposition',
+        'worker evidence'
+      ])
+
+      function artifactHeadingLabelAllowed(label, options = {}) {
+        const normalized = normalizedSectionName(label)
+        if (!normalized) {
+          return false
+        }
+        if (ARTIFACT_SECTION_LABELS.has(normalized)) {
+          return true
+        }
+        if (options.withInlineValue) {
+          return false
+        }
+        const words = normalized.split(/\s+/)
+        return words.length <= 4
+          && normalized.length <= 32
+          && !/\b(for|with|into|from|about|using|across|between|through|against|without)\b/.test(normalized)
+      }
+
       function artifactLineHeading(line) {
         const t = String(line || '').trim()
         if (!t) return null
         const markdown = /^#{1,6}\s+(.+?)\s*$/.exec(t)
         if (markdown) return { h: markdown[1].replace(/:\s*$/, ''), rest: '' }
         const bold = /^\*\*([^*]{2,72})\*\*\s*(.*)$/.exec(t)
-        if (bold) return { h: bold[1].replace(/:\s*$/, ''), rest: bold[2].trim() }
+        if (bold && artifactHeadingLabelAllowed(bold[1], { withInlineValue: Boolean(bold[2].trim()) })) {
+          return { h: bold[1].replace(/:\s*$/, ''), rest: bold[2].trim() }
+        }
         const labelOnly = /^([A-Z][A-Za-z0-9 /&'().-]{1,52}):\s*$/.exec(t)
-        if (labelOnly) return { h: labelOnly[1], rest: '' }
+        if (labelOnly && artifactHeadingLabelAllowed(labelOnly[1])) {
+          return { h: labelOnly[1], rest: '' }
+        }
         const labelWithValue = /^([A-Z][A-Za-z0-9 /&'().-]{1,44}):\s+(.+)$/.exec(t)
-        if (labelWithValue) return { h: labelWithValue[1], rest: labelWithValue[2].trim() }
+        if (labelWithValue && artifactHeadingLabelAllowed(labelWithValue[1], { withInlineValue: true })) {
+          return { h: labelWithValue[1], rest: labelWithValue[2].trim() }
+        }
         return null
       }
 
@@ -13874,11 +14402,155 @@
           section.classList.add('artifact-read__section--wide')
         }
         const h = document.createElement('h4')
-        h.textContent = String(heading || 'section').toLowerCase()
-        const p = document.createElement('p')
-        p.textContent = String(body || '').trim() || 'no detail yet.'
-        section.append(h, p)
+        h.textContent = String(heading || 'section').trim() || 'section'
+        const content = document.createElement('div')
+        content.className = 'artifact-read__section-body'
+        appendArtifactBodyNodes(content, body)
+        section.append(h, content)
         return section
+      }
+
+      function appendArtifactBodyNodes(container, body) {
+        const text = String(body || '').trim()
+        container.replaceChildren()
+        if (!text) {
+          const p = document.createElement('p')
+          p.textContent = 'no detail yet.'
+          container.appendChild(p)
+          return
+        }
+        const lines = text.split('\n')
+        let index = 0
+        let paragraph = []
+        const flushParagraph = () => {
+          const value = paragraph.join('\n').trim()
+          paragraph = []
+          if (!value) return
+          const p = document.createElement('p')
+          appendArtifactInlineNodes(p, value)
+          container.appendChild(p)
+        }
+        while (index < lines.length) {
+          const line = lines[index]
+          if (!line.trim()) {
+            flushParagraph()
+            index += 1
+            continue
+          }
+          if (artifactTableStarts(lines, index)) {
+            flushParagraph()
+            const tableLines = []
+            while (index < lines.length && /^\s*\|.*\|\s*$/.test(lines[index])) {
+              tableLines.push(lines[index])
+              index += 1
+            }
+            container.appendChild(artifactTableNode(tableLines))
+            continue
+          }
+          const listMatch = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(line)
+          if (listMatch) {
+            flushParagraph()
+            const ordered = /^\s*\d+\./.test(line)
+            const list = document.createElement(ordered ? 'ol' : 'ul')
+            list.className = 'artifact-read__list'
+            while (index < lines.length) {
+              const next = lines[index]
+              const match = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(next)
+              if (!match || /^\s*\d+\./.test(next) !== ordered) {
+                break
+              }
+              const item = document.createElement('li')
+              appendArtifactInlineNodes(item, match[1].trim())
+              list.appendChild(item)
+              index += 1
+            }
+            container.appendChild(list)
+            continue
+          }
+          const quoteMatch = /^\s*>\s*(.+)$/.exec(line)
+          if (quoteMatch) {
+            flushParagraph()
+            const quote = document.createElement('blockquote')
+            quote.className = 'artifact-read__quote'
+            const quoteLines = []
+            while (index < lines.length) {
+              const match = /^\s*>\s*(.*)$/.exec(lines[index])
+              if (!match) break
+              quoteLines.push(match[1])
+              index += 1
+            }
+            appendArtifactInlineNodes(quote, quoteLines.join('\n').trim())
+            container.appendChild(quote)
+            continue
+          }
+          paragraph.push(line)
+          index += 1
+        }
+        flushParagraph()
+      }
+
+      function appendArtifactInlineNodes(container, text) {
+        const value = String(text || '')
+        const markdownLink = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)/g
+        let lastIndex = 0
+        let matched = false
+        for (const match of value.matchAll(markdownLink)) {
+          matched = true
+          if (match.index > lastIndex) {
+            container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)))
+          }
+          const link = document.createElement('a')
+          link.className = 'artifact-read__inline-link'
+          link.href = match[2]
+          link.target = '_blank'
+          link.rel = 'noreferrer noopener'
+          link.textContent = match[1]
+          container.appendChild(link)
+          lastIndex = match.index + match[0].length
+        }
+        if (!matched) {
+          container.textContent = value
+          return
+        }
+        if (lastIndex < value.length) {
+          container.appendChild(document.createTextNode(value.slice(lastIndex)))
+        }
+      }
+
+      function artifactTableStarts(lines, index) {
+        return /^\s*\|.*\|\s*$/.test(lines[index] || '')
+          && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] || '')
+      }
+
+      function artifactTableNode(lines) {
+        const wrap = document.createElement('div')
+        wrap.className = 'artifact-read__table-wrap'
+        const table = document.createElement('table')
+        table.className = 'artifact-read__table'
+        const rows = lines.map(line => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()))
+        const headers = rows[0] || []
+        const thead = document.createElement('thead')
+        const headRow = document.createElement('tr')
+        headers.forEach(header => {
+          const th = document.createElement('th')
+          appendArtifactInlineNodes(th, header)
+          headRow.appendChild(th)
+        })
+        thead.appendChild(headRow)
+        table.appendChild(thead)
+        const tbody = document.createElement('tbody')
+        rows.slice(2).forEach(row => {
+          const tr = document.createElement('tr')
+          headers.forEach((_, cellIndex) => {
+            const td = document.createElement('td')
+            appendArtifactInlineNodes(td, row[cellIndex] || '')
+            tr.appendChild(td)
+          })
+          tbody.appendChild(tr)
+        })
+        table.appendChild(tbody)
+        wrap.appendChild(table)
+        return wrap
       }
 
       function artifactReadSourceNode(source) {
@@ -13926,12 +14598,98 @@
         }
       }
 
+      function sortedResearchArtifacts() {
+        return agentArtifacts('research')
+          .slice()
+          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
+      }
+
+      function visibleResearchArtifacts() {
+        return artifactsMatching(researchQuery, sortedResearchArtifacts())
+      }
+
+      function renderResearchArtifactList(activeEntry) {
+        if (!researchArtifactList) {
+          return
+        }
+        const all = sortedResearchArtifacts()
+        const visible = visibleResearchArtifacts()
+        if (researchArtifactCount) {
+          researchArtifactCount.textContent = visible.length
+            ? `${visible.length}/${all.length}`
+            : all.length ? `0/${all.length}` : '0'
+        }
+        if (!all.length) {
+          const empty = document.createElement('article')
+          empty.className = 'research-job research-job--empty'
+          const title = document.createElement('h4')
+          title.className = 'research-job__title'
+          title.textContent = 'no research yet'
+          const body = document.createElement('p')
+          body.className = 'research-job__body'
+          body.textContent = 'ask Scout for research and each finished brief will live here.'
+          empty.append(title, body)
+          researchArtifactList.replaceChildren(empty)
+          return
+        }
+        if (!visible.length) {
+          const empty = document.createElement('article')
+          empty.className = 'research-job research-job--empty'
+          const title = document.createElement('h4')
+          title.className = 'research-job__title'
+          title.textContent = 'nothing found'
+          const body = document.createElement('p')
+          body.className = 'research-job__body'
+          body.textContent = 'try a source, recommendation, worker, status, or phrase from the report.'
+          empty.append(title, body)
+          researchArtifactList.replaceChildren(empty)
+          return
+        }
+        researchArtifactList.replaceChildren(...visible.map(entry => renderResearchJobEntry(entry, activeEntry)))
+      }
+
+      function renderResearchJobEntry(entry, activeEntry) {
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = 'research-job'
+        item.classList.toggle('is-selected', entry.id === activeEntry?.id)
+        item.addEventListener('click', () => selectArtifact(entry.id))
+
+        const top = document.createElement('div')
+        top.className = 'research-job__top'
+        const status = document.createElement('span')
+        status.className = `research-job__status research-job__status--${artifactStatusValue(entry)}`
+        status.textContent = artifactStatusLabel(entry)
+        const time = document.createElement('span')
+        time.className = 'research-job__time'
+        time.textContent = artifactTimeLabel(entry)
+        top.append(status, time)
+
+        const title = document.createElement('h4')
+        title.className = 'research-job__title'
+        title.textContent = entry.metadata?.title || 'research brief'
+
+        const body = document.createElement('p')
+        body.className = 'research-job__body'
+        body.textContent = artifactPreviewText(entry)
+
+        const meta = document.createElement('div')
+        meta.className = 'research-job__meta'
+        const sources = artifactSources(entry).length
+        const worker = artifactWorkerLabel(entry)
+        meta.textContent = `${worker} · ${sources} source${sources === 1 ? '' : 's'}`
+
+        item.append(top, title, body, meta)
+        return item
+      }
+
       function renderResearchTool() {
         const stage = document.querySelector('[data-research-stage]')
         if (!stage) {
           return
         }
         const entry = activeResearchArtifact()
+        renderResearchArtifactList(entry)
         const status = entry ? artifactStatusValue(entry) : ''
 
         if (!entry) {
@@ -14085,7 +14843,7 @@
         counts.appendChild(pill)
         const meta = document.createElement('span')
         const sourceCount = sources.length
-        meta.textContent = `1 agent${sourceCount ? ` · ${sourceCount} source${sourceCount === 1 ? '' : 's'}` : ''}`
+        meta.textContent = `${artifactWorkerLabel(entry)} · ${sourceCount} source${sourceCount === 1 ? '' : 's'}`
         counts.appendChild(meta)
         const titleEl = document.createElement('h3')
         titleEl.className = 'research-complete__title'
@@ -14094,12 +14852,25 @@
 
         const actions = document.createElement('div')
         actions.className = 'research-complete__actions'
+        const open = document.createElement('button')
+        open.type = 'button'
+        open.className = 'btn btn--ghost'
+        open.textContent = 'Open artifact'
+        open.addEventListener('click', () => {
+          selectArtifact(entry.id)
+          openOfficeTool('artifacts')
+        })
         const download = document.createElement('button')
         download.type = 'button'
         download.className = 'btn btn--secondary'
         download.textContent = 'Download'
         download.addEventListener('click', () => researchDownloadArtifact(entry))
-        actions.appendChild(download)
+        const ask = document.createElement('button')
+        ask.type = 'button'
+        ask.className = 'btn btn--primary'
+        ask.textContent = 'Ask Scout'
+        ask.addEventListener('click', () => openOSAssistant('research'))
+        actions.append(open, download, ask)
         // No artifact delete endpoint exists on the backend, so Delete is hidden
         // rather than rendering a dead control.
 
@@ -14143,10 +14914,10 @@
         const h = document.createElement('h4')
         h.className = 'research-section__h'
         h.textContent = heading
-        const p = document.createElement('p')
-        p.className = 'research-section__body'
-        p.textContent = body
-        section.append(h, p)
+        const content = document.createElement('div')
+        content.className = 'research-section__body'
+        appendArtifactBodyNodes(content, body)
+        section.append(h, content)
         return section
       }
 
@@ -21380,8 +22151,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function selectArtifact(id) {
-        selectedArtifactId = String(id || '')
+        const nextId = String(id || '')
+        if (nextId !== selectedArtifactId) {
+          artifactEditMode = false
+        }
+        selectedArtifactId = nextId
         renderArtifacts()
+      }
+
+      function artifactSearchTokens(query) {
+        return String(query || '')
+          .toLowerCase()
+          .split(/\s+/)
+          .map(token => token.trim())
+          .filter(Boolean)
+      }
+
+      function artifactSearchText(entry) {
+        const metadata = entry?.metadata || {}
+        return [
+          entry?.id,
+          entry?.kind,
+          entry?.text,
+          metadata.mode,
+          metadata.title,
+          metadata.query,
+          metadata.threadQuery,
+          metadata.status,
+          metadata.threadStatus,
+          metadata.goalStatus,
+          metadata.reviewGate,
+          metadata.worker,
+          metadata.workerBoundary,
+          metadata.codexRunner,
+          metadata.codexSearch,
+          metadata.runnerJobId,
+          metadata.requestedTools,
+          metadata.currentStage,
+          metadata.createdBy,
+          metadata.updatedBy,
+          ...Object.values(metadata)
+        ].map(value => String(value || '').toLowerCase()).join(' ')
+      }
+
+      function artifactMatchesQuery(entry, query) {
+        const tokens = artifactSearchTokens(query)
+        if (!tokens.length) {
+          return true
+        }
+        const haystack = artifactSearchText(entry)
+        return tokens.every(token => haystack.includes(token))
+      }
+
+      function artifactsMatching(query, entries = artifactEntries) {
+        return entries.filter(entry => artifactMatchesQuery(entry, query))
       }
 
       function renderArtifacts() {
@@ -21393,11 +22216,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!artifactList) {
           return
         }
+        const visibleArtifacts = artifactsMatching(artifactQuery)
+        if (artifactQuery && visibleArtifacts.length && !visibleArtifacts.some(entry => entry.id === selectedArtifactId)) {
+          artifactEditMode = false
+          selectedArtifactId = visibleArtifacts[0].id || selectedArtifactId
+        }
         if (artifactCountLabel) {
-          const count = artifactEntries.length
+          const count = visibleArtifacts.length
+          const total = artifactEntries.length
           artifactCountLabel.textContent = count
-            ? `${count} artifact${count === 1 ? '' : 's'}`
-            : 'no artifacts yet'
+            ? `${count} of ${total} artifact${total === 1 ? '' : 's'}`
+            : total ? `0 of ${total} artifacts` : 'no artifacts yet'
         }
         if (!artifactEntries.length) {
           const empty = document.createElement('article')
@@ -21422,7 +22251,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           renderArtifactDetail()
           return
         }
-        artifactList.replaceChildren(...artifactEntries.slice().reverse().map(renderArtifactEntry))
+        if (!visibleArtifacts.length) {
+          const empty = document.createElement('article')
+          empty.className = 'artifact-item artifact-item--empty'
+          const top = document.createElement('div')
+          top.className = 'artifact-item__top'
+          const mode = document.createElement('span')
+          mode.className = 'artifact-item__mode'
+          mode.textContent = 'no match'
+          const time = document.createElement('span')
+          time.className = 'artifact-item__time'
+          time.textContent = 'search'
+          top.append(mode, time)
+          const title = document.createElement('h3')
+          title.className = 'artifact-item__title'
+          title.textContent = 'Nothing found'
+          const body = document.createElement('p')
+          body.className = 'artifact-item__body'
+          body.textContent = 'Try the title, source, status, worker, or a phrase from the artifact.'
+          empty.append(top, title, body)
+          artifactList.replaceChildren(empty)
+          renderArtifactDetail()
+          return
+        }
+        artifactList.replaceChildren(...visibleArtifacts.slice().reverse().map(renderArtifactEntry))
         renderArtifactDetail()
       }
 
@@ -21445,6 +22297,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         badge.className = `artifact-item__badge artifact-item__badge--${artifactStatusValue(entry)}`
         badge.textContent = artifactModeLabel(entry)
         lead.appendChild(badge)
+
+        const status = document.createElement('span')
+        status.className = `artifact-item__status artifact-item__status--${artifactStatusValue(entry)}`
+        status.textContent = artifactStatusLabel(entry)
+        lead.appendChild(status)
 
         if (artifactPublished(entry)) {
           const live = document.createElement('span')
@@ -21477,11 +22334,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const statusValue = artifactStatusValue(artifact)
         const approvalRequired = statusValue === 'approval_required'
         const runnerArtifact = Boolean(artifact?.metadata?.agentLoop === 'realtime_controlled_workforce' || artifact?.metadata?.worker === 'codex_exec' || artifact?.metadata?.runnerJobId)
-        artifactTitleInput.disabled = disabled
-        artifactBodyInput.disabled = disabled
+        artifactDetailForm.classList.toggle('is-editing', Boolean(!disabled && artifactEditMode))
+        artifactTitleInput.disabled = disabled || !artifactEditMode
+        artifactBodyInput.disabled = disabled || !artifactEditMode
         artifactCopyButton.disabled = disabled
         artifactPublishButton.disabled = disabled
-        artifactSaveButton.disabled = disabled
+        artifactSaveButton.hidden = disabled || !artifactEditMode
+        artifactSaveButton.disabled = disabled || !artifactEditMode
+        if (artifactEditButton) {
+          artifactEditButton.hidden = disabled
+          artifactEditButton.disabled = disabled
+          artifactEditButton.textContent = artifactEditMode ? 'Preview' : 'Edit'
+        }
         if (artifactApproveButton) {
           artifactApproveButton.hidden = !approvalRequired
           artifactApproveButton.disabled = !approvalRequired
@@ -21538,8 +22402,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!response.ok) {
             throw new Error(payload.error || 'artifact save failed')
           }
+          artifactEditMode = false
           if (payload.artifact) {
             addArtifactEntry(payload.artifact, { select: true })
+          } else {
+            renderArtifactDetail()
           }
           setArtifactDetailStatus(payload.updated ? 'saved' : 'unchanged', true)
           showToast({ text: payload.updated ? 'artifact saved' : 'artifact unchanged', kind: 'done' })

@@ -30,7 +30,7 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	if !strings.Contains(output, "Vision: Realtime 2") {
 		t.Fatalf("output=%q, want responder output", output)
 	}
-	for _, want := range []string{"Vision", "Context used", "Review against the original goal", "Gate", "stable headings", "Thesis", "Sources", "Do not claim you performed browser"} {
+	for _, want := range []string{"Vision", "Context used", "Review against the original goal", "Gate", "stable headings", "Executive Summary", "Search tags", "Thesis", "Sources", "Do not claim you performed browser"} {
 		if !strings.Contains(captured.Instructions, want) {
 			t.Fatalf("instructions missing %q: %s", want, captured.Instructions)
 		}
@@ -45,7 +45,7 @@ func TestAgentThreadModeContractsDifferentiateResearchAndDesign(t *testing.T) {
 		mode string
 		want []string
 	}{
-		{mode: "research", want: []string{"Thesis", "Evidence", "Sources", "Counterarguments", "Recommendation"}},
+		{mode: "research", want: []string{"Executive Summary", "Thesis", "Evidence", "Sources", "Counterarguments", "Recommendation", "Search tags"}},
 		{mode: "design", want: []string{"Design intent", "Context and research used", "Core screens", "Responsive behavior", "Implementation handoff"}},
 	} {
 		got := agentThreadModeContract(tt.mode)
@@ -54,5 +54,20 @@ func TestAgentThreadModeContractsDifferentiateResearchAndDesign(t *testing.T) {
 				t.Fatalf("mode %s contract missing %q: %s", tt.mode, want, got)
 			}
 		}
+	}
+}
+
+func TestAgentThreadResearchModeCarriesArtifactContractMetadata(t *testing.T) {
+	metadata := agentThreadModeMetadata("research")
+	if metadata["artifactContract"] != "research_brief_v2" {
+		t.Fatalf("artifactContract=%q, want research_brief_v2", metadata["artifactContract"])
+	}
+	for _, want := range []string{"executive summary", "sources", "worker evidence"} {
+		if !strings.Contains(metadata["artifactHeadings"], want) {
+			t.Fatalf("artifactHeadings missing %q: %s", want, metadata["artifactHeadings"])
+		}
+	}
+	if got := agentThreadModeMetadata("design"); got != nil {
+		t.Fatalf("design metadata=%v, want nil", got)
 	}
 }

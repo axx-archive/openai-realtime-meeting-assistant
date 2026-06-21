@@ -37,7 +37,7 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 	worker := configuredAgentThreadWorkerName()
 	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.memorySnapshotForClients(12))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, map[string]string{
+	metadata := map[string]string{
 		"source":          "scout_thread",
 		"threadId":        threadID,
 		"threadQuery":     query,
@@ -55,7 +55,11 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 		"worker":          worker,
 		"workerBoundary":  agentThreadWorkerBoundary(worker),
 		"latestThreadRun": threadID,
-	})
+	}
+	for key, value := range agentThreadModeMetadata(mode) {
+		metadata[key] = value
+	}
+	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
 	if err != nil {
 		return scoutAgentThread{}, err
 	}
@@ -256,7 +260,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.memorySnapshotForClients(20), time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "medium",
-		MaxOutputTokens: 1200,
+		MaxOutputTokens: 2600,
 	})
 	if err != nil {
 		return "", err
@@ -375,7 +379,7 @@ func agentThreadDeliverable(mode string) string {
 func agentThreadModeContract(mode string) string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
-		return "For research mode, include these readable sections when evidence exists: Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, and Next checks. Cite only sources or tool evidence actually used."
+		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. Cite only sources or tool evidence actually used."
 	case "design":
 		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
 	case "grill":
@@ -384,5 +388,18 @@ func agentThreadModeContract(mode string) string {
 		return "For workflow mode, keep the ten-step goal loop explicit and make the gate status unambiguous."
 	default:
 		return "For artifact mode, name the decision, evidence, risks, owner, and next move."
+	}
+}
+
+func agentThreadModeMetadata(mode string) map[string]string {
+	switch normalizeAgentThreadMode(mode) {
+	case "research":
+		return map[string]string{
+			"artifactContract": "research_brief_v2",
+			"artifactHeadings": "executive summary thesis evidence sources counterarguments recommendation open questions next checks worker evidence",
+			"searchTags":       "required",
+		}
+	default:
+		return nil
 	}
 }
