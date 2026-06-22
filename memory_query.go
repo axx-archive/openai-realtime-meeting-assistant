@@ -96,6 +96,14 @@ func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, que
 		return assistantQueryResult{}, fmt.Errorf("query is required")
 	}
 
+	if answer, ok := ambiguousClarificationAnswer(query, history); ok {
+		return assistantQueryResult{
+			query:  query,
+			answer: answer,
+			source: "clarification",
+		}, nil
+	}
+
 	if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
 		return assistantQueryResult{
 			query:        query,
@@ -124,6 +132,49 @@ func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, que
 	}, nil
 }
 
+func ambiguousClarificationAnswer(query string, history []scoutChatTurn) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	normalized = strings.Trim(normalized, " \t\r\n?!.,;:\"'`“”‘’")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	if normalized == "" {
+		return "", false
+	}
+
+	ambiguous := map[string]struct{}{
+		"what":             {},
+		"huh":              {},
+		"wait what":        {},
+		"what do you mean": {},
+		"what was that":    {},
+		"what is that":     {},
+		"say again":        {},
+	}
+	if _, ok := ambiguous[normalized]; !ok {
+		return "", false
+	}
+
+	for index := len(history) - 1; index >= 0; index-- {
+		turn := history[index]
+		if turn.role != "user" {
+			continue
+		}
+		if previous := compactAssistantLine(turn.text); previous != "" && previous != "no direct context yet" {
+			return fmt.Sprintf("Can you clarify what you want Scout to explain about %q?", truncateAssistantClarification(previous)), true
+		}
+	}
+
+	return "Can you clarify what you want Scout to explain?", true
+}
+
+func truncateAssistantClarification(value string) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) <= 120 {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:117])) + "..."
+}
+
 func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
@@ -142,14 +193,33 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 	ctx, cancel := context.WithTimeout(ctx, assistantQueryRequestTimeout)
 	defer cancel()
 
+	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    assistantQueryInstructions(),
-		Input:           buildAssistantQueryInput(query, cards, entries, history, time.Now()),
+		Input:           buildAssistantQueryInput(query, cards, entries, history, time.Now(), includeBoard),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 500,
 	})
+}
+
+func shouldIncludeBoardContextForAssistant(query string, history []scoutChatTurn) bool {
+	if isCurrentBoardQuery(query) {
+		return true
+	}
+	checkedUsers := 0
+	for index := len(history) - 1; index >= 0 && checkedUsers < 2; index-- {
+		turn := history[index]
+		if turn.role != "user" {
+			continue
+		}
+		checkedUsers++
+		if isCurrentBoardQuery(turn.text) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeOSAssistantMode(mode string) string {
@@ -374,10 +444,10 @@ func (app *kanbanBoardApp) osAssistantActions(query string, mode string, artifac
 
 	switch mode {
 	case "research", "design", "grill":
-		addTool(mode, "Opened "+assistantToolLabel(mode), artifactID)
+		addTool("chat", "Opened chat", artifactID)
 		return actions
 	case "workflow":
-		addArtifactTool(artifactID)
+		addTool("chat", "Opened chat", artifactID)
 		return actions
 	case "artifacts":
 		addArtifactTool(artifactID)
@@ -763,18 +833,20 @@ func grillReadoutLine(score int) string {
 func assistantQueryInstructions() string {
 	return strings.Join([]string{
 		"You are Scout, the Bonfire meeting assistant.",
-		"Answer using the supplied current Kanban board and memory context only.",
-		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates.",
+		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
+		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates when the user explicitly asks about board, card, task, status, owner, or due-date information.",
+		"Do not volunteer board status for ambiguous follow-ups or strategy questions just because board context is present.",
 		"Use memory only for past discussion, decisions, transcript recall, or archived meeting questions.",
 		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
+		"For short ambiguous follow-ups like \"what?\" or \"huh?\", ask one clarification question only.",
 		"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be launched as artifact-backed work threads.",
 		"Keep the answer concise and practical.",
 	}, " ")
 }
 
-func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, now time.Time) string {
+func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool) string {
 	location := meetingTimeLocation()
 	boardJSON, err := json.MarshalIndent(cards, "", "  ")
 	if err != nil {
@@ -795,8 +867,13 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 	}
 	builder.WriteString("\n\n# User question\n")
 	builder.WriteString(query)
-	builder.WriteString("\n\n# Current Kanban board\n")
-	builder.Write(boardJSON)
+	if includeBoard {
+		builder.WriteString("\n\n# Current Kanban board\n")
+		builder.Write(boardJSON)
+	} else {
+		builder.WriteString("\n\n# Current Kanban board\n")
+		builder.WriteString("Omitted because the user did not ask about board, card, task, status, owner, or due-date information.\n")
+	}
 	builder.WriteString("\n\n# Memory context\n")
 	if len(entries) == 0 {
 		builder.WriteString("No matching memory context.\n")

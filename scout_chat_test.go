@@ -189,6 +189,63 @@ func TestScoutChatHistoryPayloadIsSanitizedAndBounded(t *testing.T) {
 	}
 }
 
+func TestScoutChatAmbiguousClarificationDoesNotLeakBoardState(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("ambiguous clarification should not call the model with board context")
+		return "", nil
+	}
+
+	result, err := app.resolveAssistantQueryContext(context.Background(), "What?", []scoutChatTurn{
+		{role: "user", text: "If we were building a YouTube-centric digital media platform for rodeo culture, is it viable?"},
+		{role: "scout", text: "Clarify primary objective is currently Backlog."},
+	})
+	if err != nil {
+		t.Fatalf("resolve ambiguous clarification: %v", err)
+	}
+	if result.source != "clarification" {
+		t.Fatalf("source=%q, want clarification", result.source)
+	}
+	if !strings.Contains(result.answer, "rodeo culture") {
+		t.Fatalf("answer=%q, want clarification grounded in the previous user turn", result.answer)
+	}
+	for _, leaked := range []string{"In Progress", "Backlog", "current board"} {
+		if strings.Contains(result.answer, leaked) {
+			t.Fatalf("answer=%q leaked board/status language %q", result.answer, leaked)
+		}
+	}
+}
+
+func TestScoutChatOrdinaryQuestionOmitsBoardJSONFromModelInput(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	var capturedInput string
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		capturedInput = request.Input
+		return "It is viable if the content has its own audience and the event uses it as proof, not just promotion.", nil
+	}
+
+	if _, err := app.resolveAssistantQueryContext(context.Background(), "Is a YouTube-centric rodeo media platform viable?", nil); err != nil {
+		t.Fatalf("resolve strategy question: %v", err)
+	}
+	if !strings.Contains(capturedInput, "Omitted because the user did not ask about board") {
+		t.Fatalf("model input did not mark board context omitted: %s", capturedInput)
+	}
+	for _, leaked := range []string{`"status"`, `"owner"`, `"tags"`, "Finish RTP HEVC Packetizer"} {
+		if strings.Contains(capturedInput, leaked) {
+			t.Fatalf("model input leaked board JSON/card context %q: %s", leaked, capturedInput)
+		}
+	}
+}
+
 func TestScoutChatLaunchesAgentThreadForWorkRequest(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousRunner := startAgentThreadAsync

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -309,6 +310,59 @@ func TestAssistantQueryAnswersFromBoardWithoutRoom(t *testing.T) {
 	}
 }
 
+func TestAssistantQueryClarifiesAmbiguousFollowUpWithoutBoardLeak(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		t.Fatal("ambiguous clarification should not call the model with board context")
+		return "", nil
+	}
+
+	body := `{
+		"query":"What?",
+		"mode":"chat",
+		"history":[
+			{"role":"user","text":"If we built a YouTube-centric digital media platform for rodeo culture, is it viable?"},
+			{"role":"scout","text":"Clarify the primary objective before choosing a media strategy."}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/assistant/query", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+
+	assistantQueryHandler(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+	var payload struct {
+		Answer string `json:"answer"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Source != "clarification" {
+		t.Fatalf("source=%q, want clarification", payload.Source)
+	}
+	if !strings.Contains(payload.Answer, "rodeo culture") {
+		t.Fatalf("answer=%q, want prior user context", payload.Answer)
+	}
+	for _, leaked := range []string{"In Progress", "Backlog", "current board", "Investigate screen share"} {
+		if strings.Contains(payload.Answer, leaked) {
+			t.Fatalf("answer=%q leaked board/status language %q", payload.Answer, leaked)
+		}
+	}
+}
+
 func TestAssistantQueryShapesOSModesWithoutModelKey(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -362,8 +416,8 @@ func TestAssistantQueryShapesOSModesWithoutModelKey(t *testing.T) {
 	if payload.Artifact.ID == "" {
 		t.Fatalf("response missing saved artifact: %#v", payload)
 	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "grill", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want grill open_tool for artifact %q", payload.Actions, payload.Artifact.ID)
+	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
+		t.Fatalf("actions=%#v, want chat open_tool for grill artifact %q", payload.Actions, payload.Artifact.ID)
 	}
 }
 
@@ -415,9 +469,8 @@ func TestAssistantQueryCreatesCodexWorkflowArtifact(t *testing.T) {
 	if !strings.Contains(payload.Artifact.Metadata["workflowStages"], "verify_goal_completed") {
 		t.Fatalf("workflowStages=%q, want verify stage", payload.Artifact.Metadata["workflowStages"])
 	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "artifacts", payload.Artifact.ID) ||
-		!hasAssistantAction(payload.Actions, "select_artifact", "artifacts", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want artifacts open/select for workflow artifact %q", payload.Actions, payload.Artifact.ID)
+	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
+		t.Fatalf("actions=%#v, want chat open_tool for workflow artifact %q", payload.Actions, payload.Artifact.ID)
 	}
 }
 
@@ -586,8 +639,8 @@ func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Artifact.Text, "Goal workflow") {
 		t.Fatalf("artifact text=%q, want thread scaffold", payload.Artifact.Text)
 	}
-	if !hasAssistantAction(payload.Actions, "open_tool", "research", payload.Artifact.ID) {
-		t.Fatalf("actions=%#v, want research open action", payload.Actions)
+	if !hasAssistantAction(payload.Actions, "open_tool", "chat", payload.Artifact.ID) {
+		t.Fatalf("actions=%#v, want chat open action for research artifact", payload.Actions)
 	}
 }
 

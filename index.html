@@ -5783,6 +5783,64 @@
         overflow-wrap: anywhere;
       }
 
+      .chat-rich {
+        display: grid;
+        gap: 8px;
+        white-space: normal;
+        text-wrap: pretty;
+      }
+
+      .chat-rich p,
+      .chat-rich blockquote {
+        margin: 0;
+      }
+
+      .chat-rich ul,
+      .chat-rich ol {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .chat-rich strong {
+        color: inherit;
+        font-weight: 680;
+      }
+
+      .chat-rich code {
+        padding: 1px 5px;
+        border-radius: 6px;
+        background: var(--surface-3);
+        color: inherit;
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+      }
+
+      .chat-rich a {
+        color: inherit;
+        font-weight: 650;
+        text-decoration: underline;
+        text-decoration-color: var(--line-2);
+        text-underline-offset: 3px;
+      }
+
+      .chat-rich a:hover {
+        text-decoration-color: currentColor;
+      }
+
+      .chat-rich__heading {
+        color: inherit;
+        font: var(--type-body-medium);
+        text-wrap: balance;
+      }
+
+      .chat-rich__quote {
+        padding-left: 12px;
+        border-left: 2px solid var(--line-2);
+        color: var(--text-2);
+      }
+
       .scout-chat-msg--user .scout-chat-text {
         background: var(--accent);
         color: var(--on-accent);
@@ -5992,6 +6050,58 @@
       }
 
       .scout-chat-research__artifact[hidden] {
+        display: none;
+      }
+
+      .scout-chat-research__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .scout-chat-research__action {
+        min-height: 32px;
+        padding: 0 11px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .scout-chat-research__action:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+      }
+
+      .scout-chat-research__action:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .scout-chat-research__action[hidden] {
+        display: none;
+      }
+
+      .scout-chat-research.is-report-open {
+        max-width: min(860px, 100%);
+      }
+
+      .scout-chat-research__report {
+        max-height: min(520px, 64svh);
+        margin: 0 14px 14px;
+        overflow: auto;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+      }
+
+      .scout-chat-research__report[hidden] {
         display: none;
       }
 
@@ -12188,6 +12298,7 @@
       let lastConnectionState = 'idle'
       let lastConnectionLabel = 'not connected'
       let scoutChatSessionSeen = false
+      let scoutOfficeChatTurns = []
       let osAssistantMode = 'chat'
       let osAssistantVoiceActive = false
       let osAssistantVoiceRecognizer = null
@@ -14205,7 +14316,7 @@
             }
             if (agentToolIds.includes(tool) || tool === 'workflow') {
               if (artifactId) {
-                setActiveTool('artifacts')
+                setActiveTool('chat')
               } else {
                 promptScoutForWork(tool)
               }
@@ -14838,12 +14949,34 @@
         return pane
       }
 
+      function artifactMarkdown(entry) {
+        if (!entry) {
+          return ''
+        }
+        const title = entry.metadata?.title || 'research-brief'
+        const text = String(entry.text || '')
+        return (title ? `# ${title}\n\n` : '') + text
+      }
+
+      async function copyArtifactMarkdown(entry) {
+        const md = artifactMarkdown(entry)
+        if (!md.trim()) {
+          return
+        }
+        try {
+          await navigator.clipboard.writeText(md)
+          showToast({ text: 'markdown copied', kind: 'done' })
+        } catch {
+          showToast({ text: 'copy failed', kind: 'error' })
+        }
+      }
+
       function researchDownloadArtifact(entry) {
         if (!entry) {
           return
         }
         const title = entry.metadata?.title || 'research-brief'
-        const md = (title ? `# ${title}\n\n` : '') + String(entry.text || '')
+        const md = artifactMarkdown(entry)
         try {
           const blob = new Blob([md], { type: 'text/markdown' })
           const url = URL.createObjectURL(blob)
@@ -14958,7 +15091,7 @@
           stage.replaceChildren(researchVisionStage())
           return
         }
-        if (status === 'running') {
+        if (status === 'queued' || status === 'running') {
           // The launch path stamps running immediately; treat a freshly-created run
           // (no completedAt, scout_thread source) the same — it is still the work.
           stage.replaceChildren(researchRunningStage(entry))
@@ -14985,7 +15118,7 @@
         wrap.innerHTML = `
           <span class="research-empty__chip">${researchBonfireIcon()}</span>
           <h3 class="research-empty__title">no research running</h3>
-          <p class="research-empty__body">research is something you ask Scout to do. open the voice island and say &ldquo;research&hellip;&rdquo; — the team spins up here and the brief lands in Artifacts.</p>`
+          <p class="research-empty__body">research is something you ask Scout to do in Chat or voice. Scout opens a chat work thread, tracks the run there, and saves the finished brief into the artifact library.</p>`
         const cta = document.createElement('button')
         cta.type = 'button'
         cta.className = 'btn btn--primary'
@@ -15633,8 +15766,17 @@
           if (!response.ok && !output.error) {
             output.error = response.data?.error || 'tool request failed'
           }
+          const threadOutput = output?.thread || response.data?.result?.thread
           if (response.data?.artifact) {
-            addArtifactEntry(response.data.artifact)
+            addArtifactEntry(response.data.artifact, { select: !(name === 'launch_agent_thread' || threadOutput) })
+          }
+          if (threadOutput) {
+            const thread = { ...threadOutput }
+            if (!thread.artifact && (output?.artifact || response.data?.artifact)) {
+              thread.artifact = output?.artifact || response.data?.artifact
+            }
+            upsertScoutChatResearchNode(thread)
+            setActiveTool('chat')
           }
           if (Array.isArray(response.data?.actions)) {
             handleOSAssistantActions(response.data.actions)
@@ -18981,6 +19123,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (event?.artifact) {
           addArtifactEntry(event.artifact)
         }
+        const eventArtifact = event?.thread?.artifact || event?.artifact
+        const agentThreadEvent = Boolean(
+          event?.thread
+          || eventArtifact?.metadata?.source === 'scout_thread'
+          || event?.tool === 'launch_agent_thread'
+          || event?.tool === 'codex_runner'
+        )
+        if (agentThreadEvent && eventArtifact) {
+          const thread = event?.thread || scoutThreadFromArtifact(eventArtifact)
+          if (!thread.artifact) {
+            thread.artifact = eventArtifact
+          }
+          upsertScoutChatResearchNode(thread, { updatePreview: true })
+        }
         if (Array.isArray(event?.actions)) {
           handleOSAssistantActions(event.actions)
         }
@@ -20323,6 +20479,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               appendScoutChatNode(scoutChatSystemNode('connection reset — history cleared'))
             }
           }
+          scoutOfficeChatTurns = []
           scoutChatSessionSeen = true
         } else {
           hideScoutChatThinking()
@@ -20353,10 +20510,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const threadMode = scoutThreadModeForText(text)
         showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
         try {
+          const body = threadMode
+            ? { query: text, mode: threadMode }
+            : { query: text, mode: 'chat', history: scoutOfficeChatHistoryPayload() }
           const response = await fetch(threadMode ? '/assistant/threads' : '/assistant/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: text, mode: threadMode || 'chat' })
+            body: JSON.stringify(body)
           })
           const payload = await response.json().catch(() => ({}))
           if (!response.ok) {
@@ -20371,12 +20531,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             // Real tool-run: render the progress card wired to the launched
             // thread, then track its artifact so a refresh flips it terminal.
             const thread = payload.thread || { mode: threadMode, query: text, status: payload.artifact ? 'running' : 'running', artifact: payload.artifact }
-            appendScoutChatNode(scoutChatResearchNode(thread))
+            upsertScoutChatResearchNode(thread)
             const preview = `${assistantModeTitle(threadMode)} thread launched`
+            rememberScoutOfficeChatTurn('user', text)
+            rememberScoutOfficeChatTurn('scout', preview)
             updateChatThreadItem(preview, new Date().toISOString())
           } else {
             const answer = scoutVoice(payload.answer || 'no answer yet')
             appendScoutChatNode(scoutChatMessageNode('scout', answer, new Date().toISOString()))
+            rememberScoutOfficeChatTurn('user', text)
+            rememberScoutOfficeChatTurn('scout', answer)
             updateChatThreadItem(answer, new Date().toISOString())
           }
         } catch (error) {
@@ -20384,6 +20548,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const message = error.message || 'assistant query failed'
           appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
           updateChatThreadItem(message, new Date().toISOString())
+        }
+      }
+
+      function scoutOfficeChatHistoryPayload() {
+        return scoutOfficeChatTurns.slice(-12).map(turn => ({ role: turn.role, text: turn.text }))
+      }
+
+      function rememberScoutOfficeChatTurn(role, text) {
+        const safeRole = role === 'user' ? 'user' : 'scout'
+        const safeText = String(text || '').trim()
+        if (!safeText) {
+          return
+        }
+        scoutOfficeChatTurns.push({ role: safeRole, text: safeText })
+        if (scoutOfficeChatTurns.length > 12) {
+          scoutOfficeChatTurns = scoutOfficeChatTurns.slice(scoutOfficeChatTurns.length - 12)
         }
       }
 
@@ -20448,7 +20628,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             status: payload?.artifact ? artifactStatusValue(payload.artifact) : 'running',
             artifact: payload?.artifact
           }
-          appendScoutChatNode(scoutChatResearchNode(thread))
+          upsertScoutChatResearchNode(thread)
           updateChatThreadItem(text || `${assistantModeTitle(thread.mode)} thread launched`, ts || new Date().toISOString())
           return
         }
@@ -20489,6 +20669,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // empty state and focuses the composer — the least-surprising "new thread".
       function startNewScoutThread() {
         hideScoutChatThinking()
+        scoutOfficeChatTurns = []
         scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research').forEach(node => node.remove())
         if (!scoutChatThread.querySelector('.scout-chat-empty')) {
           const empty = document.createElement('p')
@@ -20556,7 +20737,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.className = 'chat-thread-item'
           item.setAttribute('aria-pressed', 'false')
           item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
-          item.addEventListener('click', () => openAgentArtifact(entry))
+          item.addEventListener('click', () => openAgentThreadInChat(entry))
 
           const icon = document.createElement('span')
           icon.className = 'chat-thread-item__icon'
@@ -20583,6 +20764,145 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
       }
 
+      function openAgentThreadInChat(entry) {
+        if (!entry) {
+          setActiveTool('chat')
+          return
+        }
+        addArtifactEntry(entry, { select: false })
+        const card = upsertScoutChatResearchNode(scoutThreadFromArtifact(entry), { updatePreview: true })
+        setActiveTool('chat')
+        card?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion?.matches ? 'auto' : 'smooth' })
+      }
+
+      function appendChatRichTextNodes(container, rawText) {
+        const text = String(rawText || '').replace(/\r\n?/g, '\n').trim()
+        container.replaceChildren()
+        if (!text) {
+          return
+        }
+
+        const lines = text.split('\n')
+        let index = 0
+        let paragraph = []
+        const flushParagraph = () => {
+          const value = paragraph.join(' ').trim()
+          paragraph = []
+          if (!value) {
+            return
+          }
+          const p = document.createElement('p')
+          appendChatInlineNodes(p, value)
+          container.appendChild(p)
+        }
+
+        while (index < lines.length) {
+          const line = lines[index]
+          const trimmed = line.trim()
+          if (!trimmed) {
+            flushParagraph()
+            index += 1
+            continue
+          }
+
+          const heading = /^\s{0,3}#{1,6}\s+(.+?)\s*$/.exec(line)
+          if (heading) {
+            flushParagraph()
+            const h = document.createElement('p')
+            h.className = 'chat-rich__heading'
+            appendChatInlineNodes(h, heading[1].replace(/:\s*$/, ''))
+            container.appendChild(h)
+            index += 1
+            continue
+          }
+
+          const listMatch = chatMarkdownListMatch(line)
+          if (listMatch) {
+            flushParagraph()
+            const ordered = /^\s*\d+[.)]\s+/.test(line)
+            const list = document.createElement(ordered ? 'ol' : 'ul')
+            while (index < lines.length) {
+              const next = lines[index]
+              const match = chatMarkdownListMatch(next)
+              if (!match || /^\s*\d+[.)]\s+/.test(next) !== ordered) {
+                break
+              }
+              const item = document.createElement('li')
+              appendChatInlineNodes(item, match[1].trim())
+              list.appendChild(item)
+              index += 1
+            }
+            container.appendChild(list)
+            continue
+          }
+
+          const quoteMatch = /^\s*>\s*(.+)$/.exec(line)
+          if (quoteMatch) {
+            flushParagraph()
+            const quote = document.createElement('blockquote')
+            quote.className = 'chat-rich__quote'
+            const quoteLines = []
+            while (index < lines.length) {
+              const match = /^\s*>\s*(.*)$/.exec(lines[index])
+              if (!match) {
+                break
+              }
+              quoteLines.push(match[1])
+              index += 1
+            }
+            appendChatInlineNodes(quote, quoteLines.join(' ').trim())
+            container.appendChild(quote)
+            continue
+          }
+
+          paragraph.push(trimmed)
+          index += 1
+        }
+
+        flushParagraph()
+      }
+
+      function chatMarkdownListMatch(line) {
+        return /^\s*(?:[-*]|\d+[.)])\s+(.+)$/.exec(String(line || ''))
+      }
+
+      function appendChatInlineNodes(container, text) {
+        const value = String(text || '')
+        const pattern = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`/g
+        let lastIndex = 0
+        let matched = false
+        for (const match of value.matchAll(pattern)) {
+          matched = true
+          if (match.index > lastIndex) {
+            container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)))
+          }
+          if (match[1] && match[2]) {
+            const link = document.createElement('a')
+            link.href = match[2]
+            link.target = '_blank'
+            link.rel = 'noreferrer noopener'
+            link.textContent = match[1]
+            container.appendChild(link)
+          } else if (match[3]) {
+            const strong = document.createElement('strong')
+            strong.textContent = match[3]
+            container.appendChild(strong)
+          } else if (match[4]) {
+            const code = document.createElement('code')
+            code.textContent = match[4]
+            container.appendChild(code)
+          }
+          lastIndex = match.index + match[0].length
+        }
+        if (!matched) {
+          container.textContent = value
+          return
+        }
+        if (lastIndex < value.length) {
+          container.appendChild(document.createTextNode(value.slice(lastIndex)))
+        }
+      }
+
       function scoutChatMessageNode(kind, text, ts, files) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
@@ -20607,9 +20927,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (text) {
-          const body = document.createElement('span')
-          body.className = 'scout-chat-text'
-          body.textContent = text
+          const rich = kind === 'scout'
+          const body = document.createElement('div')
+          body.className = `scout-chat-text${rich ? ' chat-rich' : ''}`
+          if (rich) {
+            appendChatRichTextNodes(body, text)
+          } else {
+            body.textContent = text
+          }
           item.appendChild(body)
         }
 
@@ -20642,6 +20967,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           wrap.appendChild(chip)
         })
         return wrap
+      }
+
+      function scoutThreadFromArtifact(entry, fallback = {}) {
+        const metadata = entry?.metadata || {}
+        const mode = String(fallback.mode || metadata.mode || scoutThreadModeForText(metadata.threadQuery || metadata.query || metadata.title || '') || 'research').trim()
+        const query = String(fallback.query || metadata.threadQuery || metadata.query || metadata.title || '').trim()
+        return {
+          id: fallback.id || metadata.threadId || entry?.id || '',
+          mode,
+          query,
+          status: artifactStatusValue(entry),
+          artifact: entry
+        }
+      }
+
+      function selectorEscape(value) {
+        return window.CSS?.escape ? window.CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&')
+      }
+
+      function upsertScoutChatResearchNode(thread, options = {}) {
+        if (!scoutChatThread) {
+          return null
+        }
+        const artifact = thread?.artifact
+        const artifactId = String(artifact?.id || thread?.artifactId || '').trim()
+        const existing = artifactId
+          ? scoutChatThread.querySelector(`.scout-chat-research[data-thread-artifact-id="${selectorEscape(artifactId)}"]`)
+          : null
+        if (existing) {
+          if (thread?.mode) {
+            existing.dataset.threadMode = String(thread.mode)
+          }
+          updateScoutChatResearchNode(existing, String(thread?.status || artifactStatusValue(artifact) || 'running'), artifact)
+          return existing
+        }
+        const card = scoutChatResearchNode(thread)
+        appendScoutChatNode(card)
+        if (options.updatePreview !== false) {
+          updateChatThreadItem(thread?.query || `${assistantModeTitle(thread?.mode)} thread`, new Date().toISOString())
+        }
+        return card
       }
 
       // kit: research / tool-progress card for a launched Scout work thread.
@@ -20677,15 +21043,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               <span class="scout-chat-research__track"><span class="scout-chat-research__fill" data-research-fill></span></span>
               <span class="scout-chat-research__pct" data-research-pct></span>
             </div>
-            <button class="scout-chat-research__artifact" type="button" data-research-artifact hidden>open artifact</button>
-          </div>`
+            <div class="scout-chat-research__actions">
+              <button class="scout-chat-research__artifact scout-chat-research__action" type="button" data-research-artifact hidden>view report</button>
+              <button class="scout-chat-research__action" type="button" data-research-download hidden>download .md</button>
+              <button class="scout-chat-research__action" type="button" data-research-copy hidden>copy md</button>
+              <button class="scout-chat-research__action" type="button" data-research-library hidden>open in library</button>
+            </div>
+          </div>
+          <div class="scout-chat-research__report artifact-read" data-research-report hidden></div>`
 
         card.querySelector('.scout-chat-research__title').textContent = title
         const artifactButton = card.querySelector('[data-research-artifact]')
         artifactButton?.addEventListener('click', () => {
-          const id = card.dataset.threadArtifactId
-          if (id) {
-            openAgentArtifact({ id })
+          const entry = card.__scoutArtifact
+          const report = card.querySelector('[data-research-report]')
+          if (!entry || !report) {
+            return
+          }
+          const open = report.hidden
+          report.hidden = !open
+          card.classList.toggle('is-report-open', open)
+          if (open) {
+            renderArtifactRead(report, entry)
+            artifactButton.textContent = 'hide report'
+          } else {
+            artifactButton.textContent = artifactStatusValue(entry) === 'complete' || artifactStatusValue(entry) === 'published' ? 'view report' : 'watch report'
+          }
+        })
+        card.querySelector('[data-research-download]')?.addEventListener('click', () => researchDownloadArtifact(card.__scoutArtifact))
+        card.querySelector('[data-research-copy]')?.addEventListener('click', () => copyArtifactMarkdown(card.__scoutArtifact))
+        card.querySelector('[data-research-library]')?.addEventListener('click', () => {
+          if (card.__scoutArtifact) {
+            openAgentArtifact(card.__scoutArtifact)
           }
         })
         updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
@@ -20721,6 +21110,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const pctEl = card.querySelector('[data-research-pct]')
         const flow = card.querySelector('[data-research-flow]')
         const artifactButton = card.querySelector('[data-research-artifact]')
+        const downloadButton = card.querySelector('[data-research-download]')
+        const copyButton = card.querySelector('[data-research-copy]')
+        const libraryButton = card.querySelector('[data-research-library]')
+        const report = card.querySelector('[data-research-report]')
+        if (artifact?.id) {
+          card.dataset.threadArtifactId = artifact.id
+        }
+        if (artifact) {
+          card.__scoutArtifact = artifact
+        }
 
         if (pill) {
           pill.className = 'pill ' + (active ? 'pill--connecting pill--breathe' : approvalRequired || rejected || error ? 'pill--offline' : 'pill--listening')
@@ -20760,9 +21159,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }))
         }
         if (artifactButton) {
-          const hasArtifact = Boolean(card.dataset.threadArtifactId)
-          artifactButton.hidden = !hasArtifact || !canUseArtifactLibrary()
-          artifactButton.textContent = done ? 'open artifact' : approvalRequired || rejected || error ? 'inspect artifact' : 'watch artifact'
+          const entry = card.__scoutArtifact
+          const hasArtifact = Boolean(entry?.id && entry?.text)
+          artifactButton.hidden = !hasArtifact
+          artifactButton.textContent = report && !report.hidden ? 'hide report' : done ? 'view report' : approvalRequired || rejected || error ? 'inspect report' : 'watch report'
+        }
+        const entry = card.__scoutArtifact
+        const hasMarkdown = Boolean(entry?.id && entry?.text)
+        if (downloadButton) {
+          downloadButton.hidden = !hasMarkdown
+        }
+        if (copyButton) {
+          copyButton.hidden = !hasMarkdown
+        }
+        if (libraryButton) {
+          libraryButton.hidden = !hasMarkdown || !canUseArtifactLibrary()
+        }
+        if (report && !report.hidden && entry) {
+          renderArtifactRead(report, entry)
         }
       }
 
@@ -22352,7 +22766,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ensureSelectedArtifact()
           renderArtifacts()
           syncScoutChatResearchCards()
-          if (artifactEntries.some(entry => artifactStatusValue(entry) === 'running')) {
+          if (artifactEntries.some(entry => ['queued', 'running'].includes(artifactStatusValue(entry)))) {
             scheduleArtifactRefresh()
           }
         } catch {
@@ -22408,7 +22822,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         ensureSelectedArtifact()
         renderArtifacts()
-        if (artifactStatusValue(entry) === 'running') {
+        syncScoutChatResearchCards()
+        if (['queued', 'running'].includes(artifactStatusValue(entry))) {
           scheduleArtifactRefresh()
         }
       }
@@ -23091,9 +23506,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         meta.className = 'assistant-meta'
         meta.textContent = assistantMessageLabel(entry, kind)
 
-        const text = document.createElement('span')
+        const text = document.createElement('div')
         text.className = 'assistant-text'
-        text.textContent = kind === 'answer' ? scoutVoice(entry.text) : entry.text
+        const messageText = kind === 'answer' ? scoutVoice(entry.text) : entry.text
+        if (kind === 'answer') {
+          text.classList.add('chat-rich')
+          appendChatRichTextNodes(text, messageText)
+        } else {
+          text.textContent = messageText
+        }
 
         item.append(meta, text)
         if (entry.downloadUrl) {
@@ -24834,8 +25255,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           card.style.setProperty('--agent-progress', `${agentStatusProgress(statusValue)}%`)
           card.addEventListener('click', () => {
             if (latest) {
-              selectArtifact(latest.id)
-              openOfficeTool('artifacts')
+              openAgentThreadInChat(latest)
               return
             }
             lane.open()
@@ -24897,7 +25317,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             title: entry.metadata?.title || artifactModeLabel(entry),
             meta: artifactTimeLabel(entry),
             preview: artifactPreviewText(entry) || compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`),
-            onOpen: () => { selectArtifact(entry.id); openOfficeTool('artifacts') }
+            onOpen: () => openAgentThreadInChat(entry)
           }))
 
         if (!threads.length) {

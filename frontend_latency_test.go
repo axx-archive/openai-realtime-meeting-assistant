@@ -194,6 +194,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="chatAgentThreads" class="chat-agent-threads"`,
 		"event: 'scout_chat_reset'",
 		"function renderChatAgentThreads()",
+		"function openAgentThreadInChat(entry)",
 		"function promptScoutForWork(mode, text = '')",
 		"function openAgentArtifact(entry)",
 		"async function runAgentTool(event)",
@@ -201,8 +202,13 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function renderResearchArtifactList(activeEntry)",
 		"function renderResearchJobEntry(entry, activeEntry)",
 		"function scoutThreadModeForText(text)",
+		"function upsertScoutChatResearchNode(thread, options = {})",
 		"function updateScoutChatResearchNode(card, status, artifact)",
 		`class="scout-chat-research__flow"`,
+		"data-research-download",
+		"data-research-copy",
+		"data-research-library",
+		"renderArtifactRead(report, entry)",
 		"data-agent-tool-form=\"research\"",
 		"data-agent-tool-form=\"design\"",
 		"data-agent-tool-form=\"grill\"",
@@ -220,7 +226,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function latestPublishedArtifacts(limit = 3)",
 		"function scheduleArtifactRefresh()",
 		"if (!canUseArtifactLibrary())",
-		"artifactButton.hidden = !hasArtifact || !canUseArtifactLibrary()",
+		"artifactButton.hidden = !hasArtifact",
+		"syncScoutChatResearchCards()",
+		"['queued', 'running'].includes(artifactStatusValue(entry))",
 		"chatAgentThreads.replaceChildren()",
 		"addArtifactEntry(result.artifact, { select: false })",
 		"meeting artifact saved",
@@ -477,6 +485,67 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 	linkBlock := functionBody(html, ".account-menu__link")
 	if !strings.Contains(linkBlock, "min-height: 44px;") {
 		t.Fatal("account menu settings/sign-out rows must keep a 44px touch target")
+	}
+}
+
+func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		".chat-rich",
+		"let scoutOfficeChatTurns = []",
+		"function appendChatRichTextNodes(container, rawText)",
+		"function appendChatInlineNodes(container, text)",
+		"function scoutOfficeChatHistoryPayload()",
+		"function rememberScoutOfficeChatTurn(role, text)",
+		"history: scoutOfficeChatHistoryPayload()",
+		"document.createElement('strong')",
+		"document.createElement('code')",
+		"document.createElement(ordered ? 'ol' : 'ul')",
+		"document.createTextNode(value.slice(lastIndex))",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing safe chat rich-text marker %q", want)
+		}
+	}
+
+	scoutBody := functionBody(html, "function scoutChatMessageNode(kind, text, ts, files)")
+	if scoutBody == "" {
+		t.Fatal("index.html missing scoutChatMessageNode")
+	}
+	for _, want := range []string{
+		"const rich = kind === 'scout'",
+		"body.className = `scout-chat-text${rich ? ' chat-rich' : ''}`",
+		"appendChatRichTextNodes(body, text)",
+		"body.textContent = text",
+	} {
+		if !strings.Contains(scoutBody, want) {
+			t.Fatalf("scout chat body missing rich-rendering marker %q", want)
+		}
+	}
+	if strings.Contains(scoutBody, "body.innerHTML") {
+		t.Fatal("scout chat messages must not render model text with innerHTML")
+	}
+
+	assistantBody := functionBody(html, "function renderAssistantMessage(entry, entering = false)")
+	if assistantBody == "" {
+		t.Fatal("index.html missing renderAssistantMessage")
+	}
+	for _, want := range []string{
+		"text.classList.add('chat-rich')",
+		"appendChatRichTextNodes(text, messageText)",
+		"text.textContent = messageText",
+	} {
+		if !strings.Contains(assistantBody, want) {
+			t.Fatalf("assistant feed body missing rich-rendering marker %q", want)
+		}
+	}
+	if strings.Contains(assistantBody, "text.innerHTML") {
+		t.Fatal("assistant feed messages must not render model text with innerHTML")
 	}
 }
 

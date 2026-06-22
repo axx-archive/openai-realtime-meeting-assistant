@@ -109,7 +109,15 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)
 	}
 	instructions := session["instructions"].(string)
-	for _, want := range []string{"private Bonfire OS voice assistant", "outside the video room", "Do not describe yourself as the shared room Scout", "do not mutate the shared Kanban board", "Use launch_agent_thread"} {
+	for _, want := range []string{
+		"private Bonfire OS voice assistant",
+		"outside the video room",
+		"Do not describe yourself as the shared room Scout",
+		"do not mutate the shared Kanban board",
+		"Use launch_agent_thread",
+		"Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information",
+		"do not volunteer board status for unclear follow-ups like \"what?\"",
+	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("private voice instructions missing %q: %s", want, instructions)
 		}
@@ -678,6 +686,13 @@ func TestRealtimeLaunchAgentThreadCreatesRunningArtifact(t *testing.T) {
 	}
 	if !strings.Contains(artifact.Text, "Scout work thread") || !strings.Contains(artifact.Text, "Goal workflow") {
 		t.Fatalf("artifact text=%q, want thread scaffold", artifact.Text)
+	}
+	actions, ok := result["actions"].([]osAssistantAction)
+	if !ok || len(actions) == 0 {
+		t.Fatalf("actions=%T %#v, want chat action", result["actions"], result["actions"])
+	}
+	if actions[0].Tool != "chat" || actions[0].ArtifactID != artifact.ID {
+		t.Fatalf("actions=%#v, want launch_agent_thread to route visible work to Chat with artifact id", actions)
 	}
 }
 

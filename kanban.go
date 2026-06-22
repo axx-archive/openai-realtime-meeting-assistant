@@ -937,10 +937,10 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
 		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not treat the user as a meeting participant, and do not mutate the shared Kanban board or room recording from this private surface. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for longer research, design, grill, or workflow goals. Use create_artifact for quick saved artifacts. Use answer_memory_question for recall across saved meetings and artifacts. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
-		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Ask one concise clarifying question when the request is ambiguous.",
+		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Ask one concise clarifying question when the request is ambiguous; do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
 	}, "\n\n")
 }
 
@@ -1786,13 +1786,13 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "create_artifact",
-			"description": "Create a durable Bonfire OS artifact, research brief, design kickoff, grill scorecard, or Codex goal workflow from a clear user request. If content is omitted, the app will scaffold the artifact from board and memory context.",
+			"description": "Create a quick durable Bonfire OS artifact from explicit content the user wants saved now. Do not use this to kick off research, design, grill, or workflow work; use launch_agent_thread for those longer worker requests.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"mode":    artifactModeProperty,
-					"query":   map[string]any{"type": "string", "description": "The user's artifact, research, design, grill, or workflow request."},
-					"content": map[string]any{"type": "string", "description": "Optional final artifact content to save. Omit when the app should scaffold it from current board and memory context."},
+					"query":   map[string]any{"type": "string", "description": "The user's quick saved-artifact request or title."},
+					"content": map[string]any{"type": "string", "description": "Final artifact content to save. Provide this when the user supplied or approved the content."},
 				},
 				"required":             []string{"mode", "query"},
 				"additionalProperties": false,
@@ -1801,7 +1801,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		{
 			"type":        "function",
 			"name":        "launch_agent_thread",
-			"description": "Launch a Scout agent-workforce thread for longer research, design, grill, artifact, or workflow requests. This creates a running artifact immediately, exposes progress in chat/artifacts, and lets the worker update it outside the live Realtime voice loop.",
+			"description": "Launch a Scout agent-workforce thread for research, investigation, sourcing, design, grill, pressure-test, planning, or workflow requests. This creates a Chat work thread immediately, saves the backing artifact, and lets the worker update progress outside the live Realtime voice loop.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

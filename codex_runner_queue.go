@@ -768,7 +768,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actions := kanbanApp.osAssistantActions(artifact.Metadata["title"], artifact.Kind, artifact)
+	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
 	broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", codexRunnerStatusMessage(payload.Status, artifact), map[string]any{
 		"tool":       "codex_runner",
