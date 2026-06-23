@@ -229,7 +229,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"artifactButton.hidden = !hasArtifact",
 		"syncScoutChatResearchCards()",
 		"['queued', 'running'].includes(artifactStatusValue(entry))",
-		"chatAgentThreads.replaceChildren()",
+		"fetch('/assistant/chat-threads'",
+		"function loadScoutChatThreads()",
+		"function archiveScoutChatThread(id)",
+		"chatAgentThreads.replaceChildren(...threads.map(thread => {",
 		"addArtifactEntry(result.artifact, { select: false })",
 		"meeting artifact saved",
 		"method: 'PATCH'",
@@ -422,6 +425,42 @@ func TestIndexAccountMenuPreservesDraftNameDuringAvatarPreview(t *testing.T) {
 	}
 }
 
+func TestIndexLoginUsesOnlyRosterNamePicker(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		`<span>name</span>`,
+		`<option value="Joel">Joel</option>`,
+		`<option value="Caitlyn">Caitlyn</option>`,
+		`<option value="Tyler">Tyler</option>`,
+		`<option value="AJ">AJ</option>`,
+		`<option value="Tim">Tim</option>`,
+		`<option value="Erick">Erick</option>`,
+		`<option value="Tom">Tom</option>`,
+		`name: selectedLoginAccountName()`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("login card missing roster-only marker %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		"Custom email",
+		"Jake Mercer",
+		"<option>Jake</option>",
+		"<option>Guest 1</option>",
+		"<option>Guest 2</option>",
+		`email: loginEmailInput.value.trim()`,
+	} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("login card still contains non-roster marker %q", unwanted)
+		}
+	}
+}
+
 func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
@@ -497,12 +536,13 @@ func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		".chat-rich",
-		"let scoutOfficeChatTurns = []",
+		"let scoutChatThreads = []",
+		"let pendingScoutFiles = []",
 		"function appendChatRichTextNodes(container, rawText)",
 		"function appendChatInlineNodes(container, text)",
-		"function scoutOfficeChatHistoryPayload()",
-		"function rememberScoutOfficeChatTurn(role, text)",
-		"history: scoutOfficeChatHistoryPayload()",
+		"function scoutChatFilePayload(file)",
+		"function renderPendingScoutFiles()",
+		"`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`",
 		"document.createElement('strong')",
 		"document.createElement('code')",
 		"document.createElement(ordered ? 'ol' : 'ul')",

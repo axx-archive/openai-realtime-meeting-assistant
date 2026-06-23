@@ -686,6 +686,163 @@ func TestAssistantThreadsHandlerHidesArtifactBodyForNonAdminUser(t *testing.T) {
 	}
 }
 
+func TestAssistantChatThreadsPersistMessagesAndAttachments(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "test-key"
+	kanbanApp.mu.Unlock()
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	var capturedInput string
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		capturedInput = request.Input
+		return "Use the attached brief as launch context.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	createReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads", strings.NewReader(`{"title":"Scout"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		createReq.AddCookie(cookie)
+	}
+	createRecorder := httptest.NewRecorder()
+	assistantChatThreadsHandler(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s, want %d", createRecorder.Code, createRecorder.Body.String(), http.StatusCreated)
+	}
+	var createPayload struct {
+		Thread scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createPayload.Thread.ID == "" {
+		t.Fatalf("created thread missing id: %#v", createPayload.Thread)
+	}
+
+	messageBody := fmt.Sprintf(`{
+		"text":"Use this for the campaign plan",
+		"files":[{"name":"brief.txt","kind":"text/plain","size":42,"text":"Audience: rodeo creators\nBudget: 12k"}]
+	}`)
+	messageReq := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+createPayload.Thread.ID+"/messages", strings.NewReader(messageBody))
+	messageReq.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		messageReq.AddCookie(cookie)
+	}
+	messageRecorder := httptest.NewRecorder()
+	assistantChatThreadHandler(messageRecorder, messageReq)
+	if messageRecorder.Code != http.StatusOK {
+		t.Fatalf("message status=%d body=%s, want %d", messageRecorder.Code, messageRecorder.Body.String(), http.StatusOK)
+	}
+	var messagePayload struct {
+		Thread scoutChatThreadRecord  `json:"thread"`
+		Answer scoutChatMessageRecord `json:"answer"`
+	}
+	if err := json.Unmarshal(messageRecorder.Body.Bytes(), &messagePayload); err != nil {
+		t.Fatalf("decode message response: %v", err)
+	}
+	if len(messagePayload.Thread.Messages) != 2 {
+		t.Fatalf("messages=%d, want user+scout", len(messagePayload.Thread.Messages))
+	}
+	if got := messagePayload.Thread.Messages[0].Files[0].Name; got != "brief.txt" {
+		t.Fatalf("attachment name=%q, want brief.txt", got)
+	}
+	if !strings.Contains(capturedInput, "Audience: rodeo creators") {
+		t.Fatalf("model input missing attachment text: %s", capturedInput)
+	}
+	if messagePayload.Answer.Text != "Use the attached brief as launch context." {
+		t.Fatalf("answer=%q, want responder output", messagePayload.Answer.Text)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads", nil)
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		listReq.AddCookie(cookie)
+	}
+	listRecorder := httptest.NewRecorder()
+	assistantChatThreadsHandler(listRecorder, listReq)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s, want %d", listRecorder.Code, listRecorder.Body.String(), http.StatusOK)
+	}
+	var listPayload struct {
+		Threads []scoutChatThreadRecord `json:"threads"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listPayload.Threads) != 1 || listPayload.Threads[0].ID != createPayload.Thread.ID {
+		t.Fatalf("threads=%#v, want persisted thread", listPayload.Threads)
+	}
+}
+
+func TestAssistantChatThreadsArchiveHidesFromDefaultList(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Archive me")
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	if matches := kanbanApp.memory.search("Archive me", 10); len(matches) != 0 {
+		t.Fatalf("chat thread leaked into memory search: %#v", matches)
+	}
+	for _, entry := range kanbanApp.memorySnapshotForClients(10) {
+		if entry.Kind == meetingMemoryKindScoutChat {
+			t.Fatalf("chat thread leaked into client memory snapshot: %#v", entry)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/assistant/chat-threads/"+thread.ID, strings.NewReader(`{"archived":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantChatThreadHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads", nil)
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		listReq.AddCookie(cookie)
+	}
+	listRecorder := httptest.NewRecorder()
+	assistantChatThreadsHandler(listRecorder, listReq)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s, want %d", listRecorder.Code, listRecorder.Body.String(), http.StatusOK)
+	}
+	var listPayload struct {
+		Threads []scoutChatThreadRecord `json:"threads"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listPayload.Threads) != 0 {
+		t.Fatalf("threads=%#v, want archived thread hidden", listPayload.Threads)
+	}
+
+	archivedReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads?archived=true", nil)
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		archivedReq.AddCookie(cookie)
+	}
+	archivedRecorder := httptest.NewRecorder()
+	assistantChatThreadsHandler(archivedRecorder, archivedReq)
+	if archivedRecorder.Code != http.StatusOK {
+		t.Fatalf("archived list status=%d body=%s, want %d", archivedRecorder.Code, archivedRecorder.Body.String(), http.StatusOK)
+	}
+	if err := json.Unmarshal(archivedRecorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode archived list response: %v", err)
+	}
+	if len(listPayload.Threads) != 1 || listPayload.Threads[0].ArchivedAt == "" {
+		t.Fatalf("threads=%#v, want archived thread when requested", listPayload.Threads)
+	}
+}
+
 func TestArtifactsHandlerUpdatesSavedArtifactForSignedInUser(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

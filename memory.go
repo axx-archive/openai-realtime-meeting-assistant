@@ -19,6 +19,7 @@ const (
 	meetingMemoryKindBoardUpdate = "board_update"
 	meetingMemoryKindArchive     = "archive"
 	meetingMemoryKindOSArtifact  = "os_artifact"
+	meetingMemoryKindScoutChat   = "scout_chat_thread"
 	defaultMeetingMemoryPath     = "data/meeting-memory.jsonl"
 )
 
@@ -242,6 +243,14 @@ func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metada
 	return store.appendEntry(meetingMemoryKindOSArtifact, id, text, metadata)
 }
 
+func (store *meetingMemoryStore) appendScoutChatThread(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindScoutChat, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateEntryWithMetadata(meetingMemoryKindScoutChat, id, text, metadataUpdates)
+}
+
 func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
 	return store.updateOSArtifactWithMetadata(id, title, text, updatedBy, nil)
 }
@@ -316,6 +325,65 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	}
 
 	return cloneMemoryEntry(entry), changed, nil
+}
+
+func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	kind = strings.TrimSpace(kind)
+	id = strings.TrimSpace(id)
+	if kind == "" || id == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory entry id and kind are required")
+	}
+	text = normalizeMemoryEntryText(kind, text)
+	if text == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory entry text is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	index := -1
+	for candidateIndex, entry := range store.entries {
+		if entry.ID == id && entry.Kind == kind {
+			index = candidateIndex
+			break
+		}
+	}
+	if index < 0 {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory entry not found")
+	}
+
+	previousEntry := store.entries[index]
+	entry := cloneMemoryEntry(previousEntry)
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]string{}
+	}
+	changed := entry.Text != text
+	for key, value := range metadataUpdates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if entry.Metadata[key] != value {
+			changed = true
+			entry.Metadata[key] = value
+		}
+	}
+	if !changed {
+		return cloneMemoryEntry(entry), false, nil
+	}
+	entry.Text = text
+
+	store.entries[index] = entry
+	if err := store.rewriteLocked(); err != nil {
+		store.entries[index] = previousEntry
+		return meetingMemoryEntry{}, false, err
+	}
+
+	return cloneMemoryEntry(entry), true, nil
 }
 
 func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -473,6 +541,9 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	matches := make([]meetingMemoryMatch, 0, len(entries))
 	lowerQuery := strings.ToLower(query)
 	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindScoutChat {
+			continue
+		}
 		lowerText := strings.ToLower(entry.Text)
 		score := 0
 		if strings.Contains(lowerText, lowerQuery) {
@@ -581,7 +652,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat {
 		return normalizeMemoryText(value)
 	}
 

@@ -232,7 +232,7 @@ var initialKanbanBoardCards = []kanbanCard{
 		Status: kanbanStatusBacklog,
 		Title:  "Harden DTLS/SRTP Cleanup",
 		Notes:  "Ensure failed and closed peer connections release transports, tracks, and SRTP state promptly.",
-		Owner:  "Jake",
+		Owner:  "Erick",
 		Tags:   []string{"webrtc", "dtls", "srtp"},
 	},
 	{
@@ -2678,7 +2678,7 @@ func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 		return nil
 	}
 
-	return app.memory.snapshot(limit)
+	return visibleMeetingMemoryEntries(app.memory.snapshot(0), limit)
 }
 
 func (app *kanbanBoardApp) memorySnapshotForMeeting(meetingID string, limit int) []meetingMemoryEntry {
@@ -2686,7 +2686,18 @@ func (app *kanbanBoardApp) memorySnapshotForMeeting(meetingID string, limit int)
 		return nil
 	}
 
-	return app.memory.snapshotForMeeting(meetingID, limit)
+	return visibleMeetingMemoryEntries(app.memory.snapshotForMeeting(meetingID, 0), limit)
+}
+
+func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meetingMemoryEntry {
+	visible := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindScoutChat {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	return tailMemoryEntries(visible, limit)
 }
 
 // memorySnapshotForClients decorates archive entries with a keyed download

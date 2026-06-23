@@ -5572,10 +5572,10 @@
 
       /* thread rows — kit components/chat/ThreadItem.jsx anatomy. Scout is
          the live thread; the others are the kit's design content */
-      .chat-thread-item {
-        display: flex;
-        align-items: flex-start;
-        gap: 12px;
+	      .chat-thread-item {
+	        display: flex;
+	        align-items: flex-start;
+	        gap: 12px;
         width: 100%;
         text-align: left;
         padding: 12px 14px;
@@ -5583,8 +5583,13 @@
         border: 1px solid transparent;
         border-radius: var(--r-md);
         cursor: pointer;
-        transition: background var(--dur-fast) var(--ease);
-      }
+	        transition: background var(--dur-fast) var(--ease);
+	      }
+
+	      .chat-thread-item--with-action {
+	        position: relative;
+	        padding-right: 48px;
+	      }
 
       .chat-thread-item[aria-pressed="true"] {
         background: var(--surface-3);
@@ -5642,13 +5647,51 @@
         white-space: nowrap;
       }
 
-      .chat-thread-item__preview {
-        font: var(--type-caption);
-        color: var(--text-2);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
+	      .chat-thread-item__preview {
+	        font: var(--type-caption);
+	        color: var(--text-2);
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	      }
+
+	      .chat-thread-item__archive {
+	        position: absolute;
+	        right: 6px;
+	        top: 50%;
+	        transform: translateY(-50%);
+	        width: 40px;
+	        height: 40px;
+	        display: inline-flex;
+	        align-items: center;
+	        justify-content: center;
+	        padding: 0;
+	        border: 0;
+	        border-radius: var(--r-md);
+	        background: transparent;
+	        color: var(--text-3);
+	        cursor: pointer;
+	        opacity: 0;
+	        transition:
+	          background var(--dur-fast) var(--ease),
+	          color var(--dur-fast) var(--ease),
+	          opacity var(--dur-fast) var(--ease),
+	          transform var(--dur-fast) var(--ease);
+	      }
+
+	      .chat-thread-item:hover .chat-thread-item__archive,
+	      .chat-thread-item:focus-within .chat-thread-item__archive {
+	        opacity: 1;
+	      }
+
+	      .chat-thread-item__archive:hover {
+	        background: var(--surface-2);
+	        color: var(--text-1);
+	      }
+
+	      .chat-thread-item__archive:active {
+	        transform: translateY(-50%) scale(var(--press-scale));
+	      }
 
       /* kit ThreadItem unread badge — ink pill, right edge of the row */
       .chat-thread-item__unread {
@@ -5914,11 +5957,80 @@
         max-width: 200px;
       }
 
-      .scout-chat-file__meta {
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
-      }
+	      .scout-chat-file__meta {
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        color: var(--text-3);
+	      }
+
+	      .scout-chat-pending-files {
+	        flex: none;
+	        display: flex;
+	        flex-wrap: wrap;
+	        gap: 8px;
+	        margin: 0 28px 8px;
+	      }
+
+	      .scout-chat-pending-files[hidden] {
+	        display: none;
+	      }
+
+	      .scout-chat-pending-file {
+	        min-width: 0;
+	        max-width: min(260px, 100%);
+	        display: inline-flex;
+	        align-items: center;
+	        gap: 8px;
+	        min-height: 40px;
+	        padding: 4px 6px 4px 10px;
+	        border: 1px solid var(--line-1);
+	        border-radius: var(--r-md);
+	        background: var(--surface-2);
+	        color: var(--text-1);
+	      }
+
+	      .scout-chat-pending-file__name {
+	        min-width: 0;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	        font: var(--type-label-lg);
+	        letter-spacing: var(--track-label);
+	      }
+
+	      .scout-chat-pending-file__meta {
+	        flex: none;
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        color: var(--text-3);
+	      }
+
+	      .scout-chat-pending-file__remove {
+	        width: 32px;
+	        height: 32px;
+	        display: inline-flex;
+	        align-items: center;
+	        justify-content: center;
+	        padding: 0;
+	        border: 0;
+	        border-radius: var(--r-md);
+	        background: transparent;
+	        color: var(--text-3);
+	        cursor: pointer;
+	        transition:
+	          background var(--dur-fast) var(--ease),
+	          color var(--dur-fast) var(--ease),
+	          transform var(--dur-fast) var(--ease);
+	      }
+
+	      .scout-chat-pending-file__remove:hover {
+	        background: var(--surface-3);
+	        color: var(--text-1);
+	      }
+
+	      .scout-chat-pending-file__remove:active {
+	        transform: scale(var(--press-scale));
+	      }
 
       /* kit: research / tool-progress card — a left-aligned run report */
       .scout-chat-research {
@@ -6220,8 +6332,8 @@
         opacity: 0.5;
       }
 
-      .scout-chat-input {
-        flex: 1;
+	      .scout-chat-input {
+	        flex: 1;
         min-width: 0;
         min-height: 36px;
         max-height: 108px;
@@ -6236,9 +6348,42 @@
         outline: 0;
       }
 
-      .scout-chat-input::placeholder {
-        color: var(--text-3);
-      }
+	      .scout-chat-input::placeholder {
+	        color: var(--text-3);
+	      }
+
+	      .scout-chat-attach {
+	        display: inline-flex;
+	        align-items: center;
+	        justify-content: center;
+	        width: 36px;
+	        height: 36px;
+	        flex: none;
+	        padding: 0;
+	        border: 0;
+	        border-radius: var(--r-full);
+	        background: transparent;
+	        color: var(--text-3);
+	        cursor: pointer;
+	        transition:
+	          background var(--dur-fast) var(--ease),
+	          color var(--dur-fast) var(--ease),
+	          transform var(--dur-fast) var(--ease);
+	      }
+
+	      .scout-chat-attach:hover:not([disabled]) {
+	        background: var(--surface-2);
+	        color: var(--text-1);
+	      }
+
+	      .scout-chat-attach:active:not([disabled]) {
+	        transform: scale(var(--press-scale));
+	      }
+
+	      .scout-chat-attach[disabled] {
+	        color: var(--text-disabled);
+	        cursor: default;
+	      }
 
       .scout-chat-send {
         display: inline-flex;
@@ -6261,10 +6406,10 @@
       }
 
       /* quiet until there's something typed to send */
-      .scout-chat-form:has(.scout-chat-input:placeholder-shown) .scout-chat-send,
-      .scout-chat-send[disabled] {
-        background: var(--surface-2);
-        color: var(--text-disabled);
+	      .scout-chat-form:has(.scout-chat-input:placeholder-shown):not(.scout-chat-form--has-files) .scout-chat-send,
+	      .scout-chat-send[disabled] {
+	        background: var(--surface-2);
+	        color: var(--text-disabled);
         cursor: default;
         transform: none;
       }
@@ -11181,34 +11326,33 @@
           </header>
           <form id="loginForm" class="login-card login-rise login-rise--card" novalidate>
             <label class="field" id="loginAccountField">
-              <span>account</span>
+              <span>name</span>
               <select id="loginAccountSelect" autocomplete="username">
-                <option value="tim@shareability.com">Tim Cook</option>
-                <option value="caitlyn@shareability.com">Caitlyn Reyes</option>
-                <option value="__missing_jake">Jake Mercer</option>
-                <option value="joel@shareability.com">Joel Adler</option>
-                <option value="e@shareability.com">Erick Tran</option>
-                <option value="__custom">Custom email</option>
+                <option value="">Select your name</option>
+                <option value="Joel">Joel</option>
+                <option value="Caitlyn">Caitlyn</option>
+                <option value="Tyler">Tyler</option>
+                <option value="AJ">AJ</option>
+                <option value="Tim">Tim</option>
+                <option value="Erick">Erick</option>
+                <option value="Tom">Tom</option>
               </select>
             </label>
             <label id="loginEmailField" class="field login-email-field" hidden>
               <span>work email</span>
-              <input id="loginEmail" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="you@company.com">
+              <input id="loginEmail" type="hidden" autocomplete="username" autocapitalize="none" spellcheck="false">
             </label>
             <label class="field" hidden>
               <span>participant</span>
               <select id="participantName" autocomplete="name" tabindex="-1" aria-hidden="true">
                 <option value="">choose your name</option>
-                <option>Erick</option>
-                <option>Tim</option>
-                <option>Tyler</option>
-                <option>Jake</option>
-                <option>Tom</option>
-                <option>Caitlyn</option>
                 <option>Joel</option>
+                <option>Caitlyn</option>
+                <option>Tyler</option>
                 <option>AJ</option>
-                <option>Guest 1</option>
-                <option>Guest 2</option>
+                <option>Tim</option>
+                <option>Erick</option>
+                <option>Tom</option>
               </select>
             </label>
             <label class="field" id="passwordField">
@@ -11405,7 +11549,7 @@
               </button>
             </div>
             <span class="chat-threads__label">threads</span>
-            <button class="chat-thread-item" type="button" aria-pressed="true">
+            <button id="chatDefaultThread" class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path>
@@ -11420,7 +11564,7 @@
                 <span id="chatThreadPreview" class="chat-thread-item__preview">ask about any meeting</span>
               </span>
             </button>
-            <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Agent work threads"></div>
+            <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Chat threads"></div>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
             <p class="scout-private-caption">private · voice and chat route Scout work here</p>
@@ -11437,7 +11581,14 @@
               <button type="button" data-scout-starter="grill">grill</button>
               <button type="button" data-scout-starter="workflow">plan</button>
             </div>
+            <div id="scoutChatPendingFiles" class="scout-chat-pending-files" hidden></div>
             <form id="scoutChatForm" class="scout-chat-form">
+              <input id="scoutChatFileInput" type="file" multiple hidden>
+              <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path>
+                </svg>
+              </button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout, or start with research/design/grill/plan…" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -12184,14 +12335,18 @@
       const scoutChatThread = document.getElementById('scoutChatThread')
       const scoutChatThinking = document.getElementById('scoutChatThinking')
       const scoutChatThinkingText = document.getElementById('scoutChatThinkingText')
-      const scoutChatForm = document.getElementById('scoutChatForm')
-      const scoutChatInput = document.getElementById('scoutChatInput')
-      const scoutChatSend = document.getElementById('scoutChatSend')
-      const scoutChatHint = document.getElementById('scoutChatHint')
-      const scoutWorkStarterButtons = Array.from(document.querySelectorAll('[data-scout-starter]'))
-      const chatThreadSearch = document.getElementById('chatThreadSearch')
-      const chatNewThread = document.getElementById('chatNewThread')
-      const chatAgentThreads = document.getElementById('chatAgentThreads')
+	      const scoutChatForm = document.getElementById('scoutChatForm')
+	      const scoutChatFileInput = document.getElementById('scoutChatFileInput')
+	      const scoutChatAttach = document.getElementById('scoutChatAttach')
+	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
+	      const scoutChatInput = document.getElementById('scoutChatInput')
+	      const scoutChatSend = document.getElementById('scoutChatSend')
+	      const scoutChatHint = document.getElementById('scoutChatHint')
+	      const scoutWorkStarterButtons = Array.from(document.querySelectorAll('[data-scout-starter]'))
+	      const chatThreadSearch = document.getElementById('chatThreadSearch')
+	      const chatNewThread = document.getElementById('chatNewThread')
+	      const chatDefaultThread = document.getElementById('chatDefaultThread')
+	      const chatAgentThreads = document.getElementById('chatAgentThreads')
       const topbarProjectEl = document.getElementById('topbarProject')
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
@@ -12295,11 +12450,14 @@
       let scoutChatTab = 'room'
       // Last honest connection state — the tool pages may dress the pill
       // as "memory ready" but never hide trouble (applyStatusPillForTool).
-      let lastConnectionState = 'idle'
-      let lastConnectionLabel = 'not connected'
-      let scoutChatSessionSeen = false
-      let scoutOfficeChatTurns = []
-      let osAssistantMode = 'chat'
+	      let lastConnectionState = 'idle'
+	      let lastConnectionLabel = 'not connected'
+	      let scoutChatSessionSeen = false
+	      let scoutOfficeChatTurns = []
+	      let scoutChatThreads = []
+	      let activeScoutThreadId = ''
+	      let pendingScoutFiles = []
+	      let osAssistantMode = 'chat'
       let osAssistantVoiceActive = false
       let osAssistantVoiceRecognizer = null
       let osAssistantVoiceRestartTimer = 0
@@ -12718,9 +12876,16 @@
       scoutWorkStarterButtons.forEach(button => {
         button.addEventListener('click', () => promptScoutForWork(button.dataset.scoutStarter || 'chat'))
       })
-      chatThreadSearch?.addEventListener('input', filterChatThreads)
-      chatNewThread?.addEventListener('click', startNewScoutThread)
-      memorySearch?.addEventListener('input', event => {
+	      chatThreadSearch?.addEventListener('input', filterChatThreads)
+	      chatNewThread?.addEventListener('click', startNewScoutThread)
+	      chatDefaultThread?.addEventListener('click', () => {
+	        if (authedUser && !selectedScoutChatThread()) {
+	          startNewScoutThread()
+	        }
+	      })
+	      scoutChatAttach?.addEventListener('click', () => scoutChatFileInput?.click())
+	      scoutChatFileInput?.addEventListener('change', addPendingScoutFiles)
+	      memorySearch?.addEventListener('input', event => {
         memoryQuery = event.target.value || ''
         renderMemory()
       })
@@ -13223,12 +13388,22 @@
         if (authedUser) {
           return true
         }
-        return loginEmailInput.value.trim().includes('@') && roomPasswordInput.value.trim() !== ''
+        return selectedLoginAccountName() !== '' && roomPasswordInput.value.trim() !== ''
       }
 
-      /* the work-email local-part derives the canonical participant name —
-         the reverse of the server's participantEmail(). Any domain is fine;
-         the office roster lives in the hidden #participantName select. */
+      function accountEmailForName(name) {
+        switch (participantNameFromRosterValue(name)) {
+          case 'Joel': return 'joel@shareability.com'
+          case 'Caitlyn': return 'caitlyn@shareability.com'
+          case 'Tyler': return 'tyler@shareability.com'
+          case 'AJ': return 'aj@shareability.com'
+          case 'Tim': return 'tim@shareability.com'
+          case 'Erick': return 'e@shareability.com'
+          case 'Tom': return 'tom@shareability.com'
+          default: return ''
+        }
+      }
+
       function participantNameFromRosterValue(value) {
         const compact = String(value || '').trim().toLowerCase().replace(/[\s._-]+/g, '')
         if (!compact) {
@@ -13257,12 +13432,16 @@
         return participantNameFromEmail(user.email) || participantNameFromRosterValue(user.name) || ''
       }
 
+      function selectedLoginAccountName() {
+        return participantNameFromRosterValue(loginAccountSelect.value)
+      }
+
       function selectedLoginAccountEmail() {
-        const value = String(loginAccountSelect.value || '').trim()
-        return value.includes('@') ? value : ''
+        return accountEmailForName(selectedLoginAccountName())
       }
 
       function syncLoginAccountSelection(options = {}) {
+        const selectedName = selectedLoginAccountName()
         const selectedEmail = selectedLoginAccountEmail()
         const preserveTypedEmail = Boolean(options.preserveTypedEmail)
         if (selectedEmail && (!preserveTypedEmail || !loginEmailInput.value.trim())) {
@@ -13270,22 +13449,22 @@
         } else if (!selectedEmail && !preserveTypedEmail) {
           loginEmailInput.value = ''
         }
-        const needsEmailField = !selectedEmail || loginEmailInput.value.trim().toLowerCase() !== selectedEmail.toLowerCase()
-        loginEmailFieldEl.hidden = needsEmailField ? false : true
+        participantNameInput.value = selectedName
+        loginEmailFieldEl.hidden = true
       }
 
       function syncLoginAccountFromEmail() {
         const email = loginEmailInput.value.trim().toLowerCase()
         const matchingOption = Array.from(loginAccountSelect.options).find(option => {
-          return String(option.value || '').toLowerCase() === email
+          return accountEmailForName(option.value).toLowerCase() === email
         })
-        loginAccountSelect.value = matchingOption ? matchingOption.value : '__custom'
+        loginAccountSelect.value = matchingOption ? matchingOption.value : ''
         syncLoginAccountSelection({ preserveTypedEmail: true })
       }
 
       function validateAccess() {
         const email = (authedUser?.email || loginEmailInput.value).trim()
-        participantNameInput.value = authedUser ? participantNameFromAccount(authedUser) : participantNameFromEmail(email)
+        participantNameInput.value = authedUser ? participantNameFromAccount(authedUser) : selectedLoginAccountName()
         const verified = hasValidAccess()
         joinButton.disabled = !verified || Boolean(ws || pc)
         joinAccessButton.disabled = joinButton.disabled
@@ -13349,13 +13528,18 @@
           authedUser = null
         }
         renderLoginMode()
-        if (canUseArtifactLibrary()) {
-          loadArtifacts()
-        } else {
-          artifactEntries = []
-          renderArtifacts()
-        }
-      }
+	        if (canUseArtifactLibrary()) {
+	          loadArtifacts()
+	        } else {
+	          artifactEntries = []
+	          renderArtifacts()
+	        }
+	        if (authedUser) {
+	          loadScoutChatThreads()
+	        } else {
+	          resetPersistedScoutChatState()
+	        }
+	      }
 
       /* identity cache — prefill only. Nothing secret lives in storage: the
          session is an HttpOnly cookie, passkeys live in the platform
@@ -13588,9 +13772,9 @@
 
       async function signInToOffice() {
         if (!validateAccess()) {
-          setLog('enter your work email and password')
-          if (!loginEmailInput.value.trim().includes('@')) {
-            loginEmailInput.focus()
+          setLog('choose your name and enter your password')
+          if (!selectedLoginAccountName()) {
+            loginAccountSelect.focus()
           } else {
             roomPasswordInput.focus()
           }
@@ -13603,7 +13787,7 @@
         setLog('signing in')
         try {
           const result = await postAuthJSON('/auth/login', {
-            email: loginEmailInput.value.trim(),
+            name: selectedLoginAccountName(),
             password: roomPasswordInput.value
           })
           if (!result.ok) {
@@ -13613,10 +13797,11 @@
           roomPasswordInput.value = ''
           renderLoginMode()
           saveCachedIdentity(authedUser.name)
-          setActiveTool('office')
-          if (canUseArtifactLibrary()) {
-            loadArtifacts()
-          }
+	          setActiveTool('office')
+	          loadScoutChatThreads()
+	          if (canUseArtifactLibrary()) {
+	            loadArtifacts()
+	          }
           setConnectionState('idle', 'office ready')
           setLog('office ready')
           return true
@@ -13669,12 +13854,13 @@
             throw new Error(finish.data?.error || 'passkey sign-in failed')
           }
           authedUser = finish.data
-          renderLoginMode()
-          saveCachedIdentity(authedUser.name)
-          setActiveTool('office')
-          if (canUseArtifactLibrary()) {
-            loadArtifacts()
-          }
+	          renderLoginMode()
+	          saveCachedIdentity(authedUser.name)
+	          setActiveTool('office')
+	          loadScoutChatThreads()
+	          if (canUseArtifactLibrary()) {
+	            loadArtifacts()
+	          }
           setConnectionState('idle', 'office ready')
           setLog('office ready')
         } catch (error) {
@@ -13688,10 +13874,10 @@
       }
 
       async function requestPasswordReset() {
-        const email = loginEmailInput.value.trim()
-        if (!email.includes('@')) {
-          accessHint.textContent = 'enter your work email first.'
-          loginEmailInput.focus()
+        const email = selectedLoginAccountEmail()
+        if (!email) {
+          accessHint.textContent = 'choose your name first.'
+          loginAccountSelect.focus()
           return
         }
         forgotPasswordButton.disabled = true
@@ -13741,9 +13927,10 @@
         } catch {
           /* the cookie clear below still happens server-side on next request */
         }
-        authedUser = null
-        artifactEntries = []
-        roomPasswordInput.value = ''
+	        authedUser = null
+	        artifactEntries = []
+	        resetPersistedScoutChatState()
+	        roomPasswordInput.value = ''
         renderLoginMode()
         renderArtifacts()
         renderAgentWorkspaces()
@@ -16900,7 +17087,7 @@
           setVoiceIslandState('connecting', 'connecting...')
         }
         if (!validateAccess()) {
-          setLog('enter your work email and password')
+          setLog('choose your name and enter your password')
           roomEntryInProgress = false
           syncOSAssistantAvailability()
           if (voiceOnly) {
@@ -16909,8 +17096,8 @@
             realtimeVoiceStartedRoom = false
             setVoiceIslandState('idle')
           }
-          if (!loginEmailInput.value.trim().includes('@')) {
-            loginEmailInput.focus()
+          if (!selectedLoginAccountName()) {
+            loginAccountSelect.focus()
           } else {
             roomPasswordInput.focus()
           }
@@ -16929,7 +17116,7 @@
           setLog('signing in')
           try {
             const result = await postAuthJSON('/auth/login', {
-              email: loginEmailInput.value.trim(),
+              name: selectedLoginAccountName(),
               password: roomPasswordInput.value
             })
             if (!result.ok) {
@@ -16958,7 +17145,7 @@
           }
         }
 
-        currentParticipantName = authedUser.name
+        currentParticipantName = participantNameFromAccount(authedUser)
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
         updateHearthParticipants()
@@ -20460,93 +20647,161 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         setActiveTool(scoutChatTab === 'private' ? 'chat' : 'room')
       }
 
-      function updateScoutChatAvailability() {
-        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
-        const available = joined || Boolean(authedUser)
-        scoutChatInput.disabled = !available
-        scoutChatSend.disabled = !available
-        scoutChatHint.hidden = available
-        if (!available) {
-          scoutChatHint.textContent = 'sign in to ask Scout'
-        }
-      }
+	      function updateScoutChatAvailability() {
+	        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
+	        const available = joined || Boolean(authedUser)
+	        scoutChatInput.disabled = !available
+	        scoutChatSend.disabled = !available
+	        if (scoutChatAttach) {
+	          scoutChatAttach.disabled = !Boolean(authedUser)
+	        }
+	        scoutChatHint.hidden = available
+	        if (!available) {
+	          scoutChatHint.textContent = 'sign in to ask Scout'
+	        } else if (!authedUser && joined) {
+	          scoutChatHint.hidden = false
+	          scoutChatHint.textContent = 'sign in to keep chat threads and attachments'
+	        }
+	      }
 
-      function syncScoutChatToRoomView(inRoom) {
-        if (inRoom) {
-          if (scoutChatSessionSeen && scoutChatThread.querySelector('.scout-chat-msg')) {
-            const last = scoutChatLastEntryNode()
-            if (!last?.classList?.contains('scout-chat-system')) {
-              appendScoutChatNode(scoutChatSystemNode('connection reset — history cleared'))
-            }
-          }
-          scoutOfficeChatTurns = []
-          scoutChatSessionSeen = true
-        } else {
-          hideScoutChatThinking()
-        }
-        updateScoutChatAvailability()
-      }
+	      function syncScoutChatToRoomView(inRoom) {
+	        if (inRoom && !authedUser) {
+	          if (scoutChatSessionSeen && scoutChatThread.querySelector('.scout-chat-msg')) {
+	            const last = scoutChatLastEntryNode()
+	            if (!last?.classList?.contains('scout-chat-system')) {
+	              appendScoutChatNode(scoutChatSystemNode('connection reset — history cleared'))
+	            }
+	          }
+	          scoutOfficeChatTurns = []
+	          scoutChatSessionSeen = true
+	        } else if (!inRoom) {
+	          hideScoutChatThinking()
+	        }
+	        updateScoutChatAvailability()
+	      }
 
-      function sendScoutChat(text) {
-        const trimmed = String(text || '').trim()
-        if (!trimmed) {
-          return false
-        }
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          sendScoutChatViaOffice(trimmed)
-          return true
-        }
-        ws.send(JSON.stringify({
-          event: 'scout_chat',
+	      function selectedScoutChatThread() {
+	        return scoutChatThreads.find(thread => String(thread?.id || '') === activeScoutThreadId) || null
+	      }
+
+	      function upsertScoutChatThread(thread, options = {}) {
+	        if (!thread?.id) {
+	          return null
+	        }
+	        const id = String(thread.id)
+	        scoutChatThreads = scoutChatThreads.filter(candidate => String(candidate?.id || '') !== id)
+	        if (!thread.archivedAt) {
+	          scoutChatThreads.unshift(thread)
+	        }
+	        if (options.select !== false && !thread.archivedAt) {
+	          activeScoutThreadId = id
+	        } else if (thread.archivedAt && activeScoutThreadId === id) {
+	          activeScoutThreadId = scoutChatThreads[0]?.id || ''
+	        }
+	        renderChatAgentThreads()
+	        renderOfficeRecentThreads()
+	        return thread
+	      }
+
+	      function resetPersistedScoutChatState() {
+	        scoutChatThreads = []
+	        activeScoutThreadId = ''
+	        pendingScoutFiles = []
+	        renderPendingScoutFiles()
+	        renderChatAgentThreads()
+	        renderActiveScoutThread()
+	      }
+
+	      async function loadScoutChatThreads() {
+	        if (!authedUser) {
+	          resetPersistedScoutChatState()
+	          return
+	        }
+	        try {
+	          const response = await fetch('/assistant/chat-threads', { cache: 'no-store' })
+	          if (!response.ok) {
+	            return
+	          }
+	          const payload = await response.json()
+	          scoutChatThreads = Array.isArray(payload?.threads) ? payload.threads : []
+	          if (!activeScoutThreadId || !scoutChatThreads.some(thread => thread.id === activeScoutThreadId)) {
+	            activeScoutThreadId = scoutChatThreads[0]?.id || ''
+	          }
+	          renderChatAgentThreads()
+	          renderActiveScoutThread()
+	          renderOfficeRecentThreads()
+	        } catch {
+	          // Persistent chat can refresh again; keep the current in-memory view.
+	        }
+	      }
+
+	      async function ensurePersistedScoutThread() {
+	        if (selectedScoutChatThread()) {
+	          return selectedScoutChatThread()
+	        }
+	        const result = await postAuthJSON('/assistant/chat-threads', { title: 'Scout' })
+	        if (!result.ok) {
+	          throw new Error(result.data?.error || 'could not create chat thread')
+	        }
+	        return upsertScoutChatThread(result.data.thread)
+	      }
+
+	      function sendScoutChat(text) {
+	        const trimmed = String(text || '').trim()
+	        const files = pendingScoutFiles.slice()
+	        if (!trimmed && !files.length) {
+	          return false
+	        }
+	        if (authedUser) {
+	          pendingScoutFiles = []
+	          renderPendingScoutFiles()
+	          sendScoutChatViaOffice(trimmed, files)
+	          return true
+	        }
+	        if (!ws || ws.readyState !== WebSocket.OPEN) {
+	          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to keep chat threads', new Date().toISOString()))
+	          return true
+	        }
+	        ws.send(JSON.stringify({
+	          event: 'scout_chat',
           data: JSON.stringify({ text: trimmed })
-        }))
-        return true
-      }
+	        }))
+	        return true
+	      }
 
-      async function sendScoutChatViaOffice(text) {
-        const ts = new Date().toISOString()
-        appendScoutChatNode(scoutChatMessageNode('user', text, ts))
-        updateChatThreadItem(text, ts)
-        const threadMode = scoutThreadModeForText(text)
-        showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
-        try {
-          const body = threadMode
-            ? { query: text, mode: threadMode }
-            : { query: text, mode: 'chat', history: scoutOfficeChatHistoryPayload() }
-          const response = await fetch(threadMode ? '/assistant/threads' : '/assistant/query', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          })
-          const payload = await response.json().catch(() => ({}))
-          if (!response.ok) {
-            throw new Error(payload.error || 'assistant query failed')
-          }
-          hideScoutChatThinking()
-          if (payload.artifact) {
-            addArtifactEntry(payload.artifact, { select: false })
-            scheduleArtifactRefresh()
-          }
-          if (threadMode) {
-            // Real tool-run: render the progress card wired to the launched
-            // thread, then track its artifact so a refresh flips it terminal.
-            const thread = payload.thread || { mode: threadMode, query: text, status: payload.artifact ? 'running' : 'running', artifact: payload.artifact }
-            upsertScoutChatResearchNode(thread)
-            const preview = `${assistantModeTitle(threadMode)} thread launched`
-            rememberScoutOfficeChatTurn('user', text)
-            rememberScoutOfficeChatTurn('scout', preview)
-            updateChatThreadItem(preview, new Date().toISOString())
-          } else {
-            const answer = scoutVoice(payload.answer || 'no answer yet')
-            appendScoutChatNode(scoutChatMessageNode('scout', answer, new Date().toISOString()))
-            rememberScoutOfficeChatTurn('user', text)
-            rememberScoutOfficeChatTurn('scout', answer)
-            updateChatThreadItem(answer, new Date().toISOString())
-          }
-        } catch (error) {
-          hideScoutChatThinking()
-          const message = error.message || 'assistant query failed'
-          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
+	      async function sendScoutChatViaOffice(text, files = []) {
+	        const ts = new Date().toISOString()
+	        appendScoutChatNode(scoutChatMessageNode('user', text, ts, files))
+	        updateChatThreadItem(text || attachedFilesPreview(files), ts)
+	        const threadMode = scoutThreadModeForText(text)
+	        showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
+	        try {
+	          const thread = await ensurePersistedScoutThread()
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ text, files })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            throw new Error(payload.error || 'assistant query failed')
+	          }
+	          hideScoutChatThinking()
+	          if (payload.artifact) {
+	            addArtifactEntry(payload.artifact, { select: false })
+	            scheduleArtifactRefresh()
+	          }
+	          if (payload.thread) {
+	            upsertScoutChatThread(payload.thread)
+	            renderActiveScoutThread()
+	          } else if (payload.answer?.text) {
+	            appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
+	            updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
+	          }
+	        } catch (error) {
+	          hideScoutChatThinking()
+	          const message = error.message || 'assistant query failed'
+	          appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
           updateChatThreadItem(message, new Date().toISOString())
         }
       }
@@ -20555,25 +20810,111 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return scoutOfficeChatTurns.slice(-12).map(turn => ({ role: turn.role, text: turn.text }))
       }
 
-      function rememberScoutOfficeChatTurn(role, text) {
-        const safeRole = role === 'user' ? 'user' : 'scout'
-        const safeText = String(text || '').trim()
+	      function rememberScoutOfficeChatTurn(role, text) {
+	        const safeRole = role === 'user' ? 'user' : 'scout'
+	        const safeText = String(text || '').trim()
         if (!safeText) {
           return
         }
         scoutOfficeChatTurns.push({ role: safeRole, text: safeText })
         if (scoutOfficeChatTurns.length > 12) {
-          scoutOfficeChatTurns = scoutOfficeChatTurns.slice(scoutOfficeChatTurns.length - 12)
-        }
-      }
+	          scoutOfficeChatTurns = scoutOfficeChatTurns.slice(scoutOfficeChatTurns.length - 12)
+	        }
+	      }
 
-      function sendScoutChatFromForm(event) {
-        event.preventDefault()
-        if (!scoutChatInput.value.trim()) {
-          return
-        }
-        if (sendScoutChat(scoutChatInput.value)) {
-          scoutChatInput.value = ''
+	      async function addPendingScoutFiles() {
+	        const files = Array.from(scoutChatFileInput?.files || [])
+	        if (!files.length) {
+	          return
+	        }
+	        const remaining = Math.max(0, 6 - pendingScoutFiles.length)
+	        const selected = files.slice(0, remaining)
+	        for (const file of selected) {
+	          pendingScoutFiles.push(await scoutChatFilePayload(file))
+	        }
+	        if (files.length > selected.length) {
+	          showToast({ text: 'up to 6 files per message', kind: 'note' })
+	        }
+	        if (scoutChatFileInput) {
+	          scoutChatFileInput.value = ''
+	        }
+	        renderPendingScoutFiles()
+	      }
+
+	      async function scoutChatFilePayload(file) {
+	        const payload = {
+	          name: file?.name || 'file',
+	          kind: file?.type || fileKindFromName(file?.name || ''),
+	          size: file?.size || 0
+	        }
+	        if (file && scoutChatFileLooksReadable(file) && file.size <= 256 * 1024) {
+	          try {
+	            payload.text = await file.text()
+	          } catch {
+	            payload.text = ''
+	          }
+	        }
+	        return payload
+	      }
+
+	      function scoutChatFileLooksReadable(file) {
+	        const type = String(file?.type || '').toLowerCase()
+	        const name = String(file?.name || '').toLowerCase()
+	        if (type.startsWith('text/') || type === 'application/json' || type === 'application/xml') {
+	          return true
+	        }
+	        return /\.(txt|md|markdown|csv|tsv|json|xml|yaml|yml|html|css|js|jsx|ts|tsx|go|py|rb|rs|java|sql)$/i.test(name)
+	      }
+
+	      function fileKindFromName(name) {
+	        const ext = String(name || '').split('.').pop()
+	        return ext && ext !== name ? ext.toLowerCase() : 'file'
+	      }
+
+	      function renderPendingScoutFiles() {
+	        if (!scoutChatPendingFiles) {
+	          return
+	        }
+	        scoutChatForm?.classList.toggle('scout-chat-form--has-files', pendingScoutFiles.length > 0)
+	        scoutChatPendingFiles.hidden = pendingScoutFiles.length === 0
+	        scoutChatPendingFiles.replaceChildren(...pendingScoutFiles.map((file, index) => {
+	          const chip = document.createElement('span')
+	          chip.className = 'scout-chat-pending-file'
+	          const name = document.createElement('span')
+	          name.className = 'scout-chat-pending-file__name'
+	          name.textContent = file.name || 'file'
+	          const meta = document.createElement('span')
+	          meta.className = 'scout-chat-pending-file__meta'
+	          meta.textContent = scoutChatFileMeta(file)
+	          const remove = document.createElement('button')
+	          remove.type = 'button'
+	          remove.className = 'scout-chat-pending-file__remove'
+	          remove.setAttribute('aria-label', `Remove ${file.name || 'file'}`)
+	          remove.title = 'remove'
+	          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+	          remove.addEventListener('click', () => {
+	            pendingScoutFiles.splice(index, 1)
+	            renderPendingScoutFiles()
+	          })
+	          chip.append(name, meta, remove)
+	          return chip
+	        }))
+	      }
+
+	      function attachedFilesPreview(files) {
+	        if (!Array.isArray(files) || !files.length) {
+	          return ''
+	        }
+	        return files.length === 1 ? `attached ${files[0].name || 'file'}` : `attached ${files.length} files`
+	      }
+
+	      function sendScoutChatFromForm(event) {
+	        event.preventDefault()
+	        if (!scoutChatInput.value.trim() && !pendingScoutFiles.length) {
+	          return
+	        }
+	        if (sendScoutChat(scoutChatInput.value)) {
+	          scoutChatInput.value = ''
           resizeScoutChatInput()
         }
       }
@@ -20650,119 +20991,213 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      // kit: live, case-insensitive filter over the thread rows by title + preview
-      function filterChatThreads() {
-        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
-        document.querySelectorAll('#chatTool .chat-thread-item').forEach(item => {
-          if (!q) {
-            item.classList.remove('chat-thread-item--hidden')
-            return
-          }
-          const title = item.querySelector('.chat-thread-item__title')?.textContent?.toLowerCase() || ''
-          const preview = item.querySelector('.chat-thread-item__preview')?.textContent?.toLowerCase() || ''
-          item.classList.toggle('chat-thread-item--hidden', !title.includes(q) && !preview.includes(q))
-        })
-      }
+	      // kit: live, case-insensitive filter over durable chat thread rows.
+	      function filterChatThreads() {
+	        renderChatAgentThreads()
+	      }
 
-      // kit: the "+" button starts a fresh Scout conversation. There is no
-      // multi-thread backend, so this clears the live Scout thread back to its
-      // empty state and focuses the composer — the least-surprising "new thread".
-      function startNewScoutThread() {
-        hideScoutChatThinking()
-        scoutOfficeChatTurns = []
-        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research').forEach(node => node.remove())
-        if (!scoutChatThread.querySelector('.scout-chat-empty')) {
-          const empty = document.createElement('p')
-          empty.className = 'scout-chat-empty'
-          empty.textContent = 'ask Scout about any meeting — only you can see this'
-          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
-        }
-        scoutChatSessionSeen = false
-        const preview = document.getElementById('chatThreadPreview')
-        const time = document.getElementById('chatThreadTime')
-        if (preview) {
-          preview.textContent = 'ask about any meeting'
-        }
-        if (time) {
-          time.hidden = true
-          time.textContent = ''
-        }
-        if (chatThreadSearch) {
-          chatThreadSearch.value = ''
-          filterChatThreads()
-        }
-        if (ws?.readyState === WebSocket.OPEN && appShell.classList.contains('is-in-room')) {
-          ws.send(JSON.stringify({ event: 'scout_chat_reset', data: '{}' }))
-        }
-        if (!scoutChatInput.disabled) {
-          scoutChatInput.focus()
-        }
+	      async function startNewScoutThread() {
+	        hideScoutChatThinking()
+	        scoutOfficeChatTurns = []
+	        scoutChatSessionSeen = false
+	        if (chatThreadSearch) {
+	          chatThreadSearch.value = ''
+	        }
+	        if (authedUser) {
+	          try {
+	            const result = await postAuthJSON('/assistant/chat-threads', { title: 'Scout' })
+	            if (!result.ok) {
+	              throw new Error(result.data?.error || 'could not create chat thread')
+	            }
+	            upsertScoutChatThread(result.data.thread)
+	            renderActiveScoutThread()
+	          } catch (error) {
+	            appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not create chat thread', new Date().toISOString()))
+	          }
+	        } else {
+	          clearScoutChatThreadNodes()
+	          ensureScoutChatEmptyState()
+	          updateChatThreadItem('ask about any meeting', '')
+	          if (ws?.readyState === WebSocket.OPEN && appShell.classList.contains('is-in-room')) {
+	            ws.send(JSON.stringify({ event: 'scout_chat_reset', data: '{}' }))
+	          }
+	        }
+	        if (!scoutChatInput.disabled) {
+	          scoutChatInput.focus()
+	        }
       }
 
       // kit ThreadItem: the row mirrors the last message — preview text plus
       // a right-aligned HH:MM timestamp on the title row
-      function updateChatThreadItem(text, ts) {
-        const time = document.getElementById('chatThreadTime')
-        const preview = document.getElementById('chatThreadPreview')
+	      function updateChatThreadItem(text, ts) {
+	        const time = document.getElementById('chatThreadTime')
+	        const preview = document.getElementById('chatThreadPreview')
         if (preview) {
           preview.textContent = text
         }
-        if (time) {
-          time.hidden = false
-          time.textContent = scoutChatTimeLabel(ts)
-        }
-      }
+	        if (time) {
+	          time.hidden = !ts
+	          time.textContent = ts ? scoutChatTimeLabel(ts) : ''
+	        }
+	      }
 
-      function renderChatAgentThreads() {
-        if (!chatAgentThreads) {
-          return
-        }
-        if (!canUseArtifactLibrary()) {
-          chatAgentThreads.replaceChildren()
-          return
-        }
-        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
-        const entries = artifactEntries
-          .filter(entry => String(entry?.metadata?.source || '') === 'scout_thread')
-          .slice()
-          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
-          .slice(0, 8)
+	      function renderChatAgentThreads() {
+	        if (!chatAgentThreads) {
+	          return
+	        }
+	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
+	        const threads = scoutChatThreads.slice()
+	        if (chatDefaultThread) {
+	          chatDefaultThread.hidden = threads.length > 0
+	          chatDefaultThread.setAttribute('aria-pressed', threads.length ? 'false' : 'true')
+	        }
+	        chatAgentThreads.replaceChildren(...threads.map(thread => {
+	          const title = thread.title || 'Scout'
+	          const preview = thread.preview || 'new chat thread'
+	          const haystack = `${title} ${preview}`.toLowerCase()
+	          const active = String(thread.id || '') === activeScoutThreadId
+	          const item = document.createElement('div')
+	          item.className = 'chat-thread-item chat-thread-item--with-action'
+	          item.setAttribute('role', 'button')
+	          item.tabIndex = 0
+	          item.setAttribute('aria-pressed', active ? 'true' : 'false')
+	          item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
+	          item.addEventListener('click', () => selectScoutChatThread(thread.id))
+	          item.addEventListener('keydown', event => {
+	            if (event.key === 'Enter' || event.key === ' ') {
+	              event.preventDefault()
+	              selectScoutChatThread(thread.id)
+	            }
+	          })
 
-        chatAgentThreads.replaceChildren(...entries.map(entry => {
-          const title = entry.metadata?.title || artifactModeLabel(entry)
-          const preview = artifactPreviewText(entry) || compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`)
-          const haystack = `${title} ${preview} ${entry.metadata?.mode || ''}`.toLowerCase()
-          const item = document.createElement('button')
-          item.type = 'button'
-          item.className = 'chat-thread-item'
-          item.setAttribute('aria-pressed', 'false')
-          item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
-          item.addEventListener('click', () => openAgentThreadInChat(entry))
+	          const icon = document.createElement('span')
+	          icon.className = 'chat-thread-item__icon'
+	          icon.setAttribute('aria-hidden', 'true')
+	          icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
 
-          const icon = document.createElement('span')
-          icon.className = 'chat-thread-item__icon'
-          icon.setAttribute('aria-hidden', 'true')
-          icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 64 64"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path></svg>'
-
-          const body = document.createElement('span')
-          body.className = 'chat-thread-item__body'
+	          const body = document.createElement('span')
+	          body.className = 'chat-thread-item__body'
           const row = document.createElement('span')
           row.className = 'chat-thread-item__row'
           const titleEl = document.createElement('span')
-          titleEl.className = 'chat-thread-item__title'
-          titleEl.textContent = title
-          const time = document.createElement('span')
-          time.className = 'chat-thread-item__time'
-          time.textContent = artifactTimeLabel(entry)
-          row.append(titleEl, time)
-          const previewEl = document.createElement('span')
-          previewEl.className = 'chat-thread-item__preview'
-          previewEl.textContent = `${artifactStatusLabel(entry)} · ${preview}`
-          body.append(row, previewEl)
-          item.append(icon, body)
-          return item
-        }))
-      }
+	          titleEl.className = 'chat-thread-item__title'
+	          titleEl.textContent = title
+	          const time = document.createElement('span')
+	          time.className = 'chat-thread-item__time'
+	          time.textContent = scoutChatTimeLabel(thread.updatedAt || thread.createdAt)
+	          row.append(titleEl, time)
+	          const previewEl = document.createElement('span')
+	          previewEl.className = 'chat-thread-item__preview'
+	          previewEl.textContent = preview
+	          body.append(row, previewEl)
+
+	          const archive = document.createElement('button')
+	          archive.type = 'button'
+	          archive.className = 'chat-thread-item__archive'
+	          archive.setAttribute('aria-label', `Archive ${title}`)
+	          archive.title = 'archive'
+	          archive.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"></rect><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>'
+	          archive.addEventListener('click', event => {
+	            event.stopPropagation()
+	            archiveScoutChatThread(thread.id)
+	          })
+
+	          item.append(icon, body, archive)
+	          return item
+	        }))
+	      }
+
+	      function selectScoutChatThread(id) {
+	        activeScoutThreadId = String(id || '')
+	        hideScoutChatThinking()
+	        renderChatAgentThreads()
+	        renderActiveScoutThread()
+	      }
+
+	      async function archiveScoutChatThread(id) {
+	        if (!id || !authedUser) {
+	          return
+	        }
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(id)}`, {
+	            method: 'PATCH',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ archived: true })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            throw new Error(payload.error || 'could not archive thread')
+	          }
+	          upsertScoutChatThread(payload.thread, { select: false })
+	          renderActiveScoutThread()
+	          showToast({ text: 'thread archived', kind: 'done' })
+	        } catch (error) {
+	          showToast({ text: error.message || 'could not archive thread', kind: 'error' })
+	        }
+	      }
+
+	      function clearScoutChatThreadNodes() {
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research').forEach(node => node.remove())
+	      }
+
+	      function ensureScoutChatEmptyState() {
+	        if (!scoutChatThread.querySelector('.scout-chat-empty')) {
+	          const empty = document.createElement('p')
+	          empty.className = 'scout-chat-empty'
+	          empty.textContent = authedUser
+	            ? 'ask Scout anything — attach files for context'
+	            : 'ask Scout about any meeting — only you can see this'
+	          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
+	        }
+	      }
+
+	      function renderActiveScoutThread() {
+	        clearScoutChatThreadNodes()
+	        const thread = selectedScoutChatThread()
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        if (!messages.length) {
+	          ensureScoutChatEmptyState()
+	          updateChatThreadItem(thread?.preview || 'ask about any meeting', thread?.updatedAt || '')
+	          return
+	        }
+	        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
+	        messages.forEach(message => appendScoutChatNode(scoutChatMessageRecordNode(message)))
+	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
+	      }
+
+	      function scoutChatMessageRecordNode(message) {
+	        if (String(message?.kind || '') === 'thread' && message.thread) {
+	          return scoutChatResearchNode(scoutThreadFromChatMessage(message))
+	        }
+	        const role = String(message?.role || '').toLowerCase()
+	        const kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
+	        const text = kind === 'scout' ? scoutVoice(message?.text || '') : String(message?.text || '')
+	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [])
+	      }
+
+	      function scoutThreadFromChatMessage(message) {
+	        const ref = message?.thread || {}
+	        const artifactId = String(ref.artifactId || '')
+	        const artifact = artifactEntries.find(entry => String(entry?.id || '') === artifactId) || (artifactId ? {
+	          id: artifactId,
+	          kind: 'os_artifact',
+	          text: '',
+	          metadata: {
+	            mode: ref.mode || 'research',
+	            threadId: ref.id || '',
+	            threadQuery: ref.query || message.text || '',
+	            threadStatus: ref.status || 'running',
+	            status: ref.status || 'running'
+	          }
+	        } : null)
+	        return {
+	          id: ref.id || '',
+	          mode: ref.mode || 'research',
+	          query: ref.query || message.text || '',
+	          status: ref.status || artifactStatusValue(artifact) || 'running',
+	          artifact
+	        }
+	      }
 
       function openAgentThreadInChat(entry) {
         if (!entry) {
@@ -20958,16 +21393,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const name = document.createElement('span')
           name.className = 'scout-chat-file__name'
           name.textContent = file.name || 'file'
-          const m = document.createElement('span')
-          m.className = 'scout-chat-file__meta'
-          m.textContent = [file.kind, file.size].filter(Boolean).join(' · ')
+	          const m = document.createElement('span')
+	          m.className = 'scout-chat-file__meta'
+	          m.textContent = scoutChatFileMeta(file)
 
           body.append(name, m)
           chip.append(icon, body)
           wrap.appendChild(chip)
         })
-        return wrap
-      }
+	        return wrap
+	      }
+
+	      function scoutChatFileMeta(file) {
+	        return [file?.kind, scoutChatFileSizeLabel(file?.size)].filter(Boolean).join(' · ')
+	      }
+
+	      function scoutChatFileSizeLabel(size) {
+	        const value = Number(size || 0)
+	        if (!Number.isFinite(value) || value <= 0) {
+	          return ''
+	        }
+	        if (value < 1024) {
+	          return `${value} B`
+	        }
+	        if (value < 1024 * 1024) {
+	          return `${Math.round(value / 1024)} KB`
+	        }
+	        return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`
+	      }
 
       function scoutThreadFromArtifact(entry, fallback = {}) {
         const metadata = entry?.metadata || {}
@@ -24375,7 +24828,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const commands = [
           'mark blocked',
           'mark done',
-          'assign to Jake',
+          'assign to Erick',
           'set due May 22'
         ]
 
@@ -24461,7 +24914,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else if (renameMatch) {
           payload.title = renameMatch[1].trim()
         } else {
-          showToast({ text: 'try: mark blocked, assign to Jake, set due May 22, note follow up', kind: 'note' })
+          showToast({ text: 'try: mark blocked, assign to Erick, set due May 22, note follow up', kind: 'note' })
           return
         }
 
@@ -25298,27 +25751,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
       }
 
-      function renderOfficeRecentThreads() {
-        if (!officeRecentThreads) {
-          return
-        }
-        if (!canUseArtifactLibrary()) {
-          officeRecentThreads.replaceChildren(renderScoutRecentThreadFallback())
-          return
-        }
-        // no thread index exists; the durable threads we have are the agent
-        // artifact threads (research/design/grill) — surface the most recent.
-        const threads = artifactEntries
-          .filter(entry => agentToolIds.includes(String(entry?.metadata?.mode || '').trim()))
-          .slice()
-          .sort((a, b) => artifactLatestTime(b) - artifactLatestTime(a))
-          .slice(0, 6)
-          .map(entry => ({
-            title: entry.metadata?.title || artifactModeLabel(entry),
-            meta: artifactTimeLabel(entry),
-            preview: artifactPreviewText(entry) || compactArtifactPreview(entry.text || `${artifactModeLabel(entry)} thread`),
-            onOpen: () => openAgentThreadInChat(entry)
-          }))
+	      function renderOfficeRecentThreads() {
+	        if (!officeRecentThreads) {
+	          return
+	        }
+	        if (!authedUser) {
+	          officeRecentThreads.replaceChildren(renderScoutRecentThreadFallback())
+	          return
+	        }
+	        const threads = scoutChatThreads
+	          .slice()
+	          .slice(0, 6)
+	          .map(thread => ({
+	            title: thread.title || 'Scout',
+	            meta: scoutChatTimeLabel(thread.updatedAt || thread.createdAt),
+	            preview: thread.preview || 'new chat thread',
+	            onOpen: () => {
+	              activeScoutThreadId = thread.id
+	              openOfficeTool('chat')
+	              renderChatAgentThreads()
+	              renderActiveScoutThread()
+	            }
+	          }))
 
         if (!threads.length) {
           // fall back to the always-present private Scout chat thread

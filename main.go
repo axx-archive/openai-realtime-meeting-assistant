@@ -268,6 +268,8 @@ func main() {
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
+	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
+	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
