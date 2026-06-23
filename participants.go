@@ -15,20 +15,17 @@ import (
 
 const (
 	defaultMeetingRoomPassword = "B0NFIRE!"
-	defaultMeetingRoomCapacity = 10
+	defaultMeetingRoomCapacity = 7
 )
 
 var meetingParticipantNames = []string{
-	"Erick",
-	"Tim",
-	"Tyler",
-	"Jake",
-	"Tom",
-	"Caitlyn",
 	"Joel",
+	"Caitlyn",
+	"Tyler",
 	"AJ",
-	"Guest 1",
-	"Guest 2",
+	"Tim",
+	"Erick",
+	"Tom",
 }
 
 func canonicalParticipantName(name string) string {

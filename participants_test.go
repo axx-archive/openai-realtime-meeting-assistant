@@ -9,14 +9,14 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func TestMeetingRoomDefaultSupportsTenParticipants(t *testing.T) {
+func TestMeetingRoomDefaultMatchesRosterCapacity(t *testing.T) {
 	t.Setenv("MEETING_ROOM_MAX_PARTICIPANTS", "")
 
 	if configuredMeetingRoomCapacity() != defaultMeetingRoomCapacity {
 		t.Fatalf("capacity=%d, want %d", configuredMeetingRoomCapacity(), defaultMeetingRoomCapacity)
 	}
-	if len(meetingParticipantNames) < configuredMeetingRoomCapacity() {
-		t.Fatalf("participant seats=%d, want at least %d", len(meetingParticipantNames), configuredMeetingRoomCapacity())
+	if len(meetingParticipantNames) != configuredMeetingRoomCapacity() {
+		t.Fatalf("participant seats=%d, want %d", len(meetingParticipantNames), configuredMeetingRoomCapacity())
 	}
 }
 
@@ -55,8 +55,8 @@ func TestAdmitParticipantEnforcesCapacity(t *testing.T) {
 		t.Fatalf("admit Tim: %v", err)
 	}
 
-	if _, err := app.admitParticipant("Jake"); err == nil {
-		t.Fatal("admit Jake succeeded in a full room")
+	if _, err := app.admitParticipant("Tom"); err == nil {
+		t.Fatal("admit Tom succeeded in a full room")
 	} else if !strings.Contains(err.Error(), "supports 2 people") {
 		t.Fatalf("full room error=%q, want capacity detail", err.Error())
 	}
@@ -66,8 +66,8 @@ func TestAdmitParticipantEnforcesCapacity(t *testing.T) {
 	}
 
 	app.forgetParticipant("AJ")
-	if _, err := app.admitParticipant("Jake"); err != nil {
-		t.Fatalf("admit Jake after one leaves: %v", err)
+	if _, err := app.admitParticipant("Tom"); err != nil {
+		t.Fatalf("admit Tom after one leaves: %v", err)
 	}
 }
 
@@ -392,9 +392,9 @@ func TestRoomSnapshotIncludesParticipantMediaState(t *testing.T) {
 	}
 }
 
-func TestGuestSeatsDoNotCreateEmailRecipients(t *testing.T) {
-	if canonicalParticipantName("guest 1") != "Guest 1" {
-		t.Fatal("guest seat should be a canonical participant")
+func TestGuestNamesAreNotRosterParticipants(t *testing.T) {
+	if canonicalParticipantName("guest 1") != "" {
+		t.Fatal("guest names should not be canonical participants")
 	}
 	if email := participantEmail("Guest 1"); email != "" {
 		t.Fatalf("guest email=%q, want empty", email)

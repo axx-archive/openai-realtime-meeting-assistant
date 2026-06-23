@@ -14142,12 +14142,14 @@
       function applyRoomRecordingState(recording) {
         if (!recording || typeof recording !== 'object') {
           updateRoomRecordingControls()
+          applyRoomListeningStatus()
           return
         }
         roomRecordingEnabled = recording.enabled !== false
         roomRecordingUpdatedAt = recording.updatedAt || ''
         roomRecordingUpdatedBy = recording.updatedBy || ''
         updateRoomRecordingControls()
+        applyRoomListeningStatus()
       }
 
       function normalizeParticipantList(names) {
@@ -17400,7 +17402,7 @@
           if (state === 'connected') {
             clearConnectionRecoveryTimer()
             if (!statusPillEl.classList.contains('pill--listening')) {
-              setConnectionState('room', 'the room is listening')
+              setRoomListeningConnectionState()
             }
           } else if (state === 'connecting' || state === 'new') {
             clearConnectionRecoveryTimer()
@@ -19291,10 +19293,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const normalized = message.toLowerCase()
         if (normalized.includes('kanban assistant is listening')) {
-          setConnectionState('listening', 'the room is listening')
+          setRoomListeningConnectionState()
           if (roomRealtimeVoiceActive()) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('connected to conference room')) {
-          setConnectionState('room', 'the room is listening')
+          setRoomListeningConnectionState()
           if (roomRealtimeVoiceActive()) setVoiceIslandState('listening', 'listening...')
         } else if (normalized.includes('reconnecting') || normalized.includes('connecting')) {
           setConnectionState('connecting', 'connecting…')
@@ -20464,7 +20466,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         accessState.textContent = 'verified'
         accessHint.textContent = `${name} is verified. Starting ${voiceOnly ? 'microphone' : 'camera and microphone'}.`
-        setConnectionState('room', 'the room is listening')
+        setRoomListeningConnectionState()
         setLog(`${name} is verified`)
         try {
           await beginMediaSession({ voiceOnly })
@@ -20532,6 +20534,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderScreenStage()
         updateHearthParticipants()
         ensureRemoteScreenShareVisible(activeScreenShareParticipant)
+        scheduleScreenShareMediaRepair('screen share started', activeScreenShareParticipant)
       }
 
       // The shared screen rides the sharer's existing forwarded video track
@@ -20591,6 +20594,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           renderScreenStage()
           updateHearthParticipants()
+          scheduleScreenShareMediaRepair('screen share stopped', name)
+        }
+      }
+
+      function scheduleScreenShareMediaRepair(reason, participantName = '') {
+        for (const delay of [0, 350, 1200, 3000]) {
+          window.setTimeout(() => {
+            if (participantName && activeScreenShareParticipant === participantName) {
+              ensureRemoteScreenShareVisible(participantName)
+            }
+            repairRemoteMediaHealth(reason)
+            requestParticipantTrackRefresh(reason)
+          }, delay)
         }
       }
 
@@ -21774,6 +21790,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         boardDockRecord.classList.toggle(staleClass, false)
       }
 
+      function roomListeningLabel() {
+        return roomRecordingEnabled ? 'the room is listening' : 'the room is not listening'
+      }
+
+      function roomListeningConnectionState() {
+        return roomRecordingEnabled ? 'listening' : 'idle'
+      }
+
+      function setRoomListeningConnectionState() {
+        setConnectionState(roomListeningConnectionState(), roomListeningLabel())
+      }
+
+      function applyRoomListeningStatus() {
+        if (appShell.classList.contains('is-in-room')) {
+          setRoomListeningConnectionState()
+        }
+        renderAssistantMessages()
+      }
+
       function toggleRoomRecording() {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           const message = 'join the room before changing recording.'
@@ -21782,9 +21817,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
+        roomRecordingEnabled = !roomRecordingEnabled
+        roomRecordingUpdatedBy = currentParticipantName || ''
+        updateRoomRecordingControls()
+        applyRoomListeningStatus()
+
         ws.send(JSON.stringify({
           event: 'set_recording',
-          data: JSON.stringify({ enabled: !roomRecordingEnabled })
+          data: JSON.stringify({ enabled: roomRecordingEnabled })
         }))
       }
 
@@ -21874,14 +21914,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const streamToStop = screenShareStream
         screenShareStream = undefined
-        streamToStop?.getTracks().forEach(track => track.stop())
-
-        const cameraTrack = localStream?.getVideoTracks()[0]
+        const cameraTrack = localVideoTrack()
         const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
-        if (cameraTrack && sender) {
-          setTrackContentHint(cameraTrack, cameraContentHint)
-          await sender.replaceTrack(cameraTrack)
-          await configureOutboundSender(sender, cameraTrack)
+        try {
+          if (cameraTrack && sender) {
+            setTrackContentHint(cameraTrack, cameraContentHint)
+            await sender.replaceTrack(cameraTrack)
+            await configureOutboundSender(sender, cameraTrack)
+          }
+        } catch (error) {
+          reportClientMediaError('screen_share_restore_camera', error)
+          setLog(error.message || String(error))
+        } finally {
+          streamToStop?.getTracks().forEach(track => track.stop())
         }
 
         if (ws?.readyState === WebSocket.OPEN) {
@@ -23935,7 +23980,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           meta.textContent = 'ready'
           const text = document.createElement('span')
           text.className = 'assistant-text'
-          text.textContent = 'the room is listening.'
+          text.textContent = `${roomListeningLabel()}.`
           empty.append(meta, text)
           assistantFeed.replaceChildren(empty)
           setAssistantStateText('ready')

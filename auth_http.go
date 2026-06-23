@@ -337,11 +337,16 @@ func identityPayload(user *userAccount) map[string]any {
 
 func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
-		Email    string `json:"email"`
+		Name     string `json:"name"`
 		Password string `json:"password"`
 	}{}
 	if err := decodeAuthBody(r, &payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name := normalizeRosterLoginName(payload.Name)
+	if name == "" {
+		writeAuthError(w, http.StatusBadRequest, "select a listed account")
 		return
 	}
 
@@ -350,15 +355,15 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	// unlimited guesses.
 	if !authAttemptAllowedForKeys(
 		"login|"+clientIPForRateLimit(r),
-		"login-email|"+normalizeAccountEmail(payload.Email),
+		"login-name|"+name,
 	) {
 		writeAuthError(w, http.StatusTooManyRequests, "too many sign-in attempts; try again in a few minutes")
 		return
 	}
 
-	user, ok := accountStore().authenticate(payload.Email, payload.Password)
+	user, ok := accountStore().authenticateRosterName(payload.Name, payload.Password)
 	if !ok {
-		writeAuthError(w, http.StatusUnauthorized, "that email and password don't match")
+		writeAuthError(w, http.StatusUnauthorized, "that name and password don't match")
 		return
 	}
 
@@ -367,7 +372,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	clearAuthAttempts("login|"+clientIPForRateLimit(r), "login-email|"+user.Email)
+	clearAuthAttempts("login|"+clientIPForRateLimit(r), "login-name|"+name)
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
 }

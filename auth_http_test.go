@@ -33,7 +33,11 @@ func postAuthJSON(t *testing.T, path, body string, cookies []*http.Cookie) *http
 
 func loginAs(t *testing.T, email, password string) []*http.Cookie {
 	t.Helper()
-	recorder := postAuthJSON(t, "/auth/login", fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), nil)
+	name := participantNameForEmail(email)
+	if name == "" {
+		name = email
+	}
+	recorder := postAuthJSON(t, "/auth/login", fmt.Sprintf(`{"name":%q,"password":%q}`, name, password), nil)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("login failed: status %d body %s", recorder.Code, recorder.Body.String())
 	}
@@ -83,13 +87,17 @@ func TestLoginSetsSessionCookieAndMeWorks(t *testing.T) {
 func TestLoginRejectsBadCredentials(t *testing.T) {
 	setupAuthTestEnv(t)
 
-	recorder := postAuthJSON(t, "/auth/login", `{"email":"aj@shareability.com","password":"nope"}`, nil)
+	recorder := postAuthJSON(t, "/auth/login", `{"name":"AJ","password":"nope"}`, nil)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for bad password, got %d", recorder.Code)
 	}
-	recorder = postAuthJSON(t, "/auth/login", `{"email":"stranger@evil.com","password":"B0NFIRE!"}`, nil)
+	recorder = postAuthJSON(t, "/auth/login", `{"name":"Jake","password":"B0NFIRE!"}`, nil)
 	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for unknown account, got %d", recorder.Code)
+		t.Fatalf("expected 401 for non-roster account, got %d", recorder.Code)
+	}
+	recorder = postAuthJSON(t, "/auth/login", `{"email":"aj@shareability.com","password":"B0NFIRE!"}`, nil)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for email login payload, got %d", recorder.Code)
 	}
 }
 
@@ -141,7 +149,7 @@ func TestSessionsPersistAcrossReload(t *testing.T) {
 func TestCrossOriginAuthPostRejected(t *testing.T) {
 	setupAuthTestEnv(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"aj@shareability.com","password":"B0NFIRE!"}`))
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://evil.example")
 	recorder := httptest.NewRecorder()
@@ -341,7 +349,7 @@ func TestLoginRateLimited(t *testing.T) {
 
 	var last *httptest.ResponseRecorder
 	for i := 0; i < loginAttemptLimit+1; i++ {
-		last = postAuthJSON(t, "/auth/login", `{"email":"aj@shareability.com","password":"nope"}`, nil)
+		last = postAuthJSON(t, "/auth/login", `{"name":"AJ","password":"nope"}`, nil)
 	}
 	if last.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 after %d attempts, got %d", loginAttemptLimit+1, last.Code)

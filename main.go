@@ -2563,6 +2563,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			broadcastKanbanEvent("screen_share_started", map[string]any{
 				"name": currentParticipantName(),
 			})
+			go dispatchKeyFrame()
 			broadcastAssistantEvent("status", currentParticipantName()+" started sharing their screen", nil)
 		case "screen_share_stopped":
 			if !participantAccepted {
@@ -2572,6 +2573,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			broadcastKanbanEvent("screen_share_stopped", map[string]any{
 				"name": currentParticipantName(),
 			})
+			go dispatchKeyFrame()
 			broadcastAssistantEvent("status", currentParticipantName()+" stopped sharing their screen", nil)
 		default:
 			log.Errorf("unknown message: %+v", message)

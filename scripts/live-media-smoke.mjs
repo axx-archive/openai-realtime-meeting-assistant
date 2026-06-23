@@ -48,6 +48,8 @@ try {
     await waitForRoomMedia(page, pages.length)
   }
 
+  const recordingSnapshots = await exerciseRecordingToggle(pages[0])
+
   if (config.rejoin) {
     await rejoinParticipant(config.rejoin)
     for (const page of pages) {
@@ -71,12 +73,14 @@ try {
   const boardSnapshots = await collectSnapshots()
 
   const failures = [
+    ...validateRecordingSnapshots(recordingSnapshots.off, 'off'),
+    ...validateRecordingSnapshots(recordingSnapshots.on, 'on'),
     ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name),
     ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
     ...validateSnapshots(speakerSnapshots, pages.length, { view: 'speaker', requireSpeakerView: true }),
     ...validateSnapshots(boardSnapshots, pages.length, { view: 'board', requireBoardDock: true })
   ]
-  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots }, null, 2))
+  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots, recordingSnapshots }, null, 2))
   await closePages(pages)
   await finish(failures.length === 0 ? 0 : 1)
 } catch (error) {
@@ -221,18 +225,19 @@ async function joinRoom(page) {
   await waitFor(page, `${page.name} form`, `
     Boolean(document.readyState !== 'loading'
       && typeof joinRoom === 'function'
-      && document.getElementById('loginEmail')
+      && typeof signInToOffice === 'function'
+      && document.getElementById('loginAccountSelect')
       && document.getElementById('participantName')
       && document.getElementById('roomPassword')
       && document.getElementById('joinAccess'))
   `)
   await evaluate(page, `
     (() => {
-      const email = document.getElementById('loginEmail')
+      const account = document.getElementById('loginAccountSelect')
       const participant = document.getElementById('participantName')
       const password = document.getElementById('roomPassword')
-      email.value = ${JSON.stringify(participantEmailForName(page.name))}
-      email.dispatchEvent(new Event('input', { bubbles: true }))
+      account.value = ${JSON.stringify(page.name)}
+      account.dispatchEvent(new Event('change', { bubbles: true }))
       participant.value = ${JSON.stringify(page.name)}
       participant.dispatchEvent(new Event('change', { bubbles: true }))
       password.value = ${JSON.stringify(config.password)}
@@ -240,13 +245,16 @@ async function joinRoom(page) {
       return true
     })()
   `)
-  await clickSelector(page, '#joinAccess')
+  const signedIn = await evaluate(page, 'signInToOffice()')
+  if (!signedIn) {
+    throw new Error(`${page.name} could not sign in to office`)
+  }
   await waitFor(page, `${page.name} office session`, `
     (() => {
       const hasLocalMedia = typeof localStream !== 'undefined' && localStream
       const hasOfficeSession = typeof authedUser !== 'undefined'
         && authedUser
-        && document.querySelector('[data-office-tool="room"]')
+        && (document.querySelector('[data-tool="room"]') || document.querySelector('[data-join-room]'))
       return Boolean(hasLocalMedia || hasOfficeSession)
     })()
   `)
@@ -254,7 +262,13 @@ async function joinRoom(page) {
     (() => Boolean(typeof localStream !== 'undefined' && localStream))()
   `)
   if (!hasLocalMedia) {
-    await clickSelector(page, '[data-office-tool="room"]')
+    await evaluate(page, `
+      (async () => {
+        setActiveTool?.('room')
+        await joinRoom()
+        return true
+      })()
+    `)
   }
   await waitFor(page, `${page.name} local media`, `
     (() => typeof localStream !== 'undefined'
@@ -268,20 +282,6 @@ async function joinRoom(page) {
       && typeof currentParticipantName !== 'undefined'
       && currentParticipantName === ${JSON.stringify(page.name)})()
   `)
-}
-
-function participantEmailForName(name) {
-  const cleanName = String(name || '').trim()
-  if (cleanName.includes('@')) {
-    return cleanName
-  }
-  if (/^aj$/i.test(cleanName)) {
-    return 'aj@shareability.com'
-  }
-  if (/^erick$/i.test(cleanName)) {
-    return 'e@shareability.com'
-  }
-  return `${cleanName.toLowerCase()}@shareability.com`
 }
 
 async function waitForRoomMedia(page, expectedClientCount) {
@@ -329,6 +329,40 @@ async function rejoinParticipant(name) {
   pages.splice(pageIndex, 0, newPage)
   await joinRoom(newPage)
   log('rejoin-complete', name)
+}
+
+async function exerciseRecordingToggle(controller) {
+  if (!controller) {
+    return { off: [], on: [] }
+  }
+  await evaluate(controller, `
+    (() => {
+      document.getElementById('recordMeeting')?.click()
+      return true
+    })()
+  `)
+  for (const page of pages) {
+    await waitFor(page, `${page.name} record off status`, `
+      (() => document.getElementById('statusText')?.textContent?.trim() === 'the room is not listening'
+        && !document.getElementById('statusPill')?.classList.contains('pill--listening'))()
+    `)
+  }
+  const off = await collectRecordingSnapshots()
+
+  await evaluate(controller, `
+    (() => {
+      document.getElementById('recordMeeting')?.click()
+      return true
+    })()
+  `)
+  for (const page of pages) {
+    await waitFor(page, `${page.name} record on status`, `
+      (() => document.getElementById('statusText')?.textContent?.trim() === 'the room is listening'
+        && document.getElementById('statusPill')?.classList.contains('pill--listening'))()
+    `)
+  }
+  const on = await collectRecordingSnapshots()
+  return { off, on }
 }
 
 async function exerciseScreenShare(sharer) {
@@ -379,6 +413,22 @@ async function exerciseScreenShare(sharer) {
   await sleep(3500)
   const stopped = await collectSnapshots()
   return { started, stopped }
+}
+
+async function collectRecordingSnapshots() {
+  const snapshots = []
+  for (const page of pages) {
+    snapshots.push(await evaluate(page, `
+      (() => ({
+        name: ${JSON.stringify(page.name)},
+        statusText: document.getElementById('statusText')?.textContent?.trim() || '',
+        statusClass: document.getElementById('statusPill')?.className || '',
+        recordLabel: document.querySelector('#recordMeeting .record-label')?.textContent?.trim() || '',
+        recordPressed: document.getElementById('recordMeeting')?.getAttribute('aria-pressed') || ''
+      }))()
+    `))
+  }
+  return snapshots
 }
 
 async function installFakeDisplayMedia(page) {
@@ -771,6 +821,31 @@ function validateScreenShareSnapshots(snapshots, sharerName) {
     const renderedStripVideos = visibleStripTiles.filter(tile => tile.renderedVideos > 0 || tile.decodedFrames > 0)
     if (renderedStripVideos.length < visibleStripTiles.length) {
       failures.push(`${prefix} participant strip rendered ${renderedStripVideos.length}/${visibleStripTiles.length} videos`)
+    }
+  }
+  return failures
+}
+
+function validateRecordingSnapshots(snapshots, expectedState) {
+  const failures = []
+  const expectedListening = expectedState === 'on'
+  const expectedText = expectedListening ? 'the room is listening' : 'the room is not listening'
+  const expectedLabel = expectedListening ? 'Recording' : 'Record off'
+  const expectedPressed = expectedListening ? 'true' : 'false'
+  for (const snapshot of snapshots) {
+    const prefix = `${snapshot.name} recording ${expectedState}`
+    if (snapshot.statusText !== expectedText) {
+      failures.push(`${prefix} status=${JSON.stringify(snapshot.statusText)}, want ${JSON.stringify(expectedText)}`)
+    }
+    const listeningClass = String(snapshot.statusClass || '').includes('pill--listening')
+    if (listeningClass !== expectedListening) {
+      failures.push(`${prefix} listening class=${listeningClass}`)
+    }
+    if (snapshot.recordLabel !== expectedLabel) {
+      failures.push(`${prefix} label=${JSON.stringify(snapshot.recordLabel)}, want ${JSON.stringify(expectedLabel)}`)
+    }
+    if (snapshot.recordPressed !== expectedPressed) {
+      failures.push(`${prefix} aria-pressed=${JSON.stringify(snapshot.recordPressed)}, want ${JSON.stringify(expectedPressed)}`)
     }
   }
   return failures

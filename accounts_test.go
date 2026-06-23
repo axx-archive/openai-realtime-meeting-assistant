@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,6 +59,12 @@ func TestAuthenticateUser(t *testing.T) {
 	if _, ok := store.authenticate("AJ@Shareability.com ", "B0NFIRE!"); !ok {
 		t.Error("expected email match to be case-insensitive and trimmed")
 	}
+	if user, ok := store.authenticateRosterName("AJ", "B0NFIRE!"); !ok || user.Name != "AJ" {
+		t.Fatalf("expected roster name login to authenticate AJ, got user=%v ok=%v", user, ok)
+	}
+	if _, ok := store.authenticateRosterName("aj@shareability.com", "B0NFIRE!"); ok {
+		t.Error("expected email-shaped login name to be rejected")
+	}
 	if _, ok := store.authenticate("aj@shareability.com", "wrong"); ok {
 		t.Error("expected wrong password to fail")
 	}
@@ -105,6 +112,52 @@ func TestUserStorePersistsAcrossReload(t *testing.T) {
 	}
 	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts) {
 		t.Errorf("expected reload to keep %d accounts, got %d", len(seededAccounts), len(emails))
+	}
+}
+
+func TestUserStorePrunesNonRosterAccountsOnReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	store, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("newUserAccountStore: %v", err)
+	}
+	aj := store.findUser("aj@shareability.com")
+	if aj == nil {
+		t.Fatal("expected AJ account")
+	}
+	extra := &userAccount{
+		Email:             "jake@shareability.com",
+		Name:              "Jake",
+		PasswordHash:      append([]byte(nil), aj.PasswordHash...),
+		WebAuthnHandle:    append([]byte(nil), aj.WebAuthnHandle...),
+		PasswordChangedAt: time.Now().UTC(),
+	}
+	records := []*userAccount{extra}
+	for _, email := range store.accountEmails() {
+		if user := store.findUser(email); user != nil {
+			records = append(records, user)
+		}
+	}
+	raw, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal user records: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write user records: %v", err)
+	}
+
+	reloaded, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if user := reloaded.findUser("jake@shareability.com"); user != nil {
+		t.Fatalf("expected non-roster account to be pruned, got %+v", user)
+	}
+	if _, ok := reloaded.authenticate("jake@shareability.com", "B0NFIRE!"); ok {
+		t.Fatal("expected pruned non-roster account to be unable to authenticate")
+	}
+	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts) {
+		t.Fatalf("expected only %d roster accounts after reload, got %d: %v", len(seededAccounts), len(emails), emails)
 	}
 }
 

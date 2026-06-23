@@ -75,11 +75,11 @@ function initScript(label, portrait) {
   }})(${JSON.stringify(label)}, ${JSON.stringify(portrait)})`
 }
 
-async function join(browserType, ctxOpts, label, email, portrait) {
+async function join(browserType, ctxOpts, label, portrait) {
   const browser = await browserType.launch()
   const context = await browser.newContext({ ...ctxOpts, permissions: ['camera','microphone'].filter(()=>browserType===chromium) })
   // login -> cookie in context jar
-  const resp = await context.request.post(BASE + '/auth/login', { data: { email, password: PW } })
+  const resp = await context.request.post(BASE + '/auth/login', { data: { name: label, password: PW } })
   if (!resp.ok()) throw new Error(label+' login failed: '+resp.status())
   const page = await context.newPage()
   page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t) && !/auth\/me|401/.test(t)) console.log(`   [${label} console] ${t.slice(0,120)}`) })
@@ -87,18 +87,21 @@ async function join(browserType, ctxOpts, label, email, portrait) {
   await page.addInitScript(initScript(label, portrait))
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded')
-  // fill + submit the access form
-  await page.fill('#loginEmail', email).catch(()=>{})
+  await page.waitForFunction(() => typeof joinRoom === 'function' && typeof setActiveTool === 'function', null, { timeout: 30000 })
+  await page.selectOption('#loginAccountSelect', label).catch(()=>{})
   await page.fill('#roomPassword', PW).catch(()=>{})
-  await page.click('#joinAccess').catch(()=>{})
+  await page.evaluate(async () => {
+    setActiveTool('room')
+    await joinRoom()
+  })
   return { browser, context, page, label }
 }
 
 const sessions = []
 try {
   console.log('[setup] A=Chromium(AJ), B=WebKit/Safari(Tim) join the same room')
-  const A = await join(chromium, {}, 'AJ', 'aj@shareability.com', false)
-  const B = await join(webkit, {}, 'Tim', 'tim@shareability.com', false)
+  const A = await join(chromium, {}, 'AJ', false)
+  const B = await join(webkit, {}, 'Tim', false)
   sessions.push(A, B)
 
   // wait until B (Safari engine) is in a real call: a remote participant tile
@@ -153,7 +156,7 @@ try {
     return vids.map(v => v.videoWidth >= v.videoHeight ? 'landscape' : 'portrait')
   })
   const beforeA = await orient(A), beforeB = await orient(B)
-  const C = await join(webkit, { ...devices['iPhone 13'] }, 'Erick', 'e@shareability.com', true)
+  const C = await join(webkit, { ...devices['iPhone 13'] }, 'Erick', true)
   sessions.push(C)
   await sleep(8000) // let C negotiate + roster propagate + any retune fire
   const cInfo = await C.page.evaluate(() => ({ gum: window.__gumCalls, applied: window.__applyConstraintsCalls,
@@ -189,7 +192,7 @@ try {
   // A new participant joining triggers SDP renegotiation on every peer. The old
   // code rebound outbound video to the CAMERA track on renegotiation, killing the
   // share for everyone. outboundTrackForKind() must keep the screen track bound.
-  const D = await join(chromium, {}, 'Tyler', 'tyler@shareability.com', false)
+  const D = await join(chromium, {}, 'Tyler', false)
   sessions.push(D)
   await sleep(8000)
   const dSees = await stageVisible(D)

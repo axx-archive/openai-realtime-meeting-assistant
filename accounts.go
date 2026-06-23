@@ -24,19 +24,21 @@ const (
 	resetTokenTTL            = 30 * time.Minute
 )
 
+type seededAccount struct {
+	Email string
+	Name  string
+}
+
 // seededAccounts is the complete roster of Bonfire accounts. There is no
 // signup path: accounts exist only because they are listed here, and seeding
 // never touches an account that already exists in the store file.
-var seededAccounts = []struct {
-	Email string
-	Name  string
-}{
+var seededAccounts = []seededAccount{
+	{"joel@shareability.com", "Joel"},
+	{"caitlyn@shareability.com", "Caitlyn"},
+	{"tyler@shareability.com", "Tyler"},
 	{"aj@shareability.com", "AJ"},
 	{"tim@shareability.com", "Tim"},
 	{"e@shareability.com", "Erick"},
-	{"joel@shareability.com", "Joel"},
-	{"tyler@shareability.com", "Tyler"},
-	{"caitlyn@shareability.com", "Caitlyn"},
 	{"tom@shareability.com", "Tom"},
 }
 
@@ -82,6 +84,28 @@ func normalizeAccountEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+func normalizeRosterLoginName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
+}
+
+func seededAccountForName(name string) (seededAccount, bool) {
+	normalized := normalizeRosterLoginName(name)
+	for _, seed := range seededAccounts {
+		if normalizeRosterLoginName(seed.Name) == normalized {
+			return seed, true
+		}
+	}
+	return seededAccount{}, false
+}
+
+func seededAccountEmailSet() map[string]struct{} {
+	allowed := make(map[string]struct{}, len(seededAccounts))
+	for _, seed := range seededAccounts {
+		allowed[normalizeAccountEmail(seed.Email)] = struct{}{}
+	}
+	return allowed
+}
+
 func newUserAccountStore(path string) (*userAccountStore, error) {
 	store := &userAccountStore{
 		path:        path,
@@ -115,7 +139,15 @@ func (s *userAccountStore) seedMissingAccounts() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	seeded := false
+	changed := false
+	allowedEmails := seededAccountEmailSet()
+	for key := range s.users {
+		if _, ok := allowedEmails[normalizeAccountEmail(key)]; !ok {
+			delete(s.users, key)
+			changed = true
+		}
+	}
+
 	for _, seed := range seededAccounts {
 		key := normalizeAccountEmail(seed.Email)
 		if _, exists := s.users[key]; exists {
@@ -136,10 +168,10 @@ func (s *userAccountStore) seedMissingAccounts() error {
 			WebAuthnHandle:    handle,
 			PasswordChangedAt: time.Now().UTC(),
 		}
-		seeded = true
+		changed = true
 	}
 
-	if !seeded {
+	if !changed {
 		return nil
 	}
 	return s.persistLocked()
@@ -201,14 +233,11 @@ func (s *userAccountStore) findUserByWebAuthnHandle(handle []byte) *userAccount 
 }
 
 func (s *userAccountStore) findUserByName(name string) *userAccount {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, user := range s.users {
-		if strings.EqualFold(user.Name, strings.TrimSpace(name)) {
-			return user
-		}
+	seed, ok := seededAccountForName(name)
+	if !ok {
+		return nil
 	}
-	return nil
+	return s.findUser(seed.Email)
 }
 
 // bcrypt hash of an arbitrary password, computed once, so authenticate can
@@ -217,6 +246,18 @@ var unknownAccountHash, _ = bcrypt.GenerateFromPassword([]byte("bonfire-no-such-
 
 func (s *userAccountStore) authenticate(email, password string) (*userAccount, bool) {
 	user := s.findUser(email)
+	if user == nil {
+		_ = bcrypt.CompareHashAndPassword(unknownAccountHash, []byte(password))
+		return nil, false
+	}
+	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) != nil {
+		return nil, false
+	}
+	return user, true
+}
+
+func (s *userAccountStore) authenticateRosterName(name, password string) (*userAccount, bool) {
+	user := s.findUserByName(name)
 	if user == nil {
 		_ = bcrypt.CompareHashAndPassword(unknownAccountHash, []byte(password))
 		return nil, false

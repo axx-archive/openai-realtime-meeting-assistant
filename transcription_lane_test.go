@@ -132,6 +132,14 @@ func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	if !initialRecording.Enabled {
 		t.Fatal("new rooms should start with transcript recording enabled")
 	}
+	app.mu.Lock()
+	app.scoutVoiceArmedAt = time.Now().UTC()
+	app.scoutVoiceArmedUntil = time.Now().UTC().Add(time.Minute)
+	app.scoutSpokenResponse = true
+	app.scoutSpokenResponseSent = true
+	app.scoutLastToolResultAt = time.Now().UTC()
+	app.scoutLastToolResultName = "answer_memory_question"
+	app.mu.Unlock()
 
 	snapshot := app.setTranscriptRecording(false, "AJ")
 	recording, ok := snapshot["recording"].(roomRecordingState)
@@ -143,6 +151,15 @@ func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	}
 	if recording.UpdatedBy != "AJ" {
 		t.Fatalf("recording updatedBy=%q, want AJ", recording.UpdatedBy)
+	}
+	app.mu.Lock()
+	wakeArmed := !app.scoutVoiceArmedAt.IsZero() || !app.scoutVoiceArmedUntil.IsZero()
+	spokenPending := app.scoutSpokenResponse || app.scoutSpokenResponseSent
+	lastToolResult := app.scoutLastToolResultAt
+	lastToolName := app.scoutLastToolResultName
+	app.mu.Unlock()
+	if wakeArmed || spokenPending || !lastToolResult.IsZero() || lastToolName != "" {
+		t.Fatalf("recording pause left Scout listening state armed: wake=%v spoken=%v lastToolAt=%s lastTool=%q", wakeArmed, spokenPending, lastToolResult, lastToolName)
 	}
 
 	speechFrame := make([]int16, roomAudioMixFrameSize)

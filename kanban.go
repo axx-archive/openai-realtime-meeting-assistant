@@ -502,9 +502,7 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	app.mu.Unlock()
 
 	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Infof("OpenAI Realtime peer state changed: %s", state.String())
-		broadcastKanbanEvent("status", "OpenAI Realtime: "+state.String())
-		broadcastAssistantEvent("status", "OpenAI Realtime: "+state.String(), nil)
+		app.handleRealtimePeerConnectionState(peerConnection, state)
 	})
 	events.OnOpen(func() {
 		log.Infof("OpenAI Realtime event channel opened")
@@ -549,6 +547,37 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error 
 	}()
 
 	return nil
+}
+
+func (app *kanbanBoardApp) handleRealtimePeerConnectionState(peerConnection *webrtc.PeerConnection, state webrtc.PeerConnectionState) {
+	log.Infof("OpenAI Realtime peer state changed: %s", state.String())
+	broadcastKanbanEvent("status", "OpenAI Realtime: "+state.String())
+	broadcastAssistantEvent("status", "OpenAI Realtime: "+state.String(), nil)
+
+	switch state {
+	case webrtc.PeerConnectionStateFailed:
+		go app.restartRealtimePeerIfStill(peerConnection, state, 0, "Realtime peer connection failed")
+	case webrtc.PeerConnectionStateDisconnected:
+		go app.restartRealtimePeerIfStill(peerConnection, state, 5*time.Second, "Realtime peer connection stayed disconnected")
+	}
+}
+
+func (app *kanbanBoardApp) restartRealtimePeerIfStill(peerConnection *webrtc.PeerConnection, state webrtc.PeerConnectionState, delay time.Duration, reason string) {
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	if peerConnection == nil {
+		return
+	}
+
+	app.mu.Lock()
+	isCurrent := app.pc == peerConnection && !app.restarting
+	app.mu.Unlock()
+	if !isCurrent || peerConnection.ConnectionState() != state {
+		return
+	}
+
+	app.restartRealtimePeer(reason)
 }
 
 func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
@@ -751,12 +780,16 @@ func (app *kanbanBoardApp) WriteMixedPCM(roomPCM []int16) error {
 
 	isSyntheticSilence := pcmIsZero(roomPCM)
 	recordingEnabled := app.transcriptRecordingActive()
+	if !recordingEnabled {
+		return nil
+	}
+
 	transcriptQueued := false
-	if !isSyntheticSilence && recordingEnabled {
+	if !isSyntheticSilence {
 		transcriptQueued = app.enqueueTranscriptionLaneAudio(roomPCM)
 	}
 
-	if (isSyntheticSilence || !recordingEnabled) && !app.realtimeAudioInputAvailable() {
+	if isSyntheticSilence && !app.realtimeAudioInputAvailable() {
 		return nil
 	}
 
@@ -3437,6 +3470,14 @@ func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string
 		app.transcriptRecordingEnabled = enabled
 		app.transcriptRecordingUpdatedAt = time.Now().UTC()
 		app.transcriptRecordingUpdatedBy = updatedBy
+	}
+	if !enabled {
+		app.scoutVoiceArmedAt = time.Time{}
+		app.scoutVoiceArmedUntil = time.Time{}
+		app.scoutSpokenResponse = false
+		app.scoutSpokenResponseSent = false
+		app.scoutLastToolResultAt = time.Time{}
+		app.scoutLastToolResultName = ""
 	}
 
 	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
