@@ -1,0 +1,309 @@
+import XCTest
+@testable import MeetingAssistCore
+@testable import MeetingAssistRoom
+@testable import MeetingAssistRoomRTC
+
+final class NativeRoomSessionCoordinatorTests: XCTestCase {
+    func testJoinAudioOnlyRunsCookieAuthServerOfferSequence() async throws {
+        let api = MockNativeRoomAPI()
+        let signaling = MockSignalingTransport(envelopes: [
+            kanbanEnvelope(event: "participants", data: .object(["participants": .array([])])),
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.candidate,
+                data: encodedJSONString(RTCIceCandidatePayload(candidate: "candidate:0 1 udp 1 127.0.0.1 9 typ host"))
+            ),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\n")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: api,
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        let result = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        XCTAssertEqual(result.participant, Participant(name: "Tom", email: "tom@example.com"))
+        XCTAssertEqual(result.websocketURL.absoluteString, "wss://thebonfire.xyz/websocket")
+        XCTAssertEqual(result.clientConfig.protocolVersion, meetingAssistNativeProtocolV1)
+        XCTAssertEqual(result.answeredOffer.type, "answer")
+        let lifecycle = await coordinator.lifecycle
+        XCTAssertEqual(lifecycle, .connected)
+
+        let sentEvents = signaling.sent.map(\.event)
+        XCTAssertEqual(sentEvents, [
+            ClientSignalEvent.participant,
+            ClientSignalEvent.mediaReady,
+            ClientSignalEvent.answer
+        ])
+
+        let mediaReady = try decodeSentPayload(MediaReadyAssertionPayload.self, from: signaling.sent[1].data)
+        XCTAssertEqual(mediaReady.client.platform, "ios")
+        XCTAssertTrue(mediaReady.media.audio)
+        XCTAssertFalse(mediaReady.media.video)
+
+        XCTAssertEqual(rtc.preparedAudio, true)
+        XCTAssertEqual(rtc.preparedVideo, false)
+        XCTAssertEqual(rtc.handledOffers, ["v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"])
+        XCTAssertEqual(rtc.remoteCandidates.count, 1)
+    }
+
+    func testRestartIceAndLayerSelectionUseExistingEvents() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.requestICERestart(reason: "native-network-change")
+        try await coordinator.selectLayer("low")
+
+        let sent = signaling.sent
+        XCTAssertEqual(sent.map(\.event), [ClientSignalEvent.restartICE, ClientSignalEvent.selectLayer])
+        XCTAssertEqual(try decodeSentPayload(RestartAssertionPayload.self, from: sent[0].data).reason, "native-network-change")
+        XCTAssertEqual(try decodeSentPayload(SelectLayerAssertionPayload.self, from: sent[1].data).layer, "low")
+        let lifecycle = await coordinator.lifecycle
+        XCTAssertEqual(lifecycle, .reconnecting)
+        XCTAssertTrue(rtc.didRestartICE)
+    }
+
+    func testParticipantMediaStatePublicationUsesExistingEvent() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        await coordinator.setMuted(true)
+        try await coordinator.sendParticipantMediaState()
+
+        let sent = signaling.sent
+        XCTAssertEqual(sent.map(\.event), [ClientSignalEvent.participantMediaState])
+        let state = try decodeSentPayload(ParticipantMediaState.self, from: sent[0].data)
+        XCTAssertTrue(state.micMuted)
+        XCTAssertFalse(state.cameraOff)
+        XCTAssertFalse(state.screenSharing)
+    }
+
+    func testAccessDeniedStopsJoinBeforeMediaReady() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            kanbanEnvelope(event: "access_denied", data: .string("Room is full."))
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        do {
+            _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+            XCTFail("join should fail on access_denied")
+        } catch NativeRoomSessionError.accessDenied("Room is full.") {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.participant])
+        XCTAssertNil(rtc.preparedAudio)
+    }
+
+    func testLeaveResetsNegotiationStateBeforeReuse() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.candidate,
+                data: encodedJSONString(RTCIceCandidatePayload(candidate: "candidate:old"))
+            ),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        XCTAssertEqual(rtc.remoteCandidates.count, 1)
+
+        await coordinator.leave()
+        try await coordinator.handleServerEvent(
+            WebSocketEnvelope(
+                event: ServerSignalEvent.candidate,
+                data: encodedJSONString(RTCIceCandidatePayload(candidate: "candidate:new-session"))
+            )
+        )
+
+        XCTAssertEqual(rtc.remoteCandidates.count, 1)
+    }
+
+    func testWebsocketURLPreservesBasePathAndUsesSecureScheme() {
+        let url = NativeRoomSessionCoordinator.websocketURL(
+            baseURL: URL(string: "https://example.com/app")!,
+            path: "/websocket"
+        )
+
+        XCTAssertEqual(url.absoluteString, "wss://example.com/app/websocket")
+    }
+}
+
+private final class MockNativeRoomAPI: NativeRoomAPIProviding, @unchecked Sendable {
+    let baseURL = URL(string: "https://thebonfire.xyz")!
+
+    func nativeConfig() async throws -> NativeClientConfig {
+        NativeClientConfig(
+            protocolVersion: meetingAssistNativeProtocolV1,
+            auth: .init(mode: "cookie", loginPath: "/auth/login", mePath: "/auth/me", logoutPath: "/auth/logout"),
+            room: .init(
+                clientConfigPath: "/client-config",
+                websocketPath: "/websocket",
+                participants: [Participant(name: "Tom", email: "tom@example.com")],
+                maxParticipants: 7
+            )
+        )
+    }
+
+    func login(name: String, password: String, path: String) async throws -> Participant {
+        XCTAssertEqual(name, "Tom")
+        XCTAssertEqual(password, "B0NFIRE!")
+        XCTAssertEqual(path, "/auth/login")
+        return Participant(name: "Tom", email: "tom@example.com")
+    }
+
+    func clientConfig(path: String) async throws -> ClientRTCConfig {
+        XCTAssertEqual(path, "/client-config")
+        return ClientRTCConfig(
+            rtcConfiguration: ["iceServers": .array([])],
+            protocolVersion: meetingAssistNativeProtocolV1,
+            auth: "cookie",
+            websocketPath: "/websocket",
+            signalingRole: "server-offer",
+            supportedLayers: ["low", "medium", "high"],
+            nativeHints: nil
+        )
+    }
+}
+
+private final class MockSignalingTransport: NativeRoomSignalingTransport, @unchecked Sendable {
+    private var envelopes: [WebSocketEnvelope]
+    private(set) var connectedURL: URL?
+    private(set) var sent: [WebSocketEnvelope] = []
+
+    init(envelopes: [WebSocketEnvelope]) {
+        self.envelopes = envelopes
+    }
+
+    func connect(to url: URL) async {
+        connectedURL = url
+    }
+
+    func send(event: String, data: String) async throws {
+        sent.append(WebSocketEnvelope(event: event, data: data))
+    }
+
+    func receive() async throws -> WebSocketEnvelope {
+        if envelopes.isEmpty {
+            throw MockError.noEnvelope
+        }
+        return envelopes.removeFirst()
+    }
+
+    func close() async {}
+}
+
+private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
+    private(set) var lifecycle: RoomLifecycleState = .signedOut
+    private(set) var preparedAudio: Bool?
+    private(set) var preparedVideo: Bool?
+    private(set) var handledOffers: [String] = []
+    private(set) var remoteCandidates: [String] = []
+    private(set) var didRestartICE = false
+    private let answerSDP: String
+
+    init(answerSDP: String) {
+        self.answerSDP = answerSDP
+    }
+
+    func prepareLocalMedia(audio: Bool, video: Bool) async throws {
+        preparedAudio = audio
+        preparedVideo = video
+        lifecycle = .preparingMedia
+    }
+
+    func handleOffer(_ sdp: String) async throws -> String {
+        handledOffers.append(sdp)
+        lifecycle = .negotiating
+        return answerSDP
+    }
+
+    func addRemoteCandidate(_ json: String) async throws {
+        remoteCandidates.append(json)
+    }
+
+    func restartICE() async {
+        didRestartICE = true
+        lifecycle = .reconnecting
+    }
+
+    func leave() async {
+        lifecycle = .leaving
+    }
+}
+
+private struct MediaReadyAssertionPayload: Decodable {
+    var client: NativeRoomClientIdentity
+    var media: MediaAssertionPayload
+}
+
+private struct MediaAssertionPayload: Decodable {
+    var audio: Bool
+    var video: Bool
+}
+
+private struct RestartAssertionPayload: Decodable {
+    var reason: String
+}
+
+private struct SelectLayerAssertionPayload: Decodable {
+    var layer: String
+}
+
+private enum MockError: Error {
+    case noEnvelope
+}
+
+private func accessGrantedEnvelope(name: String) -> WebSocketEnvelope {
+    kanbanEnvelope(event: "access_granted", data: .object(["name": .string(name)]))
+}
+
+private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope {
+    WebSocketEnvelope(
+        event: ServerSignalEvent.kanban,
+        data: encodedJSONString(RoomEvent(event: event, data: data))
+    )
+}
+
+private func encodedJSONString<T: Encodable>(_ value: T) -> String {
+    let data = try! JSONEncoder().encode(value)
+    return String(decoding: data, as: UTF8.self)
+}
+
+private func decodeSentPayload<T: Decodable>(_ type: T.Type, from data: String) throws -> T {
+    try JSONDecoder().decode(type, from: Data(data.utf8))
+}

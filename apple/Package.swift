@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "MeetingAssistSignaling", targets: ["MeetingAssistSignaling"]),
         .library(name: "MeetingAssistRoomRTC", targets: ["MeetingAssistRoomRTC"]),
         .library(name: "MeetingAssistMedia", targets: ["MeetingAssistMedia"]),
+        .library(name: "MeetingAssistRoom", targets: ["MeetingAssistRoom"]),
         .library(name: "MeetingAssistScout", targets: ["MeetingAssistScout"]),
         .library(name: "MeetingAssistDesign", targets: ["MeetingAssistDesign"])
     ],
@@ -26,6 +27,16 @@ let package = Package(
         .target(name: "MeetingAssistSignaling", dependencies: ["MeetingAssistCore"]),
         .target(name: "MeetingAssistRoomRTC", dependencies: ["MeetingAssistCore"]),
         .target(name: "MeetingAssistMedia", dependencies: ["MeetingAssistCore", "MeetingAssistRoomRTC"]),
+        .target(
+            name: "MeetingAssistRoom",
+            dependencies: [
+                "MeetingAssistCore",
+                "MeetingAssistAPI",
+                "MeetingAssistSignaling",
+                "MeetingAssistRoomRTC",
+                "MeetingAssistMedia"
+            ]
+        ),
         .target(name: "MeetingAssistScout", dependencies: ["MeetingAssistCore", "MeetingAssistAPI"]),
         .target(name: "MeetingAssistDesign", dependencies: ["MeetingAssistCore"]),
         .target(
@@ -36,6 +47,7 @@ let package = Package(
                 "MeetingAssistSignaling",
                 "MeetingAssistRoomRTC",
                 "MeetingAssistMedia",
+                "MeetingAssistRoom",
                 "MeetingAssistScout",
                 "MeetingAssistDesign"
             ],
@@ -49,6 +61,7 @@ let package = Package(
                 "MeetingAssistSignaling",
                 "MeetingAssistRoomRTC",
                 "MeetingAssistMedia",
+                "MeetingAssistRoom",
                 "MeetingAssistScout",
                 "MeetingAssistDesign"
             ],
@@ -56,6 +69,14 @@ let package = Package(
         ),
         .testTarget(name: "MeetingAssistCoreTests", dependencies: ["MeetingAssistCore"]),
         .testTarget(name: "MeetingAssistAPITests", dependencies: ["MeetingAssistAPI", "MeetingAssistCore"]),
-        .testTarget(name: "MeetingAssistSignalingTests", dependencies: ["MeetingAssistSignaling", "MeetingAssistCore"])
+        .testTarget(name: "MeetingAssistSignalingTests", dependencies: ["MeetingAssistSignaling", "MeetingAssistCore"]),
+        .testTarget(
+            name: "MeetingAssistRoomTests",
+            dependencies: [
+                "MeetingAssistRoom",
+                "MeetingAssistCore",
+                "MeetingAssistRoomRTC"
+            ]
+        )
     ]
 )

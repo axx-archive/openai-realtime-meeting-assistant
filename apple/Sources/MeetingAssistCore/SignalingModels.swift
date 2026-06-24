@@ -20,6 +20,28 @@ public struct RoomEvent<Data: Codable & Equatable & Sendable>: Codable, Equatabl
     }
 }
 
+public struct RTCSessionDescriptionPayload: Codable, Equatable, Sendable {
+    public var type: String
+    public var sdp: String
+
+    public init(type: String, sdp: String) {
+        self.type = type
+        self.sdp = sdp
+    }
+}
+
+public struct RTCIceCandidatePayload: Codable, Equatable, Sendable {
+    public var candidate: String
+    public var sdpMid: String?
+    public var sdpMLineIndex: UInt16?
+
+    public init(candidate: String, sdpMid: String? = nil, sdpMLineIndex: UInt16? = nil) {
+        self.candidate = candidate
+        self.sdpMid = sdpMid
+        self.sdpMLineIndex = sdpMLineIndex
+    }
+}
+
 public enum ClientSignalEvent {
     public static let participant = "participant"
     public static let mediaReady = "media_ready"

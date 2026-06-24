@@ -14,15 +14,22 @@ The native clients speak the existing MeetingAssist room contract:
    `media_ready`, then answer server offers.
 
 The current package includes the shared Swift models, API client, signaling
-actor, media/session abstractions, SwiftUI shell views, and tests. The generated
-Xcode project adds thin native iOS/iPadOS and macOS app bundle targets around
-those shared modules so command-line app builds and smoke-level XCTest gates are
-repeatable. The `MeetingAssistRoomRTC` module is intentionally protocol-first
-so the real WebRTC adapter can be hardened behind a small surface. A first pass
-with the `stasel/WebRTC` 149.0.0 binary package resolved successfully but failed
-the macOS Swift package test build on framework header imports, so the binary
-adapter belongs in the next WebRTC-specific wave instead of this foundation
-commit.
+actor, room-session coordinator, media/session abstractions, SwiftUI shell
+views, and tests. The generated Xcode project adds thin native iOS/iPadOS and
+macOS app bundle targets around those shared modules so command-line app builds
+and smoke-level XCTest gates are repeatable. The `MeetingAssistRoomRTC` module
+is intentionally protocol-first so the real WebRTC adapter can be hardened
+behind a small surface. A first pass with the `stasel/WebRTC` 149.0.0 binary
+package resolved successfully but failed the macOS Swift package test build on
+framework header imports, so the binary adapter belongs in the next WebRTC-
+specific wave instead of this foundation commit.
+
+`MeetingAssistRoom` is the first native room-entry coordinator. It sequences
+native discovery, cookie login, `/client-config`, websocket `participant`,
+`kanban/access_granted`, audio-only `media_ready`, top-level server `offer`,
+client `answer`, pending remote ICE candidates, `restart_ice`, `select_layer`,
+and `participant_media_state` publication through the existing protocol-first
+RTC adapter.
 
 ## Xcode Project
 

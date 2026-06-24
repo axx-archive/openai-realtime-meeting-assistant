@@ -142,3 +142,63 @@ What worked:
   `MeetingAssistMacRootView` avoided duplicating app logic.
 - Adding generated Info.plists for the test bundles fixed the first Xcode gate
   failure and made simulator/macOS XCTest repeatable.
+
+## Wave 3
+
+Status: `wave3_native_room_session_coordinator_checkpoint_validated`
+
+Scope:
+- Add `MeetingAssistRoom`, a shared Swift module that owns native room-entry
+  sequencing across API discovery/login, `/client-config`, websocket admission,
+  media-ready signaling, server-offer/client-answer flow, queued remote ICE
+  candidates, ICE restart, layer selection, participant media state, leave, and
+  coordinator reuse after leave.
+- Add typed Swift payloads for server `offer` and `candidate` frames.
+- Make `MeetingAssistSignalingClient.send` throw `notConnected` instead of
+  silently no-oping before websocket connection.
+- Keep real WebRTC media behind `RoomRTCClient` so this checkpoint proves the
+  orchestration contract without claiming native mic/camera quality yet.
+- Update iOS audio-session setup to use `allowBluetoothHFP`.
+
+Files changed:
+- `apple/Package.swift`
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistMedia/MediaSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistSignaling/MeetingAssistSignalingClient.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistSignalingTests/SignalingClientTests.swift`
+- `apple/README.md`
+
+Validation:
+- `go test ./...` passed.
+- `swift test` passed 12 tests in `apple/`, including six
+  `NativeRoomSessionCoordinatorTests`.
+- `git diff --check` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local temporary-room smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test` passed one XCTest and compiled the new `MeetingAssistRoom` module.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test` passed one XCTest and compiled the new `MeetingAssistRoom` module.
+
+Risks / blockers:
+- The coordinator uses a mock/protocol RTC adapter in tests. It does not publish
+  real native mic audio yet.
+- The real WebRTC adapter, audio playback, TURN/device validation, Scout
+  recording-path proof, and physical iPhone/iPad/Mac media gates remain required
+  before claiming native quality or stability improvements.
+- Cookie reuse is still an integration behavior of the shared `URLSession` stack
+  and must be exercised against a real local server when the app UI starts
+  invoking the coordinator.
+
+What worked:
+- Treating the room join as a single actor made lifecycle ownership explicit
+  instead of splitting truth between API, websocket, media, and RTC modules.
+- Testing candidate-before-offer queuing preserves a race the Go websocket
+  contract already supports for native clients.
+- Resetting negotiation state on join/leave prevents stale remote-description
+  readiness from leaking into a reused native room coordinator.
+- Keeping `RoomRTCClient` protocol-first lets the next WebRTC wave focus on
+  media implementation without rewriting auth/signaling orchestration.

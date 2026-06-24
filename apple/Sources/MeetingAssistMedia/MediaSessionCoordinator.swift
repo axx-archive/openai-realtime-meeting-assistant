@@ -25,7 +25,7 @@ public final class MediaSessionCoordinator: @unchecked Sendable {
     #if os(iOS)
     public func configureVideoChatAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .videoChat, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .videoChat, options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker])
         try session.setActive(true)
     }
     #endif
