@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
 )
 
 func TestWebsocketRejectsUnauthenticatedUpgrade(t *testing.T) {
@@ -114,9 +115,11 @@ func TestWebsocketAdmitsAccountEmailWhenDisplayNameChanges(t *testing.T) {
 
 	previousApp := kanbanApp
 	kanbanApp = newKanbanBoardApp()
-	t.Cleanup(func() {
-		kanbanApp = previousApp
-	})
+	if previousApp != nil {
+		t.Cleanup(func() {
+			kanbanApp = previousApp
+		})
+	}
 
 	if _, err := accountStore().updateProfile("aj@shareability.com", "// aj", ""); err != nil {
 		t.Fatalf("update profile: %v", err)
@@ -178,4 +181,349 @@ func TestWebsocketAdmitsAccountEmailWhenDisplayNameChanges(t *testing.T) {
 		}
 		return
 	}
+}
+
+func TestWebsocketNativeMediaReadyReceivesServerOffer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
+	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+
+	previousApp := kanbanApp
+	kanbanApp = newKanbanBoardApp()
+	if previousApp != nil {
+		t.Cleanup(func() {
+			kanbanApp = previousApp
+		})
+	}
+
+	listLock.Lock()
+	previousPeerConnections := peerConnections
+	previousActiveParticipantConnections := activeParticipantConnections
+	peerConnections = nil
+	activeParticipantConnections = map[string]peerConnectionState{}
+	listLock.Unlock()
+	t.Cleanup(func() {
+		listLock.Lock()
+		peerConnections = previousPeerConnections
+		activeParticipantConnections = previousActiveParticipantConnections
+		listLock.Unlock()
+	})
+
+	token, err := userSessionStore().create("tim@shareability.com")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/websocket"
+	header := http.Header{}
+	header.Set("Cookie", sessionCookieName+"="+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("dial with session cookie: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]string{
+		"event": "participant",
+		"data":  `{"client":{"platform":"ios","version":"test"}}`,
+	}); err != nil {
+		t.Fatalf("send native participant event: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket message before admission: %v", err)
+		}
+		if message.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string          `json:"event"`
+			Data  json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+			t.Fatalf("decode kanban envelope: %v", err)
+		}
+		if inner.Event == "access_denied" {
+			t.Fatalf("expected native admission, got access_denied: %s", inner.Data)
+		}
+		if inner.Event == "access_granted" {
+			break
+		}
+	}
+
+	if err := conn.WriteJSON(map[string]string{
+		"event": "media_ready",
+		"data":  `{"client":{"platform":"ios"},"media":{"audio":true,"video":true}}`,
+	}); err != nil {
+		t.Fatalf("send native media_ready event: %v", err)
+	}
+
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket message after media_ready: %v", err)
+		}
+		if message.Event != "offer" {
+			continue
+		}
+		var offer struct {
+			Type string `json:"type"`
+			SDP  string `json:"sdp"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &offer); err != nil {
+			t.Fatalf("decode server offer: %v", err)
+		}
+		if offer.Type != "offer" || !strings.Contains(offer.SDP, "m=audio") || !strings.Contains(offer.SDP, "m=video") {
+			t.Fatalf("unexpected offer: type=%q sdp=%q", offer.Type, offer.SDP)
+		}
+		return
+	}
+}
+
+func TestWebsocketNativeAnswerCandidateRestartAndLayerSelection(t *testing.T) {
+	conn := newIsolatedNativeWebsocket(t, "tom@shareability.com")
+
+	writeNativeWebsocketEvent(t, conn, "participant", map[string]any{
+		"client": map[string]string{"platform": "ios", "version": "test"},
+	})
+	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
+
+	writeNativeWebsocketEvent(t, conn, "media_ready", map[string]any{
+		"client": map[string]string{"platform": "ios"},
+		"media":  map[string]bool{"audio": true, "video": true},
+	})
+	offer := waitForServerOffer(t, conn, 5*time.Second)
+
+	nativePeer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create native peer: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = nativePeer.Close()
+	})
+
+	candidateCh := make(chan webrtc.ICECandidateInit, 1)
+	nativePeer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+		select {
+		case candidateCh <- candidate.ToJSON():
+		default:
+		}
+	})
+
+	if err := nativePeer.SetRemoteDescription(offer); err != nil {
+		t.Fatalf("native peer set remote offer: %v", err)
+	}
+	answer, err := nativePeer.CreateAnswer(nil)
+	if err != nil {
+		t.Fatalf("native peer create answer: %v", err)
+	}
+	gatherComplete := webrtc.GatheringCompletePromise(nativePeer)
+	if err := nativePeer.SetLocalDescription(answer); err != nil {
+		t.Fatalf("native peer set local answer: %v", err)
+	}
+
+	candidate := webrtc.ICECandidateInit{
+		Candidate: "candidate:0 1 udp 2130706431 127.0.0.1 9 typ host",
+	}
+	select {
+	case gathered := <-candidateCh:
+		candidate = gathered
+	case <-gatherComplete:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for native ICE gathering")
+	}
+
+	// Send the candidate before the answer to exercise the server's pending
+	// candidate queue, which native clients can hit when trickle ICE wins the
+	// race against SDP answer delivery.
+	writeNativeWebsocketEvent(t, conn, "candidate", candidate)
+	writeNativeWebsocketEvent(t, conn, "answer", nativePeer.LocalDescription())
+
+	writeNativeWebsocketEvent(t, conn, "select_layer", map[string]string{"layer": "low"})
+	waitForNativeLayerTier(t, "Tom", layerTierLow, 2*time.Second)
+
+	writeNativeWebsocketEvent(t, conn, "restart_ice", map[string]any{"reason": "native-network-change"})
+	restartOffer := waitForServerOffer(t, conn, 8*time.Second)
+	if restartOffer.Type != webrtc.SDPTypeOffer || !strings.Contains(restartOffer.SDP, "a=ice-ufrag:") {
+		t.Fatalf("restart offer did not look like a server offer with ICE credentials: %+v", restartOffer)
+	}
+}
+
+func newIsolatedNativeWebsocket(t *testing.T, email string) *websocket.Conn {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
+	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+
+	// The websocket handler can outlive httptest.Server.Close after the
+	// connection is hijacked. Leave a non-nil app installed for deferred peer
+	// cleanup callbacks instead of restoring nil under an active goroutine.
+	kanbanApp = newKanbanBoardApp()
+
+	snapshotPeerState(t)
+	listLock.Lock()
+	peerConnections = nil
+	activeParticipantConnections = map[string]peerConnectionState{}
+	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
+	trackParticipants = map[string]string{}
+	trackParticipantSessions = map[string]string{}
+	trackSourceIDs = map[string]string{}
+	trackLayerRIDs = map[string]string{}
+	trackLayerGroups = map[string]string{}
+	subscriberLayerTiers = map[string]string{}
+	listLock.Unlock()
+
+	signalRequestLock.Lock()
+	if signalRequestTimer != nil {
+		signalRequestTimer.Stop()
+	}
+	signalRequestTimer = nil
+	signalRequestLock.Unlock()
+	t.Cleanup(func() {
+		signalRequestLock.Lock()
+		if signalRequestTimer != nil {
+			signalRequestTimer.Stop()
+		}
+		signalRequestTimer = nil
+		signalRequestLock.Unlock()
+	})
+
+	token, err := userSessionStore().create(email)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/websocket"
+	header := http.Header{}
+	header.Set("Cookie", sessionCookieName+"="+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("dial with session cookie: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+	return conn
+}
+
+func writeNativeWebsocketEvent(t *testing.T, conn *websocket.Conn, event string, payload any) {
+	t.Helper()
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal %s payload: %v", event, err)
+	}
+	if err := conn.WriteJSON(websocketMessage{
+		Event: event,
+		Data:  string(data),
+	}); err != nil {
+		t.Fatalf("send %s event: %v", event, err)
+	}
+}
+
+func waitForKanbanEvent(t *testing.T, conn *websocket.Conn, event string, timeout time.Duration) json.RawMessage {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket waiting for kanban/%s: %v", event, err)
+		}
+		if message.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string          `json:"event"`
+			Data  json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+			t.Fatalf("decode kanban envelope: %v", err)
+		}
+		if inner.Event == "access_denied" {
+			t.Fatalf("unexpected access_denied while waiting for %s: %s", event, inner.Data)
+		}
+		if inner.Event == event {
+			return inner.Data
+		}
+	}
+}
+
+func waitForServerOffer(t *testing.T, conn *websocket.Conn, timeout time.Duration) webrtc.SessionDescription {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket waiting for server offer: %v", err)
+		}
+		if message.Event != "offer" {
+			continue
+		}
+		var offer struct {
+			Type string `json:"type"`
+			SDP  string `json:"sdp"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &offer); err != nil {
+			t.Fatalf("decode server offer: %v", err)
+		}
+		if offer.Type != "offer" || offer.SDP == "" {
+			t.Fatalf("unexpected server offer payload: %+v", offer)
+		}
+		return webrtc.SessionDescription{
+			Type: webrtc.SDPTypeOffer,
+			SDP:  offer.SDP,
+		}
+	}
+}
+
+func waitForNativeLayerTier(t *testing.T, participant string, tier layerTier, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		listLock.RLock()
+		state, ok := activeParticipantConnections[participant]
+		got := ""
+		if ok {
+			got = subscriberLayerTiers[state.sessionID]
+		}
+		listLock.RUnlock()
+		if ok && got == string(tier) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	t.Fatalf("subscriber layer for %s did not become %s; active=%v tiers=%v", participant, tier, activeParticipantConnections, subscriberLayerTiers)
 }

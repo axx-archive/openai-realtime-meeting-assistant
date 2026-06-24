@@ -1,5 +1,14 @@
 .DS_Store
+.env
+.env.local
+.env.*.local
+/deploy/digitalocean/.env
 /*.test
 /openai-realtime-meeting-assistant
 /data/
 .playwright-mcp/
+apple/.build/
+apple/.swiftpm/
+apple/DerivedData/
+xcuserdata/
+*.xcuserstate

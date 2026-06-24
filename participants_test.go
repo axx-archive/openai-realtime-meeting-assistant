@@ -20,6 +20,18 @@ func TestMeetingRoomDefaultMatchesRosterCapacity(t *testing.T) {
 	}
 }
 
+func TestMeetingRoomRosterHasSeededAccountEmails(t *testing.T) {
+	for _, name := range meetingParticipantNames {
+		email := participantEmail(name)
+		if email == "" {
+			t.Fatalf("participant %q has no seeded email", name)
+		}
+		if participantNameForEmail(email) != name {
+			t.Fatalf("participant %q email %q resolves to %q", name, email, participantNameForEmail(email))
+		}
+	}
+}
+
 func TestExpectedKanbanBroadcastCloseDetection(t *testing.T) {
 	for _, message := range []string{
 		"websocket: close sent",

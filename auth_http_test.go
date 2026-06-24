@@ -207,6 +207,81 @@ func TestClientConfigEndpointRequiresSession(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected /client-config with session to return 200, got %d body %s", recorder.Code, recorder.Body.String())
 	}
+	var payload struct {
+		RTCConfiguration map[string]any `json:"rtcConfiguration"`
+		ProtocolVersion  string         `json:"protocolVersion"`
+		Auth             string         `json:"auth"`
+		WebsocketPath    string         `json:"websocketPath"`
+		SignalingRole    string         `json:"signalingRole"`
+		SupportedLayers  []string       `json:"supportedLayers"`
+		NativeHints      map[string]any `json:"nativeHints"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal /client-config: %v", err)
+	}
+	if payload.RTCConfiguration == nil {
+		t.Fatal("expected existing rtcConfiguration field to remain present")
+	}
+	if payload.ProtocolVersion != nativeClientProtocolV1 {
+		t.Fatalf("protocolVersion=%q, want %q", payload.ProtocolVersion, nativeClientProtocolV1)
+	}
+	if payload.Auth != "cookie" || payload.WebsocketPath != "/websocket" || payload.SignalingRole != "server-offer" {
+		t.Fatalf("unexpected native signaling metadata: %+v", payload)
+	}
+	if strings.Join(payload.SupportedLayers, ",") != "low,medium,high" {
+		t.Fatalf("supportedLayers=%v, want low/medium/high", payload.SupportedLayers)
+	}
+	if payload.NativeHints["mediaReadyEvent"] != "media_ready" {
+		t.Fatalf("nativeHints=%v, want media_ready hint", payload.NativeHints)
+	}
+}
+
+func TestNativeClientConfigPublishesRosterAndProtocol(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/native/config", nil)
+	recorder := httptest.NewRecorder()
+	nativeClientConfigHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /native/config to return 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		ProtocolVersion string `json:"protocolVersion"`
+		Auth            struct {
+			Mode      string `json:"mode"`
+			LoginPath string `json:"loginPath"`
+		} `json:"auth"`
+		Room struct {
+			ClientConfigPath string `json:"clientConfigPath"`
+			WebsocketPath    string `json:"websocketPath"`
+			MaxParticipants  int    `json:"maxParticipants"`
+			Participants     []struct {
+				Name  string `json:"name"`
+				Email string `json:"email"`
+			} `json:"participants"`
+		} `json:"room"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal /native/config: %v", err)
+	}
+	if payload.ProtocolVersion != nativeClientProtocolV1 {
+		t.Fatalf("protocolVersion=%q, want %q", payload.ProtocolVersion, nativeClientProtocolV1)
+	}
+	if payload.Auth.Mode != "cookie" || payload.Auth.LoginPath != "/auth/login" {
+		t.Fatalf("auth config=%+v, want cookie login path", payload.Auth)
+	}
+	if payload.Room.ClientConfigPath != "/client-config" || payload.Room.WebsocketPath != "/websocket" {
+		t.Fatalf("room config=%+v, want client config and websocket paths", payload.Room)
+	}
+	if payload.Room.MaxParticipants != configuredMeetingRoomCapacity() {
+		t.Fatalf("maxParticipants=%d, want configured capacity", payload.Room.MaxParticipants)
+	}
+	if len(payload.Room.Participants) != len(meetingParticipantNames) {
+		t.Fatalf("participants=%d, want roster size %d", len(payload.Room.Participants), len(meetingParticipantNames))
+	}
+	if payload.Room.Participants[0].Name != "Joel" || payload.Room.Participants[0].Email != "joel@shareability.com" {
+		t.Fatalf("first participant=%+v, want Joel roster entry", payload.Room.Participants[0])
+	}
 }
 
 func TestChangePasswordEndpoint(t *testing.T) {

@@ -74,6 +74,7 @@ const peerSignalDebounce = 250 * time.Millisecond
 const (
 	negotiationResendAfter = 8 * time.Second
 	negotiationCloseAfter  = 30 * time.Second
+	nativeClientProtocolV1 = "native-room-v1"
 )
 
 // negotiationAction is the watchdog's verdict for a peer stuck mid-negotiation.
@@ -279,6 +280,7 @@ func main() {
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
+	http.HandleFunc("/native/config", nativeClientConfigHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
 
 	// index.html handler
@@ -513,10 +515,35 @@ func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
-		"rtcConfiguration": browserRTCConfigurationFromEnv(),
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(nativeRoomClientConfig()); err != nil {
 		log.Errorf("Failed to encode client config: %v", err)
+	}
+}
+
+func nativeClientConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"protocolVersion": nativeClientProtocolV1,
+		"auth": map[string]any{
+			"mode":       "cookie",
+			"loginPath":  "/auth/login",
+			"mePath":     "/auth/me",
+			"logoutPath": "/auth/logout",
+		},
+		"room": map[string]any{
+			"clientConfigPath": "/client-config",
+			"websocketPath":    "/websocket",
+			"participants":     nativeRosterParticipants(),
+			"maxParticipants":  configuredMeetingRoomCapacity(),
+		},
+	}); err != nil {
+		log.Errorf("Failed to encode native client config: %v", err)
 	}
 }
 
@@ -1267,6 +1294,41 @@ func browserRTCConfigurationFromEnv() map[string]any {
 	}
 
 	return map[string]any{"iceServers": iceServers}
+}
+
+func nativeRoomClientConfig() map[string]any {
+	return map[string]any{
+		"rtcConfiguration": browserRTCConfigurationFromEnv(),
+		"protocolVersion":  nativeClientProtocolV1,
+		"auth":             "cookie",
+		"websocketPath":    "/websocket",
+		"signalingRole":    "server-offer",
+		"supportedLayers":  []string{string(layerTierLow), string(layerTierMedium), string(layerTierHigh)},
+		"nativeHints": map[string]any{
+			"participantEvent":  "participant",
+			"mediaReadyEvent":   "media_ready",
+			"answerEvent":       "answer",
+			"candidateEvent":    "candidate",
+			"restartIceEvent":   "restart_ice",
+			"roomEventEnvelope": "kanban",
+			"mediaCodecs":       []string{webrtc.MimeTypeOpus, webrtc.MimeTypeH264, webrtc.MimeTypeVP8},
+		},
+	}
+}
+
+func nativeRosterParticipants() []map[string]string {
+	participants := make([]map[string]string, 0, len(meetingParticipantNames))
+	for _, name := range meetingParticipantNames {
+		name = canonicalParticipantName(name)
+		if name == "" {
+			continue
+		}
+		participants = append(participants, map[string]string{
+			"name":  name,
+			"email": participantEmail(name),
+		})
+	}
+	return participants
 }
 
 func turnCredentialsFromEnv() (string, string) {
