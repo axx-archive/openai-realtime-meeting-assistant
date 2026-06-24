@@ -39,7 +39,8 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(sentEvents, [
             ClientSignalEvent.participant,
             ClientSignalEvent.mediaReady,
-            ClientSignalEvent.answer
+            ClientSignalEvent.answer,
+            ClientSignalEvent.participantMediaState
         ])
 
         let mediaReady = try decodeSentPayload(MediaReadyAssertionPayload.self, from: signaling.sent[1].data)
@@ -49,9 +50,46 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(rtc.preparedAudio, true)
         XCTAssertEqual(rtc.preparedVideo, false)
+        XCTAssertFalse(rtc.localAudioEnabledChanges.contains(false))
+        XCTAssertFalse(rtc.localVideoEnabledChanges.contains(true))
         XCTAssertEqual(rtc.configured?.websocketPath, "/websocket")
         XCTAssertEqual(rtc.handledOffers, ["v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"])
         XCTAssertEqual(rtc.remoteCandidates.count, 1)
+    }
+
+    func testJoinWithCameraAdvertisesVideoAndPublishesCameraState() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=sendrecv\r\n")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+
+        XCTAssertEqual(rtc.preparedAudio, true)
+        XCTAssertEqual(rtc.preparedVideo, true)
+
+        let sent = signaling.sent
+        XCTAssertEqual(sent.map(\.event), [
+            ClientSignalEvent.participant,
+            ClientSignalEvent.mediaReady,
+            ClientSignalEvent.answer,
+            ClientSignalEvent.participantMediaState
+        ])
+        let mediaReady = try decodeSentPayload(MediaReadyAssertionPayload.self, from: sent[1].data)
+        XCTAssertTrue(mediaReady.media.audio)
+        XCTAssertTrue(mediaReady.media.video)
+        let mediaState = try decodeSentPayload(ParticipantMediaState.self, from: sent[3].data)
+        XCTAssertFalse(mediaState.cameraOff)
     }
 
     func testGeneratedLocalCandidateUsesExistingCandidateEvent() async throws {
@@ -85,10 +123,11 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             ClientSignalEvent.participant,
             ClientSignalEvent.mediaReady,
             ClientSignalEvent.answer,
+            ClientSignalEvent.participantMediaState,
             ClientSignalEvent.candidate
         ])
         XCTAssertEqual(
-            try decodeSentPayload(RTCIceCandidatePayload.self, from: sent[3].data),
+            try decodeSentPayload(RTCIceCandidatePayload.self, from: sent[4].data),
             RTCIceCandidatePayload(candidate: "candidate:local", sdpMid: "0", sdpMLineIndex: 0, usernameFragment: "native")
         )
     }
@@ -117,22 +156,26 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
 
     func testParticipantMediaStatePublicationUsesExistingEvent() async throws {
         let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
         let coordinator = NativeRoomSessionCoordinator(
             api: MockNativeRoomAPI(),
             signaling: signaling,
-            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            rtc: rtc,
             clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
         )
 
         await coordinator.setMuted(true)
+        await coordinator.setCameraOff(true)
         try await coordinator.sendParticipantMediaState()
 
         let sent = signaling.sent
         XCTAssertEqual(sent.map(\.event), [ClientSignalEvent.participantMediaState])
         let state = try decodeSentPayload(ParticipantMediaState.self, from: sent[0].data)
         XCTAssertTrue(state.micMuted)
-        XCTAssertFalse(state.cameraOff)
+        XCTAssertTrue(state.cameraOff)
         XCTAssertFalse(state.screenSharing)
+        XCTAssertEqual(rtc.localAudioEnabledChanges, [false])
+        XCTAssertEqual(rtc.localVideoEnabledChanges, [false])
     }
 
     func testAccessDeniedStopsJoinBeforeMediaReady() async throws {
@@ -272,10 +315,13 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var lifecycle: RoomLifecycleState = .signedOut
     private(set) var configured: ClientRTCConfig?
     private var localCandidateHandler: LocalICECandidateHandler?
+    private var remoteVideoTrackHandler: RemoteVideoTrackHandler?
     private(set) var preparedAudio: Bool?
     private(set) var preparedVideo: Bool?
     private(set) var handledOffers: [String] = []
     private(set) var remoteCandidates: [String] = []
+    private(set) var localAudioEnabledChanges: [Bool] = []
+    private(set) var localVideoEnabledChanges: [Bool] = []
     private(set) var didRestartICE = false
     private let answerSDP: String
 
@@ -291,6 +337,10 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         localCandidateHandler = handler
     }
 
+    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
+        remoteVideoTrackHandler = handler
+    }
+
     func emitLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
         await localCandidateHandler?(candidate)
     }
@@ -299,6 +349,14 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         preparedAudio = audio
         preparedVideo = video
         lifecycle = .preparingMedia
+    }
+
+    func setLocalAudioEnabled(_ enabled: Bool) async {
+        localAudioEnabledChanges.append(enabled)
+    }
+
+    func setLocalVideoEnabled(_ enabled: Bool) async {
+        localVideoEnabledChanges.append(enabled)
     }
 
     func handleOffer(_ sdp: String) async throws -> String {

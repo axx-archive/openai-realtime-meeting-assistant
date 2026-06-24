@@ -2,6 +2,7 @@ import Foundation
 import MeetingAssistAPI
 import MeetingAssistCore
 import MeetingAssistRoom
+import MeetingAssistRoomRTC
 
 public protocol NativeRoomConfigLoading: Sendable {
     func nativeConfig() async throws -> NativeClientConfig
@@ -11,7 +12,10 @@ extension MeetingAssistAPIClient: NativeRoomConfigLoading {}
 
 public protocol NativeRoomSessionControlling: Sendable {
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult
+    func joinWithCamera(name: String, password: String) async throws -> NativeRoomJoinResult
+    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async
     func setMuted(_ muted: Bool) async
+    func setCameraOff(_ off: Bool) async
     func sendParticipantMediaState() async throws
     func leave() async
     func currentLifecycle() async -> RoomLifecycleState
@@ -37,7 +41,10 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isBusy = false
     @Published public private(set) var isMuted = false
+    @Published public private(set) var isCameraOff = true
+    @Published public private(set) var hasLocalCamera = false
     @Published public private(set) var joinedParticipant: Participant?
+    @Published public private(set) var remoteVideoTracks: [NativeRemoteVideoTrack] = []
 
     private let configLoaderFactory: NativeRoomConfigLoaderFactory
     private let sessionFactory: NativeRoomSessionFactory
@@ -76,6 +83,10 @@ public final class NativeRoomViewModel: ObservableObject {
         lifecycle == .connected || lifecycle == .reconnecting
     }
 
+    public var canUseCameraControls: Bool {
+        canUseRoomControls && hasLocalCamera
+    }
+
     public func refreshRoster() async {
         guard let baseURL = normalizedBaseURL() else {
             setError("Enter a valid MeetingAssist URL.")
@@ -102,6 +113,14 @@ public final class NativeRoomViewModel: ObservableObject {
     }
 
     public func joinAudioOnly() async {
+        await join(video: false)
+    }
+
+    public func joinWithCamera() async {
+        await join(video: true)
+    }
+
+    private func join(video: Bool) async {
         guard canJoin, let baseURL = normalizedBaseURL() else {
             setError("Enter a valid room URL and name.")
             return
@@ -110,21 +129,35 @@ public final class NativeRoomViewModel: ObservableObject {
         let name = selectedName.trimmingCharacters(in: .whitespacesAndNewlines)
         isBusy = true
         errorMessage = nil
+        remoteVideoTracks = []
         statusText = "Joining"
         lifecycle = .authenticated
 
         let newSession = sessionFactory(baseURL)
+        await newSession.setRemoteVideoTrackHandler { [weak self] track in
+            await self?.appendRemoteVideoTrack(track)
+        }
 
         do {
-            let result = try await newSession.joinAudioOnly(name: name, password: password)
+            let result = if video {
+                try await newSession.joinWithCamera(name: name, password: password)
+            } else {
+                try await newSession.joinAudioOnly(name: name, password: password)
+            }
             session = newSession
             joinedParticipant = result.participant
+            isCameraOff = !video
+            hasLocalCamera = video
             lifecycle = await newSession.currentLifecycle()
             statusText = "Connected as \(result.participant.name)"
         } catch {
+            await newSession.setRemoteVideoTrackHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
+            isCameraOff = true
+            hasLocalCamera = false
+            remoteVideoTracks = []
             lifecycle = .signedOut
             setError(displayMessage(for: error))
         }
@@ -145,6 +178,19 @@ public final class NativeRoomViewModel: ObservableObject {
         }
     }
 
+    public func setCameraOff(_ off: Bool) async {
+        isCameraOff = off
+        guard let session else { return }
+
+        await session.setCameraOff(off)
+        do {
+            try await session.sendParticipantMediaState()
+            statusText = off ? "Camera off" : "Camera on"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+    }
+
     public func leave() async {
         guard let session else {
             lifecycle = .signedOut
@@ -152,10 +198,14 @@ public final class NativeRoomViewModel: ObservableObject {
         }
 
         isBusy = true
+        await session.setRemoteVideoTrackHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
         isMuted = false
+        isCameraOff = true
+        hasLocalCamera = false
+        remoteVideoTracks = []
         lifecycle = .signedOut
         statusText = "Left room"
         isBusy = false
@@ -170,6 +220,11 @@ public final class NativeRoomViewModel: ObservableObject {
     private func setError(_ message: String) {
         errorMessage = message
         statusText = "Needs attention"
+    }
+
+    private func appendRemoteVideoTrack(_ track: NativeRemoteVideoTrack) {
+        guard !remoteVideoTracks.contains(where: { $0.id == track.id }) else { return }
+        remoteVideoTracks.append(track)
     }
 
     private func displayMessage(for error: Error) -> String {
@@ -187,6 +242,26 @@ public final class NativeRoomViewModel: ObservableObject {
                 return "Unexpected WebRTC offer type: \(type)"
             case .unexpectedSignal(let event):
                 return "Unexpected signaling event: \(event)"
+            }
+        }
+        if let rtcError = error as? RoomRTCError {
+            switch rtcError {
+            case .cameraUnavailable:
+                return "No camera is available on this device."
+            case .cameraFormatUnavailable:
+                return "The camera does not expose a supported video format."
+            case .cameraCaptureFailed(let message), .webRTCOperationFailed(let message):
+                return message
+            case .missingSessionDescription:
+                return "The room did not provide a usable media description."
+            case .peerConnectionCreationFailed:
+                return "Could not create a native WebRTC connection."
+            case .peerConnectionNotConfigured:
+                return "The native WebRTC connection was not configured."
+            case .trackPublicationFailed(let kind):
+                return "Could not publish native \(kind)."
+            case .webRTCUnavailable:
+                return "Native WebRTC is unavailable in this build."
             }
         }
         return error.localizedDescription

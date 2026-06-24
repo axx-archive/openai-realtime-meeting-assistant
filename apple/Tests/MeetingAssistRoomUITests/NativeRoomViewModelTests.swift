@@ -1,6 +1,7 @@
 import XCTest
 @testable import MeetingAssistCore
 @testable import MeetingAssistRoom
+@testable import MeetingAssistRoomRTC
 @testable import MeetingAssistRoomUI
 
 @MainActor
@@ -42,6 +43,27 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.lifecycle, .connected)
         XCTAssertEqual(model.joinedParticipant?.name, "Tom")
         XCTAssertEqual(model.statusText, "Connected as Tom")
+        XCTAssertTrue(model.isCameraOff)
+        XCTAssertFalse(model.hasLocalCamera)
+        XCTAssertFalse(model.canUseCameraControls)
+    }
+
+    func testJoinWithCameraConnectsWithVideoEnabled() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+
+        XCTAssertTrue(session.didJoinWithCamera)
+        XCTAssertEqual(model.lifecycle, .connected)
+        XCTAssertFalse(model.isCameraOff)
+        XCTAssertTrue(model.hasLocalCamera)
+        XCTAssertTrue(model.canUseCameraControls)
     }
 
     func testJoinFailureLeavesSessionAndReturnsToSignedOut() async {
@@ -77,6 +99,61 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.statusText, "Muted")
     }
 
+    func testCameraTogglePublishesParticipantMediaState() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setCameraOff(true)
+
+        XCTAssertTrue(session.isCameraOff)
+        XCTAssertEqual(session.mediaStatePublishCount, 1)
+        XCTAssertEqual(model.statusText, "Camera off")
+    }
+
+    func testCameraUnavailableShowsReadableError() async {
+        let session = MockRoomSession(error: RoomRTCError.cameraUnavailable)
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+
+        XCTAssertTrue(session.didLeave)
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertEqual(model.errorMessage, "No camera is available on this device.")
+    }
+
+    func testRemoteVideoTracksAppendDedupeAndClearOnLeave() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["meetingassist-native"]))
+        await session.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["meetingassist-native"]))
+
+        XCTAssertEqual(model.remoteVideoTracks.map(\.id), ["remote-video-1"])
+
+        await model.leave()
+
+        XCTAssertTrue(model.remoteVideoTracks.isEmpty)
+        XCTAssertNil(session.remoteVideoTrackHandler)
+    }
+
+
     func testLeaveResetsJoinedState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
@@ -94,6 +171,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.lifecycle, .signedOut)
         XCTAssertNil(model.joinedParticipant)
         XCTAssertFalse(model.isMuted)
+        XCTAssertFalse(model.hasLocalCamera)
         XCTAssertEqual(model.statusText, "Left room")
     }
 }
@@ -117,10 +195,13 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
 
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
+    private(set) var remoteVideoTrackHandler: RemoteVideoTrackHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
+    private(set) var didJoinWithCamera = false
     private(set) var didLeave = false
     private(set) var isMuted = false
+    private(set) var isCameraOff = true
     private(set) var mediaStatePublishCount = 0
 
     init(error: Error? = nil) {
@@ -131,7 +212,20 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         if let error { throw error }
         joinedName = name
         joinedPassword = password
-        return NativeRoomJoinResult(
+        return joinResult(name: name)
+    }
+
+    func joinWithCamera(name: String, password: String) async throws -> NativeRoomJoinResult {
+        if let error { throw error }
+        joinedName = name
+        joinedPassword = password
+        didJoinWithCamera = true
+        isCameraOff = false
+        return joinResult(name: name)
+    }
+
+    private func joinResult(name: String) -> NativeRoomJoinResult {
+        NativeRoomJoinResult(
             participant: Participant(name: name, email: "\(name.lowercased())@example.com"),
             clientConfig: ClientRTCConfig(
                 rtcConfiguration: [:],
@@ -149,6 +243,18 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func setMuted(_ muted: Bool) async {
         isMuted = muted
+    }
+
+    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
+        remoteVideoTrackHandler = handler
+    }
+
+    func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
+        await remoteVideoTrackHandler?(track)
+    }
+
+    func setCameraOff(_ off: Bool) async {
+        isCameraOff = off
     }
 
     func sendParticipantMediaState() async throws {

@@ -34,9 +34,9 @@ trickled back through the existing top-level `candidate` event.
 
 `MeetingAssistRoomUI` is the first shared native join/control surface. The
 iOS/iPadOS and macOS apps now launch it directly, with room URL entry, roster
-refresh from `/native/config`, participant selection, password entry, audio-only
-join, mute publication, and leave controls backed by
-`NativeRoomSessionCoordinator`.
+refresh from `/native/config`, participant selection, password entry,
+audio-only or camera join, mute/camera publication, remote video track
+rendering, and leave controls backed by `NativeRoomSessionCoordinator`.
 
 ## Xcode Project
 
@@ -64,8 +64,9 @@ xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destina
 ```
 
 This checkpoint has a real native WebRTC binary linked, can create the
-audio-only peer connection locally, and exposes that join path through the
-native app targets. It is not a finished native video client. Browser/native
-audio proof, physical iPhone, iPad, and Mac media tests, and the camera/video
-wave remain release blockers before claiming native call quality or stability
-improvements.
+audio-only peer connection locally, and now includes native camera publishing
+and remote video renderer plumbing in the app targets. It is not a finished
+release-quality native video client. Browser/native media proof, physical
+iPhone, iPad, and Mac media tests, participant-labeled remote video, signing,
+privacy, and release packaging remain blockers before claiming native call
+quality or stability improvements.

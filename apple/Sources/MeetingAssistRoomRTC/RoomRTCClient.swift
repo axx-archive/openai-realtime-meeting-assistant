@@ -1,17 +1,59 @@
 import Foundation
 import MeetingAssistCore
 
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+
 #if canImport(LiveKitWebRTC)
 @preconcurrency import LiveKitWebRTC
 #endif
 
 public typealias LocalICECandidateHandler = @Sendable (RTCIceCandidatePayload) async -> Void
+public typealias RemoteVideoTrackHandler = @Sendable (NativeRemoteVideoTrack) async -> Void
+
+public final class NativeRemoteVideoTrack: Identifiable, @unchecked Sendable {
+    public let id: String
+    public let streamIds: [String]
+
+    #if canImport(LiveKitWebRTC)
+    fileprivate let track: LKRTCVideoTrack?
+
+    public init(id: String, streamIds: [String] = []) {
+        self.id = id
+        self.streamIds = streamIds
+        self.track = nil
+    }
+
+    fileprivate init(track: LKRTCVideoTrack, streamIds: [String]) {
+        self.track = track
+        self.streamIds = streamIds
+        self.id = track.trackId
+    }
+
+    public func addRenderer(_ renderer: LKRTCVideoRenderer) {
+        track?.add(renderer)
+    }
+
+    public func removeRenderer(_ renderer: LKRTCVideoRenderer) {
+        track?.remove(renderer)
+    }
+    #else
+    public init(id: String, streamIds: [String] = []) {
+        self.id = id
+        self.streamIds = streamIds
+    }
+    #endif
+}
 
 public protocol RoomRTCClient: AnyObject, Sendable {
     var lifecycle: RoomLifecycleState { get }
     func configure(_ config: ClientRTCConfig) async throws
     func setLocalCandidateHandler(_ handler: LocalICECandidateHandler?) async
+    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async
     func prepareLocalMedia(audio: Bool, video: Bool) async throws
+    func setLocalAudioEnabled(_ enabled: Bool) async
+    func setLocalVideoEnabled(_ enabled: Bool) async
     func handleOffer(_ sdp: String) async throws -> String
     func addRemoteCandidate(_ json: String) async throws
     func restartICE() async
@@ -26,7 +68,12 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     private var _lifecycle: RoomLifecycleState = .signedOut
     private var peerConnection: LKRTCPeerConnection?
     private var localAudioTrack: LKRTCAudioTrack?
+    private var localVideoTrack: LKRTCVideoTrack?
+    private var localVideoSource: LKRTCVideoSource?
+    private var cameraCapturer: LKRTCCameraVideoCapturer?
     private var localCandidateHandler: LocalICECandidateHandler?
+    private var remoteVideoTrackHandler: RemoteVideoTrackHandler?
+    private var remoteVideoTracks: [String: NativeRemoteVideoTrack] = [:]
 
     public var lifecycle: RoomLifecycleState {
         lock.withLock { _lifecycle }
@@ -42,6 +89,11 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     }
 
     public func configure(_ config: ClientRTCConfig) async throws {
+        let existingCapturer = lock.withLock { cameraCapturer }
+        if let existingCapturer {
+            await stopCapture(existingCapturer)
+        }
+
         let rtcConfiguration = LKRTCConfiguration()
         rtcConfiguration.iceServers = Self.iceServers(from: config.rtcConfiguration)
         rtcConfiguration.sdpSemantics = .unifiedPlan
@@ -66,6 +118,10 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             peerConnection?.close()
             peerConnection = connection
             localAudioTrack = nil
+            localVideoTrack = nil
+            localVideoSource = nil
+            cameraCapturer = nil
+            remoteVideoTracks.removeAll()
             _lifecycle = .authenticated
         }
     }
@@ -76,8 +132,18 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         }
     }
 
+    public func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
+        let tracks = lock.withLock {
+            remoteVideoTrackHandler = handler
+            return Array(remoteVideoTracks.values)
+        }
+        guard let handler else { return }
+        for track in tracks {
+            await handler(track)
+        }
+    }
+
     public func prepareLocalMedia(audio: Bool, video: Bool) async throws {
-        guard !video else { throw RoomRTCError.nativeVideoCapturePending }
         guard let connection = lock.withLock({ peerConnection }) else {
             throw RoomRTCError.peerConnectionNotConfigured
         }
@@ -90,7 +156,23 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             }
         }
 
+        if video {
+            try await prepareLocalVideo(on: connection)
+        }
+
         setLifecycle(.preparingMedia)
+    }
+
+    public func setLocalAudioEnabled(_ enabled: Bool) async {
+        lock.withLock {
+            localAudioTrack?.isEnabled = enabled
+        }
+    }
+
+    public func setLocalVideoEnabled(_ enabled: Bool) async {
+        lock.withLock {
+            localVideoTrack?.isEnabled = enabled
+        }
     }
 
     public func handleOffer(_ sdp: String) async throws -> String {
@@ -128,12 +210,74 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     }
 
     public func leave() async {
+        let capturer = lock.withLock { cameraCapturer }
+        if let capturer {
+            await stopCapture(capturer)
+        }
+
         lock.withLock {
             peerConnection?.close()
             peerConnection = nil
             localAudioTrack = nil
+            localVideoTrack = nil
+            localVideoSource = nil
+            cameraCapturer = nil
             localCandidateHandler = nil
+            remoteVideoTrackHandler = nil
+            remoteVideoTracks.removeAll()
             _lifecycle = .leaving
+        }
+    }
+
+    private func prepareLocalVideo(on connection: LKRTCPeerConnection) async throws {
+        guard let device = Self.preferredCameraDevice() else {
+            throw RoomRTCError.cameraUnavailable
+        }
+        guard let format = Self.preferredFormat(for: device) else {
+            throw RoomRTCError.cameraFormatUnavailable
+        }
+
+        let source = factory.videoSource()
+        source.adaptOutputFormat(toWidth: 1280, height: 720, fps: 30)
+        let capturer = LKRTCCameraVideoCapturer(delegate: source)
+        let track = factory.videoTrack(with: source, trackId: "meetingassist-video-0")
+
+        let fps = Self.preferredFPS(for: format)
+        try await startCapture(capturer, device: device, format: format, fps: fps)
+        guard connection.add(track, streamIds: ["meetingassist-native"]) != nil else {
+            await stopCapture(capturer)
+            throw RoomRTCError.trackPublicationFailed("video")
+        }
+
+        lock.withLock {
+            localVideoSource = source
+            localVideoTrack = track
+            cameraCapturer = capturer
+        }
+    }
+
+    private func startCapture(
+        _ capturer: LKRTCCameraVideoCapturer,
+        device: AVCaptureDevice,
+        format: AVCaptureDevice.Format,
+        fps: Int
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            capturer.startCapture(with: device, format: format, fps: fps) { error in
+                if let error {
+                    continuation.resume(throwing: RoomRTCError.cameraCaptureFailed(error.localizedDescription))
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
+    private func stopCapture(_ capturer: LKRTCCameraVideoCapturer) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            capturer.stopCapture {
+                continuation.resume()
+            }
         }
     }
 
@@ -236,6 +380,35 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         }
         return nil
     }
+
+    private static func preferredCameraDevice() -> AVCaptureDevice? {
+        let devices = LKRTCCameraVideoCapturer.captureDevices()
+        #if os(iOS)
+        return devices.first(where: { $0.position == .front }) ?? devices.first
+        #else
+        return devices.first
+        #endif
+    }
+
+    private static func preferredFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        LKRTCCameraVideoCapturer.supportedFormats(for: device).max { lhs, rhs in
+            let lhsDimensions = CMVideoFormatDescriptionGetDimensions(lhs.formatDescription)
+            let rhsDimensions = CMVideoFormatDescriptionGetDimensions(rhs.formatDescription)
+            let lhsPixels = Int(lhsDimensions.width) * Int(lhsDimensions.height)
+            let rhsPixels = Int(rhsDimensions.width) * Int(rhsDimensions.height)
+            if lhsPixels == rhsPixels {
+                return preferredFPS(for: lhs) < preferredFPS(for: rhs)
+            }
+            return lhsPixels < rhsPixels
+        }
+    }
+
+    private static func preferredFPS(for format: AVCaptureDevice.Format) -> Int {
+        let maxFPS = format.videoSupportedFrameRateRanges
+            .map(\.maxFrameRate)
+            .max() ?? 30
+        return max(1, min(30, Int(maxFPS.rounded(.down))))
+    }
 }
 
 extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
@@ -268,6 +441,27 @@ extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
     public func peerConnection(_ peerConnection: LKRTCPeerConnection, didRemove candidates: [LKRTCIceCandidate]) {}
 
     public func peerConnection(_ peerConnection: LKRTCPeerConnection, didOpen dataChannel: LKRTCDataChannel) {}
+
+    public func peerConnection(
+        _ peerConnection: LKRTCPeerConnection,
+        didAdd receiver: LKRTCRtpReceiver,
+        streams mediaStreams: [LKRTCMediaStream]
+    ) {
+        guard let videoTrack = receiver.track as? LKRTCVideoTrack else { return }
+        let remoteTrack = NativeRemoteVideoTrack(
+            track: videoTrack,
+            streamIds: mediaStreams.map(\.streamId)
+        )
+        let handler = lock.withLock {
+            remoteVideoTracks[remoteTrack.id] = remoteTrack
+            return remoteVideoTrackHandler
+        }
+
+        guard let handler else { return }
+        Task {
+            await handler(remoteTrack)
+        }
+    }
 }
 #else
 public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
@@ -281,9 +475,15 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     public func setLocalCandidateHandler(_ handler: LocalICECandidateHandler?) async {}
 
+    public func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {}
+
     public func prepareLocalMedia(audio: Bool, video: Bool) async throws {
         throw RoomRTCError.webRTCUnavailable
     }
+
+    public func setLocalAudioEnabled(_ enabled: Bool) async {}
+
+    public func setLocalVideoEnabled(_ enabled: Bool) async {}
 
     public func handleOffer(_ sdp: String) async throws -> String {
         throw RoomRTCError.webRTCUnavailable
@@ -304,10 +504,13 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 #endif
 
 public enum RoomRTCError: Error, Equatable {
+    case cameraCaptureFailed(String)
+    case cameraFormatUnavailable
+    case cameraUnavailable
     case missingSessionDescription
-    case nativeVideoCapturePending
     case peerConnectionCreationFailed
     case peerConnectionNotConfigured
+    case trackPublicationFailed(String)
     case webRTCOperationFailed(String)
     case webRTCUnavailable
 }

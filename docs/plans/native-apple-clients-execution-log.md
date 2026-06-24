@@ -329,3 +329,82 @@ What worked:
   removed UIKit actor-isolation warnings from the iOS build.
 - Keeping app roots as thin wrappers made the app targets prove the same shared
   room surface on both Apple platforms.
+
+## Wave 6
+
+Status: `wave6_native_video_plumbing_checkpoint_validated`
+
+Scope:
+- Replace the explicit native-video deferral with local camera capture plumbing
+  in `NativeRoomRTCClient`.
+- Add retained `LKRTCVideoSource`, `LKRTCVideoTrack`, and
+  `LKRTCCameraVideoCapturer` ownership so the capturer/source/track survive
+  beyond setup.
+- Add a `joinWithCamera` room path that sends `media_ready` with
+  `video: true`, publishes participant media state after the answer, and keeps
+  the existing audio-only path intact.
+- Make mute and camera toggles update local WebRTC track enabled state, not only
+  published participant metadata.
+- Add remote video track callbacks from Unified Plan receivers and a shared
+  SwiftUI Metal renderer tile for iOS/iPadOS and macOS.
+- Add app-facing controls for Join video, camera on/off, and a remote video
+  grid.
+- Keep participant-labeled remote tiles, physical device proof, TestFlight,
+  notarization, and release signing out of this checkpoint.
+
+Files changed:
+- `apple/Package.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRemoteVideoTrackView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `swift test` passed 27 tests in `apple/`.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed with the native video renderer in the iOS app target graph.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test`
+  passed with the native video renderer in the macOS app target graph.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local temporary-room smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- The first local smoke attempt cleared the early media/recording/screen-share
+  checkpoints but hung waiting on the external transcription websocket. The
+  passing retry set `MEETING_TRANSCRIPT_LANE_ENABLED=false`,
+  `MEETING_BRAIN_DISABLED=true`, and `MEETING_BOARD_DISABLED=true` for the
+  isolated media smoke while `/readyz` still reported Realtime connected.
+
+Risks / blockers:
+- Unit and simulator tests prove compile-time video plumbing, signaling flags,
+  callback flow, and UI state. They do not prove camera frames reach browser
+  peers or Scout/recording paths.
+- The passing browser smoke was a browser-browser preservation gate with
+  transcription lane disabled after an external transcription websocket timeout;
+  it is not proof of native camera-to-browser media or Scout recording.
+- Remote video tiles currently key by WebRTC track id. `participant_track`
+  mapping is still needed before the UI can reliably label tiles by
+  participant.
+- Real iPhone, iPad, and Mac mixed-room media proof remains mandatory before
+  claiming quality or stability gains.
+- Release packaging remains blocked on app icons, signing team/profiles,
+  monotonic build numbers, app/privacy review metadata, macOS sandbox or
+  Developer ID/notarization decisions, and archive validation.
+
+What worked:
+- Keeping video capture inside `RoomRTCClient` preserved the existing
+  coordinator and UI test seams.
+- Reusing the existing `media_ready`, `participant_media_state`, and
+  `candidate` events kept browser compatibility intact.
+- The remote video wrapper lets tests and UI use a stable, type-safe reference
+  without exposing LiveKit internals everywhere.
+- Adding the Metal renderer as shared SwiftUI kept iOS/iPadOS and macOS on one
+  room surface while still using platform-native views.

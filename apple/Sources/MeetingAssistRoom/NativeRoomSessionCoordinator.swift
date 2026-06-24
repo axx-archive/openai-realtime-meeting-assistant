@@ -105,6 +105,14 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
+        try await join(name: name, password: password, video: false)
+    }
+
+    public func joinWithCamera(name: String, password: String) async throws -> NativeRoomJoinResult {
+        try await join(name: name, password: password, video: true)
+    }
+
+    private func join(name: String, password: String, video: Bool) async throws -> NativeRoomJoinResult {
         resetNegotiationState()
 
         let discovery = try await api.nativeConfig()
@@ -136,15 +144,17 @@ public actor NativeRoomSessionCoordinator {
             await self.sendLocalCandidate(candidate)
         }
 
-        try await rtc.prepareLocalMedia(audio: true, video: false)
+        media.setCameraOff(!video)
+        try await rtc.prepareLocalMedia(audio: true, video: video)
         lifecycle = .preparingMedia
 
         try await sendJSON(
             event: ClientSignalEvent.mediaReady,
-            payload: MediaReadyPayload(client: clientIdentity, media: MediaCapabilities(audio: true, video: false))
+            payload: MediaReadyPayload(client: clientIdentity, media: MediaCapabilities(audio: true, video: video))
         )
 
         let answer = try await waitForOfferAndAnswer()
+        try await sendParticipantMediaState()
         lifecycle = .connected
 
         return NativeRoomJoinResult(
@@ -182,12 +192,18 @@ public actor NativeRoomSessionCoordinator {
         try await sendJSON(event: ClientSignalEvent.participantMediaState, payload: media.participantMediaState)
     }
 
-    public func setMuted(_ muted: Bool) {
-        media.setMuted(muted)
+    public func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
+        await rtc.setRemoteVideoTrackHandler(handler)
     }
 
-    public func setCameraOff(_ off: Bool) {
+    public func setMuted(_ muted: Bool) async {
+        media.setMuted(muted)
+        await rtc.setLocalAudioEnabled(!muted)
+    }
+
+    public func setCameraOff(_ off: Bool) async {
         media.setCameraOff(off)
+        await rtc.setLocalVideoEnabled(!off)
     }
 
     public func setScreenSharing(_ sharing: Bool) {

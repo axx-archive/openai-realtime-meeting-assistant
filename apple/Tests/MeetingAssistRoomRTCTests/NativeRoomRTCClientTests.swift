@@ -19,18 +19,13 @@ final class NativeRoomRTCClientTests: XCTestCase {
         XCTAssertEqual(client.lifecycle, .leaving)
     }
 
-    func testVideoCaptureIsExplicitlyDeferredForNextWave() async throws {
+    func testLocalTrackTogglesAreSafeBeforeMediaPreparation() async {
         let client = NativeRoomRTCClient()
 
-        try await client.configure(testClientConfig)
+        await client.setLocalAudioEnabled(false)
+        await client.setLocalVideoEnabled(false)
 
-        do {
-            try await client.prepareLocalMedia(audio: true, video: true)
-            XCTFail("video capture should remain explicit future-wave work")
-        } catch RoomRTCError.nativeVideoCapturePending {
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
+        XCTAssertEqual(client.lifecycle, .signedOut)
     }
 
     func testHandleOfferRequiresConfiguration() async throws {

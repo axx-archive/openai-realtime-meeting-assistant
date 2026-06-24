@@ -14,6 +14,7 @@ public struct NativeRoomView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 connectionForm
+                remoteVideoGrid
                 controls
                 status
             }
@@ -79,6 +80,14 @@ public struct NativeRoomView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canJoin)
+
+                Button {
+                    Task { await model.joinWithCamera() }
+                } label: {
+                    Label("Join video", systemImage: "video.circle.fill")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canJoin)
             }
         }
         .textFieldStyle(.roundedBorder)
@@ -98,12 +107,35 @@ public struct NativeRoomView: View {
             }
             .disabled(!model.canUseRoomControls)
 
+            Toggle(
+                isOn: Binding(
+                    get: { !model.isCameraOff },
+                    set: { cameraOn in
+                        Task { await model.setCameraOff(!cameraOn) }
+                    }
+                )
+            ) {
+                Label("Camera", systemImage: model.isCameraOff ? "video.slash.fill" : "video.fill")
+            }
+            .disabled(!model.canUseCameraControls)
+
             Button(role: .destructive) {
                 Task { await model.leave() }
             } label: {
                 Label("Leave", systemImage: "phone.down.fill")
             }
             .disabled(!model.canUseRoomControls && model.lifecycle != .connected)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteVideoGrid: some View {
+        if !model.remoteVideoTracks.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                ForEach(model.remoteVideoTracks) { track in
+                    NativeRemoteVideoTrackView(track: track)
+                }
+            }
         }
     }
 

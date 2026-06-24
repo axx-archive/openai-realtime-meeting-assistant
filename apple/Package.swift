@@ -54,6 +54,7 @@ let package = Package(
                 "MeetingAssistCore",
                 "MeetingAssistAPI",
                 "MeetingAssistRoom",
+                "MeetingAssistRoomRTC",
                 "MeetingAssistDesign"
             ]
         ),
