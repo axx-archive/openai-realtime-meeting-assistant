@@ -178,6 +178,79 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.localVideoEnabledChanges, [false])
     }
 
+    func testScreenShareStartStopUsesBrowserCompatibleSignals() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.setScreenSharing(true)
+        try await coordinator.setScreenSharing(false)
+
+        let sent = signaling.sent
+        XCTAssertEqual(sent.map(\.event), [
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.screenShareStarted,
+            ClientSignalEvent.screenShareStopped,
+            ClientSignalEvent.participantMediaState
+        ])
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true, false])
+        XCTAssertTrue(try decodeSentPayload(ParticipantMediaState.self, from: sent[0].data).screenSharing)
+        XCTAssertEqual(sent[1].data, "{}")
+        XCTAssertEqual(sent[2].data, "{}")
+        XCTAssertFalse(try decodeSentPayload(ParticipantMediaState.self, from: sent[3].data).screenSharing)
+    }
+
+    func testScreenShareStartFailureDoesNotAnnounceShare() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            screenShareError: RoomRTCError.screenCapturePermissionDenied
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        do {
+            try await coordinator.setScreenSharing(true)
+            XCTFail("permission denial should fail before announcing screen share")
+        } catch RoomRTCError.screenCapturePermissionDenied {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(signaling.sent.map(\.event), [])
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true])
+    }
+
+    func testIncomingScreenShareEventsUpdateRoomSnapshotMediaState() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        let snapshots = RoomSnapshotCollector()
+        await coordinator.setRoomSnapshotHandler { snapshot in
+            await snapshots.append(snapshot)
+        }
+
+        try await coordinator.handleServerEvent(roomSnapshotEnvelope(participants: ["Tom", "Caitlyn"], recordingEnabled: true))
+        try await coordinator.handleServerEvent(screenShareEnvelope(event: "screen_share_started", name: "Caitlyn"))
+        try await coordinator.handleServerEvent(screenShareEnvelope(event: "screen_share_stopped", name: "Caitlyn"))
+
+        let screenSharingStates = await snapshots.screenSharingStates(for: "Caitlyn")
+        XCTAssertEqual(screenSharingStates, [false, true, false])
+    }
+
     func testRoomAndBoardSnapshotsAreEmittedDuringJoin() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             roomSnapshotEnvelope(participants: ["Tom", "Caitlyn"], recordingEnabled: false),
@@ -662,11 +735,14 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var remoteCandidates: [String] = []
     private(set) var localAudioEnabledChanges: [Bool] = []
     private(set) var localVideoEnabledChanges: [Bool] = []
+    private(set) var screenShareEnabledChanges: [Bool] = []
     private(set) var didRestartICE = false
     private let answerSDP: String
+    private let screenShareError: Error?
 
-    init(answerSDP: String) {
+    init(answerSDP: String, screenShareError: Error? = nil) {
         self.answerSDP = answerSDP
+        self.screenShareError = screenShareError
     }
 
     func configure(_ config: ClientRTCConfig) async throws {
@@ -701,6 +777,13 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func setLocalVideoEnabled(_ enabled: Bool) async {
         localVideoEnabledChanges.append(enabled)
+    }
+
+    func setScreenShareEnabled(_ enabled: Bool) async throws {
+        screenShareEnabledChanges.append(enabled)
+        if let screenShareError, enabled {
+            throw screenShareError
+        }
     }
 
     func handleOffer(_ sdp: String) async throws -> String {
@@ -790,6 +873,10 @@ private actor RoomSnapshotCollector {
 
     func recordingStates() -> [Bool?] {
         values.map { $0.recording?.enabled }
+    }
+
+    func screenSharingStates(for name: String) -> [Bool?] {
+        values.map { $0.mediaStates?[name]?.screenSharing }
     }
 }
 
@@ -921,6 +1008,10 @@ private func roomSnapshotEnvelope(participants: [String], recordingEnabled: Bool
             ])
         ])
     )
+}
+
+private func screenShareEnvelope(event: String, name: String) -> WebSocketEnvelope {
+    kanbanEnvelope(event: event, data: .object(["name": .string(name)]))
 }
 
 private func boardEnvelope(cards: [KanbanCard]) -> WebSocketEnvelope {

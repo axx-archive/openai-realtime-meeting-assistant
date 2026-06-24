@@ -5,6 +5,10 @@ import MeetingAssistCore
 import AVFoundation
 #endif
 
+#if os(macOS)
+import CoreGraphics
+#endif
+
 #if canImport(LiveKitWebRTC)
 @preconcurrency import LiveKitWebRTC
 #endif
@@ -54,6 +58,7 @@ public protocol RoomRTCClient: AnyObject, Sendable {
     func prepareLocalMedia(audio: Bool, video: Bool) async throws
     func setLocalAudioEnabled(_ enabled: Bool) async
     func setLocalVideoEnabled(_ enabled: Bool) async
+    func setScreenShareEnabled(_ enabled: Bool) async throws
     func handleOffer(_ sdp: String) async throws -> String
     func addRemoteCandidate(_ json: String) async throws
     func restartICE() async
@@ -71,6 +76,13 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     private var localVideoTrack: LKRTCVideoTrack?
     private var localVideoSource: LKRTCVideoSource?
     private var cameraCapturer: LKRTCCameraVideoCapturer?
+    private var localVideoSender: LKRTCRtpSender?
+    #if os(macOS)
+    private var screenVideoSource: LKRTCVideoSource?
+    private var screenVideoTrack: LKRTCVideoTrack?
+    private var desktopCapturer: LKRTCDesktopCapturer?
+    private let screenShareTrackSwitch: NativeScreenShareTrackSwitch
+    #endif
     private var localCandidateHandler: LocalICECandidateHandler?
     private var remoteVideoTrackHandler: RemoteVideoTrackHandler?
     private var remoteVideoTracks: [String: NativeRemoteVideoTrack] = [:]
@@ -85,6 +97,9 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             encoderFactory: LKRTCDefaultVideoEncoderFactory(),
             decoderFactory: LKRTCDefaultVideoDecoderFactory()
         )
+        #if os(macOS)
+        self.screenShareTrackSwitch = NativeScreenShareTrackSwitch()
+        #endif
         super.init()
     }
 
@@ -93,6 +108,12 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         if let existingCapturer {
             await stopCapture(existingCapturer)
         }
+        #if os(macOS)
+        let existingDesktopCapturer: LKRTCDesktopCapturer? = lock.withLock { self.desktopCapturer }
+        if let existingDesktopCapturer {
+            await stopDesktopCapture(existingDesktopCapturer)
+        }
+        #endif
 
         let rtcConfiguration = LKRTCConfiguration()
         rtcConfiguration.iceServers = Self.iceServers(from: config.rtcConfiguration)
@@ -121,6 +142,12 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             localVideoTrack = nil
             localVideoSource = nil
             cameraCapturer = nil
+            localVideoSender = nil
+            #if os(macOS)
+            screenVideoSource = nil
+            screenVideoTrack = nil
+            desktopCapturer = nil
+            #endif
             remoteVideoTracks.removeAll()
             _lifecycle = .authenticated
         }
@@ -175,6 +202,20 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         }
     }
 
+    public func setScreenShareEnabled(_ enabled: Bool) async throws {
+        #if os(macOS)
+        if enabled {
+            try await startScreenShare()
+        } else {
+            await stopScreenShare()
+        }
+        #else
+        if enabled {
+            throw RoomRTCError.screenShareUnavailable
+        }
+        #endif
+    }
+
     public func handleOffer(_ sdp: String) async throws -> String {
         guard let connection = lock.withLock({ peerConnection }) else {
             throw RoomRTCError.peerConnectionNotConfigured
@@ -214,6 +255,12 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         if let capturer {
             await stopCapture(capturer)
         }
+        #if os(macOS)
+        let existingDesktopCapturer: LKRTCDesktopCapturer? = lock.withLock { self.desktopCapturer }
+        if let existingDesktopCapturer {
+            await stopDesktopCapture(existingDesktopCapturer)
+        }
+        #endif
 
         lock.withLock {
             peerConnection?.close()
@@ -222,6 +269,12 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             localVideoTrack = nil
             localVideoSource = nil
             cameraCapturer = nil
+            localVideoSender = nil
+            #if os(macOS)
+            screenVideoSource = nil
+            screenVideoTrack = nil
+            desktopCapturer = nil
+            #endif
             localCandidateHandler = nil
             remoteVideoTrackHandler = nil
             remoteVideoTracks.removeAll()
@@ -244,7 +297,7 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
 
         let fps = Self.preferredFPS(for: format)
         try await startCapture(capturer, device: device, format: format, fps: fps)
-        guard connection.add(track, streamIds: ["meetingassist-native"]) != nil else {
+        guard let sender = connection.add(track, streamIds: ["meetingassist-native"]) else {
             await stopCapture(capturer)
             throw RoomRTCError.trackPublicationFailed("video")
         }
@@ -253,8 +306,88 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             localVideoSource = source
             localVideoTrack = track
             cameraCapturer = capturer
+            localVideoSender = sender
         }
     }
+
+    #if os(macOS)
+    private func startScreenShare() async throws {
+        guard let sender = lock.withLock({ localVideoSender }) else {
+            throw RoomRTCError.screenShareUnavailable
+        }
+        if lock.withLock({ desktopCapturer != nil }) {
+            return
+        }
+
+        let bundle = try screenShareTrackSwitch.start(
+            makeScreenTrack: { [factory] () -> NativeDesktopScreenShareBundle in
+                let source = factory.videoSource()
+                source.adaptOutputFormat(toWidth: 1920, height: 1080, fps: 15)
+                let capturer = LKRTCDesktopCapturer(defaultScreen: self, capture: source)
+                let track = factory.videoTrack(with: source, trackId: "meetingassist-screen-0")
+                track.isEnabled = true
+                return NativeDesktopScreenShareBundle(source: source, capturer: capturer, track: track)
+            },
+            installScreenTrack: { bundle in
+                sender.track = bundle.track
+            },
+            startCapture: { bundle in
+                bundle.capturer.startCapture(withFPS: 15)
+            }
+        )
+
+        lock.withLock {
+            screenVideoSource = bundle.source
+            screenVideoTrack = bundle.track
+            desktopCapturer = bundle.capturer
+        }
+    }
+
+    private func stopScreenShare() async {
+        let state = lock.withLock {
+            (
+                sender: localVideoSender,
+                cameraTrack: localVideoTrack,
+                capturer: desktopCapturer
+            )
+        }
+
+        await screenShareTrackSwitch.stop(
+            cameraTrack: state.cameraTrack,
+            capturer: state.capturer,
+            restoreCameraTrack: { cameraTrack in
+                state.sender?.track = cameraTrack
+            },
+            stopCapture: { capturer in
+                await stopDesktopCapture(capturer)
+            }
+        )
+
+        lock.withLock {
+            screenVideoSource = nil
+            screenVideoTrack = nil
+            desktopCapturer = nil
+        }
+    }
+
+    private func stopDesktopCapture(_ capturer: LKRTCDesktopCapturer) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            capturer.stopCapture {
+                continuation.resume()
+            }
+        }
+    }
+
+    fileprivate static func screenCaptureAccessGranted() -> Bool {
+        if #available(macOS 10.15, *) {
+            if CGPreflightScreenCaptureAccess() {
+                return true
+            }
+            return CGRequestScreenCaptureAccess()
+        }
+        return true
+    }
+    #endif
 
     private func startCapture(
         _ capturer: LKRTCCameraVideoCapturer,
@@ -463,6 +596,59 @@ extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
         }
     }
 }
+
+#if os(macOS)
+private struct NativeDesktopScreenShareBundle {
+    let source: LKRTCVideoSource
+    let capturer: LKRTCDesktopCapturer
+    let track: LKRTCVideoTrack
+}
+
+internal struct NativeScreenShareTrackSwitch {
+    private let hasScreenCaptureAccess: () -> Bool
+
+    init(hasScreenCaptureAccess: @escaping () -> Bool = NativeRoomRTCClient.screenCaptureAccessGranted) {
+        self.hasScreenCaptureAccess = hasScreenCaptureAccess
+    }
+
+    @discardableResult
+    func start<ScreenTrack>(
+        makeScreenTrack: () -> ScreenTrack,
+        installScreenTrack: (ScreenTrack) -> Void,
+        startCapture: (ScreenTrack) -> Void
+    ) throws -> ScreenTrack {
+        guard hasScreenCaptureAccess() else {
+            throw RoomRTCError.screenCapturePermissionDenied
+        }
+        let screenTrack = makeScreenTrack()
+        installScreenTrack(screenTrack)
+        startCapture(screenTrack)
+        return screenTrack
+    }
+
+    func stop<CameraTrack, Capturer>(
+        cameraTrack: CameraTrack?,
+        capturer: Capturer?,
+        restoreCameraTrack: (CameraTrack?) -> Void,
+        stopCapture: (Capturer) async -> Void
+    ) async {
+        restoreCameraTrack(cameraTrack)
+        if let capturer {
+            await stopCapture(capturer)
+        }
+    }
+}
+
+extension NativeRoomRTCClient: LKRTCDesktopCapturerDelegate {
+    public func didSourceCaptureStart(_ capturer: LKRTCDesktopCapturer) {}
+
+    public func didSourceCapturePaused(_ capturer: LKRTCDesktopCapturer) {}
+
+    public func didSourceCaptureStop(_ capturer: LKRTCDesktopCapturer) {}
+
+    public func didSourceCaptureError(_ capturer: LKRTCDesktopCapturer) {}
+}
+#endif
 #else
 public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     public private(set) var lifecycle: RoomLifecycleState = .signedOut
@@ -484,6 +670,12 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     public func setLocalAudioEnabled(_ enabled: Bool) async {}
 
     public func setLocalVideoEnabled(_ enabled: Bool) async {}
+
+    public func setScreenShareEnabled(_ enabled: Bool) async throws {
+        if enabled {
+            throw RoomRTCError.webRTCUnavailable
+        }
+    }
 
     public func handleOffer(_ sdp: String) async throws -> String {
         throw RoomRTCError.webRTCUnavailable
@@ -510,6 +702,8 @@ public enum RoomRTCError: Error, Equatable {
     case missingSessionDescription
     case peerConnectionCreationFailed
     case peerConnectionNotConfigured
+    case screenCapturePermissionDenied
+    case screenShareUnavailable
     case trackPublicationFailed(String)
     case webRTCOperationFailed(String)
     case webRTCUnavailable

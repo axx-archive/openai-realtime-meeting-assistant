@@ -328,8 +328,16 @@ public actor NativeRoomSessionCoordinator {
         try await sendJSON(event: ClientSignalEvent.undoDeleteTicket, payload: EmptyPayload())
     }
 
-    public func setScreenSharing(_ sharing: Bool) {
+    public func setScreenSharing(_ sharing: Bool) async throws {
+        try await rtc.setScreenShareEnabled(sharing)
         media.setScreenSharing(sharing)
+        if sharing {
+            try await sendParticipantMediaState()
+            try await sendJSON(event: ClientSignalEvent.screenShareStarted, payload: EmptyPayload())
+        } else {
+            try await sendJSON(event: ClientSignalEvent.screenShareStopped, payload: EmptyPayload())
+            try await sendParticipantMediaState()
+        }
     }
 
     public func selectLayer(_ layer: String) async throws {
@@ -503,6 +511,12 @@ public actor NativeRoomSessionCoordinator {
         case "participant_track":
             let metadata = try participantTrackMetadata(from: event.data)
             await handleParticipantTrack(metadata)
+        case "screen_share_started":
+            let payload = try decodeKanbanData(ScreenSharePayload.self, from: event.data)
+            await updateParticipantScreenSharing(name: payload.name, sharing: true)
+        case "screen_share_stopped":
+            let payload = try decodeKanbanData(ScreenSharePayload.self, from: event.data)
+            await updateParticipantScreenSharing(name: payload.name, sharing: false)
         case "assistant_event":
             let assistantEvent = try decodeKanbanData(AssistantEvent.self, from: event.data)
             await appendAssistantEvent(assistantEvent)
@@ -626,6 +640,23 @@ public actor NativeRoomSessionCoordinator {
         }
     }
 
+    private func updateParticipantScreenSharing(name: String, sharing: Bool) async {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return }
+
+        var snapshot = currentRoomSnapshot ?? RoomSnapshot(participants: [cleanName])
+        if !snapshot.participants.contains(where: { $0.caseInsensitiveCompare(cleanName) == .orderedSame }) {
+            snapshot.participants.append(cleanName)
+        }
+        var mediaStates = snapshot.mediaStates ?? [:]
+        var state = mediaStates[cleanName] ?? ParticipantMediaState()
+        state.screenSharing = sharing
+        mediaStates[cleanName] = state
+        snapshot.mediaStates = mediaStates
+        currentRoomSnapshot = snapshot
+        await roomSnapshotHandler?(snapshot)
+    }
+
     private func handleParticipantTrack(_ metadata: NativeParticipantTrackMetadata) async {
         guard let name = metadata.normalizedName else { return }
         for key in metadata.trackLabelKeys {
@@ -726,6 +757,10 @@ private struct AssistantQueryPayload: Codable, Equatable, Sendable {
 
 private struct ScoutChatPayload: Codable, Equatable, Sendable {
     var text: String
+}
+
+private struct ScreenSharePayload: Codable, Equatable, Sendable {
+    var name: String
 }
 
 private struct BoardCardDeletePayload: Codable, Equatable, Sendable {

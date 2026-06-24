@@ -676,3 +676,87 @@ What worked:
   room-wide events and per-connection private Scout chat.
 - The private Scout composer could share the existing websocket session and
   FIFO server worker without introducing a parallel native chat service.
+
+## Wave 11
+
+Status: `wave11_native_macos_screen_share_validated`
+
+Scope:
+- Reconfirmed runtime keys without exposing values: this repo has no Vercel
+  project marker, and ignored `.env.local` matches the VPS
+  `/opt/meetingassist/deploy/digitalocean/.env` key set and normalized
+  fingerprint.
+- Kept screen sharing on the existing browser/server contract:
+  `participant_media_state`, `screen_share_started`, and
+  `screen_share_stopped`; no server protocol fork was needed.
+- Added native constants for `screen_share_started` and
+  `screen_share_stopped`.
+- Added a macOS WebRTC desktop-capture path using the bundled
+  `LKRTCDesktopCapturer`, replacing the existing outgoing camera video sender
+  with a screen track at 15 fps and restoring the camera track on stop.
+- Preflights/requests macOS Screen Recording permission before replacing the
+  video sender so native does not announce a screen share when capture cannot
+  start.
+- Added native session ordering that matches browser behavior: start publishes
+  screen-sharing media state before `screen_share_started`; stop sends
+  `screen_share_stopped` before publishing the restored media state.
+- Added native handling for incoming `screen_share_started/stopped` Kanban
+  broadcasts so participant badges update even if a participants snapshot is
+  delayed.
+- Added a macOS-only SwiftUI screen-share toggle beside the room media
+  controls, backed by view-model state and readable unavailable-error text.
+- Preserved the audio-only path by rejecting screen share when no outgoing
+  video sender exists.
+
+Files changed:
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistCoreTests/SignalingModelTests.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- Server/browser contract explorer confirmed the browser replaces the outgoing
+  video track, sends `{ event: "screen_share_started", data: "{}" }` and
+  `{ event: "screen_share_stopped", data: "{}" }`, and the server already
+  broadcasts participant snapshots, screen-share events, assistant status, and
+  keyframes without any native-specific server change.
+- Native seam explorer confirmed `ParticipantMediaState.screenSharing` was
+  already modeled, while the missing piece was sender retention/replacement,
+  explicit screen-share events, and view-model/UI controls.
+- `swift test --package-path apple` passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `git diff --check` passed.
+
+Risks / blockers:
+- Automated gates compile and unit-test the macOS native desktop-capture path,
+  including the Screen Recording permission error path, but a real Mac must
+  still grant Screen Recording permission and prove native Mac share is visible
+  to browser/iOS clients.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN
+  validation, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called end-user shippable.
+- Native iOS/iPadOS ReplayKit broadcast sharing is still intentionally deferred;
+  the current first-class native outbound screen share is macOS.
+
+What worked:
+- Matching the browser's existing replace-track model avoided SDP/server
+  protocol churn.
+- Retaining the WebRTC video sender at camera publication time created a small
+  reliable seam for macOS screen-track replacement and camera restoration.
+- Updating screen-share badges from both participant snapshots and explicit
+  screen-share broadcasts reduced ordering sensitivity for late or delayed
+  room-state events.

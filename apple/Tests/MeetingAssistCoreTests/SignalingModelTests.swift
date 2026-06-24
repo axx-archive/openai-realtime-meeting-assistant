@@ -9,4 +9,9 @@ final class SignalingModelTests: XCTestCase {
         XCTAssertEqual(decoded.event, "media_ready")
         XCTAssertEqual(decoded.data, "{}")
     }
+
+    func testScreenShareEventsUseBrowserWireNames() {
+        XCTAssertEqual(ClientSignalEvent.screenShareStarted, "screen_share_started")
+        XCTAssertEqual(ClientSignalEvent.screenShareStopped, "screen_share_stopped")
+    }
 }

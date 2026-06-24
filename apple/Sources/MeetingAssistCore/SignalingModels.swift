@@ -58,6 +58,8 @@ public enum ClientSignalEvent {
     public static let selectLayer = "select_layer"
     public static let requestParticipantTracks = "request_participant_tracks"
     public static let participantMediaState = "participant_media_state"
+    public static let screenShareStarted = "screen_share_started"
+    public static let screenShareStopped = "screen_share_stopped"
     public static let mediaQuality = "media_quality"
     public static let mediaError = "media_error"
     public static let setRecording = "set_recording"

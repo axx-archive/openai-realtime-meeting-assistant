@@ -23,6 +23,7 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
+    func setScreenSharing(_ sharing: Bool) async throws
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
     func askAssistant(_ query: String) async throws
@@ -58,6 +59,7 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var isBusy = false
     @Published public private(set) var isMuted = false
     @Published public private(set) var isCameraOff = true
+    @Published public private(set) var isScreenSharing = false
     @Published public private(set) var hasLocalCamera = false
     @Published public private(set) var joinedParticipant: Participant?
     @Published public private(set) var remoteVideoTracks: [NativeRemoteVideoTrackInfo] = []
@@ -118,6 +120,10 @@ public final class NativeRoomViewModel: ObservableObject {
 
     public var canUseCameraControls: Bool {
         canUseRoomControls && hasLocalCamera
+    }
+
+    public var canUseScreenShareControls: Bool {
+        canUseCameraControls
     }
 
     public var activeBoardCards: [KanbanCard] {
@@ -285,6 +291,22 @@ public final class NativeRoomViewModel: ObservableObject {
         }
     }
 
+    public func setScreenSharing(_ sharing: Bool) async {
+        guard let session else { return }
+
+        statusText = sharing ? "Starting screen share" : "Stopping screen share"
+        do {
+            try await session.setScreenSharing(sharing)
+            isScreenSharing = sharing
+            statusText = sharing ? "Sharing screen" : "Screen share stopped"
+        } catch {
+            if sharing {
+                isScreenSharing = false
+            }
+            setError(displayMessage(for: error))
+        }
+    }
+
     public func setRecordingEnabled(_ enabled: Bool) async {
         guard let session else { return }
         do {
@@ -426,6 +448,7 @@ public final class NativeRoomViewModel: ObservableObject {
         joinedParticipant = nil
         isMuted = false
         isCameraOff = true
+        isScreenSharing = false
         hasLocalCamera = false
         resetRoomState()
         lifecycle = .signedOut
@@ -456,6 +479,7 @@ public final class NativeRoomViewModel: ObservableObject {
         canUndoDelete = false
         isBoardMutating = false
         isArchiving = false
+        isScreenSharing = false
         assistantEvents = []
         memoryEntries = []
         latestArchive = nil
@@ -539,6 +563,10 @@ public final class NativeRoomViewModel: ObservableObject {
                 return "Could not create a native WebRTC connection."
             case .peerConnectionNotConfigured:
                 return "The native WebRTC connection was not configured."
+            case .screenCapturePermissionDenied:
+                return "Allow Screen Recording for MeetingAssist in System Settings, then try sharing again."
+            case .screenShareUnavailable:
+                return "Screen sharing is unavailable in this native build."
             case .trackPublicationFailed(let kind):
                 return "Could not publish native \(kind)."
             case .webRTCUnavailable:

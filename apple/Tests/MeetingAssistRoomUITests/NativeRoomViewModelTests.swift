@@ -116,6 +116,82 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.statusText, "Camera off")
     }
 
+    func testScreenShareToggleDelegatesAndResetsOnLeave() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setScreenSharing(true)
+        await model.setScreenSharing(false)
+        await model.setScreenSharing(true)
+
+        XCTAssertEqual(session.screenSharingChanges, [true, false, true])
+        XCTAssertTrue(model.isScreenSharing)
+        XCTAssertTrue(model.canUseScreenShareControls)
+        XCTAssertEqual(model.statusText, "Sharing screen")
+
+        await model.leave()
+
+        XCTAssertFalse(model.isScreenSharing)
+    }
+
+    func testScreenShareUnavailableShowsReadableError() async {
+        let session = MockRoomSession(screenShareError: RoomRTCError.screenShareUnavailable)
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setScreenSharing(true)
+
+        XCTAssertFalse(model.isScreenSharing)
+        XCTAssertEqual(model.errorMessage, "Screen sharing is unavailable in this native build.")
+    }
+
+    func testScreenRecordingPermissionErrorIsActionable() async {
+        let session = MockRoomSession(screenShareError: RoomRTCError.screenCapturePermissionDenied)
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setScreenSharing(true)
+
+        XCTAssertFalse(model.isScreenSharing)
+        XCTAssertEqual(model.errorMessage, "Allow Screen Recording for MeetingAssist in System Settings, then try sharing again.")
+    }
+
+    func testRemoteScreenShareSnapshotUpdatesParticipantState() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitRoomSnapshot(
+            RoomSnapshot(
+                participants: ["Tom", "Caitlyn"],
+                mediaStates: ["Caitlyn": ParticipantMediaState(micMuted: false, cameraOff: false, screenSharing: true)]
+            )
+        )
+
+        XCTAssertEqual(model.participantMediaStates["Caitlyn"]?.screenSharing, true)
+    }
+
     func testCameraUnavailableShowsReadableError() async {
         let session = MockRoomSession(error: RoomRTCError.cameraUnavailable)
         let model = NativeRoomViewModel(
@@ -425,6 +501,7 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
 
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
+    private let screenShareError: Error?
     private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
     private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private(set) var boardStateHandler: NativeBoardStateHandler?
@@ -439,6 +516,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var didLeave = false
     private(set) var isMuted = false
     private(set) var isCameraOff = true
+    private(set) var screenSharingChanges: [Bool] = []
     private(set) var mediaStatePublishCount = 0
     private(set) var recordingEnabledChanges: [Bool] = []
     private(set) var archiveRequestCount = 0
@@ -450,8 +528,9 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var scoutChatMessages: [String] = []
     private(set) var scoutChatResetCount = 0
 
-    init(error: Error? = nil) {
+    init(error: Error? = nil, screenShareError: Error? = nil) {
         self.error = error
+        self.screenShareError = screenShareError
     }
 
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -533,6 +612,11 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func setCameraOff(_ off: Bool) async {
         isCameraOff = off
+    }
+
+    func setScreenSharing(_ sharing: Bool) async throws {
+        if let screenShareError { throw screenShareError }
+        screenSharingChanges.append(sharing)
     }
 
     func setRecordingEnabled(_ enabled: Bool) async throws {

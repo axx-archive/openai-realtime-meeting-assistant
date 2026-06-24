@@ -141,6 +141,20 @@ public struct NativeRoomView: View {
             }
             .disabled(!model.canUseCameraControls)
 
+            #if os(macOS)
+            Toggle(
+                isOn: Binding(
+                    get: { model.isScreenSharing },
+                    set: { sharing in
+                        Task { await model.setScreenSharing(sharing) }
+                    }
+                )
+            ) {
+                Label("Share screen", systemImage: "display")
+            }
+            .disabled(!model.canUseScreenShareControls)
+            #endif
+
             Button(role: .destructive) {
                 Task { await model.leave() }
             } label: {
