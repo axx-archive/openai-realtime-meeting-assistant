@@ -12595,7 +12595,8 @@
       let lastMediaQualityReportAt = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
-      const audioSettingsSchemaVersion = 5
+      const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`
+      const audioSettingsSchemaVersion = 6
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
       const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
@@ -12686,6 +12687,7 @@
       }
       const cameraContentHint = 'motion'
       const screenShareContentHint = 'detail'
+      const screenShareSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)
       const connectionRecoveryDelayMs = 20000
       const iceRestartThrottleMs = 3500
 
@@ -13023,38 +13025,103 @@
 
       function loadAudioSettings() {
         const defaults = {
-          mode: 'standard',
+          mode: 'voice-focus',
           version: audioSettingsSchemaVersion,
-          profile: { ...defaultVoiceProfile }
+          profile: { ...defaultVoiceProfile },
+          preferredInput: null
         }
+        const keys = audioSettingsStorageKeysForCurrentAccount()
         try {
-          const saved = JSON.parse(window.localStorage?.getItem(audioSettingsStorageKey) || '{}')
-          const savedVersion = Number(saved?.version) || 0
-          const mode = savedVersion >= audioSettingsSchemaVersion && Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode)
-            ? saved.mode
-            : defaults.mode
-          const profile = saved?.profile && typeof saved.profile === 'object'
-            ? {
-                noiseFloor: clampNumber(saved.profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
-                speechFloor: clampNumber(saved.profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
-                trainedAt: String(saved.profile.trainedAt || '')
-              }
-            : { ...defaultVoiceProfile }
-          return { mode, version: audioSettingsSchemaVersion, profile }
+          for (const key of keys) {
+            const saved = parseStoredAudioSettings(window.localStorage?.getItem(key), defaults)
+            if (saved) {
+              return saved
+            }
+          }
+          return defaults
         } catch {
           return defaults
         }
       }
 
+      function parseStoredAudioSettings(raw, defaults) {
+        if (!raw) {
+          return null
+        }
+        const saved = JSON.parse(raw)
+        const savedVersion = Number(saved?.version) || 0
+        const savedMode = Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode) ? saved.mode : ''
+        const mode = savedVersion >= audioSettingsSchemaVersion
+          ? (savedMode || defaults.mode)
+          : (savedMode === 'voice-focus' || savedMode === 'off' ? savedMode : defaults.mode)
+        const profile = saved?.profile && typeof saved.profile === 'object'
+          ? {
+              noiseFloor: clampNumber(saved.profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+              speechFloor: clampNumber(saved.profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+              trainedAt: String(saved.profile.trainedAt || '')
+            }
+          : { ...defaultVoiceProfile }
+        const preferredInput = normalizePreferredAudioInput(saved?.preferredInput)
+        return { mode, version: audioSettingsSchemaVersion, profile, preferredInput }
+      }
+
+      function normalizePreferredAudioInput(input) {
+        if (!input || typeof input !== 'object') {
+          return null
+        }
+        const deviceId = String(input.deviceId || '').trim()
+        const groupId = String(input.groupId || '').trim()
+        const label = normalizedAudioInputLabel(input.label)
+        if (!deviceId && !groupId && !label) {
+          return null
+        }
+        return { deviceId, groupId, label }
+      }
+
+      function normalizedAudioInputLabel(label) {
+        return String(label || '').replace(/\s+/g, ' ').trim().toLowerCase()
+      }
+
+      function audioSettingsStorageKeysForCurrentAccount() {
+        const accountKey = audioSettingsAccountStorageKey()
+        return accountKey ? [accountKey, audioSettingsStorageKey] : [audioSettingsStorageKey]
+      }
+
+      function audioSettingsAccountStorageKey(user = authedUser) {
+        const email = String(user?.email || '').trim().toLowerCase()
+        if (!email) {
+          return ''
+        }
+        return `${audioSettingsAccountStoragePrefix}${email}`
+      }
+
       function saveAudioSettings() {
         try {
-          window.localStorage?.setItem(audioSettingsStorageKey, JSON.stringify({
+          const payload = JSON.stringify({
             ...audioSettings,
             version: audioSettingsSchemaVersion
-          }))
+          })
+          window.localStorage?.setItem(audioSettingsStorageKey, payload)
+          const accountKey = audioSettingsAccountStorageKey()
+          if (accountKey) {
+            window.localStorage?.setItem(accountKey, payload)
+          }
         } catch {
           // Audio still works if local storage is unavailable.
         }
+      }
+
+      function syncAudioSettingsForAccount() {
+        const nextSettings = loadAudioSettings()
+        if (JSON.stringify(nextSettings) === JSON.stringify(audioSettings)) {
+          renderAudioSettings()
+          return
+        }
+        audioSettings = nextSettings
+        renderAudioSettings()
+        applyAudioSettingsToLiveMicrophone({ announce: false }).catch(error => {
+          console.warn('Could not apply account audio settings', error)
+        })
       }
 
       function clampNumber(value, min, max, fallback) {
@@ -13109,13 +13176,18 @@
         })
 
         const inRoom = roomMediaActive()
+        const processorState = voiceFocusStatusText()
         audioSettingsButton.disabled = !inRoom
         audioSettingsButton.classList.toggle('is-voice-focus', voiceFocusEnabled())
-        audioSettingsButton.title = audioModeLabel()
-        audioSettingsButton.setAttribute('aria-label', `Audio settings: ${audioModeLabel()}`)
+        audioSettingsButton.title = processorState
+        audioSettingsButton.setAttribute('aria-label', `Audio settings: ${processorState}`)
+        const audioSettingsLabel = audioSettingsButton.querySelector('.audio-settings-label')
+        if (audioSettingsLabel) {
+          audioSettingsLabel.textContent = voiceFocusEnabled() ? 'voice focus' : audioModeLabel()
+        }
 
         const trainedAt = audioSettings.profile?.trainedAt || ''
-        voiceProfileState.textContent = trainedAt ? `trained ${formatTrainedAt(trainedAt)}` : 'adaptive profile'
+        voiceProfileState.textContent = processorState
         resetVoiceFocusButton.disabled = !trainedAt
         trainVoiceFocusButton.disabled = !inRoom || Boolean(voiceTrainingFrame)
         trainVoiceFocusButton.textContent = voiceTrainingFrame ? 'Training…' : 'Train voice focus'
@@ -13124,6 +13196,37 @@
           voiceTrainingMeter.style.width = '0%'
         }
         updateRoomClock()
+      }
+
+      function voiceFocusStatusText() {
+        if (audioSettings.mode === 'off') {
+          return 'raw mic'
+        }
+        if (!voiceFocusEnabled()) {
+          return 'standard cleanup active'
+        }
+        const trainedAt = audioSettings.profile?.trainedAt || ''
+        const profileText = trainedAt ? ` · trained ${formatTrainedAt(trainedAt)}` : ''
+        switch (voiceFocusProcessorType()) {
+          case 'rnnoise-wasm':
+            return `rnnoise voice focus active${profileText}`
+          case 'rnnoise-loading':
+            return `voice focus loading${profileText}`
+          case 'rnnoise-fallback':
+            return `adaptive voice focus active${profileText}`
+          case 'worklet':
+            return `adaptive voice focus active${profileText}`
+          case 'script':
+            return `script voice focus active${profileText}`
+          case 'webaudio':
+            return `browser voice focus active${profileText}`
+          case 'muted-clone':
+            return 'voice focus training private'
+          case 'browser':
+            return `native voice isolation active${profileText}`
+          default:
+            return `voice focus active${profileText}`
+        }
       }
 
       function formatTrainedAt(value) {
@@ -13350,7 +13453,14 @@
           return
         }
 
-        const selectedDeviceId = micSelect.value || localAudioDeviceId()
+        let selectedDeviceId = micSelect.value || localAudioDeviceId()
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices?.()
+          const audioInputs = (devices || []).filter(device => device.kind === 'audioinput' && device.deviceId)
+          selectedDeviceId = resolvePreferredAudioInputDeviceId(audioInputs) || selectedDeviceId
+        } catch {
+          // The current device remains valid if enumeration is blocked.
+        }
         micSelect.disabled = true
         let audioStream
         let replaced = false
@@ -13365,6 +13475,7 @@
           }
           await replaceLocalAudioTrack(nextTrack)
           replaced = true
+          savePreferredAudioInput(nextTrack, selectedDeviceId)
           await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
           if (options.announce) {
             setLog(`${audioModeLabel()} enabled`)
@@ -13527,6 +13638,7 @@
         } catch {
           authedUser = null
         }
+        syncAudioSettingsForAccount()
         renderLoginMode()
 	        if (canUseArtifactLibrary()) {
 	          loadArtifacts()
@@ -13725,6 +13837,7 @@
           profileAvatarDraft = null
           profileDisplayName.value = authedUser.name || ''
           saveCachedIdentity(authedUser.name)
+          syncAudioSettingsForAccount()
           renderLoginMode()
           renderAccountSettings()
           syncAccountChrome()
@@ -13795,6 +13908,7 @@
           }
           authedUser = result.data
           roomPasswordInput.value = ''
+          syncAudioSettingsForAccount()
           renderLoginMode()
           saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
@@ -17211,7 +17325,7 @@
           return
         }
 
-        const isScreenShare = track.kind === 'video' && track.contentHint === screenShareContentHint
+        const isScreenShare = track.kind === 'video' && (track === activeScreenShareTrack() || track.contentHint === screenShareContentHint)
         const encoding = parameters.encodings[0]
         const maxBitrate = outboundMaxBitrateForTrack(track, limits, isScreenShare)
         if (Number.isFinite(maxBitrate)) {
@@ -17430,7 +17544,7 @@
         }
 
         leaveButton.disabled = false
-        screenShareButton.disabled = false
+        screenShareButton.disabled = !screenShareSupported
         recordMeetingButton.disabled = false
         archiveMeetingButton.disabled = false
         canEditBoard = true
@@ -17842,6 +17956,10 @@
             console.warn('Could not constrain camera sender after lag detection', error)
           }
         }
+        if (isMobileDevice) {
+          console.info('Reduced mobile sender bandwidth without restarting camera capture', reason)
+          return
+        }
         try {
           await sender.track.applyConstraints?.({
             width: { max: limits.constrainedMaxWidth },
@@ -17876,6 +17994,7 @@
 
           currentAudioTrack?.stop()
           setLog(`using ${preferredAudioTrack.label || 'computer microphone'}`)
+          savePreferredAudioInput(preferredAudioTrack, preferredAudioTrack.getSettings?.().deviceId || preferredAudioDeviceId)
           return new MediaStream([...stream.getVideoTracks(), preferredAudioTrack])
         } catch (error) {
           console.warn('Could not switch away from continuity microphone', error)
@@ -17896,6 +18015,7 @@
         try {
           const preferredStream = await getAudioStreamWithFallback(preferredAudioDeviceId)
           currentAudioTrack?.stop()
+          savePreferredAudioInput(preferredStream.getAudioTracks()[0], preferredAudioDeviceId)
           return preferredStream
         } catch (error) {
           console.warn('Could not switch microphone for voice island', error)
@@ -18777,6 +18897,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateBoardDockControls()
       }
 
+      async function replaceLocalVideoTrack(nextTrack) {
+        if (!localStream || !nextTrack) {
+          return false
+        }
+        const previousTrack = localVideoTrack()
+        const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
+        setTrackContentHint(nextTrack, cameraContentHint)
+        nextTrack.enabled = !isCameraOff
+        if (sender) {
+          await sender.replaceTrack(nextTrack)
+          await configureOutboundSender(sender, nextTrack)
+        }
+        if (previousTrack && previousTrack !== nextTrack) {
+          localStream.removeTrack(previousTrack)
+        }
+        if (!localStream.getVideoTracks().includes(nextTrack)) {
+          localStream.addTrack(nextTrack)
+        }
+        localVideo.srcObject = localStream
+        wireLocalVideoTrack(nextTrack)
+        if (previousTrack && previousTrack !== nextTrack) {
+          previousTrack.stop()
+        }
+        isCameraOff = false
+        updateCameraButton()
+        publishParticipantMediaState()
+        updateHearthParticipants()
+        return true
+      }
+
       function updateCameraButton() {
         if (!toggleCameraButton) {
           return
@@ -18857,6 +19007,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           await replaceLocalAudioTrack(nextTrack)
           replaced = true
+          savePreferredAudioInput(nextTrack, selectedDeviceId)
           await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
           setLog(`using ${nextTrack.label || 'selected microphone'}`)
         } catch (error) {
@@ -18994,6 +19145,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return ''
         }
 
+        const savedDeviceId = resolvePreferredAudioInputDeviceId(audioInputs)
+        if (savedDeviceId && savedDeviceId !== currentDeviceId) {
+          return savedDeviceId
+        }
+        if (savedDeviceId && savedDeviceId === currentDeviceId) {
+          savePreferredAudioInput(currentAudioTrack, currentDeviceId)
+          return ''
+        }
+
         const currentDevice = audioInputs.find(device => device.deviceId === currentDeviceId) || { label: currentLabel }
         if (!isContinuityAudioInput(currentDevice) && !isContinuityAudioInput({ label: currentLabel })) {
           return ''
@@ -19005,6 +19165,44 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         return audioInputs.find(device => !isContinuityAudioInput(device))?.deviceId || ''
+      }
+
+      function resolvePreferredAudioInputDeviceId(devices) {
+        const saved = normalizePreferredAudioInput(audioSettings.preferredInput)
+        if (!saved) {
+          return ''
+        }
+        if (saved.deviceId && devices.some(device => device.deviceId === saved.deviceId)) {
+          return saved.deviceId
+        }
+        if (saved.groupId) {
+          const groupMatch = devices.find(device => device.groupId && device.groupId === saved.groupId)
+          if (groupMatch) {
+            return groupMatch.deviceId
+          }
+        }
+        if (saved.label) {
+          const labelMatch = devices.find(device => normalizedAudioInputLabel(device.label) === saved.label)
+          if (labelMatch) {
+            return labelMatch.deviceId
+          }
+        }
+        return ''
+      }
+
+      function savePreferredAudioInput(track, fallbackDeviceId = '') {
+        const settings = track?.getSettings?.() || {}
+        const label = track?.label || ''
+        const preferredInput = normalizePreferredAudioInput({
+          deviceId: settings.deviceId || fallbackDeviceId,
+          groupId: settings.groupId || '',
+          label
+        })
+        if (!preferredInput) {
+          return
+        }
+        audioSettings = { ...audioSettings, preferredInput }
+        saveAudioSettings()
       }
 
       function isContinuityAudioInput(device) {
@@ -21863,10 +22061,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setLog(message)
           return
         }
+        if (!screenShareSupported) {
+          const message = 'screen sharing is not available in this browser.'
+          addAssistantMessage({ kind: 'error', text: message })
+          setLog(message)
+          return
+        }
 
         try {
           screenShareStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
+            video: {
+              frameRate: { ideal: outboundMediaLimits.video.screenShareMaxFramerate, max: outboundMediaLimits.video.screenShareMaxFramerate }
+            },
             audio: false
           })
           const screenTrack = screenShareStream.getVideoTracks()[0]
@@ -21914,17 +22120,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const streamToStop = screenShareStream
         screenShareStream = undefined
-        const cameraTrack = localVideoTrack()
         const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
+        let cameraRestored = false
         try {
-          if (cameraTrack && sender) {
-            setTrackContentHint(cameraTrack, cameraContentHint)
-            await sender.replaceTrack(cameraTrack)
-            await configureOutboundSender(sender, cameraTrack)
-          }
+          cameraRestored = await restoreCameraAfterScreenShare(sender)
         } catch (error) {
           reportClientMediaError('screen_share_restore_camera', error)
-          setLog(error.message || String(error))
+          setLog('screen sharing stopped; camera needs restart')
+          isCameraOff = true
+          updateCameraButton()
+          publishParticipantMediaState()
         } finally {
           streamToStop?.getTracks().forEach(track => track.stop())
         }
@@ -21939,6 +22144,63 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderScreenStage()
         updateBoardDockControls()
         publishParticipantMediaState()
+        if (!cameraRestored) {
+          repairRemoteMediaHealth('screen share stopped without camera restore')
+        }
+      }
+
+      async function restoreCameraAfterScreenShare(sender) {
+        const cameraTrack = localVideoTrack()
+        if (sender && liveTrack(cameraTrack)) {
+          try {
+            setTrackContentHint(cameraTrack, cameraContentHint)
+            await sender.replaceTrack(cameraTrack)
+            await configureOutboundSender(sender, cameraTrack)
+            return true
+          } catch (error) {
+            try {
+              await sender.replaceTrack(null)
+            } catch {
+              // The original restore error is more useful.
+            }
+            throw error
+          }
+        }
+        if (sender) {
+          await sender.replaceTrack(null)
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          return false
+        }
+        let recoveredStream
+        let replaced = false
+        try {
+          recoveredStream = await getUserMediaFromAttempts([
+            {
+              label: 'camera restore',
+              constraints: { video: mediaConstraints.video, audio: false }
+            },
+            {
+              label: 'relaxed camera restore',
+              constraints: { video: relaxedVideoConstraints, audio: false }
+            },
+            {
+              label: 'browser default camera restore',
+              constraints: { video: true, audio: false }
+            }
+          ])
+          const recoveredTrack = recoveredStream.getVideoTracks()[0]
+          if (!recoveredTrack) {
+            throw new Error('camera did not provide video after screen sharing')
+          }
+          await replaceLocalVideoTrack(recoveredTrack)
+          replaced = true
+          return true
+        } finally {
+          if (!replaced) {
+            recoveredStream?.getTracks().forEach(track => track.stop())
+          }
+        }
       }
 
       function renderScreenStage() {

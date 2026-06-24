@@ -31,6 +31,8 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function startMediaQualityMonitor(sessionPeer)",
 		"function constrainCameraForLag(reason)",
 		"const sustainedLag = mediaQualityLagSamples >= 2",
+		"if (isMobileDevice) {",
+		"Reduced mobile sender bandwidth without restarting camera capture",
 		"screenShareMaxBitrate: 2500000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",
@@ -626,6 +628,7 @@ func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
 		"return liveTrack(track) ? track : null",
 		"function outboundVideoTrack()",
 		"return activeScreenShareTrack() || localVideoTrack()",
+		"const screenShareSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)",
 		"function outboundTrackForKind(kind)",
 		"return kind === 'video' ? outboundVideoTrack() : localAudioTrack()",
 		"const track = outboundTrackForKind(section.kind)",
@@ -641,7 +644,10 @@ func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
 		"scheduleScreenShareMediaRepair('screen share started'",
 		"scheduleScreenShareMediaRepair('screen share stopped'",
 		"screen_share_restore_camera",
-		"finally {",
+		"async function restoreCameraAfterScreenShare(sender)",
+		"await sender.replaceTrack(null)",
+		"camera did not provide video after screen sharing",
+		"function replaceLocalVideoTrack(nextTrack)",
 		"ignoreCameraOff: true",
 		"!target.ignoreCameraOff && participantMediaState(target.name).cameraOff",
 	} {
@@ -843,10 +849,21 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 		"function minimalAudioConstraintsForDevice(deviceId)",
 		"Media capture recovered with ${attempt.label}",
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
-		"const audioSettingsSchemaVersion = 5",
-		"mode: 'standard'",
-		"window.localStorage?.getItem(audioSettingsStorageKey)",
+		"const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`",
+		"const audioSettingsSchemaVersion = 6",
+		"mode: 'voice-focus'",
+		"savedMode === 'voice-focus' || savedMode === 'off' ? savedMode : defaults.mode",
+		"preferredInput: null",
+		"function audioSettingsAccountStorageKey(user = authedUser)",
+		"function syncAudioSettingsForAccount()",
+		"window.localStorage?.getItem(key)",
 		"version: audioSettingsSchemaVersion",
+		"function resolvePreferredAudioInputDeviceId(devices)",
+		"function savePreferredAudioInput(track, fallbackDeviceId = '')",
+		"savePreferredAudioInput(nextTrack, selectedDeviceId)",
+		"function voiceFocusStatusText()",
+		"rnnoise voice focus active",
+		"native voice isolation active",
 		"let voiceTrainingPrivacyMute = false",
 		"function effectiveMicMuted()",
 		"return Boolean(isMicMuted || voiceTrainingPrivacyMute)",
@@ -1093,6 +1110,31 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing browser media quality diagnostics %q", want)
+		}
+	}
+}
+
+func TestRoomRelayPreservesRTPHeaderExtensions(t *testing.T) {
+	rawMain, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+
+	main := string(rawMain)
+	for _, unwanted := range []string{
+		"packet.Extension = false",
+		"packet.Extensions = nil",
+	} {
+		if strings.Contains(main, unwanted) {
+			t.Fatalf("room relay must not strip mobile video RTP metadata with %q", unwanted)
+		}
+	}
+	for _, want := range []string{
+		"Preserve RTP header extensions from the publisher",
+		"trackLocal.WriteRTP(packet)",
+	} {
+		if !strings.Contains(main, want) {
+			t.Fatalf("main.go missing RTP extension preservation marker %q", want)
 		}
 	}
 }

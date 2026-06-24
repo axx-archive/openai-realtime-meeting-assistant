@@ -3,7 +3,8 @@
 //      srcObject reattach while the feed is alive (Safari's requestVideoFrameCallback
 //      is unreliable for live MediaStreams, so currentTime progress is the signal).
 //   2. Mobile orientation swap — capture must not pin a landscape aspect ratio on
-//      phones, and retuneLocalCameraCapture must not restart the camera on mobile.
+//      phones, and neither room-size retuning nor lag recovery may restart the
+//      camera on mobile.
 //   3. Screen share for all    — remoteScreenShareStream must resolve the sharer's
 //      stream even when the name casing/format skews, with a live-track fallback.
 //
@@ -127,6 +128,61 @@ console.log('[2b] retuneLocalCameraCapture - no camera restart on mobile')
   const desktopFn = run(false, ()=>track, ()=>true, {video:{maxFramerate:30}}, false, ()=>false, ()=>false, {ideal:16/9})
   await desktopFn()
   ok('desktop: applyConstraints still called (behavior preserved)', applied === 1)
+}
+
+console.log('[2c] constrainCameraForLag - sender-only throttling on mobile')
+{
+  const src = extractFn('constrainCameraForLag')
+  function build(isMobileDevice) {
+    const track = {
+      kind: 'video',
+      applied: 0,
+      applyConstraints: async constraints => {
+        track.applied++
+        track.lastConstraints = constraints
+      }
+    }
+    const sender = {
+      track,
+      tuned: 0,
+      getParameters: () => ({ encodings: [{}] }),
+      setParameters: async parameters => {
+        sender.tuned++
+        sender.lastParameters = parameters
+      }
+    }
+    const make = new Function('isMobileDevice', 'sender', 'track', `
+      let mediaQualityConstrained = false
+      const pc = { getSenders: () => [sender] }
+      const outboundMediaLimits = {
+        video: {
+          constrainedMaxBitrate: 250000,
+          constrainedMaxFramerate: 12,
+          constrainedMaxWidth: 480,
+          constrainedMaxHeight: 270
+        }
+      }
+      const widescreenAspectRatio = { ideal: 16 / 9 }
+      function localVideoTrack() { return track }
+      ${src}
+      return {
+        run: constrainCameraForLag,
+        state: () => ({ applied: track.applied, tuned: sender.tuned, mediaQualityConstrained, constraints: track.lastConstraints, parameters: sender.lastParameters })
+      }
+    `)
+    return make(isMobileDevice, sender, track)
+  }
+
+  const mobile = build(true)
+  await mobile.run('mobile packet loss')
+  const mobileState = mobile.state()
+  ok('mobile lag tunes sender bitrate/framerate', mobileState.tuned === 1 && mobileState.parameters.encodings[0].maxBitrate === 250000)
+  ok('mobile lag does NOT apply capture constraints or aspect ratio', mobileState.applied === 0 && !mobileState.constraints)
+
+  const desktop = build(false)
+  await desktop.run('desktop packet loss')
+  const desktopState = desktop.state()
+  ok('desktop lag still applies capture constraints', desktopState.applied === 1 && desktopState.constraints.aspectRatio?.ideal === 16 / 9)
 }
 
 // ---------- ISSUE 3: screen share ----------

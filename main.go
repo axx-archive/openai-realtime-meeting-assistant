@@ -2128,9 +2128,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 			}
 
-			packet.Extension = false
-			packet.Extensions = nil
-
+			// Preserve RTP header extensions from the publisher. Mobile browsers
+			// can carry video orientation/rotation and congestion metadata there;
+			// stripping them makes phone video look unstable to subscribers.
 			if err = trackLocal.WriteRTP(packet); err != nil {
 				return
 			}

@@ -739,10 +739,10 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
         failures.push(`${prefix} remote health is not using native audio playback`)
       }
     }
-    if (snapshot.audioMode !== 'standard') {
+    if (snapshot.audioMode !== 'voice-focus') {
       failures.push(`${prefix} audio mode is ${snapshot.audioMode}`)
     }
-    if (snapshot.voiceProcessor !== 'disabled') {
+    if (!snapshot.voiceProcessor || snapshot.voiceProcessor === 'disabled') {
       failures.push(`${prefix} voice processor is ${snapshot.voiceProcessor}`)
     }
     if (options.requireSpeakerView) {
