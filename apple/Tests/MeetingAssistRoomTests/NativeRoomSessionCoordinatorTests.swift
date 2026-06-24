@@ -49,8 +49,48 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(rtc.preparedAudio, true)
         XCTAssertEqual(rtc.preparedVideo, false)
+        XCTAssertEqual(rtc.configured?.websocketPath, "/websocket")
         XCTAssertEqual(rtc.handledOffers, ["v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"])
         XCTAssertEqual(rtc.remoteCandidates.count, 1)
+    }
+
+    func testGeneratedLocalCandidateUsesExistingCandidateEvent() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        await rtc.emitLocalCandidate(
+            RTCIceCandidatePayload(
+                candidate: "candidate:local",
+                sdpMid: "0",
+                sdpMLineIndex: 0,
+                usernameFragment: "native"
+            )
+        )
+
+        let sent = signaling.sent
+        XCTAssertEqual(sent.map(\.event), [
+            ClientSignalEvent.participant,
+            ClientSignalEvent.mediaReady,
+            ClientSignalEvent.answer,
+            ClientSignalEvent.candidate
+        ])
+        XCTAssertEqual(
+            try decodeSentPayload(RTCIceCandidatePayload.self, from: sent[3].data),
+            RTCIceCandidatePayload(candidate: "candidate:local", sdpMid: "0", sdpMLineIndex: 0, usernameFragment: "native")
+        )
     }
 
     func testRestartIceAndLayerSelectionUseExistingEvents() async throws {
@@ -116,6 +156,7 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         }
 
         XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.participant])
+        XCTAssertNil(rtc.configured)
         XCTAssertNil(rtc.preparedAudio)
     }
 
@@ -229,6 +270,8 @@ private final class MockSignalingTransport: NativeRoomSignalingTransport, @unche
 
 private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var lifecycle: RoomLifecycleState = .signedOut
+    private(set) var configured: ClientRTCConfig?
+    private var localCandidateHandler: LocalICECandidateHandler?
     private(set) var preparedAudio: Bool?
     private(set) var preparedVideo: Bool?
     private(set) var handledOffers: [String] = []
@@ -238,6 +281,18 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     init(answerSDP: String) {
         self.answerSDP = answerSDP
+    }
+
+    func configure(_ config: ClientRTCConfig) async throws {
+        configured = config
+    }
+
+    func setLocalCandidateHandler(_ handler: LocalICECandidateHandler?) async {
+        localCandidateHandler = handler
+    }
+
+    func emitLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
+        await localCandidateHandler?(candidate)
     }
 
     func prepareLocalMedia(audio: Bool, video: Bool) async throws {

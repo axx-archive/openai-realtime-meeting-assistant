@@ -20,12 +20,20 @@ let package = Package(
         .library(name: "MeetingAssistScout", targets: ["MeetingAssistScout"]),
         .library(name: "MeetingAssistDesign", targets: ["MeetingAssistDesign"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/livekit/webrtc-xcframework.git", exact: "144.7559.10")
+    ],
     targets: [
         .target(name: "MeetingAssistCore"),
         .target(name: "MeetingAssistAPI", dependencies: ["MeetingAssistCore"]),
         .target(name: "MeetingAssistSignaling", dependencies: ["MeetingAssistCore"]),
-        .target(name: "MeetingAssistRoomRTC", dependencies: ["MeetingAssistCore"]),
+        .target(
+            name: "MeetingAssistRoomRTC",
+            dependencies: [
+                "MeetingAssistCore",
+                .product(name: "LiveKitWebRTC", package: "webrtc-xcframework")
+            ]
+        ),
         .target(name: "MeetingAssistMedia", dependencies: ["MeetingAssistCore", "MeetingAssistRoomRTC"]),
         .target(
             name: "MeetingAssistRoom",
@@ -70,6 +78,7 @@ let package = Package(
         .testTarget(name: "MeetingAssistCoreTests", dependencies: ["MeetingAssistCore"]),
         .testTarget(name: "MeetingAssistAPITests", dependencies: ["MeetingAssistAPI", "MeetingAssistCore"]),
         .testTarget(name: "MeetingAssistSignalingTests", dependencies: ["MeetingAssistSignaling", "MeetingAssistCore"]),
+        .testTarget(name: "MeetingAssistRoomRTCTests", dependencies: ["MeetingAssistRoomRTC", "MeetingAssistCore"]),
         .testTarget(
             name: "MeetingAssistRoomTests",
             dependencies: [

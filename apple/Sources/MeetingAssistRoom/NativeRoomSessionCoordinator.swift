@@ -130,6 +130,12 @@ public actor NativeRoomSessionCoordinator {
         participant = Participant(name: admittedName, email: signedInParticipant.email)
         lifecycle = .admitted
 
+        try await rtc.configure(config)
+        await rtc.setLocalCandidateHandler { [weak self] candidate in
+            guard let self else { return }
+            await self.sendLocalCandidate(candidate)
+        }
+
         try await rtc.prepareLocalMedia(audio: true, video: false)
         lifecycle = .preparingMedia
 
@@ -199,6 +205,7 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func leave() async {
+        await rtc.setLocalCandidateHandler(nil)
         await rtc.leave()
         await signaling.close()
         resetNegotiationState()
@@ -307,6 +314,14 @@ public actor NativeRoomSessionCoordinator {
     private func sendJSON<T: Encodable>(event: String, payload: T) async throws {
         let data = try encoder.encode(payload)
         try await signaling.send(event: event, data: String(decoding: data, as: UTF8.self))
+    }
+
+    private func sendLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
+        do {
+            try await sendJSON(event: ClientSignalEvent.candidate, payload: candidate)
+        } catch {
+            // Candidate trickle is best-effort; ICE restart can recover if one send fails.
+        }
     }
 
     private func decode<T: Decodable>(_ type: T.Type, fromJSONString string: String) throws -> T {

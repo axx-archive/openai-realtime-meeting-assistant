@@ -202,3 +202,69 @@ What worked:
   readiness from leaking into a reused native room coordinator.
 - Keeping `RoomRTCClient` protocol-first lets the next WebRTC wave focus on
   media implementation without rewriting auth/signaling orchestration.
+
+## Wave 4
+
+Status: `wave4_native_webrtc_audio_adapter_checkpoint_validated`
+
+Scope:
+- Add a pinned SwiftPM WebRTC binary dependency through
+  `livekit/webrtc-xcframework` version `144.7559.10` and commit the resolver
+  lockfile.
+- Replace the placeholder `NativeRoomRTCClient` with a LiveKitWebRTC-backed
+  audio-only peer connection implementation.
+- Apply `/client-config.rtcConfiguration` before media setup, including STUN
+  and TURN server parsing.
+- Create a native audio track, set the server offer as the remote description,
+  create/set a local answer, add remote ICE candidates, restart ICE, and close
+  cleanly on leave.
+- Add local ICE candidate callbacks from the RTC adapter into the existing
+  websocket `candidate` event.
+- Preserve the Pion/browser candidate JSON shape by keeping `candidate`,
+  `sdpMid`, `sdpMLineIndex`, and optional `usernameFragment`.
+- Keep camera/video capture explicitly deferred to the next wave.
+
+Files changed:
+- `apple/Package.swift`
+- `apple/Package.resolved`
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `swift build` passed after switching from `stasel/WebRTC` to LiveKitWebRTC.
+- `swift test` passed 17 tests in `apple/`, including four direct
+  `NativeRoomRTCClientTests` that instantiate the WebRTC binary and prepare
+  audio-only local media.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test` passed and processed LiveKitWebRTC into the iOS app target graph.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test` passed and processed LiveKitWebRTC into the macOS app target graph.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local temporary-room smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+
+Risks / blockers:
+- This proves the native WebRTC binary imports, creates a peer connection, and
+  prepares audio locally. It does not yet prove native mic packets reach a
+  browser peer, Scout, or the server recording path.
+- Physical iPhone/iPad/Mac media proof, TURN validation, audible remote audio,
+  and browser/native mixed-room smokes remain required before claiming quality
+  or stability improvements.
+- Camera/video capture and remote video rendering are still next-wave work.
+
+What worked:
+- Trying the stasel M149 package first reproduced the macOS header-import
+  blocker directly, making the package decision evidence-based.
+- Keeping the WebRTC dependency behind `RoomRTCClient` let the room coordinator
+  stay stable while the binary implementation changed.
+- The server-contract subagent caught `usernameFragment` and the JSON-string
+  websocket envelope risk before the Swift candidate model shipped.
+- Moving RTC configuration until after websocket admission prevents denied room
+  joins from leaving a native peer connection alive.

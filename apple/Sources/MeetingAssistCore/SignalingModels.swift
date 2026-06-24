@@ -33,12 +33,19 @@ public struct RTCSessionDescriptionPayload: Codable, Equatable, Sendable {
 public struct RTCIceCandidatePayload: Codable, Equatable, Sendable {
     public var candidate: String
     public var sdpMid: String?
-    public var sdpMLineIndex: UInt16?
+    public var sdpMLineIndex: Int?
+    public var usernameFragment: String?
 
-    public init(candidate: String, sdpMid: String? = nil, sdpMLineIndex: UInt16? = nil) {
+    public init(
+        candidate: String,
+        sdpMid: String? = nil,
+        sdpMLineIndex: Int? = nil,
+        usernameFragment: String? = nil
+    ) {
         self.candidate = candidate
         self.sdpMid = sdpMid
         self.sdpMLineIndex = sdpMLineIndex
+        self.usernameFragment = usernameFragment
     }
 }
 

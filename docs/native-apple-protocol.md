@@ -69,6 +69,13 @@ Native clients use the same server-offer flow as the browser:
    an answer, set the local description, and send top-level `answer`.
 8. Exchange top-level `candidate` messages.
 
+Signaling payloads are the same JSON-string payloads used by the browser:
+
+```json
+{"event":"answer","data":"{\"type\":\"answer\",\"sdp\":\"...\"}"}
+{"event":"candidate","data":"{\"candidate\":\"candidate:...\",\"sdpMid\":\"0\",\"sdpMLineIndex\":0,\"usernameFragment\":\"...\"}"}
+```
+
 Native clients should send `restart_ice` when local ICE recovery requires a
 server-side ICE restart. Subscriber video quality is selected with
 `select_layer` and one of the supported layer strings.
