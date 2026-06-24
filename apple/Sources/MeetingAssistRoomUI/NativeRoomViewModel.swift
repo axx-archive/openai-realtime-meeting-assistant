@@ -16,10 +16,15 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setRemoteVideoTrackHandler(_ handler: NativeRemoteVideoTrackInfoHandler?) async
     func setRoomSnapshotHandler(_ handler: NativeRoomSnapshotHandler?) async
     func setBoardStateHandler(_ handler: NativeBoardStateHandler?) async
+    func setUndoAvailabilityHandler(_ handler: NativeUndoAvailabilityHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
+    func createBoardCard(_ payload: BoardCardMutationPayload) async throws
+    func updateBoardCard(id: String, payload: BoardCardMutationPayload) async throws
+    func deleteBoardCard(id: String) async throws
+    func undoDeletedBoardCard() async throws
     func sendParticipantMediaState() async throws
     func leave() async
     func currentLifecycle() async -> RoomLifecycleState
@@ -56,7 +61,11 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var roomRecording = RoomRecordingState()
     @Published public private(set) var boardCards: [KanbanCard] = []
     @Published public private(set) var boardUpdatedAt: String?
+    @Published public private(set) var canUndoDelete = false
+    @Published public private(set) var isBoardMutating = false
     @Published public private(set) var isArchiving = false
+
+    public let boardStatuses = ["Backlog", "In Progress", "Blocked", "Done"]
 
     private let configLoaderFactory: NativeRoomConfigLoaderFactory
     private let sessionFactory: NativeRoomSessionFactory
@@ -164,6 +173,9 @@ public final class NativeRoomViewModel: ObservableObject {
         await newSession.setBoardStateHandler { [weak self] board in
             await self?.applyBoardState(board)
         }
+        await newSession.setUndoAvailabilityHandler { [weak self] canUndo in
+            await self?.applyUndoAvailability(canUndo)
+        }
 
         do {
             let result = if video {
@@ -181,6 +193,7 @@ public final class NativeRoomViewModel: ObservableObject {
             await newSession.setRemoteVideoTrackHandler(nil)
             await newSession.setRoomSnapshotHandler(nil)
             await newSession.setBoardStateHandler(nil)
+            await newSession.setUndoAvailabilityHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
@@ -245,6 +258,62 @@ public final class NativeRoomViewModel: ObservableObject {
         isArchiving = false
     }
 
+    public func createBoardCard(_ payload: BoardCardMutationPayload) async {
+        guard let session else { return }
+
+        isBoardMutating = true
+        statusText = "Creating card"
+        do {
+            try await session.createBoardCard(payload)
+            statusText = "Card create requested"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isBoardMutating = false
+    }
+
+    public func updateBoardCard(id: String, payload: BoardCardMutationPayload) async {
+        guard let session else { return }
+
+        isBoardMutating = true
+        statusText = "Updating card"
+        do {
+            try await session.updateBoardCard(id: id, payload: payload)
+            statusText = "Card update requested"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isBoardMutating = false
+    }
+
+    public func deleteBoardCard(id: String) async {
+        guard let session else { return }
+
+        isBoardMutating = true
+        statusText = "Deleting card"
+        do {
+            try await session.deleteBoardCard(id: id)
+            statusText = "Card delete requested"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isBoardMutating = false
+    }
+
+    public func undoDeletedBoardCard() async {
+        guard let session else { return }
+
+        isBoardMutating = true
+        statusText = "Restoring card"
+        do {
+            try await session.undoDeletedBoardCard()
+            statusText = "Card restore requested"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isBoardMutating = false
+    }
+
     public func leave() async {
         guard let session else {
             lifecycle = .signedOut
@@ -255,6 +324,7 @@ public final class NativeRoomViewModel: ObservableObject {
         await session.setRemoteVideoTrackHandler(nil)
         await session.setRoomSnapshotHandler(nil)
         await session.setBoardStateHandler(nil)
+        await session.setUndoAvailabilityHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
@@ -287,6 +357,8 @@ public final class NativeRoomViewModel: ObservableObject {
         roomRecording = RoomRecordingState()
         boardCards = []
         boardUpdatedAt = nil
+        canUndoDelete = false
+        isBoardMutating = false
         isArchiving = false
     }
 
@@ -303,6 +375,10 @@ public final class NativeRoomViewModel: ObservableObject {
     private func applyBoardState(_ state: BoardState) {
         boardCards = state.cards
         boardUpdatedAt = state.updatedAt
+    }
+
+    private func applyUndoAvailability(_ canUndo: Bool) {
+        canUndoDelete = canUndo
     }
 
     private func upsertRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) {

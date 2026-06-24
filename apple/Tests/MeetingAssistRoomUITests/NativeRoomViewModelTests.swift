@@ -231,6 +231,21 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.activeBoardCards.map(\.title), ["Native board"])
     }
 
+    func testUndoAvailabilityUpdatesNativeState() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinAudioOnly()
+        await session.emitUndoAvailability(true)
+
+        XCTAssertTrue(model.canUndoDelete)
+    }
+
     func testRecordingAndArchiveControlsDelegateToSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
@@ -249,6 +264,40 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.roomRecording.enabled, false)
         XCTAssertEqual(model.statusText, "Archive requested")
         XCTAssertFalse(model.isArchiving)
+    }
+
+    func testBoardMutationsDelegateToSession() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+        let payload = BoardCardMutationPayload(
+            title: "Native card",
+            status: "In Progress",
+            owner: "Caitlyn",
+            tags: ["native"],
+            notes: "Ship native board edit",
+            dueDate: "2026-07-01",
+            keyDates: [KanbanKeyDate(label: "due", date: "2026-07-01")]
+        )
+
+        await model.joinAudioOnly()
+        await model.createBoardCard(payload)
+        await model.updateBoardCard(id: "card-1", payload: payload)
+        await model.deleteBoardCard(id: "card-1")
+        await session.emitUndoAvailability(true)
+        await model.undoDeletedBoardCard()
+
+        XCTAssertEqual(session.createdBoardCards, [payload])
+        XCTAssertEqual(session.updatedBoardCards.map(\.id), ["card-1"])
+        XCTAssertEqual(session.updatedBoardCards.map(\.payload), [payload])
+        XCTAssertEqual(session.deletedBoardCardIDs, ["card-1"])
+        XCTAssertEqual(session.undoDeleteRequestCount, 1)
+        XCTAssertEqual(model.statusText, "Card restore requested")
+        XCTAssertFalse(model.isBoardMutating)
     }
 
     func testLeaveResetsJoinedState() async {
@@ -271,6 +320,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertFalse(model.hasLocalCamera)
         XCTAssertTrue(model.roomParticipants.isEmpty)
         XCTAssertTrue(model.boardCards.isEmpty)
+        XCTAssertFalse(model.canUndoDelete)
         XCTAssertEqual(model.statusText, "Left room")
     }
 }
@@ -297,6 +347,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
     private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private(set) var boardStateHandler: NativeBoardStateHandler?
+    private(set) var undoAvailabilityHandler: NativeUndoAvailabilityHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -306,6 +357,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var mediaStatePublishCount = 0
     private(set) var recordingEnabledChanges: [Bool] = []
     private(set) var archiveRequestCount = 0
+    private(set) var createdBoardCards: [BoardCardMutationPayload] = []
+    private(set) var updatedBoardCards: [(id: String, payload: BoardCardMutationPayload)] = []
+    private(set) var deletedBoardCardIDs: [String] = []
+    private(set) var undoDeleteRequestCount = 0
 
     init(error: Error? = nil) {
         self.error = error
@@ -360,6 +415,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         boardStateHandler = handler
     }
 
+    func setUndoAvailabilityHandler(_ handler: NativeUndoAvailabilityHandler?) async {
+        undoAvailabilityHandler = handler
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -380,12 +439,32 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         archiveRequestCount += 1
     }
 
+    func createBoardCard(_ payload: BoardCardMutationPayload) async throws {
+        createdBoardCards.append(payload)
+    }
+
+    func updateBoardCard(id: String, payload: BoardCardMutationPayload) async throws {
+        updatedBoardCards.append((id: id, payload: payload))
+    }
+
+    func deleteBoardCard(id: String) async throws {
+        deletedBoardCardIDs.append(id)
+    }
+
+    func undoDeletedBoardCard() async throws {
+        undoDeleteRequestCount += 1
+    }
+
     func emitRoomSnapshot(_ snapshot: RoomSnapshot) async {
         await roomSnapshotHandler?(snapshot)
     }
 
     func emitBoardState(_ state: BoardState) async {
         await boardStateHandler?(state)
+    }
+
+    func emitUndoAvailability(_ canUndo: Bool) async {
+        await undoAvailabilityHandler?(canUndo)
     }
 
     func sendParticipantMediaState() async throws {

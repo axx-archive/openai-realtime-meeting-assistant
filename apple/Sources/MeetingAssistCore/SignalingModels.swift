@@ -62,6 +62,10 @@ public enum ClientSignalEvent {
     public static let mediaError = "media_error"
     public static let setRecording = "set_recording"
     public static let archiveMeeting = "archive_meeting"
+    public static let manualCreateTicket = "manual_create_ticket"
+    public static let manualUpdateTicket = "manual_update_ticket"
+    public static let manualDeleteTicket = "manual_delete_ticket"
+    public static let undoDeleteTicket = "undo_delete_ticket"
 }
 
 public enum ServerSignalEvent {

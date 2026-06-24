@@ -1,9 +1,11 @@
 import MeetingAssistCore
 import MeetingAssistDesign
+import Foundation
 import SwiftUI
 
 public struct NativeRoomView: View {
     @StateObject private var model: NativeRoomViewModel
+    @State private var boardEditorDraft: BoardCardEditorDraft?
 
     public init(model: NativeRoomViewModel = NativeRoomViewModel()) {
         _model = StateObject(wrappedValue: model)
@@ -30,6 +32,15 @@ public struct NativeRoomView: View {
         .task {
             guard model.roster.isEmpty else { return }
             await model.refreshRoster()
+        }
+        .sheet(item: $boardEditorDraft) { draft in
+            BoardCardEditor(
+                draft: draft,
+                statuses: model.boardStatuses,
+                canDelete: draft.cardID != nil,
+                onSave: saveBoardDraft,
+                onDelete: deleteBoardDraft
+            )
         }
     }
 
@@ -178,6 +189,21 @@ public struct NativeRoomView: View {
                 Text("\(model.boardCards.count) cards")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button {
+                    boardEditorDraft = BoardCardEditorDraft(owner: model.joinedParticipant?.name)
+                } label: {
+                    Label("New", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls || model.isBoardMutating)
+
+                Button {
+                    Task { await model.undoDeletedBoardCard() }
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls || !model.canUndoDelete || model.isBoardMutating)
             }
 
             if model.activeBoardCards.isEmpty {
@@ -259,33 +285,189 @@ public struct NativeRoomView: View {
     }
 
     private func boardRow(_ card: KanbanCard) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(card.status)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let owner = card.owner, !owner.isEmpty {
-                    Text(owner)
-                        .font(.caption2)
+        Button {
+            boardEditorDraft = BoardCardEditorDraft(card: card)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(card.status)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let owner = card.owner, !owner.isEmpty {
+                        Text(owner)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(card.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(2)
+                if let dueDate = card.dueDate, !dueDate.isEmpty {
+                    Label(dueDate, systemImage: "calendar")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            Text(card.title)
-                .font(.callout.weight(.semibold))
-                .lineLimit(2)
-            if let dueDate = card.dueDate, !dueDate.isEmpty {
-                Label(dueDate, systemImage: "calendar")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
+        .buttonStyle(.plain)
+        .disabled(!model.canUseRoomControls || model.isBoardMutating)
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private func saveBoardDraft(_ draft: BoardCardEditorDraft) {
+        let payload = draft.payload
+        boardEditorDraft = nil
+        Task {
+            if let cardID = draft.cardID {
+                await model.updateBoardCard(id: cardID, payload: payload)
+            } else {
+                await model.createBoardCard(payload)
+            }
+        }
+    }
+
+    private func deleteBoardDraft(_ draft: BoardCardEditorDraft) {
+        guard let cardID = draft.cardID else { return }
+        boardEditorDraft = nil
+        Task { await model.deleteBoardCard(id: cardID) }
+    }
+
     private func monogram(for name: String) -> String {
         String(name.trimmingCharacters(in: .whitespacesAndNewlines).first ?? "B").uppercased()
+    }
+}
+
+private struct BoardCardEditorDraft: Identifiable {
+    let id: String
+    var cardID: String?
+    var title: String
+    var status: String
+    var owner: String
+    var tagsInput: String
+    var notes: String
+    var dueDate: String
+
+    init(owner: String?) {
+        id = UUID().uuidString
+        cardID = nil
+        title = ""
+        status = "Backlog"
+        self.owner = owner ?? ""
+        tagsInput = ""
+        notes = ""
+        dueDate = ""
+    }
+
+    init(card: KanbanCard) {
+        id = card.id
+        cardID = card.id
+        title = card.title
+        status = card.status
+        owner = card.owner ?? ""
+        tagsInput = (card.tags ?? []).joined(separator: ", ")
+        notes = card.notes ?? ""
+        dueDate = card.dueDate ?? ""
+    }
+
+    var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var payload: BoardCardMutationPayload {
+        let trimmedDueDate = dueDate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyDates = trimmedDueDate.isEmpty ? [] : [KanbanKeyDate(label: "due", date: trimmedDueDate)]
+        return BoardCardMutationPayload(
+            cardID: cardID,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            status: status,
+            owner: owner.trimmingCharacters(in: .whitespacesAndNewlines),
+            tags: tagsInput
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty },
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            dueDate: trimmedDueDate,
+            keyDates: keyDates
+        )
+    }
+}
+
+private struct BoardCardEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: BoardCardEditorDraft
+    @State private var confirmsDelete = false
+
+    var statuses: [String]
+    var canDelete: Bool
+    var onSave: (BoardCardEditorDraft) -> Void
+    var onDelete: (BoardCardEditorDraft) -> Void
+
+    init(
+        draft: BoardCardEditorDraft,
+        statuses: [String],
+        canDelete: Bool,
+        onSave: @escaping (BoardCardEditorDraft) -> Void,
+        onDelete: @escaping (BoardCardEditorDraft) -> Void
+    ) {
+        _draft = State(initialValue: draft)
+        self.statuses = statuses
+        self.canDelete = canDelete
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Title", text: $draft.title)
+                    Picker("Status", selection: $draft.status) {
+                        ForEach(statuses, id: \.self) { status in
+                            Text(status).tag(status)
+                        }
+                    }
+                    TextField("Owner", text: $draft.owner)
+                    TextField("Tags", text: $draft.tagsInput)
+                    TextField("Due date", text: $draft.dueDate)
+                    TextField("Notes", text: $draft.notes, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+
+                Section {
+                    Button {
+                        onSave(draft)
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                    }
+                    .disabled(!draft.canSave)
+
+                    if canDelete {
+                        Button(role: .destructive) {
+                            confirmsDelete = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+
+                    Button(role: .cancel) {
+                        dismiss()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                }
+            }
+            .navigationTitle(draft.cardID == nil ? "New card" : "Edit card")
+        }
+        .frame(minWidth: 360, minHeight: 420)
+        .confirmationDialog("Delete card?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                onDelete(draft)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }

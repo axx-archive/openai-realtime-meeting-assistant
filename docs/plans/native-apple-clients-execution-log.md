@@ -534,3 +534,68 @@ What worked:
   without forcing an HTTP board bootstrap.
 - Reusing `set_recording` and `archive_meeting` preserved browser/native room
   parity while keeping OpenAI and TURN secrets server-side.
+
+## Wave 9
+
+Status: `wave9_native_board_edit_events_validated`
+
+Scope:
+- Keep the existing websocket room contract as the native board-edit path; no
+  HTTP board API or server protocol fork.
+- Add native constants and Codable payloads for browser-parity board commands:
+  `manual_create_ticket`, `manual_update_ticket`, `manual_delete_ticket`, and
+  `undo_delete_ticket`.
+- Send full-card create/update payloads with the server-required `card_id`
+  coding key for updates and deletes.
+- Decode and replay the existing `undo_available` event into native state so
+  native undo stays synchronized with browser clients.
+- Add native board create/edit/delete/undo controls to the shared SwiftUI room
+  surface, with local sheet draft state and delete confirmation.
+- Preserve server snapshots as authoritative; native sends mutation requests and
+  waits for the next `board` snapshot rather than mutating `boardCards`
+  optimistically.
+
+Files changed:
+- `apple/Sources/MeetingAssistCore/RoomModels.swift`
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- Server contract explorer confirmed board edit event names, payload shapes,
+  validation rules, and snapshot authority against `main.go`, `kanban.go`,
+  `index.html`, and `docs/native-apple-protocol.md`.
+- Native seam explorer confirmed the smallest safe Swift seam: coordinator
+  send methods, view-model actions, local editor draft state, and
+  `undo_available` handling.
+- `swift test` passed 39 tests in `apple/`.
+- `go test ./...` passed.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+
+Risks / blockers:
+- Native board edits are request/response-by-snapshot, matching the browser.
+  Native does not yet decode `assistant_event` error messages, `memory`,
+  `memory_*`, or `meeting_archived` payloads into first-class UI.
+- The board editor covers the source-of-truth card fields used by browser
+  manual edits, but it is intentionally compact. Rich board column management,
+  card detail comments, Scout prompts, and archive-download rendering remain
+  future native slices.
+- Physical device mixed-room media proof, TURN validation, TestFlight upload,
+  and macOS signing/notarization remain release gates.
+
+What worked:
+- Treating server board snapshots as authoritative avoided local/native-only
+  state divergence.
+- Using a local SwiftUI draft sheet preserved in-progress edits when live board
+  snapshots arrive.
+- Matching the browser's exact board event names and payload keys kept native
+  edits on the existing compatibility surface.

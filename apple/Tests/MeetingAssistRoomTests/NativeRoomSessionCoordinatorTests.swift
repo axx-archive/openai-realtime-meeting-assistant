@@ -233,6 +233,73 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(signaling.sent[1].data, "{}")
     }
 
+    func testBoardMutationsUseExistingRoomEvents() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        let payload = BoardCardMutationPayload(
+            title: "Native edit",
+            status: "In Progress",
+            owner: "Caitlyn",
+            tags: ["native", "board"],
+            notes: "Full-card update",
+            dueDate: "2026-07-01",
+            keyDates: [KanbanKeyDate(label: "due", date: "2026-07-01")]
+        )
+
+        try await coordinator.createBoardCard(payload)
+        try await coordinator.updateBoardCard(id: "card-1", payload: payload)
+        try await coordinator.deleteBoardCard(id: "card-1")
+        try await coordinator.undoDeletedBoardCard()
+
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.manualCreateTicket,
+            ClientSignalEvent.manualUpdateTicket,
+            ClientSignalEvent.manualDeleteTicket,
+            ClientSignalEvent.undoDeleteTicket
+        ])
+        let created = try decodeSentPayload(BoardCardMutationPayload.self, from: signaling.sent[0].data)
+        XCTAssertNil(created.cardID)
+        XCTAssertEqual(created.title, "Native edit")
+        XCTAssertEqual(created.status, "In Progress")
+        XCTAssertEqual(created.tags, ["native", "board"])
+        XCTAssertEqual(created.keyDates, [KanbanKeyDate(label: "due", date: "2026-07-01")])
+
+        let updated = try decodeSentPayload(BoardCardMutationPayload.self, from: signaling.sent[1].data)
+        XCTAssertEqual(updated.cardID, "card-1")
+        XCTAssertEqual(updated.title, "Native edit")
+        XCTAssertEqual(try decodeSentPayload(BoardDeleteAssertionPayload.self, from: signaling.sent[2].data).cardID, "card-1")
+        XCTAssertEqual(signaling.sent[3].data, "{}")
+    }
+
+    func testUndoAvailabilityIsEmittedAndReplayed() async throws {
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: MockSignalingTransport(envelopes: []),
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let first = UndoAvailabilityCollector()
+        let replay = UndoAvailabilityCollector()
+        await coordinator.setUndoAvailabilityHandler { canUndo in
+            await first.append(canUndo)
+        }
+
+        try await coordinator.handleServerEvent(kanbanEnvelope(event: "undo_available", data: .bool(true)))
+        await coordinator.setUndoAvailabilityHandler { canUndo in
+            await replay.append(canUndo)
+        }
+
+        let firstValues = await first.values()
+        let replayValues = await replay.values()
+        XCTAssertEqual(firstValues, [true])
+        XCTAssertEqual(replayValues, [true])
+    }
+
     func testParticipantTrackMetadataLabelsLaterRemoteVideoTrack() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             accessGrantedEnvelope(name: "Tom"),
@@ -519,6 +586,14 @@ private struct RecordingAssertionPayload: Decodable {
     var enabled: Bool
 }
 
+private struct BoardDeleteAssertionPayload: Decodable {
+    var cardID: String
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+    }
+}
+
 private enum MockError: Error {
     case noEnvelope
 }
@@ -560,6 +635,18 @@ private actor BoardStateCollector {
 
     func titles() -> [[String]] {
         values.map { $0.cards.map(\.title) }
+    }
+}
+
+private actor UndoAvailabilityCollector {
+    private var storedValues: [Bool] = []
+
+    func append(_ value: Bool) {
+        storedValues.append(value)
+    }
+
+    func values() -> [Bool] {
+        storedValues
     }
 }
 

@@ -118,6 +118,61 @@ public struct BoardState: Codable, Equatable, Sendable {
     }
 }
 
+public struct BoardCardMutationPayload: Codable, Equatable, Sendable {
+    public var cardID: String?
+    public var title: String
+    public var status: String
+    public var owner: String?
+    public var tags: [String]
+    public var notes: String
+    public var dueDate: String
+    public var keyDates: [KanbanKeyDate]
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+        case title
+        case status
+        case owner
+        case tags
+        case notes
+        case dueDate
+        case keyDates
+    }
+
+    public init(
+        cardID: String? = nil,
+        title: String,
+        status: String,
+        owner: String? = nil,
+        tags: [String] = [],
+        notes: String = "",
+        dueDate: String = "",
+        keyDates: [KanbanKeyDate] = []
+    ) {
+        self.cardID = cardID
+        self.title = title
+        self.status = status
+        self.owner = owner
+        self.tags = tags
+        self.notes = notes
+        self.dueDate = dueDate
+        self.keyDates = keyDates
+    }
+
+    public init(card: KanbanCard) {
+        self.init(
+            cardID: card.id,
+            title: card.title,
+            status: card.status,
+            owner: card.owner,
+            tags: card.tags ?? [],
+            notes: card.notes ?? "",
+            dueDate: card.dueDate ?? "",
+            keyDates: card.keyDates ?? []
+        )
+    }
+}
+
 public struct AssistantEvent: Codable, Equatable, Sendable {
     public var kind: String?
     public var text: String?

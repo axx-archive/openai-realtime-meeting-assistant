@@ -76,6 +76,7 @@ public struct NativeRoomJoinResult: Equatable, Sendable {
 
 public typealias NativeRoomSnapshotHandler = @Sendable (RoomSnapshot) async -> Void
 public typealias NativeBoardStateHandler = @Sendable (BoardState) async -> Void
+public typealias NativeUndoAvailabilityHandler = @Sendable (Bool) async -> Void
 
 public actor NativeRoomSessionCoordinator {
     public private(set) var lifecycle: RoomLifecycleState = .signedOut
@@ -101,8 +102,10 @@ public actor NativeRoomSessionCoordinator {
     private var lastParticipantTrackRequest: Date?
     private var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private var boardStateHandler: NativeBoardStateHandler?
+    private var undoAvailabilityHandler: NativeUndoAvailabilityHandler?
     private var currentRoomSnapshot: RoomSnapshot?
     private var currentBoardState: BoardState?
+    private var currentCanUndoDelete: Bool?
 
     public init(
         api: NativeRoomAPIProviding,
@@ -235,6 +238,12 @@ public actor NativeRoomSessionCoordinator {
         await handler(currentBoardState)
     }
 
+    public func setUndoAvailabilityHandler(_ handler: NativeUndoAvailabilityHandler?) async {
+        undoAvailabilityHandler = handler
+        guard let handler, let currentCanUndoDelete else { return }
+        await handler(currentCanUndoDelete)
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -251,6 +260,24 @@ public actor NativeRoomSessionCoordinator {
 
     public func archiveMeeting() async throws {
         try await sendJSON(event: ClientSignalEvent.archiveMeeting, payload: EmptyPayload())
+    }
+
+    public func createBoardCard(_ payload: BoardCardMutationPayload) async throws {
+        try await sendJSON(event: ClientSignalEvent.manualCreateTicket, payload: payload)
+    }
+
+    public func updateBoardCard(id: String, payload: BoardCardMutationPayload) async throws {
+        var updatePayload = payload
+        updatePayload.cardID = id
+        try await sendJSON(event: ClientSignalEvent.manualUpdateTicket, payload: updatePayload)
+    }
+
+    public func deleteBoardCard(id: String) async throws {
+        try await sendJSON(event: ClientSignalEvent.manualDeleteTicket, payload: BoardCardDeletePayload(cardID: id))
+    }
+
+    public func undoDeletedBoardCard() async throws {
+        try await sendJSON(event: ClientSignalEvent.undoDeleteTicket, payload: EmptyPayload())
     }
 
     public func setScreenSharing(_ sharing: Bool) {
@@ -355,6 +382,7 @@ public actor NativeRoomSessionCoordinator {
     private func resetRoomState() {
         currentRoomSnapshot = nil
         currentBoardState = nil
+        currentCanUndoDelete = nil
     }
 
     private func kanbanEvent(from envelope: WebSocketEnvelope) throws -> RoomEvent<JSONValue> {
@@ -416,6 +444,10 @@ public actor NativeRoomSessionCoordinator {
             let state = try decodeKanbanData(BoardState.self, from: event.data)
             currentBoardState = state
             await boardStateHandler?(state)
+        case "undo_available":
+            let canUndo = try decodeKanbanData(Bool.self, from: event.data)
+            currentCanUndoDelete = canUndo
+            await undoAvailabilityHandler?(canUndo)
         case "participant_track":
             let metadata = try participantTrackMetadata(from: event.data)
             await handleParticipantTrack(metadata)
@@ -548,6 +580,14 @@ private struct ParticipantTrackRequestPayload: Codable, Equatable, Sendable {
 
 private struct SetRecordingPayload: Codable, Equatable, Sendable {
     var enabled: Bool
+}
+
+private struct BoardCardDeletePayload: Codable, Equatable, Sendable {
+    var cardID: String
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+    }
 }
 
 private struct EmptyPayload: Codable, Equatable, Sendable {}
