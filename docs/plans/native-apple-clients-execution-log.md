@@ -599,3 +599,80 @@ What worked:
   snapshots arrive.
 - Matching the browser's exact board event names and payload keys kept native
   edits on the existing compatibility surface.
+
+## Wave 10
+
+Status: `wave10_native_scout_memory_archive_validated`
+
+Scope:
+- Confirmed the needed runtime keys are already present locally from the VPS:
+  `.env.local` and `deploy/digitalocean/.env` both match
+  `/opt/meetingassist/deploy/digitalocean/.env`; no Vercel project config was
+  present in this repo, no secret values were printed, and no env files were
+  changed or staged.
+- Added native Codable models for room Scout events, meeting memory entries,
+  memory answers, meeting archive results, archive email status, and private
+  Scout chat events.
+- Decoded and replayed the existing `assistant_event`, `memory`,
+  `memory_transcript`, `memory_brain`, `memory_board_update`, `memory_answer`,
+  `meeting_archived`, and `scout_chat` Kanban websocket events.
+- Added native outbound commands for `assistant_query`, `scout_chat`, and
+  `scout_chat_reset`, preserving the browser/server wire contract.
+- Published room Scout feed, memory timeline, archive download link, and
+  private Scout chat state through `NativeRoomViewModel`.
+- Added compact SwiftUI controls for room Scout questions, private Scout chat,
+  private thread reset, memory snippets, and archive download on the shared
+  iOS/iPadOS/macOS room surface.
+- Resolved server-issued relative archive URLs against the configured room base
+  URL before presenting native `Link` controls.
+- Preserved and rendered private Scout `thread` and `actions` payloads so
+  longer research/design/grill/workflow thread launches do not collapse to
+  anonymous plain text.
+
+Files changed:
+- `apple/Sources/MeetingAssistCore/RoomModels.swift`
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- Server contract explorer confirmed Scout, memory, archive, and private
+  `scout_chat` event names and payloads against `main.go`, `kanban.go`,
+  `memory.go`, `scout_chat.go`, and `index.html`.
+- Native seam explorer confirmed the smallest safe Swift seam: replayable
+  coordinator handlers, view-model publication, compact SwiftUI rows, and
+  avoiding a new REST/native protocol.
+- `swift test --package-path apple` passed 45 tests.
+- `go test ./...` passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `git diff --check` passed.
+- Critic revision pass added a server-shaped `scout_chat` thread/action fixture,
+  relative archive URL assertions, and a local `.git/info/exclude` entry for
+  the unrelated `.design-import/` worktree import.
+
+Risks / blockers:
+- Native now preserves and summarizes room Scout, memory, archive, private
+  Scout chat, thread, and action payloads, but it does not yet implement full
+  artifact-library navigation or rich action execution from native controls.
+- Physical device mixed-room media proof, TURN validation from restrictive
+  networks, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called shippable to end users.
+- The Xcode project path is `apple/MeetingAssist.xcodeproj`; root-level
+  `MeetingAssist.xcodeproj` commands are stale.
+
+What worked:
+- Keeping all Scout/memory/archive work inside the existing Kanban websocket
+  envelope preserved browser/native parity and kept secrets server-side.
+- Handler replay caches made late SwiftUI attachment deterministic for both
+  room-wide events and per-connection private Scout chat.
+- The private Scout composer could share the existing websocket session and
+  FIFO server worker without introducing a parallel native chat service.

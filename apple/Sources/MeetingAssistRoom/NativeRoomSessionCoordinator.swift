@@ -77,6 +77,10 @@ public struct NativeRoomJoinResult: Equatable, Sendable {
 public typealias NativeRoomSnapshotHandler = @Sendable (RoomSnapshot) async -> Void
 public typealias NativeBoardStateHandler = @Sendable (BoardState) async -> Void
 public typealias NativeUndoAvailabilityHandler = @Sendable (Bool) async -> Void
+public typealias NativeAssistantEventsHandler = @Sendable ([AssistantEvent]) async -> Void
+public typealias NativeMemoryEntriesHandler = @Sendable ([MemoryEntry]) async -> Void
+public typealias NativeMeetingArchiveHandler = @Sendable (MeetingArchiveResult) async -> Void
+public typealias NativeScoutChatEventsHandler = @Sendable ([ScoutChatEvent]) async -> Void
 
 public actor NativeRoomSessionCoordinator {
     public private(set) var lifecycle: RoomLifecycleState = .signedOut
@@ -103,9 +107,17 @@ public actor NativeRoomSessionCoordinator {
     private var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private var boardStateHandler: NativeBoardStateHandler?
     private var undoAvailabilityHandler: NativeUndoAvailabilityHandler?
+    private var assistantEventsHandler: NativeAssistantEventsHandler?
+    private var memoryEntriesHandler: NativeMemoryEntriesHandler?
+    private var meetingArchiveHandler: NativeMeetingArchiveHandler?
+    private var scoutChatEventsHandler: NativeScoutChatEventsHandler?
     private var currentRoomSnapshot: RoomSnapshot?
     private var currentBoardState: BoardState?
     private var currentCanUndoDelete: Bool?
+    private var currentAssistantEvents: [AssistantEvent] = []
+    private var currentMemoryEntries: [MemoryEntry] = []
+    private var currentMeetingArchive: MeetingArchiveResult?
+    private var currentScoutChatEvents: [ScoutChatEvent] = []
 
     public init(
         api: NativeRoomAPIProviding,
@@ -244,6 +256,30 @@ public actor NativeRoomSessionCoordinator {
         await handler(currentCanUndoDelete)
     }
 
+    public func setAssistantEventsHandler(_ handler: NativeAssistantEventsHandler?) async {
+        assistantEventsHandler = handler
+        guard let handler, !currentAssistantEvents.isEmpty else { return }
+        await handler(currentAssistantEvents)
+    }
+
+    public func setMemoryEntriesHandler(_ handler: NativeMemoryEntriesHandler?) async {
+        memoryEntriesHandler = handler
+        guard let handler, !currentMemoryEntries.isEmpty else { return }
+        await handler(currentMemoryEntries)
+    }
+
+    public func setMeetingArchiveHandler(_ handler: NativeMeetingArchiveHandler?) async {
+        meetingArchiveHandler = handler
+        guard let handler, let currentMeetingArchive else { return }
+        await handler(currentMeetingArchive)
+    }
+
+    public func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async {
+        scoutChatEventsHandler = handler
+        guard let handler, !currentScoutChatEvents.isEmpty else { return }
+        await handler(currentScoutChatEvents)
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -260,6 +296,18 @@ public actor NativeRoomSessionCoordinator {
 
     public func archiveMeeting() async throws {
         try await sendJSON(event: ClientSignalEvent.archiveMeeting, payload: EmptyPayload())
+    }
+
+    public func askAssistant(_ query: String) async throws {
+        try await sendJSON(event: ClientSignalEvent.assistantQuery, payload: AssistantQueryPayload(query: query))
+    }
+
+    public func sendScoutChat(_ text: String) async throws {
+        try await sendJSON(event: ClientSignalEvent.scoutChat, payload: ScoutChatPayload(text: text))
+    }
+
+    public func resetScoutChat() async throws {
+        try await sendJSON(event: ClientSignalEvent.scoutChatReset, payload: EmptyPayload())
     }
 
     public func createBoardCard(_ payload: BoardCardMutationPayload) async throws {
@@ -383,6 +431,10 @@ public actor NativeRoomSessionCoordinator {
         currentRoomSnapshot = nil
         currentBoardState = nil
         currentCanUndoDelete = nil
+        currentAssistantEvents.removeAll()
+        currentMemoryEntries.removeAll()
+        currentMeetingArchive = nil
+        currentScoutChatEvents.removeAll()
     }
 
     private func kanbanEvent(from envelope: WebSocketEnvelope) throws -> RoomEvent<JSONValue> {
@@ -451,9 +503,95 @@ public actor NativeRoomSessionCoordinator {
         case "participant_track":
             let metadata = try participantTrackMetadata(from: event.data)
             await handleParticipantTrack(metadata)
+        case "assistant_event":
+            let assistantEvent = try decodeKanbanData(AssistantEvent.self, from: event.data)
+            await appendAssistantEvent(assistantEvent)
+            if let artifact = assistantEvent.artifact {
+                await appendMemoryEntry(artifact)
+            }
+        case "memory":
+            let entries = try decodeKanbanData([MemoryEntry].self, from: event.data)
+            currentMemoryEntries = entries
+            await memoryEntriesHandler?(entries)
+        case "memory_transcript", "memory_brain", "memory_board_update":
+            let entry = try decodeKanbanData(MemoryEntry.self, from: event.data)
+            await appendMemoryEntry(entry)
+        case "memory_answer":
+            let answer = try decodeKanbanData(MemoryAnswerResult.self, from: event.data)
+            let entry = MemoryEntry(
+                id: "answer-\(currentMemoryEntries.count + 1)",
+                kind: "answer",
+                text: answer.answer,
+                metadata: answer.query.isEmpty ? nil : ["query": answer.query]
+            )
+            await appendMemoryEntry(entry)
+        case "meeting_archived":
+            let archive = try decodeKanbanData(MeetingArchiveResult.self, from: event.data)
+            currentMeetingArchive = archive
+            await meetingArchiveHandler?(archive)
+            await appendAssistantEvent(
+                AssistantEvent(
+                    kind: "archive",
+                    text: archive.summary,
+                    createdAt: archive.archivedAt,
+                    downloadURL: archive.downloadURL,
+                    artifact: archive.artifact
+                )
+            )
+            if let artifact = archive.artifact {
+                await appendMemoryEntry(artifact)
+            }
+        case "scout_chat":
+            let chatEvent = try decodeKanbanData(ScoutChatEvent.self, from: event.data)
+            await appendScoutChatEvent(chatEvent)
+            if let artifact = chatEvent.artifact {
+                await appendMemoryEntry(artifact)
+            }
+            if let artifact = chatEvent.thread?.artifact {
+                await appendMemoryEntry(artifact)
+            }
         default:
             break
         }
+    }
+
+    private func appendAssistantEvent(_ event: AssistantEvent) async {
+        guard !event.displayText.isEmpty else { return }
+        currentAssistantEvents.append(event)
+        if currentAssistantEvents.count > 40 {
+            currentAssistantEvents.removeFirst(currentAssistantEvents.count - 40)
+        }
+        await assistantEventsHandler?(currentAssistantEvents)
+    }
+
+    private func appendMemoryEntry(_ entry: MemoryEntry) async {
+        guard !entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let index = currentMemoryEntries.firstIndex(where: { $0.id == entry.id }) {
+            currentMemoryEntries[index] = entry
+        } else {
+            currentMemoryEntries.append(entry)
+            if currentMemoryEntries.count > 20 {
+                currentMemoryEntries.removeFirst(currentMemoryEntries.count - 20)
+            }
+        }
+        await memoryEntriesHandler?(currentMemoryEntries)
+    }
+
+    private func appendScoutChatEvent(_ event: ScoutChatEvent) async {
+        if event.kind == "reset" {
+            currentScoutChatEvents.removeAll()
+            if !event.displayText.isEmpty {
+                currentScoutChatEvents.append(event)
+            }
+            await scoutChatEventsHandler?(currentScoutChatEvents)
+            return
+        }
+        guard !event.displayText.isEmpty else { return }
+        currentScoutChatEvents.append(event)
+        if currentScoutChatEvents.count > 40 {
+            currentScoutChatEvents.removeFirst(currentScoutChatEvents.count - 40)
+        }
+        await scoutChatEventsHandler?(currentScoutChatEvents)
     }
 
     private func startReceiveLoop() {
@@ -580,6 +718,14 @@ private struct ParticipantTrackRequestPayload: Codable, Equatable, Sendable {
 
 private struct SetRecordingPayload: Codable, Equatable, Sendable {
     var enabled: Bool
+}
+
+private struct AssistantQueryPayload: Codable, Equatable, Sendable {
+    var query: String
+}
+
+private struct ScoutChatPayload: Codable, Equatable, Sendable {
+    var text: String
 }
 
 private struct BoardCardDeletePayload: Codable, Equatable, Sendable {

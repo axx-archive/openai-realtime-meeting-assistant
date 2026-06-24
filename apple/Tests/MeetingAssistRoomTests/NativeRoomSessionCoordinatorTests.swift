@@ -233,6 +233,29 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(signaling.sent[1].data, "{}")
     }
 
+    func testAssistantAndScoutChatUseExistingRoomEvents() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.askAssistant("What changed?")
+        try await coordinator.sendScoutChat("What is blocked?")
+        try await coordinator.resetScoutChat()
+
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.assistantQuery,
+            ClientSignalEvent.scoutChat,
+            ClientSignalEvent.scoutChatReset
+        ])
+        XCTAssertEqual(try decodeSentPayload(AssistantQueryAssertionPayload.self, from: signaling.sent[0].data).query, "What changed?")
+        XCTAssertEqual(try decodeSentPayload(ScoutChatAssertionPayload.self, from: signaling.sent[1].data).text, "What is blocked?")
+        XCTAssertEqual(signaling.sent[2].data, "{}")
+    }
+
     func testBoardMutationsUseExistingRoomEvents() async throws {
         let signaling = MockSignalingTransport(envelopes: [])
         let coordinator = NativeRoomSessionCoordinator(
@@ -298,6 +321,142 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         let replayValues = await replay.values()
         XCTAssertEqual(firstValues, [true])
         XCTAssertEqual(replayValues, [true])
+    }
+
+    func testAssistantMemoryAndArchiveEventsAreEmittedAndReplayed() async throws {
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: MockSignalingTransport(envelopes: []),
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let assistantEvents = AssistantEventsCollector()
+        let memoryEntries = MemoryEntriesCollector()
+        let archives = MeetingArchiveCollector()
+        let replayedAssistantEvents = AssistantEventsCollector()
+        let replayedMemoryEntries = MemoryEntriesCollector()
+        let replayedArchives = MeetingArchiveCollector()
+        await coordinator.setAssistantEventsHandler { events in
+            await assistantEvents.append(events)
+        }
+        await coordinator.setMemoryEntriesHandler { entries in
+            await memoryEntries.append(entries)
+        }
+        await coordinator.setMeetingArchiveHandler { archive in
+            await archives.append(archive)
+        }
+
+        try await coordinator.handleServerEvent(assistantEventEnvelope(kind: "answer", text: "The board is healthy."))
+        try await coordinator.handleServerEvent(
+            memoryEnvelope(entries: [
+                MemoryEntry(id: "memory-1", kind: "brain", text: "Launch plan summarized.", createdAt: "2026-06-24T21:00:00Z")
+            ])
+        )
+        try await coordinator.handleServerEvent(
+            memoryEntryEnvelope(event: "memory_transcript", entry: MemoryEntry(id: "memory-2", kind: "transcript", text: "Tom: We need native Scout.", metadata: ["speaker": "Tom"]))
+        )
+        try await coordinator.handleServerEvent(
+            kanbanEnvelope(
+                event: "memory_answer",
+                data: .object([
+                    "query": .string("What changed?"),
+                    "answer": .string("Native Scout feed was added.")
+                ])
+            )
+        )
+        try await coordinator.handleServerEvent(
+            archiveEnvelope(
+                MeetingArchiveResult(
+                    id: "meeting-20260624",
+                    meetingID: "meeting-current",
+                    archivedAt: "2026-06-24T21:10:00Z",
+                    archivedBy: "Tom",
+                    downloadURL: "/archives/meeting-20260624.json?key=signed",
+                    summary: "Tom archived meeting meeting-20260624 with 2 transcript item(s), 1 board card(s), 2 participant(s), and 1 project status item(s).",
+                    email: MeetingArchiveEmailStatus(skipped: true),
+                    artifact: MemoryEntry(id: "meeting-20260624-artifact", kind: "os_artifact", text: "Meeting artifact")
+                )
+            )
+        )
+        await coordinator.setAssistantEventsHandler { events in
+            await replayedAssistantEvents.append(events)
+        }
+        await coordinator.setMemoryEntriesHandler { entries in
+            await replayedMemoryEntries.append(entries)
+        }
+        await coordinator.setMeetingArchiveHandler { archive in
+            await replayedArchives.append(archive)
+        }
+
+        let assistantTexts = await assistantEvents.latestTexts()
+        let replayedAssistantTexts = await replayedAssistantEvents.latestTexts()
+        let memoryKinds = await memoryEntries.latestKinds()
+        let replayedMemoryKinds = await replayedMemoryEntries.latestKinds()
+        let archiveIDs = await archives.ids()
+        let replayedArchiveIDs = await replayedArchives.ids()
+        XCTAssertEqual(assistantTexts, ["The board is healthy.", "Tom archived meeting meeting-20260624 with 2 transcript item(s), 1 board card(s), 2 participant(s), and 1 project status item(s)."])
+        XCTAssertEqual(replayedAssistantTexts, assistantTexts)
+        XCTAssertEqual(memoryKinds, ["brain", "transcript", "answer", "os_artifact"])
+        XCTAssertEqual(replayedMemoryKinds, memoryKinds)
+        XCTAssertEqual(archiveIDs, ["meeting-20260624"])
+        XCTAssertEqual(replayedArchiveIDs, ["meeting-20260624"])
+    }
+
+    func testScoutChatEventsAreEmittedAndReplayed() async throws {
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: MockSignalingTransport(envelopes: []),
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let scoutChat = ScoutChatEventsCollector()
+        let replay = ScoutChatEventsCollector()
+        await coordinator.setScoutChatEventsHandler { events in
+            await scoutChat.append(events)
+        }
+
+        try await coordinator.handleServerEvent(scoutChatEnvelope(kind: "query", text: "What is blocked?"))
+        try await coordinator.handleServerEvent(scoutChatEnvelope(kind: "status", text: "thinking..."))
+        try await coordinator.handleServerEvent(scoutChatEnvelope(kind: "answer", text: "Native Scout chat is next."))
+        await coordinator.setScoutChatEventsHandler { events in
+            await replay.append(events)
+        }
+
+        let kinds = await scoutChat.latestKinds()
+        let replayedKinds = await replay.latestKinds()
+        XCTAssertEqual(kinds, ["query", "status", "answer"])
+        XCTAssertEqual(replayedKinds, kinds)
+
+        try await coordinator.handleServerEvent(scoutChatEnvelope(kind: "reset", text: "new Scout thread started"))
+        let resetKinds = await replay.latestKinds()
+        XCTAssertEqual(resetKinds, ["reset"])
+    }
+
+    func testScoutChatThreadPayloadPreservesThreadActionsAndArtifact() async throws {
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: MockSignalingTransport(envelopes: []),
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let scoutChat = ScoutChatEventsCollector()
+        let memoryEntries = MemoryEntriesCollector()
+        await coordinator.setScoutChatEventsHandler { events in
+            await scoutChat.append(events)
+        }
+        await coordinator.setMemoryEntriesHandler { entries in
+            await memoryEntries.append(entries)
+        }
+
+        try await coordinator.handleServerEvent(scoutChatThreadEnvelope())
+
+        let latestEvents = await scoutChat.latestEvents()
+        let memoryKinds = await memoryEntries.latestKinds()
+        XCTAssertEqual(latestEvents.map(\.kind), ["thread"])
+        XCTAssertEqual(latestEvents.first?.thread?.id, "agent-thread-research-1")
+        XCTAssertEqual(latestEvents.first?.thread?.artifact?.id, "artifact-1")
+        XCTAssertEqual(latestEvents.first?.actions?.first?.artifactID, "artifact-1")
+        XCTAssertEqual(memoryKinds, ["os_artifact"])
     }
 
     func testParticipantTrackMetadataLabelsLaterRemoteVideoTrack() async throws {
@@ -586,6 +745,14 @@ private struct RecordingAssertionPayload: Decodable {
     var enabled: Bool
 }
 
+private struct AssistantQueryAssertionPayload: Decodable {
+    var query: String
+}
+
+private struct ScoutChatAssertionPayload: Decodable {
+    var text: String
+}
+
 private struct BoardDeleteAssertionPayload: Decodable {
     var cardID: String
 
@@ -650,6 +817,59 @@ private actor UndoAvailabilityCollector {
     }
 }
 
+private actor AssistantEventsCollector {
+    private var values: [[AssistantEvent]] = []
+
+    func append(_ events: [AssistantEvent]) {
+        values.append(events)
+    }
+
+    func latestTexts() -> [String] {
+        values.last?.map(\.displayText) ?? []
+    }
+}
+
+private actor MemoryEntriesCollector {
+    private var values: [[MemoryEntry]] = []
+
+    func append(_ entries: [MemoryEntry]) {
+        values.append(entries)
+    }
+
+    func latestKinds() -> [String] {
+        values.last?.map(\.kind) ?? []
+    }
+
+}
+
+private actor MeetingArchiveCollector {
+    private var values: [MeetingArchiveResult] = []
+
+    func append(_ archive: MeetingArchiveResult) {
+        values.append(archive)
+    }
+
+    func ids() -> [String] {
+        values.map(\.id)
+    }
+}
+
+private actor ScoutChatEventsCollector {
+    private var values: [[ScoutChatEvent]] = []
+
+    func append(_ events: [ScoutChatEvent]) {
+        values.append(events)
+    }
+
+    func latestKinds() -> [String] {
+        values.last?.map(\.kind) ?? []
+    }
+
+    func latestEvents() -> [ScoutChatEvent] {
+        values.last ?? []
+    }
+}
+
 private func accessGrantedEnvelope(name: String) -> WebSocketEnvelope {
     kanbanEnvelope(event: "access_granted", data: .object(["name": .string(name)]))
 }
@@ -705,6 +925,73 @@ private func roomSnapshotEnvelope(participants: [String], recordingEnabled: Bool
 
 private func boardEnvelope(cards: [KanbanCard]) -> WebSocketEnvelope {
     kanbanEnvelope(event: "board", data: encodedJSONValue(BoardState(cards: cards, updatedAt: "2026-06-24T21:00:00Z")))
+}
+
+private func assistantEventEnvelope(kind: String, text: String) -> WebSocketEnvelope {
+    kanbanEnvelope(
+        event: "assistant_event",
+        data: encodedJSONValue(
+            AssistantEvent(
+                kind: kind,
+                text: text,
+                createdAt: "2026-06-24T21:00:00Z"
+            )
+        )
+    )
+}
+
+private func memoryEnvelope(entries: [MemoryEntry]) -> WebSocketEnvelope {
+    kanbanEnvelope(event: "memory", data: encodedJSONValue(entries))
+}
+
+private func memoryEntryEnvelope(event: String, entry: MemoryEntry) -> WebSocketEnvelope {
+    kanbanEnvelope(event: event, data: encodedJSONValue(entry))
+}
+
+private func archiveEnvelope(_ archive: MeetingArchiveResult) -> WebSocketEnvelope {
+    kanbanEnvelope(event: "meeting_archived", data: encodedJSONValue(archive))
+}
+
+private func scoutChatEnvelope(kind: String, text: String) -> WebSocketEnvelope {
+    kanbanEnvelope(
+        event: "scout_chat",
+        data: encodedJSONValue(ScoutChatEvent(kind: kind, text: text, timestamp: "2026-06-24T21:00:00Z"))
+    )
+}
+
+private func scoutChatThreadEnvelope() -> WebSocketEnvelope {
+    let artifact = MemoryEntry(
+        id: "artifact-1",
+        kind: "os_artifact",
+        text: "Research thread artifact",
+        createdAt: "2026-06-24T21:00:00Z",
+        metadata: ["title": "Native Scout research", "mode": "research", "source": "scout_thread"]
+    )
+    let action: JSONValue = .object([
+        "type": .string("open_tool"),
+        "tool": .string("chat"),
+        "artifactId": .string("artifact-1"),
+        "enabled": .bool(true),
+        "label": .string("Open thread")
+    ])
+    return kanbanEnvelope(
+        event: "scout_chat",
+        data: .object([
+            "kind": .string("thread"),
+            "text": .string("Research thread launched"),
+            "ts": .string("2026-06-24T21:00:00Z"),
+            "artifact": encodedJSONValue(artifact),
+            "actions": .array([action]),
+            "thread": .object([
+                "id": .string("agent-thread-research-1"),
+                "mode": .string("research"),
+                "query": .string("Research native client readiness"),
+                "status": .string("running"),
+                "artifact": encodedJSONValue(artifact),
+                "actions": .array([action])
+            ])
+        ])
+    )
 }
 
 private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope {

@@ -6,6 +6,8 @@ import SwiftUI
 public struct NativeRoomView: View {
     @StateObject private var model: NativeRoomViewModel
     @State private var boardEditorDraft: BoardCardEditorDraft?
+    @State private var scoutChatDraft = ""
+    @State private var roomScoutDraft = ""
 
     public init(model: NativeRoomViewModel = NativeRoomViewModel()) {
         _model = StateObject(wrappedValue: model)
@@ -22,6 +24,9 @@ public struct NativeRoomView: View {
                 }
                 if model.canUseRoomControls || !model.boardCards.isEmpty {
                     boardPreview
+                }
+                if model.canUseRoomControls || !model.assistantEvents.isEmpty || !model.memoryEntries.isEmpty || model.latestArchive != nil {
+                    scoutMemoryPanel
                 }
                 controls
                 status
@@ -220,6 +225,115 @@ public struct NativeRoomView: View {
         }
     }
 
+    private var scoutMemoryPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Scout", systemImage: "sparkles")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.memoryEntries.count) saved")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !model.assistantEvents.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(model.assistantEvents.suffix(4))) { event in
+                        assistantRow(event)
+                    }
+                }
+            } else {
+                Text(model.canUseRoomControls ? "Scout is quiet" : "Join to load Scout")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let latestArchive = model.latestArchive {
+                archiveRow(latestArchive)
+            }
+
+            if !model.recentMemoryEntries.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.recentMemoryEntries) { entry in
+                        memoryRow(entry)
+                    }
+                }
+            }
+
+            Divider()
+            roomScoutComposer
+            privateScoutChat
+        }
+    }
+
+    private var roomScoutComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Room Scout")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("Ask the room", text: $roomScoutDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.canUseRoomControls)
+                Button {
+                    let query = roomScoutDraft
+                    roomScoutDraft = ""
+                    Task { await model.askAssistant(query) }
+                } label: {
+                    Label("Ask", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls || roomScoutDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private var privateScoutChat: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Private Scout")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task { await model.resetScoutChat() }
+                } label: {
+                    Label("New", systemImage: "plus.message")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls)
+            }
+
+            if model.scoutChatEvents.isEmpty {
+                Text(model.canUseRoomControls ? "Ask Scout privately" : "Join to chat privately with Scout")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(model.scoutChatEvents.suffix(5))) { event in
+                        scoutChatRow(event)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Message Scout", text: $scoutChatDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.canUseRoomControls || model.isScoutChatSending)
+                Button {
+                    let text = scoutChatDraft
+                    scoutChatDraft = ""
+                    Task { await model.sendScoutChat(text) }
+                } label: {
+                    Label("Send", systemImage: "paperplane")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.canUseRoomControls || model.isScoutChatSending || scoutChatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
     @ViewBuilder
     private var remoteVideoGrid: some View {
         if !model.remoteVideoTracks.isEmpty {
@@ -317,6 +431,113 @@ public struct NativeRoomView: View {
         .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private func assistantRow(_ event: AssistantEvent) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(assistantLabel(event))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(event.displayText)
+                .font(.callout)
+                .lineLimit(3)
+            if let url = model.assistantDownloadURL(for: event) {
+                Link(destination: url) {
+                    Label("Download archive", systemImage: "arrow.down.doc")
+                }
+                .font(.caption.weight(.semibold))
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func archiveRow(_ archive: MeetingArchiveResult) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "archivebox.fill")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Archive ready")
+                    .font(.callout.weight(.semibold))
+                Text(archive.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                if let url = model.latestArchiveDownloadURL {
+                    Link(destination: url) {
+                        Label("Download archive", systemImage: "arrow.down.doc")
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func memoryRow(_ entry: MemoryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(memoryKindLabel(entry.kind))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if let speaker = entry.metadata?["speaker"], !speaker.isEmpty {
+                    Text(speaker)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(memoryDisplayText(entry))
+                .font(.caption)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func scoutChatRow(_ event: ScoutChatEvent) -> some View {
+        let isUser = event.kind == "query"
+        let isError = event.kind == "error"
+        return VStack(alignment: isUser ? .trailing : .leading, spacing: 3) {
+            Text(scoutChatLabel(event.kind))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(event.displayText)
+                .font(.caption)
+                .lineLimit(4)
+            if let thread = event.thread {
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 3) {
+                    Text(scoutThreadTitle(thread))
+                        .font(.caption.weight(.semibold))
+                    Text(thread.query)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    if let actions = event.actions ?? thread.actions, !actions.isEmpty {
+                        Text(actions.map(scoutActionLabel).joined(separator: " · "))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.top, 2)
+            } else if let actions = event.actions, !actions.isEmpty {
+                Text(actions.map(scoutActionLabel).joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .background(
+            isError ? Color.red.opacity(0.12) : (isUser ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.1)),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
     private func saveBoardDraft(_ draft: BoardCardEditorDraft) {
         let payload = draft.payload
         boardEditorDraft = nil
@@ -337,6 +558,87 @@ public struct NativeRoomView: View {
 
     private func monogram(for name: String) -> String {
         String(name.trimmingCharacters(in: .whitespacesAndNewlines).first ?? "B").uppercased()
+    }
+
+    private func assistantLabel(_ event: AssistantEvent) -> String {
+        let kind = (event.kind ?? "status").trimmingCharacters(in: .whitespacesAndNewlines)
+        return kind.isEmpty ? "status" : kind
+    }
+
+    private func memoryKindLabel(_ kind: String) -> String {
+        switch kind {
+        case "answer":
+            return "answer"
+        case "archive":
+            return "archive"
+        case "brain":
+            return "brain"
+        case "board_update":
+            return "board"
+        case "os_artifact":
+            return "artifact"
+        default:
+            return "transcript"
+        }
+    }
+
+    private func memoryDisplayText(_ entry: MemoryEntry) -> String {
+        let raw = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entry.kind == "archive" {
+            return raw
+                .replacingOccurrences(of: " item(s)", with: " items")
+                .replacingOccurrences(of: " card(s)", with: " cards")
+                .replacingOccurrences(of: " participant(s)", with: " participants")
+        }
+        return raw
+    }
+
+    private func scoutChatLabel(_ kind: String) -> String {
+        switch kind {
+        case "query":
+            return "you"
+        case "answer":
+            return "scout"
+        case "thread":
+            return "thread"
+        case "error":
+            return "error"
+        case "reset":
+            return "new thread"
+        default:
+            return kind.isEmpty ? "scout" : kind
+        }
+    }
+
+    private func scoutThreadTitle(_ thread: ScoutChatThread) -> String {
+        let mode = thread.mode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let status = thread.status.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = thread.artifact?.metadata?["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty {
+            return status.isEmpty ? title : "\(title) · \(status)"
+        }
+        if !mode.isEmpty && !status.isEmpty {
+            return "\(mode) thread · \(status)"
+        }
+        return mode.isEmpty ? "Scout thread" : "\(mode) thread"
+    }
+
+    private func scoutActionLabel(_ action: AssistantAction) -> String {
+        if let label = action.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            return label
+        }
+        let tool = action.tool?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mode = action.mode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (action.type, tool, mode) {
+        case ("open_tool", let tool?, _):
+            return "open \(tool)"
+        case ("select_artifact", _, _):
+            return "select artifact"
+        case (_, _, let mode?):
+            return mode
+        default:
+            return action.type.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 }
 

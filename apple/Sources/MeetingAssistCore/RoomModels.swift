@@ -173,10 +173,68 @@ public struct BoardCardMutationPayload: Codable, Equatable, Sendable {
     }
 }
 
-public struct AssistantEvent: Codable, Equatable, Sendable {
+public struct AssistantEvent: Codable, Equatable, Identifiable, Sendable {
+    public var eventID: String?
     public var kind: String?
     public var text: String?
+    public var message: String?
+    public var createdAt: String?
+    public var downloadURL: String?
+    public var artifact: MemoryEntry?
+    public var thread: ScoutChatThread?
+    public var actions: [AssistantAction]?
     public var data: [String: JSONValue]?
+
+    public var id: String {
+        if let eventID, !eventID.isEmpty {
+            return eventID
+        }
+        return [kind, createdAt, text ?? message]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "|")
+    }
+
+    public var displayText: String {
+        (text ?? message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case eventID = "id"
+        case kind
+        case text
+        case message
+        case createdAt
+        case downloadURL = "downloadUrl"
+        case artifact
+        case thread
+        case actions
+        case data
+    }
+
+    public init(
+        eventID: String? = nil,
+        kind: String? = nil,
+        text: String? = nil,
+        message: String? = nil,
+        createdAt: String? = nil,
+        downloadURL: String? = nil,
+        artifact: MemoryEntry? = nil,
+        thread: ScoutChatThread? = nil,
+        actions: [AssistantAction]? = nil,
+        data: [String: JSONValue]? = nil
+    ) {
+        self.eventID = eventID
+        self.kind = kind
+        self.text = text
+        self.message = message
+        self.createdAt = createdAt
+        self.downloadURL = downloadURL
+        self.artifact = artifact
+        self.thread = thread
+        self.actions = actions
+        self.data = data
+    }
 }
 
 public struct MemoryEntry: Codable, Equatable, Identifiable, Sendable {
@@ -185,6 +243,209 @@ public struct MemoryEntry: Codable, Equatable, Identifiable, Sendable {
     public var text: String
     public var createdAt: String?
     public var metadata: [String: String]?
+
+    public init(id: String, kind: String, text: String, createdAt: String? = nil, metadata: [String: String]? = nil) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.createdAt = createdAt
+        self.metadata = metadata
+    }
+}
+
+public struct MemoryAnswerResult: Codable, Equatable, Sendable {
+    public var query: String
+    public var answer: String
+
+    public init(query: String, answer: String) {
+        self.query = query
+        self.answer = answer
+    }
+}
+
+public struct MeetingArchiveResult: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var meetingID: String?
+    public var archivedAt: String
+    public var archivedBy: String?
+    public var downloadURL: String
+    public var summary: String
+    public var email: MeetingArchiveEmailStatus?
+    public var artifact: MemoryEntry?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case meetingID = "meetingId"
+        case archivedAt
+        case archivedBy
+        case downloadURL = "downloadUrl"
+        case summary
+        case email
+        case artifact
+    }
+
+    public init(
+        id: String,
+        meetingID: String? = nil,
+        archivedAt: String,
+        archivedBy: String? = nil,
+        downloadURL: String,
+        summary: String,
+        email: MeetingArchiveEmailStatus? = nil,
+        artifact: MemoryEntry? = nil
+    ) {
+        self.id = id
+        self.meetingID = meetingID
+        self.archivedAt = archivedAt
+        self.archivedBy = archivedBy
+        self.downloadURL = downloadURL
+        self.summary = summary
+        self.email = email
+        self.artifact = artifact
+    }
+}
+
+public struct MeetingArchiveEmailStatus: Codable, Equatable, Sendable {
+    public var attempted: Bool
+    public var sent: Bool
+    public var skipped: Bool
+    public var error: String?
+    public var reason: String?
+    public var recipients: [String]?
+
+    public init(
+        attempted: Bool = false,
+        sent: Bool = false,
+        skipped: Bool = false,
+        error: String? = nil,
+        reason: String? = nil,
+        recipients: [String]? = nil
+    ) {
+        self.attempted = attempted
+        self.sent = sent
+        self.skipped = skipped
+        self.error = error
+        self.reason = reason
+        self.recipients = recipients
+    }
+}
+
+public struct AssistantAction: Codable, Equatable, Identifiable, Sendable {
+    public var type: String
+    public var tool: String?
+    public var mode: String?
+    public var artifactID: String?
+    public var enabled: Bool?
+    public var label: String?
+
+    public var id: String {
+        [type, tool, mode, artifactID, label]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "|")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case tool
+        case mode
+        case artifactID = "artifactId"
+        case enabled
+        case label
+    }
+
+    public init(
+        type: String,
+        tool: String? = nil,
+        mode: String? = nil,
+        artifactID: String? = nil,
+        enabled: Bool? = nil,
+        label: String? = nil
+    ) {
+        self.type = type
+        self.tool = tool
+        self.mode = mode
+        self.artifactID = artifactID
+        self.enabled = enabled
+        self.label = label
+    }
+}
+
+public struct ScoutChatThread: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var mode: String
+    public var query: String
+    public var status: String
+    public var artifact: MemoryEntry?
+    public var actions: [AssistantAction]?
+
+    public init(
+        id: String,
+        mode: String,
+        query: String,
+        status: String,
+        artifact: MemoryEntry? = nil,
+        actions: [AssistantAction]? = nil
+    ) {
+        self.id = id
+        self.mode = mode
+        self.query = query
+        self.status = status
+        self.artifact = artifact
+        self.actions = actions
+    }
+}
+
+public struct ScoutChatEvent: Codable, Equatable, Identifiable, Sendable {
+    public var eventID: String?
+    public var kind: String
+    public var text: String
+    public var timestamp: String?
+    public var artifact: MemoryEntry?
+    public var thread: ScoutChatThread?
+    public var actions: [AssistantAction]?
+
+    public var id: String {
+        if let eventID, !eventID.isEmpty {
+            return eventID
+        }
+        return [kind, timestamp, text]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "|")
+    }
+
+    public var displayText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case eventID = "id"
+        case kind
+        case text
+        case timestamp = "ts"
+        case artifact
+        case thread
+        case actions
+    }
+
+    public init(
+        eventID: String? = nil,
+        kind: String,
+        text: String,
+        timestamp: String? = nil,
+        artifact: MemoryEntry? = nil,
+        thread: ScoutChatThread? = nil,
+        actions: [AssistantAction]? = nil
+    ) {
+        self.eventID = eventID
+        self.kind = kind
+        self.text = text
+        self.timestamp = timestamp
+        self.artifact = artifact
+        self.thread = thread
+        self.actions = actions
+    }
 }
 
 public enum RoomLifecycleState: String, Codable, Equatable, Sendable {

@@ -17,10 +17,17 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setRoomSnapshotHandler(_ handler: NativeRoomSnapshotHandler?) async
     func setBoardStateHandler(_ handler: NativeBoardStateHandler?) async
     func setUndoAvailabilityHandler(_ handler: NativeUndoAvailabilityHandler?) async
+    func setAssistantEventsHandler(_ handler: NativeAssistantEventsHandler?) async
+    func setMemoryEntriesHandler(_ handler: NativeMemoryEntriesHandler?) async
+    func setMeetingArchiveHandler(_ handler: NativeMeetingArchiveHandler?) async
+    func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
+    func askAssistant(_ query: String) async throws
+    func sendScoutChat(_ text: String) async throws
+    func resetScoutChat() async throws
     func createBoardCard(_ payload: BoardCardMutationPayload) async throws
     func updateBoardCard(id: String, payload: BoardCardMutationPayload) async throws
     func deleteBoardCard(id: String) async throws
@@ -64,6 +71,11 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var canUndoDelete = false
     @Published public private(set) var isBoardMutating = false
     @Published public private(set) var isArchiving = false
+    @Published public private(set) var assistantEvents: [AssistantEvent] = []
+    @Published public private(set) var memoryEntries: [MemoryEntry] = []
+    @Published public private(set) var latestArchive: MeetingArchiveResult?
+    @Published public private(set) var scoutChatEvents: [ScoutChatEvent] = []
+    @Published public private(set) var isScoutChatSending = false
 
     public let boardStatuses = ["Backlog", "In Progress", "Blocked", "Done"]
 
@@ -115,6 +127,30 @@ public final class NativeRoomViewModel: ObservableObject {
             return active
         }
         return boardCards.filter { $0.status == "Backlog" }.prefix(4).map { $0 }
+    }
+
+    public var recentMemoryEntries: [MemoryEntry] {
+        Array(memoryEntries.suffix(4).reversed())
+    }
+
+    public var latestArchiveDownloadURL: URL? {
+        guard let downloadURL = latestArchive?.downloadURL else { return nil }
+        return resolvedDownloadURL(downloadURL)
+    }
+
+    public func assistantDownloadURL(for event: AssistantEvent) -> URL? {
+        resolvedDownloadURL(event.downloadURL)
+    }
+
+    public func resolvedDownloadURL(_ value: String?) -> URL? {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        if let url = URL(string: value), url.scheme != nil {
+            return url
+        }
+        guard let baseURL = normalizedBaseURL() else {
+            return URL(string: value)
+        }
+        return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
 
     public func refreshRoster() async {
@@ -176,6 +212,18 @@ public final class NativeRoomViewModel: ObservableObject {
         await newSession.setUndoAvailabilityHandler { [weak self] canUndo in
             await self?.applyUndoAvailability(canUndo)
         }
+        await newSession.setAssistantEventsHandler { [weak self] events in
+            await self?.applyAssistantEvents(events)
+        }
+        await newSession.setMemoryEntriesHandler { [weak self] entries in
+            await self?.applyMemoryEntries(entries)
+        }
+        await newSession.setMeetingArchiveHandler { [weak self] archive in
+            await self?.applyMeetingArchive(archive)
+        }
+        await newSession.setScoutChatEventsHandler { [weak self] events in
+            await self?.applyScoutChatEvents(events)
+        }
 
         do {
             let result = if video {
@@ -194,6 +242,10 @@ public final class NativeRoomViewModel: ObservableObject {
             await newSession.setRoomSnapshotHandler(nil)
             await newSession.setBoardStateHandler(nil)
             await newSession.setUndoAvailabilityHandler(nil)
+            await newSession.setAssistantEventsHandler(nil)
+            await newSession.setMemoryEntriesHandler(nil)
+            await newSession.setMeetingArchiveHandler(nil)
+            await newSession.setScoutChatEventsHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
@@ -256,6 +308,46 @@ public final class NativeRoomViewModel: ObservableObject {
             setError(displayMessage(for: error))
         }
         isArchiving = false
+    }
+
+    public func askAssistant(_ query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let session, !trimmed.isEmpty else { return }
+
+        statusText = "Asking Scout"
+        do {
+            try await session.askAssistant(trimmed)
+            statusText = "Scout is checking"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+    }
+
+    public func sendScoutChat(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let session, !trimmed.isEmpty else { return }
+
+        isScoutChatSending = true
+        statusText = "Sending to Scout"
+        do {
+            try await session.sendScoutChat(trimmed)
+            statusText = "Scout is thinking"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isScoutChatSending = false
+    }
+
+    public func resetScoutChat() async {
+        guard let session else { return }
+
+        do {
+            try await session.resetScoutChat()
+            scoutChatEvents = []
+            statusText = "New Scout thread"
+        } catch {
+            setError(displayMessage(for: error))
+        }
     }
 
     public func createBoardCard(_ payload: BoardCardMutationPayload) async {
@@ -325,6 +417,10 @@ public final class NativeRoomViewModel: ObservableObject {
         await session.setRoomSnapshotHandler(nil)
         await session.setBoardStateHandler(nil)
         await session.setUndoAvailabilityHandler(nil)
+        await session.setAssistantEventsHandler(nil)
+        await session.setMemoryEntriesHandler(nil)
+        await session.setMeetingArchiveHandler(nil)
+        await session.setScoutChatEventsHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
@@ -360,6 +456,11 @@ public final class NativeRoomViewModel: ObservableObject {
         canUndoDelete = false
         isBoardMutating = false
         isArchiving = false
+        assistantEvents = []
+        memoryEntries = []
+        latestArchive = nil
+        scoutChatEvents = []
+        isScoutChatSending = false
     }
 
     private func applyRoomSnapshot(_ snapshot: RoomSnapshot) {
@@ -379,6 +480,24 @@ public final class NativeRoomViewModel: ObservableObject {
 
     private func applyUndoAvailability(_ canUndo: Bool) {
         canUndoDelete = canUndo
+    }
+
+    private func applyAssistantEvents(_ events: [AssistantEvent]) {
+        assistantEvents = events.filter { !$0.displayText.isEmpty }
+    }
+
+    private func applyMemoryEntries(_ entries: [MemoryEntry]) {
+        memoryEntries = entries.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func applyMeetingArchive(_ archive: MeetingArchiveResult) {
+        latestArchive = archive
+        statusText = "Archive ready"
+        isArchiving = false
+    }
+
+    private func applyScoutChatEvents(_ events: [ScoutChatEvent]) {
+        scoutChatEvents = events.filter { !$0.displayText.isEmpty }
     }
 
     private func upsertRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) {
@@ -428,4 +547,5 @@ public final class NativeRoomViewModel: ObservableObject {
         }
         return error.localizedDescription
     }
+
 }

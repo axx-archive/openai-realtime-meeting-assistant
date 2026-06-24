@@ -246,6 +246,87 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertTrue(model.canUndoDelete)
     }
 
+    func testAssistantMemoryAndArchiveUpdatesNativeState() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinAudioOnly()
+        let assistantArchive = AssistantEvent(
+            kind: "archive",
+            text: "Archive ready",
+            downloadURL: "/archives/latest.json?key=signed"
+        )
+        await session.emitAssistantEvents([
+            AssistantEvent(kind: "query", text: "What is blocked?"),
+            AssistantEvent(kind: "answer", text: "Native Scout rendering is next."),
+            assistantArchive
+        ])
+        await session.emitMemoryEntries([
+            MemoryEntry(id: "memory-1", kind: "brain", text: "Native plan summarized."),
+            MemoryEntry(id: "memory-2", kind: "transcript", text: "Tom: Add Scout.", metadata: ["speaker": "Tom"])
+        ])
+        await session.emitMeetingArchive(
+            MeetingArchiveResult(
+                id: "meeting-20260624",
+                archivedAt: "2026-06-24T21:10:00Z",
+                archivedBy: "Tom",
+                downloadURL: "/archives/meeting-20260624.json?key=signed",
+                summary: "Tom archived meeting meeting-20260624 with 2 transcript item(s), 1 board card(s), 2 participant(s), and 1 project status item(s).",
+                email: MeetingArchiveEmailStatus(skipped: true)
+            )
+        )
+
+        XCTAssertEqual(model.assistantEvents.map(\.displayText), ["What is blocked?", "Native Scout rendering is next.", "Archive ready"])
+        XCTAssertEqual(model.memoryEntries.map(\.kind), ["brain", "transcript"])
+        XCTAssertEqual(model.recentMemoryEntries.map(\.id), ["memory-2", "memory-1"])
+        XCTAssertEqual(model.latestArchive?.id, "meeting-20260624")
+        XCTAssertEqual(model.latestArchiveDownloadURL?.host, "example.com")
+        XCTAssertEqual(model.latestArchiveDownloadURL?.path, "/archives/meeting-20260624.json")
+        XCTAssertEqual(model.assistantDownloadURL(for: assistantArchive)?.host, "example.com")
+        XCTAssertEqual(model.assistantDownloadURL(for: assistantArchive)?.path, "/archives/latest.json")
+        XCTAssertEqual(model.statusText, "Archive ready")
+
+        await model.leave()
+
+        XCTAssertTrue(model.assistantEvents.isEmpty)
+        XCTAssertTrue(model.memoryEntries.isEmpty)
+        XCTAssertNil(model.latestArchive)
+        XCTAssertNil(session.assistantEventsHandler)
+        XCTAssertNil(session.memoryEntriesHandler)
+        XCTAssertNil(session.meetingArchiveHandler)
+    }
+
+    func testAssistantAndPrivateScoutChatDelegateToSession() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinAudioOnly()
+        await model.askAssistant("What changed?")
+        await model.sendScoutChat("What is blocked?")
+        await session.emitScoutChatEvents([
+            ScoutChatEvent(kind: "query", text: "What is blocked?"),
+            ScoutChatEvent(kind: "answer", text: "Native private Scout chat.")
+        ])
+        await model.resetScoutChat()
+
+        XCTAssertEqual(session.assistantQueries, ["What changed?"])
+        XCTAssertEqual(session.scoutChatMessages, ["What is blocked?"])
+        XCTAssertEqual(session.scoutChatResetCount, 1)
+        XCTAssertEqual(model.scoutChatEvents.map(\.displayText), [])
+        XCTAssertEqual(model.statusText, "New Scout thread")
+        XCTAssertFalse(model.isScoutChatSending)
+    }
+
     func testRecordingAndArchiveControlsDelegateToSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
@@ -348,6 +429,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private(set) var boardStateHandler: NativeBoardStateHandler?
     private(set) var undoAvailabilityHandler: NativeUndoAvailabilityHandler?
+    private(set) var assistantEventsHandler: NativeAssistantEventsHandler?
+    private(set) var memoryEntriesHandler: NativeMemoryEntriesHandler?
+    private(set) var meetingArchiveHandler: NativeMeetingArchiveHandler?
+    private(set) var scoutChatEventsHandler: NativeScoutChatEventsHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -361,6 +446,9 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var updatedBoardCards: [(id: String, payload: BoardCardMutationPayload)] = []
     private(set) var deletedBoardCardIDs: [String] = []
     private(set) var undoDeleteRequestCount = 0
+    private(set) var assistantQueries: [String] = []
+    private(set) var scoutChatMessages: [String] = []
+    private(set) var scoutChatResetCount = 0
 
     init(error: Error? = nil) {
         self.error = error
@@ -419,6 +507,22 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         undoAvailabilityHandler = handler
     }
 
+    func setAssistantEventsHandler(_ handler: NativeAssistantEventsHandler?) async {
+        assistantEventsHandler = handler
+    }
+
+    func setMemoryEntriesHandler(_ handler: NativeMemoryEntriesHandler?) async {
+        memoryEntriesHandler = handler
+    }
+
+    func setMeetingArchiveHandler(_ handler: NativeMeetingArchiveHandler?) async {
+        meetingArchiveHandler = handler
+    }
+
+    func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async {
+        scoutChatEventsHandler = handler
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -437,6 +541,18 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func archiveMeeting() async throws {
         archiveRequestCount += 1
+    }
+
+    func askAssistant(_ query: String) async throws {
+        assistantQueries.append(query)
+    }
+
+    func sendScoutChat(_ text: String) async throws {
+        scoutChatMessages.append(text)
+    }
+
+    func resetScoutChat() async throws {
+        scoutChatResetCount += 1
     }
 
     func createBoardCard(_ payload: BoardCardMutationPayload) async throws {
@@ -465,6 +581,22 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func emitUndoAvailability(_ canUndo: Bool) async {
         await undoAvailabilityHandler?(canUndo)
+    }
+
+    func emitAssistantEvents(_ events: [AssistantEvent]) async {
+        await assistantEventsHandler?(events)
+    }
+
+    func emitMemoryEntries(_ entries: [MemoryEntry]) async {
+        await memoryEntriesHandler?(entries)
+    }
+
+    func emitMeetingArchive(_ archive: MeetingArchiveResult) async {
+        await meetingArchiveHandler?(archive)
+    }
+
+    func emitScoutChatEvents(_ events: [ScoutChatEvent]) async {
+        await scoutChatEventsHandler?(events)
     }
 
     func sendParticipantMediaState() async throws {
