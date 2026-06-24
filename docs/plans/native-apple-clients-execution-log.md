@@ -470,3 +470,67 @@ What worked:
 - A replay request for unlabeled tracks gives native the same recovery hook the
   browser uses without making the first render path depend on perfect event
   ordering.
+
+## Wave 8
+
+Status: `wave8_native_room_board_surface_validated`
+
+Scope:
+- Pull the current VPS runtime secrets into the ignored local deployment env and
+  verify `.env.local` already matches the VPS key set and per-variable values
+  without printing secret values.
+- Decode existing `participants` and `board` Kanban websocket events into typed
+  native room models.
+- Cache and replay the latest room and board state when native handlers attach.
+- Publish room participants, media states, capacity, recording state, and board
+  cards through `NativeRoomViewModel`.
+- Add a compact native room-state and board-preview surface to the shared
+  iOS/iPadOS/macOS SwiftUI room.
+- Wire native recording pause/resume and archive buttons to the existing
+  `set_recording` and `archive_meeting` websocket events.
+
+Files changed:
+- `apple/Sources/MeetingAssistCore/RoomModels.swift`
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- VPS `/opt/meetingassist/deploy/digitalocean/.env` and local `.env.local`
+  matched by variable name and per-variable comparison; 27/27 values present,
+  no secret values printed, and no env file staged.
+- Ignored `deploy/digitalocean/.env` refreshed from the VPS with mode `600`.
+- `swift test` passed 35 tests in `apple/`.
+- Focused native room/board Swift tests passed:
+  `NativeRoomSessionCoordinatorTests/testRoomAndBoardSnapshotsAreEmittedDuringJoin`
+  and `NativeRoomViewModelTests/testRoomAndBoardSnapshotsUpdateNativeState`.
+- `go test ./...` passed.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+
+Risks / blockers:
+- This wave proves native room/board state decoding, caching, view-model
+  publication, app-target builds, and websocket command wiring. It does not
+  prove real native camera/audio frames across iPhone, iPad, Mac, and browser
+  peers.
+- The native room surface now shows the board and recording controls, but full
+  board editing, Scout assistant-event rendering, and archive download handling
+  remain future native slices.
+- Physical device mixed-room media proof, TURN validation, TestFlight upload,
+  and macOS signing/notarization remain release gates.
+
+What worked:
+- Keeping room and board state inside the existing `kanban` websocket envelope
+  avoided a parallel native protocol.
+- A handler replay cache makes late SwiftUI/view-model attachment deterministic
+  without forcing an HTTP board bootstrap.
+- Reusing `set_recording` and `archive_meeting` preserved browser/native room
+  parity while keeping OpenAI and TURN secrets server-side.

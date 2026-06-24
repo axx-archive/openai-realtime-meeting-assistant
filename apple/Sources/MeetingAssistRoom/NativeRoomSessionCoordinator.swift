@@ -74,6 +74,9 @@ public struct NativeRoomJoinResult: Equatable, Sendable {
     }
 }
 
+public typealias NativeRoomSnapshotHandler = @Sendable (RoomSnapshot) async -> Void
+public typealias NativeBoardStateHandler = @Sendable (BoardState) async -> Void
+
 public actor NativeRoomSessionCoordinator {
     public private(set) var lifecycle: RoomLifecycleState = .signedOut
     public private(set) var participant: Participant?
@@ -96,6 +99,10 @@ public actor NativeRoomSessionCoordinator {
     private var labelsByStreamID: [String: String] = [:]
     private var streamLabelConflicts: Set<String> = []
     private var lastParticipantTrackRequest: Date?
+    private var roomSnapshotHandler: NativeRoomSnapshotHandler?
+    private var boardStateHandler: NativeBoardStateHandler?
+    private var currentRoomSnapshot: RoomSnapshot?
+    private var currentBoardState: BoardState?
 
     public init(
         api: NativeRoomAPIProviding,
@@ -123,6 +130,7 @@ public actor NativeRoomSessionCoordinator {
         stopReceiveLoop()
         resetNegotiationState()
         resetRemoteVideoState()
+        resetRoomState()
 
         let discovery = try await api.nativeConfig()
         try validate(discovery)
@@ -193,11 +201,7 @@ public actor NativeRoomSessionCoordinator {
         case ServerSignalEvent.kanban:
             let event = try kanbanEvent(from: envelope)
             try throwIfTerminalKanbanEvent(event)
-            if event.event == "participant_track" {
-                let metadata = try participantTrackMetadata(from: event.data)
-                await handleParticipantTrack(metadata)
-                return
-            }
+            try await handleKanbanRoomEvent(event)
             if let grantName = try accessGrantName(from: event) {
                 participant = Participant(name: grantName, email: participant?.email ?? "")
                 lifecycle = .admitted
@@ -219,6 +223,18 @@ public actor NativeRoomSessionCoordinator {
         }
     }
 
+    public func setRoomSnapshotHandler(_ handler: NativeRoomSnapshotHandler?) async {
+        roomSnapshotHandler = handler
+        guard let handler, let currentRoomSnapshot else { return }
+        await handler(currentRoomSnapshot)
+    }
+
+    public func setBoardStateHandler(_ handler: NativeBoardStateHandler?) async {
+        boardStateHandler = handler
+        guard let handler, let currentBoardState else { return }
+        await handler(currentBoardState)
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -227,6 +243,14 @@ public actor NativeRoomSessionCoordinator {
     public func setCameraOff(_ off: Bool) async {
         media.setCameraOff(off)
         await rtc.setLocalVideoEnabled(!off)
+    }
+
+    public func setRecordingEnabled(_ enabled: Bool) async throws {
+        try await sendJSON(event: ClientSignalEvent.setRecording, payload: SetRecordingPayload(enabled: enabled))
+    }
+
+    public func archiveMeeting() async throws {
+        try await sendJSON(event: ClientSignalEvent.archiveMeeting, payload: EmptyPayload())
     }
 
     public func setScreenSharing(_ sharing: Bool) {
@@ -251,6 +275,7 @@ public actor NativeRoomSessionCoordinator {
         await signaling.close()
         resetNegotiationState()
         resetRemoteVideoState()
+        resetRoomState()
         lifecycle = .leaving
     }
 
@@ -275,6 +300,7 @@ public actor NativeRoomSessionCoordinator {
             if let grantName = try accessGrantName(from: event) {
                 return grantName
             }
+            try await handleKanbanRoomEvent(event)
         }
     }
 
@@ -326,6 +352,11 @@ public actor NativeRoomSessionCoordinator {
         lastParticipantTrackRequest = nil
     }
 
+    private func resetRoomState() {
+        currentRoomSnapshot = nil
+        currentBoardState = nil
+    }
+
     private func kanbanEvent(from envelope: WebSocketEnvelope) throws -> RoomEvent<JSONValue> {
         guard envelope.event == ServerSignalEvent.kanban else {
             throw NativeRoomSessionError.unexpectedSignal(envelope.event)
@@ -333,9 +364,13 @@ public actor NativeRoomSessionCoordinator {
         return try decode(RoomEvent<JSONValue>.self, fromJSONString: envelope.data)
     }
 
-    private func participantTrackMetadata(from data: JSONValue) throws -> NativeParticipantTrackMetadata {
+    private func decodeKanbanData<T: Decodable>(_ type: T.Type, from data: JSONValue) throws -> T {
         let encoded = try encoder.encode(data)
-        return try decoder.decode(NativeParticipantTrackMetadata.self, from: encoded)
+        return try decoder.decode(type, from: encoded)
+    }
+
+    private func participantTrackMetadata(from data: JSONValue) throws -> NativeParticipantTrackMetadata {
+        try decodeKanbanData(NativeParticipantTrackMetadata.self, from: data)
     }
 
     private func throwIfTerminalKanbanEvent(_ event: RoomEvent<JSONValue>) throws {
@@ -369,6 +404,24 @@ public actor NativeRoomSessionCoordinator {
     private func sendJSON<T: Encodable>(event: String, payload: T) async throws {
         let data = try encoder.encode(payload)
         try await signaling.send(event: event, data: String(decoding: data, as: UTF8.self))
+    }
+
+    private func handleKanbanRoomEvent(_ event: RoomEvent<JSONValue>) async throws {
+        switch event.event {
+        case "participants":
+            let snapshot = try decodeKanbanData(RoomSnapshot.self, from: event.data)
+            currentRoomSnapshot = snapshot
+            await roomSnapshotHandler?(snapshot)
+        case "board":
+            let state = try decodeKanbanData(BoardState.self, from: event.data)
+            currentBoardState = state
+            await boardStateHandler?(state)
+        case "participant_track":
+            let metadata = try participantTrackMetadata(from: event.data)
+            await handleParticipantTrack(metadata)
+        default:
+            break
+        }
     }
 
     private func startReceiveLoop() {
@@ -492,6 +545,12 @@ public actor NativeRoomSessionCoordinator {
 private struct ParticipantTrackRequestPayload: Codable, Equatable, Sendable {
     var reason: String
 }
+
+private struct SetRecordingPayload: Codable, Equatable, Sendable {
+    var enabled: Bool
+}
+
+private struct EmptyPayload: Codable, Equatable, Sendable {}
 
 public enum NativeRoomSessionError: Error, Equatable {
     case accessDenied(String)

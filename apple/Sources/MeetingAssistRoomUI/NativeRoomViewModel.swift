@@ -14,8 +14,12 @@ public protocol NativeRoomSessionControlling: Sendable {
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult
     func joinWithCamera(name: String, password: String) async throws -> NativeRoomJoinResult
     func setRemoteVideoTrackHandler(_ handler: NativeRemoteVideoTrackInfoHandler?) async
+    func setRoomSnapshotHandler(_ handler: NativeRoomSnapshotHandler?) async
+    func setBoardStateHandler(_ handler: NativeBoardStateHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
+    func setRecordingEnabled(_ enabled: Bool) async throws
+    func archiveMeeting() async throws
     func sendParticipantMediaState() async throws
     func leave() async
     func currentLifecycle() async -> RoomLifecycleState
@@ -45,6 +49,14 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var hasLocalCamera = false
     @Published public private(set) var joinedParticipant: Participant?
     @Published public private(set) var remoteVideoTracks: [NativeRemoteVideoTrackInfo] = []
+    @Published public private(set) var roomParticipants: [String] = []
+    @Published public private(set) var roomCapacity: Int?
+    @Published public private(set) var roomAvailableSeats: Int?
+    @Published public private(set) var participantMediaStates: [String: ParticipantMediaState] = [:]
+    @Published public private(set) var roomRecording = RoomRecordingState()
+    @Published public private(set) var boardCards: [KanbanCard] = []
+    @Published public private(set) var boardUpdatedAt: String?
+    @Published public private(set) var isArchiving = false
 
     private let configLoaderFactory: NativeRoomConfigLoaderFactory
     private let sessionFactory: NativeRoomSessionFactory
@@ -85,6 +97,15 @@ public final class NativeRoomViewModel: ObservableObject {
 
     public var canUseCameraControls: Bool {
         canUseRoomControls && hasLocalCamera
+    }
+
+    public var activeBoardCards: [KanbanCard] {
+        let activeStatuses = ["In Progress", "Blocked"]
+        let active = boardCards.filter { activeStatuses.contains($0.status) }
+        if !active.isEmpty {
+            return active
+        }
+        return boardCards.filter { $0.status == "Backlog" }.prefix(4).map { $0 }
     }
 
     public func refreshRoster() async {
@@ -129,13 +150,19 @@ public final class NativeRoomViewModel: ObservableObject {
         let name = selectedName.trimmingCharacters(in: .whitespacesAndNewlines)
         isBusy = true
         errorMessage = nil
-        remoteVideoTracks = []
+        resetRoomState()
         statusText = "Joining"
         lifecycle = .authenticated
 
         let newSession = sessionFactory(baseURL)
         await newSession.setRemoteVideoTrackHandler { [weak self] trackInfo in
             await self?.upsertRemoteVideoTrack(trackInfo)
+        }
+        await newSession.setRoomSnapshotHandler { [weak self] snapshot in
+            await self?.applyRoomSnapshot(snapshot)
+        }
+        await newSession.setBoardStateHandler { [weak self] board in
+            await self?.applyBoardState(board)
         }
 
         do {
@@ -152,12 +179,14 @@ public final class NativeRoomViewModel: ObservableObject {
             statusText = "Connected as \(result.participant.name)"
         } catch {
             await newSession.setRemoteVideoTrackHandler(nil)
+            await newSession.setRoomSnapshotHandler(nil)
+            await newSession.setBoardStateHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
             isCameraOff = true
             hasLocalCamera = false
-            remoteVideoTracks = []
+            resetRoomState()
             lifecycle = .signedOut
             setError(displayMessage(for: error))
         }
@@ -191,6 +220,31 @@ public final class NativeRoomViewModel: ObservableObject {
         }
     }
 
+    public func setRecordingEnabled(_ enabled: Bool) async {
+        guard let session else { return }
+        do {
+            try await session.setRecordingEnabled(enabled)
+            roomRecording.enabled = enabled
+            statusText = enabled ? "Recording on" : "Recording off"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+    }
+
+    public func archiveMeeting() async {
+        guard let session else { return }
+
+        isArchiving = true
+        statusText = "Generating notes"
+        do {
+            try await session.archiveMeeting()
+            statusText = "Archive requested"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+        isArchiving = false
+    }
+
     public func leave() async {
         guard let session else {
             lifecycle = .signedOut
@@ -199,13 +253,15 @@ public final class NativeRoomViewModel: ObservableObject {
 
         isBusy = true
         await session.setRemoteVideoTrackHandler(nil)
+        await session.setRoomSnapshotHandler(nil)
+        await session.setBoardStateHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
         isMuted = false
         isCameraOff = true
         hasLocalCamera = false
-        remoteVideoTracks = []
+        resetRoomState()
         lifecycle = .signedOut
         statusText = "Left room"
         isBusy = false
@@ -220,6 +276,33 @@ public final class NativeRoomViewModel: ObservableObject {
     private func setError(_ message: String) {
         errorMessage = message
         statusText = "Needs attention"
+    }
+
+    private func resetRoomState() {
+        remoteVideoTracks = []
+        roomParticipants = []
+        roomCapacity = nil
+        roomAvailableSeats = nil
+        participantMediaStates = [:]
+        roomRecording = RoomRecordingState()
+        boardCards = []
+        boardUpdatedAt = nil
+        isArchiving = false
+    }
+
+    private func applyRoomSnapshot(_ snapshot: RoomSnapshot) {
+        roomParticipants = snapshot.participants
+        roomCapacity = snapshot.capacity
+        roomAvailableSeats = snapshot.availableSeats
+        participantMediaStates = snapshot.mediaStates ?? [:]
+        if let recording = snapshot.recording {
+            roomRecording = recording
+        }
+    }
+
+    private func applyBoardState(_ state: BoardState) {
+        boardCards = state.cards
+        boardUpdatedAt = state.updatedAt
     }
 
     private func upsertRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) {

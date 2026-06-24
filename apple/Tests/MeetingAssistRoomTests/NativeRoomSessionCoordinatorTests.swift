@@ -178,6 +178,61 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.localVideoEnabledChanges, [false])
     }
 
+    func testRoomAndBoardSnapshotsAreEmittedDuringJoin() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            roomSnapshotEnvelope(participants: ["Tom", "Caitlyn"], recordingEnabled: false),
+            accessGrantedEnvelope(name: "Tom"),
+            boardEnvelope(cards: [
+                KanbanCard(id: "card-1", status: "In Progress", title: "Native board", owner: "Caitlyn")
+            ]),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let roomSnapshots = RoomSnapshotCollector()
+        let boardStates = BoardStateCollector()
+        await coordinator.setRoomSnapshotHandler { snapshot in
+            await roomSnapshots.append(snapshot)
+        }
+        await coordinator.setBoardStateHandler { board in
+            await boardStates.append(board)
+        }
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let participantSnapshots = await roomSnapshots.participants()
+        let recordingStates = await roomSnapshots.recordingStates()
+        let boardTitles = await boardStates.titles()
+        XCTAssertEqual(participantSnapshots, [["Tom", "Caitlyn"]])
+        XCTAssertEqual(recordingStates, [false])
+        XCTAssertEqual(boardTitles, [["Native board"]])
+    }
+
+    func testRecordingAndArchiveUseExistingRoomEvents() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.setRecordingEnabled(false)
+        try await coordinator.archiveMeeting()
+
+        XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.setRecording, ClientSignalEvent.archiveMeeting])
+        XCTAssertEqual(try decodeSentPayload(RecordingAssertionPayload.self, from: signaling.sent[0].data).enabled, false)
+        XCTAssertEqual(signaling.sent[1].data, "{}")
+    }
+
     func testParticipantTrackMetadataLabelsLaterRemoteVideoTrack() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             accessGrantedEnvelope(name: "Tom"),
@@ -460,6 +515,10 @@ private struct SelectLayerAssertionPayload: Decodable {
     var layer: String
 }
 
+private struct RecordingAssertionPayload: Decodable {
+    var enabled: Bool
+}
+
 private enum MockError: Error {
     case noEnvelope
 }
@@ -473,6 +532,34 @@ private actor RemoteVideoInfoCollector {
 
     func displayNames() -> [String] {
         values.map(\.displayName)
+    }
+}
+
+private actor RoomSnapshotCollector {
+    private var values: [RoomSnapshot] = []
+
+    func append(_ snapshot: RoomSnapshot) {
+        values.append(snapshot)
+    }
+
+    func participants() -> [[String]] {
+        values.map(\.participants)
+    }
+
+    func recordingStates() -> [Bool?] {
+        values.map { $0.recording?.enabled }
+    }
+}
+
+private actor BoardStateCollector {
+    private var values: [BoardState] = []
+
+    func append(_ state: BoardState) {
+        values.append(state)
+    }
+
+    func titles() -> [[String]] {
+        values.map { $0.cards.map(\.title) }
     }
 }
 
@@ -501,6 +588,38 @@ private func participantTrackEnvelope(
     return kanbanEnvelope(event: "participant_track", data: .object(data))
 }
 
+private func roomSnapshotEnvelope(participants: [String], recordingEnabled: Bool = true) -> WebSocketEnvelope {
+    kanbanEnvelope(
+        event: "participants",
+        data: .object([
+            "participants": .array(participants.map(JSONValue.string)),
+            "capacity": .number(7),
+            "occupiedSeats": .number(Double(participants.count)),
+            "availableSeats": .number(Double(max(0, 7 - participants.count))),
+            "mediaStates": .object([
+                "Tom": .object([
+                    "micMuted": .bool(false),
+                    "cameraOff": .bool(true),
+                    "screenSharing": .bool(false)
+                ]),
+                "Caitlyn": .object([
+                    "micMuted": .bool(true),
+                    "cameraOff": .bool(false),
+                    "screenSharing": .bool(false)
+                ])
+            ]),
+            "recording": .object([
+                "enabled": .bool(recordingEnabled),
+                "updatedBy": .string("Caitlyn")
+            ])
+        ])
+    )
+}
+
+private func boardEnvelope(cards: [KanbanCard]) -> WebSocketEnvelope {
+    kanbanEnvelope(event: "board", data: encodedJSONValue(BoardState(cards: cards, updatedAt: "2026-06-24T21:00:00Z")))
+}
+
 private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope {
     WebSocketEnvelope(
         event: ServerSignalEvent.kanban,
@@ -511,6 +630,11 @@ private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope
 private func encodedJSONString<T: Encodable>(_ value: T) -> String {
     let data = try! JSONEncoder().encode(value)
     return String(decoding: data, as: UTF8.self)
+}
+
+private func encodedJSONValue<T: Encodable>(_ value: T) -> JSONValue {
+    let data = try! JSONEncoder().encode(value)
+    return try! JSONDecoder().decode(JSONValue.self, from: data)
 }
 
 private func decodeSentPayload<T: Decodable>(_ type: T.Type, from data: String) throws -> T {

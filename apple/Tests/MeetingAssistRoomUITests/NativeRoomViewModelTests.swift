@@ -191,6 +191,65 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.remoteVideoTracks.map(\.displayName), ["Caitlyn"])
     }
 
+    func testRoomAndBoardSnapshotsUpdateNativeState() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitRoomSnapshot(
+            RoomSnapshot(
+                participants: ["Tom", "Caitlyn"],
+                capacity: 7,
+                occupiedSeats: 2,
+                availableSeats: 5,
+                mediaStates: ["Caitlyn": ParticipantMediaState(micMuted: true, cameraOff: false)],
+                recording: RoomRecordingState(enabled: false, updatedBy: "Caitlyn")
+            )
+        )
+        await session.emitBoardState(
+            BoardState(
+                cards: [
+                    KanbanCard(id: "card-1", status: "In Progress", title: "Native board", owner: "Caitlyn"),
+                    KanbanCard(id: "card-2", status: "Backlog", title: "Later")
+                ],
+                updatedAt: "2026-06-24T21:00:00Z"
+            )
+        )
+
+        XCTAssertEqual(model.roomParticipants, ["Tom", "Caitlyn"])
+        XCTAssertEqual(model.roomCapacity, 7)
+        XCTAssertEqual(model.roomAvailableSeats, 5)
+        XCTAssertEqual(model.participantMediaStates["Caitlyn"]?.micMuted, true)
+        XCTAssertEqual(model.roomRecording.enabled, false)
+        XCTAssertEqual(model.roomRecording.updatedBy, "Caitlyn")
+        XCTAssertEqual(model.boardCards.map(\.title), ["Native board", "Later"])
+        XCTAssertEqual(model.activeBoardCards.map(\.title), ["Native board"])
+    }
+
+    func testRecordingAndArchiveControlsDelegateToSession() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinAudioOnly()
+        await model.setRecordingEnabled(false)
+        await model.archiveMeeting()
+
+        XCTAssertEqual(session.recordingEnabledChanges, [false])
+        XCTAssertEqual(session.archiveRequestCount, 1)
+        XCTAssertEqual(model.roomRecording.enabled, false)
+        XCTAssertEqual(model.statusText, "Archive requested")
+        XCTAssertFalse(model.isArchiving)
+    }
 
     func testLeaveResetsJoinedState() async {
         let session = MockRoomSession()
@@ -210,6 +269,8 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertNil(model.joinedParticipant)
         XCTAssertFalse(model.isMuted)
         XCTAssertFalse(model.hasLocalCamera)
+        XCTAssertTrue(model.roomParticipants.isEmpty)
+        XCTAssertTrue(model.boardCards.isEmpty)
         XCTAssertEqual(model.statusText, "Left room")
     }
 }
@@ -234,6 +295,8 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
     private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
+    private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
+    private(set) var boardStateHandler: NativeBoardStateHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -241,6 +304,8 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var isMuted = false
     private(set) var isCameraOff = true
     private(set) var mediaStatePublishCount = 0
+    private(set) var recordingEnabledChanges: [Bool] = []
+    private(set) var archiveRequestCount = 0
 
     init(error: Error? = nil) {
         self.error = error
@@ -287,6 +352,14 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         remoteVideoTrackHandler = handler
     }
 
+    func setRoomSnapshotHandler(_ handler: NativeRoomSnapshotHandler?) async {
+        roomSnapshotHandler = handler
+    }
+
+    func setBoardStateHandler(_ handler: NativeBoardStateHandler?) async {
+        boardStateHandler = handler
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -297,6 +370,22 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func setCameraOff(_ off: Bool) async {
         isCameraOff = off
+    }
+
+    func setRecordingEnabled(_ enabled: Bool) async throws {
+        recordingEnabledChanges.append(enabled)
+    }
+
+    func archiveMeeting() async throws {
+        archiveRequestCount += 1
+    }
+
+    func emitRoomSnapshot(_ snapshot: RoomSnapshot) async {
+        await roomSnapshotHandler?(snapshot)
+    }
+
+    func emitBoardState(_ state: BoardState) async {
+        await boardStateHandler?(state)
     }
 
     func sendParticipantMediaState() async throws {

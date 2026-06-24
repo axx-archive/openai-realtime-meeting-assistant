@@ -60,6 +60,8 @@ public enum ClientSignalEvent {
     public static let participantMediaState = "participant_media_state"
     public static let mediaQuality = "media_quality"
     public static let mediaError = "media_error"
+    public static let setRecording = "set_recording"
+    public static let archiveMeeting = "archive_meeting"
 }
 
 public enum ServerSignalEvent {

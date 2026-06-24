@@ -15,6 +15,12 @@ public struct NativeRoomView: View {
                 header
                 connectionForm
                 remoteVideoGrid
+                if model.canUseRoomControls || !model.roomParticipants.isEmpty {
+                    roomState
+                }
+                if model.canUseRoomControls || !model.boardCards.isEmpty {
+                    boardPreview
+                }
                 controls
                 status
             }
@@ -128,6 +134,66 @@ public struct NativeRoomView: View {
         }
     }
 
+    private var roomState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Label(recordingLabel, systemImage: model.roomRecording.enabled ? "record.circle.fill" : "pause.circle")
+                    .foregroundStyle(model.roomRecording.enabled ? .red : .secondary)
+
+                Spacer()
+
+                Button {
+                    Task { await model.setRecordingEnabled(!model.roomRecording.enabled) }
+                } label: {
+                    Label(model.roomRecording.enabled ? "Pause" : "Resume", systemImage: model.roomRecording.enabled ? "pause.fill" : "record.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls)
+
+                Button {
+                    Task { await model.archiveMeeting() }
+                } label: {
+                    Label("Archive", systemImage: "tray.and.arrow.down.fill")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls || model.isArchiving)
+            }
+
+            if !model.roomParticipants.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                    ForEach(model.roomParticipants, id: \.self) { name in
+                        participantRow(name)
+                    }
+                }
+            }
+        }
+    }
+
+    private var boardPreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Board", systemImage: "rectangle.3.group.fill")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.boardCards.count) cards")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.activeBoardCards.isEmpty {
+                Text(model.canUseRoomControls ? "No active cards" : "Join to load the board")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.activeBoardCards) { card in
+                        boardRow(card)
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var remoteVideoGrid: some View {
         if !model.remoteVideoTracks.isEmpty {
@@ -155,5 +221,71 @@ public struct NativeRoomView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var recordingLabel: String {
+        guard let updatedBy = model.roomRecording.updatedBy, !updatedBy.isEmpty else {
+            return model.roomRecording.enabled ? "Recording" : "Paused"
+        }
+        return model.roomRecording.enabled ? "Recording by \(updatedBy)" : "Paused by \(updatedBy)"
+    }
+
+    private func participantRow(_ name: String) -> some View {
+        let media = model.participantMediaStates[name]
+        return HStack(spacing: 8) {
+            Text(monogram(for: name))
+                .font(.caption.weight(.bold))
+                .frame(width: 24, height: 24)
+                .background(.secondary.opacity(0.16), in: Circle())
+
+            Text(name)
+                .font(.callout)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Image(systemName: media?.micMuted == true ? "mic.slash.fill" : "mic.fill")
+                .foregroundStyle(media?.micMuted == true ? .secondary : .primary)
+            Image(systemName: media?.cameraOff == true ? "video.slash.fill" : "video.fill")
+                .foregroundStyle(media?.cameraOff == true ? .secondary : .primary)
+            if media?.screenSharing == true {
+                Image(systemName: "display")
+                    .foregroundStyle(.blue)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func boardRow(_ card: KanbanCard) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(card.status)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let owner = card.owner, !owner.isEmpty {
+                    Text(owner)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(card.title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(2)
+            if let dueDate = card.dueDate, !dueDate.isEmpty {
+                Label(dueDate, systemImage: "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func monogram(for name: String) -> String {
+        String(name.trimmingCharacters(in: .whitespacesAndNewlines).first ?? "B").uppercased()
     }
 }
