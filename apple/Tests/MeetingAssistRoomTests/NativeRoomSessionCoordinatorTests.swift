@@ -178,6 +178,65 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.localVideoEnabledChanges, [false])
     }
 
+    func testParticipantTrackMetadataLabelsLaterRemoteVideoTrack() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            participantTrackEnvelope(name: "Caitlyn", kind: "video", trackId: "forwarded-video-1", sourceTrackId: "source-video-1", streamId: "stream-1"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let emitted = RemoteVideoInfoCollector()
+        await coordinator.setRemoteVideoTrackHandler { info in
+            await emitted.append(info)
+        }
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "forwarded-video-1", streamIds: ["stream-1"]))
+
+        let displayNames = await emitted.displayNames()
+        XCTAssertEqual(displayNames, ["Caitlyn"])
+    }
+
+    func testParticipantTrackMetadataRelabelsExistingRemoteVideoTrack() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let emitted = RemoteVideoInfoCollector()
+        await coordinator.setRemoteVideoTrackHandler { info in
+            await emitted.append(info)
+        }
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "forwarded-video-2", streamIds: ["stream-2"]))
+        try await coordinator.handleServerEvent(
+            participantTrackEnvelope(name: "Caitlyn", kind: "video", trackId: "forwarded-video-2", sourceTrackId: "source-video-2", streamId: "stream-2")
+        )
+
+        let displayNames = await emitted.displayNames()
+        XCTAssertEqual(displayNames, ["forwarded-video-2", "Caitlyn"])
+        XCTAssertEqual(signaling.sent.last?.event, ClientSignalEvent.requestParticipantTracks)
+    }
+
     func testAccessDeniedStopsJoinBeforeMediaReady() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             kanbanEnvelope(event: "access_denied", data: .string("Room is full."))
@@ -345,6 +404,10 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         await localCandidateHandler?(candidate)
     }
 
+    func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
+        await remoteVideoTrackHandler?(track)
+    }
+
     func prepareLocalMedia(audio: Bool, video: Bool) async throws {
         preparedAudio = audio
         preparedVideo = video
@@ -401,8 +464,41 @@ private enum MockError: Error {
     case noEnvelope
 }
 
+private actor RemoteVideoInfoCollector {
+    private var values: [NativeRemoteVideoTrackInfo] = []
+
+    func append(_ info: NativeRemoteVideoTrackInfo) {
+        values.append(info)
+    }
+
+    func displayNames() -> [String] {
+        values.map(\.displayName)
+    }
+}
+
 private func accessGrantedEnvelope(name: String) -> WebSocketEnvelope {
     kanbanEnvelope(event: "access_granted", data: .object(["name": .string(name)]))
+}
+
+private func participantTrackEnvelope(
+    name: String,
+    kind: String,
+    trackId: String,
+    sourceTrackId: String? = nil,
+    streamId: String? = nil
+) -> WebSocketEnvelope {
+    var data: [String: JSONValue] = [
+        "name": .string(name),
+        "kind": .string(kind),
+        "trackId": .string(trackId)
+    ]
+    if let sourceTrackId {
+        data["sourceTrackId"] = .string(sourceTrackId)
+    }
+    if let streamId {
+        data["streamId"] = .string(streamId)
+    }
+    return kanbanEnvelope(event: "participant_track", data: .object(data))
 }
 
 private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope {

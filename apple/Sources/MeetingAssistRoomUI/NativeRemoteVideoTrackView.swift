@@ -7,9 +7,12 @@ import SwiftUI
 
 public struct NativeRemoteVideoTrackView: View {
     public let track: NativeRemoteVideoTrack
+    public let displayName: String
 
-    public init(track: NativeRemoteVideoTrack) {
+    public init(track: NativeRemoteVideoTrack, displayName: String? = nil) {
         self.track = track
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.displayName = trimmed.isEmpty ? track.id : trimmed
     }
 
     public var body: some View {
@@ -19,8 +22,8 @@ public struct NativeRemoteVideoTrackView: View {
                 .background(.black)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text(track.id)
-                .font(.caption2.monospaced())
+            Text(displayName)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
@@ -28,7 +31,7 @@ public struct NativeRemoteVideoTrackView: View {
                 .background(.black.opacity(0.65), in: Capsule())
                 .padding(8)
         }
-        .accessibilityLabel("Remote video \(track.id)")
+        .accessibilityLabel("Remote video \(displayName)")
     }
 
     @ViewBuilder

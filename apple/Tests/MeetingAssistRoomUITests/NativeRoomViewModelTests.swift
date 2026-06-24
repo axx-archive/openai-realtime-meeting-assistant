@@ -153,6 +153,44 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertNil(session.remoteVideoTrackHandler)
     }
 
+    func testRemoteVideoTrackRelabelsWithoutDuplicatingTile() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        let track = NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["meetingassist-native"])
+        await session.emitRemoteVideoTrack(track)
+        await session.emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track, participantName: "Caitlyn"))
+
+        XCTAssertEqual(model.remoteVideoTracks.map(\.id), ["remote-video-1"])
+        XCTAssertEqual(model.remoteVideoTracks.map(\.displayName), ["Caitlyn"])
+    }
+
+    func testRemoteVideoTrackUsesParticipantNameWhenMetadataArrivesFirst() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitRemoteVideoTrack(
+            NativeRemoteVideoTrackInfo(
+                track: NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["meetingassist-native"]),
+                participantName: "Caitlyn"
+            )
+        )
+
+        XCTAssertEqual(model.remoteVideoTracks.map(\.displayName), ["Caitlyn"])
+    }
+
 
     func testLeaveResetsJoinedState() async {
         let session = MockRoomSession()
@@ -195,7 +233,7 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
 
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
-    private(set) var remoteVideoTrackHandler: RemoteVideoTrackHandler?
+    private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -245,12 +283,16 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         isMuted = muted
     }
 
-    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
+    func setRemoteVideoTrackHandler(_ handler: NativeRemoteVideoTrackInfoHandler?) async {
         remoteVideoTrackHandler = handler
     }
 
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
-        await remoteVideoTrackHandler?(track)
+        await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
+    }
+
+    func emitRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) async {
+        await remoteVideoTrackHandler?(trackInfo)
     }
 
     func setCameraOff(_ off: Bool) async {

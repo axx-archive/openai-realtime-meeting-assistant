@@ -13,7 +13,7 @@ extension MeetingAssistAPIClient: NativeRoomConfigLoading {}
 public protocol NativeRoomSessionControlling: Sendable {
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult
     func joinWithCamera(name: String, password: String) async throws -> NativeRoomJoinResult
-    func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async
+    func setRemoteVideoTrackHandler(_ handler: NativeRemoteVideoTrackInfoHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func sendParticipantMediaState() async throws
@@ -44,7 +44,7 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var isCameraOff = true
     @Published public private(set) var hasLocalCamera = false
     @Published public private(set) var joinedParticipant: Participant?
-    @Published public private(set) var remoteVideoTracks: [NativeRemoteVideoTrack] = []
+    @Published public private(set) var remoteVideoTracks: [NativeRemoteVideoTrackInfo] = []
 
     private let configLoaderFactory: NativeRoomConfigLoaderFactory
     private let sessionFactory: NativeRoomSessionFactory
@@ -134,8 +134,8 @@ public final class NativeRoomViewModel: ObservableObject {
         lifecycle = .authenticated
 
         let newSession = sessionFactory(baseURL)
-        await newSession.setRemoteVideoTrackHandler { [weak self] track in
-            await self?.appendRemoteVideoTrack(track)
+        await newSession.setRemoteVideoTrackHandler { [weak self] trackInfo in
+            await self?.upsertRemoteVideoTrack(trackInfo)
         }
 
         do {
@@ -222,9 +222,12 @@ public final class NativeRoomViewModel: ObservableObject {
         statusText = "Needs attention"
     }
 
-    private func appendRemoteVideoTrack(_ track: NativeRemoteVideoTrack) {
-        guard !remoteVideoTracks.contains(where: { $0.id == track.id }) else { return }
-        remoteVideoTracks.append(track)
+    private func upsertRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) {
+        if let index = remoteVideoTracks.firstIndex(where: { $0.id == trackInfo.id }) {
+            remoteVideoTracks[index] = trackInfo
+        } else {
+            remoteVideoTracks.append(trackInfo)
+        }
     }
 
     private func displayMessage(for error: Error) -> String {

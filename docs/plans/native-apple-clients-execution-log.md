@@ -408,3 +408,65 @@ What worked:
   without exposing LiveKit internals everywhere.
 - Adding the Metal renderer as shared SwiftUI kept iOS/iPadOS and macOS on one
   room surface while still using platform-native views.
+
+## Wave 7
+
+Status: `wave7_native_participant_labeled_remote_video_validated`
+
+Scope:
+- Verify the ignored local `.env.local` has the same variable names and
+  per-variable values as the VPS runtime `.env` without printing secrets.
+- Decode the existing `kanban` / `participant_track` metadata in the native
+  coordinator instead of adding a new server contract.
+- Cache participant labels by forwarded track id, source track id, and reliable
+  stream id, matching the browser's resilient remote-media labeling strategy.
+- Add a post-join receive loop so late participant-track replays, renegotiation
+  offers, and ICE candidates keep flowing after the initial answer.
+- Request a `request_participant_tracks` replay when native receives an
+  unlabeled remote video track.
+- Replace raw remote video track UI state with `NativeRemoteVideoTrackInfo`,
+  allowing existing tiles to relabel without duplicating when metadata arrives
+  after WebRTC `ontrack`.
+
+Files changed:
+- `apple/Sources/MeetingAssistCore/SignalingModels.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRemoteVideoTrackInfo.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRemoteVideoTrackView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `.env.local` and `/opt/meetingassist/deploy/digitalocean/.env` matched by
+  variable name and per-variable SHA-256 comparison; no secret values were
+  printed or committed.
+- `swift test` passed 31 tests in `apple/`.
+- `go test ./...` passed.
+- `xcodebuild -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- The package product schemes `MeetingAssistApple` and `MeetingAssistMac` are
+  not configured for the Xcode `test` action; the app schemes above are the
+  executable Xcode test gates.
+
+Risks / blockers:
+- This proves participant-label propagation in unit tests, Swift package tests,
+  and simulator/macOS app test builds. It still does not prove real native
+  camera/audio frames across iPhone, iPad, Mac, and browser peers.
+- Physical device mixed-room media proof, TURN validation, TestFlight upload,
+  and macOS signing/notarization remain release gates.
+
+What worked:
+- Treating `RoomRTCClient` as a track transport kept participant identity in the
+  signaling/room layer where the server contract already lives.
+- Reusing the browser's track/source/stream label keys avoided a native-only
+  labeling protocol.
+- A replay request for unlabeled tracks gives native the same recovery hook the
+  browser uses without making the first render path depend on perfect event
+  ordering.

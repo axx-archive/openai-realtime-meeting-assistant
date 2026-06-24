@@ -56,6 +56,7 @@ public enum ClientSignalEvent {
     public static let candidate = "candidate"
     public static let restartICE = "restart_ice"
     public static let selectLayer = "select_layer"
+    public static let requestParticipantTracks = "request_participant_tracks"
     public static let participantMediaState = "participant_media_state"
     public static let mediaQuality = "media_quality"
     public static let mediaError = "media_error"

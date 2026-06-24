@@ -132,8 +132,8 @@ public struct NativeRoomView: View {
     private var remoteVideoGrid: some View {
         if !model.remoteVideoTracks.isEmpty {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                ForEach(model.remoteVideoTracks) { track in
-                    NativeRemoteVideoTrackView(track: track)
+                ForEach(model.remoteVideoTracks) { trackInfo in
+                    NativeRemoteVideoTrackView(track: trackInfo.track, displayName: trackInfo.displayName)
                 }
             }
         }

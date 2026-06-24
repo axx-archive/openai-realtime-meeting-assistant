@@ -89,6 +89,13 @@ public actor NativeRoomSessionCoordinator {
     private let decoder = JSONDecoder()
     private var pendingRemoteCandidates: [RTCIceCandidatePayload] = []
     private var remoteDescriptionReady = false
+    private var receiveTask: Task<Void, Never>?
+    private var remoteVideoTrackInfoHandler: NativeRemoteVideoTrackInfoHandler?
+    private var remoteVideoTracksByID: [String: NativeRemoteVideoTrack] = [:]
+    private var labelsByTrackID: [String: String] = [:]
+    private var labelsByStreamID: [String: String] = [:]
+    private var streamLabelConflicts: Set<String> = []
+    private var lastParticipantTrackRequest: Date?
 
     public init(
         api: NativeRoomAPIProviding,
@@ -113,7 +120,9 @@ public actor NativeRoomSessionCoordinator {
     }
 
     private func join(name: String, password: String, video: Bool) async throws -> NativeRoomJoinResult {
+        stopReceiveLoop()
         resetNegotiationState()
+        resetRemoteVideoState()
 
         let discovery = try await api.nativeConfig()
         try validate(discovery)
@@ -143,6 +152,10 @@ public actor NativeRoomSessionCoordinator {
             guard let self else { return }
             await self.sendLocalCandidate(candidate)
         }
+        await rtc.setRemoteVideoTrackHandler { [weak self] track in
+            guard let self else { return }
+            await self.handleRemoteVideoTrack(track)
+        }
 
         media.setCameraOff(!video)
         try await rtc.prepareLocalMedia(audio: true, video: video)
@@ -156,6 +169,7 @@ public actor NativeRoomSessionCoordinator {
         let answer = try await waitForOfferAndAnswer()
         try await sendParticipantMediaState()
         lifecycle = .connected
+        startReceiveLoop()
 
         return NativeRoomJoinResult(
             participant: participant ?? signedInParticipant,
@@ -179,6 +193,11 @@ public actor NativeRoomSessionCoordinator {
         case ServerSignalEvent.kanban:
             let event = try kanbanEvent(from: envelope)
             try throwIfTerminalKanbanEvent(event)
+            if event.event == "participant_track" {
+                let metadata = try participantTrackMetadata(from: event.data)
+                await handleParticipantTrack(metadata)
+                return
+            }
             if let grantName = try accessGrantName(from: event) {
                 participant = Participant(name: grantName, email: participant?.email ?? "")
                 lifecycle = .admitted
@@ -192,8 +211,12 @@ public actor NativeRoomSessionCoordinator {
         try await sendJSON(event: ClientSignalEvent.participantMediaState, payload: media.participantMediaState)
     }
 
-    public func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
-        await rtc.setRemoteVideoTrackHandler(handler)
+    public func setRemoteVideoTrackHandler(_ handler: NativeRemoteVideoTrackInfoHandler?) async {
+        remoteVideoTrackInfoHandler = handler
+        guard let handler else { return }
+        for track in remoteVideoTracksByID.values {
+            await handler(remoteVideoTrackInfo(for: track))
+        }
     }
 
     public func setMuted(_ muted: Bool) async {
@@ -221,10 +244,13 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func leave() async {
+        stopReceiveLoop()
         await rtc.setLocalCandidateHandler(nil)
+        await rtc.setRemoteVideoTrackHandler(nil)
         await rtc.leave()
         await signaling.close()
         resetNegotiationState()
+        resetRemoteVideoState()
         lifecycle = .leaving
     }
 
@@ -292,11 +318,24 @@ public actor NativeRoomSessionCoordinator {
         remoteDescriptionReady = false
     }
 
+    private func resetRemoteVideoState() {
+        remoteVideoTracksByID.removeAll()
+        labelsByTrackID.removeAll()
+        labelsByStreamID.removeAll()
+        streamLabelConflicts.removeAll()
+        lastParticipantTrackRequest = nil
+    }
+
     private func kanbanEvent(from envelope: WebSocketEnvelope) throws -> RoomEvent<JSONValue> {
         guard envelope.event == ServerSignalEvent.kanban else {
             throw NativeRoomSessionError.unexpectedSignal(envelope.event)
         }
         return try decode(RoomEvent<JSONValue>.self, fromJSONString: envelope.data)
+    }
+
+    private func participantTrackMetadata(from data: JSONValue) throws -> NativeParticipantTrackMetadata {
+        let encoded = try encoder.encode(data)
+        return try decoder.decode(NativeParticipantTrackMetadata.self, from: encoded)
     }
 
     private func throwIfTerminalKanbanEvent(_ event: RoomEvent<JSONValue>) throws {
@@ -332,6 +371,100 @@ public actor NativeRoomSessionCoordinator {
         try await signaling.send(event: event, data: String(decoding: data, as: UTF8.self))
     }
 
+    private func startReceiveLoop() {
+        stopReceiveLoop()
+        receiveTask = Task { [weak self] in
+            await self?.receiveLoop()
+        }
+    }
+
+    private func stopReceiveLoop() {
+        receiveTask?.cancel()
+        receiveTask = nil
+    }
+
+    private func receiveLoop() async {
+        while !Task.isCancelled {
+            do {
+                let envelope = try await signaling.receive()
+                try await handleServerEvent(envelope)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func handleRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
+        remoteVideoTracksByID[track.id] = track
+        let info = remoteVideoTrackInfo(for: track)
+        await remoteVideoTrackInfoHandler?(info)
+        if info.participantName == nil {
+            await requestParticipantTrackRefresh(reason: "unlabeled remote video")
+        }
+    }
+
+    private func handleParticipantTrack(_ metadata: NativeParticipantTrackMetadata) async {
+        guard let name = metadata.normalizedName else { return }
+        for key in metadata.trackLabelKeys {
+            labelsByTrackID[key] = name
+        }
+        rememberRemoteStreamLabel(metadata.reliableStreamId, name: name)
+
+        for track in remoteVideoTracksByID.values {
+            guard remoteVideoTrackMatches(track, metadata: metadata) else { continue }
+            await remoteVideoTrackInfoHandler?(remoteVideoTrackInfo(for: track))
+        }
+    }
+
+    private func rememberRemoteStreamLabel(_ streamId: String?, name: String) {
+        guard let streamId, !streamLabelConflicts.contains(streamId) else { return }
+        if let existingName = labelsByStreamID[streamId],
+           existingName.caseInsensitiveCompare(name) != .orderedSame {
+            labelsByStreamID.removeValue(forKey: streamId)
+            streamLabelConflicts.insert(streamId)
+            return
+        }
+        labelsByStreamID[streamId] = name
+    }
+
+    private func remoteVideoTrackInfo(for track: NativeRemoteVideoTrack) -> NativeRemoteVideoTrackInfo {
+        NativeRemoteVideoTrackInfo(track: track, participantName: participantName(for: track))
+    }
+
+    private func participantName(for track: NativeRemoteVideoTrack) -> String? {
+        if let name = labelsByTrackID[track.id] {
+            return name
+        }
+        for streamId in track.streamIds {
+            guard let reliableStreamId = NativeParticipantTrackMetadata.reliableStreamId(streamId) else { continue }
+            if let name = labelsByStreamID[reliableStreamId] {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private func remoteVideoTrackMatches(_ track: NativeRemoteVideoTrack, metadata: NativeParticipantTrackMetadata) -> Bool {
+        guard metadata.isVideo else {
+            return metadata.reliableStreamId.map { track.streamIds.contains($0) } ?? false
+        }
+        if metadata.trackLabelKeys.contains(track.id) {
+            return true
+        }
+        guard let streamId = metadata.reliableStreamId else { return false }
+        return track.streamIds.contains(streamId)
+    }
+
+    private func requestParticipantTrackRefresh(reason: String) async {
+        let now = Date()
+        if let lastParticipantTrackRequest,
+           now.timeIntervalSince(lastParticipantTrackRequest) < 0.9 {
+            return
+        }
+        lastParticipantTrackRequest = now
+        try? await sendJSON(event: ClientSignalEvent.requestParticipantTracks, payload: ParticipantTrackRequestPayload(reason: reason))
+    }
+
     private func sendLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
         do {
             try await sendJSON(event: ClientSignalEvent.candidate, payload: candidate)
@@ -354,6 +487,10 @@ public actor NativeRoomSessionCoordinator {
         case (false, false): return "/" + cleanBase + "/" + cleanPath
         }
     }
+}
+
+private struct ParticipantTrackRequestPayload: Codable, Equatable, Sendable {
+    var reason: String
 }
 
 public enum NativeRoomSessionError: Error, Equatable {
