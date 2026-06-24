@@ -263,7 +263,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"goal workflow",
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 62px;",
-		`"topbar topbar"`,
+		`id="toolRail" class="tool-rail" aria-label="Tools"`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
@@ -467,7 +467,7 @@ func TestIndexLoginUsesOnlyRosterNamePicker(t *testing.T) {
 	}
 }
 
-func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
+func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -475,20 +475,23 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`"topbar topbar"`,
+		`id="toolRail" class="tool-rail" aria-label="Tools"`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
-		"position: sticky;",
-		"top: var(--shell-topbar-height);",
-		"height: calc(100svh - var(--shell-topbar-height));",
-		"align-self: flex-start;",
-		"width: 68px;",
+		"top: 50%;",
+		"left: max(16px, env(safe-area-inset-left));",
+		"max-height: min(640px, calc(100svh - 48px));",
+		"width: 64px;",
+		"border-radius: calc(var(--r-2xl) + 4px);",
+		"transform: translateY(-50%);",
 		"padding: 0 20px 0 0;",
 		".tool-rail:hover,",
 		".tool-rail:focus-within",
-		"width: 228px;",
-		"max-width: 140px;",
+		"width: 64px;",
+		"max-width: 0;",
 		".tool-rail:hover .tool-rail__theme,",
 		".tool-rail:focus-within .tool-rail__theme",
+		"#appShell.is-authed:not(.is-rail-hidden) .workspace",
+		"padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));",
 		`<span class="tool-rail__label">office</span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
@@ -507,7 +510,10 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 		"max-width: 44px;",
 		"padding: 0 12px 0 0;",
 		"position: fixed;",
+		"inset: auto auto max(12px, env(safe-area-inset-bottom)) 50%;",
 		"bottom: max(12px, env(safe-area-inset-bottom));",
+		"width: max-content;",
+		"max-width: calc(100dvw - 24px);",
 		"transform: translateX(-50%);",
 		"backdrop-filter: blur(22px) saturate(1.45);",
 		"#appShell:not(.is-rail-hidden) .workspace",
@@ -524,12 +530,50 @@ func TestIndexAccountMenuAndExpandableRailInteractionsAreWired(t *testing.T) {
 	if strings.Contains(html, `class="tool-rail__flame"`) {
 		t.Fatal("brand flame should stay anchored in the topbar above the rail")
 	}
+	if strings.Contains(html, `id="toolRail" class="tool-rail mount-stagger"`) {
+		t.Fatal("tool rail must not use mount-stagger; its transform anchors desktop left-center and mobile bottom-center positioning")
+	}
 	if strings.Contains(html, `id="topbarAccountEmail"`) || strings.Contains(html, `class="topbar__account-email"`) {
 		t.Fatal("topbar account trigger should not render an email line")
 	}
 	linkBlock := functionBody(html, ".account-menu__link")
 	if !strings.Contains(linkBlock, "min-height: 44px;") {
 		t.Fatal("account menu settings/sign-out rows must keep a 44px touch target")
+	}
+}
+
+func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		`id="toolRail" class="tool-rail" aria-label="Tools"`,
+		"left: max(16px, env(safe-area-inset-left));",
+		"transform: translateY(-50%);",
+		"inset: auto auto max(12px, env(safe-area-inset-bottom)) 50%;",
+		"left: 50%;",
+		"width: max-content;",
+		"max-width: calc(100dvw - 24px);",
+		"transform: translateX(-50%);",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing floating rail viewport-safe anchor %q", want)
+		}
+	}
+	if strings.Contains(html, `id="toolRail" class="tool-rail mount-stagger"`) {
+		t.Fatal("tool rail must not use mount-stagger; mount transforms can override its centering anchors")
+	}
+
+	const phoneViewport = 390.0
+	const horizontalInset = 24.0
+	maxRailWidth := phoneViewport - horizontalInset
+	left := phoneViewport/2 - maxRailWidth/2
+	right := phoneViewport/2 + maxRailWidth/2
+	if left < 0 || right > phoneViewport {
+		t.Fatalf("worst-case centered mobile rail bounds left=%v right=%v viewport=%v", left, right, phoneViewport)
 	}
 }
 
