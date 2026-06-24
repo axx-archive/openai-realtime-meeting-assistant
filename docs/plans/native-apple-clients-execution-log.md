@@ -268,3 +268,64 @@ What worked:
   websocket envelope risk before the Swift candidate model shipped.
 - Moving RTC configuration until after websocket admission prevents denied room
   joins from leaving a native peer connection alive.
+
+## Wave 5
+
+Status: `wave5_native_room_ui_checkpoint_validated`
+
+Scope:
+- Add `MeetingAssistRoomUI`, a shared SwiftUI room join/control layer used by
+  both the iOS/iPadOS and macOS app targets.
+- Add `NativeRoomViewModel` to load `/native/config`, select a participant,
+  join the room through `NativeRoomSessionCoordinator`, publish mute state, and
+  leave cleanly.
+- Add platform client identity for iOS, iPadOS, and macOS without leaking UIKit
+  main-actor calls into sendable room factories.
+- Replace the demo app root views with `NativeRoomView` so the app targets now
+  exercise the real native room-entry path instead of static shell controls.
+- Add focused view-model tests for roster loading, successful join, failed join
+  cleanup, and mute-state publication.
+
+Files changed:
+- `apple/Package.swift`
+- `apple/Apps/MeetingAssistIOS/MeetingAssistIOSRootView.swift`
+- `apple/Apps/MeetingAssistMac/MeetingAssistMacRootView.swift`
+- `apple/Sources/MeetingAssistRoomUI/`
+- `apple/Tests/MeetingAssistRoomUITests/`
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `swift test` passed 22 tests in `apple/`, including five
+  `NativeRoomViewModelTests`.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed after the app target compiled the shared room UI.
+- `xcodebuild -quiet -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test`
+  passed after the macOS app target compiled the shared room UI.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local temporary-room smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- Temporary local `/readyz` reported Realtime connected while using ignored
+  `.env.local` with isolated temp state files.
+
+Risks / blockers:
+- The native app UI currently exposes the audio-only join path. Native camera
+  capture, remote video rendering, and mixed browser/native media proof remain
+  future waves.
+- Physical iPhone, iPad, and Mac tests remain required before claiming native
+  quality or stability improvements.
+- TestFlight/App Store distribution, macOS signing/notarization, and deployed
+  VPS rollout were not part of this commit.
+
+What worked:
+- A single `MeetingAssistRoomUI` product keeps iOS/iPadOS and macOS room entry
+  aligned instead of forking app-specific join screens.
+- Injecting config loaders and session controllers made the UI model testable
+  without network or WebRTC side effects.
+- Capturing the client identity before creating the sendable session factory
+  removed UIKit actor-isolation warnings from the iOS build.
+- Keeping app roots as thin wrappers made the app targets prove the same shared
+  room surface on both Apple platforms.

@@ -1,0 +1,194 @@
+import Foundation
+import MeetingAssistAPI
+import MeetingAssistCore
+import MeetingAssistRoom
+
+public protocol NativeRoomConfigLoading: Sendable {
+    func nativeConfig() async throws -> NativeClientConfig
+}
+
+extension MeetingAssistAPIClient: NativeRoomConfigLoading {}
+
+public protocol NativeRoomSessionControlling: Sendable {
+    func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult
+    func setMuted(_ muted: Bool) async
+    func sendParticipantMediaState() async throws
+    func leave() async
+    func currentLifecycle() async -> RoomLifecycleState
+}
+
+extension NativeRoomSessionCoordinator: NativeRoomSessionControlling {
+    public func currentLifecycle() async -> RoomLifecycleState {
+        lifecycle
+    }
+}
+
+public typealias NativeRoomConfigLoaderFactory = @Sendable (URL) -> NativeRoomConfigLoading
+public typealias NativeRoomSessionFactory = @Sendable (URL) -> NativeRoomSessionControlling
+
+@MainActor
+public final class NativeRoomViewModel: ObservableObject {
+    @Published public var baseURLString: String
+    @Published public var selectedName: String
+    @Published public var password: String
+    @Published public private(set) var roster: [Participant] = []
+    @Published public private(set) var lifecycle: RoomLifecycleState = .signedOut
+    @Published public private(set) var statusText = "Ready"
+    @Published public private(set) var errorMessage: String?
+    @Published public private(set) var isBusy = false
+    @Published public private(set) var isMuted = false
+    @Published public private(set) var joinedParticipant: Participant?
+
+    private let configLoaderFactory: NativeRoomConfigLoaderFactory
+    private let sessionFactory: NativeRoomSessionFactory
+    private var session: NativeRoomSessionControlling?
+
+    public init(
+        baseURLString: String = "https://thebonfire.xyz",
+        selectedName: String = "",
+        password: String = "",
+        configLoaderFactory: @escaping NativeRoomConfigLoaderFactory = { baseURL in
+            MeetingAssistAPIClient(baseURL: baseURL)
+        },
+        sessionFactory: NativeRoomSessionFactory? = nil
+    ) {
+        self.baseURLString = baseURLString
+        self.selectedName = selectedName
+        self.password = password
+        self.configLoaderFactory = configLoaderFactory
+        let clientIdentity = NativeRoomClientIdentity.current
+        self.sessionFactory = sessionFactory ?? { baseURL in
+            NativeRoomSessionCoordinator(
+                api: MeetingAssistAPIClient(baseURL: baseURL),
+                clientIdentity: clientIdentity
+            )
+        }
+    }
+
+    public var canJoin: Bool {
+        !isBusy
+            && lifecycle != .connected
+            && normalizedBaseURL() != nil
+            && !selectedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var canUseRoomControls: Bool {
+        lifecycle == .connected || lifecycle == .reconnecting
+    }
+
+    public func refreshRoster() async {
+        guard let baseURL = normalizedBaseURL() else {
+            setError("Enter a valid MeetingAssist URL.")
+            return
+        }
+
+        isBusy = true
+        errorMessage = nil
+        statusText = "Loading roster"
+
+        do {
+            let config = try await configLoaderFactory(baseURL).nativeConfig()
+            roster = config.room.participants
+            if selectedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let first = config.room.participants.first {
+                selectedName = first.name
+            }
+            statusText = "Roster loaded"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+
+        isBusy = false
+    }
+
+    public func joinAudioOnly() async {
+        guard canJoin, let baseURL = normalizedBaseURL() else {
+            setError("Enter a valid room URL and name.")
+            return
+        }
+
+        let name = selectedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        isBusy = true
+        errorMessage = nil
+        statusText = "Joining"
+        lifecycle = .authenticated
+
+        let newSession = sessionFactory(baseURL)
+
+        do {
+            let result = try await newSession.joinAudioOnly(name: name, password: password)
+            session = newSession
+            joinedParticipant = result.participant
+            lifecycle = await newSession.currentLifecycle()
+            statusText = "Connected as \(result.participant.name)"
+        } catch {
+            await newSession.leave()
+            session = nil
+            joinedParticipant = nil
+            lifecycle = .signedOut
+            setError(displayMessage(for: error))
+        }
+
+        isBusy = false
+    }
+
+    public func setMuted(_ muted: Bool) async {
+        isMuted = muted
+        guard let session else { return }
+
+        await session.setMuted(muted)
+        do {
+            try await session.sendParticipantMediaState()
+            statusText = muted ? "Muted" : "Unmuted"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+    }
+
+    public func leave() async {
+        guard let session else {
+            lifecycle = .signedOut
+            return
+        }
+
+        isBusy = true
+        await session.leave()
+        self.session = nil
+        joinedParticipant = nil
+        isMuted = false
+        lifecycle = .signedOut
+        statusText = "Left room"
+        isBusy = false
+    }
+
+    private func normalizedBaseURL() -> URL? {
+        let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else { return nil }
+        return url
+    }
+
+    private func setError(_ message: String) {
+        errorMessage = message
+        statusText = "Needs attention"
+    }
+
+    private func displayMessage(for error: Error) -> String {
+        if let roomError = error as? NativeRoomSessionError {
+            switch roomError {
+            case .accessDenied(let message), .sessionReplaced(let message):
+                return message
+            case .unsupportedAuthMode(let mode):
+                return "Unsupported auth mode: \(mode)"
+            case .unsupportedProtocol(let version):
+                return "Unsupported native protocol: \(version)"
+            case .missingAccessGrantName:
+                return "Room admission did not include a participant name."
+            case .unexpectedOfferType(let type):
+                return "Unexpected WebRTC offer type: \(type)"
+            case .unexpectedSignal(let event):
+                return "Unexpected signaling event: \(event)"
+            }
+        }
+        return error.localizedDescription
+    }
+}
