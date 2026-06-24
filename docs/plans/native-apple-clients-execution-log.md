@@ -86,3 +86,59 @@ What worked:
   leaking into higher-level app modules.
 - Validating the binary package during this wave exposed a concrete macOS
   header/import issue before it could destabilize every Apple module.
+
+## Wave 2
+
+Status: `wave2_xcode_app_shell_checkpoint_validated`
+
+Scope:
+- Add a repeatable XcodeGen project spec for native app bundle targets.
+- Generate `apple/MeetingAssist.xcodeproj` and point the workspace at it.
+- Add a universal iPhone/iPad `MeetingAssistAppleApp` target.
+- Add a native macOS `MeetingAssistMacApp` target.
+- Add app-level XCTest bundles that compile against the shared SwiftPM native
+  modules.
+- Update Apple README gates to use project-backed `xcodebuild test` commands.
+
+Files changed:
+- `apple/project.yml`
+- `apple/MeetingAssist.xcodeproj/`
+- `apple/MeetingAssist.xcworkspace/contents.xcworkspacedata`
+- `apple/Xcode/MeetingAssistAppleApp.swift`
+- `apple/Xcode/MeetingAssistMacApp.swift`
+- `apple/Xcode/MeetingAssistAppleApp-Info.plist`
+- `apple/Xcode/MeetingAssistMacApp-Info.plist`
+- `apple/Xcode/Tests/MeetingAssistAppleAppTests/MeetingAssistAppleAppTests.swift`
+- `apple/Xcode/Tests/MeetingAssistMacAppTests/MeetingAssistMacAppTests.swift`
+- `apple/README.md`
+
+Validation:
+- `go test ./...` passed.
+- `swift test` passed in `apple/`.
+- `git diff --check` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local temporary-room smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test` passed one XCTest.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test` passed one XCTest.
+
+Risks / blockers:
+- The app shells are installable targets, but they still exercise only the
+  shared native module surface and shell views.
+- The real WebRTC adapter, native mic/camera publishing, remote media rendering,
+  TURN/device validation, TestFlight upload, and macOS signing/notarization are
+  still future waves.
+- App schemes are named `MeetingAssistAppleApp` and `MeetingAssistMacApp` to
+  avoid colliding with SwiftPM package/product scheme names.
+- Physical iPhone, iPad, and Mac media proof remains mandatory before claiming
+  quality or stability improvements from native clients.
+
+What worked:
+- XcodeGen made the app targets reproducible while keeping SwiftPM as the shared
+  source-of-truth for native modules.
+- Thin `@main` wrappers around `MeetingAssistIOSRootView` and
+  `MeetingAssistMacRootView` avoided duplicating app logic.
+- Adding generated Info.plists for the test bundles fixed the first Xcode gate
+  failure and made simulator/macOS XCTest repeatable.

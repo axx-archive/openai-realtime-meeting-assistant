@@ -1,0 +1,107 @@
+name: MeetingAssist
+options:
+  minimumXcodeGenVersion: 2.45.4
+  bundleIdPrefix: co.thebonfire.meetingassist
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  localPackagesGroup: Packages
+packages:
+  MeetingAssistApple:
+    path: .
+targets:
+  MeetingAssistAppleApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Xcode/MeetingAssistAppleApp.swift
+    dependencies:
+      - package: MeetingAssistApple
+        product: MeetingAssistApple
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.ios
+        PRODUCT_NAME: MeetingAssist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+    info:
+      path: Xcode/MeetingAssistAppleApp-Info.plist
+      properties:
+        CFBundleDisplayName: MeetingAssist
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: MeetingAssist uses the camera when you join a video room.
+        NSMicrophoneUsageDescription: MeetingAssist uses the microphone when you join a video room.
+  MeetingAssistAppleAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Xcode/Tests/MeetingAssistAppleAppTests
+    dependencies:
+      - package: MeetingAssistApple
+        product: MeetingAssistApple
+      - package: MeetingAssistApple
+        product: MeetingAssistCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.ios.tests
+  MeetingAssistMacApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: Xcode/MeetingAssistMacApp.swift
+    dependencies:
+      - package: MeetingAssistApple
+        product: MeetingAssistMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac
+        PRODUCT_NAME: MeetingAssist
+    info:
+      path: Xcode/MeetingAssistMacApp-Info.plist
+      properties:
+        CFBundleDisplayName: MeetingAssist
+        NSCameraUsageDescription: MeetingAssist uses the camera when you join a video room.
+        NSMicrophoneUsageDescription: MeetingAssist uses the microphone when you join a video room.
+  MeetingAssistMacAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Xcode/Tests/MeetingAssistMacAppTests
+    dependencies:
+      - package: MeetingAssistApple
+        product: MeetingAssistMac
+      - package: MeetingAssistApple
+        product: MeetingAssistCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac.tests
+schemes:
+  MeetingAssistAppleApp:
+    build:
+      targets:
+        MeetingAssistAppleApp: all
+    run:
+      executable: MeetingAssistAppleApp
+    test:
+      targets:
+        - MeetingAssistAppleAppTests
+  MeetingAssistMacApp:
+    build:
+      targets:
+        MeetingAssistMacApp: all
+    run:
+      executable: MeetingAssistMacApp
+    test:
+      targets:
+        - MeetingAssistMacAppTests
