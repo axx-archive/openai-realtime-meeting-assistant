@@ -7,6 +7,65 @@ final class NativeRoomRTCClientTests: XCTestCase {
         XCTAssertTrue(WebRTCLinkStatus.isWebRTCImportable)
     }
 
+    func testICEServerDescriptorParsesTurnCredentialsAndMultipleURLs() {
+        let descriptors = NativeICEServerDescriptor.parse(from: [
+            "iceServers": .array([
+                .object(["urls": .string(" stun:stun.example.com:3478 ")]),
+                .object([
+                    "urls": .array([
+                        .string("turn:turn.example.com:3478?transport=udp"),
+                        .string("turns:turn.example.com:5349?transport=tcp")
+                    ]),
+                    "username": .string(" native "),
+                    "credential": .string(" secret "),
+                    "credentialType": .string("password")
+                ])
+            ])
+        ])
+
+        XCTAssertEqual(descriptors, [
+            NativeICEServerDescriptor(
+                urls: ["stun:stun.example.com:3478"],
+                username: nil,
+                credential: nil
+            ),
+            NativeICEServerDescriptor(
+                urls: [
+                    "turn:turn.example.com:3478?transport=udp",
+                    "turns:turn.example.com:5349?transport=tcp"
+                ],
+                username: "native",
+                credential: "secret"
+            )
+        ])
+        XCTAssertFalse(descriptors[0].isTurnRelay)
+        XCTAssertTrue(descriptors[1].isTurnRelay)
+    }
+
+    func testICEServerDescriptorSkipsMalformedAndBlankURLServers() {
+        let descriptors = NativeICEServerDescriptor.parse(from: [
+            "iceServers": .array([
+                .object(["urls": .array([.string(" "), .number(7)])]),
+                .string("bad-server"),
+                .object([
+                    "urls": .array([
+                        .string("turn:relay.example.com:3478"),
+                        .string("")
+                    ])
+                ])
+            ])
+        ])
+
+        XCTAssertEqual(descriptors, [
+            NativeICEServerDescriptor(
+                urls: ["turn:relay.example.com:3478"],
+                username: nil,
+                credential: nil
+            )
+        ])
+        XCTAssertTrue(descriptors[0].isTurnRelay)
+    }
+
     func testConfigureAndPrepareAudioOnlyCreatesNativePeerConnection() async throws {
         let client = NativeRoomRTCClient()
 

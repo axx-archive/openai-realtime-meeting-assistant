@@ -16,6 +16,59 @@ import CoreGraphics
 public typealias LocalICECandidateHandler = @Sendable (RTCIceCandidatePayload) async -> Void
 public typealias RemoteVideoTrackHandler = @Sendable (NativeRemoteVideoTrack) async -> Void
 
+struct NativeICEServerDescriptor: Equatable, Sendable {
+    var urls: [String]
+    var username: String?
+    var credential: String?
+
+    static func parse(from rtcConfiguration: [String: JSONValue]) -> [NativeICEServerDescriptor] {
+        guard case .array(let servers)? = rtcConfiguration["iceServers"] else { return [] }
+        return servers.compactMap { value in
+            guard case .object(let server) = value else { return nil }
+            let urls = stringList(from: server["urls"])
+            guard !urls.isEmpty else { return nil }
+            return NativeICEServerDescriptor(
+                urls: urls,
+                username: nonEmptyString(from: server["username"]),
+                credential: nonEmptyString(from: server["credential"])
+            )
+        }
+    }
+
+    var isTurnRelay: Bool {
+        urls.contains { url in
+            let normalized = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized.hasPrefix("turn:") || normalized.hasPrefix("turns:")
+        }
+    }
+
+    private static func stringList(from value: JSONValue?) -> [String] {
+        switch value {
+        case .string(let string):
+            return normalizedStrings([string])
+        case .array(let values):
+            return normalizedStrings(values.compactMap { item in
+                if case .string(let string) = item { return string }
+                return nil
+            })
+        default:
+            return []
+        }
+    }
+
+    private static func normalizedStrings(_ values: [String]) -> [String] {
+        values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func nonEmptyString(from value: JSONValue?) -> String? {
+        guard case .string(let string) = value else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 public final class NativeRemoteVideoTrack: Identifiable, @unchecked Sendable {
     public let id: String
     public let streamIds: [String]
@@ -479,39 +532,16 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     }
 
     private static func iceServers(from rtcConfiguration: [String: JSONValue]) -> [LKRTCIceServer] {
-        guard case .array(let servers)? = rtcConfiguration["iceServers"] else { return [] }
-        return servers.compactMap { value in
-            guard case .object(let server) = value else { return nil }
-            let urls = stringList(from: server["urls"])
-            guard !urls.isEmpty else { return nil }
-            let username = string(from: server["username"])
-            let credential = string(from: server["credential"])
-            if username != nil || credential != nil {
-                return LKRTCIceServer(urlStrings: urls, username: username, credential: credential)
+        NativeICEServerDescriptor.parse(from: rtcConfiguration).map { server in
+            if server.username != nil || server.credential != nil {
+                return LKRTCIceServer(
+                    urlStrings: server.urls,
+                    username: server.username,
+                    credential: server.credential
+                )
             }
-            return LKRTCIceServer(urlStrings: urls)
+            return LKRTCIceServer(urlStrings: server.urls)
         }
-    }
-
-    private static func stringList(from value: JSONValue?) -> [String] {
-        switch value {
-        case .string(let string):
-            return [string]
-        case .array(let values):
-            return values.compactMap { item in
-                if case .string(let string) = item { return string }
-                return nil
-            }
-        default:
-            return []
-        }
-    }
-
-    private static func string(from value: JSONValue?) -> String? {
-        if case .string(let string) = value {
-            return string
-        }
-        return nil
     }
 
     private static func preferredCameraDevice() -> AVCaptureDevice? {

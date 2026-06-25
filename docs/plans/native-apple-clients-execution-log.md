@@ -883,3 +883,74 @@ What worked:
 - Keeping recovery dispatch in `NativeRoomViewModel.requestMediaRecovery`
   avoided a second media-recovery pathway and kept scene, network, and audio
   recovery aligned.
+
+## Wave 14
+
+Status: `wave14_native_turn_readiness_validated`
+
+Scope:
+- Continued release hardening from Wave 13, focused on native TURN readiness
+  before physical restrictive-network validation.
+- Assigned a server/browser ICE-contract explorer and a native WebRTC parser
+  explorer, then folded both completed findings into the scoped implementation.
+- Confirmed the server/browser ICE contract already preserves `rtcConfiguration`
+  for native clients and that existing Go tests cover static and ephemeral TURN
+  config generation.
+- Added a testable `NativeICEServerDescriptor` parser for Apple clients so
+  STUN/TURN/TURNS URL arrays, username, and credential handling are explicit
+  before `LKRTCIceServer` creation.
+- Tightened native parsing to trim blank values, skip malformed ICE server
+  entries, and preserve multi-URL relay definitions such as `turn:` plus
+  `turns:` in one server.
+- Added `scripts/native-ice-readiness.mjs`, a sanitized preflight for captured
+  `/client-config` JSON from `--file`, `--stdin`, or synthetic `--json`
+  fixtures. It reports counts and relay transports only; it does not print
+  usernames or credentials.
+- Documented that real credential-bearing config captures should use `--file`
+  or `--stdin`, because inline `--json` can be exposed through shell history or
+  process listings.
+- Kept `/client-config` auth behavior unchanged, so live checks should use an
+  authenticated capture or a copied JSON fixture rather than weakening the
+  endpoint.
+
+Files changed:
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `scripts/native-ice-readiness.mjs`
+- `scripts/native-ice-readiness.test.mjs`
+
+Validation:
+- `swift test --package-path apple` passed 64 tests.
+- XcodeBuildMCP iOS simulator test for `MeetingAssistAppleApp` on `iPhone 17`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-ice-readiness.mjs --json '<valid TURN fixture>' --require-turn`
+  passed.
+- `node scripts/native-ice-readiness.mjs --json '<STUN-only fixture>' --require-turn`
+  failed as expected with `No TURN or TURNS relay URLs were found.`
+- `node scripts/native-ice-readiness.mjs --json '<unknown-scheme fixture>'`
+  failed as expected with `No STUN, STUNS, TURN, or TURNS ICE server URLs were found.`
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This proves the native parser and preflight contract, but it does not prove
+  actual TURN relay use on a restrictive network.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  validation, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called end-user shippable.
+
+What worked:
+- Reusing the existing server `rtcConfiguration` payload kept browser and native
+  clients on one ICE contract.
+- Pulling ICE parsing into a pure descriptor made TURN credentials and multi-URL
+  relay fixtures testable without constructing a live peer connection.
+- Making the preflight consume captured JSON avoided weakening the authenticated
+  `/client-config` endpoint while still giving the release process a repeatable
+  TURN readiness check.
