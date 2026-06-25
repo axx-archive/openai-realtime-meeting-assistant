@@ -4,7 +4,9 @@ import Foundation
 import SwiftUI
 
 public struct NativeRoomView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: NativeRoomViewModel
+    @StateObject private var connectivityMonitor = NativeConnectivityMonitor()
     @State private var boardEditorDraft: BoardCardEditorDraft?
     @State private var scoutChatDraft = ""
     @State private var roomScoutDraft = ""
@@ -37,6 +39,18 @@ public struct NativeRoomView: View {
         .task {
             guard model.roster.isEmpty else { return }
             await model.refreshRoster()
+        }
+        .task {
+            connectivityMonitor.start { reason in
+                Task { await model.requestMediaRecovery(reason: reason) }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.appForegrounded.rawValue) }
+        }
+        .onDisappear {
+            connectivityMonitor.stop()
         }
         .sheet(item: $boardEditorDraft) { draft in
             BoardCardEditor(

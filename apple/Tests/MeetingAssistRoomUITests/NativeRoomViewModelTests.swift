@@ -192,6 +192,74 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.participantMediaStates["Caitlyn"]?.screenSharing, true)
     }
 
+    func testMediaRecoveryRequestsIceRestartForConnectedSession() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.appForegrounded.rawValue)
+
+        XCTAssertEqual(session.iceRestartReasons, ["native-foreground"])
+        XCTAssertEqual(model.lifecycle, .reconnecting)
+        XCTAssertEqual(model.statusText, "Media reconnect requested")
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testMediaRecoveryNoopsBeforeJoining() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.networkChanged.rawValue)
+
+        XCTAssertTrue(session.iceRestartReasons.isEmpty)
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertEqual(model.statusText, "Ready")
+    }
+
+    func testMediaRecoveryFailureShowsReadableError() async {
+        let session = MockRoomSession(iceRestartError: NativeRoomSessionError.unexpectedSignal("restart_ice"))
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.networkRecovered.rawValue)
+
+        XCTAssertEqual(session.iceRestartReasons, ["native-network-recovered"])
+        XCTAssertEqual(model.errorMessage, "Unexpected signaling event: restart_ice")
+        XCTAssertEqual(model.statusText, "Needs attention")
+    }
+
+    func testConnectivityRecoveryPolicyOnlySignalsRealRecoveryOrPathChange() {
+        var policy = NativeConnectivityRecoveryPolicy()
+
+        XCTAssertNil(policy.record(.init(status: .satisfied, interfaces: [.wifi])))
+        XCTAssertNil(policy.record(.init(status: .satisfied, interfaces: [.wifi])))
+        XCTAssertNil(policy.record(.init(status: .unsatisfied, interfaces: [])))
+        XCTAssertEqual(
+            policy.record(.init(status: .satisfied, interfaces: [.wifi])),
+            "native-network-recovered"
+        )
+        XCTAssertEqual(
+            policy.record(.init(status: .satisfied, isExpensive: true, interfaces: [.cellular])),
+            "native-network-change"
+        )
+        XCTAssertNil(policy.record(.init(status: .satisfied, isExpensive: true, interfaces: [.cellular])))
+    }
+
     func testCameraUnavailableShowsReadableError() async {
         let session = MockRoomSession(error: RoomRTCError.cameraUnavailable)
         let model = NativeRoomViewModel(
@@ -502,6 +570,7 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
     private let screenShareError: Error?
+    private let iceRestartError: Error?
     private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
     private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
     private(set) var boardStateHandler: NativeBoardStateHandler?
@@ -517,6 +586,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var isMuted = false
     private(set) var isCameraOff = true
     private(set) var screenSharingChanges: [Bool] = []
+    private(set) var iceRestartReasons: [String] = []
     private(set) var mediaStatePublishCount = 0
     private(set) var recordingEnabledChanges: [Bool] = []
     private(set) var archiveRequestCount = 0
@@ -528,15 +598,19 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var scoutChatMessages: [String] = []
     private(set) var scoutChatResetCount = 0
 
-    init(error: Error? = nil, screenShareError: Error? = nil) {
+    private var lifecycle: RoomLifecycleState = .connected
+
+    init(error: Error? = nil, screenShareError: Error? = nil, iceRestartError: Error? = nil) {
         self.error = error
         self.screenShareError = screenShareError
+        self.iceRestartError = iceRestartError
     }
 
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
         if let error { throw error }
         joinedName = name
         joinedPassword = password
+        lifecycle = .connected
         return joinResult(name: name)
     }
 
@@ -546,6 +620,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         joinedPassword = password
         didJoinWithCamera = true
         isCameraOff = false
+        lifecycle = .connected
         return joinResult(name: name)
     }
 
@@ -619,6 +694,12 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         screenSharingChanges.append(sharing)
     }
 
+    func requestICERestart(reason: String) async throws {
+        iceRestartReasons.append(reason)
+        if let iceRestartError { throw iceRestartError }
+        lifecycle = .reconnecting
+    }
+
     func setRecordingEnabled(_ enabled: Bool) async throws {
         recordingEnabledChanges.append(enabled)
     }
@@ -689,9 +770,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func leave() async {
         didLeave = true
+        lifecycle = .signedOut
     }
 
     func currentLifecycle() async -> RoomLifecycleState {
-        .connected
+        lifecycle
     }
 }

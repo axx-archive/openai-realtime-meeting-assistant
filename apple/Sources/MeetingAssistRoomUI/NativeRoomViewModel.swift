@@ -24,6 +24,7 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setScreenSharing(_ sharing: Bool) async throws
+    func requestICERestart(reason: String) async throws
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
     func askAssistant(_ query: String) async throws
@@ -303,6 +304,21 @@ public final class NativeRoomViewModel: ObservableObject {
             if sharing {
                 isScreenSharing = false
             }
+            setError(displayMessage(for: error))
+        }
+    }
+
+    public func requestMediaRecovery(reason: String) async {
+        guard let session, canUseRoomControls else { return }
+
+        errorMessage = nil
+        statusText = "Reconnecting media"
+        lifecycle = .reconnecting
+        do {
+            try await session.requestICERestart(reason: reason)
+            lifecycle = await session.currentLifecycle()
+            statusText = "Media reconnect requested"
+        } catch {
             setError(displayMessage(for: error))
         }
     }

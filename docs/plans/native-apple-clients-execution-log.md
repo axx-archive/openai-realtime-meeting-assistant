@@ -760,3 +760,62 @@ What worked:
 - Updating screen-share badges from both participant snapshots and explicit
   screen-share broadcasts reduced ordering sensitivity for late or delayed
   room-state events.
+
+## Wave 12
+
+Status: `wave12_native_media_recovery_validated`
+
+Scope:
+- Continued the release-hardening track from the native Apple client plan,
+  focused on foreground and network-path recovery.
+- Attempted to assign separate native-seam and server-contract explorer agents;
+  both delegated workers hit the account usage limit, so the lead agent folded
+  those roles back into the main loop and kept the work scoped locally.
+- Reused the existing browser/server `restart_ice` contract instead of adding
+  a native-only recovery protocol.
+- Added `requestICERestart(reason:)` to the native room session UI protocol and
+  wired `NativeRoomViewModel.requestMediaRecovery(reason:)` through the existing
+  coordinator ICE restart path.
+- Added a testable `NativeConnectivityRecoveryPolicy` plus
+  `NativeConnectivityMonitor` backed by `NWPathMonitor`.
+- Wired the SwiftUI room view to request media recovery when the app returns to
+  the active scene phase or when the network path recovers/changes after the
+  first stable path sample.
+- Kept recovery no-op before join so opening the native app or refreshing the
+  roster cannot send room signaling before the user has joined.
+
+Files changed:
+- `apple/Sources/MeetingAssistRoomUI/NativeConnectivityMonitor.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+
+Validation:
+- `swift test --package-path apple` passed 60 tests.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `git diff --check` passed.
+- Critic gate accepted after tightening monitor state locking.
+
+Risks / blockers:
+- This adds native ICE-restart requests on foreground/network recovery, but it
+  does not prove real iPhone/iPad/Mac network switching, restrictive-network
+  TURN relay use, background audio route interruptions, or long soak stability.
+- Physical device mixed-room proof, restrictive-network TURN validation,
+  TestFlight upload, and macOS signing/notarization remain release gates before
+  this can be called end-user shippable.
+
+What worked:
+- The existing `restart_ice` event was already enough for native recovery,
+  which kept the browser/server contract unchanged.
+- A pure recovery policy made network flapping behavior testable without
+  simulator network manipulation.
+- Routing scene and network recovery through the view model preserved the
+  existing SwiftUI ownership pattern and kept room signaling out of the view.
