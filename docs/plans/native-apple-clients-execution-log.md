@@ -819,3 +819,67 @@ What worked:
   simulator network manipulation.
 - Routing scene and network recovery through the view model preserved the
   existing SwiftUI ownership pattern and kept room signaling out of the view.
+
+## Wave 13
+
+Status: `wave13_native_audio_route_recovery_validated`
+
+Scope:
+- Continued release hardening from Wave 12, focused on iOS/iPadOS audio-session
+  correctness, route changes, and interruption recovery.
+- Confirmed no server-contract change was needed; audio and route recovery reuse
+  the existing native `restart_ice` request path.
+- Fixed the native join path to configure the video-chat audio session before
+  WebRTC prepares local audio/video media.
+- Made `MediaSessionCoordinator` expose a thread-safe participant media-state
+  snapshot and an injectable audio-session configurator so ordering is testable.
+- Added an iOS-only `NativeAudioRecoveryMonitor` that listens for
+  `AVAudioSession` interruptions, route changes, and media-services reset, then
+  routes recoverable events through `NativeRoomViewModel.requestMediaRecovery`.
+- Added a pure audio recovery policy so interruption-start, non-resumable
+  interruption end, and category-only route changes do not create noisy recovery
+  loops.
+- Added `deinit` cleanup to the native recovery monitors in addition to the
+  SwiftUI `onDisappear` stop path.
+
+Files changed:
+- `apple/Package.swift`
+- `apple/Sources/MeetingAssistMedia/MediaSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeConnectivityMonitor.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+
+Validation:
+- `swift test --package-path apple` passed 62 tests.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `git diff --check` passed.
+- Critic gate accepted after adding monitor `deinit` cleanup.
+
+Risks / blockers:
+- This proves the native code paths compile and the recovery policy is unit
+  tested, but it still does not prove real headset/Bluetooth route changes,
+  phone-call interruptions, long background/foreground cycles, or thermal soak
+  on physical iPhone/iPad hardware.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN
+  validation, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called end-user shippable.
+
+What worked:
+- Fixing audio-session configuration at the native room join boundary made the
+  route/interruption monitor meaningful without changing the browser/server
+  signaling contract.
+- A pure audio recovery policy let simulator-safe tests cover the noisy edge
+  cases while leaving physical-device route proof as an explicit release gate.
+- Keeping recovery dispatch in `NativeRoomViewModel.requestMediaRecovery`
+  avoided a second media-recovery pathway and kept scene, network, and audio
+  recovery aligned.

@@ -260,6 +260,26 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertNil(policy.record(.init(status: .satisfied, isExpensive: true, interfaces: [.cellular])))
     }
 
+    func testAudioRecoveryPolicyOnlySignalsRecoverableEvents() {
+        let policy = NativeAudioRecoveryPolicy()
+
+        XCTAssertNil(policy.recoveryReason(for: .interruptionBegan))
+        XCTAssertNil(policy.recoveryReason(for: .interruptionEnded(shouldResume: false)))
+        XCTAssertNil(policy.recoveryReason(for: .routeCategoryChanged))
+        XCTAssertEqual(
+            policy.recoveryReason(for: .interruptionEnded(shouldResume: true)),
+            "native-audio-interruption-ended"
+        )
+        XCTAssertEqual(
+            policy.recoveryReason(for: .routeChanged),
+            "native-audio-route-change"
+        )
+        XCTAssertEqual(
+            policy.recoveryReason(for: .mediaServicesReset),
+            "native-audio-services-reset"
+        )
+    }
+
     func testCameraUnavailableShowsReadableError() async {
         let session = MockRoomSession(error: RoomRTCError.cameraUnavailable)
         let model = NativeRoomViewModel(

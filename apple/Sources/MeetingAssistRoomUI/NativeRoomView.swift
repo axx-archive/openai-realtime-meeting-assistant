@@ -6,6 +6,7 @@ import SwiftUI
 public struct NativeRoomView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: NativeRoomViewModel
+    @StateObject private var audioRecoveryMonitor = NativeAudioRecoveryMonitor()
     @StateObject private var connectivityMonitor = NativeConnectivityMonitor()
     @State private var boardEditorDraft: BoardCardEditorDraft?
     @State private var scoutChatDraft = ""
@@ -45,11 +46,17 @@ public struct NativeRoomView: View {
                 Task { await model.requestMediaRecovery(reason: reason) }
             }
         }
+        .task {
+            audioRecoveryMonitor.start { reason in
+                Task { await model.requestMediaRecovery(reason: reason) }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.appForegrounded.rawValue) }
         }
         .onDisappear {
+            audioRecoveryMonitor.stop()
             connectivityMonitor.stop()
         }
         .sheet(item: $boardEditorDraft) { draft in

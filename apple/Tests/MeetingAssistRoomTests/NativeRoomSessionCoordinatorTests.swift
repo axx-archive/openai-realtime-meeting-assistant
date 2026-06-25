@@ -1,9 +1,40 @@
 import XCTest
 @testable import MeetingAssistCore
+@testable import MeetingAssistMedia
 @testable import MeetingAssistRoom
 @testable import MeetingAssistRoomRTC
 
 final class NativeRoomSessionCoordinatorTests: XCTestCase {
+    func testJoinConfiguresAudioSessionBeforePreparingLocalMedia() async throws {
+        let api = MockNativeRoomAPI()
+        let signaling = MockSignalingTransport(envelopes: [
+            kanbanEnvelope(event: "participants", data: .object(["participants": .array([])])),
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"))
+            )
+        ])
+        let steps = JoinStepRecorder()
+        let media = MediaSessionCoordinator(audioSessionConfigurator: {
+            steps.append("configure-audio-session")
+        })
+        let rtc = MockRoomRTCClient(answerSDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\n") {
+            steps.append("prepare-local-media")
+        }
+        let coordinator = NativeRoomSessionCoordinator(
+            api: api,
+            signaling: signaling,
+            rtc: rtc,
+            media: media,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        XCTAssertEqual(steps.values, ["configure-audio-session", "prepare-local-media"])
+    }
+
     func testJoinAudioOnlyRunsCookieAuthServerOfferSequence() async throws {
         let api = MockNativeRoomAPI()
         let signaling = MockSignalingTransport(envelopes: [
@@ -739,10 +770,16 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var didRestartICE = false
     private let answerSDP: String
     private let screenShareError: Error?
+    private let onPrepareLocalMedia: (@Sendable () -> Void)?
 
-    init(answerSDP: String, screenShareError: Error? = nil) {
+    init(
+        answerSDP: String,
+        screenShareError: Error? = nil,
+        onPrepareLocalMedia: (@Sendable () -> Void)? = nil
+    ) {
         self.answerSDP = answerSDP
         self.screenShareError = screenShareError
+        self.onPrepareLocalMedia = onPrepareLocalMedia
     }
 
     func configure(_ config: ClientRTCConfig) async throws {
@@ -766,6 +803,7 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     }
 
     func prepareLocalMedia(audio: Bool, video: Bool) async throws {
+        onPrepareLocalMedia?()
         preparedAudio = audio
         preparedVideo = video
         lifecycle = .preparingMedia
@@ -1090,6 +1128,21 @@ private func kanbanEnvelope(event: String, data: JSONValue) -> WebSocketEnvelope
         event: ServerSignalEvent.kanban,
         data: encodedJSONString(RoomEvent(event: event, data: data))
     )
+}
+
+private final class JoinStepRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedValues: [String] = []
+
+    var values: [String] {
+        lock.withLock { recordedValues }
+    }
+
+    func append(_ value: String) {
+        lock.withLock {
+            recordedValues.append(value)
+        }
+    }
 }
 
 private func encodedJSONString<T: Encodable>(_ value: T) -> String {

@@ -181,6 +181,7 @@ public actor NativeRoomSessionCoordinator {
         }
 
         media.setCameraOff(!video)
+        try media.configureVideoChatAudioSession()
         try await rtc.prepareLocalMedia(audio: true, video: video)
         lifecycle = .preparingMedia
 

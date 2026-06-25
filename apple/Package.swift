@@ -98,6 +98,7 @@ let package = Package(
             dependencies: [
                 "MeetingAssistRoom",
                 "MeetingAssistCore",
+                "MeetingAssistMedia",
                 "MeetingAssistRoomRTC"
             ]
         )

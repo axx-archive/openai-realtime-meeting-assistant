@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import AVFoundation
+#endif
 #if canImport(Network)
 import Network
 #endif
@@ -14,6 +17,10 @@ public final class NativeConnectivityMonitor: ObservableObject, @unchecked Senda
     #endif
 
     public init() {}
+
+    deinit {
+        stop()
+    }
 
     public func start(onRecovery: @escaping @MainActor @Sendable (String) -> Void) {
         #if canImport(Network)
@@ -86,8 +93,131 @@ struct NativeConnectivityRecoveryPolicy: Sendable {
 
 enum NativeMediaRecoveryReason: String, Sendable {
     case appForegrounded = "native-foreground"
+    case audioInterruptionEnded = "native-audio-interruption-ended"
+    case audioRouteChanged = "native-audio-route-change"
+    case audioServicesReset = "native-audio-services-reset"
     case networkRecovered = "native-network-recovered"
     case networkChanged = "native-network-change"
+}
+
+public final class NativeAudioRecoveryMonitor: ObservableObject, @unchecked Sendable {
+    private let center: NotificationCenter
+    private let lock = NSLock()
+    private let recoveryPolicy = NativeAudioRecoveryPolicy()
+    private var tokens: [NSObjectProtocol] = []
+
+    public init(center: NotificationCenter = .default) {
+        self.center = center
+    }
+
+    deinit {
+        stop()
+    }
+
+    public func start(onRecovery: @escaping @MainActor @Sendable (String) -> Void) {
+        stop()
+        #if os(iOS)
+        let notificationNames: [Notification.Name] = [
+            AVAudioSession.interruptionNotification,
+            AVAudioSession.routeChangeNotification,
+            AVAudioSession.mediaServicesWereResetNotification
+        ]
+        let newTokens = notificationNames.map { name in
+            center.addObserver(forName: name, object: AVAudioSession.sharedInstance(), queue: nil) { [weak self] notification in
+                guard let self, let event = self.audioEvent(from: notification) else { return }
+                guard let reason = self.recoveryPolicy.recoveryReason(for: event) else { return }
+                Task { @MainActor in
+                    onRecovery(reason)
+                }
+            }
+        }
+        lock.lock()
+        tokens = newTokens
+        lock.unlock()
+        #endif
+    }
+
+    public func stop() {
+        let currentTokens: [NSObjectProtocol]
+        lock.lock()
+        currentTokens = tokens
+        tokens = []
+        lock.unlock()
+
+        for token in currentTokens {
+            center.removeObserver(token)
+        }
+    }
+
+    #if os(iOS)
+    private func audioEvent(from notification: Notification) -> NativeAudioRecoveryEvent? {
+        switch notification.name {
+        case AVAudioSession.interruptionNotification:
+            return interruptionEvent(from: notification.userInfo ?? [:])
+        case AVAudioSession.routeChangeNotification:
+            return routeChangeEvent(from: notification.userInfo ?? [:])
+        case AVAudioSession.mediaServicesWereResetNotification:
+            return .mediaServicesReset
+        default:
+            return nil
+        }
+    }
+
+    private func interruptionEvent(from userInfo: [AnyHashable: Any]) -> NativeAudioRecoveryEvent? {
+        guard let rawValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: rawValue) else {
+            return nil
+        }
+
+        switch type {
+        case .began:
+            return .interruptionBegan
+        case .ended:
+            let optionsRawValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsRawValue)
+            return .interruptionEnded(shouldResume: options.contains(.shouldResume))
+        @unknown default:
+            return nil
+        }
+    }
+
+    private func routeChangeEvent(from userInfo: [AnyHashable: Any]) -> NativeAudioRecoveryEvent? {
+        guard let rawValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: rawValue) else {
+            return .routeChanged
+        }
+
+        if reason == .categoryChange {
+            return .routeCategoryChanged
+        }
+        return .routeChanged
+    }
+    #endif
+}
+
+struct NativeAudioRecoveryPolicy: Sendable {
+    func recoveryReason(for event: NativeAudioRecoveryEvent) -> String? {
+        switch event {
+        case .interruptionBegan:
+            return nil
+        case .interruptionEnded(let shouldResume):
+            return shouldResume ? NativeMediaRecoveryReason.audioInterruptionEnded.rawValue : nil
+        case .mediaServicesReset:
+            return NativeMediaRecoveryReason.audioServicesReset.rawValue
+        case .routeCategoryChanged:
+            return nil
+        case .routeChanged:
+            return NativeMediaRecoveryReason.audioRouteChanged.rawValue
+        }
+    }
+}
+
+enum NativeAudioRecoveryEvent: Equatable, Sendable {
+    case interruptionBegan
+    case interruptionEnded(shouldResume: Bool)
+    case mediaServicesReset
+    case routeCategoryChanged
+    case routeChanged
 }
 
 struct NativeNetworkPathSignature: Equatable, Sendable {

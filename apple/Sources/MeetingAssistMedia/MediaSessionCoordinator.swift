@@ -5,28 +5,48 @@ import MeetingAssistCore
 import AVFoundation
 #endif
 
-public final class MediaSessionCoordinator: @unchecked Sendable {
-    public private(set) var participantMediaState = ParticipantMediaState()
+public typealias MediaAudioSessionConfigurator = @Sendable () throws -> Void
 
-    public init() {}
+public final class MediaSessionCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private let audioSessionConfigurator: MediaAudioSessionConfigurator
+    private var _participantMediaState = ParticipantMediaState()
+
+    public var participantMediaState: ParticipantMediaState {
+        lock.withLock { _participantMediaState }
+    }
+
+    public init(audioSessionConfigurator: MediaAudioSessionConfigurator? = nil) {
+        self.audioSessionConfigurator = audioSessionConfigurator ?? Self.platformAudioSessionConfigurator
+    }
 
     public func setMuted(_ muted: Bool) {
-        participantMediaState.micMuted = muted
+        lock.withLock {
+            _participantMediaState.micMuted = muted
+        }
     }
 
     public func setCameraOff(_ off: Bool) {
-        participantMediaState.cameraOff = off
+        lock.withLock {
+            _participantMediaState.cameraOff = off
+        }
     }
 
     public func setScreenSharing(_ sharing: Bool) {
-        participantMediaState.screenSharing = sharing
+        lock.withLock {
+            _participantMediaState.screenSharing = sharing
+        }
     }
 
-    #if os(iOS)
     public func configureVideoChatAudioSession() throws {
+        try audioSessionConfigurator()
+    }
+
+    private static func platformAudioSessionConfigurator() throws {
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .videoChat, options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker])
         try session.setActive(true)
+        #endif
     }
-    #endif
 }
