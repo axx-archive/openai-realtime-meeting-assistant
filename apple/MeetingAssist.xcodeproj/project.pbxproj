@@ -300,11 +300,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 15;
 				INFOPLIST_FILE = "Xcode/MeetingAssistAppleApp-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = co.thebonfire.meetingassist.ios;
 				PRODUCT_NAME = MeetingAssist;
 				SDKROOT = iphoneos;
@@ -317,11 +319,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 15;
 				INFOPLIST_FILE = "Xcode/MeetingAssistAppleApp-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = co.thebonfire.meetingassist.ios;
 				PRODUCT_NAME = MeetingAssist;
 				SDKROOT = iphoneos;
@@ -396,12 +400,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Xcode/MeetingAssistMacApp.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 15;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Xcode/MeetingAssistMacApp-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = co.thebonfire.meetingassist.mac;
 				PRODUCT_NAME = MeetingAssist;
 				SDKROOT = macosx;
@@ -500,12 +508,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Xcode/MeetingAssistMacApp.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 15;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Xcode/MeetingAssistMacApp-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = co.thebonfire.meetingassist.mac;
 				PRODUCT_NAME = MeetingAssist;
 				SDKROOT = macosx;

@@ -954,3 +954,84 @@ What worked:
 - Making the preflight consume captured JSON avoided weakening the authenticated
   `/client-config` endpoint while still giving the release process a repeatable
   TURN readiness check.
+
+## Wave 15
+
+Status: `wave15_native_release_preflight_scaffold_validated`
+
+Scope:
+- Continued the release-hardening track from Wave 14, focused on repo-owned
+  TestFlight/macOS signing and notarization prerequisites that can be improved
+  without Apple account credentials.
+- Assigned a release-readiness explorer and a media-QA explorer. The release
+  explorer found the immediately actionable slice; the media-QA explorer
+  identified native `media_quality` diagnostics as the next useful media slice.
+- Added macOS hardened runtime and `MeetingAssistMacApp.entitlements` for
+  camera and audio-input access, wired from `project.yml` and regenerated into
+  `MeetingAssist.xcodeproj`.
+- Moved iOS/iPadOS and macOS version/build strings to `MARKETING_VERSION` and
+  `CURRENT_PROJECT_VERSION` build settings, with build number `15` for this
+  checkpoint.
+- Added `scripts/native-apple-release-readiness.mjs`, a non-secret release
+  preflight that checks repo-owned prerequisites in default mode and reports
+  external distribution blockers in `--strict` mode.
+- Added `scripts/native-apple-release-readiness.test.mjs` with synthetic
+  blocked and strict-ready fixtures so the checker is not coupled to today's
+  specific blocker set.
+- Documented the preflight semantics in `apple/README.md`: default mode is a
+  repo prerequisite check, not proof of TestFlight upload or notarization.
+
+Files changed:
+- `apple/MeetingAssist.xcodeproj/project.pbxproj`
+- `apple/Xcode/MeetingAssistAppleApp-Info.plist`
+- `apple/Xcode/MeetingAssistMacApp-Info.plist`
+- `apple/Xcode/MeetingAssistMacApp.entitlements`
+- `apple/project.yml`
+- `apple/README.md`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `plutil -lint apple/Xcode/MeetingAssistAppleApp-Info.plist apple/Xcode/MeetingAssistMacApp-Info.plist apple/Xcode/MeetingAssistMacApp.entitlements`
+  passed.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers: Apple development team/signing config, real iOS and
+  macOS app icons, and `PrivacyInfo.xcprivacy`.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 3 checks.
+- `swift test --package-path apple` passed 64 tests.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -sdk iphonesimulator -configuration Debug build CODE_SIGNING_ALLOWED=NO`
+  passed as a fallback iOS app compile gate.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+
+Risks / blockers:
+- The required iPhone simulator app test could not run on this machine because
+  Xcode 26.6 reports CoreSimulator version skew: current `1051.54.0`, required
+  `1051.55.0`. The fallback generic iOS simulator build passed, but it is not a
+  substitute for the simulator test gate.
+- This wave does not upload to TestFlight, notarize a macOS build, add final app
+  icons, create `PrivacyInfo.xcprivacy`, configure an Apple development team, or
+  prove physical-device media.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  validation, native media diagnostics, TestFlight upload, and macOS
+  signing/notarization remain release gates before this can be called end-user
+  shippable.
+
+What worked:
+- Keeping account-specific signing outside the repo avoided committing secrets
+  or machine-local Apple configuration while still making missing prerequisites
+  mechanically visible.
+- Treating strict release readiness as an expected failure preserved honesty:
+  default mode proves repo-owned scaffold health; strict mode tracks what still
+  needs product/account/device evidence.
+- Regenerating from XcodeGen kept the generated project aligned with
+  `project.yml`, which is the durable source of truth for this Apple scaffold.

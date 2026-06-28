@@ -61,7 +61,33 @@ swift test
 xcodegen generate --spec project.yml
 xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test
 xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test
+cd ..
+node scripts/native-apple-release-readiness.mjs
 ```
+
+## Release Preflight
+
+`scripts/native-apple-release-readiness.mjs` checks the repo-owned Apple
+release prerequisites without requiring Apple account credentials. Default mode
+must pass before each release-readiness checkpoint:
+
+```bash
+node scripts/native-apple-release-readiness.mjs
+node scripts/native-apple-release-readiness.test.mjs
+```
+
+Strict mode is expected to fail until the external release blockers are
+resolved:
+
+```bash
+node scripts/native-apple-release-readiness.mjs --strict
+```
+
+Current strict blockers are intentionally explicit: Apple development team or
+private signing configuration, real iOS/iPadOS and macOS app icons,
+`PrivacyInfo.xcprivacy` after product-owned privacy answers are final, physical
+device media proof, and actual TestFlight/notarization credentials. Do not
+treat a passing default preflight as a TestFlight upload or notarized macOS app.
 
 This checkpoint has a real native WebRTC binary linked, can create the
 audio-only peer connection locally, and now includes native camera publishing
