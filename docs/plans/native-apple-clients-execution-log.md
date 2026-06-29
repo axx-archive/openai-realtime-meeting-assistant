@@ -2225,3 +2225,83 @@ What worked:
   contract, not just the JSON shape.
 - Splitting `inbox/` inputs from `evidence/` outputs keeps the operator path
   clear while preserving a durable audit trail.
+
+## Wave 31
+
+Status: `wave31_native_operator_command_pack_validated`
+
+Scope:
+- Continued the TestFlight/macOS distribution handoff by adding a credential-free
+  operator command-pack generator for the Apple-account machine.
+- Assigned a read-only release/SRE reviewer. The reviewer confirmed the highest
+  value repo-owned gap was the repeatable bridge from proof pack to real
+  TestFlight upload, Developer ID export, notary submission, stapling,
+  Gatekeeper verification, and sanitized observation promotion.
+- Added `scripts/native-apple-release-package-plan.mjs`. It reads current
+  version/build/bundle IDs from `apple/project.yml`, validates optional
+  proof-pack metadata, writes non-secret export option plists, and emits a
+  command manifest under ignored `artifacts/native-apple/<run-id>/operator/`.
+- Added the generated command pack to the proof-pack next steps and documented
+  the operator flow in the Apple README.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-package-plan.mjs` passed.
+- `node --check scripts/native-apple-release-package-plan.test.mjs` passed.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 8 checks,
+  including plutil parsing of generated TestFlight and Developer ID export
+  option plists.
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-generate-privacy-manifest.test.mjs` passed 6
+  checks.
+- `node scripts/native-apple-configure-signing.test.mjs` passed 10 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with blockers for Apple development team, privacy manifest, and release
+  evidence file.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> node scripts/native-apple-release-readiness.mjs --strict`
+  removed only the `apple_development_team` blocker and still failed as expected
+  on privacy manifest and release evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 84 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This wave does not archive, upload, notarize, staple, or contact Apple. Those
+  still require the Apple-account machine with real certificates, provisioning,
+  profiles, App Store Connect access, and notarytool keychain profile.
+- The command pack intentionally avoids Team IDs, Apple IDs, API keys,
+  certificate names, profile names, notarytool profile names, and raw command
+  logs.
+- Xcode export option keys can change across Xcode versions; the command pack
+  is grounded in this repo's current project settings and leaves final execution
+  to the operator machine's Xcode.
+
+What worked:
+- Keeping the command pack under the ignored proof-pack `operator/` directory
+  ties distribution commands to the same run as the evidence inbox.
+- Rendering post-run promotion commands next to the archive/export/notary
+  commands reduces the chance that TestFlight or notarization screenshots/logs
+  are mistaken for release evidence without promotion and strict readiness.

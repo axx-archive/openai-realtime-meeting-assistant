@@ -701,6 +701,7 @@ function createProofpack(args) {
     gates,
     nextSteps: [
       "Copy generated inbox/*.template.json files to non-template JSON files only after replacing placeholders with real external-run observations.",
+      "Create the non-secret Apple-account machine command pack with scripts/native-apple-release-package-plan.mjs --proofpack-dir <proofpack> --write.",
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",

@@ -105,6 +105,7 @@ assert.equal(proofpack.runId, runId);
 assert.equal(proofpack.roomId, roomId);
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind testflight")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind notarization")));
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-release-package-plan.mjs")));
 for (const ref of Object.values(proofpack.evidenceArtifacts)) {
   assert.match(ref, new RegExp(`^artifacts/native-apple/${runId}/evidence/`));
   assert.ok(existsSync(resolve(rootDir, ref)));

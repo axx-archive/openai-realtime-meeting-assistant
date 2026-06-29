@@ -176,6 +176,25 @@ hand; copy a generated `inbox/*.template.json` file to the matching non-template
 name only after replacing placeholders with values from the real run, then let
 the promoter rewrite `evidence/` and `ReleaseEvidence.draft.json`.
 
+Before moving to the Apple-account machine, generate the non-secret operator
+command pack for the proof pack:
+
+```bash
+node scripts/native-apple-release-package-plan.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --write
+```
+
+This writes `operator/release-command-plan.json`,
+`operator/release-commands.md`, and the iOS/macOS export option plists under the
+ignored proof-pack directory. The command pack contains the Xcode archive,
+TestFlight export/upload, Developer ID export, notarytool, stapler, Gatekeeper,
+and post-run promotion commands. It does not run any of them, does not contact
+Apple, and does not write Team IDs, certificate names, provisioning profiles,
+App Store Connect keys, notarytool profile names, or raw command logs. Use it as
+the deterministic checklist on the machine that has the Apple account,
+certificates, profiles, and notarytool keychain profile configured.
+
 The native room UI includes a QA evidence panel that captures a non-secret
 `native_device_media` JSON snapshot from summarized WebRTC stats. The snapshot
 can be copied into the matching
