@@ -2145,3 +2145,83 @@ What worked:
   blocker actionable while preserving the no-Team-IDs-in-git invariant.
 - Treating validate-only as a failing preflight when no team is configured makes
   the helper useful in local release checklists and CI-like operator scripts.
+
+## Wave 30
+
+Status: `wave30_native_proofpack_inbox_templates_validated`
+
+Scope:
+- Continued the external native Apple release handoff by generating ignored
+  proof-pack `inbox/*.template.json` scaffolds for physical-device media,
+  restrictive-network TURN, TestFlight upload, and macOS notarization
+  observations.
+- Assigned a read-only release-evidence reviewer. The reviewer flagged that
+  templates and pending drafts could look too official, so this wave also made
+  `--write-evidence` refuse incomplete drafts unless `--force` is passed for
+  diagnostic local checks.
+- Added `observationTemplates` references to `proofpack.json` while keeping
+  release artifacts under `evidence/`.
+- Added an `inbox/README.md` to every proof pack explaining that templates are
+  scaffolds, not proof, and that promoters are the only supported path from
+  inbox observations to release evidence.
+- Updated operator docs to replace manual “pending artifact” editing language
+  with the intended flow: fill sanitized inbox observation, run promoter, copy
+  completed draft, run strict readiness.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node --check scripts/native-apple-release-proofpack.test.mjs` passed.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks,
+  including generated-template promotion through the media, TURN, TestFlight,
+  and notarization promoters.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-generate-privacy-manifest.test.mjs` passed 6
+  checks.
+- `node scripts/native-apple-configure-signing.test.mjs` passed 10 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with blockers for Apple development team, privacy manifest, and release
+  evidence file.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> node scripts/native-apple-release-readiness.mjs --strict`
+  removed only the `apple_development_team` blocker and still failed as expected
+  on privacy manifest and release evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 84 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This wave does not run real physical iPhone, iPad, or Mac media tests, and it
+  does not prove a restrictive-network TURN relay on real infrastructure.
+- TestFlight upload and macOS notarization remain external operator actions.
+- Apple development team/signing and final privacy approval/manifest generation
+  remain release blockers.
+- `--force` can still copy incomplete local evidence for diagnostics, but the
+  command output labels it incomplete and strict readiness remains authoritative.
+
+What worked:
+- Treating templates as `status: "template"` made direct promotion fail until a
+  real observation replaces placeholder values.
+- Testing generated templates through the real promoters caught the practical
+  contract, not just the JSON shape.
+- Splitting `inbox/` inputs from `evidence/` outputs keeps the operator path
+  clear while preserving a durable audit trail.

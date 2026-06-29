@@ -14,12 +14,13 @@ function usage() {
     "    [--skip-gates] [--full-gates] [--write-evidence] [--force]",
     "",
     "Creates a non-secret native Apple release proof pack. The pack contains",
-    "operator-fillable evidence artifacts and a ReleaseEvidence.draft.json shaped",
-    "for scripts/native-apple-release-readiness.mjs.",
+    "pending evidence artifacts, inbox observation templates, and a",
+    "ReleaseEvidence.draft.json shaped for scripts/native-apple-release-readiness.mjs.",
     "",
     "Default gates are lightweight repo release gates. --full-gates adds Go, Swift,",
-    "media, and voice checks. --write-evidence copies the current draft to ignored",
-    "apple/ReleaseEvidence.local.json; strict readiness remains the source of truth.",
+    "media, and voice checks. --write-evidence copies a completed draft to ignored",
+    "apple/ReleaseEvidence.local.json; use --force only for diagnostic pending copies.",
+    "Strict readiness remains the source of truth.",
   ].join("\n");
 }
 
@@ -88,9 +89,18 @@ function readText(path) {
   return readFileSync(path, "utf8");
 }
 
+function readJSON(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
 function writeJSON(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeText(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, value);
 }
 
 function isoForId(value) {
@@ -105,6 +115,17 @@ function cleanBuildValue(value) {
   return String(value ?? "").trim().replace(/^["']|["']$/g, "").replace(/;$/, "").trim();
 }
 
+function bundleIdentifierForTarget(projectText, targetName) {
+  const start = projectText.indexOf(`  ${targetName}:`);
+  if (start === -1) {
+    return "";
+  }
+  const targetBlock = projectText.slice(start + targetName.length + 4);
+  const nextTarget = targetBlock.search(/\n  [A-Za-z0-9_]+:/);
+  const block = nextTarget >= 0 ? targetBlock.slice(0, nextTarget) : targetBlock;
+  return cleanBuildValue(/PRODUCT_BUNDLE_IDENTIFIER:\s*([^\n#]+)/.exec(block)?.[1] ?? "");
+}
+
 function readVersionBuild(appleDir) {
   const projectText = readText(join(appleDir, "project.yml"));
   const marketing = /MARKETING_VERSION:\s*([^\n#]+)/.exec(projectText)?.[1];
@@ -115,6 +136,10 @@ function readVersionBuild(appleDir) {
   return {
     version: cleanBuildValue(marketing),
     build: cleanBuildValue(build),
+    bundleIdentifiers: {
+      ios: bundleIdentifierForTarget(projectText, "MeetingAssistAppleApp"),
+      macos: bundleIdentifierForTarget(projectText, "MeetingAssistMacApp"),
+    },
   };
 }
 
@@ -226,6 +251,187 @@ function pendingNotarizationArtifact(runId, createdAt) {
   };
 }
 
+function deviceAppMetadata(platform, version, build) {
+  return {
+    version,
+    build,
+    target: platform === "mac" ? "MeetingAssistMacApp" : "MeetingAssistAppleApp",
+    clientPlatform: platform === "ipad" ? "ipados" : platform === "mac" ? "macos" : "ios",
+  };
+}
+
+function deviceObservationTemplate(platform, runId, roomId, createdAt, version, build) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_device_media",
+    claimScope: "qa_snapshot",
+    releaseEligible: false,
+    status: "template",
+    lifecycle: "connected",
+    runId,
+    roomId,
+    capturedAt: createdAt,
+    app: deviceAppMetadata(platform, version, build),
+    device: {
+      kind: platform,
+      physical: false,
+      model: "",
+      os: "",
+    },
+    mediaAssertions: {
+      cameraPublished: false,
+      microphonePublished: false,
+      remoteAudioReceived: false,
+      remoteVideoRendered: false,
+    },
+    assertionEvidence: {
+      cameraPublished: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
+      microphonePublished: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
+      remoteAudioReceived: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
+      remoteVideoRendered: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
+    },
+    counters: {
+      outboundAudioPacketsSent: 0,
+      outboundVideoFramesSent: 0,
+      inboundAudioPacketsReceived: 0,
+      inboundVideoDecoded: 0,
+    },
+    remoteVideoTiles: 0,
+  };
+}
+
+function turnObservationTemplate(runId, roomId, createdAt, version, build) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_turn_relay_observation",
+    status: "template",
+    runId,
+    roomId,
+    network: "",
+    capturedAt: createdAt,
+    app: {
+      version,
+      build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+    },
+    device: {
+      kind: "iphone",
+      physical: false,
+      model: "",
+      os: "",
+    },
+    selectedCandidate: {
+      relayProtocol: "",
+      relayCandidateType: "",
+      relayCandidateSelected: false,
+      localCandidateType: "",
+      remoteCandidateType: "",
+      currentRoundTripTime: 0,
+      protocol: "",
+      networkType: "",
+    },
+    iceReadiness: {
+      ok: false,
+      hasIceServers: false,
+      iceServerCount: 0,
+      knownUrlCount: 0,
+      unknownUrlCount: 0,
+      stunCount: 0,
+      stunsCount: 0,
+      turnCount: 0,
+      turnsCount: 0,
+      turnServersWithCredentials: 0,
+      turnServersMissingCredentials: 0,
+      relayTransports: [],
+      warnings: [],
+      errors: [],
+    },
+  };
+}
+
+function testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifier) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_testflight_upload_observation",
+    status: "template",
+    runId,
+    uploadedAt: createdAt,
+    app: {
+      version,
+      build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+      bundleIdentifier,
+    },
+    appStoreConnect: {
+      buildId: "",
+      processingStatus: "",
+    },
+  };
+}
+
+function notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifier) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_macos_notarization_observation",
+    status: "template",
+    runId,
+    checkedAt: createdAt,
+    distributionArtifact: {
+      kind: "",
+      filename: "",
+      sha256: "",
+    },
+    app: {
+      version,
+      build,
+      target: "MeetingAssistMacApp",
+      clientPlatform: "macos",
+      bundleIdentifier,
+    },
+    signing: {
+      style: "",
+      signed: false,
+      hardenedRuntime: false,
+      timestamped: false,
+    },
+    notarization: {
+      requestId: "",
+      status: "",
+      issueCount: 1,
+    },
+    staple: {
+      stapled: false,
+      validated: false,
+    },
+    gatekeeper: {
+      assessment: "",
+      source: "",
+    },
+  };
+}
+
+function inboxReadme(runId) {
+  return `# Native Apple Proof-Pack Inbox
+
+This folder is for real external-run observations for ${runId}.
+
+Files ending in .template.json are scaffolds, not release proof. Copy a template
+to the same folder without .template.json only after replacing placeholders with
+values from the real physical-device, restrictive-network, TestFlight, or
+notarization run.
+
+Promotion helpers validate inbox observations and then write the release proof
+under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
+directly except to inspect generated pending or promoted artifacts.
+
+Keep this folder non-secret: no raw SDP, raw ICE candidates, TURN URLs, account
+identifiers, private key material, profiles, certificates, raw logs, headers,
+cookies, host names, or device names.
+`;
+}
+
 function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }) {
   return {
     version,
@@ -305,6 +511,91 @@ function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }
   };
 }
 
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function releaseEvidenceCompletion(draft) {
+  const missing = [];
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) {
+    return { complete: false, missing: ["draft"] };
+  }
+  for (const key of ["version", "build", "runId", "roomId"]) {
+    if (!nonEmptyString(draft[key])) {
+      missing.push(key);
+    }
+  }
+
+  const media = draft.physicalDeviceMedia;
+  for (const platform of ["iphone", "ipad", "mac"]) {
+    const item = media?.[platform];
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      missing.push(`physicalDeviceMedia.${platform}`);
+      continue;
+    }
+    if (item.status !== "passed") {
+      missing.push(`physicalDeviceMedia.${platform}.status`);
+    }
+    for (const key of ["runId", "roomId", "device", "os", "testedAt", "artifactRef"]) {
+      if (!nonEmptyString(item[key])) {
+        missing.push(`physicalDeviceMedia.${platform}.${key}`);
+      }
+    }
+    for (const key of ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"]) {
+      if (item.mediaAssertions?.[key] !== true) {
+        missing.push(`physicalDeviceMedia.${platform}.mediaAssertions.${key}`);
+      }
+    }
+  }
+
+  const turn = draft.restrictiveNetworkTurn;
+  if (!turn || typeof turn !== "object" || Array.isArray(turn)) {
+    missing.push("restrictiveNetworkTurn");
+  } else {
+    if (turn.status !== "passed") {
+      missing.push("restrictiveNetworkTurn.status");
+    }
+    for (const key of ["runId", "roomId", "network", "relayProtocol", "relayCandidateType", "testedAt", "artifactRef"]) {
+      if (!nonEmptyString(turn[key])) {
+        missing.push(`restrictiveNetworkTurn.${key}`);
+      }
+    }
+  }
+
+  const testFlight = draft.testFlight;
+  if (!testFlight || typeof testFlight !== "object" || Array.isArray(testFlight)) {
+    missing.push("testFlight");
+  } else {
+    if (!["ready", "uploaded", "processing", "accepted"].includes(String(testFlight.status ?? "").trim())) {
+      missing.push("testFlight.status");
+    }
+    for (const key of ["appStoreConnectBuildId", "uploadedAt", "artifactRef"]) {
+      if (!nonEmptyString(testFlight[key])) {
+        missing.push(`testFlight.${key}`);
+      }
+    }
+  }
+
+  const mac = draft.macNotarization;
+  if (!mac || typeof mac !== "object" || Array.isArray(mac)) {
+    missing.push("macNotarization");
+  } else {
+    if (mac.status !== "accepted") {
+      missing.push("macNotarization.status");
+    }
+    if (mac.stapled !== true) {
+      missing.push("macNotarization.stapled");
+    }
+    for (const key of ["requestId", "checkedAt", "artifactRef"]) {
+      if (!nonEmptyString(mac[key])) {
+        missing.push(`macNotarization.${key}`);
+      }
+    }
+  }
+
+  return { complete: missing.length === 0, missing };
+}
+
 function gateCommands(fullGates) {
   const gates = [
     ["node", ["scripts/native-apple-release-readiness.mjs"]],
@@ -355,8 +646,10 @@ function createProofpack(args) {
   }
 
   const evidenceDir = join(proofpackDir, "evidence");
+  const inboxDir = join(proofpackDir, "inbox");
   mkdirSync(evidenceDir, { recursive: true });
-  const { version, build } = readVersionBuild(appleDir);
+  mkdirSync(inboxDir, { recursive: true });
+  const { version, build, bundleIdentifiers } = readVersionBuild(appleDir);
   const artifactPaths = {
     iphone: join(evidenceDir, "iphone-media.json"),
     ipad: join(evidenceDir, "ipad-media.json"),
@@ -366,6 +659,15 @@ function createProofpack(args) {
     notarization: join(evidenceDir, "mac-notarization.json"),
   };
   const refs = Object.fromEntries(Object.entries(artifactPaths).map(([key, path]) => [key, artifactRef(path)]));
+  const templatePaths = {
+    iphoneMedia: join(inboxDir, "iphone-qa_snapshot.template.json"),
+    ipadMedia: join(inboxDir, "ipad-qa_snapshot.template.json"),
+    macMedia: join(inboxDir, "mac-qa_snapshot.template.json"),
+    turnRelay: join(inboxDir, "turn-relay-observation.template.json"),
+    testFlight: join(inboxDir, "testflight-observation.template.json"),
+    notarization: join(inboxDir, "notarization-observation.template.json"),
+  };
+  const templateRefs = Object.fromEntries(Object.entries(templatePaths).map(([key, path]) => [key, artifactRef(path)]));
 
   writeJSON(artifactPaths.iphone, pendingDeviceArtifact("iphone", runId, roomId, createdAt));
   writeJSON(artifactPaths.ipad, pendingDeviceArtifact("ipad", runId, roomId, createdAt));
@@ -373,6 +675,13 @@ function createProofpack(args) {
   writeJSON(artifactPaths.turn, pendingTurnArtifact(runId, roomId, createdAt));
   writeJSON(artifactPaths.testFlight, pendingTestFlightArtifact(runId, createdAt));
   writeJSON(artifactPaths.notarization, pendingNotarizationArtifact(runId, createdAt));
+  writeJSON(templatePaths.iphoneMedia, deviceObservationTemplate("iphone", runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.ipadMedia, deviceObservationTemplate("ipad", runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.macMedia, deviceObservationTemplate("mac", runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.turnRelay, turnObservationTemplate(runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.testFlight, testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
+  writeJSON(templatePaths.notarization, notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.macos));
+  writeText(join(inboxDir, "README.md"), inboxReadme(runId));
 
   const gates = args.skipGates ? [] : runGates(args.fullGates);
   const draftPath = join(proofpackDir, "ReleaseEvidence.draft.json");
@@ -388,8 +697,10 @@ function createProofpack(args) {
     appleDir: relative(rootDir, appleDir).split(/[/\\]/).join("/"),
     evidenceDraft: artifactRef(draftPath),
     evidenceArtifacts: refs,
+    observationTemplates: templateRefs,
     gates,
     nextSteps: [
+      "Copy generated inbox/*.template.json files to non-template JSON files only after replacing placeholders with real external-run observations.",
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
@@ -399,7 +710,9 @@ function createProofpack(args) {
     ],
   });
 
-  return { appleDir, proofpackDir, proofpackPath, draftPath, version, build, runId, roomId, gates };
+  const draft = readJSON(draftPath);
+  const releaseEvidence = releaseEvidenceCompletion(draft);
+  return { appleDir, proofpackDir, proofpackPath, draftPath, version, build, runId, roomId, gates, releaseEvidence };
 }
 
 function writeLocalEvidence(args, proofpackDir) {
@@ -408,9 +721,18 @@ function writeLocalEvidence(args, proofpackDir) {
   if (!existsSync(draftPath)) {
     throw new Error(`Missing proof-pack evidence draft: ${draftPath}`);
   }
+  const draft = readJSON(draftPath);
+  const releaseEvidence = releaseEvidenceCompletion(draft);
+  if (!releaseEvidence.complete && !args.force) {
+    throw new Error(
+      `ReleaseEvidence.draft.json is incomplete and cannot be copied to apple/ReleaseEvidence.local.json yet. Missing or invalid: ${releaseEvidence.missing
+        .slice(0, 8)
+        .join(", ")}. Promote real inbox observations first, or pass --force only for diagnostic local checks.`
+    );
+  }
   const localPath = join(appleDir, "ReleaseEvidence.local.json");
   cpSync(draftPath, localPath);
-  return localPath;
+  return { localPath, releaseEvidence };
 }
 
 function existingProofpack(args) {
@@ -425,15 +747,18 @@ function existingProofpack(args) {
   if (!existsSync(draftPath)) {
     throw new Error(`Missing proof-pack evidence draft: ${draftPath}`);
   }
+  const draft = readJSON(draftPath);
+  const releaseEvidence = releaseEvidenceCompletion(draft);
   return {
     proofpackDir,
     proofpackPath: join(proofpackDir, "proofpack.json"),
     draftPath,
-    version: "",
-    build: "",
-    runId: "",
-    roomId: "",
+    version: draft.version || "",
+    build: draft.build || "",
+    runId: draft.runId || "",
+    roomId: draft.roomId || "",
     gates: [],
+    releaseEvidence,
   };
 }
 
@@ -448,12 +773,27 @@ function main() {
     const proofpack = args.writeEvidence ? existingProofpack(args) : createProofpack(args);
 
     let localEvidence = "";
+    let releaseEvidence = proofpack.releaseEvidence ?? { complete: false, missing: ["releaseEvidence"] };
     if (args.writeEvidence) {
-      localEvidence = writeLocalEvidence(args, proofpack.proofpackDir);
+      const written = writeLocalEvidence(args, proofpack.proofpackDir);
+      localEvidence = written.localPath;
+      releaseEvidence = written.releaseEvidence;
+    }
+
+    const gatesOk = proofpack.gates.every((gate) => gate.status === "passed");
+    const warnings = [];
+    if (!releaseEvidence.complete) {
+      warnings.push("Release evidence is incomplete; this proof pack is not release proof until inbox observations are promoted and strict readiness passes.");
+    }
+    if (args.writeEvidence && !releaseEvidence.complete) {
+      warnings.push("Incomplete ReleaseEvidence.local.json was written only because --force was passed.");
     }
 
     const output = {
-      ok: proofpack.gates.every((gate) => gate.status === "passed"),
+      ok: gatesOk,
+      gatesOk,
+      releaseEvidenceComplete: releaseEvidence.complete,
+      releaseEvidenceMissing: releaseEvidence.complete ? [] : releaseEvidence.missing.slice(0, 12),
       proofpackDir: proofpack.proofpackDir,
       proofpackPath: proofpack.proofpackPath,
       evidenceDraft: proofpack.draftPath,
@@ -463,6 +803,7 @@ function main() {
       runId: proofpack.runId || undefined,
       roomId: proofpack.roomId || undefined,
       gateFailures: proofpack.gates.filter((gate) => gate.status !== "passed").map((gate) => gate.command),
+      warnings,
     };
     console.log(JSON.stringify(output, null, 2));
     if (!output.ok) {

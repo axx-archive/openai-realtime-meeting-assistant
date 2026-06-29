@@ -153,19 +153,28 @@ node scripts/native-apple-release-proofpack.mjs --run-id native-apple-YYYYMMDD-a
 ```
 
 The proof pack is written under ignored `artifacts/native-apple/` and contains
-operator-fillable artifacts plus `ReleaseEvidence.draft.json`. Replace the
-pending artifacts with real device, TURN, TestFlight, and notarization proof,
-then copy the draft into ignored local evidence:
+pending `evidence/` artifacts, fill-in `inbox/*.template.json` observation
+scaffolds, and `ReleaseEvidence.draft.json`. Fill sanitized inbox observations
+from the real external run, promote them with the helper scripts below, then copy
+the completed draft into ignored local evidence:
 
 ```bash
 node scripts/native-apple-release-proofpack.mjs --proofpack-dir artifacts/native-apple/<run-id> --write-evidence
 node scripts/native-apple-release-readiness.mjs --strict
 ```
 
-The proof-pack runner is an evidence workflow, not a release claim. Strict
-readiness still fails until the draft contains completed statuses, local
-artifact references point at files that exist, signing/privacy blockers are
-resolved, and Apple/TestFlight/notarization proof is real.
+The proof-pack runner is an evidence workflow, not a release claim.
+`--write-evidence` refuses incomplete drafts by default; `--force` exists only
+for diagnostic local checks. Strict readiness still fails until the draft
+contains completed statuses, local artifact references point at files that
+exist, signing/privacy blockers are resolved, and Apple/TestFlight/notarization
+proof is real.
+
+Files under `inbox/` are operator inputs. Files under `evidence/` are the
+pending or promoted release artifacts. Do not edit promoted `evidence/` files by
+hand; copy a generated `inbox/*.template.json` file to the matching non-template
+name only after replacing placeholders with values from the real run, then let
+the promoter rewrite `evidence/` and `ReleaseEvidence.draft.json`.
 
 The native room UI includes a QA evidence panel that captures a non-secret
 `native_device_media` JSON snapshot from summarized WebRTC stats. The snapshot
@@ -202,6 +211,14 @@ has connected lifecycle, has all four media assertions backed by counters, and
 does not contain raw media/credential details. It updates only the selected
 device media artifact and `ReleaseEvidence.draft.json`.
 
+The physical-device inbox observation must have `status: "observed"`,
+`claimScope: "qa_snapshot"`, `releaseEligible: false`, matching `runId` and
+`roomId`, physical device metadata, connected lifecycle, all four media
+assertions set to true, positive assertion evidence and counters, and
+`remoteVideoTiles > 0`. A generated template has `status: "template"` and
+`physical: false`, so promotion rejects it until a real device snapshot replaces
+those placeholders.
+
 Promote the restrictive-network TURN observation the same way, using a
 sanitized selected-relay artifact copied from the operator run:
 
@@ -220,6 +237,11 @@ facts, a sanitized `native-ice-readiness.mjs --require-turn` summary, and no raw
 ICE candidates, TURN URLs, usernames, credentials, IP addresses, or account
 identifiers. It updates only `restrictiveNetworkTurn` and the matching
 `selected-turn-relay.json` artifact.
+
+The TURN inbox observation must have `status: "observed"`, matching `runId` and
+`roomId`, a named restrictive network, physical device metadata, selected relay
+candidate-pair facts, positive RTT, and a clean ICE-readiness summary with
+credentialed TURN/TURNS and no warnings or errors.
 
 Promote the App Store Connect/TestFlight upload observation with a sanitized
 operator artifact after a real archive/upload:
@@ -252,6 +274,18 @@ The distribution helper does not upload to TestFlight, notarize, staple, or
 access Apple credentials. It promotes already-completed, non-secret operator
 observations into the proof pack and updates only `testFlight` or
 `macNotarization` in `ReleaseEvidence.draft.json`.
+
+The TestFlight inbox observation must have `status: "observed"`, matching
+`runId`, current iOS/iPad app version/build/bundle id, an App Store Connect
+build id, and processing status of `ready`, `uploaded`, `processing`, or
+`accepted`. This proves upload evidence, not external tester availability.
+
+The macOS notarization inbox observation must have `status: "accepted"`, matching
+`runId`, current macOS app version/build/bundle id, distribution artifact
+filename and SHA-256, Developer ID signing booleans, accepted notary request
+with zero issues, stapling validation, and Gatekeeper acceptance. It is still
+only an inbox observation until the notarization promoter writes the release
+artifact.
 
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include

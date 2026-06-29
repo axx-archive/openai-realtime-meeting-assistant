@@ -115,6 +115,13 @@ validates a physical-device snapshot, binds it to the proof-pack run/room, and
 writes the promoted proof artifact plus the matching `ReleaseEvidence.draft.json`
 device summary.
 
+The proof-pack generator also creates ignored `inbox/*.template.json` files for
+the external release run. These templates are scaffolds, not observations and
+not proof. They intentionally keep placeholder values such as
+`status: "template"`, false media assertions, non-physical device flags, empty
+build ids, and incomplete notarization fields so promotion fails until an
+operator replaces them with real sanitized observations from the run.
+
 Restrictive-network TURN proof follows the same rule. The app/operator may
 export a sanitized `native_turn_relay_observation`, but it is not release proof
 until `scripts/native-apple-promote-turn-evidence.mjs` validates the same-room
@@ -139,6 +146,12 @@ stapling validation, Gatekeeper acceptance, and timestamps. It must not include
 raw upload/notary/codesign/spctl logs, API keys, Apple IDs, Team IDs, p8 or p12
 files, provisioning profiles, certificates, private keys, keychain identities,
 usernames, headers, cookies, or other account identifiers.
+
+Copying `ReleaseEvidence.draft.json` to `apple/ReleaseEvidence.local.json` is a
+local evidence handoff, not a release claim. The proof-pack script refuses to
+copy incomplete drafts by default, but strict readiness is still the authority
+because it validates promoted artifact contents, current version/build, signing,
+privacy, and local artifact references together.
 
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session
