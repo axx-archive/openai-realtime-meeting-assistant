@@ -1189,6 +1189,35 @@ func TestServerLogsClientMediaQualityDiagnostics(t *testing.T) {
 	}
 }
 
+func TestServerLogsClientMediaErrorDiagnostics(t *testing.T) {
+	rawMain, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+
+	mainSource := string(rawMain)
+	for _, want := range []string{
+		"func logClientMediaErrorReport(rawData string, participantName string, sessionID string)",
+		"Client media error participant=",
+		"case \"media_error\":",
+		"logClientMediaErrorReport(message.Data, currentParticipantName(), participantSessionID)",
+	} {
+		if !strings.Contains(mainSource, want) {
+			t.Fatalf("main.go missing client media error diagnostics %q", want)
+		}
+	}
+
+	for _, unwanted := range []string{
+		"logBrowserMediaErrorReport",
+		"Browser media error participant=",
+		"Failed to unmarshal browser media error report",
+	} {
+		if strings.Contains(mainSource, unwanted) {
+			t.Fatalf("main.go still has browser-only media error diagnostics %q", unwanted)
+		}
+	}
+}
+
 func TestRoomRelayPreservesRTPHeaderExtensions(t *testing.T) {
 	rawMain, err := os.ReadFile("main.go")
 	if err != nil {

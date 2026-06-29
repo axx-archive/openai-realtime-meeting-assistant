@@ -271,6 +271,84 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertNil(payload.deltas.elapsedMs)
     }
 
+    func testMediaQualitySnapshotFailureReportsNativeMediaError() async throws {
+        let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(answerSDP: "answer", mediaQualityError: RoomRTCError.peerConnectionNotConfigured)
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        await coordinator.setCameraOff(true)
+
+        do {
+            try await coordinator.sendMediaQualityReport()
+            XCTFail("media quality snapshot failure should rethrow")
+        } catch RoomRTCError.peerConnectionNotConfigured {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.mediaError])
+        let payload = try decodeSentPayload(MediaErrorAssertionPayload.self, from: signaling.sent[0].data)
+        XCTAssertEqual(payload.stage, "media_quality_snapshot")
+        XCTAssertEqual(payload.client.platform, "ios")
+        XCTAssertEqual(payload.browser.platform, "ios")
+        XCTAssertEqual(payload.audio.mode, "native")
+        XCTAssertEqual(payload.audio.processor, "avfoundation")
+        XCTAssertFalse(payload.video.settings.enabled)
+        XCTAssertTrue(payload.error.name.contains("RoomRTCError"))
+        XCTAssertTrue(payload.error.message.contains("peerConnectionNotConfigured"))
+    }
+
+    func testNativeMediaErrorRedactsNetworkSecretsFromMessage() async throws {
+        let rawMessage = """
+        ICE failed candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host raddr 10.0.0.2 rport 60000;
+        retry url turn:alice:secret@203.0.113.55:3478?transport=tcp;
+        relay 198.51.100.24:5349;
+        remote [2001:db8::1]:3478
+        """
+        let signaling = MockSignalingTransport(envelopes: [])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            mediaQualityError: RedactionProbeError(description: rawMessage)
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        do {
+            try await coordinator.sendMediaQualityReport()
+            XCTFail("media quality snapshot failure should rethrow")
+        } catch is RedactionProbeError {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.mediaError])
+        let payload = try decodeSentPayload(MediaErrorAssertionPayload.self, from: signaling.sent[0].data)
+        XCTAssertEqual(payload.stage, "media_quality_snapshot")
+        XCTAssertTrue(payload.error.message.contains("candidate:<redacted>"))
+        XCTAssertTrue(payload.error.message.contains("turn:<redacted>"))
+        XCTAssertTrue(payload.error.message.contains("<redacted-ip>"))
+        XCTAssertLessThanOrEqual(payload.error.message.count, 220)
+        for leaked in [
+            "candidate:842163049",
+            "192.168.1.25",
+            "10.0.0.2",
+            "alice:secret",
+            "203.0.113.55",
+            "198.51.100.24",
+            "2001:db8::1"
+        ] {
+            XCTAssertFalse(payload.error.message.contains(leaked), "leaked sensitive media diagnostic detail: \(leaked)")
+        }
+    }
+
     func testScreenShareStartStopUsesBrowserCompatibleSignals() async throws {
         let signaling = MockSignalingTransport(envelopes: [])
         let rtc = MockRoomRTCClient(answerSDP: "answer")
@@ -310,6 +388,7 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             rtc: rtc,
             clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
         )
+        await coordinator.setCameraOff(false)
 
         do {
             try await coordinator.setScreenSharing(true)
@@ -319,8 +398,48 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
 
-        XCTAssertEqual(signaling.sent.map(\.event), [])
+        XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.mediaError])
+        let payload = try decodeSentPayload(MediaErrorAssertionPayload.self, from: signaling.sent[0].data)
+        XCTAssertEqual(payload.stage, "screen_share_start")
+        XCTAssertEqual(payload.client.platform, "macos")
+        XCTAssertEqual(payload.audio.mode, "native")
+        XCTAssertEqual(payload.video.settings.enabled, true)
+        XCTAssertTrue(payload.error.name.contains("RoomRTCError"))
         XCTAssertEqual(rtc.screenShareEnabledChanges, [true])
+    }
+
+    func testPrepareLocalMediaFailureReportsNativeMediaErrorBeforeRethrow() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom")
+        ])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            prepareLocalMediaError: RoomRTCError.cameraUnavailable
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        do {
+            _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+            XCTFail("camera failure should stop join")
+        } catch RoomRTCError.cameraUnavailable {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.participant,
+            ClientSignalEvent.mediaError
+        ])
+        let payload = try decodeSentPayload(MediaErrorAssertionPayload.self, from: signaling.sent[1].data)
+        XCTAssertEqual(payload.stage, "prepare_camera_media")
+        XCTAssertEqual(payload.client.platform, "ios")
+        XCTAssertTrue(payload.video.settings.enabled)
+        XCTAssertTrue(payload.error.message.contains("cameraUnavailable"))
     }
 
     func testIncomingScreenShareEventsUpdateRoomSnapshotMediaState() async throws {
@@ -342,6 +461,37 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
 
         let screenSharingStates = await snapshots.screenSharingStates(for: "Caitlyn")
         XCTAssertEqual(screenSharingStates, [false, true, false])
+    }
+
+    func testMediaDisconnectedEventNotifiesRecoveryHandler() async throws {
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: MockSignalingTransport(envelopes: []),
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let recovery = MediaRecoveryCollector()
+        await coordinator.setMediaRecoveryHandler { event in
+            await recovery.append(event)
+        }
+
+        try await coordinator.handleServerEvent(
+            kanbanEnvelope(event: "media_disconnected", data: .string("media negotiation stalled; rejoin the room."))
+        )
+
+        let events = await recovery.values()
+        XCTAssertEqual(
+            events,
+            [
+                NativeMediaRecoveryEvent(
+                    stage: "media_disconnected",
+                    message: "media negotiation stalled; rejoin the room.",
+                    terminal: true
+                )
+            ]
+        )
+        let lifecycle = await coordinator.lifecycle
+        XCTAssertEqual(lifecycle, .reconnecting)
     }
 
     func testRoomAndBoardSnapshotsAreEmittedDuringJoin() async throws {
@@ -832,17 +982,29 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var didRestartICE = false
     private var mediaQualitySnapshots: [NativeMediaQualitySnapshot]
     private let answerSDP: String
+    private let prepareLocalMediaError: Error?
+    private let handleOfferError: Error?
+    private let remoteCandidateError: Error?
+    private let mediaQualityError: Error?
     private let screenShareError: Error?
     private let onPrepareLocalMedia: (@Sendable () -> Void)?
 
     init(
         answerSDP: String,
         mediaQualitySnapshots: [NativeMediaQualitySnapshot] = [],
+        prepareLocalMediaError: Error? = nil,
+        handleOfferError: Error? = nil,
+        remoteCandidateError: Error? = nil,
+        mediaQualityError: Error? = nil,
         screenShareError: Error? = nil,
         onPrepareLocalMedia: (@Sendable () -> Void)? = nil
     ) {
         self.answerSDP = answerSDP
         self.mediaQualitySnapshots = mediaQualitySnapshots
+        self.prepareLocalMediaError = prepareLocalMediaError
+        self.handleOfferError = handleOfferError
+        self.remoteCandidateError = remoteCandidateError
+        self.mediaQualityError = mediaQualityError
         self.screenShareError = screenShareError
         self.onPrepareLocalMedia = onPrepareLocalMedia
     }
@@ -871,6 +1033,9 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         onPrepareLocalMedia?()
         preparedAudio = audio
         preparedVideo = video
+        if let prepareLocalMediaError {
+            throw prepareLocalMediaError
+        }
         lifecycle = .preparingMedia
     }
 
@@ -891,11 +1056,17 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func handleOffer(_ sdp: String) async throws -> String {
         handledOffers.append(sdp)
+        if let handleOfferError {
+            throw handleOfferError
+        }
         lifecycle = .negotiating
         return answerSDP
     }
 
     func addRemoteCandidate(_ json: String) async throws {
+        if let remoteCandidateError {
+            throw remoteCandidateError
+        }
         remoteCandidates.append(json)
     }
 
@@ -905,6 +1076,9 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     }
 
     func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
+        if let mediaQualityError {
+            throw mediaQualityError
+        }
         guard !mediaQualitySnapshots.isEmpty else {
             return NativeMediaQualitySnapshot()
         }
@@ -935,6 +1109,15 @@ private struct MediaQualityAssertionPayload: Decodable {
     var deltas: NativeMediaQualityDeltas
 }
 
+private struct MediaErrorAssertionPayload: Decodable {
+    var stage: String
+    var client: NativeRoomClientIdentity
+    var browser: MediaQualityBrowserAssertionPayload
+    var audio: MediaErrorAudioAssertionPayload
+    var video: MediaQualityVideoAssertionPayload
+    var error: MediaErrorDetailAssertionPayload
+}
+
 private struct MediaQualityBrowserAssertionPayload: Decodable {
     var safari: Bool
     var platform: String
@@ -946,6 +1129,11 @@ private struct MediaQualityAudioAssertionPayload: Decodable {
     var outputSettings: MediaQualityTrackSettingsAssertionPayload
 }
 
+private struct MediaErrorAudioAssertionPayload: Decodable {
+    var mode: String
+    var processor: String
+}
+
 private struct MediaQualityVideoAssertionPayload: Decodable {
     var settings: MediaQualityTrackSettingsAssertionPayload
 }
@@ -953,6 +1141,13 @@ private struct MediaQualityVideoAssertionPayload: Decodable {
 private struct MediaQualityTrackSettingsAssertionPayload: Decodable {
     var enabled: Bool
     var readyState: String
+}
+
+private struct MediaErrorDetailAssertionPayload: Decodable {
+    var name: String
+    var message: String
+    var constraint: String
+    var attempts: [String]
 }
 
 private struct RestartAssertionPayload: Decodable {
@@ -985,6 +1180,10 @@ private struct BoardDeleteAssertionPayload: Decodable {
 
 private enum MockError: Error {
     case noEnvelope
+}
+
+private struct RedactionProbeError: Error, CustomStringConvertible {
+    var description: String
 }
 
 private actor RemoteVideoInfoCollector {
@@ -1093,6 +1292,18 @@ private actor ScoutChatEventsCollector {
 
     func latestEvents() -> [ScoutChatEvent] {
         values.last ?? []
+    }
+}
+
+private actor MediaRecoveryCollector {
+    private var storedValues: [NativeMediaRecoveryEvent] = []
+
+    func append(_ value: NativeMediaRecoveryEvent) {
+        storedValues.append(value)
+    }
+
+    func values() -> [NativeMediaRecoveryEvent] {
+        storedValues
     }
 }
 

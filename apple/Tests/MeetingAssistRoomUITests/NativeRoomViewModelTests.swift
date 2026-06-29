@@ -243,6 +243,69 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.statusText, "Needs attention")
     }
 
+    func testTerminalMediaRecoveryEventLeavesBrokenSessionAndAllowsRejoin() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitMediaRecoveryEvent(
+            NativeMediaRecoveryEvent(
+                stage: "media_disconnected",
+                message: "media negotiation stalled; rejoin the room.",
+                terminal: true
+            )
+        )
+
+        XCTAssertTrue(session.didLeave)
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertNil(model.joinedParticipant)
+        XCTAssertTrue(model.isCameraOff)
+        XCTAssertFalse(model.hasLocalCamera)
+        XCTAssertFalse(model.isScreenSharing)
+        XCTAssertTrue(model.canJoin)
+        XCTAssertEqual(model.statusText, "Media disconnected")
+        XCTAssertEqual(model.errorMessage, "media negotiation stalled; rejoin the room.")
+    }
+
+    func testTerminalMediaRecoveryEventClearsBusyStateAndAllowsRejoin() async {
+        let session = MockRoomSession()
+        let loader = SuspendedConfigLoader()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in loader },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        let refreshTask = Task {
+            await model.refreshRoster()
+        }
+        await loader.waitUntilRequested()
+        XCTAssertTrue(model.isBusy)
+
+        await session.emitMediaRecoveryEvent(
+            NativeMediaRecoveryEvent(
+                stage: "media_disconnected",
+                message: "media negotiation stalled; rejoin the room.",
+                terminal: true
+            )
+        )
+
+        XCTAssertTrue(session.didLeave)
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertTrue(model.canJoin)
+        XCTAssertFalse(model.isBusy)
+        XCTAssertEqual(model.statusText, "Media disconnected")
+        await loader.resume()
+        await refreshTask.value
+    }
+
     func testConnectivityRecoveryPolicyOnlySignalsRealRecoveryOrPathChange() {
         var policy = NativeConnectivityRecoveryPolicy()
 
@@ -587,6 +650,46 @@ private struct MockConfigLoader: NativeRoomConfigLoading {
     }
 }
 
+private actor SuspendedConfigLoader: NativeRoomConfigLoading {
+    private var requested = false
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var configContinuation: CheckedContinuation<NativeClientConfig, Error>?
+
+    func nativeConfig() async throws -> NativeClientConfig {
+        requested = true
+        requestWaiters.forEach { $0.resume() }
+        requestWaiters.removeAll()
+        return try await withCheckedThrowingContinuation { continuation in
+            configContinuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        if requested { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+    }
+
+    func resume(participants: [Participant] = []) {
+        configContinuation?.resume(returning: Self.config(participants: participants))
+        configContinuation = nil
+    }
+
+    private static func config(participants: [Participant]) -> NativeClientConfig {
+        NativeClientConfig(
+            protocolVersion: meetingAssistNativeProtocolV1,
+            auth: .init(mode: "cookie", loginPath: "/auth/login", mePath: "/auth/me", logoutPath: "/auth/logout"),
+            room: .init(
+                clientConfigPath: "/client-config",
+                websocketPath: "/websocket",
+                participants: participants,
+                maxParticipants: 7
+            )
+        )
+    }
+}
+
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
     private let screenShareError: Error?
@@ -599,6 +702,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var memoryEntriesHandler: NativeMemoryEntriesHandler?
     private(set) var meetingArchiveHandler: NativeMeetingArchiveHandler?
     private(set) var scoutChatEventsHandler: NativeScoutChatEventsHandler?
+    private(set) var mediaRecoveryHandler: NativeMediaRecoveryHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -697,6 +801,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         scoutChatEventsHandler = handler
     }
 
+    func setMediaRecoveryHandler(_ handler: NativeMediaRecoveryHandler?) async {
+        mediaRecoveryHandler = handler
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -782,6 +890,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func emitScoutChatEvents(_ events: [ScoutChatEvent]) async {
         await scoutChatEventsHandler?(events)
+    }
+
+    func emitMediaRecoveryEvent(_ event: NativeMediaRecoveryEvent) async {
+        await mediaRecoveryHandler?(event)
     }
 
     func sendParticipantMediaState() async throws {

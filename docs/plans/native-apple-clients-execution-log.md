@@ -1361,3 +1361,81 @@ What worked:
   proof manifest rather than a loose self-attestation checklist.
 - Making the example evidence intentionally non-passing prevents template files
   from becoming accidental release evidence.
+
+## Wave 20
+
+Status: `wave20_native_media_error_recovery_checkpoint_validated`
+
+Scope:
+- Continued the native room quality/stability track by closing the gap between
+  browser media error reporting and native client observability.
+- Assigned two read-only explorers. One proposed a release-operator dry run;
+  the other identified native `media_error` and recovery parity as the more
+  client-aligned next slice because the native clients already had
+  `media_quality` but not failure reports.
+- Added a public `NativeMediaRecoveryEvent` callback from
+  `NativeRoomSessionCoordinator` to `NativeRoomViewModel`.
+- Handled server `kanban/media_disconnected` as a terminal native media session
+  event, returning the SwiftUI room to a rejoinable state with the server
+  message visible.
+- Added best-effort native `media_error` reports for local media setup,
+  peer-connection configuration, offer/answer, remote-candidate, ICE restart,
+  screen-share, and media-quality snapshot/report failures.
+- Kept `media_error` browser-compatible by preserving `stage`, `browser`,
+  `audio`, and `error` keys while adding native `client` and `video` summaries.
+  Error messages redact ICE candidate strings, TURN/TURNS URLs, and IP literals
+  before sending.
+- After critic review rejected the first pass for weak diagnostic redaction and
+  a stuck-busy terminal recovery edge case, hardened redaction and made terminal
+  recovery clear busy and screen-share state before returning to signed out.
+- Renamed the Go server media-error logger from browser-only wording to
+  client-wide wording so browser and native clients share the same diagnostic
+  path.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `frontend_latency_test.go`
+- `main.go`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests`
+  passed 27 tests.
+- `swift test --package-path apple --filter NativeRoomViewModelTests` passed 28
+  tests.
+- `swift test --package-path apple` passed 76 tests.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 26 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green and strict release blockers still explicit.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This makes native failures visible and recoverable in local tests. It is not
+  physical-device proof of camera/audio quality, macOS screen-share visibility,
+  restrictive-network TURN relay use, TestFlight upload, or notarized macOS
+  distribution.
+- `media_error` is intentionally best-effort. If the websocket is already
+  closed, native UI recovery still proceeds locally, but the server may not
+  receive the diagnostic event.
+
+What worked:
+- Using the existing `media_error` event avoided a native-only telemetry fork.
+- Keeping terminal recovery as a callback let the actor own websocket parsing
+  while SwiftUI owns the user-facing rejoin state.
+- Renaming only the server log path preserved browser behavior while making the
+  diagnostics honest for native clients.
+- The critic gate caught two concrete shipping issues before commit: sensitive
+  network details in error strings and a terminal recovery path that could have
+  left the join controls disabled.

@@ -80,6 +80,20 @@ Native clients should send `restart_ice` when local ICE recovery requires a
 server-side ICE restart. Subscriber video quality is selected with
 `select_layer` and one of the supported layer strings.
 
+## Media Diagnostics And Recovery
+
+Native clients send `participant_media_state`, `media_quality`, and
+`media_error` using the existing browser event names. `media_error` is
+best-effort and must keep the browser-compatible top-level keys `stage`,
+`browser`, `audio`, and `error`; native clients also include `client` and
+`video` summaries. Do not include raw ICE candidates, TURN credentials, IP
+addresses, or full WebRTC stats in `media_error`.
+
+The server may send `kanban/media_disconnected` when media negotiation has
+failed or stalled. Native clients should treat that as a terminal media session
+event, leave the broken peer connection, and return the UI to a rejoinable
+state with the server-provided message visible to the user.
+
 ## Compatibility Rules
 
 - Do not rename existing browser events.

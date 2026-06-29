@@ -37,6 +37,9 @@ iOS/iPadOS and macOS apps now launch it directly, with room URL entry, roster
 refresh from `/native/config`, participant selection, password entry,
 audio-only or camera join, mute/camera publication, remote video track
 rendering, and leave controls backed by `NativeRoomSessionCoordinator`.
+Native media failures now emit browser-compatible `media_error` diagnostics, and
+server `media_disconnected` events return the UI to a rejoinable state instead
+of failing silently.
 
 ## Xcode Project
 

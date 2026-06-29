@@ -81,6 +81,19 @@ public typealias NativeAssistantEventsHandler = @Sendable ([AssistantEvent]) asy
 public typealias NativeMemoryEntriesHandler = @Sendable ([MemoryEntry]) async -> Void
 public typealias NativeMeetingArchiveHandler = @Sendable (MeetingArchiveResult) async -> Void
 public typealias NativeScoutChatEventsHandler = @Sendable ([ScoutChatEvent]) async -> Void
+public typealias NativeMediaRecoveryHandler = @Sendable (NativeMediaRecoveryEvent) async -> Void
+
+public struct NativeMediaRecoveryEvent: Equatable, Sendable {
+    public var stage: String
+    public var message: String
+    public var terminal: Bool
+
+    public init(stage: String, message: String, terminal: Bool) {
+        self.stage = stage
+        self.message = message
+        self.terminal = terminal
+    }
+}
 
 public actor NativeRoomSessionCoordinator {
     public private(set) var lifecycle: RoomLifecycleState = .signedOut
@@ -118,6 +131,7 @@ public actor NativeRoomSessionCoordinator {
     private var currentMemoryEntries: [MemoryEntry] = []
     private var currentMeetingArchive: MeetingArchiveResult?
     private var currentScoutChatEvents: [ScoutChatEvent] = []
+    private var mediaRecoveryHandler: NativeMediaRecoveryHandler?
     private var mediaQualityTask: Task<Void, Never>?
     private var previousMediaQualitySnapshot: NativeMediaQualitySnapshot?
     private let mediaQualityReportIntervalNanoseconds: UInt64
@@ -176,7 +190,12 @@ public actor NativeRoomSessionCoordinator {
         participant = Participant(name: admittedName, email: signedInParticipant.email)
         lifecycle = .admitted
 
-        try await rtc.configure(config)
+        do {
+            try await rtc.configure(config)
+        } catch {
+            await reportMediaError(stage: "configure_peer_connection", error: error)
+            throw error
+        }
         await rtc.setLocalCandidateHandler { [weak self] candidate in
             guard let self else { return }
             await self.sendLocalCandidate(candidate)
@@ -187,8 +206,18 @@ public actor NativeRoomSessionCoordinator {
         }
 
         media.setCameraOff(!video)
-        try media.configureVideoChatAudioSession()
-        try await rtc.prepareLocalMedia(audio: true, video: video)
+        do {
+            try media.configureVideoChatAudioSession()
+        } catch {
+            await reportMediaError(stage: "configure_audio_session", error: error)
+            throw error
+        }
+        do {
+            try await rtc.prepareLocalMedia(audio: true, video: video)
+        } catch {
+            await reportMediaError(stage: video ? "prepare_camera_media" : "prepare_audio_media", error: error)
+            throw error
+        }
         lifecycle = .preparingMedia
 
         try await sendJSON(
@@ -215,7 +244,12 @@ public actor NativeRoomSessionCoordinator {
         case ServerSignalEvent.candidate:
             let candidate = try decode(RTCIceCandidatePayload.self, fromJSONString: envelope.data)
             if remoteDescriptionReady {
-                try await rtc.addRemoteCandidate(envelope.data)
+                do {
+                    try await rtc.addRemoteCandidate(envelope.data)
+                } catch {
+                    await reportMediaError(stage: "add_remote_candidate", error: error)
+                    throw error
+                }
             } else {
                 pendingRemoteCandidates.append(candidate)
             }
@@ -288,6 +322,10 @@ public actor NativeRoomSessionCoordinator {
         await handler(currentScoutChatEvents)
     }
 
+    public func setMediaRecoveryHandler(_ handler: NativeMediaRecoveryHandler?) async {
+        mediaRecoveryHandler = handler
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -337,7 +375,12 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func setScreenSharing(_ sharing: Bool) async throws {
-        try await rtc.setScreenShareEnabled(sharing)
+        do {
+            try await rtc.setScreenShareEnabled(sharing)
+        } catch {
+            await reportMediaError(stage: sharing ? "screen_share_start" : "screen_share_stop", error: error)
+            throw error
+        }
         media.setScreenSharing(sharing)
         if sharing {
             try await sendParticipantMediaState()
@@ -355,7 +398,12 @@ public actor NativeRoomSessionCoordinator {
     public func requestICERestart(reason: String) async throws {
         await rtc.restartICE()
         lifecycle = .reconnecting
-        try await sendJSON(event: ClientSignalEvent.restartICE, payload: RestartICEPayload(reason: reason))
+        do {
+            try await sendJSON(event: ClientSignalEvent.restartICE, payload: RestartICEPayload(reason: reason))
+        } catch {
+            await reportMediaError(stage: "restart_ice", error: error)
+            throw error
+        }
     }
 
     public func sendMediaQualityReport() async throws {
@@ -418,11 +466,27 @@ public actor NativeRoomSessionCoordinator {
             throw NativeRoomSessionError.unexpectedOfferType(offer.type)
         }
         lifecycle = .negotiating
-        let answerSDP = try await rtc.handleOffer(offer.sdp)
+        let answerSDP: String
+        do {
+            answerSDP = try await rtc.handleOffer(offer.sdp)
+        } catch {
+            await reportMediaError(stage: "answer_offer", error: error)
+            throw error
+        }
         remoteDescriptionReady = true
-        try await flushPendingRemoteCandidates()
+        do {
+            try await flushPendingRemoteCandidates()
+        } catch {
+            await reportMediaError(stage: "add_remote_candidate", error: error)
+            throw error
+        }
         let answer = RTCSessionDescriptionPayload(type: "answer", sdp: answerSDP)
-        try await sendJSON(event: ClientSignalEvent.answer, payload: answer)
+        do {
+            try await sendJSON(event: ClientSignalEvent.answer, payload: answer)
+        } catch {
+            await reportMediaError(stage: "send_answer", error: error)
+            throw error
+        }
         return answer
     }
 
@@ -530,6 +594,16 @@ public actor NativeRoomSessionCoordinator {
         case "screen_share_stopped":
             let payload = try decodeKanbanData(ScreenSharePayload.self, from: event.data)
             await updateParticipantScreenSharing(name: payload.name, sharing: false)
+        case "media_disconnected":
+            let message = event.data.stringValue ?? "Media connection ended. Rejoin the room."
+            lifecycle = .reconnecting
+            await mediaRecoveryHandler?(
+                NativeMediaRecoveryEvent(
+                    stage: "media_disconnected",
+                    message: message,
+                    terminal: true
+                )
+            )
         case "assistant_event":
             let assistantEvent = try decodeKanbanData(AssistantEvent.self, from: event.data)
             await appendAssistantEvent(assistantEvent)
@@ -671,20 +745,45 @@ public actor NativeRoomSessionCoordinator {
     }
 
     private func publishMediaQualityReport() async throws {
-        let snapshot = try await rtc.mediaQualitySnapshot()
+        let snapshot: NativeMediaQualitySnapshot
+        do {
+            snapshot = try await rtc.mediaQualitySnapshot()
+        } catch {
+            await reportMediaError(stage: "media_quality_snapshot", error: error)
+            throw error
+        }
         let previous = previousMediaQualitySnapshot
         previousMediaQualitySnapshot = snapshot
-        try await sendJSON(
-            event: ClientSignalEvent.mediaQuality,
-            payload: NativeMediaQualityPayload(
+        do {
+            try await sendJSON(
+                event: ClientSignalEvent.mediaQuality,
+                payload: NativeMediaQualityPayload(
+                    sentAt: Self.iso8601String(Date()),
+                    laggy: false,
+                    client: clientIdentity,
+                    browser: mediaBrowserPayload(),
+                    audio: mediaQualityAudioPayload(),
+                    video: mediaQualityVideoPayload(),
+                    remote: NativeMediaQualityRemotePayload(remoteVideoTiles: remoteVideoTracksByID.count),
+                    stats: snapshot,
+                    deltas: snapshot.deltas(since: previous)
+                )
+            )
+        } catch {
+            await reportMediaError(stage: "media_quality_report", error: error)
+            throw error
+        }
+    }
+
+    private func reportMediaError(stage: String, error: Error) async {
+        try? await sendJSON(
+            event: ClientSignalEvent.mediaError,
+            payload: NativeMediaErrorPayload(
                 sentAt: Self.iso8601String(Date()),
-                laggy: false,
+                stage: stage,
                 client: clientIdentity,
-                browser: NativeMediaQualityBrowserPayload(
-                    userAgent: "MeetingAssistApple/\(clientIdentity.version)",
-                    platform: clientIdentity.platform
-                ),
-                audio: NativeMediaQualityAudioPayload(
+                browser: mediaBrowserPayload(),
+                audio: NativeMediaErrorAudioPayload(
                     mode: "native",
                     processor: "avfoundation",
                     outputSettings: NativeMediaQualityTrackSettings(
@@ -692,15 +791,41 @@ public actor NativeRoomSessionCoordinator {
                         readyState: lifecycle == .connected ? "live" : ""
                     )
                 ),
-                video: NativeMediaQualityVideoPayload(
+                video: NativeMediaErrorVideoPayload(
+                    constrained: false,
                     settings: NativeMediaQualityTrackSettings(
                         enabled: !media.participantMediaState.cameraOff,
                         readyState: lifecycle == .connected ? "live" : ""
                     )
                 ),
-                remote: NativeMediaQualityRemotePayload(remoteVideoTiles: remoteVideoTracksByID.count),
-                stats: snapshot,
-                deltas: snapshot.deltas(since: previous)
+                error: NativeMediaErrorDetailPayload(error: error)
+            )
+        )
+    }
+
+    private func mediaBrowserPayload() -> NativeMediaQualityBrowserPayload {
+        NativeMediaQualityBrowserPayload(
+            userAgent: "MeetingAssistApple/\(clientIdentity.version)",
+            platform: clientIdentity.platform
+        )
+    }
+
+    private func mediaQualityAudioPayload() -> NativeMediaQualityAudioPayload {
+        NativeMediaQualityAudioPayload(
+            mode: "native",
+            processor: "avfoundation",
+            outputSettings: NativeMediaQualityTrackSettings(
+                enabled: !media.participantMediaState.micMuted,
+                readyState: lifecycle == .connected ? "live" : ""
+            )
+        )
+    }
+
+    private func mediaQualityVideoPayload() -> NativeMediaQualityVideoPayload {
+        NativeMediaQualityVideoPayload(
+            settings: NativeMediaQualityTrackSettings(
+                enabled: !media.participantMediaState.cameraOff,
+                readyState: lifecycle == .connected ? "live" : ""
             )
         )
     }
@@ -837,6 +962,16 @@ private struct NativeMediaQualityPayload: Codable, Equatable, Sendable {
     var deltas: NativeMediaQualityDeltas
 }
 
+private struct NativeMediaErrorPayload: Codable, Equatable, Sendable {
+    var sentAt: String
+    var stage: String
+    var client: NativeRoomClientIdentity
+    var browser: NativeMediaQualityBrowserPayload
+    var audio: NativeMediaErrorAudioPayload
+    var video: NativeMediaErrorVideoPayload
+    var error: NativeMediaErrorDetailPayload
+}
+
 private struct NativeMediaQualityBrowserPayload: Codable, Equatable, Sendable {
     var safari: Bool = false
     var userAgent: String
@@ -855,6 +990,13 @@ private struct NativeMediaQualityAudioPayload: Codable, Equatable, Sendable {
     var outputSettings: NativeMediaQualityTrackSettings
 }
 
+private struct NativeMediaErrorAudioPayload: Codable, Equatable, Sendable {
+    var mode: String
+    var voiceFocus: Bool = false
+    var processor: String
+    var outputSettings: NativeMediaQualityTrackSettings
+}
+
 private struct NativeVoiceFocusMetrics: Codable, Equatable, Sendable {
     var gain: Double = 0
     var suppressionDb: Double = 0
@@ -867,9 +1009,55 @@ private struct NativeMediaQualityVideoPayload: Codable, Equatable, Sendable {
     var settings: NativeMediaQualityTrackSettings
 }
 
+private struct NativeMediaErrorVideoPayload: Codable, Equatable, Sendable {
+    var constrained: Bool = false
+    var settings: NativeMediaQualityTrackSettings
+}
+
 private struct NativeMediaQualityTrackSettings: Codable, Equatable, Sendable {
     var enabled: Bool
     var readyState: String
+}
+
+private struct NativeMediaErrorDetailPayload: Codable, Equatable, Sendable {
+    var name: String
+    var message: String
+    var constraint: String = ""
+    var attempts: [String] = []
+
+    init(error: Error) {
+        name = String(reflecting: type(of: error))
+        message = Self.safeMessage(error)
+    }
+
+    private static func safeMessage(_ error: Error) -> String {
+        let raw = String(describing: error)
+        let redactedCandidates = raw.replacingOccurrences(
+            of: #"(?i)candidate:[^\n\r,;)\]}"]*"#,
+            with: "candidate:<redacted>",
+            options: .regularExpression
+        )
+        let squashed = redactedCandidates
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        let redacted = squashed
+            .replacingOccurrences(
+                of: #"(?i)\b(turns?:)[^\s,;)\]}"]+"#,
+                with: "$1<redacted>",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b"#,
+                with: "<redacted-ip>",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"(?i)\b(?:(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:|:(?::[0-9a-f]{1,4}){1,7}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4})(?:%\w+)?(?::\d{1,5})?\b"#,
+                with: "<redacted-ip>",
+                options: .regularExpression
+            )
+        return String(redacted.prefix(220))
+    }
 }
 
 private struct NativeMediaQualityRemotePayload: Codable, Equatable, Sendable {

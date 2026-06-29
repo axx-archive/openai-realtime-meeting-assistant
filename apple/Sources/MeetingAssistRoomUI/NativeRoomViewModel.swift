@@ -21,6 +21,7 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setMemoryEntriesHandler(_ handler: NativeMemoryEntriesHandler?) async
     func setMeetingArchiveHandler(_ handler: NativeMeetingArchiveHandler?) async
     func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async
+    func setMediaRecoveryHandler(_ handler: NativeMediaRecoveryHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setScreenSharing(_ sharing: Bool) async throws
@@ -231,6 +232,9 @@ public final class NativeRoomViewModel: ObservableObject {
         await newSession.setScoutChatEventsHandler { [weak self] events in
             await self?.applyScoutChatEvents(events)
         }
+        await newSession.setMediaRecoveryHandler { [weak self] event in
+            await self?.applyMediaRecoveryEvent(event)
+        }
 
         do {
             let result = if video {
@@ -253,11 +257,13 @@ public final class NativeRoomViewModel: ObservableObject {
             await newSession.setMemoryEntriesHandler(nil)
             await newSession.setMeetingArchiveHandler(nil)
             await newSession.setScoutChatEventsHandler(nil)
+            await newSession.setMediaRecoveryHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
             isCameraOff = true
             hasLocalCamera = false
+            isBusy = false
             resetRoomState()
             lifecycle = .signedOut
             setError(displayMessage(for: error))
@@ -459,6 +465,7 @@ public final class NativeRoomViewModel: ObservableObject {
         await session.setMemoryEntriesHandler(nil)
         await session.setMeetingArchiveHandler(nil)
         await session.setScoutChatEventsHandler(nil)
+        await session.setMediaRecoveryHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
@@ -538,6 +545,37 @@ public final class NativeRoomViewModel: ObservableObject {
 
     private func applyScoutChatEvents(_ events: [ScoutChatEvent]) {
         scoutChatEvents = events.filter { !$0.displayText.isEmpty }
+    }
+
+    private func applyMediaRecoveryEvent(_ event: NativeMediaRecoveryEvent) async {
+        errorMessage = event.message
+        if event.terminal {
+            statusText = "Media disconnected"
+            let endedSession = session
+            session = nil
+            joinedParticipant = nil
+            isMuted = false
+            isCameraOff = true
+            isScreenSharing = false
+            hasLocalCamera = false
+            isBusy = false
+            resetRoomState()
+            lifecycle = .signedOut
+            await endedSession?.setRemoteVideoTrackHandler(nil)
+            await endedSession?.setRoomSnapshotHandler(nil)
+            await endedSession?.setBoardStateHandler(nil)
+            await endedSession?.setUndoAvailabilityHandler(nil)
+            await endedSession?.setAssistantEventsHandler(nil)
+            await endedSession?.setMemoryEntriesHandler(nil)
+            await endedSession?.setMeetingArchiveHandler(nil)
+            await endedSession?.setScoutChatEventsHandler(nil)
+            await endedSession?.setMediaRecoveryHandler(nil)
+            await endedSession?.leave()
+            return
+        }
+
+        lifecycle = .reconnecting
+        statusText = "Media reconnect needed"
     }
 
     private func upsertRemoteVideoTrack(_ trackInfo: NativeRemoteVideoTrackInfo) {
