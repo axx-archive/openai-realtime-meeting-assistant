@@ -58,15 +58,28 @@ SwiftPM package products rather than duplicating app logic.
 ## Local Gates
 
 ```bash
-go test ./...
-cd apple
-swift test
-xcodegen generate --spec project.yml
-xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test
-xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test
-cd ..
-node scripts/native-apple-release-readiness.mjs
+node scripts/native-apple-local-gates.mjs \
+  --live-url http://127.0.0.1:3100 \
+  --participants Tom,Caitlyn \
+  --live-timeout-ms 100000 \
+  --run-xcode
 ```
+
+`scripts/native-apple-local-gates.mjs` runs the repo-owned checkpoint suite in
+one place: browser media fix verification, voice-focus benchmark, Go tests,
+SwiftPM tests, default native Apple release readiness, optional live media smoke,
+and optional iOS simulator/macOS Xcode tests. Run it with `--dry-run` to inspect
+the command plan without executing it.
+
+When `--run-xcode` is enabled, app-target tests are generated with
+`CODE_SIGNING_ALLOWED=NO` so the local gate can compile and test without Apple
+Developer credentials. Real archive/device builds still require the signing
+preflight and external release evidence below.
+
+The live media smoke is intentionally not run unless `--live-url` is provided.
+Without that URL the command reports `complete:false` and a skipped
+`liveMediaSmoke` blocker. Add `--require-live-media-smoke` when a mergeable
+checkpoint must fail closed if no local or live room URL is available.
 
 ## Release Preflight
 

@@ -2473,3 +2473,66 @@ What worked:
 - Keeping the preflight as an explicit command in the generated command pack
   gives the operator a first step that is machine-checkable without exposing
   account secrets.
+
+## Wave 34
+
+Status: `wave34_native_local_checkpoint_gates_validated`
+
+Scope:
+- Continued the gate-before-shipping track by adding one local checkpoint
+  runner for the native Apple work.
+- Assigned a read-only release/SRE reviewer. The reviewer confirmed the gap:
+  release proof-pack full gates covered part of the plan, but there was no
+  general checkpoint command that included optional live media smoke or Xcode
+  app-target tests.
+- Added `scripts/native-apple-local-gates.mjs`. It orchestrates browser media
+  fix verification, voice-focus benchmark, Go tests, SwiftPM tests, default
+  native Apple release readiness, optional live media smoke, and optional iOS
+  simulator/macOS app-target Xcode tests.
+- Added `--require-live-media-smoke` so mergeable checkpoints can fail closed
+  when no local or live room URL is supplied. Without `--live-url`, the command
+  reports `complete:false` and a skipped `liveMediaSmoke` blocker instead of
+  pretending media smoke ran.
+- Added signing-independent Xcode commands with `CODE_SIGNING_ALLOWED=NO` for
+  local simulator/macOS test execution.
+- Documented the single command in `apple/README.md`.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-local-gates.mjs`
+- `scripts/native-apple-local-gates.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-local-gates.mjs` passed.
+- `node --check scripts/native-apple-local-gates.test.mjs` passed.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- Started a throwaway local server on `http://127.0.0.1:3100` with temporary
+  memory, users, and sessions under `/tmp/ma-native-gates.G1wKhv`; `/readyz`
+  returned `ok:true` with the expected `openai_api_key_missing` degradation.
+- `node scripts/native-apple-local-gates.mjs --live-url http://127.0.0.1:3100 --participants Tom,Caitlyn --live-timeout-ms 100000 --require-live-media-smoke --run-xcode`
+  passed with `ok:true`, `complete:true`, and no warnings.
+- The full runner passed:
+  - `node scripts/media-fix-verification.mjs`
+  - `node scripts/voice-focus-benchmark.mjs`
+  - `go test ./...`
+  - `swift test --package-path apple` with 90 tests
+  - `node scripts/native-apple-release-readiness.mjs --apple-dir apple`
+  - `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`
+  - `xcodegen generate --spec project.yml`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test CODE_SIGNING_ALLOWED=NO`
+
+Risks / blockers:
+- This proves the repo-owned local checkpoint path, including browser local
+  smoke, but it is not physical-device native media evidence.
+- Apple signing/team setup, final privacy manifest, restrictive-network TURN
+  proof, real iPhone/iPad/Mac media proof, real TestFlight upload, and macOS
+  notarization remain external release blockers.
+
+What worked:
+- Making live media smoke explicit in the runner prevents accidental
+  "green" checkpoint claims when no room URL was tested.
+- Running the live smoke against an isolated local server kept the durable repo
+  `data/` files untouched while still exercising two browser participants,
+  recording toggles, screen share start/stop, speaker view, and board view.
