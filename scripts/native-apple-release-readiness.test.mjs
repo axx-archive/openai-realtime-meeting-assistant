@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -180,6 +180,22 @@ function writePrivacyManifestFixture(appleDir, body = "complete") {
     </dict>
   </array>
 </dict>`
+  );
+}
+
+function wirePrivacyManifestFixture(appleDir) {
+  const projectYmlPath = resolve(appleDir, "project.yml");
+  let projectYml = readFileSync(projectYmlPath, "utf8");
+  for (let index = 0; index < 2; index += 1) {
+    projectYml = projectYml.replace(
+      "      - path: Xcode/Assets.xcassets\n    settings:",
+      "      - path: Xcode/Assets.xcassets\n      - path: Xcode/PrivacyInfo.xcprivacy\n    settings:"
+    );
+  }
+  writeFixtureFile(projectYmlPath, projectYml);
+  appendFileSync(
+    resolve(appleDir, "MeetingAssist.xcodeproj", "project.pbxproj"),
+    "PrivacyInfo.xcprivacy in Resources;\nPrivacyInfo.xcprivacy in Resources;\n"
   );
 }
 
@@ -722,6 +738,7 @@ Signing.xcconfig;
   }
   if (includePrivacy) {
     writePrivacyManifestFixture(appleDir, includePrivacy);
+    wirePrivacyManifestFixture(appleDir);
   }
   return appleDir;
 }
@@ -788,6 +805,22 @@ assert.equal(incompletePrivacyFixture.status, 1);
 assert.equal(incompletePrivacyFixture.output.ok, true);
 assert.equal(incompletePrivacyFixture.output.readyForDistribution, false);
 assert.equal(incompletePrivacyFixture.output.blockers.some((blocker) => blocker.id === "privacy_manifest"), true);
+
+const unwiredPrivacyFixturePath = makeFixture({ includeIcons: true, includePrivacy: false });
+writePrivacyManifestFixture(unwiredPrivacyFixturePath, "complete");
+writeReleaseEvidenceFixture(resolve(unwiredPrivacyFixturePath, "ReleaseEvidence.local.json"));
+const unwiredPrivacyFixture = runReadiness(["--apple-dir", unwiredPrivacyFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(unwiredPrivacyFixture.status, 1);
+assert.equal(unwiredPrivacyFixture.output.ok, true);
+assert.equal(unwiredPrivacyFixture.output.readyForDistribution, false);
+assert.equal(
+  unwiredPrivacyFixture.output.blockers.some(
+    (blocker) => blocker.id === "privacy_manifest" && blocker.detail.includes("project_yml_sources")
+  ),
+  true
+);
 
 const missingEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 const missingEvidenceFixture = runReadiness(["--apple-dir", missingEvidenceFixturePath, "--strict"], {
@@ -1622,4 +1655,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 52 checks passed");
+console.log("native-apple-release-readiness: 53 checks passed");

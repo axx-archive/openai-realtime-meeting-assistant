@@ -1972,3 +1972,96 @@ What worked:
 - Keeping rich upload/notarization details in local artifacts while preserving a
   compact `ReleaseEvidence.draft.json` avoided turning the draft into a place
   where Apple credentials or raw logs might accidentally land.
+
+## Wave 28
+
+Status: `wave28_native_privacy_manifest_generation_checkpoint_validated`
+
+Scope:
+- Continued the privacy release-gate path by adding a guarded generator for
+  `apple/Xcode/PrivacyInfo.xcprivacy` instead of committing a guessed privacy
+  manifest.
+- Added `apple/PrivacyManifest.decisions.example.json` as the non-secret,
+  non-approved shape for product/legal decisions. The real
+  `apple/PrivacyManifest.decisions.local.json` is ignored.
+- Added `scripts/native-apple-generate-privacy-manifest.mjs`. It requires
+  approved product/legal metadata plus `--confirm-approved`, rejects placeholder
+  answers, tracking without domains, empty collected-data declarations, and
+  secret-shaped values, then writes the plist manifest.
+- Added `--wire-project` and `--generate-xcode-project` so the approved manifest
+  can be added to both app targets only after the file exists. A temp XcodeGen
+  probe proved that optional missing privacy resources break Xcode builds, so
+  the base project intentionally remains unwired until generation time.
+- Tightened release readiness so a present `PrivacyInfo.xcprivacy` must also be
+  present in both generated Xcode app-target resource phases. A manifest that
+  exists on disk but is not bundled now remains blocked.
+- Updated `apple/README.md` and `docs/native-apple-privacy-review.md` with the
+  concrete approval-to-manifest workflow.
+
+Files changed:
+- `.gitignore`
+- `apple/PrivacyManifest.decisions.example.json`
+- `apple/README.md`
+- `docs/native-apple-privacy-review.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-generate-privacy-manifest.mjs`
+- `scripts/native-apple-generate-privacy-manifest.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-generate-privacy-manifest.mjs` passed.
+- `node --check scripts/native-apple-generate-privacy-manifest.test.mjs`
+  passed.
+- `node scripts/native-apple-generate-privacy-manifest.test.mjs` passed 6
+  checks.
+- Temp command smoke from inside `apple/` generated
+  `Xcode/PrivacyInfo.xcprivacy` and wired both app targets using the documented
+  relative paths.
+- Temp `--generate-xcode-project` smoke produced generated project resource
+  references for `PrivacyInfo.xcprivacy`.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node --check scripts/native-apple-release-proofpack.test.mjs` passed.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers for Apple development team, privacy manifest, and
+  release evidence file.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 84 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+- Standalone critic-loop fallback accepted the wave at 9.0/10. The main caveat
+  is intentional: product/legal approval is still required before the generator
+  should be run for a real release manifest.
+
+Risks / blockers:
+- This wave does not decide Apple privacy answers and does not add
+  `apple/Xcode/PrivacyInfo.xcprivacy` to the repo.
+- Apple development team/signing, final privacy approval/manifest generation,
+  physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN proof,
+  real TestFlight upload, and real macOS notarization remain external release
+  gates.
+- The generator validates shape, approval flags, and obvious secret mistakes; it
+  cannot prove the business/legal correctness of the chosen Apple data-type
+  categories.
+
+What worked:
+- Keeping the final manifest generated from an ignored approved-decisions file
+  avoids committing guesses while giving release operators a precise command
+  path once privacy answers are final.
+- Testing XcodeGen's missing-resource behavior before changing the base project
+  prevented a tempting but broken optional-source approach from landing.

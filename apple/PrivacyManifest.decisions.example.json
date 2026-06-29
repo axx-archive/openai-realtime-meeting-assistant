@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "approval": {
+    "approved": false,
+    "approvedAt": "YYYY-MM-DDTHH:MM:SSZ",
+    "approvedBy": "product-legal-reviewer"
+  },
+  "tracking": false,
+  "trackingDomains": [],
+  "accessedAPITypes": [],
+  "collectedDataTypes": [
+    {
+      "dataType": "NSPrivacyCollectedDataTypeName",
+      "linked": true,
+      "tracking": false,
+      "purposes": [
+        "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+      ]
+    },
+    {
+      "dataType": "NSPrivacyCollectedDataTypeOtherDiagnosticData",
+      "linked": false,
+      "tracking": false,
+      "purposes": [
+        "NSPrivacyCollectedDataTypePurposeDiagnostics"
+      ]
+    }
+  ]
+}

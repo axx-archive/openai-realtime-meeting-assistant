@@ -1860,6 +1860,22 @@ function privacyManifestStatus(path) {
   return { ok: missing.length === 0, missing };
 }
 
+function privacyManifestWiringStatus(manifestPath, projectYml, pbxproj) {
+  if (!existsSync(manifestPath)) {
+    return { ok: true, missing: [] };
+  }
+  const missing = [];
+  const projectYmlRefs = projectYml.match(/path:\s*Xcode\/PrivacyInfo\.xcprivacy/g) ?? [];
+  const pbxResourceRefs = pbxproj.match(/PrivacyInfo\.xcprivacy in Resources/g) ?? [];
+  if (projectYmlRefs.length < 2) {
+    missing.push("project_yml_sources");
+  }
+  if (pbxResourceRefs.length < 2) {
+    missing.push("xcode_project_resources");
+  }
+  return { ok: missing.length === 0, missing };
+}
+
 function findAppIconSet(appleDir, iconName) {
   let found = "";
   walk(appleDir, (path) => {
@@ -2135,11 +2151,17 @@ function analyze(options) {
   }
 
   const privacyStatus = privacyManifestStatus(privacyManifestPath);
-  if (!privacyStatus.ok) {
+  const privacyWiringStatus = privacyManifestWiringStatus(privacyManifestPath, projectYml, pbxproj);
+  if (!privacyStatus.ok || !privacyWiringStatus.ok) {
     addBlocker(
       blockers,
       "privacy_manifest",
-      `Add apple/Xcode/PrivacyInfo.xcprivacy only after docs/native-apple-privacy-review.md decisions are final. Missing or invalid: ${privacyStatus.missing.slice(0, 6).join(", ")}`
+      `Add apple/Xcode/PrivacyInfo.xcprivacy only after docs/native-apple-privacy-review.md decisions are final. Missing or invalid: ${[
+        ...privacyStatus.missing,
+        ...privacyWiringStatus.missing,
+      ]
+        .slice(0, 6)
+        .join(", ")}`
     );
   }
 

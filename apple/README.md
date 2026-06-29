@@ -104,6 +104,26 @@ Do not add `Xcode/PrivacyInfo.xcprivacy` until the product-owned answers in
 missing, empty, or shape-incomplete privacy manifests because this client sends
 user, room, media, and diagnostic data to the MeetingAssist service.
 
+After product/legal approval, create the manifest from an ignored copy of the
+decisions template:
+
+```bash
+cp PrivacyManifest.decisions.example.json PrivacyManifest.decisions.local.json
+# Fill the local file with approved answers, set approval.approved to true,
+# then generate and wire the manifest:
+node ../scripts/native-apple-generate-privacy-manifest.mjs \
+  --apple-dir . \
+  --decisions-file PrivacyManifest.decisions.local.json \
+  --confirm-approved \
+  --wire-project \
+  --generate-xcode-project
+```
+
+The generator refuses unapproved, placeholder, tracking-domain-incomplete, or
+secret-shaped decisions. It writes `Xcode/PrivacyInfo.xcprivacy`, wires the file
+into both app targets, and can regenerate `MeetingAssist.xcodeproj` so strict
+readiness can verify the manifest is bundled.
+
 Strict mode also requires build-bound distribution proof before it can report
 `readyForDistribution: true`. Copy `ReleaseEvidence.example.json` to ignored
 `ReleaseEvidence.local.json` after the real run, or pass an explicit evidence

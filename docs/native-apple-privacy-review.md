@@ -57,16 +57,31 @@ final manifest so the review decision is explicit.
 
 Only after those answers are final:
 
-1. Add `apple/Xcode/PrivacyInfo.xcprivacy`.
-2. Include non-empty `NSPrivacyCollectedDataTypes` declarations matching the
+1. Copy `apple/PrivacyManifest.decisions.example.json` to ignored
+   `apple/PrivacyManifest.decisions.local.json`.
+2. Fill in the approved data-practice answers, including approval metadata, and
+   set `approval.approved` to `true`.
+3. Run:
+
+   ```bash
+   node scripts/native-apple-generate-privacy-manifest.mjs \
+     --apple-dir apple \
+     --decisions-file apple/PrivacyManifest.decisions.local.json \
+     --confirm-approved \
+     --wire-project \
+     --generate-xcode-project
+   ```
+
+4. Include non-empty `NSPrivacyCollectedDataTypes` declarations matching the
    approved data practices.
-3. Include `NSPrivacyTracking`, `NSPrivacyTrackingDomains`, and
+5. Include `NSPrivacyTracking`, `NSPrivacyTrackingDomains`, and
    `NSPrivacyAccessedAPITypes`.
-4. Run `node scripts/native-apple-release-readiness.mjs --strict`.
+6. Run `node scripts/native-apple-release-readiness.mjs --strict`.
 
 The readiness script intentionally rejects a missing, empty, or shape-incomplete
 privacy manifest because this app already transmits user, room, media, and
-diagnostic data to the MeetingAssist service.
+diagnostic data to the MeetingAssist service. It also rejects a manifest that is
+present on disk but not wired into the generated Xcode app-target resources.
 
 After privacy is approved, strict release readiness still requires
 `apple/ReleaseEvidence.local.json` or an explicit `--evidence-file` with
