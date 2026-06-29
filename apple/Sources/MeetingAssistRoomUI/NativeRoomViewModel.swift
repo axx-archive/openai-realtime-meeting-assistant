@@ -108,7 +108,12 @@ public final class NativeRoomViewModel: ObservableObject {
         self.sessionFactory = sessionFactory ?? { baseURL in
             NativeRoomSessionCoordinator(
                 api: MeetingAssistAPIClient(baseURL: baseURL),
-                clientIdentity: clientIdentity
+                clientIdentity: clientIdentity,
+                mediaEvidenceContextProvider: {
+                    await MainActor.run {
+                        NativeMediaEvidenceCaptureContext.current
+                    }
+                }
             )
         }
     }

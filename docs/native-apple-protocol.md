@@ -92,12 +92,15 @@ addresses, or full WebRTC stats in `media_error`.
 Native clients may also export a local `native_device_media` QA evidence
 snapshot from the same summarized `media_quality` counters. The export is a
 local operator artifact, not a websocket event. It includes only assertion
-booleans, safe RTP counters, remote tile count, lifecycle, platform/version, and
+booleans, safe RTP counters, remote tile count, lifecycle, app
+version/build/target, device kind/hardware model/OS, platform/version, and
 selected candidate-pair type/RTT summary; it must not include raw SDP, raw ICE
 candidates, candidate IDs, IP addresses, TURN URLs, TURN usernames, TURN
-credentials, cookies, headers, API keys, Team IDs, or provisioning data. The
-snapshot status remains `observed` for QA exports, and the assertion source is
-cumulative peer-connection stats rather than a fresh current-health interval.
+credentials, cookies, headers, API keys, Team IDs, provisioning data, iPhone or
+iPad device names, or macOS host names. Release `runId` and `roomId` are
+operator/proof-pack fields, not auto-discovered room state. The snapshot status
+remains `observed` for QA exports, and the assertion source is cumulative
+peer-connection stats rather than a fresh current-health interval.
 
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session

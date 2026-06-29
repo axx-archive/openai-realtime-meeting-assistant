@@ -1592,3 +1592,82 @@ What worked:
   and avoided any dependency on UI labels or status text.
 - Reusing the existing `media_quality` stats path kept the feature additive and
   aligned with the proof-pack artifacts from Wave 21.
+
+## Wave 23
+
+Status: `wave23_native_media_evidence_metadata_checkpoint_validated`
+
+Scope:
+- Continued the native QA proof-pack path by auto-populating app and device
+  metadata in copied `native_device_media` snapshots without changing their
+  release eligibility.
+- Consumed the earlier read-only native-agent recommendations: keep
+  `MeetingAssistRoomRTC` pure and pass a small async evidence context provider
+  into `NativeRoomSessionCoordinator`; keep UIKit/Darwin platform calls in
+  `MeetingAssistRoomUI`; leave `runId` and `roomId` operator/proof-pack owned;
+  avoid personal device names and macOS host names.
+- Added `NativeMediaEvidenceCaptureContext` so app metadata, device metadata,
+  `runId`, and `roomId` move together without expanding the release evidence
+  schema.
+- Wired the default native room session to collect app version/build/target,
+  client platform/version, device kind, hardware model, OS version, and
+  physical-vs-simulator state at evidence capture/report time.
+- Kept QA snapshots at `claimScope: "qa_snapshot"`, `releaseEligible: false`,
+  `status: "observed"`, and release summary `status: "pending"` so hydrated
+  metadata cannot look like release proof.
+- Updated the Apple README, protocol notes, and privacy checklist to state that
+  app/device metadata is auto-filled, while release run/room identity still
+  comes from the proof-pack/operator workflow.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomClientIdentity+Platform.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/native-apple-privacy-review.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests/testCaptureMediaEvidenceSnapshotDerivesProofFromNativeStats`
+  passed.
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests/testMediaQualityReportPublishesMediaEvidenceHandler`
+  passed.
+- `swift test --package-path apple --filter NativeRoomViewModelTests/testCurrentMediaEvidenceContextsPopulateAppAndDeviceMetadata`
+  passed.
+- `swift test --package-path apple` passed 84 tests.
+- `go test ./...` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 30 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green and strict blockers still explicit.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with `apple_development_team`, `privacy_manifest`, and
+  `release_evidence_file`.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This wave still does not prove physical iPhone/iPad/Mac media quality,
+  restrictive-network TURN relay use, TestFlight upload, final privacy manifest,
+  Apple signing/team setup, or macOS notarization.
+- `device.physical: true` on macOS means the native app is not running in a
+  simulator context; it is not a release-proof substitute by itself.
+- `runId` and `roomId` remain empty in app-generated snapshots unless the
+  proof-pack/operator workflow supplies them.
+
+What worked:
+- A context provider kept platform metadata out of the RTC/stat derivation
+  module while still hydrating both manual evidence capture and automatic
+  `media_quality` handler snapshots.
+- Recording hardware model and OS, instead of personal device names or host
+  names, gives operators useful proof-pack context without expanding the
+  sensitive data surface.

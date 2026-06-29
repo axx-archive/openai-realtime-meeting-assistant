@@ -83,6 +83,7 @@ public typealias NativeMeetingArchiveHandler = @Sendable (MeetingArchiveResult) 
 public typealias NativeScoutChatEventsHandler = @Sendable ([ScoutChatEvent]) async -> Void
 public typealias NativeMediaRecoveryHandler = @Sendable (NativeMediaRecoveryEvent) async -> Void
 public typealias NativeMediaEvidenceHandler = @Sendable (NativeMediaEvidenceSnapshot) async -> Void
+public typealias NativeMediaEvidenceContextProvider = @Sendable () async -> NativeMediaEvidenceCaptureContext
 
 public struct NativeMediaRecoveryEvent: Equatable, Sendable {
     public var stage: String
@@ -137,6 +138,7 @@ public actor NativeRoomSessionCoordinator {
     private var mediaQualityTask: Task<Void, Never>?
     private var previousMediaQualitySnapshot: NativeMediaQualitySnapshot?
     private var currentMediaEvidenceSnapshot: NativeMediaEvidenceSnapshot?
+    private let mediaEvidenceContextProvider: NativeMediaEvidenceContextProvider
     private let mediaQualityReportIntervalNanoseconds: UInt64
 
     public init(
@@ -145,6 +147,7 @@ public actor NativeRoomSessionCoordinator {
         rtc: RoomRTCClient = NativeRoomRTCClient(),
         media: MediaSessionCoordinator = MediaSessionCoordinator(),
         clientIdentity: NativeRoomClientIdentity,
+        mediaEvidenceContextProvider: @escaping NativeMediaEvidenceContextProvider = { NativeMediaEvidenceCaptureContext() },
         mediaQualityReportIntervalNanoseconds: UInt64 = 12_000_000_000
     ) {
         self.api = api
@@ -152,6 +155,7 @@ public actor NativeRoomSessionCoordinator {
         self.rtc = rtc
         self.media = media
         self.clientIdentity = clientIdentity
+        self.mediaEvidenceContextProvider = mediaEvidenceContextProvider
         self.mediaQualityReportIntervalNanoseconds = mediaQualityReportIntervalNanoseconds
     }
 
@@ -427,7 +431,7 @@ public actor NativeRoomSessionCoordinator {
             await reportMediaError(stage: "media_evidence_snapshot", error: error)
             throw error
         }
-        let evidence = mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
+        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
         currentMediaEvidenceSnapshot = evidence
         await mediaEvidenceHandler?(evidence)
         return evidence
@@ -779,7 +783,7 @@ public actor NativeRoomSessionCoordinator {
         let previous = previousMediaQualitySnapshot
         previousMediaQualitySnapshot = snapshot
         let sentAt = Self.iso8601String(Date())
-        let evidence = mediaEvidenceSnapshot(from: snapshot, capturedAt: sentAt)
+        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: sentAt)
         currentMediaEvidenceSnapshot = evidence
         await mediaEvidenceHandler?(evidence)
         do {
@@ -806,13 +810,18 @@ public actor NativeRoomSessionCoordinator {
     private func mediaEvidenceSnapshot(
         from snapshot: NativeMediaQualitySnapshot,
         capturedAt: String
-    ) -> NativeMediaEvidenceSnapshot {
-        NativeMediaEvidenceSnapshot(
+    ) async -> NativeMediaEvidenceSnapshot {
+        let context = await mediaEvidenceContextProvider()
+        return NativeMediaEvidenceSnapshot(
             source: snapshot,
             capturedAt: capturedAt,
             client: NativeMediaEvidenceClient(platform: clientIdentity.platform, version: clientIdentity.version),
+            app: context.app,
+            device: context.device,
             lifecycle: lifecycle,
-            remoteVideoTiles: remoteVideoTracksByID.count
+            remoteVideoTiles: remoteVideoTracksByID.count,
+            runId: context.runId,
+            roomId: context.roomId
         )
     }
 

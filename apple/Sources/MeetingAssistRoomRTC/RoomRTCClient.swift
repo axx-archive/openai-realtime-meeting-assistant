@@ -297,6 +297,25 @@ public struct NativeMediaEvidenceDeviceContext: Codable, Equatable, Sendable {
     }
 }
 
+public struct NativeMediaEvidenceCaptureContext: Codable, Equatable, Sendable {
+    public var app: NativeMediaEvidenceAppContext
+    public var device: NativeMediaEvidenceDeviceContext
+    public var runId: String
+    public var roomId: String
+
+    public init(
+        app: NativeMediaEvidenceAppContext = NativeMediaEvidenceAppContext(),
+        device: NativeMediaEvidenceDeviceContext = NativeMediaEvidenceDeviceContext(),
+        runId: String = "",
+        roomId: String = ""
+    ) {
+        self.app = app
+        self.device = device
+        self.runId = runId
+        self.roomId = roomId
+    }
+}
+
 public struct NativeMediaEvidenceReleaseSummary: Codable, Equatable, Sendable {
     public var status: String
     public var runId: String

@@ -338,7 +338,10 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             api: MockNativeRoomAPI(),
             signaling: signaling,
             rtc: rtc,
-            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test"),
+            mediaEvidenceContextProvider: {
+                nativeEvidenceTestContext()
+            }
         )
 
         _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
@@ -353,6 +356,19 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(evidence.status, "observed")
         XCTAssertEqual(evidence.releaseEvidenceSummary.status, "pending")
         XCTAssertEqual(evidence.client.platform, "ios")
+        XCTAssertEqual(evidence.app.version, "1.0")
+        XCTAssertEqual(evidence.app.build, "15")
+        XCTAssertEqual(evidence.app.target, "MeetingAssistAppleApp")
+        XCTAssertEqual(evidence.device.kind, "iphone")
+        XCTAssertEqual(evidence.device.model, "iPhone physical")
+        XCTAssertEqual(evidence.device.os, "iOS 26.5")
+        XCTAssertTrue(evidence.device.physical)
+        XCTAssertEqual(evidence.releaseEvidenceSummary.device, "iPhone physical")
+        XCTAssertEqual(evidence.releaseEvidenceSummary.os, "iOS 26.5")
+        XCTAssertEqual(evidence.runId, "native-apple-run-test")
+        XCTAssertEqual(evidence.roomId, "release-room-test")
+        XCTAssertEqual(evidence.releaseEvidenceSummary.runId, "native-apple-run-test")
+        XCTAssertEqual(evidence.releaseEvidenceSummary.roomId, "release-room-test")
         XCTAssertEqual(evidence.lifecycle, .connected)
         XCTAssertEqual(evidence.remoteVideoTiles, 1)
         XCTAssertTrue(evidence.mediaAssertions.microphonePublished)
@@ -393,7 +409,10 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             api: MockNativeRoomAPI(),
             signaling: signaling,
             rtc: rtc,
-            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test"),
+            mediaEvidenceContextProvider: {
+                nativeEvidenceTestContext()
+            }
         )
         let collector = MediaEvidenceCollector()
         await coordinator.setMediaEvidenceHandler { evidence in
@@ -407,6 +426,15 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         let values = await collector.values()
         XCTAssertEqual(values.count, 1)
         XCTAssertEqual(values.first?.status, "observed")
+        XCTAssertEqual(values.first?.app.version, "1.0")
+        XCTAssertEqual(values.first?.app.build, "15")
+        XCTAssertEqual(values.first?.app.target, "MeetingAssistAppleApp")
+        XCTAssertEqual(values.first?.device.kind, "iphone")
+        XCTAssertEqual(values.first?.device.model, "iPhone physical")
+        XCTAssertEqual(values.first?.device.os, "iOS 26.5")
+        XCTAssertEqual(values.first?.device.physical, true)
+        XCTAssertEqual(values.first?.runId, "native-apple-run-test")
+        XCTAssertEqual(values.first?.roomId, "release-room-test")
         XCTAssertEqual(values.first?.mediaAssertions.cameraPublished, true)
         XCTAssertEqual(values.first?.mediaAssertions.remoteVideoRendered, true)
     }
@@ -1317,6 +1345,26 @@ private let disallowedMediaEvidenceLeakTokens = [
     "localCandidateId",
     "remoteCandidateId",
 ]
+
+private func nativeEvidenceTestContext() -> NativeMediaEvidenceCaptureContext {
+    NativeMediaEvidenceCaptureContext(
+        app: NativeMediaEvidenceAppContext(
+            version: "1.0",
+            build: "15",
+            target: "MeetingAssistAppleApp",
+            clientPlatform: "ios",
+            clientVersion: "test"
+        ),
+        device: NativeMediaEvidenceDeviceContext(
+            kind: "iphone",
+            model: "iPhone physical",
+            os: "iOS 26.5",
+            physical: true
+        ),
+        runId: "native-apple-run-test",
+        roomId: "release-room-test"
+    )
+}
 
 private actor RemoteVideoInfoCollector {
     private var values: [NativeRemoteVideoTrackInfo] = []

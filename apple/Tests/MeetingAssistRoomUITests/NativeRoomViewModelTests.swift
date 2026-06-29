@@ -462,6 +462,28 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.latestMediaEvidenceJSON?.contains("\"releaseEligible\" : false"), true)
     }
 
+    func testCurrentMediaEvidenceContextsPopulateAppAndDeviceMetadata() {
+        let identity = NativeRoomClientIdentity.current
+        let app = NativeMediaEvidenceAppContext.current
+        let device = NativeMediaEvidenceDeviceContext.current
+
+        XCTAssertFalse(app.target.isEmpty)
+        XCTAssertEqual(app.clientPlatform, identity.platform)
+        XCTAssertEqual(app.clientVersion, identity.version)
+        XCTAssertNotEqual(device.kind, "unknown")
+        XCTAssertFalse(device.os.isEmpty)
+        #if os(iOS) && targetEnvironment(simulator)
+        XCTAssertEqual(device.kind, "simulator")
+        XCTAssertFalse(device.physical)
+        #elseif os(iOS)
+        XCTAssertTrue(["iphone", "ipad"].contains(device.kind))
+        XCTAssertTrue(device.physical)
+        #elseif os(macOS)
+        XCTAssertEqual(device.kind, "mac")
+        XCTAssertTrue(device.physical)
+        #endif
+    }
+
     func testRoomAndBoardSnapshotsUpdateNativeState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
