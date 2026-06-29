@@ -102,6 +102,13 @@ operator/proof-pack fields, not auto-discovered room state. The snapshot status
 remains `observed` for QA exports, and the assertion source is cumulative
 peer-connection stats rather than a fresh current-health interval.
 
+If an operator promotes a local `native_device_media` JSON artifact into
+physical-device release evidence, it must be a distinct release-proof artifact
+for the same run, room, version, build, platform, and physical device. Strict
+readiness rejects unpromoted QA snapshots, simulator captures, pending proof
+pack placeholders, mismatched artifacts, and artifacts with raw SDP, raw ICE,
+IP addresses, credentials, or account identifiers.
+
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session
 event, leave the broken peer connection, and return the UI to a rejoinable

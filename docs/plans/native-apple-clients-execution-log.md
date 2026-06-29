@@ -1671,3 +1671,56 @@ What worked:
 - Recording hardware model and OS, instead of personal device names or host
   names, gives operators useful proof-pack context without expanding the
   sensitive data surface.
+
+## Wave 24
+
+Status: `wave24_native_media_artifact_guard_checkpoint_validated`
+
+Scope:
+- Continued the physical-device release gate path by making strict readiness
+  inspect local JSON physical-device media artifacts, not just their existence.
+- Assigned two read-only reviewers. The readiness reviewer recommended keeping
+  the release evidence schema unchanged and validating only local device media
+  artifact refs. The proof-pack reviewer recommended rejecting QA snapshots,
+  simulator captures, wrong version/build, wrong run/room, missing assertion
+  support, and secret-shaped artifact content.
+- Added strict local artifact validation for
+  `physicalDeviceMedia.{iphone,ipad,mac}.artifactRef` when the ref resolves to a
+  local JSON file. Valid promoted artifacts must match the release version,
+  build, run, room, platform, device OS, physical device kind, connected
+  lifecycle, passed release status, all four media assertions, and supporting
+  assertion evidence/counters.
+- Kept remote artifact refs behavior unchanged because the repo script cannot
+  inspect remote evidence safely.
+- Updated fixtures so synthetic strict-ready release evidence points to
+  promoted physical media proof artifacts instead of arbitrary JSON files.
+- Added negative tests for local QA snapshot artifacts, simulator artifacts,
+  stale artifact build metadata, wrong artifact run identity, arbitrary fixture
+  JSON, and unsafe raw media/credential-like artifact content.
+- Updated README/protocol notes with the promotion contract.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 36 checks.
+
+Risks / blockers:
+- This wave still does not create real physical iPhone/iPad/Mac evidence,
+  restrictive TURN proof, Apple signing/team setup, final privacy manifest,
+  TestFlight upload, or macOS notarization.
+- Strict readiness can validate only local JSON artifact content. Remote
+  evidence refs still require human/operator review and artifact discipline.
+
+What worked:
+- Keeping artifact-content failures under the existing
+  `physical_device_media_evidence` blocker avoided adding another release-state
+  category while making the blocker more meaningful.
+- Treating app-exported QA snapshots as inputs to a promotion workflow, not as
+  release proof, keeps the proof-pack path useful without overclaiming.

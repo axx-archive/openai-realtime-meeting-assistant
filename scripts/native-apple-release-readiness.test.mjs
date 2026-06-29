@@ -290,17 +290,90 @@ function evidenceRootForPath(path) {
   return evidenceDir.endsWith("/apple") ? dirname(evidenceDir) : evidenceDir;
 }
 
-function writeEvidenceArtifactFixtures(path, evidence) {
+function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
+  const item = evidence.physicalDeviceMedia[platform];
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_device_media",
+    claimScope: "physical_device",
+    releaseEligible: true,
+    status: "passed",
+    runId: evidence.runId,
+    roomId: evidence.roomId,
+    platform,
+    capturedAt: item.testedAt,
+    lifecycle: "connected",
+    remoteVideoTiles: 1,
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+      target: platform === "mac" ? "MeetingAssistMacApp" : "MeetingAssistAppleApp",
+      clientPlatform: platform === "ipad" ? "ipados" : platform === "mac" ? "macos" : "ios",
+      clientVersion: "test",
+    },
+    device: {
+      kind: platform,
+      model: item.device,
+      os: item.os,
+      physical: true,
+    },
+    mediaAssertions: { ...item.mediaAssertions },
+    assertionEvidence: {
+      cameraPublished: { source: "outboundVideoFramesSent", value: 90, passed: true },
+      microphonePublished: { source: "outboundAudioPacketsSent", value: 120, passed: true },
+      remoteAudioReceived: { source: "inboundAudioPacketsReceived", value: 180, passed: true },
+      remoteVideoRendered: { source: "remoteVideoTiles+inboundVideoDecoded", value: 140, passed: true },
+    },
+    counters: {
+      outboundAudioPacketsSent: 120,
+      outboundVideoFramesSent: 90,
+      inboundAudioPacketsReceived: 180,
+      inboundVideoDecoded: 140,
+    },
+    releaseEvidenceSummary: {
+      status: "passed",
+      runId: evidence.runId,
+      roomId: evidence.roomId,
+      device: item.device,
+      os: item.os,
+      testedAt: item.testedAt,
+      mediaAssertions: { ...item.mediaAssertions },
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    device: { ...base.device, ...(overrides.device ?? {}) },
+    mediaAssertions: { ...base.mediaAssertions, ...(overrides.mediaAssertions ?? {}) },
+    releaseEvidenceSummary: {
+      ...base.releaseEvidenceSummary,
+      ...(overrides.releaseEvidenceSummary ?? {}),
+      mediaAssertions: {
+        ...base.releaseEvidenceSummary.mediaAssertions,
+        ...(overrides.releaseEvidenceSummary?.mediaAssertions ?? {}),
+      },
+    },
+  };
+}
+
+function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   const rootDir = evidenceRootForPath(path);
-  const refs = [
-    evidence.physicalDeviceMedia?.iphone?.artifactRef,
-    evidence.physicalDeviceMedia?.ipad?.artifactRef,
-    evidence.physicalDeviceMedia?.mac?.artifactRef,
+  for (const platform of ["iphone", "ipad", "mac"]) {
+    const ref = evidence.physicalDeviceMedia?.[platform]?.artifactRef;
+    if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
+      continue;
+    }
+    const artifact =
+      options.physicalMediaArtifacts?.[platform] ??
+      promotedPhysicalMediaArtifact(platform, evidence, options.physicalMediaArtifactOverrides?.[platform]);
+    writeFixtureFile(resolve(rootDir, ref), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  for (const ref of [
     evidence.restrictiveNetworkTurn?.artifactRef,
     evidence.testFlight?.artifactRef,
     evidence.macNotarization?.artifactRef,
-  ];
-  for (const ref of refs) {
+  ]) {
     if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
       continue;
     }
@@ -312,7 +385,7 @@ function writeReleaseEvidenceFixture(path, overrides = {}, options = {}) {
   const evidence = releaseEvidence(overrides);
   writeFixtureFile(path, `${JSON.stringify(evidence, null, 2)}\n`);
   if (options.createArtifacts !== false) {
-    writeEvidenceArtifactFixtures(path, evidence);
+    writeEvidenceArtifactFixtures(path, evidence, options);
   }
 }
 
@@ -616,6 +689,128 @@ assert.equal(
   true
 );
 
+const qaSnapshotArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(qaSnapshotArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    iphone: {
+      claimScope: "qa_snapshot",
+      releaseEligible: false,
+      status: "observed",
+      releaseEvidenceSummary: { status: "pending" },
+    },
+  },
+});
+const qaSnapshotArtifactFixture = runReadiness(["--apple-dir", qaSnapshotArtifactFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(qaSnapshotArtifactFixture.status, 1);
+assert.equal(qaSnapshotArtifactFixture.output.ok, true);
+assert.equal(qaSnapshotArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  qaSnapshotArtifactFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const simulatorArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(simulatorArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    ipad: {
+      device: { kind: "simulator", physical: false },
+    },
+  },
+});
+const simulatorArtifactFixture = runReadiness(["--apple-dir", simulatorArtifactFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(simulatorArtifactFixture.status, 1);
+assert.equal(simulatorArtifactFixture.output.ok, true);
+assert.equal(simulatorArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  simulatorArtifactFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const staleArtifactBuildFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(staleArtifactBuildFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    mac: {
+      app: { build: "14" },
+    },
+  },
+});
+const staleArtifactBuildFixture = runReadiness(["--apple-dir", staleArtifactBuildFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(staleArtifactBuildFixture.status, 1);
+assert.equal(staleArtifactBuildFixture.output.ok, true);
+assert.equal(staleArtifactBuildFixture.output.readyForDistribution, false);
+assert.equal(
+  staleArtifactBuildFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const wrongArtifactRunFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(wrongArtifactRunFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    iphone: {
+      runId: "native-release-run-other",
+      releaseEvidenceSummary: { runId: "native-release-run-other" },
+    },
+  },
+});
+const wrongArtifactRunFixture = runReadiness(["--apple-dir", wrongArtifactRunFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(wrongArtifactRunFixture.status, 1);
+assert.equal(wrongArtifactRunFixture.output.ok, true);
+assert.equal(wrongArtifactRunFixture.output.readyForDistribution, false);
+assert.equal(
+  wrongArtifactRunFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const placeholderDeviceArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(placeholderDeviceArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifacts: {
+    iphone: { artifactRef: "artifacts/native-release-run-20260629-a/iphone-media.json", fixture: true },
+  },
+});
+const placeholderDeviceArtifactFixture = runReadiness(
+  ["--apple-dir", placeholderDeviceArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(placeholderDeviceArtifactFixture.status, 1);
+assert.equal(placeholderDeviceArtifactFixture.output.ok, true);
+assert.equal(placeholderDeviceArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  placeholderDeviceArtifactFixture.output.blockers.some(
+    (blocker) => blocker.id === "physical_device_media_evidence"
+  ),
+  true
+);
+
+const unsafeDeviceArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unsafeDeviceArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    mac: {
+      diagnostics: {
+        rawSdp: "v=0\r\na=candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host\r\n",
+        turnCredential: "secret-turn-password",
+      },
+    },
+  },
+});
+const unsafeDeviceArtifactFixture = runReadiness(["--apple-dir", unsafeDeviceArtifactFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(unsafeDeviceArtifactFixture.status, 1);
+assert.equal(unsafeDeviceArtifactFixture.output.ok, true);
+assert.equal(unsafeDeviceArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unsafeDeviceArtifactFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
 const nonRelayTurnEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(nonRelayTurnEvidenceFixturePath, "ReleaseEvidence.local.json"), {
   restrictiveNetworkTurn: { relayProtocol: "stun", relayCandidateType: "host" },
@@ -868,4 +1063,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 30 checks passed");
+console.log("native-apple-release-readiness: 36 checks passed");

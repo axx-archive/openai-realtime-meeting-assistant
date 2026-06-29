@@ -262,6 +262,227 @@ function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
     .filter(Boolean);
 }
 
+const physicalDeviceKinds = {
+  iphone: "iphone",
+  ipad: "ipad",
+  mac: "mac",
+};
+
+function mediaAssertionsAllTrue(assertions) {
+  if (!assertions || typeof assertions !== "object" || Array.isArray(assertions)) {
+    return false;
+  }
+  return ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"].every(
+    (key) => assertions[key] === true
+  );
+}
+
+function collectUnsafeMediaArtifactContent(value, path = "$") {
+  const problems = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      problems.push(...collectUnsafeMediaArtifactContent(item, `${path}[${index}]`));
+    });
+    return problems;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        /\bcandidate:/.test(trimmed) ||
+        /\ba=candidate/.test(trimmed) ||
+        /^v=0(?:\r?\n|$)/.test(trimmed) ||
+        /\bturns?:[^,\s]+/i.test(trimmed) ||
+        /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(trimmed) ||
+        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed)
+      ) {
+        problems.push(path);
+      }
+    }
+    return problems;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      /^(rawSdp|rawIceCandidates|candidateIds?|localCandidateId|remoteCandidateId|turnUsername|turnCredential|cookies?|headers?|apiKeys?|teamIds?|certificates?|provisioningProfiles?)$/i.test(
+        key
+      )
+    ) {
+      problems.push(`${path}.${key}`);
+    }
+    problems.push(...collectUnsafeMediaArtifactContent(item, `${path}.${key}`));
+  }
+  return problems;
+}
+
+function nativeDeviceMediaArtifactProblems({
+  platform,
+  item,
+  artifact,
+  expectedVersion,
+  expectedBuild,
+  runId,
+  roomId,
+}) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return [`${platform}:artifact:not_object`];
+  }
+  if (artifact.artifactType !== "native_device_media") {
+    problems.push(`${platform}:artifactType`);
+  }
+  if (artifact.schemaVersion !== 1) {
+    problems.push(`${platform}:schemaVersion`);
+  }
+  if (artifact.claimScope !== "physical_device") {
+    problems.push(`${platform}:claimScope`);
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push(`${platform}:releaseEligible`);
+  }
+  if (artifact.status !== "passed") {
+    problems.push(`${platform}:status`);
+  }
+  if (artifact.lifecycle !== "connected") {
+    problems.push(`${platform}:lifecycle`);
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push(`${platform}:runId`);
+  }
+  if (!expectedIdentity(artifact.roomId, roomId)) {
+    problems.push(`${platform}:roomId`);
+  }
+  if (!validTimestamp(artifact.capturedAt)) {
+    problems.push(`${platform}:capturedAt`);
+  }
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push(`${platform}:app`);
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push(`${platform}:app.version`);
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push(`${platform}:app.build`);
+    }
+  }
+  if (!artifact.device || typeof artifact.device !== "object" || Array.isArray(artifact.device)) {
+    problems.push(`${platform}:device`);
+  } else {
+    if (artifact.device.kind !== physicalDeviceKinds[platform]) {
+      problems.push(`${platform}:device.kind`);
+    }
+    if (artifact.device.physical !== true) {
+      problems.push(`${platform}:device.physical`);
+    }
+    if (!nonPlaceholderString(artifact.device.model)) {
+      problems.push(`${platform}:device.model`);
+    }
+    if (!expectedIdentity(artifact.device.os, item.os)) {
+      problems.push(`${platform}:device.os`);
+    }
+  }
+  if (!mediaAssertionsAllTrue(artifact.mediaAssertions)) {
+    problems.push(`${platform}:mediaAssertions`);
+  }
+  for (const key of ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"]) {
+    if (artifact.mediaAssertions?.[key] !== item.mediaAssertions?.[key]) {
+      problems.push(`${platform}:mediaAssertions.${key}.match`);
+    }
+  }
+  if (!artifact.assertionEvidence || typeof artifact.assertionEvidence !== "object") {
+    problems.push(`${platform}:assertionEvidence`);
+  } else {
+    const requiredAssertionEvidence = [
+      "cameraPublished",
+      "microphonePublished",
+      "remoteAudioReceived",
+      "remoteVideoRendered",
+    ];
+    for (const key of requiredAssertionEvidence) {
+      const assertion = artifact.assertionEvidence[key];
+      if (!assertion || typeof assertion !== "object" || assertion.passed !== true || !(Number(assertion.value) > 0)) {
+        problems.push(`${platform}:assertionEvidence.${key}`);
+      }
+    }
+  }
+  if (!artifact.counters || typeof artifact.counters !== "object") {
+    problems.push(`${platform}:counters`);
+  } else {
+    if (!(Number(artifact.counters.outboundVideoFramesSent) > 0)) {
+      problems.push(`${platform}:counters.outboundVideoFramesSent`);
+    }
+    if (!(Number(artifact.counters.outboundAudioPacketsSent) > 0)) {
+      problems.push(`${platform}:counters.outboundAudioPacketsSent`);
+    }
+    if (!(Number(artifact.counters.inboundAudioPacketsReceived) > 0)) {
+      problems.push(`${platform}:counters.inboundAudioPacketsReceived`);
+    }
+    if (!(Number(artifact.counters.inboundVideoDecoded) > 0)) {
+      problems.push(`${platform}:counters.inboundVideoDecoded`);
+    }
+  }
+  if (!(Number(artifact.remoteVideoTiles) > 0)) {
+    problems.push(`${platform}:remoteVideoTiles`);
+  }
+  if (!artifact.releaseEvidenceSummary || typeof artifact.releaseEvidenceSummary !== "object") {
+    problems.push(`${platform}:releaseEvidenceSummary`);
+  } else {
+    if (artifact.releaseEvidenceSummary.status !== "passed") {
+      problems.push(`${platform}:releaseEvidenceSummary.status`);
+    }
+    if (!expectedIdentity(artifact.releaseEvidenceSummary.runId, runId)) {
+      problems.push(`${platform}:releaseEvidenceSummary.runId`);
+    }
+    if (!expectedIdentity(artifact.releaseEvidenceSummary.roomId, roomId)) {
+      problems.push(`${platform}:releaseEvidenceSummary.roomId`);
+    }
+    if (!validTimestamp(artifact.releaseEvidenceSummary.testedAt)) {
+      problems.push(`${platform}:releaseEvidenceSummary.testedAt`);
+    }
+    if (!mediaAssertionsAllTrue(artifact.releaseEvidenceSummary.mediaAssertions)) {
+      problems.push(`${platform}:releaseEvidenceSummary.mediaAssertions`);
+    }
+  }
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, `$.physicalDeviceMedia.${platform}.artifact`),
+    ...collectUnsafeMediaArtifactContent(artifact, `$.physicalDeviceMedia.${platform}.artifact`),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`${platform}:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function collectPhysicalDeviceArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const problems = [];
+  for (const platform of ["iphone", "ipad", "mac"]) {
+    const item = evidence.physicalDeviceMedia?.[platform];
+    const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+    if (!path || path.startsWith("__") || !path.toLowerCase().endsWith(".json") || !existsSync(path)) {
+      continue;
+    }
+    let artifact;
+    try {
+      artifact = readJSONFile(path);
+    } catch {
+      problems.push(`${platform}:artifact:not_valid_json`);
+      continue;
+    }
+    problems.push(
+      ...nativeDeviceMediaArtifactProblems({
+        platform,
+        item,
+        artifact,
+        expectedVersion,
+        expectedBuild,
+        runId: evidence.runId,
+        roomId: evidence.roomId,
+      })
+    );
+  }
+  return uniqueLabels(problems);
+}
+
 function expectedIdentity(value, expected) {
   return nonPlaceholderString(value) && strictStringEqual(value, expected);
 }
@@ -476,7 +697,9 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
   }
 
   const media = evidence.physicalDeviceMedia;
-  const deviceProblems = [];
+  const deviceProblems = [
+    ...collectPhysicalDeviceArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
   for (const platform of ["iphone", "ipad", "mac"]) {
     const item = media?.[platform];
     if (!item || typeof item !== "object" || Array.isArray(item)) {

@@ -163,6 +163,16 @@ Store Connect API keys, provisioning profiles, cert private keys, and real Team
 IDs out of evidence files; the strict checker rejects unknown or secret-shaped
 evidence fields.
 
+When a physical-device `artifactRef` points to a local JSON file, strict
+readiness also inspects the artifact content. The artifact must be promoted
+physical-device release proof for the same version, build, run, room, platform,
+and device OS; it must have `claimScope: "physical_device"`,
+`releaseEligible: true`, `status: "passed"`, `lifecycle: "connected"`, physical
+device metadata, all four media assertions true, and supporting assertion
+evidence/counters. A copied QA snapshot with `claimScope: "qa_snapshot"` or a
+simulator artifact remains useful diagnostic evidence, but it cannot satisfy
+physical-device release readiness.
+
 The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
 
 ```bash
