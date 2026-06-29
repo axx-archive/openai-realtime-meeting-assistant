@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function usage() {
   return [
@@ -223,6 +224,44 @@ function validArtifactRef(value) {
   return /^(artifacts\/|evidence\/|s3:\/\/|gs:\/\/|https?:\/\/|file:\/)/.test(trimmed);
 }
 
+function localArtifactPath(value, evidenceRootDir) {
+  if (!nonPlaceholderString(value)) {
+    return "";
+  }
+  const trimmed = value.trim();
+  if (/^(artifacts\/|evidence\/)/.test(trimmed)) {
+    if (trimmed.split("/").includes("..")) {
+      return "__invalid_local_artifact_path__";
+    }
+    return resolve(evidenceRootDir, trimmed);
+  }
+  if (trimmed.startsWith("file:/")) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return "__invalid_file_artifact_url__";
+    }
+  }
+  return "";
+}
+
+function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
+  const refs = [
+    ["physicalDeviceMedia.iphone.artifactRef", evidence.physicalDeviceMedia?.iphone?.artifactRef],
+    ["physicalDeviceMedia.ipad.artifactRef", evidence.physicalDeviceMedia?.ipad?.artifactRef],
+    ["physicalDeviceMedia.mac.artifactRef", evidence.physicalDeviceMedia?.mac?.artifactRef],
+    ["restrictiveNetworkTurn.artifactRef", evidence.restrictiveNetworkTurn?.artifactRef],
+    ["testFlight.artifactRef", evidence.testFlight?.artifactRef],
+    ["macNotarization.artifactRef", evidence.macNotarization?.artifactRef],
+  ];
+  return refs
+    .map(([label, ref]) => {
+      const path = localArtifactPath(ref, evidenceRootDir);
+      return path && !existsSync(path) ? `${label}:${String(ref ?? "").trim()}` : "";
+    })
+    .filter(Boolean);
+}
+
 function expectedIdentity(value, expected) {
   return nonPlaceholderString(value) && strictStringEqual(value, expected);
 }
@@ -400,6 +439,14 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     blockers.push({
       id: "release_evidence_secret_safety",
       detail: `Release evidence must not contain Team IDs, API keys, tokens, TURN credentials, private keys, certificates, or provisioning profiles. Problem fields: ${secretProblems.slice(0, 6).join(", ")}`,
+    });
+  }
+
+  const missingLocalArtifactRefs = collectMissingLocalArtifactRefs(evidence, dirname(appleDir));
+  if (missingLocalArtifactRefs.length > 0) {
+    blockers.push({
+      id: "release_evidence_artifacts",
+      detail: `Local release evidence artifact references must point to files that exist. Missing: ${missingLocalArtifactRefs.slice(0, 6).join(", ")}`,
     });
   }
 

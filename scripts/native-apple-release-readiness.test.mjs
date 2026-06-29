@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -284,8 +285,35 @@ function releaseEvidence(overrides = {}) {
   };
 }
 
-function writeReleaseEvidenceFixture(path, overrides = {}) {
-  writeFixtureFile(path, `${JSON.stringify(releaseEvidence(overrides), null, 2)}\n`);
+function evidenceRootForPath(path) {
+  const evidenceDir = dirname(path);
+  return evidenceDir.endsWith("/apple") ? dirname(evidenceDir) : evidenceDir;
+}
+
+function writeEvidenceArtifactFixtures(path, evidence) {
+  const rootDir = evidenceRootForPath(path);
+  const refs = [
+    evidence.physicalDeviceMedia?.iphone?.artifactRef,
+    evidence.physicalDeviceMedia?.ipad?.artifactRef,
+    evidence.physicalDeviceMedia?.mac?.artifactRef,
+    evidence.restrictiveNetworkTurn?.artifactRef,
+    evidence.testFlight?.artifactRef,
+    evidence.macNotarization?.artifactRef,
+  ];
+  for (const ref of refs) {
+    if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
+      continue;
+    }
+    writeFixtureFile(resolve(rootDir, ref), `${JSON.stringify({ artifactRef: ref, fixture: true }, null, 2)}\n`);
+  }
+}
+
+function writeReleaseEvidenceFixture(path, overrides = {}, options = {}) {
+  const evidence = releaseEvidence(overrides);
+  writeFixtureFile(path, `${JSON.stringify(evidence, null, 2)}\n`);
+  if (options.createArtifacts !== false) {
+    writeEvidenceArtifactFixtures(path, evidence);
+  }
 }
 
 function writePlist(path, body) {
@@ -582,6 +610,60 @@ assert.equal(
   true
 );
 
+const missingLocalArtifactFilesFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingLocalArtifactFilesFixturePath, "ReleaseEvidence.local.json"), {}, {
+  createArtifacts: false,
+});
+const missingLocalArtifactFilesFixture = runReadiness(
+  ["--apple-dir", missingLocalArtifactFilesFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingLocalArtifactFilesFixture.status, 1);
+assert.equal(missingLocalArtifactFilesFixture.output.ok, true);
+assert.equal(missingLocalArtifactFilesFixture.output.readyForDistribution, false);
+assert.equal(
+  missingLocalArtifactFilesFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_artifacts"),
+  true
+);
+
+const missingFileArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingFileArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: {
+    artifactRef: pathToFileURL(resolve(missingFileArtifactEvidenceFixturePath, "missing-turn-artifact.json")).href,
+  },
+});
+const missingFileArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", missingFileArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingFileArtifactEvidenceFixture.status, 1);
+assert.equal(missingFileArtifactEvidenceFixture.output.ok, true);
+assert.equal(missingFileArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingFileArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_artifacts"),
+  true
+);
+
+const existingFileArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const existingFileArtifactPath = resolve(existingFileArtifactEvidenceFixturePath, "turn-artifact.json");
+writeFixtureFile(existingFileArtifactPath, "{}\n");
+writeReleaseEvidenceFixture(resolve(existingFileArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: {
+    artifactRef: pathToFileURL(existingFileArtifactPath).href,
+  },
+});
+const existingFileArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", existingFileArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(existingFileArtifactEvidenceFixture.status, 0);
+assert.equal(existingFileArtifactEvidenceFixture.output.ok, true);
+assert.equal(existingFileArtifactEvidenceFixture.output.readyForDistribution, true);
+assert.equal(
+  existingFileArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_artifacts"),
+  false
+);
+
 const unstapledNotarizationEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(unstapledNotarizationEvidenceFixturePath, "ReleaseEvidence.local.json"), {
   macNotarization: { stapled: false },
@@ -749,4 +831,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 26 checks passed");
+console.log("native-apple-release-readiness: 29 checks passed");

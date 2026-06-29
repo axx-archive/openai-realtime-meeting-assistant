@@ -1439,3 +1439,72 @@ What worked:
 - The critic gate caught two concrete shipping issues before commit: sensitive
   network details in error strings and a terminal recovery path that could have
   left the join controls disabled.
+
+## Wave 21
+
+Status: `wave21_native_release_proofpack_checkpoint_validated`
+
+Scope:
+- Continued the distribution-readiness track by turning the strict release
+  evidence schema into a repeatable release-operator proof-pack workflow.
+- Assigned two read-only subagents. The Release/SRE agent recommended a
+  non-secret proof-pack runner because strict readiness already names the real
+  external blockers. The Native QA agent recommended native QA evidence
+  snapshots; this wave chose the proof-pack first because it gives those future
+  snapshots a durable artifact destination.
+- Added `scripts/native-apple-release-proofpack.mjs` to create an ignored
+  `artifacts/native-apple/<run-id>/` folder with pending physical iPhone, iPad,
+  Mac, restrictive TURN, TestFlight, and macOS notarization artifacts plus a
+  `ReleaseEvidence.draft.json` shaped for strict readiness.
+- Added `scripts/native-apple-release-proofpack.test.mjs` to verify run folder
+  creation, draft evidence shape, local evidence writing, duplicate-run
+  protection, and secret-shaped run ID rejection.
+- Hardened `scripts/native-apple-release-readiness.mjs` so repo-local evidence
+  refs under `artifacts/`, `evidence/`, or `file:/` must point to files that
+  exist before strict readiness can pass.
+- Ignored `artifacts/native-apple/` so real proof-pack artifacts and local
+  release runs stay out of git.
+
+Files changed:
+- `.gitignore`
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 29 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with `apple_development_team`, `privacy_manifest`, and
+  `release_evidence_file`.
+- `node scripts/native-apple-release-proofpack.mjs --run-id native-apple-validation-20260629-a --room-id validation-room-20260629 --created-at 2026-06-29T17:00:00Z --skip-gates`
+  created an ignored proof pack for MARKETING_VERSION `1.0` and build `15`.
+- `swift test --package-path apple` passed 76 tests.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- The proof pack is an operator workflow, not physical-device proof by itself.
+- This wave does not add Apple signing credentials, final privacy manifest,
+  TestFlight upload, or macOS notarization.
+- Native QA proof snapshots from live media stats remain a good follow-on input
+  for the physical-device artifacts.
+
+What worked:
+- Keeping proof-pack artifacts ignored allows real local evidence capture
+  without leaking account data or generated test run files.
+- Making local artifact refs existence-checked prevents completed-looking
+  evidence JSON from passing strict readiness without backing files.

@@ -6,6 +6,7 @@
 /*.test
 /openai-realtime-meeting-assistant
 /data/
+/artifacts/native-apple/
 .playwright-mcp/
 apple/.build/
 apple/.swiftpm/

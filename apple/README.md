@@ -113,6 +113,27 @@ file:
 node scripts/native-apple-release-readiness.mjs --strict --evidence-file /path/to/ReleaseEvidence.json
 ```
 
+The release operator can create a non-secret proof pack before the real run:
+
+```bash
+node scripts/native-apple-release-proofpack.mjs --run-id native-apple-YYYYMMDD-a --room-id release-room-YYYYMMDD
+```
+
+The proof pack is written under ignored `artifacts/native-apple/` and contains
+operator-fillable artifacts plus `ReleaseEvidence.draft.json`. Replace the
+pending artifacts with real device, TURN, TestFlight, and notarization proof,
+then copy the draft into ignored local evidence:
+
+```bash
+node scripts/native-apple-release-proofpack.mjs --proofpack-dir artifacts/native-apple/<run-id> --write-evidence
+node scripts/native-apple-release-readiness.mjs --strict
+```
+
+The proof-pack runner is an evidence workflow, not a release claim. Strict
+readiness still fails until the draft contains completed statuses, local
+artifact references point at files that exist, signing/privacy blockers are
+resolved, and Apple/TestFlight/notarization proof is real.
+
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must
