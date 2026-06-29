@@ -268,6 +268,19 @@ const physicalDeviceKinds = {
   mac: "mac",
 };
 
+const physicalDeviceClientPlatforms = {
+  iphone: "ios",
+  ipad: "ipados",
+  mac: "macos",
+};
+
+const assertionEvidenceSources = {
+  cameraPublished: "outboundVideoFramesSent",
+  microphonePublished: "outboundAudioPacketsSent",
+  remoteAudioReceived: "inboundAudioPacketsReceived",
+  remoteVideoRendered: "remoteVideoTiles+inboundVideoDecoded",
+};
+
 function mediaAssertionsAllTrue(assertions) {
   if (!assertions || typeof assertions !== "object" || Array.isArray(assertions)) {
     return false;
@@ -343,6 +356,9 @@ function nativeDeviceMediaArtifactProblems({
   if (artifact.status !== "passed") {
     problems.push(`${platform}:status`);
   }
+  if (artifact.platform !== platform) {
+    problems.push(`${platform}:platform`);
+  }
   if (artifact.lifecycle !== "connected") {
     problems.push(`${platform}:lifecycle`);
   }
@@ -354,6 +370,8 @@ function nativeDeviceMediaArtifactProblems({
   }
   if (!validTimestamp(artifact.capturedAt)) {
     problems.push(`${platform}:capturedAt`);
+  } else if (!strictStringEqual(artifact.capturedAt, item.testedAt)) {
+    problems.push(`${platform}:capturedAt.match`);
   }
   if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
     problems.push(`${platform}:app`);
@@ -363,6 +381,9 @@ function nativeDeviceMediaArtifactProblems({
     }
     if (!expectedIdentity(artifact.app.build, expectedBuild)) {
       problems.push(`${platform}:app.build`);
+    }
+    if (artifact.app.clientPlatform !== physicalDeviceClientPlatforms[platform]) {
+      problems.push(`${platform}:app.clientPlatform`);
     }
   }
   if (!artifact.device || typeof artifact.device !== "object" || Array.isArray(artifact.device)) {
@@ -402,6 +423,8 @@ function nativeDeviceMediaArtifactProblems({
       const assertion = artifact.assertionEvidence[key];
       if (!assertion || typeof assertion !== "object" || assertion.passed !== true || !(Number(assertion.value) > 0)) {
         problems.push(`${platform}:assertionEvidence.${key}`);
+      } else if (assertion.source !== assertionEvidenceSources[key]) {
+        problems.push(`${platform}:assertionEvidence.${key}.source`);
       }
     }
   }
@@ -436,8 +459,16 @@ function nativeDeviceMediaArtifactProblems({
     if (!expectedIdentity(artifact.releaseEvidenceSummary.roomId, roomId)) {
       problems.push(`${platform}:releaseEvidenceSummary.roomId`);
     }
+    if (!expectedIdentity(artifact.releaseEvidenceSummary.device, item.device)) {
+      problems.push(`${platform}:releaseEvidenceSummary.device`);
+    }
+    if (!expectedIdentity(artifact.releaseEvidenceSummary.os, item.os)) {
+      problems.push(`${platform}:releaseEvidenceSummary.os`);
+    }
     if (!validTimestamp(artifact.releaseEvidenceSummary.testedAt)) {
       problems.push(`${platform}:releaseEvidenceSummary.testedAt`);
+    } else if (!strictStringEqual(artifact.releaseEvidenceSummary.testedAt, item.testedAt)) {
+      problems.push(`${platform}:releaseEvidenceSummary.testedAt.match`);
     }
     if (!mediaAssertionsAllTrue(artifact.releaseEvidenceSummary.mediaAssertions)) {
       problems.push(`${platform}:releaseEvidenceSummary.mediaAssertions`);

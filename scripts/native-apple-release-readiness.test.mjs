@@ -769,6 +769,70 @@ assert.equal(
   true
 );
 
+const wrongArtifactPlatformFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(wrongArtifactPlatformFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    ipad: {
+      platform: "iphone",
+      app: { clientPlatform: "ios" },
+    },
+  },
+});
+const wrongArtifactPlatformFixture = runReadiness(["--apple-dir", wrongArtifactPlatformFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(wrongArtifactPlatformFixture.status, 1);
+assert.equal(wrongArtifactPlatformFixture.output.ok, true);
+assert.equal(wrongArtifactPlatformFixture.output.readyForDistribution, false);
+assert.equal(
+  wrongArtifactPlatformFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const mismatchedArtifactTimestampFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(mismatchedArtifactTimestampFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    mac: {
+      capturedAt: "2026-06-29T13:20:00Z",
+      releaseEvidenceSummary: { testedAt: "2026-06-29T13:20:00Z" },
+    },
+  },
+});
+const mismatchedArtifactTimestampFixture = runReadiness(
+  ["--apple-dir", mismatchedArtifactTimestampFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(mismatchedArtifactTimestampFixture.status, 1);
+assert.equal(mismatchedArtifactTimestampFixture.output.ok, true);
+assert.equal(mismatchedArtifactTimestampFixture.output.readyForDistribution, false);
+assert.equal(
+  mismatchedArtifactTimestampFixture.output.blockers.some(
+    (blocker) => blocker.id === "physical_device_media_evidence"
+  ),
+  true
+);
+
+const wrongAssertionSourceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(wrongAssertionSourceFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    iphone: {
+      assertionEvidence: {
+        cameraPublished: { source: "uiCameraToggle", value: 1, passed: true },
+      },
+    },
+  },
+});
+const wrongAssertionSourceFixture = runReadiness(["--apple-dir", wrongAssertionSourceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(wrongAssertionSourceFixture.status, 1);
+assert.equal(wrongAssertionSourceFixture.output.ok, true);
+assert.equal(wrongAssertionSourceFixture.output.readyForDistribution, false);
+assert.equal(
+  wrongAssertionSourceFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
 const placeholderDeviceArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(placeholderDeviceArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifacts: {
@@ -1063,4 +1127,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 36 checks passed");
+console.log("native-apple-release-readiness: 39 checks passed");

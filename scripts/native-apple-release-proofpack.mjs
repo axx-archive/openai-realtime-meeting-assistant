@@ -166,7 +166,7 @@ function pendingDeviceArtifact(platform, runId, roomId, createdAt) {
       remoteAudioReceived: false,
       remoteVideoRendered: false,
     },
-    notes: "Replace this pending artifact with real non-secret device proof before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
+    notes: "Use scripts/native-apple-promote-media-evidence.mjs with a real app-copied QA snapshot from this physical device before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
   };
 }
 
@@ -384,7 +384,8 @@ function createProofpack(args) {
     evidenceArtifacts: refs,
     gates,
     nextSteps: [
-      "Replace pending evidence artifacts with real non-secret physical-device, TURN, TestFlight, and notarization proof.",
+      "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
+      "Replace remaining pending TURN, TestFlight, and notarization artifacts with real non-secret proof.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],

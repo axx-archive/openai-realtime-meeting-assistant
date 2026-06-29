@@ -109,6 +109,12 @@ readiness rejects unpromoted QA snapshots, simulator captures, pending proof
 pack placeholders, mismatched artifacts, and artifacts with raw SDP, raw ICE,
 IP addresses, credentials, or account identifiers.
 
+Promotion is explicit operator action, not an app behavior. The app continues
+to export `qa_snapshot` diagnostics; `scripts/native-apple-promote-media-evidence.mjs`
+validates a physical-device snapshot, binds it to the proof-pack run/room, and
+writes the promoted proof artifact plus the matching `ReleaseEvidence.draft.json`
+device summary.
+
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session
 event, leave the broken peer connection, and return the UI to a rejoinable

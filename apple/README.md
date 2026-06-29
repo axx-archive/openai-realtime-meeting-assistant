@@ -151,6 +151,24 @@ was captured on the matching physical iPhone, iPad, or Mac for the same run,
 room, version, and build. Simulator or repo-only snapshots are diagnostic
 artifacts only.
 
+Use the promotion helper to turn a real app-copied physical-device snapshot
+into the matching proof-pack artifact and draft summary:
+
+```bash
+node scripts/native-apple-promote-media-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --platform iphone \
+  --input artifacts/native-apple/<run-id>/inbox/iphone-qa_snapshot.json \
+  --confirm-physical-device \
+  --confirm-same-room
+```
+
+Repeat for `ipad` and `mac`. The helper validates that the input is still a
+`qa_snapshot`, came from the expected app version/build and physical platform,
+has connected lifecycle, has all four media assertions backed by counters, and
+does not contain raw media/credential details. It updates only the selected
+device media artifact and `ReleaseEvidence.draft.json`.
+
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must

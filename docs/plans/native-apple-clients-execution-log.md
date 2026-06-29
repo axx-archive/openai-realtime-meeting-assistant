@@ -1724,3 +1724,65 @@ What worked:
   category while making the blocker more meaningful.
 - Treating app-exported QA snapshots as inputs to a promotion workflow, not as
   release proof, keeps the proof-pack path useful without overclaiming.
+
+## Wave 25
+
+Status: `wave25_native_media_evidence_promotion_checkpoint_validated`
+
+Scope:
+- Continued the physical-device proof path by adding an explicit operator
+  promotion workflow from app-copied QA snapshots to strict-ready proof-pack
+  device media artifacts.
+- Assigned two read-only reviewers. The native QA reviewer recommended treating
+  `qa_snapshot` app exports as inputs only and requiring physical-device,
+  connected-lifecycle, matching version/build/run/room, assertion, counter, and
+  secret-safety checks. The release workflow reviewer recommended keeping
+  proof-pack creation and `--write-evidence` stable while making media
+  promotion an explicit command.
+- Added `scripts/native-apple-promote-media-evidence.mjs`. It promotes one
+  `iphone`, `ipad`, or `mac` app-copied `native_device_media` QA snapshot into
+  the matching proof-pack `evidence/{platform}-media.json` file and updates only
+  `physicalDeviceMedia.<platform>` in `ReleaseEvidence.draft.json`.
+- Required explicit `--confirm-physical-device` and `--confirm-same-room`
+  operator flags. Empty app-exported `runId`/`roomId` are allowed only with that
+  confirmation; non-empty mismatches fail.
+- Added atomic JSON writes, proofpack/draft identity checks, duplicate
+  promotion refusal without `--force`, source snapshot preservation, and unsafe
+  raw media/credential rejection.
+- Tightened strict readiness so local promoted artifacts must also match
+  platform/clientPlatform, captured/tested timestamp, release summary device/OS,
+  and expected assertion source names.
+- Updated proof-pack generated next steps plus README/protocol docs to point
+  operators at the promotion command.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-media-evidence.mjs`
+- `scripts/native-apple-promote-media-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-promote-media-evidence.mjs` passed.
+- `node --check scripts/native-apple-promote-media-evidence.test.mjs` passed.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 39 checks.
+
+Risks / blockers:
+- This wave does not create real physical-device captures. It creates the
+  guarded operator path for when those captures are available.
+- TURN relay proof, TestFlight upload, Apple signing/team setup, final privacy
+  manifest, and macOS notarization remain separate external release gates.
+
+What worked:
+- Keeping promotion as a separate explicit command avoided changing proof-pack
+  creation or `--write-evidence`, so pending artifacts cannot become passed by
+  scaffold alone.
+- Binding empty app-exported run/room values only through explicit operator
+  confirmation keeps the current native app usable while preserving proof-pack
+  identity as the release source of truth.
