@@ -259,6 +259,7 @@ function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
     ["physicalDeviceMedia.ipad.artifactRef", evidence.physicalDeviceMedia?.ipad?.artifactRef],
     ["physicalDeviceMedia.mac.artifactRef", evidence.physicalDeviceMedia?.mac?.artifactRef],
     ["restrictiveNetworkTurn.artifactRef", evidence.restrictiveNetworkTurn?.artifactRef],
+    ["roomInterop.artifactRef", evidence.roomInterop?.artifactRef],
     ["testFlight.artifactRef", evidence.testFlight?.artifactRef],
     ["macNotarization.artifactRef", evidence.macNotarization?.artifactRef],
   ];
@@ -344,7 +345,9 @@ function collectUnsafeMediaArtifactContent(value, path = "$") {
         /^v=0(?:\r?\n|$)/.test(trimmed) ||
         /\bturns?:[^,\s]+/i.test(trimmed) ||
         /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(trimmed) ||
-        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed)
+        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed) ||
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed) ||
+        /\/Users\/[^/\s]+/i.test(trimmed)
       ) {
         problems.push(path);
       }
@@ -587,7 +590,9 @@ function collectUnsafeTurnArtifactContent(value, path = "$") {
         /^v=0(?:\r?\n|$)/.test(trimmed) ||
         /\bturns?:[^,\s]+/i.test(trimmed) ||
         /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(trimmed) ||
-        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed)
+        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed) ||
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed) ||
+        /\/Users\/[^/\s]+/i.test(trimmed)
       ) {
         problems.push(path);
       }
@@ -689,6 +694,9 @@ function restrictiveTurnArtifactProblems({ item, artifact, expectedVersion, expe
       "promotedAt",
       "sourceArtifactType",
       "sourceStatus",
+      "sourceRunId",
+      "sourceRoomId",
+      "sourceCapturedAt",
       "sourceArtifact",
       "operatorConfirmedRestrictiveNetwork",
       "operatorConfirmedSameRoom",
@@ -855,6 +863,15 @@ function restrictiveTurnArtifactProblems({ item, artifact, expectedVersion, expe
     if (promotion.sourceStatus !== "observed") {
       problems.push("artifact:promotion.sourceStatus");
     }
+    if (!expectedIdentity(promotion.sourceRunId, runId)) {
+      problems.push("artifact:promotion.sourceRunId");
+    }
+    if (!expectedIdentity(promotion.sourceRoomId, roomId)) {
+      problems.push("artifact:promotion.sourceRoomId");
+    }
+    if (!validTimestamp(promotion.sourceCapturedAt) || !strictStringEqual(promotion.sourceCapturedAt, item.testedAt)) {
+      problems.push("artifact:promotion.sourceCapturedAt");
+    }
     if (promotion.operatorConfirmedRestrictiveNetwork !== true) {
       problems.push("artifact:promotion.operatorConfirmedRestrictiveNetwork");
     }
@@ -901,6 +918,330 @@ function collectRestrictiveTurnArtifactContentProblems(evidence, evidenceRootDir
       roomId: evidence.roomId,
     })
   );
+}
+
+function normalizedRoomPlatforms(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((item) => String(item ?? "").trim().toLowerCase()).filter(Boolean))];
+}
+
+function hasNativeApplePlatform(platforms) {
+  return platforms.some((platform) => ["ios", "ipados", "macos"].includes(platform));
+}
+
+function collectUnsafeRoomInteropArtifactContent(value, path = "$") {
+  const problems = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      problems.push(...collectUnsafeRoomInteropArtifactContent(item, `${path}[${index}]`));
+    });
+    return problems;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        /\bcandidate:/.test(trimmed) ||
+        /\ba=candidate/.test(trimmed) ||
+        /^v=0(?:\r?\n|$)/.test(trimmed) ||
+        /\bturns?:[^,\s]+/i.test(trimmed) ||
+        /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(trimmed) ||
+        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed) ||
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed) ||
+        /\/Users\/[^/\s]+/i.test(trimmed)
+      ) {
+        problems.push(path);
+      }
+    }
+    return problems;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      /(raw|logs?|stdout|stderr|command|args|env|sdp|ice|candidate|turn_?(user|pass|credential|url)|cookies?|headers?|emails?|screenshots?|pixels?|frames?)/i.test(
+        key
+      )
+    ) {
+      problems.push(`${path}.${key}`);
+    }
+    problems.push(...collectUnsafeRoomInteropArtifactContent(item, `${path}.${key}`));
+  }
+  return problems;
+}
+
+function roomInteropArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId, roomId }) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["artifact:not_object"];
+  }
+  problems.push(
+    ...collectUnexpectedKeys(
+      artifact,
+      [
+        "schemaVersion",
+        "artifactType",
+        "claimScope",
+        "releaseEligible",
+        "status",
+        "runId",
+        "roomId",
+        "testedAt",
+        "app",
+        "room",
+        "media",
+        "lifecycle",
+        "recording",
+        "releaseEvidenceSummary",
+        "promotion",
+      ],
+      "artifact"
+    ),
+    ...collectUnexpectedKeys(artifact.app, ["version", "build"], "artifact.app"),
+    ...collectUnexpectedKeys(
+      artifact.room,
+      ["participantCount", "clientPlatforms", "browserNativeMixed", "threePlusParticipants"],
+      "artifact.room"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.media,
+      ["remoteAudioAudible", "remoteVideoRendered", "noMissingRemoteHealth", "noDuplicateParticipants", "noStalledRemoteMedia"],
+      "artifact.media"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.lifecycle,
+      ["cleanLeaveParticipantsEmpty", "participantsAfterLeave"],
+      "artifact.lifecycle"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.recording,
+      ["recordingOffStopsForwarding", "recordingOffTranscriptForwarded", "recordingOffRealtimeForwarded"],
+      "artifact.recording"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.releaseEvidenceSummary,
+      [
+        "status",
+        "runId",
+        "roomId",
+        "version",
+        "build",
+        "testedAt",
+        "participantCount",
+        "clientPlatforms",
+        "browserNativeMixed",
+        "threePlusParticipants",
+        "cleanLeaveParticipantsEmpty",
+        "recordingOffStopsForwarding",
+      ],
+      "artifact.releaseEvidenceSummary"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.promotion,
+      [
+        "promotedAt",
+        "sourceArtifactType",
+        "sourceStatus",
+        "sourceRunId",
+        "sourceRoomId",
+        "sourceTestedAt",
+        "sourceArtifact",
+        "operatorConfirmedBrowserNativeMixedRoom",
+        "operatorConfirmedThreePlusParticipants",
+        "operatorConfirmedCleanLeave",
+        "operatorConfirmedRecordingOff",
+        "operatorConfirmedCurrentBuild",
+        "operatorConfirmedNoSecrets",
+        "releaseEvidenceArtifactRef",
+      ],
+      "artifact.promotion"
+    )
+  );
+  if (artifact.schemaVersion !== 1) {
+    problems.push("artifact:schemaVersion");
+  }
+  if (artifact.artifactType !== "native_room_interop") {
+    problems.push("artifact:artifactType");
+  }
+  if (artifact.claimScope !== "browser_native_room_gate") {
+    problems.push("artifact:claimScope");
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push("artifact:releaseEligible");
+  }
+  if (artifact.status !== "passed") {
+    problems.push("artifact:status");
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push("artifact:runId");
+  }
+  if (!expectedIdentity(artifact.roomId, roomId)) {
+    problems.push("artifact:roomId");
+  }
+  if (!validTimestamp(artifact.testedAt) || !strictStringEqual(artifact.testedAt, item.testedAt)) {
+    problems.push("artifact:testedAt");
+  }
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push("artifact:app");
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push("artifact:app.version");
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push("artifact:app.build");
+    }
+  }
+  const room = artifact.room;
+  const platforms = normalizedRoomPlatforms(room?.clientPlatforms);
+  if (!room || typeof room !== "object" || Array.isArray(room)) {
+    problems.push("artifact:room");
+  } else {
+    if (!(Number(room.participantCount) >= 3) || Number(room.participantCount) !== Number(item.participantCount)) {
+      problems.push("artifact:room.participantCount");
+    }
+    if (!platforms.includes("browser")) {
+      problems.push("artifact:room.clientPlatforms.browser");
+    }
+    if (!hasNativeApplePlatform(platforms)) {
+      problems.push("artifact:room.clientPlatforms.native");
+    }
+    if (room.browserNativeMixed !== true || item.browserNativeMixed !== true) {
+      problems.push("artifact:room.browserNativeMixed");
+    }
+    if (room.threePlusParticipants !== true || item.threePlusParticipants !== true) {
+      problems.push("artifact:room.threePlusParticipants");
+    }
+  }
+  const media = artifact.media;
+  if (!media || typeof media !== "object" || Array.isArray(media)) {
+    problems.push("artifact:media");
+  } else {
+    for (const key of ["remoteAudioAudible", "remoteVideoRendered", "noMissingRemoteHealth", "noDuplicateParticipants", "noStalledRemoteMedia"]) {
+      if (media[key] !== true) {
+        problems.push(`artifact:media.${key}`);
+      }
+    }
+  }
+  if (!artifact.lifecycle || typeof artifact.lifecycle !== "object" || Array.isArray(artifact.lifecycle)) {
+    problems.push("artifact:lifecycle");
+  } else {
+    if (artifact.lifecycle.cleanLeaveParticipantsEmpty !== true || item.cleanLeaveParticipantsEmpty !== true) {
+      problems.push("artifact:lifecycle.cleanLeaveParticipantsEmpty");
+    }
+    if (Number(artifact.lifecycle.participantsAfterLeave) !== 0) {
+      problems.push("artifact:lifecycle.participantsAfterLeave");
+    }
+  }
+  if (!artifact.recording || typeof artifact.recording !== "object" || Array.isArray(artifact.recording)) {
+    problems.push("artifact:recording");
+  } else {
+    if (artifact.recording.recordingOffStopsForwarding !== true || item.recordingOffStopsForwarding !== true) {
+      problems.push("artifact:recording.recordingOffStopsForwarding");
+    }
+    if (artifact.recording.recordingOffTranscriptForwarded !== false) {
+      problems.push("artifact:recording.recordingOffTranscriptForwarded");
+    }
+    if (artifact.recording.recordingOffRealtimeForwarded !== false) {
+      problems.push("artifact:recording.recordingOffRealtimeForwarded");
+    }
+  }
+  const summary = artifact.releaseEvidenceSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    problems.push("artifact:releaseEvidenceSummary");
+  } else {
+    if (summary.status !== "passed") {
+      problems.push("artifact:releaseEvidenceSummary.status");
+    }
+    if (!expectedIdentity(summary.runId, runId)) {
+      problems.push("artifact:releaseEvidenceSummary.runId");
+    }
+    if (!expectedIdentity(summary.roomId, roomId)) {
+      problems.push("artifact:releaseEvidenceSummary.roomId");
+    }
+    if (!expectedIdentity(summary.version, expectedVersion)) {
+      problems.push("artifact:releaseEvidenceSummary.version");
+    }
+    if (!expectedIdentity(summary.build, expectedBuild)) {
+      problems.push("artifact:releaseEvidenceSummary.build");
+    }
+    if (!validTimestamp(summary.testedAt) || !strictStringEqual(summary.testedAt, item.testedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.testedAt");
+    }
+    if (!(Number(summary.participantCount) >= 3) || Number(summary.participantCount) !== Number(item.participantCount)) {
+      problems.push("artifact:releaseEvidenceSummary.participantCount");
+    }
+    const summaryPlatforms = normalizedRoomPlatforms(summary.clientPlatforms);
+    if (!summaryPlatforms.includes("browser") || !hasNativeApplePlatform(summaryPlatforms)) {
+      problems.push("artifact:releaseEvidenceSummary.clientPlatforms");
+    }
+    for (const key of ["browserNativeMixed", "threePlusParticipants", "cleanLeaveParticipantsEmpty", "recordingOffStopsForwarding"]) {
+      if (summary[key] !== true || item[key] !== true) {
+        problems.push(`artifact:releaseEvidenceSummary.${key}`);
+      }
+    }
+  }
+  const promotion = artifact.promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) {
+    problems.push("artifact:promotion");
+  } else {
+    if (!validTimestamp(promotion.promotedAt)) {
+      problems.push("artifact:promotion.promotedAt");
+    }
+    if (promotion.sourceStatus !== "observed") {
+      problems.push("artifact:promotion.sourceStatus");
+    }
+    if (!expectedIdentity(promotion.sourceRunId, runId)) {
+      problems.push("artifact:promotion.sourceRunId");
+    }
+    if (!expectedIdentity(promotion.sourceRoomId, roomId)) {
+      problems.push("artifact:promotion.sourceRoomId");
+    }
+    if (!validTimestamp(promotion.sourceTestedAt) || !strictStringEqual(promotion.sourceTestedAt, item.testedAt)) {
+      problems.push("artifact:promotion.sourceTestedAt");
+    }
+    for (const key of [
+      "operatorConfirmedBrowserNativeMixedRoom",
+      "operatorConfirmedThreePlusParticipants",
+      "operatorConfirmedCleanLeave",
+      "operatorConfirmedRecordingOff",
+      "operatorConfirmedCurrentBuild",
+      "operatorConfirmedNoSecrets",
+    ]) {
+      if (promotion[key] !== true) {
+        problems.push(`artifact:promotion.${key}`);
+      }
+    }
+    if (!strictStringEqual(promotion.releaseEvidenceArtifactRef, item.artifactRef)) {
+      problems.push("artifact:promotion.releaseEvidenceArtifactRef");
+    }
+  }
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, "$.roomInterop.artifact"),
+    ...collectUnsafeRoomInteropArtifactContent(artifact, "$.roomInterop.artifact"),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function collectRoomInteropArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const item = evidence.roomInterop;
+  const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+  if (!path || path.startsWith("__") || !existsSync(path)) {
+    return [];
+  }
+  if (!path.toLowerCase().endsWith(".json")) {
+    return ["artifact:not_json"];
+  }
+  let artifact;
+  try {
+    artifact = readJSONFile(path);
+  } catch {
+    return ["artifact:not_valid_json"];
+  }
+  return uniqueLabels(roomInteropArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId, roomId: evidence.roomId }));
 }
 
 const testFlightEvidenceStatuses = ["ready", "uploaded", "processing", "accepted"];
@@ -1002,6 +1343,8 @@ function testFlightArtifactProblems({ item, artifact, expectedVersion, expectedB
         "promotedAt",
         "sourceArtifactType",
         "sourceStatus",
+        "sourceRunId",
+        "sourceUploadedAt",
         "sourceArtifact",
         "operatorConfirmedAppStoreConnectUpload",
         "operatorConfirmedNoSecrets",
@@ -1099,6 +1442,12 @@ function testFlightArtifactProblems({ item, artifact, expectedVersion, expectedB
     if (promotion.sourceStatus !== "observed") {
       problems.push("artifact:promotion.sourceStatus");
     }
+    if (!expectedIdentity(promotion.sourceRunId, runId)) {
+      problems.push("artifact:promotion.sourceRunId");
+    }
+    if (!validTimestamp(promotion.sourceUploadedAt) || !strictStringEqual(promotion.sourceUploadedAt, item.uploadedAt)) {
+      problems.push("artifact:promotion.sourceUploadedAt");
+    }
     if (promotion.operatorConfirmedAppStoreConnectUpload !== true) {
       problems.push("artifact:promotion.operatorConfirmedAppStoreConnectUpload");
     }
@@ -1190,6 +1539,8 @@ function notarizationArtifactProblems({ item, artifact, expectedVersion, expecte
         "promotedAt",
         "sourceArtifactType",
         "sourceStatus",
+        "sourceRunId",
+        "sourceCheckedAt",
         "sourceArtifact",
         "operatorConfirmedDeveloperIdArchive",
         "operatorConfirmedNotaryAccepted",
@@ -1340,6 +1691,12 @@ function notarizationArtifactProblems({ item, artifact, expectedVersion, expecte
     }
     if (promotion.sourceStatus !== "accepted") {
       problems.push("artifact:promotion.sourceStatus");
+    }
+    if (!expectedIdentity(promotion.sourceRunId, runId)) {
+      problems.push("artifact:promotion.sourceRunId");
+    }
+    if (!validTimestamp(promotion.sourceCheckedAt) || !strictStringEqual(promotion.sourceCheckedAt, item.checkedAt)) {
+      problems.push("artifact:promotion.sourceCheckedAt");
     }
     if (promotion.operatorConfirmedDeveloperIdArchive !== true) {
       problems.push("artifact:promotion.operatorConfirmedDeveloperIdArchive");
@@ -1512,7 +1869,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
       {
         id: "release_evidence_file",
         detail:
-          "Add ignored apple/ReleaseEvidence.local.json or pass --evidence-file with physical device, TURN relay, TestFlight, and macOS notarization proof for this build.",
+          "Add ignored apple/ReleaseEvidence.local.json or pass --evidence-file with physical device, TURN relay, browser/native room-gate, TestFlight, and macOS notarization proof for this build.",
       },
     ];
   }
@@ -1538,6 +1895,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
         "roomId",
         "physicalDeviceMedia",
         "restrictiveNetworkTurn",
+        "roomInterop",
         "testFlight",
         "macNotarization",
       ],
@@ -1565,6 +1923,24 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
       evidence.restrictiveNetworkTurn,
       ["status", "runId", "roomId", "network", "relayProtocol", "relayCandidateType", "testedAt", "artifactRef"],
       "$.restrictiveNetworkTurn"
+    ),
+    ...collectUnexpectedKeys(
+      evidence.roomInterop,
+      [
+        "status",
+        "runId",
+        "roomId",
+        "testedAt",
+        "participantCount",
+        "browserNativeMixed",
+        "threePlusParticipants",
+        "remoteAudioAudible",
+        "remoteVideoRendered",
+        "cleanLeaveParticipantsEmpty",
+        "recordingOffStopsForwarding",
+        "artifactRef",
+      ],
+      "$.roomInterop"
     ),
     ...collectUnexpectedKeys(
       evidence.testFlight,
@@ -1711,6 +2087,52 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     blockers.push({
       id: "restrictive_turn_evidence",
       detail: `Add restrictive-network proof that native media used a selected TURN relay, tied to the release run, with a log/artifact reference. Missing or invalid: ${missing.join(", ")}`,
+    });
+  }
+
+  const roomInterop = evidence.roomInterop;
+  const roomInteropProblems = [
+    ...collectRoomInteropArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
+  if (!roomInterop || typeof roomInterop !== "object" || Array.isArray(roomInterop)) {
+    roomInteropProblems.push("missing");
+  } else {
+    if (roomInterop.status !== "passed") {
+      roomInteropProblems.push("status");
+    }
+    if (!validTimestamp(roomInterop.testedAt)) {
+      roomInteropProblems.push("testedAt");
+    }
+    if (!expectedIdentity(roomInterop.runId, runId)) {
+      roomInteropProblems.push("runId");
+    }
+    if (!expectedIdentity(roomInterop.roomId, roomId)) {
+      roomInteropProblems.push("roomId");
+    }
+    if (!(Number(roomInterop.participantCount) >= 3)) {
+      roomInteropProblems.push("participantCount");
+    }
+    for (const key of [
+      "browserNativeMixed",
+      "threePlusParticipants",
+      "remoteAudioAudible",
+      "remoteVideoRendered",
+      "cleanLeaveParticipantsEmpty",
+      "recordingOffStopsForwarding",
+    ]) {
+      if (roomInterop[key] !== true) {
+        roomInteropProblems.push(key);
+      }
+    }
+    if (!validArtifactRef(roomInterop.artifactRef)) {
+      roomInteropProblems.push("artifactRef");
+    }
+  }
+  if (roomInteropProblems.length > 0) {
+    const missing = uniqueLabels(roomInteropProblems);
+    blockers.push({
+      id: "room_interop_evidence",
+      detail: `Add browser/native 3+ participant room gate evidence for the same release run, including clean leave and recording-off forwarding proof. Missing or invalid: ${missing.join(", ")}`,
     });
   }
 

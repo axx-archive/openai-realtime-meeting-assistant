@@ -121,6 +121,8 @@ assert.equal(plan.observationInputs.macMediaTemplate, `artifacts/native-apple/${
 assert.equal(plan.observationInputs.macMediaInput, `artifacts/native-apple/${runId}/inbox/mac-qa_snapshot.json`);
 assert.equal(plan.observationInputs.turnRelayTemplate, `artifacts/native-apple/${runId}/inbox/turn-relay-observation.template.json`);
 assert.equal(plan.observationInputs.turnRelayInput, `artifacts/native-apple/${runId}/inbox/turn-relay-observation.json`);
+assert.equal(plan.observationInputs.roomInteropTemplate, `artifacts/native-apple/${runId}/inbox/room-interop-observation.template.json`);
+assert.equal(plan.observationInputs.roomInteropInput, `artifacts/native-apple/${runId}/inbox/room-interop-observation.json`);
 assert.equal(plan.observationInputs.testFlightTemplate, `artifacts/native-apple/${runId}/inbox/testflight-observation.template.json`);
 assert.equal(plan.observationInputs.testFlightInput, `artifacts/native-apple/${runId}/inbox/testflight-observation.json`);
 assert.equal(plan.observationInputs.notarizationTemplate, `artifacts/native-apple/${runId}/inbox/notarization-observation.template.json`);
@@ -141,6 +143,9 @@ assert.match(plan.commands.promoteIPadMediaEvidence.shell, /ipad-qa_snapshot\.js
 assert.match(plan.commands.promoteMacMediaEvidence.shell, /mac-qa_snapshot\.json/);
 assert.match(plan.commands.promoteTurnRelayObservation.shell, /turn-relay-observation\.json/);
 assert.match(plan.commands.promoteTurnRelayObservation.shell, /"\$NATIVE_APPLE_RESTRICTIVE_NETWORK"/);
+assert.match(plan.commands.promoteRoomInteropObservation.shell, /room-interop-observation\.json/);
+assert.match(plan.commands.promoteRoomInteropObservation.shell, /--confirm-browser-native-mixed-room/);
+assert.match(plan.commands.promoteRoomInteropObservation.shell, /--confirm-recording-off/);
 assert.match(plan.commands.promoteTestFlightObservation.shell, /testflight-observation\.json/);
 assert.match(plan.commands.promoteMacNotarizationObservation.shell, /notarization-observation\.json/);
 assert.match(plan.commands.writeLocalReleaseEvidence.shell, /--write-evidence/);
@@ -165,6 +170,7 @@ const readme = readFileSync(resolve(rootDir, plan.outputDir, "release-commands.m
 assert.match(readme, /non-secret command plan/);
 assert.match(readme, /promoteIPhoneMediaEvidence/);
 assert.match(readme, /promoteTurnRelayObservation/);
+assert.match(readme, /promoteRoomInteropObservation/);
 assert.match(readme, /notarytool/);
 assert.match(readme, /strict readiness/);
 

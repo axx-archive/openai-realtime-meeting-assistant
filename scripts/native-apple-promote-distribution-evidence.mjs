@@ -218,10 +218,10 @@ function validateSharedObservation(observation, draft, args, expectedType, expec
     problems.push("confirmCurrentBuild");
   }
   const runId = String(observation.runId ?? "").trim();
-  if (runId && runId !== draft.runId) {
-    problems.push("runId");
-  } else if (!runId && !args.confirmCurrentBuild) {
+  if (!runId) {
     problems.push("runId:empty");
+  } else if (runId !== draft.runId) {
+    problems.push("runId");
   }
   if (!observation.app || typeof observation.app !== "object" || Array.isArray(observation.app)) {
     problems.push("app");
@@ -414,6 +414,8 @@ function promotedTestFlightArtifact(observation, draft, item, promotedAt, inputP
       promotedAt,
       sourceArtifactType: observation.artifactType,
       sourceStatus: observation.status,
+      sourceRunId: String(observation.runId ?? "").trim(),
+      sourceUploadedAt: observation.uploadedAt,
       sourceArtifact: repoSafeSourceLabel(inputPath),
       operatorConfirmedAppStoreConnectUpload: true,
       operatorConfirmedNoSecrets: true,
@@ -477,6 +479,8 @@ function promotedNotarizationArtifact(observation, draft, item, promotedAt, inpu
       promotedAt,
       sourceArtifactType: observation.artifactType,
       sourceStatus: observation.status,
+      sourceRunId: String(observation.runId ?? "").trim(),
+      sourceCheckedAt: observation.checkedAt,
       sourceArtifact: repoSafeSourceLabel(inputPath),
       operatorConfirmedDeveloperIdArchive: true,
       operatorConfirmedNotaryAccepted: true,

@@ -258,10 +258,10 @@ function validateObservation(observation, draft, args) {
     ["roomId", draft.roomId],
   ]) {
     const value = String(observation[key] ?? "").trim();
-    if (value && value !== expected) {
-      problems.push(key);
-    } else if (!value && !args.confirmSameRoom) {
+    if (!value) {
       problems.push(`${key}:empty`);
+    } else if (value !== expected) {
+      problems.push(key);
     }
   }
 
@@ -418,6 +418,9 @@ function promotedArtifact(observation, draft, args, promotedAt, inputPath) {
       promotedAt,
       sourceArtifactType: observation.artifactType,
       sourceStatus: observation.status,
+      sourceRunId: String(observation.runId ?? "").trim(),
+      sourceRoomId: String(observation.roomId ?? "").trim(),
+      sourceCapturedAt: observation.capturedAt,
       sourceArtifact: repoSafeSourceLabel(inputPath),
       operatorConfirmedRestrictiveNetwork: true,
       operatorConfirmedSameRoom: true,

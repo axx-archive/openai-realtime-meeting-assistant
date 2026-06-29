@@ -373,6 +373,8 @@ function buildPlan(args) {
         macMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "mac-qa_snapshot.json")),
         turnRelayTemplate: proofpack.proofpack.observationTemplates?.turnRelay ?? null,
         turnRelayInput: artifactRef(join(proofpack.proofpackDir, "inbox", "turn-relay-observation.json")),
+        roomInteropTemplate: proofpack.proofpack.observationTemplates?.roomInterop ?? null,
+        roomInteropInput: artifactRef(join(proofpack.proofpackDir, "inbox", "room-interop-observation.json")),
         testFlightTemplate: proofpack.proofpack.observationTemplates?.testFlight ?? null,
         testFlightInput: artifactRef(join(proofpack.proofpackDir, "inbox", "testflight-observation.json")),
         notarizationTemplate: proofpack.proofpack.observationTemplates?.notarization ?? null,
@@ -547,6 +549,23 @@ function buildPlan(args) {
       ],
       "Promotes the restrictive-network TURN observation. Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret network label before running."
     );
+    commands.promoteRoomInteropObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-room-gate-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--input",
+        observationInputs.roomInteropInput,
+        "--confirm-browser-native-mixed-room",
+        "--confirm-three-plus-participants",
+        "--confirm-clean-leave",
+        "--confirm-recording-off",
+        "--confirm-current-build",
+        "--confirm-no-secrets",
+      ],
+      "Promotes the browser/native 3+ participant room gate observation after clean leave and recording-off forwarding behavior are verified."
+    );
     commands.promoteTestFlightObservation = commandSpec(
       [
         "node",
@@ -679,6 +698,7 @@ function buildPlan(args) {
       "Run operatorPreflight on the Apple-account machine before archive/upload/notarization.",
       "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
       "Capture and promote restrictive-network TURN relay evidence.",
+      "Capture and promote browser/native 3+ participant room gate evidence.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",
@@ -725,10 +745,10 @@ function packageReadme(plan) {
     lines.push(`## ${name}`, "", command.note, "", "```bash", command.shell, "```", "");
   }
   lines.push(
-    "After physical-device media, restrictive TURN, TestFlight upload, and macOS",
-    "notarization observations are captured, promote sanitized proof-pack inbox",
-    "files, copy the completed draft into local release evidence, and run strict",
-    "readiness before claiming release readiness.",
+    "After physical-device media, restrictive TURN, browser/native room-gate,",
+    "TestFlight upload, and macOS notarization observations are captured, promote",
+    "sanitized proof-pack inbox files, copy the completed draft into local release",
+    "evidence, and run strict readiness before claiming release readiness.",
     ""
   );
   return `${lines.join("\n")}\n`;

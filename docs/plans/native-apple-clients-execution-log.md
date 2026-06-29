@@ -2782,7 +2782,6 @@ Validation:
 - `swift test --package-path apple` passed 95 tests.
 - `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
 - `git diff --check` passed.
-
 Risks / blockers:
 - This wave does not create or approve `PrivacyInfo.xcprivacy`; it only makes
   the real operator handoff fail closed until that external product/legal
@@ -2883,3 +2882,95 @@ What worked:
   becoming an accidental release checklist.
 - Checking command body fragments catches stale hand-edited packs without
   storing secrets or requiring Apple-account access.
+
+## Wave 39
+
+Status: `wave39_room_interop_and_bound_operator_evidence_checkpoint_validated`
+
+Scope:
+- Continued the native Apple objective through the requested multi-agent loop.
+  The explorer found that operator confirmation flags could still mask blank
+  source identities in TURN/TestFlight/notarization promotion, and the original
+  plan still needed first-class browser/native 3+ participant room proof.
+- Added a new `roomInterop` release-evidence lane covering the browser/native
+  room gate: same proof-pack `runId`/`roomId`, current version/build, at least
+  three participants, browser plus native Apple platforms, remote audio/video,
+  no missing/duplicate/stalled remote health, clean leave with empty
+  `/participants`, and recording-off transcript/Realtime forwarding stopped.
+- Added `scripts/native-apple-promote-room-gate-evidence.mjs` to promote only a
+  sanitized `native_room_interop_observation` into a release-eligible
+  `native_room_interop` artifact and update `ReleaseEvidence.draft.json`.
+- Tightened strict readiness so local `roomInterop.artifactRef` JSON must be
+  promoted room-gate proof for the same run, room, build, timestamp, source
+  run/room binding, operator confirmations, and no raw logs/media/network or
+  account-bearing fields.
+- Hardened TURN/TestFlight/notarization promotion and strict readiness with
+  source `runId`, `roomId` where applicable, and source timestamp binding, so a
+  blank or stale operator observation can no longer pass because a confirmation
+  flag was present.
+- Updated proof-pack generation, operator package plans, preflight stale-command
+  checks, release-evidence examples, Apple handoff docs, and protocol notes so
+  the human checklist and generated commands include room-gate promotion.
+
+Files changed:
+- `apple/README.md`
+- `apple/ReleaseEvidence.example.json`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-room-gate-evidence.mjs`
+- `scripts/native-apple-promote-room-gate-evidence.test.mjs`
+- `scripts/native-apple-promote-turn-evidence.mjs`
+- `scripts/native-apple-promote-turn-evidence.test.mjs`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+
+Validation:
+- `node --check` passed for all changed native Apple evidence scripts and tests.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 8
+  checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 11
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 60 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 7
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true` and known external blockers.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  exited nonzero as expected with `ok:true`, `readyForDistribution:false`, and
+  blockers for Apple development team/signing, privacy manifest, and release
+  evidence now naming physical device, TURN relay, browser/native room-gate,
+  TestFlight, and macOS notarization proof.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `git diff --check` passed.
+- Critic gate rejected the first pass on a room-interoperability unsafe-content
+  false pass; after tightening strict readiness for account-bearing room
+  artifact values and rerunning validation, the second critic pass accepted the
+  checkpoint at 9.1/10.
+
+Risks / blockers:
+- This wave does not create real browser/native room proof. A real external
+  run still needs physical iPhone/iPad/Mac media, a browser peer, restrictive
+  TURN proof, clean leave verification, recording-off forwarding verification,
+  real TestFlight upload, and real macOS notarization/stapling/Gatekeeper proof.
+- Apple signing/team setup and the final approved privacy manifest remain
+  external blockers before end-user distribution.
+
+What worked:
+- Keeping room interop as an operator proof-pack lane preserved the live
+  websocket protocol and avoided smuggling release evidence into room events.
+- Binding promoted artifacts back to the source observation identity closed the
+  gap where an operator flag could overstate blank or stale evidence.
+- Extending the proof-pack and command-plan tests first made the new strict
+  readiness blocker straightforward to validate without real Apple credentials.

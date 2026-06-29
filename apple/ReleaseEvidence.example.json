@@ -60,6 +60,20 @@
     "testedAt": "2026-06-29T12:25:00Z",
     "artifactRef": "<artifacts/run-id/selected-turn-relay.json>"
   },
+  "roomInterop": {
+    "status": "passed",
+    "runId": "<same native release run ID>",
+    "roomId": "<same mixed-room smoke room ID or label>",
+    "testedAt": "2026-06-29T12:27:00Z",
+    "participantCount": 3,
+    "browserNativeMixed": true,
+    "threePlusParticipants": true,
+    "remoteAudioAudible": true,
+    "remoteVideoRendered": true,
+    "cleanLeaveParticipantsEmpty": true,
+    "recordingOffStopsForwarding": true,
+    "artifactRef": "<artifacts/run-id/room-interop.json>"
+  },
   "testFlight": {
     "status": "ready",
     "appStoreConnectBuildId": "<App Store Connect build ID>",

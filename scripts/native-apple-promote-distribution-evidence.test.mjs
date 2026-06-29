@@ -161,7 +161,15 @@ const created = createProofpack(fixture.appleDir, runId);
 assert.equal(created.status, 0);
 assert.equal(created.output.ok, true);
 
-const testFlightPath = writeObservation(fixture.dir, "testflight-observation.json", testFlightObservation());
+function boundTestFlightObservation(overrides = {}) {
+  return testFlightObservation({ runId, ...overrides });
+}
+
+function boundNotarizationObservation(overrides = {}) {
+  return notarizationObservation({ runId, ...overrides });
+}
+
+const testFlightPath = writeObservation(fixture.dir, "testflight-observation.json", boundTestFlightObservation());
 const promotedTestFlight = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -188,6 +196,8 @@ assert.equal(testFlightArtifact.claimScope, "app_store_connect_upload");
 assert.equal(testFlightArtifact.releaseEligible, true);
 assert.equal(testFlightArtifact.app.build, "15");
 assert.equal(testFlightArtifact.appStoreConnect.buildId, "asc-build-20260629-15");
+assert.equal(testFlightArtifact.promotion.sourceRunId, runId);
+assert.equal(testFlightArtifact.promotion.sourceUploadedAt, "2026-06-29T20:15:00Z");
 assert.equal(testFlightArtifact.promotion.operatorConfirmedAppStoreConnectUpload, true);
 assert.equal(testFlightArtifact.promotion.operatorConfirmedNoSecrets, true);
 
@@ -205,7 +215,22 @@ const duplicateTestFlight = promote([
 assert.equal(duplicateTestFlight.status, 1);
 assert.match(duplicateTestFlight.output.error, /already passed/);
 
-const notarizationPath = writeObservation(fixture.dir, "notarization-observation.json", notarizationObservation());
+const blankRunRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "testflight",
+  "--input",
+  writeObservation(fixture.dir, "blank-run.json", testFlightObservation()),
+  "--confirm-app-store-connect-upload",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(blankRunRejected.status, 1);
+assert.match(blankRunRejected.output.error, /runId:empty/);
+
+const notarizationPath = writeObservation(fixture.dir, "notarization-observation.json", boundNotarizationObservation());
 const promotedNotarization = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -238,6 +263,8 @@ assert.equal(notarizationArtifact.distributionArtifact.kind, "zip");
 assert.equal(notarizationArtifact.signing.hardenedRuntime, true);
 assert.equal(notarizationArtifact.staple.validated, true);
 assert.equal(notarizationArtifact.gatekeeper.assessment, "accepted");
+assert.equal(notarizationArtifact.promotion.sourceRunId, runId);
+assert.equal(notarizationArtifact.promotion.sourceCheckedAt, "2026-06-29T20:25:00Z");
 assert.equal(notarizationArtifact.promotion.operatorConfirmedStapledApp, true);
 assert.equal(notarizationArtifact.promotion.operatorConfirmedGatekeeperAccepted, true);
 
@@ -247,7 +274,7 @@ const missingUploadConfirm = promote([
   "--kind",
   "testflight",
   "--input",
-  writeObservation(fixture.dir, "missing-upload-confirm.json", testFlightObservation()),
+  writeObservation(fixture.dir, "missing-upload-confirm.json", boundTestFlightObservation()),
   "--confirm-current-build",
   "--force",
 ]);
@@ -260,7 +287,7 @@ const wrongBuildRejected = promote([
   "--kind",
   "testflight",
   "--input",
-  writeObservation(fixture.dir, "wrong-build.json", testFlightObservation({ app: { build: "14" } })),
+  writeObservation(fixture.dir, "wrong-build.json", boundTestFlightObservation({ app: { build: "14" } })),
   "--confirm-app-store-connect-upload",
   "--confirm-no-secrets",
   "--confirm-current-build",
@@ -278,7 +305,7 @@ const unsafeTestFlightRejected = promote([
   writeObservation(
     fixture.dir,
     "unsafe-testflight.json",
-    testFlightObservation({ appStoreConnectApiKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----" })
+    boundTestFlightObservation({ appStoreConnectApiKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----" })
   ),
   "--confirm-app-store-connect-upload",
   "--confirm-no-secrets",
@@ -294,7 +321,7 @@ const missingNotaryConfirm = promote([
   "--kind",
   "notarization",
   "--input",
-  writeObservation(fixture.dir, "missing-notary-confirm.json", notarizationObservation()),
+  writeObservation(fixture.dir, "missing-notary-confirm.json", boundNotarizationObservation()),
   "--confirm-current-build",
   "--force",
 ]);
@@ -310,7 +337,7 @@ const unstapledRejected = promote([
   writeObservation(
     fixture.dir,
     "unstapled.json",
-    notarizationObservation({ staple: { stapled: false, validated: false }, gatekeeper: { assessment: "rejected" } })
+    boundNotarizationObservation({ staple: { stapled: false, validated: false }, gatekeeper: { assessment: "rejected" } })
   ),
   "--confirm-developer-id-archive",
   "--confirm-notary-accepted",
@@ -331,7 +358,7 @@ const unsafeNotarizationRejected = promote([
   writeObservation(
     fixture.dir,
     "unsafe-notarization.json",
-    notarizationObservation({ notarytoolLog: "submitted with keychain profile secret-profile" })
+    boundNotarizationObservation({ notarytoolLog: "submitted with keychain profile secret-profile" })
   ),
   "--confirm-developer-id-archive",
   "--confirm-notary-accepted",
@@ -345,4 +372,4 @@ assert.match(unsafeNotarizationRejected.output.error, /unsafeContent/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-distribution-evidence: 10 checks passed");
+console.log("native-apple-promote-distribution-evidence: 11 checks passed");

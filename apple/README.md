@@ -101,9 +101,10 @@ node scripts/native-apple-release-readiness.mjs --strict
 
 Current strict blockers are intentionally explicit: Apple development team or
 private signing configuration, `PrivacyInfo.xcprivacy` after product-owned
-privacy answers are final, physical device media proof, and actual
-TestFlight/notarization credentials. Do not treat a passing default preflight
-as a TestFlight upload or notarized macOS app.
+privacy answers are final, physical device media proof, restrictive-network
+TURN proof, browser/native 3+ participant room-gate proof, and actual
+TestFlight/notarization evidence. Do not treat a passing default preflight as a
+TestFlight upload or notarized macOS app.
 
 Signing is wired through `Config/Signing.xcconfig` for both app targets. To
 enable local archive or device builds, either provide `DEVELOPMENT_TEAM` /
@@ -217,8 +218,9 @@ This writes `operator/release-command-plan.json`,
 ignored proof-pack directory. The command pack contains the Xcode archive,
 TestFlight export/upload, Developer ID export, notarytool, stapler, Gatekeeper,
 physical iPhone/iPad/Mac media-promotion commands, restrictive-network TURN
-promotion, TestFlight/macOS distribution promotion, local evidence handoff,
-final strict readiness, and an offline operator preflight. It does not run the
+promotion, browser/native room-gate promotion, TestFlight/macOS distribution
+promotion, local evidence handoff, final strict readiness, and an offline
+operator preflight. It does not run the
 archive/upload/notarization commands, does not contact Apple, and does not write
 Team IDs, certificate names, provisioning profiles, App Store Connect keys,
 notarytool profile names, or raw command logs. `--proofpack-dir` is required for
@@ -337,6 +339,30 @@ The TURN inbox observation must have `status: "observed"`, matching `runId` and
 candidate-pair facts, positive RTT, and a clean ICE-readiness summary with
 credentialed TURN/TURNS and no warnings or errors.
 
+Promote the browser/native room-gate observation after a same-room smoke with at
+least three total participants, at least one browser peer, and at least one
+native Apple peer:
+
+```bash
+node scripts/native-apple-promote-room-gate-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --input artifacts/native-apple/<run-id>/inbox/room-interop-observation.json \
+  --confirm-browser-native-mixed-room \
+  --confirm-three-plus-participants \
+  --confirm-clean-leave \
+  --confirm-recording-off \
+  --confirm-current-build \
+  --confirm-no-secrets
+```
+
+The room-gate helper does not read room logs or media frames. It promotes a
+sanitized operator observation only after the observation matches the proof-pack
+`runId`, `roomId`, version, and build, proves browser/native platform mix,
+remote audio/video, no missing/duplicate/stalled remote media health, clean
+leave with `/participants` empty, and recording-off transcript/Realtime
+forwarding stopped. It rejects raw SDP, ICE candidates, TURN URLs, credentials,
+account data, raw logs, screenshots, pixels, and frames.
+
 Promote the App Store Connect/TestFlight upload observation with a sanitized
 operator artifact after a real archive/upload:
 
@@ -387,8 +413,11 @@ artifact references for the underlying proof. Physical-device entries must
 cover iPhone, iPad, and Mac in the same mixed-room run and assert camera,
 microphone, remote-audio, and remote-video success. Restrictive-network TURN
 evidence must be tied to the same run and include a selected relay-candidate
-artifact. TestFlight/App Store Connect upload and accepted/stapled macOS
-notarization also need artifact references. Keep raw TURN credentials, App
+artifact. Browser/native room-gate evidence must prove the same run has at
+least three participants, browser/native platform mix, remote audio/video,
+clean leave, and recording-off forwarding stopped. TestFlight/App Store Connect
+upload and accepted/stapled macOS notarization also need artifact references.
+Keep raw TURN credentials, App
 Store Connect API keys, provisioning profiles, cert private keys, and real Team
 IDs out of evidence files; the strict checker rejects unknown or secret-shaped
 evidence fields.
@@ -410,6 +439,15 @@ readiness also inspects that content. The artifact must be promoted
 app/device metadata for the current build, selected relay candidate-pair facts,
 and a sanitized ICE-readiness summary with credentialed TURN/TURNS servers and
 no warnings or errors.
+
+When a room-gate `artifactRef` points to a local JSON file, strict readiness
+requires promoted `native_room_interop` proof with
+`claimScope: "browser_native_room_gate"`, `releaseEligible: true`, current
+version/build, matching run/room/timestamp, a browser/native platform mix,
+three or more participants, remote audio/video assertions, clean leave with no
+remaining `/participants`, recording-off transcript/Realtime forwarding false,
+source run/room binding, and operator confirmations for current build and no
+secret-bearing fields.
 
 When a TestFlight `artifactRef` points to a local JSON file, strict readiness
 requires promoted `native_testflight_upload` proof with

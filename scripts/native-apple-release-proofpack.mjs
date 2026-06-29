@@ -216,6 +216,26 @@ function pendingTurnArtifact(runId, roomId, createdAt) {
   };
 }
 
+function pendingRoomInteropArtifact(runId, roomId, createdAt) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_room_interop",
+    status: "pending",
+    runId,
+    roomId,
+    capturedAt: createdAt,
+    operatorChecklist: [
+      "Run a same-room smoke with at least one browser peer and at least one native Apple peer.",
+      "Use three or more total participants in the mixed room.",
+      "Confirm remote audio is audible and remote video is rendered across browser/native peers.",
+      "Confirm no missing, duplicate, or stalled remote participant media health remains.",
+      "Confirm leaving all clients empties /participants for the release room.",
+      "Confirm recording-off state stops transcript and Realtime forwarding, not only UI labels.",
+    ],
+    notes: "Use scripts/native-apple-promote-room-gate-evidence.mjs with a sanitized native_room_interop_observation before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
+  };
+}
+
 function pendingTestFlightArtifact(runId, createdAt) {
   return {
     schemaVersion: 1,
@@ -359,6 +379,43 @@ function turnObservationTemplate(runId, roomId, createdAt, version, build) {
   };
 }
 
+function roomInteropObservationTemplate(runId, roomId, createdAt, version, build) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_room_interop_observation",
+    status: "template",
+    runId,
+    roomId,
+    testedAt: createdAt,
+    app: {
+      version,
+      build,
+    },
+    room: {
+      participantCount: 0,
+      clientPlatforms: [],
+      browserNativeMixed: false,
+      threePlusParticipants: false,
+    },
+    media: {
+      remoteAudioAudible: false,
+      remoteVideoRendered: false,
+      noMissingRemoteHealth: false,
+      noDuplicateParticipants: false,
+      noStalledRemoteMedia: false,
+    },
+    lifecycle: {
+      cleanLeaveParticipantsEmpty: false,
+      participantsAfterLeave: -1,
+    },
+    recording: {
+      recordingOffStopsForwarding: false,
+      recordingOffTranscriptForwarded: true,
+      recordingOffRealtimeForwarded: true,
+    },
+  };
+}
+
 function testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifier) {
   return {
     schemaVersion: 1,
@@ -446,17 +503,24 @@ provisioning details, certificates, or private key material to launch links or
 inbox files.
 
 In the native app QA Evidence panel, use Save after capture to export the exact
-inbox filename for each observation:
+inbox filename for each physical-device media observation:
 
 - iPhone media: iphone-qa_snapshot.json
 - iPad media: ipad-qa_snapshot.json
 - Mac media: mac-qa_snapshot.json
+
+For release-gate observations that require operator review, copy the matching
+template, fill only the sanitized fields, and promote it with the named helper:
+
 - Restrictive TURN: turn-relay-observation.json
+- Browser/native room gate: room-interop-observation.json
+- TestFlight upload: testflight-observation.json
+- macOS notarization: notarization-observation.json
 
 Files ending in .template.json are scaffolds, not release proof. Copy a template
 to the same folder without .template.json only after replacing placeholders with
-values from the real physical-device, restrictive-network, TestFlight, or
-notarization run.
+values from the real physical-device, restrictive-network, browser/native room,
+TestFlight, or notarization run.
 
 Promotion helpers validate inbox observations and then write the release proof
 under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
@@ -530,6 +594,20 @@ function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }
       relayCandidateType: "",
       testedAt: createdAt,
       artifactRef: refs.turn,
+    },
+    roomInterop: {
+      status: "pending",
+      runId,
+      roomId,
+      testedAt: createdAt,
+      participantCount: 0,
+      browserNativeMixed: false,
+      threePlusParticipants: false,
+      remoteAudioAudible: false,
+      remoteVideoRendered: false,
+      cleanLeaveParticipantsEmpty: false,
+      recordingOffStopsForwarding: false,
+      artifactRef: refs.roomInterop,
     },
     testFlight: {
       status: "pending",
@@ -608,6 +686,35 @@ function releaseEvidenceCompletion(draft) {
     for (const key of ["appStoreConnectBuildId", "uploadedAt", "artifactRef"]) {
       if (!nonEmptyString(testFlight[key])) {
         missing.push(`testFlight.${key}`);
+      }
+    }
+  }
+
+  const roomInterop = draft.roomInterop;
+  if (!roomInterop || typeof roomInterop !== "object" || Array.isArray(roomInterop)) {
+    missing.push("roomInterop");
+  } else {
+    if (roomInterop.status !== "passed") {
+      missing.push("roomInterop.status");
+    }
+    for (const key of ["runId", "roomId", "testedAt", "artifactRef"]) {
+      if (!nonEmptyString(roomInterop[key])) {
+        missing.push(`roomInterop.${key}`);
+      }
+    }
+    if (!(Number(roomInterop.participantCount) >= 3)) {
+      missing.push("roomInterop.participantCount");
+    }
+    for (const key of [
+      "browserNativeMixed",
+      "threePlusParticipants",
+      "remoteAudioAudible",
+      "remoteVideoRendered",
+      "cleanLeaveParticipantsEmpty",
+      "recordingOffStopsForwarding",
+    ]) {
+      if (roomInterop[key] !== true) {
+        missing.push(`roomInterop.${key}`);
       }
     }
   }
@@ -691,6 +798,7 @@ function createProofpack(args) {
     ipad: join(evidenceDir, "ipad-media.json"),
     mac: join(evidenceDir, "mac-media.json"),
     turn: join(evidenceDir, "selected-turn-relay.json"),
+    roomInterop: join(evidenceDir, "room-interop.json"),
     testFlight: join(evidenceDir, "testflight-build.json"),
     notarization: join(evidenceDir, "mac-notarization.json"),
   };
@@ -700,6 +808,7 @@ function createProofpack(args) {
     ipadMedia: join(inboxDir, "ipad-qa_snapshot.template.json"),
     macMedia: join(inboxDir, "mac-qa_snapshot.template.json"),
     turnRelay: join(inboxDir, "turn-relay-observation.template.json"),
+    roomInterop: join(inboxDir, "room-interop-observation.template.json"),
     testFlight: join(inboxDir, "testflight-observation.template.json"),
     notarization: join(inboxDir, "notarization-observation.template.json"),
   };
@@ -709,12 +818,14 @@ function createProofpack(args) {
   writeJSON(artifactPaths.ipad, pendingDeviceArtifact("ipad", runId, roomId, createdAt));
   writeJSON(artifactPaths.mac, pendingDeviceArtifact("mac", runId, roomId, createdAt));
   writeJSON(artifactPaths.turn, pendingTurnArtifact(runId, roomId, createdAt));
+  writeJSON(artifactPaths.roomInterop, pendingRoomInteropArtifact(runId, roomId, createdAt));
   writeJSON(artifactPaths.testFlight, pendingTestFlightArtifact(runId, createdAt));
   writeJSON(artifactPaths.notarization, pendingNotarizationArtifact(runId, createdAt));
   writeJSON(templatePaths.iphoneMedia, deviceObservationTemplate("iphone", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.ipadMedia, deviceObservationTemplate("ipad", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.macMedia, deviceObservationTemplate("mac", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.turnRelay, turnObservationTemplate(runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.roomInterop, roomInteropObservationTemplate(runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.testFlight, testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
   writeJSON(templatePaths.notarization, notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.macos));
   writeText(join(inboxDir, "README.md"), inboxReadme(runId, roomId, version, build));
@@ -741,6 +852,7 @@ function createProofpack(args) {
       "Create the non-secret Apple-account machine command pack with scripts/native-apple-release-package-plan.mjs --proofpack-dir <proofpack> --write.",
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
+      "Promote sanitized browser/native 3+ participant room gate observations with scripts/native-apple-promote-room-gate-evidence.mjs.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
       "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",

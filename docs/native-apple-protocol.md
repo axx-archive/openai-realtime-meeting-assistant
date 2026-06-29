@@ -138,6 +138,21 @@ metadata, and TURN-readiness counts. It must not include raw SDP, raw ICE
 candidates, candidate IDs, IP addresses, TURN URLs, usernames, credentials,
 cookies, headers, API keys, Team IDs, certificates, profiles, or private keys.
 
+Browser/native room-gate proof is operator-only as well. A sanitized
+`native_room_interop_observation` is a local proof-pack input, not a websocket
+event and not app media diagnostics. `scripts/native-apple-promote-room-gate-evidence.mjs`
+promotes it only when it matches the proof-pack run, room, version, and build,
+and when the operator confirms a same-room smoke with at least three
+participants, at least one browser peer, at least one native Apple peer, remote
+audio/video working, no missing/duplicate/stalled remote media health, clean
+leave with `/participants` empty, and recording-off transcript and Realtime
+forwarding stopped. The promoted `native_room_interop` artifact may include
+only safe summary fields such as participant count, platform labels, boolean
+media/lifecycle/recording assertions, timestamps, source run/room binding, and
+operator confirmations. It must not include raw SDP, raw ICE candidates, TURN
+URLs, credentials, account data, raw logs, screenshots, pixels, frames, cookies,
+headers, API keys, Team IDs, certificates, profiles, or private keys.
+
 Distribution proof is also operator-only. Sanitized App Store Connect/TestFlight
 and macOS notarization observations are local proof-pack inputs, not websocket
 events and not app-exported media diagnostics. `scripts/native-apple-promote-distribution-evidence.mjs`

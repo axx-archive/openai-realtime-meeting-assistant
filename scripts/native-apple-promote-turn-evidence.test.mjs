@@ -141,7 +141,11 @@ const created = createProofpack(fixture.appleDir, runId);
 assert.equal(created.status, 0);
 assert.equal(created.output.ok, true);
 
-const observationPath = writeObservation(fixture.dir, "turn-observation.json", turnObservation());
+function boundTurnObservation(overrides = {}) {
+  return turnObservation({ runId, roomId: "turn-promotion-room-test", ...overrides });
+}
+
+const observationPath = writeObservation(fixture.dir, "turn-observation.json", boundTurnObservation());
 const promoted = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -175,6 +179,9 @@ assert.equal(artifact.device.physical, true);
 assert.equal(artifact.selectedCandidate.relayCandidateSelected, true);
 assert.equal(artifact.selectedCandidate.localCandidateType, "relay");
 assert.equal(artifact.iceReadiness.turnServersWithCredentials, 1);
+assert.equal(artifact.promotion.sourceRunId, runId);
+assert.equal(artifact.promotion.sourceRoomId, "turn-promotion-room-test");
+assert.equal(artifact.promotion.sourceCapturedAt, "2026-06-29T19:15:00Z");
 assert.equal(artifact.promotion.operatorConfirmedRestrictiveNetwork, true);
 assert.equal(artifact.promotion.operatorConfirmedSameRoom, true);
 
@@ -195,7 +202,7 @@ const missingConfirm = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--input",
-  writeObservation(fixture.dir, "missing-confirm.json", turnObservation()),
+  writeObservation(fixture.dir, "missing-confirm.json", boundTurnObservation()),
   "--network",
   "restricted guest network",
   "--force",
@@ -203,11 +210,25 @@ const missingConfirm = promote([
 assert.equal(missingConfirm.status, 1);
 assert.match(missingConfirm.output.error, /confirmRestrictiveNetwork|confirmSameRoom/);
 
+const blankIdentityRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--input",
+  writeObservation(fixture.dir, "blank-identity.json", turnObservation()),
+  "--network",
+  "restricted guest network",
+  "--confirm-restrictive-network",
+  "--confirm-same-room",
+  "--force",
+]);
+assert.equal(blankIdentityRejected.status, 1);
+assert.match(blankIdentityRejected.output.error, /runId:empty|roomId:empty/);
+
 const missingNetwork = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--input",
-  writeObservation(fixture.dir, "missing-network.json", turnObservation()),
+  writeObservation(fixture.dir, "missing-network.json", boundTurnObservation()),
   "--confirm-restrictive-network",
   "--confirm-same-room",
   "--force",
@@ -222,7 +243,7 @@ const nonRelayRejected = promote([
   writeObservation(
     fixture.dir,
     "non-relay.json",
-    turnObservation({
+    boundTurnObservation({
       selectedCandidate: {
         relayProtocol: "stun",
         relayCandidateType: "host",
@@ -249,7 +270,7 @@ const promotedArtifactInputRejected = promote([
   writeObservation(
     fixture.dir,
     "already-promoted-input.json",
-    turnObservation({
+    boundTurnObservation({
       artifactType: "native_restrictive_turn",
     })
   ),
@@ -266,7 +287,7 @@ const wrongBuildRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--input",
-  writeObservation(fixture.dir, "wrong-build.json", turnObservation({ app: { build: "14" } })),
+  writeObservation(fixture.dir, "wrong-build.json", boundTurnObservation({ app: { build: "14" } })),
   "--network",
   "restricted guest network",
   "--confirm-restrictive-network",
@@ -280,7 +301,7 @@ const mismatchedRunRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--input",
-  writeObservation(fixture.dir, "wrong-run.json", turnObservation({ runId: "native-apple-other-run" })),
+  writeObservation(fixture.dir, "wrong-run.json", boundTurnObservation({ runId: "native-apple-other-run" })),
   "--network",
   "restricted guest network",
   "--confirm-restrictive-network",
@@ -294,7 +315,7 @@ const networkMismatchRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--input",
-  writeObservation(fixture.dir, "network-mismatch.json", turnObservation({ network: "carrier hotspot restricted" })),
+  writeObservation(fixture.dir, "network-mismatch.json", boundTurnObservation({ network: "carrier hotspot restricted" })),
   "--network",
   "restricted guest network",
   "--confirm-restrictive-network",
@@ -311,7 +332,7 @@ const unsafeRejected = promote([
   writeObservation(
     fixture.dir,
     "unsafe.json",
-    turnObservation({
+    boundTurnObservation({
       diagnostics: {
         rawSdp: "v=0\r\na=candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host\r\n",
       },
@@ -333,7 +354,7 @@ const iceWarningsRejected = promote([
   writeObservation(
     fixture.dir,
     "ice-warning.json",
-    turnObservation({ iceReadiness: { warnings: ["1 TURN server entries are missing username or credential."] } })
+    boundTurnObservation({ iceReadiness: { warnings: ["1 TURN server entries are missing username or credential."] } })
   ),
   "--network",
   "restricted guest network",
@@ -346,4 +367,4 @@ assert.match(iceWarningsRejected.output.error, /iceReadiness.warnings/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-turn-evidence: 11 checks passed");
+console.log("native-apple-promote-turn-evidence: 12 checks passed");

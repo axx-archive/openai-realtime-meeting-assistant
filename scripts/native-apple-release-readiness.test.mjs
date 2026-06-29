@@ -264,6 +264,20 @@ function releaseEvidence(overrides = {}) {
       testedAt: "2026-06-29T12:25:00Z",
       artifactRef: "artifacts/native-release-run-20260629-a/turn-selected-relay.json",
     },
+    roomInterop: {
+      status: "passed",
+      runId,
+      roomId,
+      testedAt: "2026-06-29T12:27:00Z",
+      participantCount: 4,
+      browserNativeMixed: true,
+      threePlusParticipants: true,
+      remoteAudioAudible: true,
+      remoteVideoRendered: true,
+      cleanLeaveParticipantsEmpty: true,
+      recordingOffStopsForwarding: true,
+      artifactRef: "artifacts/native-release-run-20260629-a/room-interop.json",
+    },
     testFlight: {
       status: "ready",
       appStoreConnectBuildId: `asc-${syntheticTeamId("82", "91", "74", "65", "02")}`,
@@ -289,6 +303,10 @@ function releaseEvidence(overrides = {}) {
     restrictiveNetworkTurn: {
       ...base.restrictiveNetworkTurn,
       ...(overrides.restrictiveNetworkTurn ?? {}),
+    },
+    roomInterop: {
+      ...base.roomInterop,
+      ...(overrides.roomInterop ?? {}),
     },
     testFlight: {
       ...base.testFlight,
@@ -446,6 +464,9 @@ function promotedTurnArtifact(evidence, overrides = {}) {
       promotedAt: "2026-06-29T12:26:00Z",
       sourceArtifactType: "native_turn_relay_observation",
       sourceStatus: "observed",
+      sourceRunId: evidence.runId,
+      sourceRoomId: evidence.roomId,
+      sourceCapturedAt: item.testedAt,
       sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/turn-observation.json",
       operatorConfirmedRestrictiveNetwork: true,
       operatorConfirmedSameRoom: true,
@@ -482,6 +503,90 @@ function promotedTurnArtifact(evidence, overrides = {}) {
   };
 }
 
+function promotedRoomInteropArtifact(evidence, overrides = {}) {
+  const item = evidence.roomInterop;
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_room_interop",
+    claimScope: "browser_native_room_gate",
+    releaseEligible: true,
+    status: "passed",
+    runId: evidence.runId,
+    roomId: evidence.roomId,
+    testedAt: item.testedAt,
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+    },
+    room: {
+      participantCount: item.participantCount,
+      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      browserNativeMixed: true,
+      threePlusParticipants: true,
+    },
+    media: {
+      remoteAudioAudible: true,
+      remoteVideoRendered: true,
+      noMissingRemoteHealth: true,
+      noDuplicateParticipants: true,
+      noStalledRemoteMedia: true,
+    },
+    lifecycle: {
+      cleanLeaveParticipantsEmpty: true,
+      participantsAfterLeave: 0,
+    },
+    recording: {
+      recordingOffStopsForwarding: true,
+      recordingOffTranscriptForwarded: false,
+      recordingOffRealtimeForwarded: false,
+    },
+    releaseEvidenceSummary: {
+      status: "passed",
+      runId: evidence.runId,
+      roomId: evidence.roomId,
+      version: evidence.version,
+      build: evidence.build,
+      testedAt: item.testedAt,
+      participantCount: item.participantCount,
+      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      browserNativeMixed: true,
+      threePlusParticipants: true,
+      cleanLeaveParticipantsEmpty: true,
+      recordingOffStopsForwarding: true,
+    },
+    promotion: {
+      promotedAt: "2026-06-29T12:28:00Z",
+      sourceArtifactType: "native_room_interop_observation",
+      sourceStatus: "observed",
+      sourceRunId: evidence.runId,
+      sourceRoomId: evidence.roomId,
+      sourceTestedAt: item.testedAt,
+      sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/room-interop-observation.json",
+      operatorConfirmedBrowserNativeMixedRoom: true,
+      operatorConfirmedThreePlusParticipants: true,
+      operatorConfirmedCleanLeave: true,
+      operatorConfirmedRecordingOff: true,
+      operatorConfirmedCurrentBuild: true,
+      operatorConfirmedNoSecrets: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    room: { ...base.room, ...(overrides.room ?? {}) },
+    media: { ...base.media, ...(overrides.media ?? {}) },
+    lifecycle: { ...base.lifecycle, ...(overrides.lifecycle ?? {}) },
+    recording: { ...base.recording, ...(overrides.recording ?? {}) },
+    releaseEvidenceSummary: {
+      ...base.releaseEvidenceSummary,
+      ...(overrides.releaseEvidenceSummary ?? {}),
+    },
+    promotion: { ...base.promotion, ...(overrides.promotion ?? {}) },
+  };
+}
+
 function promotedTestFlightArtifact(evidence, overrides = {}) {
   const item = evidence.testFlight;
   const base = {
@@ -515,6 +620,8 @@ function promotedTestFlightArtifact(evidence, overrides = {}) {
       promotedAt: "2026-06-29T12:31:00Z",
       sourceArtifactType: "native_testflight_upload_observation",
       sourceStatus: "observed",
+      sourceRunId: evidence.runId,
+      sourceUploadedAt: item.uploadedAt,
       sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/testflight-observation.json",
       operatorConfirmedAppStoreConnectUpload: true,
       operatorConfirmedNoSecrets: true,
@@ -586,6 +693,8 @@ function promotedNotarizationArtifact(evidence, overrides = {}) {
       promotedAt: "2026-06-29T12:41:00Z",
       sourceArtifactType: "native_macos_notarization_observation",
       sourceStatus: "accepted",
+      sourceRunId: evidence.runId,
+      sourceCheckedAt: item.checkedAt,
       sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/notarization-observation.json",
       operatorConfirmedDeveloperIdArchive: true,
       operatorConfirmedNotaryAccepted: true,
@@ -628,6 +737,15 @@ function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   if (typeof turnRef === "string" && /^(artifacts\/|evidence\/)/.test(turnRef) && !turnRef.split("/").includes("..")) {
     const artifact = options.turnArtifact ?? promotedTurnArtifact(evidence, options.turnArtifactOverrides);
     writeFixtureFile(resolve(rootDir, turnRef), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  const roomInteropRef = evidence.roomInterop?.artifactRef;
+  if (
+    typeof roomInteropRef === "string" &&
+    /^(artifacts\/|evidence\/)/.test(roomInteropRef) &&
+    !roomInteropRef.split("/").includes("..")
+  ) {
+    const artifact = options.roomInteropArtifact ?? promotedRoomInteropArtifact(evidence, options.roomInteropArtifactOverrides);
+    writeFixtureFile(resolve(rootDir, roomInteropRef), `${JSON.stringify(artifact, null, 2)}\n`);
   }
   const testFlightRef = evidence.testFlight?.artifactRef;
   if (
@@ -1413,6 +1531,112 @@ assert.equal(
   true
 );
 
+const missingRoomInteropEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const missingRoomInteropEvidencePath = resolve(missingRoomInteropEvidenceFixturePath, "ReleaseEvidence.local.json");
+const missingRoomInteropEvidence = releaseEvidence();
+delete missingRoomInteropEvidence.roomInterop;
+writeFixtureFile(missingRoomInteropEvidencePath, `${JSON.stringify(missingRoomInteropEvidence, null, 2)}\n`);
+writeEvidenceArtifactFixtures(missingRoomInteropEvidencePath, missingRoomInteropEvidence);
+const missingRoomInteropEvidenceFixture = runReadiness(
+  ["--apple-dir", missingRoomInteropEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingRoomInteropEvidenceFixture.status, 1);
+assert.equal(missingRoomInteropEvidenceFixture.output.ok, true);
+assert.equal(missingRoomInteropEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingRoomInteropEvidenceFixture.output.blockers.some((blocker) => blocker.id === "room_interop_evidence"),
+  true
+);
+
+const weakRoomInteropEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(weakRoomInteropEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  roomInterop: {
+    participantCount: 2,
+    browserNativeMixed: false,
+    threePlusParticipants: false,
+    remoteAudioAudible: false,
+  },
+});
+const weakRoomInteropEvidenceFixture = runReadiness(
+  ["--apple-dir", weakRoomInteropEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(weakRoomInteropEvidenceFixture.status, 1);
+assert.equal(weakRoomInteropEvidenceFixture.output.ok, true);
+assert.equal(weakRoomInteropEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  weakRoomInteropEvidenceFixture.output.blockers.some((blocker) => blocker.id === "room_interop_evidence"),
+  true
+);
+
+const unboundRoomInteropArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unboundRoomInteropArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  roomInteropArtifactOverrides: {
+    promotion: {
+      sourceRunId: "",
+      sourceRoomId: "",
+    },
+  },
+});
+const unboundRoomInteropArtifactFixture = runReadiness(
+  ["--apple-dir", unboundRoomInteropArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unboundRoomInteropArtifactFixture.status, 1);
+assert.equal(unboundRoomInteropArtifactFixture.output.ok, true);
+assert.equal(unboundRoomInteropArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unboundRoomInteropArtifactFixture.output.blockers.some((blocker) => blocker.id === "room_interop_evidence"),
+  true
+);
+
+const noNativeRoomInteropArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(noNativeRoomInteropArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  roomInteropArtifactOverrides: {
+    room: {
+      clientPlatforms: ["browser", "web"],
+    },
+    releaseEvidenceSummary: {
+      clientPlatforms: ["browser", "web"],
+    },
+  },
+});
+const noNativeRoomInteropArtifactFixture = runReadiness(
+  ["--apple-dir", noNativeRoomInteropArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(noNativeRoomInteropArtifactFixture.status, 1);
+assert.equal(noNativeRoomInteropArtifactFixture.output.ok, true);
+assert.equal(noNativeRoomInteropArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  noNativeRoomInteropArtifactFixture.output.blockers.some((blocker) => blocker.id === "room_interop_evidence"),
+  true
+);
+
+const unsafeRoomInteropArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unsafeRoomInteropArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  roomInteropArtifactOverrides: {
+    room: {
+      clientPlatforms: ["browser", "ios", "operator@example.com"],
+    },
+    releaseEvidenceSummary: {
+      clientPlatforms: ["browser", "ios", "operator@example.com"],
+    },
+  },
+});
+const unsafeRoomInteropArtifactFixture = runReadiness(
+  ["--apple-dir", unsafeRoomInteropArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unsafeRoomInteropArtifactFixture.status, 1);
+assert.equal(unsafeRoomInteropArtifactFixture.output.ok, true);
+assert.equal(unsafeRoomInteropArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unsafeRoomInteropArtifactFixture.output.blockers.some((blocker) => blocker.id === "room_interop_evidence"),
+  true
+);
+
 const placeholderTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(placeholderTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
   testFlightArtifact: { artifactRef: "artifacts/native-release-run-20260629-a/testflight-build.json", fixture: true },
@@ -1724,4 +1948,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 55 checks passed");
+console.log("native-apple-release-readiness: 60 checks passed");

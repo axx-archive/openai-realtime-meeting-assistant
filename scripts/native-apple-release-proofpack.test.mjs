@@ -12,6 +12,7 @@ const scriptPath = resolve(scriptsDir, "native-apple-release-proofpack.mjs");
 const readinessScriptPath = resolve(scriptsDir, "native-apple-release-readiness.mjs");
 const promoteMediaScriptPath = resolve(scriptsDir, "native-apple-promote-media-evidence.mjs");
 const promoteTurnScriptPath = resolve(scriptsDir, "native-apple-promote-turn-evidence.mjs");
+const promoteRoomScriptPath = resolve(scriptsDir, "native-apple-promote-room-gate-evidence.mjs");
 const promoteDistributionScriptPath = resolve(scriptsDir, "native-apple-promote-distribution-evidence.mjs");
 
 function runScript(path, args = []) {
@@ -116,6 +117,7 @@ for (const ref of Object.values(proofpack.observationTemplates)) {
   assert.ok(existsSync(resolve(rootDir, ref)));
 }
 assert.equal(proofpack.observationTemplates.iphoneMedia, `artifacts/native-apple/${runId}/inbox/iphone-qa_snapshot.template.json`);
+assert.equal(proofpack.observationTemplates.roomInterop, `artifacts/native-apple/${runId}/inbox/room-interop-observation.template.json`);
 assert.equal(proofpack.observationTemplates.testFlight, `artifacts/native-apple/${runId}/inbox/testflight-observation.template.json`);
 const inboxReadme = readFileSync(resolve(rootDir, "artifacts", "native-apple", runId, "inbox", "README.md"), "utf8");
 assert.match(inboxReadme, /scaffolds, not release proof/);
@@ -128,6 +130,7 @@ assert.match(inboxReadme, /iPhone media: iphone-qa_snapshot\.json/);
 assert.match(inboxReadme, /iPad media: ipad-qa_snapshot\.json/);
 assert.match(inboxReadme, /Mac media: mac-qa_snapshot\.json/);
 assert.match(inboxReadme, /Restrictive TURN: turn-relay-observation\.json/);
+assert.match(inboxReadme, /Browser\/native room gate: room-interop-observation\.json/);
 const iphoneTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.iphoneMedia), "utf8"));
 assert.equal(iphoneTemplate.artifactType, "native_device_media");
 assert.equal(iphoneTemplate.status, "template");
@@ -140,6 +143,14 @@ const turnTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observat
 assert.equal(turnTemplate.artifactType, "native_turn_relay_observation");
 assert.equal(turnTemplate.status, "template");
 assert.equal(turnTemplate.selectedCandidate.relayCandidateSelected, false);
+const roomInteropArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.roomInterop), "utf8"));
+assert.equal(roomInteropArtifact.schemaVersion, 1);
+assert.match(roomInteropArtifact.notes, /native-apple-promote-room-gate-evidence\.mjs/);
+const roomInteropTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.roomInterop), "utf8"));
+assert.equal(roomInteropTemplate.artifactType, "native_room_interop_observation");
+assert.equal(roomInteropTemplate.status, "template");
+assert.equal(roomInteropTemplate.room.participantCount, 0);
+assert.equal(roomInteropTemplate.recording.recordingOffRealtimeForwarded, true);
 const testFlightArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.testFlight), "utf8"));
 assert.equal(testFlightArtifact.schemaVersion, 1);
 assert.match(testFlightArtifact.notes, /native-apple-promote-distribution-evidence\.mjs --kind testflight/);
@@ -287,6 +298,50 @@ const promotedTurn = runScript(promoteTurnScriptPath, [
 ]);
 assert.equal(promotedTurn.status, 0);
 
+const roomInteropObservation = JSON.parse(readFileSync(resolve(rootDir, promotionManifest.observationTemplates.roomInterop), "utf8"));
+const roomInteropInputPath = writeJSONFile(
+  resolve(promotionProofpack.output.proofpackDir, "inbox", "room-interop-observation.json"),
+  {
+    ...roomInteropObservation,
+    status: "observed",
+    room: {
+      participantCount: 4,
+      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      browserNativeMixed: true,
+      threePlusParticipants: true,
+    },
+    media: {
+      remoteAudioAudible: true,
+      remoteVideoRendered: true,
+      noMissingRemoteHealth: true,
+      noDuplicateParticipants: true,
+      noStalledRemoteMedia: true,
+    },
+    lifecycle: {
+      cleanLeaveParticipantsEmpty: true,
+      participantsAfterLeave: 0,
+    },
+    recording: {
+      recordingOffStopsForwarding: true,
+      recordingOffTranscriptForwarded: false,
+      recordingOffRealtimeForwarded: false,
+    },
+  }
+);
+const promotedRoomInterop = runScript(promoteRoomScriptPath, [
+  "--proofpack-dir",
+  promotionProofpack.output.proofpackDir,
+  "--input",
+  roomInteropInputPath,
+  "--confirm-browser-native-mixed-room",
+  "--confirm-three-plus-participants",
+  "--confirm-clean-leave",
+  "--confirm-recording-off",
+  "--confirm-current-build",
+  "--confirm-no-secrets",
+]);
+assert.equal(promotedRoomInterop.status, 0);
+
 const testFlightObservation = JSON.parse(readFileSync(resolve(rootDir, promotionManifest.observationTemplates.testFlight), "utf8"));
 const testFlightInputPath = writeJSONFile(
   resolve(promotionProofpack.output.proofpackDir, "inbox", "testflight-observation.json"),
@@ -363,6 +418,7 @@ assert.equal(promotedDraft.physicalDeviceMedia.iphone.status, "passed");
 assert.equal(promotedDraft.physicalDeviceMedia.ipad.status, "passed");
 assert.equal(promotedDraft.physicalDeviceMedia.mac.status, "passed");
 assert.equal(promotedDraft.restrictiveNetworkTurn.status, "passed");
+assert.equal(promotedDraft.roomInterop.status, "passed");
 assert.equal(promotedDraft.testFlight.status, "ready");
 assert.equal(promotedDraft.macNotarization.status, "accepted");
 
@@ -398,6 +454,7 @@ assert.equal(strictReadinessOutput.ok, true);
 assert.equal(strictReadinessOutput.readyForDistribution, false);
 assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"));
 assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"));
+assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "room_interop_evidence"));
 
 const localEvidencePath = resolve(fixture.appleDir, "ReleaseEvidence.local.json");
 const pendingWrite = runProofpack([
@@ -473,6 +530,17 @@ const completedDraft = {
     network: "restricted guest network",
     relayProtocol: "turns",
     relayCandidateType: "relay",
+  },
+  roomInterop: {
+    ...draft.roomInterop,
+    status: "passed",
+    participantCount: 4,
+    browserNativeMixed: true,
+    threePlusParticipants: true,
+    remoteAudioAudible: true,
+    remoteVideoRendered: true,
+    cleanLeaveParticipantsEmpty: true,
+    recordingOffStopsForwarding: true,
   },
   testFlight: {
     ...draft.testFlight,
