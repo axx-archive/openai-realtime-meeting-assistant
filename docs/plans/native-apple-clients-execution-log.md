@@ -1112,3 +1112,75 @@ What worked:
   the server stay additive and avoided a native-only diagnostics fork.
 - The local browser smoke doubled as live proof that the renamed Go logger
   still handles existing browser `media_quality` reports.
+
+## Wave 17
+
+Status: `wave17_native_app_icon_release_readiness_checkpoint_validated`
+
+Scope:
+- Continued the repo-owned Apple release-readiness track by removing the iOS,
+  iPadOS, and macOS app icon blockers without using Apple account credentials.
+- Assigned an asset-catalog explorer and a preflight explorer. They confirmed a
+  single shared `Xcode/Assets.xcassets/AppIcon.appiconset` is the safest shape
+  for both `MeetingAssistAppleApp` and `MeetingAssistMacApp`, and that the old
+  preflight icon check was too shallow.
+- Added `Xcode/AppIconSource.svg` plus
+  `scripts/generate-native-apple-app-icons.mjs` so the committed icon PNGs are
+  reproducible from a source asset.
+- Generated a complete shared AppIcon set for iPhone, iPad, iOS marketing, and
+  macOS idioms.
+- Wired `Xcode/Assets.xcassets` into both app targets in `project.yml`, set
+  `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`, and regenerated
+  `MeetingAssist.xcodeproj`.
+- Strengthened `scripts/native-apple-release-readiness.mjs` so icon readiness
+  requires expected slots, actual PNG files, correct PNG dimensions, asset
+  catalog target wiring, and generated Xcode build settings.
+- Updated release-readiness tests so synthetic strict-ready fixtures include
+  the full icon matrix, while blocked fixtures still prove missing icons remain
+  a strict blocker.
+- Updated `apple/README.md` to remove app icons from the current strict blocker
+  list and document the icon generation command.
+
+Files changed:
+- `apple/MeetingAssist.xcodeproj/project.pbxproj`
+- `apple/README.md`
+- `apple/project.yml`
+- `apple/Xcode/AppIconSource.svg`
+- `apple/Xcode/Assets.xcassets/`
+- `scripts/generate-native-apple-app-icons.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node scripts/generate-native-apple-app-icons.mjs` regenerated 28 icon PNGs.
+- Asset catalog JSON parsed successfully for
+  `apple/Xcode/Assets.xcassets/Contents.json` and
+  `apple/Xcode/Assets.xcassets/AppIcon.appiconset/Contents.json`.
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 3 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green and no icon blockers.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as
+  expected with only `apple_development_team` and `privacy_manifest`.
+
+Risks / blockers:
+- This proves the app icon asset catalog is present, complete, and wired into
+  generated app targets. It does not prove Apple signing, TestFlight upload, or
+  macOS notarization.
+- The icon is a committed generated brand-ready placeholder for release
+  readiness; final brand review may still replace `AppIconSource.svg` and
+  regenerate the PNGs.
+- Strict release readiness still blocks on Apple development team/signing
+  configuration and `PrivacyInfo.xcprivacy` after product-owned privacy answers
+  are final.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  validation, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called end-user shippable.
+
+What worked:
+- Treating the SVG as the source of truth made binary icon assets
+  reproducible instead of manually maintained.
+- Tightening the release preflight prevented an empty `Contents.json` from
+  satisfying icon readiness.
+- Regenerating from XcodeGen kept asset catalog wiring in `project.yml` as the
+  durable source of truth.

@@ -84,10 +84,18 @@ node scripts/native-apple-release-readiness.mjs --strict
 ```
 
 Current strict blockers are intentionally explicit: Apple development team or
-private signing configuration, real iOS/iPadOS and macOS app icons,
-`PrivacyInfo.xcprivacy` after product-owned privacy answers are final, physical
-device media proof, and actual TestFlight/notarization credentials. Do not
-treat a passing default preflight as a TestFlight upload or notarized macOS app.
+private signing configuration, `PrivacyInfo.xcprivacy` after product-owned
+privacy answers are final, physical device media proof, and actual
+TestFlight/notarization credentials. Do not treat a passing default preflight
+as a TestFlight upload or notarized macOS app.
+
+The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
+
+```bash
+node scripts/generate-native-apple-app-icons.mjs
+cd apple
+xcodegen generate --spec project.yml
+```
 
 This checkpoint has a real native WebRTC binary linked, can create the
 audio-only peer connection locally, and now includes native camera publishing

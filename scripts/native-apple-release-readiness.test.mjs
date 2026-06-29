@@ -39,6 +39,70 @@ function writeFixtureFile(path, contents) {
   writeFileSync(path, contents);
 }
 
+const appIconSlots = [
+  ["iphone", "20x20", "2x"],
+  ["iphone", "20x20", "3x"],
+  ["iphone", "29x29", "2x"],
+  ["iphone", "29x29", "3x"],
+  ["iphone", "40x40", "2x"],
+  ["iphone", "40x40", "3x"],
+  ["iphone", "60x60", "2x"],
+  ["iphone", "60x60", "3x"],
+  ["ipad", "20x20", "1x"],
+  ["ipad", "20x20", "2x"],
+  ["ipad", "29x29", "1x"],
+  ["ipad", "29x29", "2x"],
+  ["ipad", "40x40", "1x"],
+  ["ipad", "40x40", "2x"],
+  ["ipad", "76x76", "1x"],
+  ["ipad", "76x76", "2x"],
+  ["ipad", "83.5x83.5", "2x"],
+  ["ios-marketing", "1024x1024", "1x"],
+  ["mac", "16x16", "1x"],
+  ["mac", "16x16", "2x"],
+  ["mac", "32x32", "1x"],
+  ["mac", "32x32", "2x"],
+  ["mac", "128x128", "1x"],
+  ["mac", "128x128", "2x"],
+  ["mac", "256x256", "1x"],
+  ["mac", "256x256", "2x"],
+  ["mac", "512x512", "1x"],
+  ["mac", "512x512", "2x"],
+];
+
+function pixelsForSlot(size, scale) {
+  return Math.round(Number(size.split("x")[0]) * Number(scale.replace("x", "")));
+}
+
+function pngWithDimensions(pixels) {
+  const png = Buffer.alloc(33);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(png, 0);
+  png.writeUInt32BE(13, 8);
+  png.write("IHDR", 12, "ascii");
+  png.writeUInt32BE(pixels, 16);
+  png.writeUInt32BE(pixels, 20);
+  png[24] = 8;
+  png[25] = 6;
+  return png;
+}
+
+function writeAppIconFixture(appleDir) {
+  const iconSetDir = resolve(appleDir, "Xcode", "Assets.xcassets", "AppIcon.appiconset");
+  writeFixtureFile(
+    resolve(appleDir, "Xcode", "Assets.xcassets", "Contents.json"),
+    `${JSON.stringify({ info: { author: "xcode", version: 1 } }, null, 2)}\n`
+  );
+  const images = appIconSlots.map(([idiom, size, scale]) => {
+    const filename = `AppIcon-${idiom}-${size.replaceAll(".", "_")}@${scale}.png`;
+    writeFixtureFile(resolve(iconSetDir, filename), pngWithDimensions(pixelsForSlot(size, scale)));
+    return { idiom, size, scale, filename };
+  });
+  writeFixtureFile(
+    resolve(iconSetDir, "Contents.json"),
+    `${JSON.stringify({ images, info: { author: "xcode", version: 1 } }, null, 2)}\n`
+  );
+}
+
 function writePlist(path, body) {
   writeFixtureFile(
     path,
@@ -60,6 +124,9 @@ function makeFixture({ includeIcons, includePrivacy }) {
     resolve(appleDir, "project.yml"),
     `targets:
   MeetingAssistAppleApp:
+    sources:
+      - path: Xcode/MeetingAssistAppleApp.swift
+      - path: Xcode/Assets.xcassets
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -68,6 +135,9 @@ function makeFixture({ includeIcons, includePrivacy }) {
         PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.ios
         TARGETED_DEVICE_FAMILY: "1,2"
   MeetingAssistMacApp:
+    sources:
+      - path: Xcode/MeetingAssistMacApp.swift
+      - path: Xcode/Assets.xcassets
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Xcode/MeetingAssistMacApp.entitlements
@@ -85,6 +155,8 @@ CODE_SIGN_ENTITLEMENTS = Xcode/MeetingAssistMacApp.entitlements;
 ENABLE_HARDENED_RUNTIME = YES;
 MARKETING_VERSION = 1.0;
 CURRENT_PROJECT_VERSION = 15;
+Assets.xcassets in Resources;
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 `
   );
@@ -110,7 +182,7 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 </dict>`
   );
   if (includeIcons) {
-    writeFixtureFile(resolve(appleDir, "Xcode", "Assets.xcassets", "AppIcon.appiconset", "Contents.json"), "{}\n");
+    writeAppIconFixture(appleDir);
   }
   if (includePrivacy) {
     writeFixtureFile(resolve(appleDir, "Xcode", "PrivacyInfo.xcprivacy"), "{}\n");
@@ -121,6 +193,8 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 const defaultRepo = runReadiness();
 assert.equal(defaultRepo.status, 0);
 assert.equal(defaultRepo.output.ok, true);
+assert.equal(defaultRepo.output.blockers.some((blocker) => blocker.id === "ios_app_icon"), false);
+assert.equal(defaultRepo.output.blockers.some((blocker) => blocker.id === "mac_app_icon"), false);
 
 const blockedFixturePath = makeFixture({ includeIcons: false, includePrivacy: false });
 const blockedFixture = runReadiness(["--apple-dir", blockedFixturePath]);

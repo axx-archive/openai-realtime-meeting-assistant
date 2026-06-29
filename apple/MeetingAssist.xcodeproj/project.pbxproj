@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		053BA0A99A10672298F922C8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FECC724FECE267E15A909E85 /* Assets.xcassets */; };
 		4126CD4DA3086A8A0251803D /* MeetingAssistMacAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70C5E8C6CC57B1E5E67FF535 /* MeetingAssistMacAppTests.swift */; };
 		46AE19AA7104C374A9516C24 /* MeetingAssistApple in Frameworks */ = {isa = PBXBuildFile; productRef = C267E3576C3976EC9D735849 /* MeetingAssistApple */; };
 		4722127820354EB83BEC68DA /* MeetingAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7847077B70C54F91725C2387 /* MeetingAssistCore */; };
 		8272EC54D2530F2A3DC5D477 /* MeetingAssistMac in Frameworks */ = {isa = PBXBuildFile; productRef = 9A594FACB2D536B32E698BB2 /* MeetingAssistMac */; };
+		8DCD953804E6D7BC0A0FE3F6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FECC724FECE267E15A909E85 /* Assets.xcassets */; };
 		94002004E11959B1AD493A71 /* MeetingAssistMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2169807E01A7AF9D99E9B7 /* MeetingAssistMacApp.swift */; };
 		AB322D01DEACE017B25808AE /* MeetingAssistApple in Frameworks */ = {isa = PBXBuildFile; productRef = 9839A1375A9000BBCE9C873D /* MeetingAssistApple */; };
 		C872CAA6A21CBE6037BF0D14 /* MeetingAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8F426BC29973D4075D40EC75 /* MeetingAssistCore */; };
@@ -29,6 +31,7 @@
 		B9E8D8F28F7EB0D13887E744 /* MeetingAssistAppleAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAssistAppleAppTests.swift; sourceTree = "<group>"; };
 		EA2169807E01A7AF9D99E9B7 /* MeetingAssistMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAssistMacApp.swift; sourceTree = "<group>"; };
 		F78B60720C7462567DBB6059 /* MeetingAssistAppleAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MeetingAssistAppleAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FECC724FECE267E15A909E85 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +123,7 @@
 		A5C11D092975A67C916AC9B9 /* Xcode */ = {
 			isa = PBXGroup;
 			children = (
+				FECC724FECE267E15A909E85 /* Assets.xcassets */,
 				985613C88FF07C2E1131A81F /* MeetingAssistAppleApp.swift */,
 				EA2169807E01A7AF9D99E9B7 /* MeetingAssistMacApp.swift */,
 			);
@@ -174,6 +178,7 @@
 			buildConfigurationList = B7075C8FB9653359CAF298A7 /* Build configuration list for PBXNativeTarget "MeetingAssistAppleApp" */;
 			buildPhases = (
 				10759D1C399B18A528DC8721 /* Sources */,
+				25A37500313F511E3258B7F3 /* Resources */,
 				1AE97042B6F225BC9C020BF9 /* Frameworks */,
 			);
 			buildRules = (
@@ -193,6 +198,7 @@
 			buildConfigurationList = E7D0D2C3E35C775F01761AFD /* Build configuration list for PBXNativeTarget "MeetingAssistMacApp" */;
 			buildPhases = (
 				DC7CB22DF5EFC52654D7E02E /* Sources */,
+				3FE5C767DA48DB98EF5314E9 /* Resources */,
 				6C87BE12A1B5528F1D729333 /* Frameworks */,
 			);
 			buildRules = (
@@ -242,6 +248,25 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		25A37500313F511E3258B7F3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DCD953804E6D7BC0A0FE3F6 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3FE5C767DA48DB98EF5314E9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				053BA0A99A10672298F922C8 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		09DAC0D21073B631AD04C97A /* Sources */ = {
@@ -298,7 +323,7 @@
 		0866A58D9AA132879A516E65 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 15;
 				INFOPLIST_FILE = "Xcode/MeetingAssistAppleApp-Info.plist";
@@ -317,7 +342,7 @@
 		32EB7F9C852C45AA3927A376 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 15;
 				INFOPLIST_FILE = "Xcode/MeetingAssistAppleApp-Info.plist";

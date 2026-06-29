@@ -76,14 +76,117 @@ function walk(dir, visit) {
   }
 }
 
-function hasAppIconSet(appleDir, iconName) {
-  let found = false;
+const iosAppIconSlots = [
+  ["iphone", "20x20", "2x"],
+  ["iphone", "20x20", "3x"],
+  ["iphone", "29x29", "2x"],
+  ["iphone", "29x29", "3x"],
+  ["iphone", "40x40", "2x"],
+  ["iphone", "40x40", "3x"],
+  ["iphone", "60x60", "2x"],
+  ["iphone", "60x60", "3x"],
+  ["ipad", "20x20", "1x"],
+  ["ipad", "20x20", "2x"],
+  ["ipad", "29x29", "1x"],
+  ["ipad", "29x29", "2x"],
+  ["ipad", "40x40", "1x"],
+  ["ipad", "40x40", "2x"],
+  ["ipad", "76x76", "1x"],
+  ["ipad", "76x76", "2x"],
+  ["ipad", "83.5x83.5", "2x"],
+  ["ios-marketing", "1024x1024", "1x"],
+];
+
+const macAppIconSlots = [
+  ["mac", "16x16", "1x"],
+  ["mac", "16x16", "2x"],
+  ["mac", "32x32", "1x"],
+  ["mac", "32x32", "2x"],
+  ["mac", "128x128", "1x"],
+  ["mac", "128x128", "2x"],
+  ["mac", "256x256", "1x"],
+  ["mac", "256x256", "2x"],
+  ["mac", "512x512", "1x"],
+  ["mac", "512x512", "2x"],
+];
+
+function appIconSlotKey(idiom, size, scale) {
+  return `${idiom}:${size}:${scale}`;
+}
+
+function expectedIconPixels(size, scale) {
+  const points = Number(size.split("x")[0]);
+  const multiplier = Number(scale.replace("x", ""));
+  return Math.round(points * multiplier);
+}
+
+function pngDimensions(path) {
+  const data = readFileSync(path);
+  const signature = "89504e470d0a1a0a";
+  if (
+    data.length < 24 ||
+    data.subarray(0, 8).toString("hex") !== signature ||
+    data.subarray(12, 16).toString("ascii") !== "IHDR"
+  ) {
+    return null;
+  }
+  return {
+    width: data.readUInt32BE(16),
+    height: data.readUInt32BE(20),
+  };
+}
+
+function findAppIconSet(appleDir, iconName) {
+  let found = "";
   walk(appleDir, (path) => {
     if (path.endsWith(`${iconName}.appiconset`) && existsSync(join(path, "Contents.json"))) {
-      found = true;
+      found = path;
     }
   });
   return found;
+}
+
+function appIconSetStatus(appleDir, iconName, requiredSlots) {
+  if (!iconName) {
+    return { ok: false, missing: ["missing_app_icon_name"] };
+  }
+  const iconSetPath = findAppIconSet(appleDir, iconName);
+  if (!iconSetPath) {
+    return { ok: false, missing: [`missing_${iconName}.appiconset`] };
+  }
+
+  let contents;
+  try {
+    contents = JSON.parse(readText(join(iconSetPath, "Contents.json")));
+  } catch {
+    return { ok: false, missing: [`invalid_${iconName}_contents_json`] };
+  }
+
+  const images = Array.isArray(contents.images) ? contents.images : [];
+  const imagesBySlot = new Map(
+    images.map((image) => [appIconSlotKey(image.idiom, image.size, image.scale), image])
+  );
+  const missing = [];
+  for (const [idiom, size, scale] of requiredSlots) {
+    const key = appIconSlotKey(idiom, size, scale);
+    const image = imagesBySlot.get(key);
+    if (!image?.filename) {
+      missing.push(key);
+      continue;
+    }
+    const imagePath = join(iconSetPath, image.filename);
+    if (!existsSync(imagePath)) {
+      missing.push(`${key}:file`);
+      continue;
+    }
+    const dimensions = pngDimensions(imagePath);
+    const pixels = expectedIconPixels(size, scale);
+    if (!dimensions || dimensions.width !== pixels || dimensions.height !== pixels) {
+      missing.push(`${key}:dimensions`);
+    }
+  }
+
+  return { ok: missing.length === 0, missing };
 }
 
 function extractSetting(text, key, assignmentPattern) {
@@ -221,6 +324,21 @@ function analyze(options) {
     textHas(pbxproj, /PRODUCT_BUNDLE_IDENTIFIER = co\.thebonfire\.meetingassist\.mac;/);
   addCheck(checks, Boolean(hasBundleIds), "bundle_identifiers", "iOS and macOS bundle identifiers should be stable.");
 
+  addCheck(
+    checks,
+    textHas(projectYml, /path:\s*Xcode\/Assets\.xcassets/) &&
+      textHas(pbxproj, /Assets\.xcassets in Resources/),
+    "asset_catalog_wired",
+    "iOS and macOS app targets should include the shared asset catalog."
+  );
+  addCheck(
+    checks,
+    textHas(projectYml, /ASSETCATALOG_COMPILER_APPICON_NAME:\s*AppIcon/) &&
+      (pbxproj.match(/ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/g) ?? []).length >= 2,
+    "app_icon_build_settings",
+    "Generated Xcode project should compile AppIcon for both app targets."
+  );
+
   const hasTeam =
     Boolean(process.env.DEVELOPMENT_TEAM || process.env.APPLE_DEVELOPMENT_TEAM) ||
     textHas(projectYml, /DEVELOPMENT_TEAM:\s*[A-Z0-9]+/) ||
@@ -238,17 +356,27 @@ function analyze(options) {
     "ASSETCATALOG_COMPILER_APPICON_NAME",
     /ASSETCATALOG_COMPILER_APPICON_NAME = ([^;]*);/
   );
-  if (!iosIconName || !hasAppIconSet(appleDir, iosIconName)) {
-    addBlocker(blockers, "ios_app_icon", "Add a real iOS/iPadOS AppIcon asset catalog before TestFlight upload.");
+  const iosIconStatus = appIconSetStatus(appleDir, iosIconName, iosAppIconSlots);
+  if (!iosIconStatus.ok) {
+    addBlocker(
+      blockers,
+      "ios_app_icon",
+      `Add a complete iOS/iPadOS AppIcon asset catalog before TestFlight upload. Missing: ${iosIconStatus.missing.slice(0, 5).join(", ")}`
+    );
   }
 
   const macIconName = extractSetting(
-    pbxproj,
+    projectYml,
     "ASSETCATALOG_COMPILER_APPICON_NAME",
     /ASSETCATALOG_COMPILER_APPICON_NAME = ([^;]*);/
   );
-  if (!macIconName || !hasAppIconSet(appleDir, macIconName)) {
-    addBlocker(blockers, "mac_app_icon", "Add a real macOS AppIcon asset catalog before distribution.");
+  const macIconStatus = appIconSetStatus(appleDir, macIconName, macAppIconSlots);
+  if (!macIconStatus.ok) {
+    addBlocker(
+      blockers,
+      "mac_app_icon",
+      `Add a complete macOS AppIcon asset catalog before distribution. Missing: ${macIconStatus.missing.slice(0, 5).join(", ")}`
+    );
   }
 
   if (!existsSync(privacyManifestPath)) {
