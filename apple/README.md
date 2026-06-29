@@ -229,14 +229,18 @@ Before archive/upload/notarization on that machine, run the generated
 ```bash
 node scripts/native-apple-release-operator-preflight.mjs \
   --proofpack-dir artifacts/native-apple/<run-id> \
+  --require-privacy-manifest \
   --require-notary-profile \
   --run-build-rehearsal
 ```
 
 The preflight checks local Apple tooling, schemes, ignored signing config,
-default release readiness, proof-pack command-plan consistency, export option
-plists, notary profile environment presence, and Release generic iOS/macOS
-builds with signing disabled. It still does not prove App Store Connect login,
+default release readiness, approved privacy manifest presence/wiring,
+proof-pack command-plan consistency, export option plists, notary profile
+environment presence, and Release generic iOS/macOS builds with signing
+disabled. The generated command pack includes `--require-privacy-manifest` so
+the Apple-account operator run hard-stops until `PrivacyInfo.xcprivacy` exists
+and is bundled. It still does not prove App Store Connect login,
 provisioning-profile download, notary profile validity, physical devices, or
 actual upload/notarization.
 

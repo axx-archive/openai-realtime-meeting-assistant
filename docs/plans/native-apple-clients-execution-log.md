@@ -2721,3 +2721,81 @@ What worked:
   privacy boundary.
 - Making the app export exact inbox filenames removes a manual copy/rename step
   from the physical-device proof-pack run.
+
+## Wave 37
+
+Status: `wave37_operator_privacy_manifest_fail_closed_checkpoint_validated`
+
+Scope:
+- Continued the Apple-account operator handoff path without fabricating
+  product/legal privacy answers.
+- Assigned a read-only release explorer. The explorer identified that strict
+  readiness correctly blocks missing `PrivacyInfo.xcprivacy`, but the generated
+  operator command pack could still lead an Apple-account machine through
+  preflight/archive preparation before the manifest existed.
+- Added `--require-privacy-manifest` to
+  `scripts/native-apple-release-operator-preflight.mjs`. When set, the
+  preflight parses default release readiness output and turns the existing
+  `privacy_manifest` blocker into a hard `readyForOperator:false` result.
+- Updated `scripts/native-apple-release-package-plan.mjs` so generated
+  `operatorPreflight` commands include `--require-privacy-manifest` by default.
+- Updated Apple README operator-handoff docs to state that real
+  archive/upload/notarization preflight hard-stops until the approved, wired
+  privacy manifest exists.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-operator-preflight.mjs` passed.
+- `node --check scripts/native-apple-release-package-plan.mjs` passed.
+- `node --check scripts/native-apple-release-operator-preflight.test.mjs`
+  passed.
+- `node --check scripts/native-apple-release-package-plan.test.mjs` passed.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 5
+  checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 9 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 55 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  exited nonzero as expected with `ok:true`, `readyForDistribution:false`, and
+  blockers for Apple development team/signing, privacy manifest, and release
+  evidence.
+- With synthetic non-secret signing and notary environment values,
+  `node scripts/native-apple-release-operator-preflight.mjs --apple-dir apple --require-privacy-manifest --require-notary-profile`
+  exited nonzero with `readyForOperator:false` and a single hard
+  `privacy_manifest` blocker.
+- The operator-preflight test also generated a privacy manifest from approved
+  fixture decisions in a temporary copied Apple project and verified
+  `privacy_manifest_required` passes when the manifest is shape-complete and
+  wired.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This wave does not create or approve `PrivacyInfo.xcprivacy`; it only makes
+  the real operator handoff fail closed until that external product/legal
+  decision has been made and the generated manifest is wired.
+- Apple signing/team setup, real physical-device media proof, restrictive TURN
+  proof, real TestFlight upload, macOS notarization, stapling, and Gatekeeper
+  proof remain external release blockers.
+
+What worked:
+- Reusing default readiness output avoided creating a second privacy-manifest
+  validator.
+- Making the generated operator command stricter than casual local preflight
+  keeps lightweight local checks possible while preventing the real release
+  checklist from drifting past privacy approval.
+- Testing both missing and present privacy manifests caught the intended
+  fail-closed behavior without committing a guessed production manifest.

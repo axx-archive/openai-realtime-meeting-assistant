@@ -381,10 +381,11 @@ function buildPlan(args) {
         ...(proofpack ? ["--proofpack-dir", artifactRef(proofpack.proofpackDir)] : []),
         "--configuration",
         configuration,
+        "--require-privacy-manifest",
         "--require-notary-profile",
         "--run-build-rehearsal",
       ],
-      "Runs the offline Apple-account machine preflight, including tool checks, proof-pack command-plan consistency, notary profile presence, and Release generic iOS/macOS build rehearsals with signing disabled."
+      "Runs the offline Apple-account machine preflight, including tool checks, privacy-manifest presence/wiring, proof-pack command-plan consistency, notary profile presence, and Release generic iOS/macOS build rehearsals with signing disabled."
     ),
     preflightSigning: commandSpec(
       ["node", "scripts/native-apple-configure-signing.mjs", "--apple-dir", repoRelative(appleDir), "--validate-only"],

@@ -119,6 +119,7 @@ assert.equal(plan.observationInputs.notarizationTemplate, `artifacts/native-appl
 assert.equal(plan.observationInputs.notarizationInput, `artifacts/native-apple/${runId}/inbox/notarization-observation.json`);
 assert.match(plan.commands.operatorPreflight.shell, /native-apple-release-operator-preflight\.mjs/);
 assert.match(plan.commands.operatorPreflight.shell, /--run-build-rehearsal/);
+assert.match(plan.commands.operatorPreflight.shell, /--require-privacy-manifest/);
 assert.match(plan.commands.operatorPreflight.shell, /--require-notary-profile/);
 assert.match(plan.nextSteps[0], /operatorPreflight/);
 assert.match(plan.commands.iosArchive.shell, /generic\/platform=iOS/);

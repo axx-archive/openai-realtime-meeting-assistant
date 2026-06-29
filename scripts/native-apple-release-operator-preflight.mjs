@@ -11,7 +11,8 @@ function usage() {
     "Usage:",
     "  node scripts/native-apple-release-operator-preflight.mjs [--apple-dir apple]",
     "    [--proofpack-dir artifacts/native-apple/<run-id>] [--configuration Release]",
-    "    [--require-notary-profile] [--run-build-rehearsal]",
+    "    [--require-privacy-manifest] [--require-notary-profile]",
+    "    [--run-build-rehearsal]",
     "",
     "Runs an offline, non-secret preflight for the Apple-account machine before",
     "executing the native Apple release command pack. It does not archive, upload,",
@@ -25,6 +26,7 @@ function parseArgs(argv) {
     appleDir: "apple",
     proofpackDir: "",
     configuration: "Release",
+    requirePrivacyManifest: false,
     requireNotaryProfile: false,
     runBuildRehearsal: false,
     help: false,
@@ -41,6 +43,8 @@ function parseArgs(argv) {
     } else if (arg === "--configuration") {
       args.configuration = requiredValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--require-privacy-manifest") {
+      args.requirePrivacyManifest = true;
     } else if (arg === "--require-notary-profile") {
       args.requireNotaryProfile = true;
     } else if (arg === "--run-build-rehearsal") {
@@ -174,7 +178,7 @@ function checkSigning(appleDir, checks, blockers) {
   }
 }
 
-function checkDefaultReadiness(appleDir, checks, blockers) {
+function checkDefaultReadiness(appleDir, checks, blockers, args) {
   const result = run(process.execPath, [
     "scripts/native-apple-release-readiness.mjs",
     "--apple-dir",
@@ -191,6 +195,33 @@ function checkDefaultReadiness(appleDir, checks, blockers) {
       id: "default_release_readiness",
       detail: "Run node scripts/native-apple-release-readiness.mjs and fix repo-owned prerequisites before the operator run.",
     });
+  }
+
+  let readiness = null;
+  try {
+    readiness = JSON.parse(result.stdout || "{}");
+  } catch {
+    readiness = null;
+  }
+
+  if (args.requirePrivacyManifest) {
+    const privacyBlocker = readiness?.blockers?.find((blocker) => blocker?.id === "privacy_manifest");
+    const privacyOk = ok && !privacyBlocker;
+    checks.push({
+      id: "privacy_manifest_required",
+      ok: privacyOk,
+      detail: privacyOk
+        ? "PrivacyInfo.xcprivacy is present, shape-complete, and wired into the generated app targets."
+        : "PrivacyInfo.xcprivacy is missing, invalid, or not wired into the generated app targets.",
+    });
+    if (!privacyOk) {
+      blockers.push({
+        id: "privacy_manifest",
+        detail:
+          privacyBlocker?.detail ??
+          "Generate and wire apple/Xcode/PrivacyInfo.xcprivacy from approved privacy decisions before TestFlight or macOS distribution.",
+      });
+    }
   }
 }
 
@@ -406,7 +437,7 @@ function buildPreflight(args) {
   }
 
   checkSigning(appleDir, checks, blockers);
-  checkDefaultReadiness(appleDir, checks, blockers);
+  checkDefaultReadiness(appleDir, checks, blockers, args);
 
   if (args.runBuildRehearsal) {
     if (existsSync(projectPath)) {
