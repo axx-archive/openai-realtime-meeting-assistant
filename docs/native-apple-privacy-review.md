@@ -25,6 +25,12 @@ manifest.
   payload includes platform/version, enabled media state, remote tile counts,
   WebRTC RTP counters, jitter/loss/RTT summaries, and ICE candidate-pair
   metadata.
+- Native QA evidence snapshots can be copied locally from the app into ignored
+  release proof-pack artifacts. They contain assertion booleans, platform/build
+  context, safe WebRTC counters, remote tile counts, and candidate-pair type/RTT
+  summaries. They intentionally omit raw SDP, raw ICE candidates, IP addresses,
+  TURN credentials, cookies, headers, API keys, Team IDs, certificates, and
+  provisioning data.
 - The Apple package has no app-owned analytics SDK in source. Its direct native
   binary dependency is `LiveKitWebRTC`, pinned through SwiftPM.
 

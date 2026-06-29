@@ -418,6 +418,50 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.remoteVideoTracks.map(\.displayName), ["Caitlyn"])
     }
 
+    func testCaptureMediaEvidenceUpdatesExportJSONFromSessionStats() async {
+        let evidence = Self.passingMediaEvidence()
+        let session = MockRoomSession(mediaEvidenceSnapshot: evidence)
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.captureMediaEvidence()
+
+        XCTAssertEqual(model.latestMediaEvidence, evidence)
+        XCTAssertEqual(model.statusText, "Media evidence captured")
+        XCTAssertFalse(model.isCapturingMediaEvidence)
+        let json = model.latestMediaEvidenceJSON ?? ""
+        XCTAssertTrue(json.contains("\"mediaAssertions\""))
+        XCTAssertTrue(json.contains("\"cameraPublished\""))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("candidate:"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("turn:"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("alice:secret"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("Bearer "))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("BEGIN PRIVATE KEY"))
+    }
+
+    func testMediaEvidenceHandlerUpdatesLatestEvidence() async {
+        let evidence = Self.passingMediaEvidence()
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await session.emitMediaEvidence(evidence)
+
+        XCTAssertEqual(model.latestMediaEvidence, evidence)
+        XCTAssertEqual(model.latestMediaEvidenceJSON?.contains("\"status\" : \"observed\""), true)
+        XCTAssertEqual(model.latestMediaEvidenceJSON?.contains("\"releaseEligible\" : false"), true)
+    }
+
     func testRoomAndBoardSnapshotsUpdateNativeState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
@@ -631,6 +675,31 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertFalse(model.canUndoDelete)
         XCTAssertEqual(model.statusText, "Left room")
     }
+
+    private static func passingMediaEvidence() -> NativeMediaEvidenceSnapshot {
+        NativeMediaEvidenceSnapshot(
+            source: NativeMediaQualitySnapshot(
+                at: 1_000,
+                outboundAudioBytesSent: 1_200,
+                outboundAudioPacketsSent: 12,
+                outboundVideoBytesSent: 9_000,
+                outboundVideoFramesSent: 90,
+                inboundAudioPacketsReceived: 80,
+                inboundVideoDecoded: 140,
+                candidatePair: NativeMediaQualityCandidatePair(
+                    protocol: "udp",
+                    networkType: "wifi",
+                    localCandidateType: "host",
+                    remoteCandidateType: "relay",
+                    currentRoundTripTime: 0.08
+                )
+            ),
+            capturedAt: "2026-06-29T17:00:00Z",
+            client: NativeMediaEvidenceClient(platform: "ios", version: "test"),
+            lifecycle: .connected,
+            remoteVideoTiles: 1
+        )
+    }
 }
 
 private struct MockConfigLoader: NativeRoomConfigLoading {
@@ -703,6 +772,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var meetingArchiveHandler: NativeMeetingArchiveHandler?
     private(set) var scoutChatEventsHandler: NativeScoutChatEventsHandler?
     private(set) var mediaRecoveryHandler: NativeMediaRecoveryHandler?
+    private(set) var mediaEvidenceHandler: NativeMediaEvidenceHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -723,11 +793,18 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var scoutChatResetCount = 0
 
     private var lifecycle: RoomLifecycleState = .connected
+    private let mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot
 
-    init(error: Error? = nil, screenShareError: Error? = nil, iceRestartError: Error? = nil) {
+    init(
+        error: Error? = nil,
+        screenShareError: Error? = nil,
+        iceRestartError: Error? = nil,
+        mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot = NativeMediaEvidenceSnapshot(source: NativeMediaQualitySnapshot())
+    ) {
         self.error = error
         self.screenShareError = screenShareError
         self.iceRestartError = iceRestartError
+        self.mediaEvidenceSnapshot = mediaEvidenceSnapshot
     }
 
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -805,6 +882,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         mediaRecoveryHandler = handler
     }
 
+    func setMediaEvidenceHandler(_ handler: NativeMediaEvidenceHandler?) async {
+        mediaEvidenceHandler = handler
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -826,6 +907,11 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         iceRestartReasons.append(reason)
         if let iceRestartError { throw iceRestartError }
         lifecycle = .reconnecting
+    }
+
+    func captureMediaEvidenceSnapshot() async throws -> NativeMediaEvidenceSnapshot {
+        await mediaEvidenceHandler?(mediaEvidenceSnapshot)
+        return mediaEvidenceSnapshot
     }
 
     func setRecordingEnabled(_ enabled: Bool) async throws {
@@ -894,6 +980,10 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func emitMediaRecoveryEvent(_ event: NativeMediaRecoveryEvent) async {
         await mediaRecoveryHandler?(event)
+    }
+
+    func emitMediaEvidence(_ evidence: NativeMediaEvidenceSnapshot) async {
+        await mediaEvidenceHandler?(evidence)
     }
 
     func sendParticipantMediaState() async throws {

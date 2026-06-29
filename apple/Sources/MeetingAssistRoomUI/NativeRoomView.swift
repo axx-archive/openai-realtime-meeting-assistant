@@ -1,7 +1,14 @@
 import MeetingAssistCore
 import MeetingAssistDesign
+import MeetingAssistRoomRTC
 import Foundation
 import SwiftUI
+
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 public struct NativeRoomView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -11,6 +18,7 @@ public struct NativeRoomView: View {
     @State private var boardEditorDraft: BoardCardEditorDraft?
     @State private var scoutChatDraft = ""
     @State private var roomScoutDraft = ""
+    @State private var mediaEvidenceCopied = false
 
     public init(model: NativeRoomViewModel = NativeRoomViewModel()) {
         _model = StateObject(wrappedValue: model)
@@ -24,6 +32,9 @@ public struct NativeRoomView: View {
                 remoteVideoGrid
                 if model.canUseRoomControls || !model.roomParticipants.isEmpty {
                     roomState
+                }
+                if model.canUseRoomControls || model.latestMediaEvidence != nil {
+                    mediaEvidencePanel
                 }
                 if model.canUseRoomControls || !model.boardCards.isEmpty {
                     boardPreview
@@ -216,6 +227,61 @@ public struct NativeRoomView: View {
                         participantRow(name)
                     }
                 }
+            }
+        }
+    }
+
+    private var mediaEvidencePanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("QA Evidence", systemImage: "checkmark.shield")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    mediaEvidenceCopied = false
+                    Task { await model.captureMediaEvidence() }
+                } label: {
+                    Label("Capture", systemImage: "waveform.path.ecg.rectangle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canUseRoomControls || model.isCapturingMediaEvidence)
+
+                Button {
+                    copyMediaEvidenceJSON()
+                } label: {
+                    Label(mediaEvidenceCopied ? "Copied" : "Copy", systemImage: mediaEvidenceCopied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.latestMediaEvidenceJSON == nil)
+            }
+
+            if let evidence = model.latestMediaEvidence {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 8) {
+                    mediaEvidenceFlag("Mic", evidence.mediaAssertions.microphonePublished)
+                    mediaEvidenceFlag("Camera", evidence.mediaAssertions.cameraPublished)
+                    mediaEvidenceFlag("Remote audio", evidence.mediaAssertions.remoteAudioReceived)
+                    mediaEvidenceFlag("Remote video", evidence.mediaAssertions.remoteVideoRendered)
+                    mediaEvidenceFlag("Relay", evidence.selectedCandidate.relayCandidateSelected)
+                }
+
+                Text(mediaEvidenceCandidateSummary(evidence))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                if let json = model.latestMediaEvidenceJSON {
+                    Text(json)
+                        .font(.caption.monospaced())
+                        .lineLimit(12)
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            } else {
+                Text("No evidence captured")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -431,6 +497,48 @@ public struct NativeRoomView: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func mediaEvidenceFlag(_ title: String, _ passed: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: passed ? "checkmark.circle.fill" : "xmark.circle")
+                .foregroundStyle(passed ? .green : .secondary)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func mediaEvidenceCandidateSummary(_ evidence: NativeMediaEvidenceSnapshot) -> String {
+        let candidate = evidence.selectedCandidate
+        let parts = [
+            candidate.protocol,
+            candidate.networkType,
+            candidate.localCandidateType,
+            candidate.remoteCandidateType,
+        ]
+        if parts.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+           candidate.currentRoundTripTime == 0 {
+            return "Candidate stats unavailable"
+        }
+        let rtt = String(format: "%.0f ms", candidate.currentRoundTripTime * 1_000)
+        return "Candidate \(candidate.protocol)/\(candidate.networkType) local \(candidate.localCandidateType) remote \(candidate.remoteCandidateType), RTT \(rtt)"
+    }
+
+    private func copyMediaEvidenceJSON() {
+        guard let json = model.latestMediaEvidenceJSON else { return }
+        #if os(iOS)
+        UIPasteboard.general.string = json
+        #elseif os(macOS)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(json, forType: .string)
+        #endif
+        mediaEvidenceCopied = true
     }
 
     private func boardRow(_ card: KanbanCard) -> some View {

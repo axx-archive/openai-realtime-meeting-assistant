@@ -3,6 +3,29 @@ import XCTest
 @testable import MeetingAssistRoomRTC
 
 final class NativeRoomRTCClientTests: XCTestCase {
+    private static let disallowedEvidenceLeakTokens = [
+        "candidate:842163049",
+        "a=candidate",
+        "v=0",
+        "a=ice-ufrag",
+        "turn:alice",
+        "turns:relay",
+        "alice:secret",
+        "192.168.",
+        "10.0.0.",
+        "203.0.113.",
+        "2001:db8",
+        "Cookie:",
+        "Authorization:",
+        "Bearer ",
+        "sk-proj-",
+        "ABCDE12345",
+        "BEGIN PRIVATE KEY",
+        ".mobileprovision",
+        "localCandidateId",
+        "remoteCandidateId",
+    ]
+
     func testWebRTCBinaryIsImportable() {
         XCTAssertTrue(WebRTCLinkStatus.isWebRTCImportable)
     }
@@ -185,6 +208,90 @@ final class NativeRoomRTCClientTests: XCTestCase {
             )
         )
         XCTAssertEqual(snapshot.outboundRtt, 0.082)
+    }
+
+    func testNativeMediaEvidenceSnapshotDerivesAssertionsFromStatsOnly() throws {
+        let source = NativeMediaQualitySnapshot(
+            at: 4_000,
+            outboundAudioBytesSent: 12_000,
+            outboundAudioPacketsSent: 60,
+            outboundVideoBytesSent: 90_000,
+            outboundVideoFramesEncoded: 300,
+            outboundVideoFramesSent: 280,
+            inboundAudioPacketsReceived: 500,
+            inboundVideoPacketsReceived: 1_000,
+            inboundVideoDecoded: 250,
+            outboundRtt: 0.082,
+            candidatePair: NativeMediaQualityCandidatePair(
+                protocol: "udp",
+                networkType: "wifi",
+                localCandidateType: "host",
+                remoteCandidateType: "relay",
+                currentRoundTripTime: 0.082
+            )
+        )
+
+        let evidence = NativeMediaEvidenceSnapshot(
+            source: source,
+            capturedAt: "2026-06-29T17:00:00Z",
+            client: NativeMediaEvidenceClient(platform: "ios", version: "test"),
+            lifecycle: .connected,
+            remoteVideoTiles: 1
+        )
+
+        XCTAssertEqual(evidence.schemaVersion, 1)
+        XCTAssertEqual(evidence.artifactType, "native_device_media")
+        XCTAssertEqual(evidence.claimScope, "qa_snapshot")
+        XCTAssertFalse(evidence.releaseEligible)
+        XCTAssertEqual(evidence.status, "observed")
+        XCTAssertEqual(evidence.releaseEvidenceSummary.status, "pending")
+        XCTAssertTrue(evidence.mediaAssertions.microphonePublished)
+        XCTAssertTrue(evidence.mediaAssertions.cameraPublished)
+        XCTAssertTrue(evidence.mediaAssertions.remoteAudioReceived)
+        XCTAssertTrue(evidence.mediaAssertions.remoteVideoRendered)
+        XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
+        XCTAssertEqual(evidence.counters.outboundVideoFramesSent, 280)
+        XCTAssertEqual(evidence.stats.observationWindow, "cumulative_peer_connection_stats")
+        XCTAssertEqual(evidence.assertionEvidence.cameraPublished.source, "outboundVideoFramesSent")
+        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "remoteVideoTiles+inboundVideoDecoded")
+        XCTAssertTrue(evidence.limitations.contains("Do not mark ReleaseEvidence physicalDeviceMedia as passed from a qa_snapshot artifact."))
+        XCTAssertEqual(evidence.client.platform, "ios")
+
+        let encoded = String(data: try JSONEncoder().encode(evidence), encoding: .utf8) ?? ""
+        for leaked in Self.disallowedEvidenceLeakTokens {
+            XCTAssertFalse(encoded.localizedCaseInsensitiveContains(leaked), "leaked sensitive media evidence detail: \(leaked)")
+        }
+    }
+
+    func testNativeMediaEvidenceDoesNotTreatEncodedFramesAsCameraProof() {
+        let source = NativeMediaQualitySnapshot(
+            outboundVideoFramesEncoded: 300,
+            inboundVideoDecoded: 250,
+            candidatePair: NativeMediaQualityCandidatePair(localCandidateType: "relay")
+        )
+
+        let evidence = NativeMediaEvidenceSnapshot(source: source, remoteVideoTiles: 1)
+
+        XCTAssertFalse(evidence.mediaAssertions.cameraPublished)
+        XCTAssertFalse(evidence.mediaAssertions.microphonePublished)
+        XCTAssertFalse(evidence.mediaAssertions.remoteAudioReceived)
+        XCTAssertTrue(evidence.mediaAssertions.remoteVideoRendered)
+        XCTAssertEqual(evidence.status, "observed")
+        XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
+    }
+
+    func testNativeMediaEvidenceRequiresRemoteTileAndDecodedVideoForRemoteVideoRendered() {
+        let decodedWithoutTile = NativeMediaEvidenceSnapshot(
+            source: NativeMediaQualitySnapshot(inboundVideoDecoded: 250),
+            remoteVideoTiles: 0
+        )
+        let tileWithoutDecoded = NativeMediaEvidenceSnapshot(
+            source: NativeMediaQualitySnapshot(inboundVideoPacketsReceived: 250),
+            remoteVideoTiles: 1
+        )
+
+        XCTAssertFalse(decodedWithoutTile.mediaAssertions.remoteVideoRendered)
+        XCTAssertFalse(tileWithoutDecoded.mediaAssertions.remoteVideoRendered)
     }
 
     func testMediaQualitySnapshotFallsBackToSucceededCandidatePairAndMediaType() {

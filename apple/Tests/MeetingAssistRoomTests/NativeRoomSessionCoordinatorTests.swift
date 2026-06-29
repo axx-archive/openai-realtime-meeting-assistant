@@ -302,6 +302,115 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertTrue(payload.error.message.contains("peerConnectionNotConfigured"))
     }
 
+    func testCaptureMediaEvidenceSnapshotDerivesProofFromNativeStats() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            mediaQualitySnapshots: [
+                NativeMediaQualitySnapshot(
+                    at: 1_000,
+                    outboundAudioBytesSent: 1_200,
+                    outboundAudioPacketsSent: 12,
+                    outboundVideoBytesSent: 9_000,
+                    outboundVideoFramesEncoded: 95,
+                    outboundVideoFramesSent: 90,
+                    inboundAudioPacketsReceived: 80,
+                    inboundVideoPacketsReceived: 160,
+                    inboundVideoDecoded: 140,
+                    outboundRtt: 0.08,
+                    candidatePair: NativeMediaQualityCandidatePair(
+                        protocol: "udp",
+                        networkType: "wifi",
+                        localCandidateType: "host",
+                        remoteCandidateType: "relay",
+                        currentRoundTripTime: 0.08
+                    )
+                )
+            ]
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+        await coordinator.setMuted(true)
+        await coordinator.setCameraOff(true)
+        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"]))
+        let evidence = try await coordinator.captureMediaEvidenceSnapshot()
+
+        XCTAssertEqual(evidence.artifactType, "native_device_media")
+        XCTAssertEqual(evidence.claimScope, "qa_snapshot")
+        XCTAssertFalse(evidence.releaseEligible)
+        XCTAssertEqual(evidence.status, "observed")
+        XCTAssertEqual(evidence.releaseEvidenceSummary.status, "pending")
+        XCTAssertEqual(evidence.client.platform, "ios")
+        XCTAssertEqual(evidence.lifecycle, .connected)
+        XCTAssertEqual(evidence.remoteVideoTiles, 1)
+        XCTAssertTrue(evidence.mediaAssertions.microphonePublished)
+        XCTAssertTrue(evidence.mediaAssertions.cameraPublished)
+        XCTAssertTrue(evidence.mediaAssertions.remoteAudioReceived)
+        XCTAssertTrue(evidence.mediaAssertions.remoteVideoRendered)
+        XCTAssertEqual(evidence.assertionEvidence.cameraPublished.value, 90)
+        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "remoteVideoTiles+inboundVideoDecoded")
+        XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
+
+        let encoded = String(data: try JSONEncoder().encode(evidence), encoding: .utf8) ?? ""
+        for leaked in disallowedMediaEvidenceLeakTokens {
+            XCTAssertFalse(encoded.localizedCaseInsensitiveContains(leaked), "leaked sensitive media evidence detail: \(leaked)")
+        }
+    }
+
+    func testMediaQualityReportPublishesMediaEvidenceHandler() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            mediaQualitySnapshots: [
+                NativeMediaQualitySnapshot(
+                    at: 1_000,
+                    outboundAudioPacketsSent: 12,
+                    outboundVideoFramesSent: 90,
+                    inboundAudioPacketsReceived: 80,
+                    inboundVideoDecoded: 140
+                )
+            ]
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+        let collector = MediaEvidenceCollector()
+        await coordinator.setMediaEvidenceHandler { evidence in
+            await collector.append(evidence)
+        }
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"]))
+        try await coordinator.sendMediaQualityReport()
+
+        let values = await collector.values()
+        XCTAssertEqual(values.count, 1)
+        XCTAssertEqual(values.first?.status, "observed")
+        XCTAssertEqual(values.first?.mediaAssertions.cameraPublished, true)
+        XCTAssertEqual(values.first?.mediaAssertions.remoteVideoRendered, true)
+    }
+
     func testNativeMediaErrorRedactsNetworkSecretsFromMessage() async throws {
         let rawMessage = """
         ICE failed candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host raddr 10.0.0.2 rport 60000;
@@ -1186,6 +1295,29 @@ private struct RedactionProbeError: Error, CustomStringConvertible {
     var description: String
 }
 
+private let disallowedMediaEvidenceLeakTokens = [
+    "candidate:842163049",
+    "a=candidate",
+    "v=0",
+    "a=ice-ufrag",
+    "turn:alice",
+    "turns:relay",
+    "alice:secret",
+    "192.168.",
+    "10.0.0.",
+    "203.0.113.",
+    "2001:db8",
+    "Cookie:",
+    "Authorization:",
+    "Bearer ",
+    "sk-proj-",
+    "ABCDE12345",
+    "BEGIN PRIVATE KEY",
+    ".mobileprovision",
+    "localCandidateId",
+    "remoteCandidateId",
+]
+
 private actor RemoteVideoInfoCollector {
     private var values: [NativeRemoteVideoTrackInfo] = []
 
@@ -1303,6 +1435,18 @@ private actor MediaRecoveryCollector {
     }
 
     func values() -> [NativeMediaRecoveryEvent] {
+        storedValues
+    }
+}
+
+private actor MediaEvidenceCollector {
+    private var storedValues: [NativeMediaEvidenceSnapshot] = []
+
+    func append(_ value: NativeMediaEvidenceSnapshot) {
+        storedValues.append(value)
+    }
+
+    func values() -> [NativeMediaEvidenceSnapshot] {
         storedValues
     }
 }

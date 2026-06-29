@@ -82,6 +82,7 @@ public typealias NativeMemoryEntriesHandler = @Sendable ([MemoryEntry]) async ->
 public typealias NativeMeetingArchiveHandler = @Sendable (MeetingArchiveResult) async -> Void
 public typealias NativeScoutChatEventsHandler = @Sendable ([ScoutChatEvent]) async -> Void
 public typealias NativeMediaRecoveryHandler = @Sendable (NativeMediaRecoveryEvent) async -> Void
+public typealias NativeMediaEvidenceHandler = @Sendable (NativeMediaEvidenceSnapshot) async -> Void
 
 public struct NativeMediaRecoveryEvent: Equatable, Sendable {
     public var stage: String
@@ -132,8 +133,10 @@ public actor NativeRoomSessionCoordinator {
     private var currentMeetingArchive: MeetingArchiveResult?
     private var currentScoutChatEvents: [ScoutChatEvent] = []
     private var mediaRecoveryHandler: NativeMediaRecoveryHandler?
+    private var mediaEvidenceHandler: NativeMediaEvidenceHandler?
     private var mediaQualityTask: Task<Void, Never>?
     private var previousMediaQualitySnapshot: NativeMediaQualitySnapshot?
+    private var currentMediaEvidenceSnapshot: NativeMediaEvidenceSnapshot?
     private let mediaQualityReportIntervalNanoseconds: UInt64
 
     public init(
@@ -326,6 +329,12 @@ public actor NativeRoomSessionCoordinator {
         mediaRecoveryHandler = handler
     }
 
+    public func setMediaEvidenceHandler(_ handler: NativeMediaEvidenceHandler?) async {
+        mediaEvidenceHandler = handler
+        guard let handler, let currentMediaEvidenceSnapshot else { return }
+        await handler(currentMediaEvidenceSnapshot)
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -408,6 +417,20 @@ public actor NativeRoomSessionCoordinator {
 
     public func sendMediaQualityReport() async throws {
         try await publishMediaQualityReport()
+    }
+
+    public func captureMediaEvidenceSnapshot() async throws -> NativeMediaEvidenceSnapshot {
+        let snapshot: NativeMediaQualitySnapshot
+        do {
+            snapshot = try await rtc.mediaQualitySnapshot()
+        } catch {
+            await reportMediaError(stage: "media_evidence_snapshot", error: error)
+            throw error
+        }
+        let evidence = mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
+        currentMediaEvidenceSnapshot = evidence
+        await mediaEvidenceHandler?(evidence)
+        return evidence
     }
 
     public func leave() async {
@@ -520,6 +543,7 @@ public actor NativeRoomSessionCoordinator {
         currentMemoryEntries.removeAll()
         currentMeetingArchive = nil
         currentScoutChatEvents.removeAll()
+        currentMediaEvidenceSnapshot = nil
     }
 
     private func kanbanEvent(from envelope: WebSocketEnvelope) throws -> RoomEvent<JSONValue> {
@@ -754,11 +778,15 @@ public actor NativeRoomSessionCoordinator {
         }
         let previous = previousMediaQualitySnapshot
         previousMediaQualitySnapshot = snapshot
+        let sentAt = Self.iso8601String(Date())
+        let evidence = mediaEvidenceSnapshot(from: snapshot, capturedAt: sentAt)
+        currentMediaEvidenceSnapshot = evidence
+        await mediaEvidenceHandler?(evidence)
         do {
             try await sendJSON(
                 event: ClientSignalEvent.mediaQuality,
                 payload: NativeMediaQualityPayload(
-                    sentAt: Self.iso8601String(Date()),
+                    sentAt: sentAt,
                     laggy: false,
                     client: clientIdentity,
                     browser: mediaBrowserPayload(),
@@ -773,6 +801,19 @@ public actor NativeRoomSessionCoordinator {
             await reportMediaError(stage: "media_quality_report", error: error)
             throw error
         }
+    }
+
+    private func mediaEvidenceSnapshot(
+        from snapshot: NativeMediaQualitySnapshot,
+        capturedAt: String
+    ) -> NativeMediaEvidenceSnapshot {
+        NativeMediaEvidenceSnapshot(
+            source: snapshot,
+            capturedAt: capturedAt,
+            client: NativeMediaEvidenceClient(platform: clientIdentity.platform, version: clientIdentity.version),
+            lifecycle: lifecycle,
+            remoteVideoTiles: remoteVideoTracksByID.count
+        )
     }
 
     private func reportMediaError(stage: String, error: Error) async {

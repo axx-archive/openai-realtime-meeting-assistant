@@ -1508,3 +1508,87 @@ What worked:
   without leaking account data or generated test run files.
 - Making local artifact refs existence-checked prevents completed-looking
   evidence JSON from passing strict readiness without backing files.
+
+## Wave 22
+
+Status: `wave22_native_media_evidence_export_checkpoint_validated`
+
+Scope:
+- Continued the physical-device proof track by adding a native QA evidence
+  snapshot that can feed the proof-pack device media artifacts later.
+- Assigned two read-only subagents. The Native QA agent recommended deriving
+  booleans from `NativeMediaQualitySnapshot` counters next to the RTC stats,
+  not from UI labels. The Release/SRE agent recommended keeping
+  `ReleaseEvidence.local.json` narrow and placing rich, non-secret device media
+  details in ignored proof-pack artifact files.
+- Added `NativeMediaEvidenceSnapshot` and related safe structs in
+  `MeetingAssistRoomRTC`. The snapshot includes schema/artifact metadata,
+  `claimScope: "qa_snapshot"`, `releaseEligible: false`, platform/version,
+  lifecycle, remote tile count, assertion booleans, summarized RTP counters, and
+  selected candidate-pair type/RTT summary.
+- Kept QA artifact status at `observed` and release summary status at `pending`
+  so local/simulator exports cannot look like passed physical-device release
+  proof.
+- Added assertion-evidence source fields, sanitization metadata, and limitations
+  that state the snapshot is cumulative peer-connection evidence, not a fresh
+  current-health interval.
+- Added session-coordinator evidence capture and handler replay. Manual capture
+  and automatic `media_quality` sampling use the same sanitized evidence path.
+- Added a compact native QA evidence panel with Capture and Copy controls in
+  the shared iOS/iPadOS/macOS room UI.
+- Documented that simulator or repo-only evidence is diagnostic only and must
+  not be promoted to passed physical-device release evidence.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/native-apple-privacy-review.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomRTCClientTests` passed 17
+  tests.
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests`
+  passed 29 tests.
+- `swift test --package-path apple --filter NativeRoomViewModelTests` passed 30
+  tests.
+- `swift test --package-path apple` passed 83 tests.
+- `go test ./...` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 30 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green and strict blockers still explicit.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with `apple_development_team`, `privacy_manifest`, and
+  `release_evidence_file`.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This is not physical iPhone, iPad, or Mac media proof by itself. It still
+  requires real device capture, restrictive-network TURN proof, Apple signing,
+  final privacy manifest, TestFlight upload, and macOS notarization before the
+  original native Apple client goal can be marked complete.
+- `remoteVideoRendered` is derived from remote tile presence plus decoded
+  inbound video stats. Literal renderer-frame instrumentation remains a future
+  hardening option if product wants screen-render callbacks in addition to
+  WebRTC decode proof.
+
+What worked:
+- Keeping evidence derivation in the RTC module made the proof source explicit
+  and avoided any dependency on UI labels or status text.
+- Reusing the existing `media_quality` stats path kept the feature additive and
+  aligned with the proof-pack artifacts from Wave 21.

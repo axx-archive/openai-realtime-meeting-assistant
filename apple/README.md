@@ -134,6 +134,19 @@ readiness still fails until the draft contains completed statuses, local
 artifact references point at files that exist, signing/privacy blockers are
 resolved, and Apple/TestFlight/notarization proof is real.
 
+The native room UI includes a QA evidence panel that captures a non-secret
+`native_device_media` JSON snapshot from summarized WebRTC stats. The snapshot
+can be copied into the matching
+`artifacts/native-apple/<run-id>/evidence/{iphone,ipad,mac}-media.json` file
+during a real device run. These snapshots carry `claimScope: "qa_snapshot"`,
+`releaseEligible: false`, and `status: "observed"` even when all media
+assertions are true. Their assertion sources are cumulative peer-connection
+counters, so they are diagnostic observations, not fresh-interval current-health
+proof. Do not promote one into `ReleaseEvidence.local.json` as passed physical
+proof unless it was captured on the matching physical iPhone, iPad, or Mac for
+the same run, room, version, and build. Simulator or repo-only snapshots are
+diagnostic artifacts only.
+
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must

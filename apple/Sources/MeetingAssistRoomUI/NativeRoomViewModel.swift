@@ -22,10 +22,12 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setMeetingArchiveHandler(_ handler: NativeMeetingArchiveHandler?) async
     func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async
     func setMediaRecoveryHandler(_ handler: NativeMediaRecoveryHandler?) async
+    func setMediaEvidenceHandler(_ handler: NativeMediaEvidenceHandler?) async
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setScreenSharing(_ sharing: Bool) async throws
     func requestICERestart(reason: String) async throws
+    func captureMediaEvidenceSnapshot() async throws -> NativeMediaEvidenceSnapshot
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
     func askAssistant(_ query: String) async throws
@@ -80,6 +82,8 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var latestArchive: MeetingArchiveResult?
     @Published public private(set) var scoutChatEvents: [ScoutChatEvent] = []
     @Published public private(set) var isScoutChatSending = false
+    @Published public private(set) var latestMediaEvidence: NativeMediaEvidenceSnapshot?
+    @Published public private(set) var isCapturingMediaEvidence = false
 
     public let boardStatuses = ["Backlog", "In Progress", "Blocked", "Done"]
 
@@ -126,6 +130,14 @@ public final class NativeRoomViewModel: ObservableObject {
 
     public var canUseScreenShareControls: Bool {
         canUseCameraControls
+    }
+
+    public var latestMediaEvidenceJSON: String? {
+        guard let latestMediaEvidence else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(latestMediaEvidence) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     public var activeBoardCards: [KanbanCard] {
@@ -204,6 +216,8 @@ public final class NativeRoomViewModel: ObservableObject {
         isBusy = true
         errorMessage = nil
         resetRoomState()
+        latestMediaEvidence = nil
+        isCapturingMediaEvidence = false
         statusText = "Joining"
         lifecycle = .authenticated
 
@@ -235,6 +249,9 @@ public final class NativeRoomViewModel: ObservableObject {
         await newSession.setMediaRecoveryHandler { [weak self] event in
             await self?.applyMediaRecoveryEvent(event)
         }
+        await newSession.setMediaEvidenceHandler { [weak self] evidence in
+            await self?.applyMediaEvidence(evidence)
+        }
 
         do {
             let result = if video {
@@ -258,6 +275,7 @@ public final class NativeRoomViewModel: ObservableObject {
             await newSession.setMeetingArchiveHandler(nil)
             await newSession.setScoutChatEventsHandler(nil)
             await newSession.setMediaRecoveryHandler(nil)
+            await newSession.setMediaEvidenceHandler(nil)
             await newSession.leave()
             session = nil
             joinedParticipant = nil
@@ -270,6 +288,23 @@ public final class NativeRoomViewModel: ObservableObject {
         }
 
         isBusy = false
+    }
+
+    public func captureMediaEvidence() async {
+        guard let session, canUseRoomControls else { return }
+
+        isCapturingMediaEvidence = true
+        errorMessage = nil
+        statusText = "Capturing media evidence"
+        defer { isCapturingMediaEvidence = false }
+
+        do {
+            let evidence = try await session.captureMediaEvidenceSnapshot()
+            applyMediaEvidence(evidence)
+            statusText = "Media evidence captured"
+        } catch {
+            setError(displayMessage(for: error))
+        }
     }
 
     public func setMuted(_ muted: Bool) async {
@@ -466,6 +501,7 @@ public final class NativeRoomViewModel: ObservableObject {
         await session.setMeetingArchiveHandler(nil)
         await session.setScoutChatEventsHandler(nil)
         await session.setMediaRecoveryHandler(nil)
+        await session.setMediaEvidenceHandler(nil)
         await session.leave()
         self.session = nil
         joinedParticipant = nil
@@ -473,6 +509,7 @@ public final class NativeRoomViewModel: ObservableObject {
         isCameraOff = true
         isScreenSharing = false
         hasLocalCamera = false
+        isCapturingMediaEvidence = false
         resetRoomState()
         lifecycle = .signedOut
         statusText = "Left room"
@@ -547,6 +584,10 @@ public final class NativeRoomViewModel: ObservableObject {
         scoutChatEvents = events.filter { !$0.displayText.isEmpty }
     }
 
+    private func applyMediaEvidence(_ evidence: NativeMediaEvidenceSnapshot) {
+        latestMediaEvidence = evidence
+    }
+
     private func applyMediaRecoveryEvent(_ event: NativeMediaRecoveryEvent) async {
         errorMessage = event.message
         if event.terminal {
@@ -559,6 +600,7 @@ public final class NativeRoomViewModel: ObservableObject {
             isScreenSharing = false
             hasLocalCamera = false
             isBusy = false
+            isCapturingMediaEvidence = false
             resetRoomState()
             lifecycle = .signedOut
             await endedSession?.setRemoteVideoTrackHandler(nil)
@@ -570,6 +612,7 @@ public final class NativeRoomViewModel: ObservableObject {
             await endedSession?.setMeetingArchiveHandler(nil)
             await endedSession?.setScoutChatEventsHandler(nil)
             await endedSession?.setMediaRecoveryHandler(nil)
+            await endedSession?.setMediaEvidenceHandler(nil)
             await endedSession?.leave()
             return
         }

@@ -503,6 +503,43 @@ assert.equal(arrayEvidenceFixture.output.ok, true);
 assert.equal(arrayEvidenceFixture.output.readyForDistribution, false);
 assert.equal(arrayEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_file"), true);
 
+const qaSnapshotEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeFixtureFile(
+  resolve(qaSnapshotEvidenceFixturePath, "ReleaseEvidence.local.json"),
+  `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      artifactType: "native_device_media",
+      claimScope: "qa_snapshot",
+      releaseEligible: false,
+      status: "observed",
+      runId: "native-release-run-20260629-a",
+      roomId: "release-room-smoke-20260629",
+      releaseEvidenceSummary: {
+        status: "pending",
+        mediaAssertions: {
+          cameraPublished: true,
+          microphonePublished: true,
+          remoteAudioReceived: true,
+          remoteVideoRendered: true,
+        },
+      },
+    },
+    null,
+    2
+  )}\n`
+);
+const qaSnapshotEvidenceFixture = runReadiness(["--apple-dir", qaSnapshotEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(qaSnapshotEvidenceFixture.status, 1);
+assert.equal(qaSnapshotEvidenceFixture.output.ok, true);
+assert.equal(qaSnapshotEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  qaSnapshotEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_schema"),
+  true
+);
+
 const placeholderEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(placeholderEvidenceFixturePath, "ReleaseEvidence.local.json"), {
   testFlight: { appStoreConnectBuildId: "<App Store Connect build ID>" },
@@ -831,4 +868,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 29 checks passed");
+console.log("native-apple-release-readiness: 30 checks passed");

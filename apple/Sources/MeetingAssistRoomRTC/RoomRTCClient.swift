@@ -153,6 +153,381 @@ public struct NativeMediaQualitySnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public struct NativeMediaEvidenceClient: Codable, Equatable, Sendable {
+    public var platform: String
+    public var version: String
+
+    public init(platform: String = "", version: String = "") {
+        self.platform = platform
+        self.version = version
+    }
+}
+
+public struct NativeMediaEvidenceAssertions: Codable, Equatable, Sendable {
+    public var cameraPublished: Bool
+    public var microphonePublished: Bool
+    public var remoteAudioReceived: Bool
+    public var remoteVideoRendered: Bool
+
+    public init(
+        cameraPublished: Bool = false,
+        microphonePublished: Bool = false,
+        remoteAudioReceived: Bool = false,
+        remoteVideoRendered: Bool = false
+    ) {
+        self.cameraPublished = cameraPublished
+        self.microphonePublished = microphonePublished
+        self.remoteAudioReceived = remoteAudioReceived
+        self.remoteVideoRendered = remoteVideoRendered
+    }
+
+    public var allPassed: Bool {
+        cameraPublished
+            && microphonePublished
+            && remoteAudioReceived
+            && remoteVideoRendered
+    }
+}
+
+public struct NativeMediaEvidenceCandidatePair: Codable, Equatable, Sendable {
+    public var `protocol`: String
+    public var networkType: String
+    public var localCandidateType: String
+    public var remoteCandidateType: String
+    public var relayCandidateSelected: Bool
+    public var currentRoundTripTime: Double
+
+    public init(
+        protocol: String = "",
+        networkType: String = "",
+        localCandidateType: String = "",
+        remoteCandidateType: String = "",
+        relayCandidateSelected: Bool = false,
+        currentRoundTripTime: Double = 0
+    ) {
+        self.protocol = `protocol`
+        self.networkType = networkType
+        self.localCandidateType = localCandidateType
+        self.remoteCandidateType = remoteCandidateType
+        self.relayCandidateSelected = relayCandidateSelected
+        self.currentRoundTripTime = currentRoundTripTime
+    }
+
+    public init(source: NativeMediaQualityCandidatePair) {
+        let localType = source.localCandidateType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let remoteType = source.remoteCandidateType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.init(
+            protocol: source.protocol,
+            networkType: source.networkType,
+            localCandidateType: source.localCandidateType,
+            remoteCandidateType: source.remoteCandidateType,
+            relayCandidateSelected: localType == "relay" || remoteType == "relay",
+            currentRoundTripTime: source.currentRoundTripTime
+        )
+    }
+}
+
+public struct NativeMediaEvidenceCounters: Codable, Equatable, Sendable {
+    public var outboundAudioBytesSent: Double
+    public var outboundAudioPacketsSent: Double
+    public var outboundVideoBytesSent: Double
+    public var outboundVideoFramesEncoded: Double
+    public var outboundVideoFramesSent: Double
+    public var inboundAudioJitter: Double
+    public var inboundAudioLost: Double
+    public var inboundAudioPacketsReceived: Double
+    public var inboundVideoJitter: Double
+    public var inboundVideoLost: Double
+    public var inboundVideoPacketsReceived: Double
+    public var inboundVideoDrops: Double
+    public var inboundVideoDecoded: Double
+    public var outboundRtt: Double
+
+    public init(source: NativeMediaQualitySnapshot) {
+        outboundAudioBytesSent = source.outboundAudioBytesSent
+        outboundAudioPacketsSent = source.outboundAudioPacketsSent
+        outboundVideoBytesSent = source.outboundVideoBytesSent
+        outboundVideoFramesEncoded = source.outboundVideoFramesEncoded
+        outboundVideoFramesSent = source.outboundVideoFramesSent
+        inboundAudioJitter = source.inboundAudioJitter
+        inboundAudioLost = source.inboundAudioLost
+        inboundAudioPacketsReceived = source.inboundAudioPacketsReceived
+        inboundVideoJitter = source.inboundVideoJitter
+        inboundVideoLost = source.inboundVideoLost
+        inboundVideoPacketsReceived = source.inboundVideoPacketsReceived
+        inboundVideoDrops = source.inboundVideoDrops
+        inboundVideoDecoded = source.inboundVideoDecoded
+        outboundRtt = source.outboundRtt
+    }
+}
+
+public struct NativeMediaEvidenceAppContext: Codable, Equatable, Sendable {
+    public var version: String
+    public var build: String
+    public var target: String
+    public var clientPlatform: String
+    public var clientVersion: String
+
+    public init(
+        version: String = "",
+        build: String = "",
+        target: String = "",
+        clientPlatform: String = "",
+        clientVersion: String = ""
+    ) {
+        self.version = version
+        self.build = build
+        self.target = target
+        self.clientPlatform = clientPlatform
+        self.clientVersion = clientVersion
+    }
+}
+
+public struct NativeMediaEvidenceDeviceContext: Codable, Equatable, Sendable {
+    public var kind: String
+    public var model: String
+    public var os: String
+    public var physical: Bool
+
+    public init(kind: String = "unknown", model: String = "", os: String = "", physical: Bool = false) {
+        self.kind = kind
+        self.model = model
+        self.os = os
+        self.physical = physical
+    }
+}
+
+public struct NativeMediaEvidenceReleaseSummary: Codable, Equatable, Sendable {
+    public var status: String
+    public var runId: String
+    public var roomId: String
+    public var device: String
+    public var os: String
+    public var testedAt: String
+    public var mediaAssertions: NativeMediaEvidenceAssertions
+
+    public init(
+        status: String = "pending",
+        runId: String = "",
+        roomId: String = "",
+        device: String = "",
+        os: String = "",
+        testedAt: String = "",
+        mediaAssertions: NativeMediaEvidenceAssertions = NativeMediaEvidenceAssertions()
+    ) {
+        self.status = status
+        self.runId = runId
+        self.roomId = roomId
+        self.device = device
+        self.os = os
+        self.testedAt = testedAt
+        self.mediaAssertions = mediaAssertions
+    }
+}
+
+public struct NativeMediaEvidenceAssertionDetail: Codable, Equatable, Sendable {
+    public var source: String
+    public var value: Double
+    public var passed: Bool
+
+    public init(source: String, value: Double, passed: Bool) {
+        self.source = source
+        self.value = value
+        self.passed = passed
+    }
+}
+
+public struct NativeMediaEvidenceAssertionEvidence: Codable, Equatable, Sendable {
+    public var cameraPublished: NativeMediaEvidenceAssertionDetail
+    public var microphonePublished: NativeMediaEvidenceAssertionDetail
+    public var remoteAudioReceived: NativeMediaEvidenceAssertionDetail
+    public var remoteVideoRendered: NativeMediaEvidenceAssertionDetail
+
+    public init(
+        source: NativeMediaQualitySnapshot,
+        remoteVideoTiles: Int,
+        assertions: NativeMediaEvidenceAssertions
+    ) {
+        cameraPublished = NativeMediaEvidenceAssertionDetail(
+            source: "outboundVideoFramesSent",
+            value: source.outboundVideoFramesSent,
+            passed: assertions.cameraPublished
+        )
+        microphonePublished = NativeMediaEvidenceAssertionDetail(
+            source: "outboundAudioPacketsSent",
+            value: source.outboundAudioPacketsSent,
+            passed: assertions.microphonePublished
+        )
+        remoteAudioReceived = NativeMediaEvidenceAssertionDetail(
+            source: "inboundAudioPacketsReceived",
+            value: source.inboundAudioPacketsReceived,
+            passed: assertions.remoteAudioReceived
+        )
+        remoteVideoRendered = NativeMediaEvidenceAssertionDetail(
+            source: "remoteVideoTiles+inboundVideoDecoded",
+            value: min(Double(remoteVideoTiles), source.inboundVideoDecoded),
+            passed: assertions.remoteVideoRendered
+        )
+    }
+}
+
+public struct NativeMediaEvidenceStats: Codable, Equatable, Sendable {
+    public var observationWindow: String
+    public var samples: [NativeMediaEvidenceCounters]
+    public var counters: NativeMediaEvidenceCounters
+    public var candidatePair: NativeMediaEvidenceCandidatePair
+
+    public init(
+        counters: NativeMediaEvidenceCounters,
+        candidatePair: NativeMediaEvidenceCandidatePair,
+        observationWindow: String = "cumulative_peer_connection_stats",
+        samples: [NativeMediaEvidenceCounters] = []
+    ) {
+        self.observationWindow = observationWindow
+        self.samples = samples
+        self.counters = counters
+        self.candidatePair = candidatePair
+    }
+}
+
+public struct NativeMediaEvidenceRemoteContext: Codable, Equatable, Sendable {
+    public var remoteVideoTracks: Int
+    public var labeledRemoteVideoTracks: Int
+    public var remoteVideoTiles: Int
+
+    public init(remoteVideoTracks: Int = 0, labeledRemoteVideoTracks: Int = 0, remoteVideoTiles: Int = 0) {
+        self.remoteVideoTracks = remoteVideoTracks
+        self.labeledRemoteVideoTracks = labeledRemoteVideoTracks
+        self.remoteVideoTiles = remoteVideoTiles
+    }
+}
+
+public struct NativeMediaEvidenceSanitization: Codable, Equatable, Sendable {
+    public var omitted: [String]
+    public var redactionPolicy: String
+
+    public init(
+        omitted: [String] = [
+            "cookies",
+            "headers",
+            "passwords",
+            "rawSdp",
+            "rawIceCandidates",
+            "candidateIds",
+            "turnUrls",
+            "turnUsername",
+            "turnCredential",
+            "ipAddresses",
+            "apiKeys",
+            "teamIds",
+            "certificates",
+            "provisioningProfiles",
+        ],
+        redactionPolicy: String = "native_media_error_safe_message"
+    ) {
+        self.omitted = omitted
+        self.redactionPolicy = redactionPolicy
+    }
+}
+
+public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
+    public var schemaVersion: Int
+    public var artifactType: String
+    public var claimScope: String
+    public var releaseEligible: Bool
+    public var status: String
+    public var runId: String
+    public var roomId: String
+    public var platform: String
+    public var capturedAt: String
+    public var sampledAt: Double
+    public var app: NativeMediaEvidenceAppContext
+    public var device: NativeMediaEvidenceDeviceContext
+    public var client: NativeMediaEvidenceClient
+    public var lifecycle: RoomLifecycleState
+    public var remoteVideoTiles: Int
+    public var mediaAssertions: NativeMediaEvidenceAssertions
+    public var releaseEvidenceSummary: NativeMediaEvidenceReleaseSummary
+    public var assertionEvidence: NativeMediaEvidenceAssertionEvidence
+    public var selectedCandidate: NativeMediaEvidenceCandidatePair
+    public var counters: NativeMediaEvidenceCounters
+    public var stats: NativeMediaEvidenceStats
+    public var remote: NativeMediaEvidenceRemoteContext
+    public var sanitization: NativeMediaEvidenceSanitization
+    public var limitations: [String]
+
+    public init(
+        source: NativeMediaQualitySnapshot,
+        capturedAt: String = "",
+        client: NativeMediaEvidenceClient = NativeMediaEvidenceClient(),
+        app: NativeMediaEvidenceAppContext = NativeMediaEvidenceAppContext(),
+        device: NativeMediaEvidenceDeviceContext = NativeMediaEvidenceDeviceContext(),
+        lifecycle: RoomLifecycleState = .signedOut,
+        remoteVideoTiles: Int = 0,
+        runId: String = "",
+        roomId: String = ""
+    ) {
+        let assertions = NativeMediaEvidenceAssertions(
+            cameraPublished: source.outboundVideoFramesSent > 0,
+            microphonePublished: source.outboundAudioPacketsSent > 0,
+            remoteAudioReceived: source.inboundAudioPacketsReceived > 0,
+            remoteVideoRendered: remoteVideoTiles > 0 && source.inboundVideoDecoded > 0
+        )
+        let candidate = NativeMediaEvidenceCandidatePair(source: source.candidatePair)
+        let safeCounters = NativeMediaEvidenceCounters(source: source)
+        schemaVersion = 1
+        artifactType = "native_device_media"
+        claimScope = "qa_snapshot"
+        releaseEligible = false
+        status = "observed"
+        self.runId = runId
+        self.roomId = roomId
+        platform = client.platform
+        self.capturedAt = capturedAt
+        sampledAt = source.at
+        self.app = NativeMediaEvidenceAppContext(
+            version: app.version,
+            build: app.build,
+            target: app.target,
+            clientPlatform: app.clientPlatform.isEmpty ? client.platform : app.clientPlatform,
+            clientVersion: app.clientVersion.isEmpty ? client.version : app.clientVersion
+        )
+        self.device = device
+        self.client = client
+        self.lifecycle = lifecycle
+        self.remoteVideoTiles = remoteVideoTiles
+        mediaAssertions = assertions
+        releaseEvidenceSummary = NativeMediaEvidenceReleaseSummary(
+            status: "pending",
+            runId: runId,
+            roomId: roomId,
+            device: device.model,
+            os: device.os,
+            testedAt: capturedAt,
+            mediaAssertions: assertions
+        )
+        assertionEvidence = NativeMediaEvidenceAssertionEvidence(
+            source: source,
+            remoteVideoTiles: remoteVideoTiles,
+            assertions: assertions
+        )
+        selectedCandidate = candidate
+        counters = safeCounters
+        stats = NativeMediaEvidenceStats(counters: safeCounters, candidatePair: candidate)
+        remote = NativeMediaEvidenceRemoteContext(
+            remoteVideoTracks: remoteVideoTiles,
+            labeledRemoteVideoTracks: 0,
+            remoteVideoTiles: remoteVideoTiles
+        )
+        sanitization = NativeMediaEvidenceSanitization()
+        limitations = [
+            "QA snapshots are cumulative peer-connection observations, not proof of current media health over a fresh interval.",
+            "QA snapshots are not physical-device release proof unless captured and promoted through the release proof-pack process.",
+            "Do not mark ReleaseEvidence physicalDeviceMedia as passed from a qa_snapshot artifact.",
+        ]
+    }
+}
+
 struct NativeRTCStatisticsEntry: Equatable, Sendable {
     var id: String
     var type: String
