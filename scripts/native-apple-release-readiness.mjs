@@ -514,6 +514,357 @@ function collectPhysicalDeviceArtifactContentProblems(evidence, evidenceRootDir,
   return uniqueLabels(problems);
 }
 
+function normalizedTurnRelayProtocol(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["turn", "turns"].includes(normalized) ? normalized : "";
+}
+
+function normalizedTurnRelayCandidateType(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "relay" ? normalized : "";
+}
+
+function finitePositiveNumber(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+function safeIceReadinessSummary(summary) {
+  return summary && typeof summary === "object" && !Array.isArray(summary) ? summary : null;
+}
+
+function collectUnsafeTurnArtifactContent(value, path = "$") {
+  const problems = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      problems.push(...collectUnsafeTurnArtifactContent(item, `${path}[${index}]`));
+    });
+    return problems;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        /\bcandidate:/.test(trimmed) ||
+        /\ba=candidate/.test(trimmed) ||
+        /^v=0(?:\r?\n|$)/.test(trimmed) ||
+        /\bturns?:[^,\s]+/i.test(trimmed) ||
+        /\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(trimmed) ||
+        /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){2,}\b/i.test(trimmed)
+      ) {
+        problems.push(path);
+      }
+    }
+    return problems;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      /^(rawSdp|rawIceCandidates|candidateIds?|localCandidateId|remoteCandidateId|turnUsername|turnCredential|turnPassword|turnUrl|turnUri|username|credential|credentials|urls?|uris?|ipAddress|localAddress|remoteAddress|cookies?|headers?|apiKeys?|teamIds?|certificates?|provisioningProfiles?)$/i.test(
+        key
+      )
+    ) {
+      problems.push(`${path}.${key}`);
+    }
+    problems.push(...collectUnsafeTurnArtifactContent(item, `${path}.${key}`));
+  }
+  return problems;
+}
+
+function restrictiveTurnArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId, roomId }) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["artifact:not_object"];
+  }
+  problems.push(...collectUnexpectedKeys(
+    artifact,
+    [
+      "schemaVersion",
+      "artifactType",
+      "claimScope",
+      "releaseEligible",
+      "status",
+      "runId",
+      "roomId",
+      "network",
+      "capturedAt",
+      "app",
+      "device",
+      "selectedCandidate",
+      "iceReadiness",
+      "releaseEvidenceSummary",
+      "promotion",
+    ],
+    "artifact"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.app,
+    ["version", "build", "target", "clientPlatform"],
+    "artifact.app"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.device,
+    ["kind", "model", "os", "physical"],
+    "artifact.device"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.selectedCandidate,
+    [
+      "relayProtocol",
+      "relayCandidateType",
+      "relayCandidateSelected",
+      "localCandidateType",
+      "remoteCandidateType",
+      "currentRoundTripTime",
+      "protocol",
+      "networkType",
+    ],
+    "artifact.selectedCandidate"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.iceReadiness,
+    [
+      "ok",
+      "hasIceServers",
+      "iceServerCount",
+      "knownUrlCount",
+      "unknownUrlCount",
+      "stunCount",
+      "stunsCount",
+      "turnCount",
+      "turnsCount",
+      "turnServersWithCredentials",
+      "turnServersMissingCredentials",
+      "relayTransports",
+      "warnings",
+      "errors",
+    ],
+    "artifact.iceReadiness"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.releaseEvidenceSummary,
+    ["status", "runId", "roomId", "network", "testedAt", "relayProtocol", "relayCandidateType"],
+    "artifact.releaseEvidenceSummary"
+  ));
+  problems.push(...collectUnexpectedKeys(
+    artifact.promotion,
+    [
+      "promotedAt",
+      "sourceArtifactType",
+      "sourceStatus",
+      "sourceArtifact",
+      "operatorConfirmedRestrictiveNetwork",
+      "operatorConfirmedSameRoom",
+      "releaseEvidenceArtifactRef",
+    ],
+    "artifact.promotion"
+  ));
+  if (artifact.schemaVersion !== 1) {
+    problems.push("artifact:schemaVersion");
+  }
+  if (artifact.artifactType !== "native_restrictive_turn") {
+    problems.push("artifact:artifactType");
+  }
+  if (artifact.claimScope !== "restrictive_network_turn") {
+    problems.push("artifact:claimScope");
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push("artifact:releaseEligible");
+  }
+  if (artifact.status !== "passed") {
+    problems.push("artifact:status");
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push("artifact:runId");
+  }
+  if (!expectedIdentity(artifact.roomId, roomId)) {
+    problems.push("artifact:roomId");
+  }
+  if (!expectedIdentity(artifact.network, item.network)) {
+    problems.push("artifact:network");
+  }
+  if (!validTimestamp(artifact.capturedAt)) {
+    problems.push("artifact:capturedAt");
+  } else if (!strictStringEqual(artifact.capturedAt, item.testedAt)) {
+    problems.push("artifact:capturedAt.match");
+  }
+
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push("artifact:app");
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push("artifact:app.version");
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push("artifact:app.build");
+    }
+    if (!["MeetingAssistAppleApp", "MeetingAssistMacApp"].includes(String(artifact.app.target ?? "").trim())) {
+      problems.push("artifact:app.target");
+    }
+    if (!Object.values(physicalDeviceClientPlatforms).includes(String(artifact.app.clientPlatform ?? "").trim())) {
+      problems.push("artifact:app.clientPlatform");
+    }
+  }
+
+  if (!artifact.device || typeof artifact.device !== "object" || Array.isArray(artifact.device)) {
+    problems.push("artifact:device");
+  } else {
+    if (!Object.values(physicalDeviceKinds).includes(String(artifact.device.kind ?? "").trim())) {
+      problems.push("artifact:device.kind");
+    }
+    if (artifact.device.physical !== true) {
+      problems.push("artifact:device.physical");
+    }
+    if (!nonPlaceholderString(artifact.device.model)) {
+      problems.push("artifact:device.model");
+    }
+    if (!nonPlaceholderString(artifact.device.os)) {
+      problems.push("artifact:device.os");
+    }
+  }
+
+  const selected = artifact.selectedCandidate;
+  if (!selected || typeof selected !== "object" || Array.isArray(selected)) {
+    problems.push("artifact:selectedCandidate");
+  } else {
+    const relayProtocol = normalizedTurnRelayProtocol(selected.relayProtocol);
+    const relayCandidateType = normalizedTurnRelayCandidateType(selected.relayCandidateType);
+    if (!relayProtocol) {
+      problems.push("artifact:selectedCandidate.relayProtocol");
+    } else if (relayProtocol !== normalizedTurnRelayProtocol(item.relayProtocol)) {
+      problems.push("artifact:selectedCandidate.relayProtocol.match");
+    }
+    if (!relayCandidateType) {
+      problems.push("artifact:selectedCandidate.relayCandidateType");
+    } else if (relayCandidateType !== normalizedTurnRelayCandidateType(item.relayCandidateType)) {
+      problems.push("artifact:selectedCandidate.relayCandidateType.match");
+    }
+    if (selected.relayCandidateSelected !== true) {
+      problems.push("artifact:selectedCandidate.relayCandidateSelected");
+    }
+    const localCandidateType = String(selected.localCandidateType ?? "").trim().toLowerCase();
+    const remoteCandidateType = String(selected.remoteCandidateType ?? "").trim().toLowerCase();
+    if (localCandidateType !== "relay" && remoteCandidateType !== "relay") {
+      problems.push("artifact:selectedCandidate.localOrRemoteRelay");
+    }
+    if (!finitePositiveNumber(selected.currentRoundTripTime)) {
+      problems.push("artifact:selectedCandidate.currentRoundTripTime");
+    }
+  }
+
+  const iceReadiness = safeIceReadinessSummary(artifact.iceReadiness);
+  if (!iceReadiness) {
+    problems.push("artifact:iceReadiness");
+  } else {
+    if (iceReadiness.ok !== true) {
+      problems.push("artifact:iceReadiness.ok");
+    }
+    if (iceReadiness.hasIceServers !== true) {
+      problems.push("artifact:iceReadiness.hasIceServers");
+    }
+    if (!(Number(iceReadiness.turnCount) + Number(iceReadiness.turnsCount) > 0)) {
+      problems.push("artifact:iceReadiness.turnRelayCount");
+    }
+    if (!(Number(iceReadiness.turnServersWithCredentials) > 0)) {
+      problems.push("artifact:iceReadiness.turnServersWithCredentials");
+    }
+    if (Number(iceReadiness.turnServersMissingCredentials) !== 0) {
+      problems.push("artifact:iceReadiness.turnServersMissingCredentials");
+    }
+    if (!Array.isArray(iceReadiness.errors) || iceReadiness.errors.length > 0) {
+      problems.push("artifact:iceReadiness.errors");
+    }
+    if (!Array.isArray(iceReadiness.warnings) || iceReadiness.warnings.length > 0) {
+      problems.push("artifact:iceReadiness.warnings");
+    }
+  }
+
+  const summary = artifact.releaseEvidenceSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    problems.push("artifact:releaseEvidenceSummary");
+  } else {
+    if (summary.status !== "passed") {
+      problems.push("artifact:releaseEvidenceSummary.status");
+    }
+    if (!expectedIdentity(summary.runId, runId)) {
+      problems.push("artifact:releaseEvidenceSummary.runId");
+    }
+    if (!expectedIdentity(summary.roomId, roomId)) {
+      problems.push("artifact:releaseEvidenceSummary.roomId");
+    }
+    if (!expectedIdentity(summary.network, item.network)) {
+      problems.push("artifact:releaseEvidenceSummary.network");
+    }
+    if (!validTimestamp(summary.testedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.testedAt");
+    } else if (!strictStringEqual(summary.testedAt, item.testedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.testedAt.match");
+    }
+    if (normalizedTurnRelayProtocol(summary.relayProtocol) !== normalizedTurnRelayProtocol(item.relayProtocol)) {
+      problems.push("artifact:releaseEvidenceSummary.relayProtocol");
+    }
+    if (normalizedTurnRelayCandidateType(summary.relayCandidateType) !== normalizedTurnRelayCandidateType(item.relayCandidateType)) {
+      problems.push("artifact:releaseEvidenceSummary.relayCandidateType");
+    }
+  }
+
+  const promotion = artifact.promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) {
+    problems.push("artifact:promotion");
+  } else {
+    if (!validTimestamp(promotion.promotedAt)) {
+      problems.push("artifact:promotion.promotedAt");
+    }
+    if (promotion.sourceStatus !== "observed") {
+      problems.push("artifact:promotion.sourceStatus");
+    }
+    if (promotion.operatorConfirmedRestrictiveNetwork !== true) {
+      problems.push("artifact:promotion.operatorConfirmedRestrictiveNetwork");
+    }
+    if (promotion.operatorConfirmedSameRoom !== true) {
+      problems.push("artifact:promotion.operatorConfirmedSameRoom");
+    }
+    if (!strictStringEqual(promotion.releaseEvidenceArtifactRef, item.artifactRef)) {
+      problems.push("artifact:promotion.releaseEvidenceArtifactRef");
+    }
+  }
+
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, "$.restrictiveNetworkTurn.artifact"),
+    ...collectUnsafeTurnArtifactContent(artifact, "$.restrictiveNetworkTurn.artifact"),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function collectRestrictiveTurnArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const item = evidence.restrictiveNetworkTurn;
+  const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+  if (!path || path.startsWith("__") || !existsSync(path)) {
+    return [];
+  }
+  if (!path.toLowerCase().endsWith(".json")) {
+    return ["artifact:not_json"];
+  }
+  let artifact;
+  try {
+    artifact = readJSONFile(path);
+  } catch {
+    return ["artifact:not_valid_json"];
+  }
+  return uniqueLabels(
+    restrictiveTurnArtifactProblems({
+      item,
+      artifact,
+      expectedVersion,
+      expectedBuild,
+      runId: evidence.runId,
+      roomId: evidence.roomId,
+    })
+  );
+}
+
 function expectedIdentity(value, expected) {
   return nonPlaceholderString(value) && strictStringEqual(value, expected);
 }
@@ -555,7 +906,9 @@ function collectSecretLikeEvidence(value, path = "$") {
   }
 
   for (const [key, item] of Object.entries(value)) {
+    const isSafeCountField = /^(turnServersWithCredentials|turnServersMissingCredentials)$/i.test(key);
     if (
+      !isSafeCountField &&
       /(secret|password|passwd|token|credential|api_?key|apikey|private_?key|provision|certificate|cert|p8|p12|team_?id|development_?team|turn_?(user|pass|credential))/i.test(
         key
       )
@@ -777,7 +1130,9 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
   }
 
   const turn = evidence.restrictiveNetworkTurn;
-  const turnProblems = [];
+  const turnProblems = [
+    ...collectRestrictiveTurnArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
   if (!turn || typeof turn !== "object" || Array.isArray(turn)) {
     turnProblems.push("missing");
   } else {
@@ -799,10 +1154,10 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     if (!validArtifactRef(turn.artifactRef)) {
       turnProblems.push("artifactRef");
     }
-    if (!["turn", "turns"].includes(String(turn.relayProtocol ?? "").trim().toLowerCase())) {
+    if (!normalizedTurnRelayProtocol(turn.relayProtocol)) {
       turnProblems.push("relayProtocol");
     }
-    if (String(turn.relayCandidateType ?? "").trim().toLowerCase() !== "relay") {
+    if (!normalizedTurnRelayCandidateType(turn.relayCandidateType)) {
       turnProblems.push("relayCandidateType");
     }
   }

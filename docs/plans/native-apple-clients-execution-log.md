@@ -1786,3 +1786,92 @@ What worked:
 - Binding empty app-exported run/room values only through explicit operator
   confirmation keeps the current native app usable while preserving proof-pack
   identity as the release source of truth.
+
+## Wave 26
+
+Status: `wave26_native_turn_evidence_promotion_checkpoint_validated`
+
+Scope:
+- Continued the restrictive-network release gate path by adding an explicit
+  operator promotion workflow from sanitized selected-relay observations to
+  strict-ready TURN proof-pack artifacts.
+- Assigned two read-only reviewers. The TURN proof reviewer identified the
+  local artifact loophole where `{}` could satisfy existence checks. The
+  release workflow reviewer recommended keeping proof-pack creation pending,
+  preserving the compact `ReleaseEvidence.draft.json` schema, and mirroring the
+  media promoter's proofpack/draft identity and duplicate-write guards.
+- Added `scripts/native-apple-promote-turn-evidence.mjs`. It promotes one
+  `native_turn_relay_observation` into the matching
+  `evidence/selected-turn-relay.json` proof-pack artifact and updates only
+  `restrictiveNetworkTurn` in `ReleaseEvidence.draft.json`.
+- Required explicit `--confirm-restrictive-network`, `--confirm-same-room`, and
+  `--network`. Empty observation run/room values are allowed only with the
+  same-room confirmation; non-empty mismatches fail.
+- Added proof checks for current app version/build, physical iPhone/iPad/Mac
+  context, selected relay candidate-pair facts, positive RTT, sanitized
+  `native-ice-readiness.mjs --require-turn` summary, atomic writes,
+  proofpack/draft identity, duplicate promotion refusal without `--force`, and
+  unsafe raw SDP/ICE/IP/TURN/account data rejection.
+- Tightened strict readiness so local `restrictiveNetworkTurn.artifactRef` JSON
+  must be promoted `native_restrictive_turn` proof for the same run, room,
+  network, timestamp, version, and build. Placeholder JSON, stale artifacts,
+  non-JSON local files, non-relay artifacts, and secret-bearing artifacts now
+  fail under the existing `restrictive_turn_evidence` blocker.
+- Updated proof-pack generated next steps plus README/protocol docs to point
+  operators at the TURN promotion command.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-turn-evidence.mjs`
+- `scripts/native-apple-promote-turn-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-promote-turn-evidence.mjs` passed.
+- `node --check scripts/native-apple-promote-turn-evidence.test.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node --check scripts/native-apple-release-proofpack.test.mjs` passed.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 44 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers for Apple development team, privacy manifest, and
+  release evidence file.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `swift test --package-path apple` passed 84 tests.
+- `go test ./...` passed.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+- Critic gate initially failed on a local non-JSON TURN artifact bypass and
+  overly broad promoter input type. Both were fixed and covered by regression
+  tests before commit.
+
+Risks / blockers:
+- This wave does not create real restrictive-network TURN relay evidence. It
+  creates the guarded operator path for when that physical run is available.
+- Physical iPhone/iPad/Mac mixed-room proof, Apple signing/team setup, final
+  privacy manifest, TestFlight upload, and macOS notarization remain external
+  release gates.
+- Strict readiness still inspects local JSON artifact content only. Remote
+  evidence refs remain an operator review responsibility.
+
+What worked:
+- Keeping the rich TURN proof inside `selected-turn-relay.json` preserved the
+  compact release-evidence schema while making local proof packs much harder to
+  fake accidentally.
+- Reusing the media-promotion pattern kept the operator workflow predictable:
+  scaffold pending proof, capture sanitized observation, promote explicitly,
+  then let strict readiness decide.

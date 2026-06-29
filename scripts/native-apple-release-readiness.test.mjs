@@ -357,6 +357,105 @@ function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
   };
 }
 
+function promotedTurnArtifact(evidence, overrides = {}) {
+  const item = evidence.restrictiveNetworkTurn;
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_restrictive_turn",
+    claimScope: "restrictive_network_turn",
+    releaseEligible: true,
+    status: "passed",
+    runId: evidence.runId,
+    roomId: evidence.roomId,
+    network: item.network,
+    capturedAt: item.testedAt,
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+    },
+    device: {
+      kind: "iphone",
+      model: "iPhone 17 physical",
+      os: "iOS 26.5",
+      physical: true,
+    },
+    selectedCandidate: {
+      relayProtocol: item.relayProtocol,
+      relayCandidateType: item.relayCandidateType,
+      relayCandidateSelected: true,
+      localCandidateType: "relay",
+      remoteCandidateType: "srflx",
+      currentRoundTripTime: 0.087,
+      protocol: "udp",
+      networkType: "wifi",
+    },
+    iceReadiness: {
+      ok: true,
+      hasIceServers: true,
+      iceServerCount: 2,
+      knownUrlCount: 3,
+      unknownUrlCount: 0,
+      stunCount: 1,
+      stunsCount: 0,
+      turnCount: 1,
+      turnsCount: 1,
+      turnServersWithCredentials: 1,
+      turnServersMissingCredentials: 0,
+      relayTransports: ["tls", "udp"],
+      warnings: [],
+      errors: [],
+    },
+    releaseEvidenceSummary: {
+      status: "passed",
+      runId: evidence.runId,
+      roomId: evidence.roomId,
+      network: item.network,
+      testedAt: item.testedAt,
+      relayProtocol: item.relayProtocol,
+      relayCandidateType: item.relayCandidateType,
+    },
+    promotion: {
+      promotedAt: "2026-06-29T12:26:00Z",
+      sourceArtifactType: "native_turn_relay_observation",
+      sourceStatus: "observed",
+      sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/turn-observation.json",
+      operatorConfirmedRestrictiveNetwork: true,
+      operatorConfirmedSameRoom: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: {
+      ...base.app,
+      ...(overrides.app ?? {}),
+    },
+    device: {
+      ...base.device,
+      ...(overrides.device ?? {}),
+    },
+    selectedCandidate: {
+      ...base.selectedCandidate,
+      ...(overrides.selectedCandidate ?? {}),
+    },
+    iceReadiness: {
+      ...base.iceReadiness,
+      ...(overrides.iceReadiness ?? {}),
+    },
+    releaseEvidenceSummary: {
+      ...base.releaseEvidenceSummary,
+      ...(overrides.releaseEvidenceSummary ?? {}),
+    },
+    promotion: {
+      ...base.promotion,
+      ...(overrides.promotion ?? {}),
+    },
+  };
+}
+
 function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   const rootDir = evidenceRootForPath(path);
   for (const platform of ["iphone", "ipad", "mac"]) {
@@ -369,11 +468,12 @@ function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
       promotedPhysicalMediaArtifact(platform, evidence, options.physicalMediaArtifactOverrides?.[platform]);
     writeFixtureFile(resolve(rootDir, ref), `${JSON.stringify(artifact, null, 2)}\n`);
   }
-  for (const ref of [
-    evidence.restrictiveNetworkTurn?.artifactRef,
-    evidence.testFlight?.artifactRef,
-    evidence.macNotarization?.artifactRef,
-  ]) {
+  const turnRef = evidence.restrictiveNetworkTurn?.artifactRef;
+  if (typeof turnRef === "string" && /^(artifacts\/|evidence\/)/.test(turnRef) && !turnRef.split("/").includes("..")) {
+    const artifact = options.turnArtifact ?? promotedTurnArtifact(evidence, options.turnArtifactOverrides);
+    writeFixtureFile(resolve(rootDir, turnRef), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  for (const ref of [evidence.testFlight?.artifactRef, evidence.macNotarization?.artifactRef]) {
     if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
       continue;
     }
@@ -942,12 +1042,16 @@ assert.equal(
 
 const existingFileArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 const existingFileArtifactPath = resolve(existingFileArtifactEvidenceFixturePath, "turn-artifact.json");
-writeFixtureFile(existingFileArtifactPath, "{}\n");
-writeReleaseEvidenceFixture(resolve(existingFileArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+const existingFileArtifactOverrides = {
   restrictiveNetworkTurn: {
     artifactRef: pathToFileURL(existingFileArtifactPath).href,
   },
-});
+};
+writeReleaseEvidenceFixture(resolve(existingFileArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), existingFileArtifactOverrides);
+writeFixtureFile(
+  existingFileArtifactPath,
+  `${JSON.stringify(promotedTurnArtifact(releaseEvidence(existingFileArtifactOverrides)), null, 2)}\n`
+);
 const existingFileArtifactEvidenceFixture = runReadiness(
   ["--apple-dir", existingFileArtifactEvidenceFixturePath, "--strict"],
   { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
@@ -958,6 +1062,111 @@ assert.equal(existingFileArtifactEvidenceFixture.output.readyForDistribution, tr
 assert.equal(
   existingFileArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_artifacts"),
   false
+);
+
+const placeholderTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const placeholderTurnArtifactPath = resolve(placeholderTurnArtifactEvidenceFixturePath, "placeholder-turn-artifact.json");
+writeFixtureFile(placeholderTurnArtifactPath, "{}\n");
+writeReleaseEvidenceFixture(resolve(placeholderTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: {
+    artifactRef: pathToFileURL(placeholderTurnArtifactPath).href,
+  },
+});
+const placeholderTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", placeholderTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(placeholderTurnArtifactEvidenceFixture.status, 1);
+assert.equal(placeholderTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(placeholderTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  placeholderTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const nonJsonTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const nonJsonTurnArtifactPath = resolve(nonJsonTurnArtifactEvidenceFixturePath, "turn-artifact.txt");
+writeFixtureFile(nonJsonTurnArtifactPath, "selected relay proof lives elsewhere\n");
+writeReleaseEvidenceFixture(resolve(nonJsonTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: {
+    artifactRef: pathToFileURL(nonJsonTurnArtifactPath).href,
+  },
+});
+const nonJsonTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", nonJsonTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(nonJsonTurnArtifactEvidenceFixture.status, 1);
+assert.equal(nonJsonTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(nonJsonTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  nonJsonTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const nonRelayTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(nonRelayTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {}, {
+  turnArtifactOverrides: {
+    selectedCandidate: {
+      relayCandidateType: "relay",
+      relayCandidateSelected: true,
+      localCandidateType: "host",
+      remoteCandidateType: "srflx",
+      currentRoundTripTime: 0,
+    },
+  },
+});
+const nonRelayTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", nonRelayTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(nonRelayTurnArtifactEvidenceFixture.status, 1);
+assert.equal(nonRelayTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(nonRelayTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  nonRelayTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const staleTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(staleTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {}, {
+  turnArtifactOverrides: {
+    app: { build: "14" },
+    network: "old restricted network",
+    releaseEvidenceSummary: { network: "old restricted network" },
+  },
+});
+const staleTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", staleTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(staleTurnArtifactEvidenceFixture.status, 1);
+assert.equal(staleTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(staleTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  staleTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const unsafeTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unsafeTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {}, {
+  turnArtifactOverrides: {
+    diagnostics: {
+      rawIceCandidates: ["candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host"],
+      turnCredential: "secret-turn-password",
+    },
+  },
+});
+const unsafeTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", unsafeTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unsafeTurnArtifactEvidenceFixture.status, 1);
+assert.equal(unsafeTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(unsafeTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  unsafeTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
 );
 
 const unstapledNotarizationEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
@@ -1127,4 +1336,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 39 checks passed");
+console.log("native-apple-release-readiness: 44 checks passed");

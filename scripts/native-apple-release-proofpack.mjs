@@ -172,6 +172,7 @@ function pendingDeviceArtifact(platform, runId, roomId, createdAt) {
 
 function pendingTurnArtifact(runId, roomId, createdAt) {
   return {
+    schemaVersion: 1,
     artifactType: "native_restrictive_turn",
     status: "pending",
     runId,
@@ -186,6 +187,7 @@ function pendingTurnArtifact(runId, roomId, createdAt) {
       relayProtocol: "",
       relayCandidateType: "",
     },
+    notes: "Use scripts/native-apple-promote-turn-evidence.mjs with a sanitized native_turn_relay_observation from the restrictive network before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
   };
 }
 
@@ -385,7 +387,8 @@ function createProofpack(args) {
     gates,
     nextSteps: [
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
-      "Replace remaining pending TURN, TestFlight, and notarization artifacts with real non-secret proof.",
+      "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
+      "Replace remaining pending TestFlight and notarization artifacts with real non-secret proof.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],

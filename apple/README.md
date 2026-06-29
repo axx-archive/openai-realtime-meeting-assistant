@@ -169,6 +169,25 @@ has connected lifecycle, has all four media assertions backed by counters, and
 does not contain raw media/credential details. It updates only the selected
 device media artifact and `ReleaseEvidence.draft.json`.
 
+Promote the restrictive-network TURN observation the same way, using a
+sanitized selected-relay artifact copied from the operator run:
+
+```bash
+node scripts/native-apple-promote-turn-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --input artifacts/native-apple/<run-id>/inbox/turn-relay-observation.json \
+  --network "restricted guest network" \
+  --confirm-restrictive-network \
+  --confirm-same-room
+```
+
+The TURN helper requires a same-room native app observation for the current
+version/build, a physical iPhone/iPad/Mac context, selected candidate-pair relay
+facts, a sanitized `native-ice-readiness.mjs --require-turn` summary, and no raw
+ICE candidates, TURN URLs, usernames, credentials, IP addresses, or account
+identifiers. It updates only `restrictiveNetworkTurn` and the matching
+`selected-turn-relay.json` artifact.
+
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must
@@ -190,6 +209,14 @@ device metadata, all four media assertions true, and supporting assertion
 evidence/counters. A copied QA snapshot with `claimScope: "qa_snapshot"` or a
 simulator artifact remains useful diagnostic evidence, but it cannot satisfy
 physical-device release readiness.
+
+When a restrictive TURN `artifactRef` points to a local JSON file, strict
+readiness also inspects that content. The artifact must be promoted
+`native_restrictive_turn` proof with `claimScope: "restrictive_network_turn"`,
+`releaseEligible: true`, a matching run/room/network/timestamp, physical native
+app/device metadata for the current build, selected relay candidate-pair facts,
+and a sanitized ICE-readiness summary with credentialed TURN/TURNS servers and
+no warnings or errors.
 
 The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
 

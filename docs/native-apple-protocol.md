@@ -115,6 +115,17 @@ validates a physical-device snapshot, binds it to the proof-pack run/room, and
 writes the promoted proof artifact plus the matching `ReleaseEvidence.draft.json`
 device summary.
 
+Restrictive-network TURN proof follows the same rule. The app/operator may
+export a sanitized `native_turn_relay_observation`, but it is not release proof
+until `scripts/native-apple-promote-turn-evidence.mjs` validates the same-room
+native app version/build, physical device context, selected relay candidate-pair
+facts, and sanitized ICE-readiness summary. The promoted
+`native_restrictive_turn` artifact may include only safe summary fields such as
+relay protocol/type, local/remote candidate type labels, RTT, app/build/device
+metadata, and TURN-readiness counts. It must not include raw SDP, raw ICE
+candidates, candidate IDs, IP addresses, TURN URLs, usernames, credentials,
+cookies, headers, API keys, Team IDs, certificates, profiles, or private keys.
+
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session
 event, leave the broken peer connection, and return the UI to a rejoinable
