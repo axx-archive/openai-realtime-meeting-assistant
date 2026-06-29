@@ -113,21 +113,39 @@ assert.equal(plan.proofpack.proofpackDir, `artifacts/native-apple/${runId}`);
 assert.equal(plan.outputDir, `artifacts/native-apple/${runId}/operator`);
 assert.equal(plan.bundleIdentifiers.ios, "co.thebonfire.meetingassist.ios");
 assert.equal(plan.bundleIdentifiers.macos, "co.thebonfire.meetingassist.mac");
+assert.equal(plan.observationInputs.iphoneMediaTemplate, `artifacts/native-apple/${runId}/inbox/iphone-qa_snapshot.template.json`);
+assert.equal(plan.observationInputs.iphoneMediaInput, `artifacts/native-apple/${runId}/inbox/iphone-qa_snapshot.json`);
+assert.equal(plan.observationInputs.ipadMediaTemplate, `artifacts/native-apple/${runId}/inbox/ipad-qa_snapshot.template.json`);
+assert.equal(plan.observationInputs.ipadMediaInput, `artifacts/native-apple/${runId}/inbox/ipad-qa_snapshot.json`);
+assert.equal(plan.observationInputs.macMediaTemplate, `artifacts/native-apple/${runId}/inbox/mac-qa_snapshot.template.json`);
+assert.equal(plan.observationInputs.macMediaInput, `artifacts/native-apple/${runId}/inbox/mac-qa_snapshot.json`);
+assert.equal(plan.observationInputs.turnRelayTemplate, `artifacts/native-apple/${runId}/inbox/turn-relay-observation.template.json`);
+assert.equal(plan.observationInputs.turnRelayInput, `artifacts/native-apple/${runId}/inbox/turn-relay-observation.json`);
 assert.equal(plan.observationInputs.testFlightTemplate, `artifacts/native-apple/${runId}/inbox/testflight-observation.template.json`);
 assert.equal(plan.observationInputs.testFlightInput, `artifacts/native-apple/${runId}/inbox/testflight-observation.json`);
 assert.equal(plan.observationInputs.notarizationTemplate, `artifacts/native-apple/${runId}/inbox/notarization-observation.template.json`);
 assert.equal(plan.observationInputs.notarizationInput, `artifacts/native-apple/${runId}/inbox/notarization-observation.json`);
 assert.match(plan.commands.operatorPreflight.shell, /native-apple-release-operator-preflight\.mjs/);
 assert.match(plan.commands.operatorPreflight.shell, /--run-build-rehearsal/);
+assert.match(plan.commands.operatorPreflight.shell, /--require-proofpack/);
 assert.match(plan.commands.operatorPreflight.shell, /--require-privacy-manifest/);
 assert.match(plan.commands.operatorPreflight.shell, /--require-notary-profile/);
 assert.match(plan.nextSteps[0], /operatorPreflight/);
 assert.match(plan.commands.iosArchive.shell, /generic\/platform=iOS/);
 assert.match(plan.commands.testflightUpload.shell, /ExportOptions\.testflight\.plist/);
 assert.match(plan.commands.macArchive.shell, /generic\/platform=macOS/);
+assert.match(plan.commands.macZipForNotary.shell, /MeetingAssistMacApp\.zip/);
 assert.match(plan.commands.macSubmitNotary.shell, /"\$NOTARYTOOL_KEYCHAIN_PROFILE"/);
+assert.match(plan.commands.promoteIPhoneMediaEvidence.shell, /iphone-qa_snapshot\.json/);
+assert.match(plan.commands.promoteIPadMediaEvidence.shell, /ipad-qa_snapshot\.json/);
+assert.match(plan.commands.promoteMacMediaEvidence.shell, /mac-qa_snapshot\.json/);
+assert.match(plan.commands.promoteTurnRelayObservation.shell, /turn-relay-observation\.json/);
+assert.match(plan.commands.promoteTurnRelayObservation.shell, /"\$NATIVE_APPLE_RESTRICTIVE_NETWORK"/);
 assert.match(plan.commands.promoteTestFlightObservation.shell, /testflight-observation\.json/);
 assert.match(plan.commands.promoteMacNotarizationObservation.shell, /notarization-observation\.json/);
+assert.match(plan.commands.writeLocalReleaseEvidence.shell, /--write-evidence/);
+assert.match(plan.commands.strictReleaseReadiness.shell, /--strict/);
+assert.match(plan.commands.strictReleaseReadiness.shell, /ReleaseEvidence\.draft\.json/);
 assert.doesNotMatch(JSON.stringify(plan), /-----BEGIN|\.p8|\.p12|mobileprovision|provisionprofile|sk-[A-Za-z0-9_-]{20,}/);
 
 const testflightOptions = readPlistJSON(resolve(rootDir, plan.exportOptions.testflight));
@@ -145,6 +163,8 @@ assert.equal(developerIdOptions.signingStyle, "automatic");
 
 const readme = readFileSync(resolve(rootDir, plan.outputDir, "release-commands.md"), "utf8");
 assert.match(readme, /non-secret command plan/);
+assert.match(readme, /promoteIPhoneMediaEvidence/);
+assert.match(readme, /promoteTurnRelayObservation/);
 assert.match(readme, /notarytool/);
 assert.match(readme, /strict readiness/);
 
@@ -183,6 +203,32 @@ const blocked = runNode(packagePlanScriptPath, [
 ]);
 assert.equal(blocked.status, 1);
 assert.ok(blocked.output.blockers.some((blocker) => blocker.id === "xcode_project"));
+assert.ok(blocked.output.blockers.some((blocker) => blocker.id === "proofpack"));
+
+const noProofpack = runNode(packagePlanScriptPath, [
+  "--apple-dir",
+  fixture.appleDir,
+  "--run-id",
+  `native-apple-package-plan-no-proofpack-${process.pid}`,
+  "--created-at",
+  "2026-06-29T22:52:00Z",
+]);
+assert.equal(noProofpack.status, 1);
+assert.equal(noProofpack.output.ok, false);
+assert.equal(noProofpack.output.status, "blocked");
+assert.ok(noProofpack.output.blockers.some((blocker) => blocker.id === "proofpack"));
+
+const noProofpackWrite = runNode(packagePlanScriptPath, [
+  "--apple-dir",
+  fixture.appleDir,
+  "--run-id",
+  `native-apple-package-plan-no-proofpack-write-${process.pid}`,
+  "--created-at",
+  "2026-06-29T22:53:00Z",
+  "--write",
+]);
+assert.equal(noProofpackWrite.status, 1);
+assert.match(noProofpackWrite.output.error, /Refusing to write a blocked release package plan/);
 
 const secretRunId = runNode(packagePlanScriptPath, [
   "--apple-dir",
@@ -212,4 +258,4 @@ const mismatch = runNode(packagePlanScriptPath, [
 assert.equal(mismatch.status, 1);
 assert.match(mismatch.output.error, /does not match/);
 
-console.log("native-apple-release-package-plan: 9 checks passed");
+console.log("native-apple-release-package-plan: 11 checks passed");

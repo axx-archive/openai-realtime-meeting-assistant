@@ -216,12 +216,16 @@ This writes `operator/release-command-plan.json`,
 `operator/release-commands.md`, and the iOS/macOS export option plists under the
 ignored proof-pack directory. The command pack contains the Xcode archive,
 TestFlight export/upload, Developer ID export, notarytool, stapler, Gatekeeper,
-post-run promotion commands, and an offline operator preflight. It does not run
-the archive/upload/notarization commands, does not contact Apple, and does not
-write Team IDs, certificate names, provisioning profiles, App Store Connect
-keys, notarytool profile names, or raw command logs. Use it as the deterministic
-checklist on the machine that has the Apple account, certificates, profiles, and
-notarytool keychain profile configured.
+physical iPhone/iPad/Mac media-promotion commands, restrictive-network TURN
+promotion, TestFlight/macOS distribution promotion, local evidence handoff,
+final strict readiness, and an offline operator preflight. It does not run the
+archive/upload/notarization commands, does not contact Apple, and does not write
+Team IDs, certificate names, provisioning profiles, App Store Connect keys,
+notarytool profile names, or raw command logs. `--proofpack-dir` is required for
+an operator-ready plan; without it the script returns a blocked diagnostic plan.
+Use the generated pack as the deterministic checklist on the machine that has
+the Apple account, certificates, profiles, and notarytool keychain profile
+configured.
 
 Before archive/upload/notarization on that machine, run the generated
 `operatorPreflight` command or call it directly:
@@ -229,6 +233,7 @@ Before archive/upload/notarization on that machine, run the generated
 ```bash
 node scripts/native-apple-release-operator-preflight.mjs \
   --proofpack-dir artifacts/native-apple/<run-id> \
+  --require-proofpack \
   --require-privacy-manifest \
   --require-notary-profile \
   --run-build-rehearsal
@@ -240,7 +245,9 @@ proof-pack command-plan consistency, export option plists, notary profile
 environment presence, and Release generic iOS/macOS builds with signing
 disabled. The generated command pack includes `--require-privacy-manifest` so
 the Apple-account operator run hard-stops until `PrivacyInfo.xcprivacy` exists
-and is bundled. It still does not prove App Store Connect login,
+and is bundled. It also includes `--require-proofpack`, so preflight hard-stops
+if it is separated from the generated proof pack. It still does not prove App
+Store Connect login,
 provisioning-profile download, notary profile validity, physical devices, or
 actual upload/notarization.
 

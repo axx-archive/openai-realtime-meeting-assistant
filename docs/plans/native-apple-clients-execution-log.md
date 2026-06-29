@@ -2799,3 +2799,87 @@ What worked:
   checklist from drifting past privacy approval.
 - Testing both missing and present privacy manifests caught the intended
   fail-closed behavior without committing a guessed production manifest.
+
+## Wave 38
+
+Status: `wave38_proofpack_bound_operator_handoff_checkpoint_validated`
+
+Scope:
+- Continued the Apple-account operator handoff path through the requested
+  multi-agent loop. The explorer identified that the package plan could still
+  look `ready_for_operator` without a proof pack, even though the proof pack is
+  the evidence spine for physical devices, restrictive TURN, TestFlight, and
+  macOS notarization.
+- Made `scripts/native-apple-release-package-plan.mjs` fail closed when
+  `--proofpack-dir` is missing. A no-proof-pack run now returns a blocked
+  diagnostic plan, and `--write` refuses to create an operator command pack
+  while blockers are present.
+- Expanded generated package plans to include the full proof loop: iPhone,
+  iPad, and Mac physical media promotion commands, restrictive-network TURN
+  promotion, TestFlight upload promotion, macOS notarization promotion, local
+  release-evidence handoff, and final strict readiness against the proof-pack
+  draft.
+- Added `--require-proofpack` to generated operator preflight commands and to
+  `scripts/native-apple-release-operator-preflight.mjs`, so the Apple-account
+  preflight hard-stops if it is separated from the generated proof pack.
+- Tightened operator command-pack consistency checks to reject stale command
+  bodies, not just missing command names. A command pack with
+  `promoteIPhoneMediaEvidence` present but pointing at a stale shell command is
+  now blocked before operator work proceeds.
+- Updated Apple README operator-handoff docs so the human checklist matches
+  the generated plan and still avoids claiming real Apple/device/TestFlight or
+  notarization completion.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-package-plan.mjs` passed.
+- `node --check scripts/native-apple-release-package-plan.test.mjs` passed.
+- `node --check scripts/native-apple-release-operator-preflight.mjs` passed.
+- `node --check scripts/native-apple-release-operator-preflight.test.mjs`
+  passed.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 7
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 55 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true` and the known external blockers.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  exited nonzero as expected with `ok:true`, `readyForDistribution:false`, and
+  blockers for Apple development team/signing, privacy manifest, and release
+  evidence.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+- `git diff --check` passed.
+- Critic gate accepted the checkpoint at 9.1/10 with no blocking findings. The
+  optional stale-command hardening suggestion was implemented and validated
+  before commit.
+
+Risks / blockers:
+- This wave does not create or approve `PrivacyInfo.xcprivacy`, configure real
+  Apple signing/team state, prove physical iPhone/iPad/Mac media, prove
+  restrictive-network TURN relay, upload to TestFlight, notarize macOS, staple
+  the app, or prove Gatekeeper acceptance.
+- Expo/EAS may still be useful later for a separate iOS/iPadOS testing workflow
+  if the project intentionally adds or converts to an Expo/React Native mobile
+  client, but it is not the macOS distribution path for the current SwiftUI/Xcode
+  native clients.
+
+What worked:
+- Treating the proof pack as the operator command pack's root artifact keeps
+  archive/upload/notarization work tied to the same evidence run.
+- Making `--write` refuse blocked package plans prevents a diagnostic plan from
+  becoming an accidental release checklist.
+- Checking command body fragments catches stale hand-edited packs without
+  storing secrets or requiring Apple-account access.

@@ -16,7 +16,8 @@ function usage() {
     "Creates a non-secret native Apple archive/export/notarization command plan.",
     "The plan writes export option plists and shell-safe command strings, but it",
     "does not archive, upload to TestFlight, notarize, staple, or access Apple",
-    "credentials. Run it on the Apple-account machine before the real release run.",
+    "credentials. Pass --proofpack-dir for an operator-ready plan; without a",
+    "proof pack this script returns a blocked diagnostic plan only.",
   ].join("\n");
 }
 
@@ -364,6 +365,14 @@ function buildPlan(args) {
 
   const observationInputs = proofpack
     ? {
+        iphoneMediaTemplate: proofpack.proofpack.observationTemplates?.iphoneMedia ?? null,
+        iphoneMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "iphone-qa_snapshot.json")),
+        ipadMediaTemplate: proofpack.proofpack.observationTemplates?.ipadMedia ?? null,
+        ipadMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "ipad-qa_snapshot.json")),
+        macMediaTemplate: proofpack.proofpack.observationTemplates?.macMedia ?? null,
+        macMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "mac-qa_snapshot.json")),
+        turnRelayTemplate: proofpack.proofpack.observationTemplates?.turnRelay ?? null,
+        turnRelayInput: artifactRef(join(proofpack.proofpackDir, "inbox", "turn-relay-observation.json")),
         testFlightTemplate: proofpack.proofpack.observationTemplates?.testFlight ?? null,
         testFlightInput: artifactRef(join(proofpack.proofpackDir, "inbox", "testflight-observation.json")),
         notarizationTemplate: proofpack.proofpack.observationTemplates?.notarization ?? null,
@@ -381,11 +390,12 @@ function buildPlan(args) {
         ...(proofpack ? ["--proofpack-dir", artifactRef(proofpack.proofpackDir)] : []),
         "--configuration",
         configuration,
+        "--require-proofpack",
         "--require-privacy-manifest",
         "--require-notary-profile",
         "--run-build-rehearsal",
       ],
-      "Runs the offline Apple-account machine preflight, including tool checks, privacy-manifest presence/wiring, proof-pack command-plan consistency, notary profile presence, and Release generic iOS/macOS build rehearsals with signing disabled."
+      "Runs the offline Apple-account machine preflight, including proof-pack presence, tool checks, privacy-manifest presence/wiring, proof-pack command-plan consistency, notary profile presence, and Release generic iOS/macOS build rehearsals with signing disabled."
     ),
     preflightSigning: commandSpec(
       ["node", "scripts/native-apple-configure-signing.mjs", "--apple-dir", repoRelative(appleDir), "--validate-only"],
@@ -477,6 +487,66 @@ function buildPlan(args) {
     ),
   };
   if (proofpack) {
+    commands.promoteIPhoneMediaEvidence = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-media-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--platform",
+        "iphone",
+        "--input",
+        observationInputs.iphoneMediaInput,
+        "--confirm-physical-device",
+        "--confirm-same-room",
+      ],
+      "Promotes the saved iPhone QA snapshot after it was captured on a physical iPhone in the release room."
+    );
+    commands.promoteIPadMediaEvidence = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-media-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--platform",
+        "ipad",
+        "--input",
+        observationInputs.ipadMediaInput,
+        "--confirm-physical-device",
+        "--confirm-same-room",
+      ],
+      "Promotes the saved iPad QA snapshot after it was captured on a physical iPad in the release room."
+    );
+    commands.promoteMacMediaEvidence = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-media-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--platform",
+        "mac",
+        "--input",
+        observationInputs.macMediaInput,
+        "--confirm-physical-device",
+        "--confirm-same-room",
+      ],
+      "Promotes the saved Mac QA snapshot after it was captured on the physical Mac in the release room."
+    );
+    commands.promoteTurnRelayObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-turn-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--input",
+        observationInputs.turnRelayInput,
+        "--network",
+        "$NATIVE_APPLE_RESTRICTIVE_NETWORK",
+        "--confirm-restrictive-network",
+        "--confirm-same-room",
+      ],
+      "Promotes the restrictive-network TURN observation. Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret network label before running."
+    );
     commands.promoteTestFlightObservation = commandSpec(
       [
         "node",
@@ -511,6 +581,30 @@ function buildPlan(args) {
       ],
       "Promotes the sanitized macOS notarization observation after notary acceptance, stapling, and Gatekeeper verification."
     );
+    commands.writeLocalReleaseEvidence = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-release-proofpack.mjs",
+        "--apple-dir",
+        repoRelative(appleDir),
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--write-evidence",
+      ],
+      "Copies the completed proof-pack draft to ignored apple/ReleaseEvidence.local.json after every evidence category has been promoted."
+    );
+    commands.strictReleaseReadiness = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-release-readiness.mjs",
+        "--apple-dir",
+        repoRelative(appleDir),
+        "--strict",
+        "--evidence-file",
+        artifactRef(proofpack.draftPath),
+      ],
+      "Runs the final strict readiness gate against the completed proof-pack draft before any release-readiness claim."
+    );
   }
 
   const blockers = [];
@@ -534,9 +628,9 @@ function buildPlan(args) {
     });
   }
   if (!proofpack) {
-    warnings.push({
+    blockers.push({
       id: "proofpack",
-      detail: "No --proofpack-dir was provided; create one before the real external run so TestFlight/notarization observations can be promoted.",
+      detail: "Pass --proofpack-dir for a generated proof pack before creating an operator-ready release command plan.",
     });
   }
 
@@ -577,16 +671,20 @@ function buildPlan(args) {
     operatorEnvironment: {
       appleDevelopmentTeam: "Configure through apple/Config/Signing.local.xcconfig or APPLE_DEVELOPMENT_TEAM; this plan intentionally does not print the Team ID.",
       notarytoolKeychainProfile: "Set NOTARYTOOL_KEYCHAIN_PROFILE in the local shell before running the notarytool command.",
+      restrictiveNetworkLabel: "Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret label before promoting TURN evidence.",
     },
     blockers,
     warnings,
     nextSteps: [
       "Run operatorPreflight on the Apple-account machine before archive/upload/notarization.",
+      "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
+      "Capture and promote restrictive-network TURN relay evidence.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",
       "Fill proof-pack inbox TestFlight and macOS notarization observations from the real operator run.",
       "Promote sanitized TestFlight and macOS notarization observations into the proof pack.",
+      "Copy the completed proof-pack draft into ignored local release evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],
   };
@@ -627,9 +725,10 @@ function packageReadme(plan) {
     lines.push(`## ${name}`, "", command.note, "", "```bash", command.shell, "```", "");
   }
   lines.push(
-    "After TestFlight upload and macOS notarization, promote sanitized observations",
-    "from the proof-pack inbox and run strict readiness before claiming release",
-    "readiness.",
+    "After physical-device media, restrictive TURN, TestFlight upload, and macOS",
+    "notarization observations are captured, promote sanitized proof-pack inbox",
+    "files, copy the completed draft into local release evidence, and run strict",
+    "readiness before claiming release readiness.",
     ""
   );
   return `${lines.join("\n")}\n`;
@@ -651,6 +750,9 @@ function main() {
     }
     const result = buildPlan(args);
     if (args.write) {
+      if (!result.ok) {
+        throw new Error("Refusing to write a blocked release package plan. Fix blockers or run without --write to inspect the diagnostic output.");
+      }
       writePlan(result, args);
     }
     console.log(

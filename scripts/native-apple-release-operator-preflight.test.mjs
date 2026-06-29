@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,6 +139,7 @@ const passing = runNode(
     appleDir,
     "--proofpack-dir",
     proofpackDir,
+    "--require-proofpack",
     "--require-notary-profile",
   ],
   {
@@ -163,6 +164,7 @@ const missingPrivacyManifest = runNode(
     appleDir,
     "--proofpack-dir",
     proofpackDir,
+    "--require-proofpack",
     "--require-privacy-manifest",
     "--require-notary-profile",
   ],
@@ -204,6 +206,7 @@ const privacyPassing = runNode(
     privacyAppleDir,
     "--proofpack-dir",
     privacyProofpackDir,
+    "--require-proofpack",
     "--require-privacy-manifest",
     "--require-notary-profile",
   ],
@@ -221,12 +224,50 @@ const missingSigning = runNode(preflightScriptPath, [
   appleDir,
   "--proofpack-dir",
   proofpackDir,
+  "--require-proofpack",
   "--require-notary-profile",
 ]);
 assert.equal(missingSigning.status, 1);
 assert.equal(missingSigning.output.readyForOperator, false);
 assert.ok(missingSigning.output.blockers.some((blocker) => blocker.id === "signing_configuration"));
 assert.ok(missingSigning.output.blockers.some((blocker) => blocker.id === "notarytool_keychain_profile"));
+
+const missingProofpack = runNode(
+  preflightScriptPath,
+  ["--apple-dir", appleDir, "--require-proofpack"],
+  { APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5" }
+);
+assert.equal(missingProofpack.status, 1);
+assert.equal(missingProofpack.output.readyForOperator, false);
+assert.ok(missingProofpack.output.checks.some((check) => check.id === "proofpack_required" && !check.ok));
+assert.ok(missingProofpack.output.blockers.some((blocker) => blocker.id === "proofpack_dir"));
+
+const staleRunId = `native-apple-operator-preflight-stale-test-${process.pid}`;
+const staleProofpackDir = createProofpack(appleDir, staleRunId);
+createPackagePlan(appleDir, staleProofpackDir);
+const stalePlanPath = resolve(rootDir, staleProofpackDir, "operator", "release-command-plan.json");
+const stalePlan = JSON.parse(readFileSync(stalePlanPath, "utf8"));
+stalePlan.commands.promoteIPhoneMediaEvidence.shell = "echo stale-promoter";
+writeFileSync(stalePlanPath, `${JSON.stringify(stalePlan, null, 2)}\n`);
+const stalePlanPreflight = runNode(
+  preflightScriptPath,
+  [
+    "--apple-dir",
+    appleDir,
+    "--proofpack-dir",
+    staleProofpackDir,
+    "--require-proofpack",
+    "--require-notary-profile",
+  ],
+  {
+    APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5",
+    NOTARYTOOL_KEYCHAIN_PROFILE: "meetingassist-notary-profile",
+  }
+);
+assert.equal(stalePlanPreflight.status, 1);
+assert.equal(stalePlanPreflight.output.readyForOperator, false);
+assert.ok(stalePlanPreflight.output.checks.some((check) => check.id === "operator_commands" && !check.ok && /promoteIPhoneMediaEvidence/.test(check.detail)));
+assert.ok(stalePlanPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
 
 const noProjectFixture = makeAppleFixture({ project: false });
 const noProject = runNode(
@@ -237,4 +278,4 @@ const noProject = runNode(
 assert.equal(noProject.status, 1);
 assert.ok(noProject.output.blockers.some((blocker) => blocker.id === "xcode_project"));
 
-console.log("native-apple-release-operator-preflight: 5 checks passed");
+console.log("native-apple-release-operator-preflight: 7 checks passed");

@@ -11,7 +11,8 @@ function usage() {
     "Usage:",
     "  node scripts/native-apple-release-operator-preflight.mjs [--apple-dir apple]",
     "    [--proofpack-dir artifacts/native-apple/<run-id>] [--configuration Release]",
-    "    [--require-privacy-manifest] [--require-notary-profile]",
+    "    [--require-proofpack] [--require-privacy-manifest]",
+    "    [--require-notary-profile]",
     "    [--run-build-rehearsal]",
     "",
     "Runs an offline, non-secret preflight for the Apple-account machine before",
@@ -26,6 +27,7 @@ function parseArgs(argv) {
     appleDir: "apple",
     proofpackDir: "",
     configuration: "Release",
+    requireProofpack: false,
     requirePrivacyManifest: false,
     requireNotaryProfile: false,
     runBuildRehearsal: false,
@@ -43,6 +45,8 @@ function parseArgs(argv) {
     } else if (arg === "--configuration") {
       args.configuration = requiredValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--require-proofpack") {
+      args.requireProofpack = true;
     } else if (arg === "--require-privacy-manifest") {
       args.requirePrivacyManifest = true;
     } else if (arg === "--require-notary-profile") {
@@ -331,19 +335,84 @@ function checkProofpack(proofpackDir, configuration, checks, blockers, warnings)
     "testflightUpload",
     "macArchive",
     "macDeveloperIdExport",
+    "macZipForNotary",
     "macSubmitNotary",
     "macStaple",
     "macGatekeeper",
+    "promoteIPhoneMediaEvidence",
+    "promoteIPadMediaEvidence",
+    "promoteMacMediaEvidence",
+    "promoteTurnRelayObservation",
     "promoteTestFlightObservation",
     "promoteMacNotarizationObservation",
+    "writeLocalReleaseEvidence",
+    "strictReleaseReadiness",
   ];
   const missingCommands = requiredCommands.filter((name) => !plan.commands?.[name]?.shell);
+  const requiredCommandFragments = {
+    operatorPreflight: [
+      "native-apple-release-operator-preflight.mjs",
+      "--proofpack-dir",
+      "--require-proofpack",
+      "--require-privacy-manifest",
+      "--require-notary-profile",
+      "--run-build-rehearsal",
+    ],
+    preflightSigning: ["native-apple-configure-signing.mjs", "--validate-only"],
+    defaultReadiness: ["native-apple-release-readiness.mjs"],
+    iosArchive: ["xcodebuild", "MeetingAssistAppleApp", "generic/platform=iOS", "archive"],
+    testflightUpload: ["xcodebuild", "-exportArchive", "ExportOptions.testflight.plist"],
+    macArchive: ["xcodebuild", "MeetingAssistMacApp", "generic/platform=macOS", "archive"],
+    macDeveloperIdExport: ["xcodebuild", "-exportArchive", "ExportOptions.developer-id.plist"],
+    macZipForNotary: ["ditto", "MeetingAssistMacApp.zip"],
+    macSubmitNotary: ["notarytool", "submit", "$NOTARYTOOL_KEYCHAIN_PROFILE"],
+    macStaple: ["stapler", "staple"],
+    macGatekeeper: ["spctl"],
+    promoteIPhoneMediaEvidence: ["native-apple-promote-media-evidence.mjs", "--platform iphone", "iphone-qa_snapshot.json", "--confirm-physical-device", "--confirm-same-room"],
+    promoteIPadMediaEvidence: ["native-apple-promote-media-evidence.mjs", "--platform ipad", "ipad-qa_snapshot.json", "--confirm-physical-device", "--confirm-same-room"],
+    promoteMacMediaEvidence: ["native-apple-promote-media-evidence.mjs", "--platform mac", "mac-qa_snapshot.json", "--confirm-physical-device", "--confirm-same-room"],
+    promoteTurnRelayObservation: [
+      "native-apple-promote-turn-evidence.mjs",
+      "turn-relay-observation.json",
+      "$NATIVE_APPLE_RESTRICTIVE_NETWORK",
+      "--confirm-restrictive-network",
+      "--confirm-same-room",
+    ],
+    promoteTestFlightObservation: [
+      "native-apple-promote-distribution-evidence.mjs",
+      "--kind testflight",
+      "testflight-observation.json",
+      "--confirm-app-store-connect-upload",
+      "--confirm-no-secrets",
+      "--confirm-current-build",
+    ],
+    promoteMacNotarizationObservation: [
+      "native-apple-promote-distribution-evidence.mjs",
+      "--kind notarization",
+      "notarization-observation.json",
+      "--confirm-developer-id-archive",
+      "--confirm-notary-accepted",
+      "--confirm-stapled-app",
+      "--confirm-gatekeeper-accepted",
+      "--confirm-current-build",
+    ],
+    writeLocalReleaseEvidence: ["native-apple-release-proofpack.mjs", "--write-evidence"],
+    strictReleaseReadiness: ["native-apple-release-readiness.mjs", "--strict", "ReleaseEvidence.draft.json"],
+  };
+  const staleCommands = Object.entries(requiredCommandFragments).flatMap(([name, fragments]) => {
+    const shell = String(plan.commands?.[name]?.shell ?? "");
+    return fragments.filter((fragment) => !shell.includes(fragment)).map((fragment) => `${name}:${fragment}`);
+  });
+  const commandProblems = [...missingCommands, ...staleCommands];
   checks.push({
     id: "operator_commands",
-    ok: missingCommands.length === 0,
-    detail: missingCommands.length === 0 ? "Operator command pack includes archive, upload, notarization, and promotion commands." : `Missing commands: ${missingCommands.join(", ")}`,
+    ok: commandProblems.length === 0,
+    detail:
+      commandProblems.length === 0
+        ? "Operator command pack includes archive, upload, notarization, and full proof-loop commands."
+        : `Missing or stale commands: ${commandProblems.join(", ")}`,
   });
-  if (missingCommands.length > 0) {
+  if (commandProblems.length > 0) {
     blockers.push({
       id: "operator_commands",
       detail: "Regenerate the command plan so the Apple-account machine has the full ordered command pack.",
@@ -478,6 +547,16 @@ function buildPreflight(args) {
 
   if (args.proofpackDir) {
     checkProofpack(resolve(rootDir, args.proofpackDir), args.configuration, checks, blockers, warnings);
+  } else if (args.requireProofpack) {
+    checks.push({
+      id: "proofpack_required",
+      ok: false,
+      detail: "No proof pack directory was provided.",
+    });
+    blockers.push({
+      id: "proofpack_dir",
+      detail: "Pass --proofpack-dir for the generated proof pack before running the Apple-account operator preflight.",
+    });
   } else {
     warnings.push({
       id: "proofpack_dir",
