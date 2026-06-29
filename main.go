@@ -1379,13 +1379,14 @@ func splitEnvList(name string) []string {
 	return values
 }
 
-func logBrowserMediaQualityReport(rawData string, participantName string, sessionID string) {
+func logClientMediaQualityReport(rawData string, participantName string, sessionID string) {
 	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(rawData), &payload); err != nil {
-		log.Errorf("Failed to unmarshal browser media quality report: %v", err)
+		log.Errorf("Failed to unmarshal client media quality report: %v", err)
 		return
 	}
 
+	client := mapFromPayload(payload, "client")
 	browser := mapFromPayload(payload, "browser")
 	audio := mapFromPayload(payload, "audio")
 	video := mapFromPayload(payload, "video")
@@ -1398,9 +1399,11 @@ func logBrowserMediaQualityReport(rawData string, participantName string, sessio
 	videoSettings := mapFromPayload(video, "settings")
 	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
 	fmt.Printf(
-		"Browser media quality participant=%q session=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
+		stringFromPayload(client, "platform"),
+		stringFromPayload(client, "version"),
 		boolFromPayload(browser, "safari"),
 		boolFromPayload(payload, "laggy"),
 		boolFromPayload(video, "constrained"),
@@ -2610,7 +2613,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted {
 				continue
 			}
-			logBrowserMediaQualityReport(message.Data, currentParticipantName(), participantSessionID)
+			logClientMediaQualityReport(message.Data, currentParticipantName(), participantSessionID)
 		case "media_error":
 			if !participantAccepted {
 				continue

@@ -16,6 +16,157 @@ import CoreGraphics
 public typealias LocalICECandidateHandler = @Sendable (RTCIceCandidatePayload) async -> Void
 public typealias RemoteVideoTrackHandler = @Sendable (NativeRemoteVideoTrack) async -> Void
 
+public struct NativeMediaQualityCandidatePair: Codable, Equatable, Sendable {
+    public var `protocol`: String
+    public var networkType: String
+    public var localCandidateType: String
+    public var remoteCandidateType: String
+    public var availableOutgoingBitrate: Double
+    public var currentRoundTripTime: Double
+
+    public init(
+        protocol: String = "",
+        networkType: String = "",
+        localCandidateType: String = "",
+        remoteCandidateType: String = "",
+        availableOutgoingBitrate: Double = 0,
+        currentRoundTripTime: Double = 0
+    ) {
+        self.protocol = `protocol`
+        self.networkType = networkType
+        self.localCandidateType = localCandidateType
+        self.remoteCandidateType = remoteCandidateType
+        self.availableOutgoingBitrate = availableOutgoingBitrate
+        self.currentRoundTripTime = currentRoundTripTime
+    }
+}
+
+public struct NativeMediaQualityDeltas: Codable, Equatable, Sendable {
+    public var outboundAudioBytesSent: Double?
+    public var outboundAudioPacketsSent: Double?
+    public var outboundVideoBytesSent: Double?
+    public var outboundVideoFramesSent: Double?
+    public var inboundAudioPacketsLost: Double?
+    public var inboundAudioPacketsReceived: Double?
+    public var inboundVideoPacketsLost: Double?
+    public var inboundVideoPacketsReceived: Double?
+    public var inboundVideoDecoded: Double?
+    public var inboundVideoDrops: Double?
+    public var elapsedMs: Double?
+
+    public init(
+        outboundAudioBytesSent: Double? = nil,
+        outboundAudioPacketsSent: Double? = nil,
+        outboundVideoBytesSent: Double? = nil,
+        outboundVideoFramesSent: Double? = nil,
+        inboundAudioPacketsLost: Double? = nil,
+        inboundAudioPacketsReceived: Double? = nil,
+        inboundVideoPacketsLost: Double? = nil,
+        inboundVideoPacketsReceived: Double? = nil,
+        inboundVideoDecoded: Double? = nil,
+        inboundVideoDrops: Double? = nil,
+        elapsedMs: Double? = nil
+    ) {
+        self.outboundAudioBytesSent = outboundAudioBytesSent
+        self.outboundAudioPacketsSent = outboundAudioPacketsSent
+        self.outboundVideoBytesSent = outboundVideoBytesSent
+        self.outboundVideoFramesSent = outboundVideoFramesSent
+        self.inboundAudioPacketsLost = inboundAudioPacketsLost
+        self.inboundAudioPacketsReceived = inboundAudioPacketsReceived
+        self.inboundVideoPacketsLost = inboundVideoPacketsLost
+        self.inboundVideoPacketsReceived = inboundVideoPacketsReceived
+        self.inboundVideoDecoded = inboundVideoDecoded
+        self.inboundVideoDrops = inboundVideoDrops
+        self.elapsedMs = elapsedMs
+    }
+}
+
+public struct NativeMediaQualitySnapshot: Codable, Equatable, Sendable {
+    public var at: Double
+    public var outboundAudioBytesSent: Double
+    public var outboundAudioPacketsSent: Double
+    public var outboundVideoBytesSent: Double
+    public var outboundVideoFramesEncoded: Double
+    public var outboundVideoFramesSent: Double
+    public var inboundAudioJitter: Double
+    public var inboundAudioLost: Double
+    public var inboundAudioPacketsReceived: Double
+    public var inboundVideoJitter: Double
+    public var inboundVideoLost: Double
+    public var inboundVideoPacketsReceived: Double
+    public var inboundVideoDrops: Double
+    public var inboundVideoDecoded: Double
+    public var outboundRtt: Double
+    public var candidatePair: NativeMediaQualityCandidatePair
+
+    public init(
+        at: Double = 0,
+        outboundAudioBytesSent: Double = 0,
+        outboundAudioPacketsSent: Double = 0,
+        outboundVideoBytesSent: Double = 0,
+        outboundVideoFramesEncoded: Double = 0,
+        outboundVideoFramesSent: Double = 0,
+        inboundAudioJitter: Double = 0,
+        inboundAudioLost: Double = 0,
+        inboundAudioPacketsReceived: Double = 0,
+        inboundVideoJitter: Double = 0,
+        inboundVideoLost: Double = 0,
+        inboundVideoPacketsReceived: Double = 0,
+        inboundVideoDrops: Double = 0,
+        inboundVideoDecoded: Double = 0,
+        outboundRtt: Double = 0,
+        candidatePair: NativeMediaQualityCandidatePair = NativeMediaQualityCandidatePair()
+    ) {
+        self.at = at
+        self.outboundAudioBytesSent = outboundAudioBytesSent
+        self.outboundAudioPacketsSent = outboundAudioPacketsSent
+        self.outboundVideoBytesSent = outboundVideoBytesSent
+        self.outboundVideoFramesEncoded = outboundVideoFramesEncoded
+        self.outboundVideoFramesSent = outboundVideoFramesSent
+        self.inboundAudioJitter = inboundAudioJitter
+        self.inboundAudioLost = inboundAudioLost
+        self.inboundAudioPacketsReceived = inboundAudioPacketsReceived
+        self.inboundVideoJitter = inboundVideoJitter
+        self.inboundVideoLost = inboundVideoLost
+        self.inboundVideoPacketsReceived = inboundVideoPacketsReceived
+        self.inboundVideoDrops = inboundVideoDrops
+        self.inboundVideoDecoded = inboundVideoDecoded
+        self.outboundRtt = outboundRtt
+        self.candidatePair = candidatePair
+    }
+
+    public func deltas(since previous: NativeMediaQualitySnapshot?) -> NativeMediaQualityDeltas {
+        guard let previous else { return NativeMediaQualityDeltas() }
+        return NativeMediaQualityDeltas(
+            outboundAudioBytesSent: outboundAudioBytesSent - previous.outboundAudioBytesSent,
+            outboundAudioPacketsSent: outboundAudioPacketsSent - previous.outboundAudioPacketsSent,
+            outboundVideoBytesSent: outboundVideoBytesSent - previous.outboundVideoBytesSent,
+            outboundVideoFramesSent: outboundVideoFramesSent - previous.outboundVideoFramesSent,
+            inboundAudioPacketsLost: inboundAudioLost - previous.inboundAudioLost,
+            inboundAudioPacketsReceived: inboundAudioPacketsReceived - previous.inboundAudioPacketsReceived,
+            inboundVideoPacketsLost: inboundVideoLost - previous.inboundVideoLost,
+            inboundVideoPacketsReceived: inboundVideoPacketsReceived - previous.inboundVideoPacketsReceived,
+            inboundVideoDecoded: inboundVideoDecoded - previous.inboundVideoDecoded,
+            inboundVideoDrops: inboundVideoDrops - previous.inboundVideoDrops,
+            elapsedMs: at - previous.at
+        )
+    }
+}
+
+struct NativeRTCStatisticsEntry: Equatable, Sendable {
+    var id: String
+    var type: String
+    var timestampUs: Double
+    var values: [String: JSONValue]
+
+    init(id: String, type: String, timestampUs: Double, values: [String: JSONValue]) {
+        self.id = id
+        self.type = type
+        self.timestampUs = timestampUs
+        self.values = values
+    }
+}
+
 struct NativeICEServerDescriptor: Equatable, Sendable {
     var urls: [String]
     var username: String?
@@ -115,6 +266,7 @@ public protocol RoomRTCClient: AnyObject, Sendable {
     func handleOffer(_ sdp: String) async throws -> String
     func addRemoteCandidate(_ json: String) async throws
     func restartICE() async
+    func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot
     func leave() async
 }
 
@@ -301,6 +453,19 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         let connection = lock.withLock { peerConnection }
         connection?.restartIce()
         setLifecycle(.reconnecting)
+    }
+
+    public func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
+        guard let connection = lock.withLock({ peerConnection }) else {
+            throw RoomRTCError.peerConnectionNotConfigured
+        }
+
+        let report = await withCheckedContinuation { (continuation: CheckedContinuation<LKRTCStatisticsReport, Never>) in
+            connection.statistics { report in
+                continuation.resume(returning: report)
+            }
+        }
+        return Self.mediaQualitySnapshot(from: Self.statisticsEntries(from: report))
     }
 
     public func leave() async {
@@ -544,6 +709,147 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         }
     }
 
+    static func mediaQualitySnapshot(from entries: [NativeRTCStatisticsEntry]) -> NativeMediaQualitySnapshot {
+        var snapshot = NativeMediaQualitySnapshot(
+            at: entries.map(\.timestampUs).max().map { $0 / 1_000 } ?? 0
+        )
+        let entriesByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        var selectedCandidatePair: NativeRTCStatisticsEntry?
+
+        for entry in entries {
+            switch entry.type {
+            case "transport":
+                if let selectedPairID = stringValue(entry, "selectedCandidatePairId"),
+                   let pair = entriesByID[selectedPairID] {
+                    selectedCandidatePair = pair
+                }
+            case "inbound-rtp":
+                switch mediaKind(entry) {
+                case "audio":
+                    snapshot.inboundAudioJitter = max(snapshot.inboundAudioJitter, numberValue(entry, "jitter"))
+                    snapshot.inboundAudioLost += numberValue(entry, "packetsLost")
+                    snapshot.inboundAudioPacketsReceived += numberValue(entry, "packetsReceived")
+                case "video":
+                    snapshot.inboundVideoJitter = max(snapshot.inboundVideoJitter, numberValue(entry, "jitter"))
+                    snapshot.inboundVideoLost += numberValue(entry, "packetsLost")
+                    snapshot.inboundVideoPacketsReceived += numberValue(entry, "packetsReceived")
+                    snapshot.inboundVideoDrops += numberValue(entry, "framesDropped")
+                    snapshot.inboundVideoDecoded += numberValue(entry, "framesDecoded")
+                default:
+                    break
+                }
+            case "outbound-rtp":
+                switch mediaKind(entry) {
+                case "audio":
+                    snapshot.outboundAudioBytesSent += numberValue(entry, "bytesSent")
+                    snapshot.outboundAudioPacketsSent += numberValue(entry, "packetsSent")
+                case "video":
+                    snapshot.outboundVideoBytesSent += numberValue(entry, "bytesSent")
+                    snapshot.outboundVideoFramesEncoded += numberValue(entry, "framesEncoded")
+                    snapshot.outboundVideoFramesSent += numberValue(entry, "framesSent")
+                default:
+                    break
+                }
+            case "candidate-pair":
+                if boolValue(entry, "nominated") || stringValue(entry, "state") == "succeeded" {
+                    selectedCandidatePair = selectedCandidatePair ?? entry
+                    snapshot.outboundRtt = max(snapshot.outboundRtt, numberValue(entry, "currentRoundTripTime"))
+                }
+            default:
+                break
+            }
+        }
+
+        if let selectedCandidatePair {
+            snapshot.outboundRtt = max(snapshot.outboundRtt, numberValue(selectedCandidatePair, "currentRoundTripTime"))
+            snapshot.candidatePair = candidatePairSummary(selectedCandidatePair, entriesByID: entriesByID)
+        }
+        return snapshot
+    }
+
+    private static func statisticsEntries(from report: LKRTCStatisticsReport) -> [NativeRTCStatisticsEntry] {
+        report.statistics.values.map { stat in
+            NativeRTCStatisticsEntry(
+                id: stat.id,
+                type: stat.type,
+                timestampUs: stat.timestamp_us,
+                values: stat.values.compactMapValues(jsonValue)
+            )
+        }
+    }
+
+    private static func candidatePairSummary(
+        _ candidatePair: NativeRTCStatisticsEntry,
+        entriesByID: [String: NativeRTCStatisticsEntry]
+    ) -> NativeMediaQualityCandidatePair {
+        let localCandidate = stringValue(candidatePair, "localCandidateId").flatMap { entriesByID[$0] }
+        let remoteCandidate = stringValue(candidatePair, "remoteCandidateId").flatMap { entriesByID[$0] }
+        let pairProtocol = stringValue(candidatePair, "protocol")
+        return NativeMediaQualityCandidatePair(
+            protocol: pairProtocol ?? stringValue(localCandidate, "protocol") ?? "",
+            networkType: stringValue(localCandidate, "networkType") ?? "",
+            localCandidateType: stringValue(localCandidate, "candidateType") ?? "",
+            remoteCandidateType: stringValue(remoteCandidate, "candidateType") ?? "",
+            availableOutgoingBitrate: numberValue(candidatePair, "availableOutgoingBitrate"),
+            currentRoundTripTime: numberValue(candidatePair, "currentRoundTripTime")
+        )
+    }
+
+    private static func mediaKind(_ entry: NativeRTCStatisticsEntry) -> String {
+        stringValue(entry, "kind") ?? stringValue(entry, "mediaType") ?? ""
+    }
+
+    private static func stringValue(_ entry: NativeRTCStatisticsEntry?, _ key: String) -> String? {
+        guard let value = entry?.values[key] else { return nil }
+        if case .string(let string) = value {
+            return string
+        }
+        return nil
+    }
+
+    private static func numberValue(_ entry: NativeRTCStatisticsEntry?, _ key: String) -> Double {
+        guard let value = entry?.values[key] else { return 0 }
+        switch value {
+        case .number(let number):
+            return number
+        case .bool(let bool):
+            return bool ? 1 : 0
+        default:
+            return 0
+        }
+    }
+
+    private static func boolValue(_ entry: NativeRTCStatisticsEntry, _ key: String) -> Bool {
+        guard let value = entry.values[key] else { return false }
+        switch value {
+        case .bool(let bool):
+            return bool
+        case .number(let number):
+            return number != 0
+        default:
+            return false
+        }
+    }
+
+    private static func jsonValue(from object: NSObject) -> JSONValue? {
+        if let number = object as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            return .number(number.doubleValue)
+        }
+        if let string = object as? NSString {
+            return .string(string as String)
+        }
+        if let array = object as? [NSObject] {
+            return .array(array.compactMap(jsonValue))
+        }
+        if let dictionary = object as? [String: NSObject] {
+            return .object(dictionary.compactMapValues(jsonValue))
+        }
+        return nil
+    }
+
     private static func preferredCameraDevice() -> AVCaptureDevice? {
         let devices = LKRTCCameraVideoCapturer.captureDevices()
         #if os(iOS)
@@ -717,6 +1023,10 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     public func restartICE() async {
         lifecycle = .reconnecting
+    }
+
+    public func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
+        throw RoomRTCError.webRTCUnavailable
     }
 
     public func leave() async {

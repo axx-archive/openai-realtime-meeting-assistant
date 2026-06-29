@@ -209,6 +209,68 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.localVideoEnabledChanges, [false])
     }
 
+    func testMediaQualityReportUsesExistingEventAndBrowserCompatiblePayload() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            mediaQualitySnapshots: [
+                NativeMediaQualitySnapshot(
+                    at: 1_000,
+                    outboundAudioBytesSent: 1_200,
+                    outboundAudioPacketsSent: 12,
+                    outboundVideoBytesSent: 9_000,
+                    outboundVideoFramesSent: 90,
+                    inboundAudioPacketsReceived: 80,
+                    inboundVideoPacketsReceived: 160,
+                    outboundRtt: 0.08,
+                    candidatePair: NativeMediaQualityCandidatePair(
+                        protocol: "udp",
+                        networkType: "wifi",
+                        localCandidateType: "host",
+                        remoteCandidateType: "relay",
+                        currentRoundTripTime: 0.08
+                    )
+                )
+            ]
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        try await coordinator.sendMediaQualityReport()
+
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.participant,
+            ClientSignalEvent.mediaReady,
+            ClientSignalEvent.answer,
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.mediaQuality
+        ])
+        let payload = try decodeSentPayload(MediaQualityAssertionPayload.self, from: signaling.sent[4].data)
+        XCTAssertEqual(payload.client.platform, "ios")
+        XCTAssertEqual(payload.client.version, "test")
+        XCTAssertEqual(payload.browser.platform, "ios")
+        XCTAssertFalse(payload.browser.safari)
+        XCTAssertEqual(payload.audio.mode, "native")
+        XCTAssertEqual(payload.audio.processor, "avfoundation")
+        XCTAssertEqual(payload.audio.outputSettings.readyState, "live")
+        XCTAssertTrue(payload.audio.outputSettings.enabled)
+        XCTAssertFalse(payload.video.settings.enabled)
+        XCTAssertEqual(payload.stats.outboundRtt, 0.08)
+        XCTAssertEqual(payload.stats.candidatePair.localCandidateType, "host")
+        XCTAssertNil(payload.deltas.elapsedMs)
+    }
+
     func testScreenShareStartStopUsesBrowserCompatibleSignals() async throws {
         let signaling = MockSignalingTransport(envelopes: [])
         let rtc = MockRoomRTCClient(answerSDP: "answer")
@@ -768,16 +830,19 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var localVideoEnabledChanges: [Bool] = []
     private(set) var screenShareEnabledChanges: [Bool] = []
     private(set) var didRestartICE = false
+    private var mediaQualitySnapshots: [NativeMediaQualitySnapshot]
     private let answerSDP: String
     private let screenShareError: Error?
     private let onPrepareLocalMedia: (@Sendable () -> Void)?
 
     init(
         answerSDP: String,
+        mediaQualitySnapshots: [NativeMediaQualitySnapshot] = [],
         screenShareError: Error? = nil,
         onPrepareLocalMedia: (@Sendable () -> Void)? = nil
     ) {
         self.answerSDP = answerSDP
+        self.mediaQualitySnapshots = mediaQualitySnapshots
         self.screenShareError = screenShareError
         self.onPrepareLocalMedia = onPrepareLocalMedia
     }
@@ -839,6 +904,13 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         lifecycle = .reconnecting
     }
 
+    func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
+        guard !mediaQualitySnapshots.isEmpty else {
+            return NativeMediaQualitySnapshot()
+        }
+        return mediaQualitySnapshots.removeFirst()
+    }
+
     func leave() async {
         lifecycle = .leaving
     }
@@ -852,6 +924,35 @@ private struct MediaReadyAssertionPayload: Decodable {
 private struct MediaAssertionPayload: Decodable {
     var audio: Bool
     var video: Bool
+}
+
+private struct MediaQualityAssertionPayload: Decodable {
+    var client: NativeRoomClientIdentity
+    var browser: MediaQualityBrowserAssertionPayload
+    var audio: MediaQualityAudioAssertionPayload
+    var video: MediaQualityVideoAssertionPayload
+    var stats: NativeMediaQualitySnapshot
+    var deltas: NativeMediaQualityDeltas
+}
+
+private struct MediaQualityBrowserAssertionPayload: Decodable {
+    var safari: Bool
+    var platform: String
+}
+
+private struct MediaQualityAudioAssertionPayload: Decodable {
+    var mode: String
+    var processor: String
+    var outputSettings: MediaQualityTrackSettingsAssertionPayload
+}
+
+private struct MediaQualityVideoAssertionPayload: Decodable {
+    var settings: MediaQualityTrackSettingsAssertionPayload
+}
+
+private struct MediaQualityTrackSettingsAssertionPayload: Decodable {
+    var enabled: Bool
+    var readyState: String
 }
 
 private struct RestartAssertionPayload: Decodable {

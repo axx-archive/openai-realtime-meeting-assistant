@@ -1035,3 +1035,80 @@ What worked:
   needs product/account/device evidence.
 - Regenerating from XcodeGen kept the generated project aligned with
   `project.yml`, which is the durable source of truth for this Apple scaffold.
+
+## Wave 16
+
+Status: `wave16_native_media_quality_diagnostics_checkpoint_validated`
+
+Scope:
+- Continued the native media-readiness track with diagnostics parity, not a
+  media-quality or release-readiness claim.
+- Assigned two read-only explorers: one inspected the LiveKitWebRTC stats API
+  and native RTC test seam; the other inspected the browser/server
+  `media_quality` contract and confirmed the event is log-only server
+  diagnostics, not a broadcast path.
+- Added `RoomRTCClient.mediaQualitySnapshot()` and browser-compatible native
+  snapshot/delta DTOs for outbound/inbound RTP counters, jitter/loss, selected
+  ICE candidate-pair summary, and safe candidate metadata only.
+- Wrapped LiveKitWebRTC `statistics` reports into a pure internal stat-entry
+  normalizer so synthetic Swift tests can cover aggregation without
+  constructing unavailable WebRTC report objects.
+- Started a conservative native coordinator media-quality report loop after a
+  successful join, stopped it on leave/rejoin reset, and exposed
+  `sendMediaQualityReport()` for deterministic tests.
+- Emitted existing websocket event `media_quality` from native clients with a
+  browser-compatible payload plus explicit native `client.platform` and
+  `client.version`.
+- Renamed the Go logger from browser-specific to `logClientMediaQualityReport`
+  and updated the log prefix to `Client media quality`, while preserving the
+  current browser payload path.
+
+Files changed:
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `frontend_latency_test.go`
+- `main.go`
+
+Validation:
+- `swift test --package-path apple` passed 70 tests.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 3 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers: Apple development team/signing config, real iOS and
+  macOS app icons, and `PrivacyInfo.xcprivacy`.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test`
+  passed.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- The local smoke exercised the renamed server logger, producing
+  `Client media quality ...` reports for both browser participants.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This proves native diagnostics plumbing and browser/server regression health;
+  it does not prove physical iPhone/iPad/Mac media quality, mixed-room
+  stability, or restrictive-network TURN relay behavior.
+- Native reports summarize safe candidate metadata only and intentionally do
+  not forward raw WebRTC statistics or candidate addresses.
+- The strict release preflight still blocks on external Apple distribution
+  inputs: development team/signing config, final app icons, and
+  `PrivacyInfo.xcprivacy`.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  validation, TestFlight upload, and macOS signing/notarization remain release
+  gates before this can be called end-user shippable.
+
+What worked:
+- Keeping stats at the `RoomRTCClient` seam preserved UI/session layering and
+  made future native media renderers observable without changing signaling.
+- Summarizing WebRTC stats into the same shape the browser already sends let
+  the server stay additive and avoided a native-only diagnostics fork.
+- The local browser smoke doubled as live proof that the renamed Go logger
+  still handles existing browser `media_quality` reports.

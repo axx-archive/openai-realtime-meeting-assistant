@@ -118,19 +118,24 @@ public actor NativeRoomSessionCoordinator {
     private var currentMemoryEntries: [MemoryEntry] = []
     private var currentMeetingArchive: MeetingArchiveResult?
     private var currentScoutChatEvents: [ScoutChatEvent] = []
+    private var mediaQualityTask: Task<Void, Never>?
+    private var previousMediaQualitySnapshot: NativeMediaQualitySnapshot?
+    private let mediaQualityReportIntervalNanoseconds: UInt64
 
     public init(
         api: NativeRoomAPIProviding,
         signaling: NativeRoomSignalingTransport = URLSessionRoomSignalingTransport(),
         rtc: RoomRTCClient = NativeRoomRTCClient(),
         media: MediaSessionCoordinator = MediaSessionCoordinator(),
-        clientIdentity: NativeRoomClientIdentity
+        clientIdentity: NativeRoomClientIdentity,
+        mediaQualityReportIntervalNanoseconds: UInt64 = 12_000_000_000
     ) {
         self.api = api
         self.signaling = signaling
         self.rtc = rtc
         self.media = media
         self.clientIdentity = clientIdentity
+        self.mediaQualityReportIntervalNanoseconds = mediaQualityReportIntervalNanoseconds
     }
 
     public func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -143,6 +148,7 @@ public actor NativeRoomSessionCoordinator {
 
     private func join(name: String, password: String, video: Bool) async throws -> NativeRoomJoinResult {
         stopReceiveLoop()
+        stopMediaQualityReporting()
         resetNegotiationState()
         resetRemoteVideoState()
         resetRoomState()
@@ -194,6 +200,7 @@ public actor NativeRoomSessionCoordinator {
         try await sendParticipantMediaState()
         lifecycle = .connected
         startReceiveLoop()
+        startMediaQualityReporting()
 
         return NativeRoomJoinResult(
             participant: participant ?? signedInParticipant,
@@ -351,8 +358,13 @@ public actor NativeRoomSessionCoordinator {
         try await sendJSON(event: ClientSignalEvent.restartICE, payload: RestartICEPayload(reason: reason))
     }
 
+    public func sendMediaQualityReport() async throws {
+        try await publishMediaQualityReport()
+    }
+
     public func leave() async {
         stopReceiveLoop()
+        stopMediaQualityReporting()
         await rtc.setLocalCandidateHandler(nil)
         await rtc.setRemoteVideoTrackHandler(nil)
         await rtc.leave()
@@ -632,6 +644,71 @@ public actor NativeRoomSessionCoordinator {
         }
     }
 
+    private func startMediaQualityReporting() {
+        stopMediaQualityReporting()
+        let interval = mediaQualityReportIntervalNanoseconds
+        mediaQualityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: interval)
+                    if Task.isCancelled {
+                        return
+                    }
+                    try await self?.publishMediaQualityReport()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    continue
+                }
+            }
+        }
+    }
+
+    private func stopMediaQualityReporting() {
+        mediaQualityTask?.cancel()
+        mediaQualityTask = nil
+        previousMediaQualitySnapshot = nil
+    }
+
+    private func publishMediaQualityReport() async throws {
+        let snapshot = try await rtc.mediaQualitySnapshot()
+        let previous = previousMediaQualitySnapshot
+        previousMediaQualitySnapshot = snapshot
+        try await sendJSON(
+            event: ClientSignalEvent.mediaQuality,
+            payload: NativeMediaQualityPayload(
+                sentAt: Self.iso8601String(Date()),
+                laggy: false,
+                client: clientIdentity,
+                browser: NativeMediaQualityBrowserPayload(
+                    userAgent: "MeetingAssistApple/\(clientIdentity.version)",
+                    platform: clientIdentity.platform
+                ),
+                audio: NativeMediaQualityAudioPayload(
+                    mode: "native",
+                    processor: "avfoundation",
+                    outputSettings: NativeMediaQualityTrackSettings(
+                        enabled: !media.participantMediaState.micMuted,
+                        readyState: lifecycle == .connected ? "live" : ""
+                    )
+                ),
+                video: NativeMediaQualityVideoPayload(
+                    settings: NativeMediaQualityTrackSettings(
+                        enabled: !media.participantMediaState.cameraOff,
+                        readyState: lifecycle == .connected ? "live" : ""
+                    )
+                ),
+                remote: NativeMediaQualityRemotePayload(remoteVideoTiles: remoteVideoTracksByID.count),
+                stats: snapshot,
+                deltas: snapshot.deltas(since: previous)
+            )
+        )
+    }
+
+    private static func iso8601String(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
     private func handleRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         remoteVideoTracksByID[track.id] = track
         let info = remoteVideoTrackInfo(for: track)
@@ -746,6 +823,76 @@ public actor NativeRoomSessionCoordinator {
 
 private struct ParticipantTrackRequestPayload: Codable, Equatable, Sendable {
     var reason: String
+}
+
+private struct NativeMediaQualityPayload: Codable, Equatable, Sendable {
+    var sentAt: String
+    var laggy: Bool
+    var client: NativeRoomClientIdentity
+    var browser: NativeMediaQualityBrowserPayload
+    var audio: NativeMediaQualityAudioPayload
+    var video: NativeMediaQualityVideoPayload
+    var remote: NativeMediaQualityRemotePayload
+    var stats: NativeMediaQualitySnapshot
+    var deltas: NativeMediaQualityDeltas
+}
+
+private struct NativeMediaQualityBrowserPayload: Codable, Equatable, Sendable {
+    var safari: Bool = false
+    var userAgent: String
+    var visibilityState: String = "active"
+    var audioContextState: String = "native"
+    var platform: String
+}
+
+private struct NativeMediaQualityAudioPayload: Codable, Equatable, Sendable {
+    var mode: String
+    var voiceFocus: Bool = false
+    var processing: Bool = false
+    var processor: String
+    var voiceFocusMetrics = NativeVoiceFocusMetrics()
+    var sourceSettings: NativeMediaQualityTrackSettings?
+    var outputSettings: NativeMediaQualityTrackSettings
+}
+
+private struct NativeVoiceFocusMetrics: Codable, Equatable, Sendable {
+    var gain: Double = 0
+    var suppressionDb: Double = 0
+    var noiseBias: Double = 0
+    var speechConfidence: Double = 0
+}
+
+private struct NativeMediaQualityVideoPayload: Codable, Equatable, Sendable {
+    var constrained: Bool = false
+    var settings: NativeMediaQualityTrackSettings
+}
+
+private struct NativeMediaQualityTrackSettings: Codable, Equatable, Sendable {
+    var enabled: Bool
+    var readyState: String
+}
+
+private struct NativeMediaQualityRemotePayload: Codable, Equatable, Sendable {
+    var remoteVideoTiles: Int
+    var remoteAudioMonitors: Int = 0
+    var remoteAudioMaxLevel: Double = 0
+    var remoteAudioAudibleMonitors: Int = 0
+    var remoteAudioPlaybackPaths = NativeRemoteAudioPlaybackPaths()
+    var audioContextState: String = "native"
+    var missingVideoNames: [String] = []
+    var missingAudioNames: [String] = []
+    var duplicateVideoNames: [String] = []
+    var duplicateAudioNames: [String] = []
+    var placeholderVideoTiles: Int = 0
+    var placeholderAudioMonitors: Int = 0
+    var stalledVideoNames: [String] = []
+    var audiblePendingRemotePlayback: Int = 0
+}
+
+private struct NativeRemoteAudioPlaybackPaths: Codable, Equatable, Sendable {
+    var element: Int = 0
+    var webaudio: Int = 0
+    var none: Int = 0
 }
 
 private struct SetRecordingPayload: Codable, Equatable, Sendable {
