@@ -2118,7 +2118,7 @@ function analyze(options) {
     addBlocker(
       blockers,
       "apple_development_team",
-      "Set DEVELOPMENT_TEAM or APPLE_DEVELOPMENT_TEAM in the build environment, or copy apple/Config/Signing.local.example.xcconfig to ignored apple/Config/Signing.local.xcconfig and set DEVELOPMENT_TEAM."
+      "Set DEVELOPMENT_TEAM or APPLE_DEVELOPMENT_TEAM in the build environment, or run scripts/native-apple-configure-signing.mjs --team-id TEAMID --confirm-local-only to write ignored apple/Config/Signing.local.xcconfig."
     );
   }
 

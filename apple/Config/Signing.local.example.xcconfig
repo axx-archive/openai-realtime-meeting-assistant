@@ -1,4 +1,5 @@
-// Copy this file to Signing.local.xcconfig and keep the copy out of git.
-// Use the 10-character Apple Developer Team ID from your Apple account.
+// Prefer scripts/native-apple-configure-signing.mjs to generate the ignored
+// Signing.local.xcconfig copy. Use the 10-character Apple Developer Team ID
+// from your Apple account.
 //
 // DEVELOPMENT_TEAM = <YOUR_REAL_TEAM_ID>

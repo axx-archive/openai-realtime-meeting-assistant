@@ -93,11 +93,24 @@ TestFlight/notarization credentials. Do not treat a passing default preflight
 as a TestFlight upload or notarized macOS app.
 
 Signing is wired through `Config/Signing.xcconfig` for both app targets. To
-enable local archive or device builds, copy
-`Config/Signing.local.example.xcconfig` to ignored
-`Config/Signing.local.xcconfig` and set your real `DEVELOPMENT_TEAM`, or provide
-`DEVELOPMENT_TEAM` / `APPLE_DEVELOPMENT_TEAM` in the build environment. Keep
-real team IDs out of git.
+enable local archive or device builds, either provide `DEVELOPMENT_TEAM` /
+`APPLE_DEVELOPMENT_TEAM` in the build environment or generate the ignored local
+config from your Apple Developer Team ID:
+
+```bash
+node ../scripts/native-apple-configure-signing.mjs \
+  --apple-dir . \
+  --team-id TEAMID12345 \
+  --confirm-local-only
+node ../scripts/native-apple-configure-signing.mjs --apple-dir . --validate-only
+```
+
+Replace `TEAMID12345` with the real 10-character Team ID from your Apple
+Developer account. The helper refuses placeholders, refuses to write a local
+config unless it is ignored by git, and redacts Team IDs from JSON output. This
+only configures the local Team ID; it does not prove certificates, provisioning
+profiles, App Store Connect access, TestFlight upload, Developer ID signing, or
+notarization.
 
 Do not add `Xcode/PrivacyInfo.xcprivacy` until the product-owned answers in
 `../docs/native-apple-privacy-review.md` are final. The strict preflight rejects

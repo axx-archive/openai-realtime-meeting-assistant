@@ -2065,3 +2065,83 @@ What worked:
   path once privacy answers are final.
 - Testing XcodeGen's missing-resource behavior before changing the base project
   prevented a tempting but broken optional-source approach from landing.
+
+## Wave 29
+
+Status: `wave29_native_signing_preflight_checkpoint_validated`
+
+Scope:
+- Continued the Apple signing release-gate path by adding a local signing
+  preflight helper instead of asking operators to hand-edit
+  `Signing.local.xcconfig`.
+- Assigned a read-only signing/release reviewer. The reviewer confirmed the best
+  repo-owned next step was a helper that writes and validates ignored local
+  signing config, redacts Team IDs, rejects committed Team IDs, and keeps
+  certificates/profiles/App Store Connect access external.
+- Added `scripts/native-apple-configure-signing.mjs`. It writes ignored
+  `apple/Config/Signing.local.xcconfig` only with `--confirm-local-only`,
+  validates `DEVELOPMENT_TEAM`, `APPLE_DEVELOPMENT_TEAM`, or local signing
+  config with `--validate-only`, refuses placeholders, refuses existing local
+  config without `--force`, refuses unignored local signing paths, and redacts
+  Team IDs from JSON output.
+- Updated strict readiness blocker text to point at the helper and updated the
+  Apple README/signing example to make the helper the default operator path.
+
+Files changed:
+- `apple/Config/Signing.local.example.xcconfig`
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-configure-signing.mjs`
+- `scripts/native-apple-configure-signing.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+
+Validation:
+- `node --check scripts/native-apple-configure-signing.mjs` passed.
+- `node --check scripts/native-apple-configure-signing.test.mjs` passed.
+- `node scripts/native-apple-configure-signing.test.mjs` passed 10 checks.
+- `node scripts/native-apple-configure-signing.mjs --validate-only` failed as
+  expected with redacted JSON and no configured teams on this machine.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node scripts/native-apple-generate-privacy-manifest.test.mjs` passed 6
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers for Apple development team, privacy manifest, and
+  release evidence file.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> node scripts/native-apple-release-readiness.mjs --strict`
+  removed only the `apple_development_team` blocker and still failed as expected
+  on privacy manifest and release evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 84 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+- Standalone critic-loop accepted the wave at 9.1/10.
+
+Risks / blockers:
+- This wave does not obtain or prove a real Apple Developer Team ID,
+  certificates, provisioning profiles, App Store Connect access, TestFlight
+  upload, Developer ID signing, or notarization.
+- Final privacy approval/manifest generation, physical iPhone/iPad/Mac
+  mixed-room proof, restrictive-network TURN proof, real TestFlight upload, and
+  real macOS notarization remain external release gates.
+- Synthetic Team IDs in tests prove checker behavior only; real archive/device
+  signing still needs a real Apple account on the operator machine.
+
+What worked:
+- Turning signing setup into an explicit helper made the strict-readiness
+  blocker actionable while preserving the no-Team-IDs-in-git invariant.
+- Treating validate-only as a failing preflight when no team is configured makes
+  the helper useful in local release checklists and CI-like operator scripts.
