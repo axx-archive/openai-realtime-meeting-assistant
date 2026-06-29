@@ -1184,3 +1184,97 @@ What worked:
   satisfying icon readiness.
 - Regenerating from XcodeGen kept asset catalog wiring in `project.yml` as the
   durable source of truth.
+
+## Wave 18
+
+Status: `wave18_native_signing_privacy_gate_checkpoint_validated`
+
+Scope:
+- Continued the Apple distribution-readiness track by making the signing-team
+  blocker locally actionable without committing account-specific values.
+- Assigned two read-only explorers: one audited native privacy-relevant data
+  flows and confirmed that committing an empty or guessed privacy manifest would
+  be inaccurate; the other recommended a private xcconfig signing scaffold.
+- Added `Config/Signing.xcconfig` for both app targets and an ignored
+  `Config/Signing.local.xcconfig` path, with a tracked example file that
+  explains how to set a real Apple `DEVELOPMENT_TEAM` locally.
+- Wired both generated app targets to the shared signing xcconfig in
+  `project.yml` and regenerated `MeetingAssist.xcodeproj`.
+- Added `docs/native-apple-privacy-review.md` so product/legal privacy
+  decisions have a concrete checklist before `PrivacyInfo.xcprivacy` is added.
+- Strengthened `scripts/native-apple-release-readiness.mjs` so it validates the
+  signing xcconfig wiring, accepts a real team from env or ignored local
+  xcconfig, rejects obvious placeholder team IDs, fails if a literal Team ID is
+  committed through `DEVELOPMENT_TEAM`, Xcode `DevelopmentTeam`, or the tracked
+  signing xcconfig, and rejects missing, empty, or shape-incomplete privacy
+  manifests.
+- Updated release-readiness tests so synthetic strict-ready fixtures contain a
+  real-shaped privacy manifest, ignored local signing can satisfy the team
+  blocker, and empty or shape-incomplete privacy manifests still block strict
+  readiness.
+
+Files changed:
+- `.gitignore`
+- `apple/Config/Signing.xcconfig`
+- `apple/Config/Signing.local.example.xcconfig`
+- `apple/MeetingAssist.xcodeproj/project.pbxproj`
+- `apple/README.md`
+- `apple/project.yml`
+- `docs/native-apple-privacy-review.md`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `xcodegen generate --spec project.yml` passed in `apple/`.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 10 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with `apple_development_team` and `privacy_manifest`.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> node scripts/native-apple-release-readiness.mjs --strict`
+  failed as expected with only `privacy_manifest`, proving the team blocker can
+  be removed without committing a real Team ID.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -showBuildSettings CODE_SIGNING_ALLOWED=NO`
+  showed automatic signing and no stamped Team ID.
+- `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -showBuildSettings CODE_SIGNING_ALLOWED=NO`
+  showed automatic signing, no stamped Team ID, and
+  `_DEVELOPMENT_TEAM_IS_EMPTY = YES`.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on `iPhone 17`.
+- `swift test --package-path apple` passed 70 tests.
+- `go test ./...` passed.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with no failures.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- Local browser live media smoke passed:
+  `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`.
+- `git diff --check` passed.
+
+Risks / blockers:
+- The signing scaffold does not provide Apple credentials. A real Apple
+  Developer Team ID still has to be supplied through environment or the ignored
+  local xcconfig before archive/device/TestFlight work.
+- `PrivacyInfo.xcprivacy` remains intentionally absent until product-owned
+  privacy decisions are final. The new gate makes an empty manifest fail
+  instead of creating a false sense of readiness.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  validation, actual TestFlight upload, App Store Connect setup, and macOS
+  signing/notarization remain release gates before this can be called
+  end-user shippable.
+
+What worked:
+- Keeping signing values in xcconfig files lets Xcode archive/device workflows
+  use normal Apple tooling while keeping account-specific IDs out of the repo.
+- Making committed Team IDs fail default readiness gives the generated Xcode
+  project and tracked signing xcconfig a guardrail against accidental local
+  signing churn.
+- Testing nonempty but malformed privacy manifests kept the gate tied to real
+  declaration shape, not just file presence.
+- Treating privacy as a product/legal decision gate prevented the release
+  checker from rewarding a cosmetic `PrivacyInfo.xcprivacy`.
+- The synthetic-team strict check proved the team blocker can be removed
+  independently from the privacy blocker, which keeps the next execution slice
+  clear.

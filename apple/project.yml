@@ -13,6 +13,9 @@ targets:
   MeetingAssistAppleApp:
     type: application
     platform: iOS
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources:
       - path: Xcode/MeetingAssistAppleApp.swift
       - path: Xcode/Assets.xcassets
@@ -62,6 +65,9 @@ targets:
   MeetingAssistMacApp:
     type: application
     platform: macOS
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources:
       - path: Xcode/MeetingAssistMacApp.swift
       - path: Xcode/Assets.xcassets

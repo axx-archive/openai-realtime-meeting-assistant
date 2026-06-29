@@ -10,5 +10,6 @@
 apple/.build/
 apple/.swiftpm/
 apple/DerivedData/
+apple/Config/Signing.local.xcconfig
 xcuserdata/
 *.xcuserstate

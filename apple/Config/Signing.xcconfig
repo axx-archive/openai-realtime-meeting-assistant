@@ -1,0 +1,8 @@
+// Shared non-secret signing defaults for app targets.
+//
+// Keep account-specific values in Signing.local.xcconfig, which is ignored.
+// CI or local shells may also provide APPLE_DEVELOPMENT_TEAM.
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM = $(APPLE_DEVELOPMENT_TEAM)
+
+#include? "Signing.local.xcconfig"

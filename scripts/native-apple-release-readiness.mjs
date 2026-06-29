@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 function usage() {
   return [
@@ -136,6 +136,167 @@ function pngDimensions(path) {
   };
 }
 
+function cleanBuildSettingValue(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/;$/, "")
+    .trim();
+}
+
+function expandBuildSettingValue(value, settings, options = {}) {
+  const { includeEnv = true } = options;
+  return cleanBuildSettingValue(value).replace(/\$\(([^)]+)\)/g, (_match, key) => {
+    return cleanBuildSettingValue(settings[key] ?? (includeEnv ? process.env[key] : "") ?? "");
+  });
+}
+
+function validDevelopmentTeam(value) {
+  const normalized = cleanBuildSettingValue(value);
+  const placeholders = new Set(["ABCDE12345", "YOURTEAMID", "YOUR_TEAM_ID", "TEAMID1234"]);
+  return /^[A-Z0-9]{10}$/.test(normalized) && !placeholders.has(normalized);
+}
+
+function developmentTeamValuesFromText(text) {
+  const values = [];
+  const patterns = [
+    /DEVELOPMENT_TEAM:\s*([^\n#]+)/g,
+    /DEVELOPMENT_TEAM\s*=\s*([^;\n#]+)/g,
+    /DevelopmentTeam:\s*([^\n#]+)/g,
+    /DevelopmentTeam\s*=\s*([^;\n#]+)/g,
+  ];
+  for (const pattern of patterns) {
+    let match = pattern.exec(text);
+    while (match) {
+      values.push(cleanBuildSettingValue(match[1]));
+      match = pattern.exec(text);
+    }
+  }
+  return values;
+}
+
+function stripXcconfigComment(line) {
+  const commentStart = line.indexOf("//");
+  return (commentStart === -1 ? line : line.slice(0, commentStart)).trim();
+}
+
+function parseXcconfigSettings(path, options = {}, seen = new Set()) {
+  const { includeOptional = true } = options;
+  const settings = {};
+  if (!existsSync(path)) {
+    return settings;
+  }
+
+  const resolved = resolve(path);
+  if (seen.has(resolved)) {
+    return settings;
+  }
+  seen.add(resolved);
+
+  for (const rawLine of readText(resolved).split(/\r?\n/)) {
+    const line = stripXcconfigComment(rawLine);
+    if (!line) {
+      continue;
+    }
+
+    const includeMatch = /^#include(\?)?\s+"([^"]+)"/.exec(line);
+    if (includeMatch) {
+      const optional = includeMatch[1] === "?";
+      if (optional && !includeOptional) {
+        continue;
+      }
+      const includePath = resolve(dirname(resolved), includeMatch[2]);
+      if (existsSync(includePath) || !optional) {
+        Object.assign(settings, parseXcconfigSettings(includePath, options, seen));
+      }
+      continue;
+    }
+
+    const assignmentMatch = /^([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(line);
+    if (assignmentMatch) {
+      settings[assignmentMatch[1]] = cleanBuildSettingValue(assignmentMatch[2]);
+    }
+  }
+
+  return settings;
+}
+
+function privacyManifestStatus(path) {
+  if (!existsSync(path)) {
+    return { ok: false, missing: ["missing_file"] };
+  }
+
+  let manifest;
+  try {
+    manifest = parsePlist(path);
+  } catch {
+    return { ok: false, missing: ["invalid_plist"] };
+  }
+
+  const missing = [];
+  if (typeof manifest.NSPrivacyTracking !== "boolean") {
+    missing.push("NSPrivacyTracking");
+  }
+
+  if (!Array.isArray(manifest.NSPrivacyTrackingDomains)) {
+    missing.push("NSPrivacyTrackingDomains");
+  } else if (manifest.NSPrivacyTracking === true && manifest.NSPrivacyTrackingDomains.length === 0) {
+    missing.push("NSPrivacyTrackingDomains:required_when_tracking");
+  }
+
+  if (!Array.isArray(manifest.NSPrivacyAccessedAPITypes)) {
+    missing.push("NSPrivacyAccessedAPITypes");
+  } else {
+    manifest.NSPrivacyAccessedAPITypes.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        missing.push(`NSPrivacyAccessedAPITypes[${index}]`);
+        return;
+      }
+      if (!nonEmptyPlistString(entry, "NSPrivacyAccessedAPIType")) {
+        missing.push(`NSPrivacyAccessedAPITypes[${index}].NSPrivacyAccessedAPIType`);
+      }
+      if (
+        !Array.isArray(entry.NSPrivacyAccessedAPITypeReasons) ||
+        entry.NSPrivacyAccessedAPITypeReasons.length === 0 ||
+        entry.NSPrivacyAccessedAPITypeReasons.some((reason) => typeof reason !== "string" || reason.trim() === "")
+      ) {
+        missing.push(`NSPrivacyAccessedAPITypes[${index}].NSPrivacyAccessedAPITypeReasons`);
+      }
+    });
+  }
+
+  if (!Array.isArray(manifest.NSPrivacyCollectedDataTypes)) {
+    missing.push("NSPrivacyCollectedDataTypes");
+  } else if (manifest.NSPrivacyCollectedDataTypes.length === 0) {
+    missing.push("NSPrivacyCollectedDataTypes:empty");
+  } else {
+    manifest.NSPrivacyCollectedDataTypes.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        missing.push(`NSPrivacyCollectedDataTypes[${index}]`);
+        return;
+      }
+      if (!nonEmptyPlistString(entry, "NSPrivacyCollectedDataType")) {
+        missing.push(`NSPrivacyCollectedDataTypes[${index}].NSPrivacyCollectedDataType`);
+      }
+      if (typeof entry.NSPrivacyCollectedDataTypeLinked !== "boolean") {
+        missing.push(`NSPrivacyCollectedDataTypes[${index}].NSPrivacyCollectedDataTypeLinked`);
+      }
+      if (typeof entry.NSPrivacyCollectedDataTypeTracking !== "boolean") {
+        missing.push(`NSPrivacyCollectedDataTypes[${index}].NSPrivacyCollectedDataTypeTracking`);
+      }
+      if (
+        !Array.isArray(entry.NSPrivacyCollectedDataTypePurposes) ||
+        entry.NSPrivacyCollectedDataTypePurposes.length === 0 ||
+        entry.NSPrivacyCollectedDataTypePurposes.some((purpose) => typeof purpose !== "string" || purpose.trim() === "")
+      ) {
+        missing.push(`NSPrivacyCollectedDataTypes[${index}].NSPrivacyCollectedDataTypePurposes`);
+      }
+    });
+  }
+
+  return { ok: missing.length === 0, missing };
+}
+
 function findAppIconSet(appleDir, iconName) {
   let found = "";
   walk(appleDir, (path) => {
@@ -222,6 +383,7 @@ function analyze(options) {
   const macInfoPath = join(appleDir, "Xcode", "MeetingAssistMacApp-Info.plist");
   const macEntitlementsPath = join(appleDir, "Xcode", "MeetingAssistMacApp.entitlements");
   const privacyManifestPath = join(appleDir, "Xcode", "PrivacyInfo.xcprivacy");
+  const signingConfigPath = join(appleDir, "Config", "Signing.xcconfig");
 
   const checks = [];
   const blockers = [];
@@ -338,16 +500,39 @@ function analyze(options) {
     "app_icon_build_settings",
     "Generated Xcode project should compile AppIcon for both app targets."
   );
+  addCheck(
+    checks,
+    existsSync(signingConfigPath) &&
+      (projectYml.match(/Config\/Signing\.xcconfig/g) ?? []).length >= 2 &&
+      textHas(pbxproj, /Signing\.xcconfig/),
+    "signing_xcconfig_wired",
+    "App targets should use Config/Signing.xcconfig while keeping local team IDs out of git."
+  );
 
-  const hasTeam =
-    Boolean(process.env.DEVELOPMENT_TEAM || process.env.APPLE_DEVELOPMENT_TEAM) ||
-    textHas(projectYml, /DEVELOPMENT_TEAM:\s*[A-Z0-9]+/) ||
-    textHas(pbxproj, /DEVELOPMENT_TEAM = [A-Z0-9]+;/);
+  const signingSettings = parseXcconfigSettings(signingConfigPath);
+  const signingTeamValue = expandBuildSettingValue(signingSettings.DEVELOPMENT_TEAM, signingSettings);
+  const trackedSigningText = existsSync(signingConfigPath) ? readText(signingConfigPath) : "";
+  const committedTeamValues = [
+    ...developmentTeamValuesFromText(projectYml),
+    ...developmentTeamValuesFromText(pbxproj),
+    ...developmentTeamValuesFromText(trackedSigningText),
+  ];
+  addCheck(
+    checks,
+    !committedTeamValues.some(validDevelopmentTeam),
+    "no_committed_development_team",
+    "Apple development team IDs should come from environment or ignored local xcconfig, not committed project files or tracked xcconfig."
+  );
+  const hasTeam = [
+    process.env.DEVELOPMENT_TEAM,
+    process.env.APPLE_DEVELOPMENT_TEAM,
+    signingTeamValue,
+  ].some(validDevelopmentTeam);
   if (!hasTeam) {
     addBlocker(
       blockers,
       "apple_development_team",
-      "Set DEVELOPMENT_TEAM or APPLE_DEVELOPMENT_TEAM in the build environment, or configure a team in a private xcconfig."
+      "Set DEVELOPMENT_TEAM or APPLE_DEVELOPMENT_TEAM in the build environment, or copy apple/Config/Signing.local.example.xcconfig to ignored apple/Config/Signing.local.xcconfig and set DEVELOPMENT_TEAM."
     );
   }
 
@@ -379,11 +564,12 @@ function analyze(options) {
     );
   }
 
-  if (!existsSync(privacyManifestPath)) {
+  const privacyStatus = privacyManifestStatus(privacyManifestPath);
+  if (!privacyStatus.ok) {
     addBlocker(
       blockers,
       "privacy_manifest",
-      "Add or generate PrivacyInfo.xcprivacy only after product-owned privacy data collection answers are final."
+      `Add apple/Xcode/PrivacyInfo.xcprivacy only after docs/native-apple-privacy-review.md decisions are final. Missing or invalid: ${privacyStatus.missing.slice(0, 6).join(", ")}`
     );
   }
 

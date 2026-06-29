@@ -89,6 +89,18 @@ privacy answers are final, physical device media proof, and actual
 TestFlight/notarization credentials. Do not treat a passing default preflight
 as a TestFlight upload or notarized macOS app.
 
+Signing is wired through `Config/Signing.xcconfig` for both app targets. To
+enable local archive or device builds, copy
+`Config/Signing.local.example.xcconfig` to ignored
+`Config/Signing.local.xcconfig` and set your real `DEVELOPMENT_TEAM`, or provide
+`DEVELOPMENT_TEAM` / `APPLE_DEVELOPMENT_TEAM` in the build environment. Keep
+real team IDs out of git.
+
+Do not add `Xcode/PrivacyInfo.xcprivacy` until the product-owned answers in
+`../docs/native-apple-privacy-review.md` are final. The strict preflight rejects
+missing, empty, or shape-incomplete privacy manifests because this client sends
+user, room, media, and diagnostic data to the MeetingAssist service.
+
 The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
 
 ```bash
