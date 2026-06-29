@@ -385,6 +385,89 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         }
     }
 
+    func testCaptureTurnRelayObservationExportsSanitizedRestrictiveNetworkProof() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(
+            answerSDP: "answer",
+            mediaQualitySnapshots: [
+                NativeMediaQualitySnapshot(
+                    at: 1_000,
+                    outboundAudioPacketsSent: 12,
+                    outboundVideoFramesSent: 90,
+                    inboundAudioPacketsReceived: 80,
+                    inboundVideoDecoded: 140,
+                    candidatePair: NativeMediaQualityCandidatePair(
+                        protocol: "udp",
+                        networkType: "wifi",
+                        localCandidateType: "host",
+                        remoteCandidateType: "relay",
+                        currentRoundTripTime: 0.08
+                    )
+                )
+            ]
+        )
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(
+                clientRTCConfig: ClientRTCConfig(
+                    rtcConfiguration: [
+                        "iceServers": .array([
+                            .object(["urls": .string("stun:stun.example.com:19302")]),
+                            .object([
+                                "urls": .string("turns:relay.example.com:5349?transport=tcp"),
+                                "username": .string("alice"),
+                                "credential": .string("secret")
+                            ])
+                        ])
+                    ],
+                    protocolVersion: meetingAssistNativeProtocolV1,
+                    auth: "cookie",
+                    websocketPath: "/websocket",
+                    signalingRole: "server-offer",
+                    supportedLayers: ["low", "medium", "high"],
+                    nativeHints: nil
+                )
+            ),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test"),
+            mediaEvidenceContextProvider: {
+                nativeEvidenceTestContext()
+            }
+        )
+
+        _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
+        let observation = try await coordinator.captureTurnRelayObservation(network: " restricted guest network ")
+
+        XCTAssertEqual(observation.artifactType, "native_turn_relay_observation")
+        XCTAssertEqual(observation.status, "observed")
+        XCTAssertEqual(observation.runId, "native-apple-run-test")
+        XCTAssertEqual(observation.roomId, "release-room-test")
+        XCTAssertEqual(observation.network, "restricted guest network")
+        XCTAssertEqual(observation.selectedCandidate.relayProtocol, "turns")
+        XCTAssertEqual(observation.selectedCandidate.relayCandidateType, "relay")
+        XCTAssertTrue(observation.selectedCandidate.relayCandidateSelected)
+        XCTAssertEqual(observation.selectedCandidate.remoteCandidateType, "relay")
+        XCTAssertEqual(observation.selectedCandidate.currentRoundTripTime, 0.08)
+        XCTAssertEqual(observation.iceReadiness.turnsCount, 1)
+        XCTAssertEqual(observation.iceReadiness.turnServersWithCredentials, 1)
+        XCTAssertEqual(observation.iceReadiness.relayTransports, ["tcp"])
+
+        let encoded = String(data: try JSONEncoder().encode(observation), encoding: .utf8) ?? ""
+        for leaked in disallowedMediaEvidenceLeakTokens {
+            XCTAssertFalse(encoded.localizedCaseInsensitiveContains(leaked), "leaked sensitive TURN observation detail: \(leaked)")
+        }
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("relay.example.com"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("stun.example.com"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("alice"))
+        XCTAssertFalse(encoded.localizedCaseInsensitiveContains("secret"))
+    }
+
     func testMediaQualityReportPublishesMediaEvidenceHandler() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             accessGrantedEnvelope(name: "Tom"),
@@ -1042,6 +1125,11 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
 
 private final class MockNativeRoomAPI: NativeRoomAPIProviding, @unchecked Sendable {
     let baseURL = URL(string: "https://thebonfire.xyz")!
+    private let clientRTCConfig: ClientRTCConfig
+
+    init(clientRTCConfig: ClientRTCConfig = MockNativeRoomAPI.defaultClientRTCConfig) {
+        self.clientRTCConfig = clientRTCConfig
+    }
 
     func nativeConfig() async throws -> NativeClientConfig {
         NativeClientConfig(
@@ -1065,16 +1153,18 @@ private final class MockNativeRoomAPI: NativeRoomAPIProviding, @unchecked Sendab
 
     func clientConfig(path: String) async throws -> ClientRTCConfig {
         XCTAssertEqual(path, "/client-config")
-        return ClientRTCConfig(
-            rtcConfiguration: ["iceServers": .array([])],
-            protocolVersion: meetingAssistNativeProtocolV1,
-            auth: "cookie",
-            websocketPath: "/websocket",
-            signalingRole: "server-offer",
-            supportedLayers: ["low", "medium", "high"],
-            nativeHints: nil
-        )
+        return clientRTCConfig
     }
+
+    private static let defaultClientRTCConfig = ClientRTCConfig(
+        rtcConfiguration: ["iceServers": .array([])],
+        protocolVersion: meetingAssistNativeProtocolV1,
+        auth: "cookie",
+        websocketPath: "/websocket",
+        signalingRole: "server-offer",
+        supportedLayers: ["low", "medium", "high"],
+        nativeHints: nil
+    )
 }
 
 private final class MockSignalingTransport: NativeRoomSignalingTransport, @unchecked Sendable {

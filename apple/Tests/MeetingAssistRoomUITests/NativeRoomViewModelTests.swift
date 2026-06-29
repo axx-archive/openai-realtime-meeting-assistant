@@ -444,6 +444,44 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertFalse(json.localizedCaseInsensitiveContains("BEGIN PRIVATE KEY"))
     }
 
+    func testCaptureTurnRelayObservationUsesSeparateExportState() async {
+        let evidence = Self.passingMediaEvidence()
+        let observation = Self.passingTurnRelayObservation(evidence: evidence)
+        let session = MockRoomSession(
+            mediaEvidenceSnapshot: evidence,
+            turnRelayObservation: observation
+        )
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.captureMediaEvidence()
+        model.turnRelayNetwork = "restricted guest network"
+        await model.captureTurnRelayObservation()
+
+        XCTAssertEqual(session.turnRelayNetworks, ["restricted guest network"])
+        XCTAssertEqual(model.latestMediaEvidence, evidence)
+        XCTAssertEqual(model.latestTurnRelayObservation, observation)
+        XCTAssertEqual(model.statusText, "TURN observation captured")
+        XCTAssertFalse(model.isCapturingTurnRelayObservation)
+
+        let mediaJSON = model.latestMediaEvidenceJSON ?? ""
+        let turnJSON = model.latestTurnRelayObservationJSON ?? ""
+        XCTAssertTrue(mediaJSON.contains("\"native_device_media\""))
+        XCTAssertFalse(mediaJSON.contains("\"native_turn_relay_observation\""))
+        XCTAssertTrue(turnJSON.contains("\"native_turn_relay_observation\""))
+        XCTAssertTrue(turnJSON.contains("\"relayProtocol\" : \"turns\""))
+        XCTAssertFalse(turnJSON.localizedCaseInsensitiveContains("relay.example.com"))
+        XCTAssertFalse(turnJSON.localizedCaseInsensitiveContains("alice"))
+        XCTAssertFalse(turnJSON.localizedCaseInsensitiveContains("secret"))
+        XCTAssertFalse(turnJSON.localizedCaseInsensitiveContains("candidate:"))
+        XCTAssertFalse(turnJSON.localizedCaseInsensitiveContains("Bearer "))
+    }
+
     func testMediaEvidenceHandlerUpdatesLatestEvidence() async {
         let evidence = Self.passingMediaEvidence()
         let session = MockRoomSession()
@@ -722,6 +760,24 @@ final class NativeRoomViewModelTests: XCTestCase {
             remoteVideoTiles: 1
         )
     }
+
+    private static func passingTurnRelayObservation(
+        evidence: NativeMediaEvidenceSnapshot
+    ) -> NativeTurnRelayObservation {
+        try! NativeTurnRelayObservation(
+            evidence: evidence,
+            iceReadiness: NativeICEReadinessSummary(rtcConfiguration: [
+                "iceServers": .array([
+                    .object([
+                        "urls": .string("turns:relay.example.com:5349?transport=tcp"),
+                        "username": .string("alice"),
+                        "credential": .string("secret")
+                    ])
+                ])
+            ]),
+            network: "restricted guest network"
+        )
+    }
 }
 
 private struct MockConfigLoader: NativeRoomConfigLoading {
@@ -806,6 +862,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var mediaStatePublishCount = 0
     private(set) var recordingEnabledChanges: [Bool] = []
     private(set) var archiveRequestCount = 0
+    private(set) var turnRelayNetworks: [String] = []
     private(set) var createdBoardCards: [BoardCardMutationPayload] = []
     private(set) var updatedBoardCards: [(id: String, payload: BoardCardMutationPayload)] = []
     private(set) var deletedBoardCardIDs: [String] = []
@@ -816,17 +873,20 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     private var lifecycle: RoomLifecycleState = .connected
     private let mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot
+    private let turnRelayObservation: NativeTurnRelayObservation
 
     init(
         error: Error? = nil,
         screenShareError: Error? = nil,
         iceRestartError: Error? = nil,
-        mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot = NativeMediaEvidenceSnapshot(source: NativeMediaQualitySnapshot())
+        mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot = NativeMediaEvidenceSnapshot(source: NativeMediaQualitySnapshot()),
+        turnRelayObservation: NativeTurnRelayObservation? = nil
     ) {
         self.error = error
         self.screenShareError = screenShareError
         self.iceRestartError = iceRestartError
         self.mediaEvidenceSnapshot = mediaEvidenceSnapshot
+        self.turnRelayObservation = turnRelayObservation ?? Self.defaultTurnRelayObservation()
     }
 
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -936,6 +996,11 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         return mediaEvidenceSnapshot
     }
 
+    func captureTurnRelayObservation(network: String) async throws -> NativeTurnRelayObservation {
+        turnRelayNetworks.append(network)
+        return turnRelayObservation
+    }
+
     func setRecordingEnabled(_ enabled: Bool) async throws {
         recordingEnabledChanges.append(enabled)
     }
@@ -1019,5 +1084,33 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
 
     func currentLifecycle() async -> RoomLifecycleState {
         lifecycle
+    }
+
+    private static func defaultTurnRelayObservation() -> NativeTurnRelayObservation {
+        try! NativeTurnRelayObservation(
+            evidence: NativeMediaEvidenceSnapshot(
+                source: NativeMediaQualitySnapshot(
+                    outboundAudioPacketsSent: 1,
+                    outboundVideoFramesSent: 1,
+                    inboundAudioPacketsReceived: 1,
+                    inboundVideoDecoded: 1,
+                    candidatePair: NativeMediaQualityCandidatePair(
+                        localCandidateType: "relay",
+                        currentRoundTripTime: 0.05
+                    )
+                ),
+                remoteVideoTiles: 1
+            ),
+            iceReadiness: NativeICEReadinessSummary(rtcConfiguration: [
+                "iceServers": .array([
+                    .object([
+                        "urls": .string("turn:relay.example.com:3478"),
+                        "username": .string("alice"),
+                        "credential": .string("secret")
+                    ])
+                ])
+            ]),
+            network: "restricted guest network"
+        )
     }
 }

@@ -212,6 +212,17 @@ was captured on the matching physical iPhone, iPad, or Mac for the same run,
 room, version, and build. Simulator or repo-only snapshots are diagnostic
 artifacts only.
 
+The same QA panel also has a separate TURN Relay capture flow for restrictive
+network runs. After joining the room on the restrictive network, enter the
+network label, capture the TURN observation, and copy the resulting
+`native_turn_relay_observation` JSON into
+`artifacts/native-apple/<run-id>/inbox/turn-relay-observation.json`. This export
+is built from a fresh native media-stat snapshot plus count-only
+`ClientRTCConfig` ICE readiness. It does not include raw ICE candidates, TURN
+URLs, usernames, credentials, IP addresses, SDP, cookies, headers, Team IDs, or
+account data, and it remains an observation until the promotion helper validates
+it.
+
 Use the promotion helper to turn a real app-copied physical-device snapshot
 into the matching proof-pack artifact and draft summary:
 

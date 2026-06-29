@@ -437,6 +437,28 @@ public actor NativeRoomSessionCoordinator {
         return evidence
     }
 
+    public func captureTurnRelayObservation(network: String) async throws -> NativeTurnRelayObservation {
+        let trimmedNetwork = network.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let clientConfig else {
+            throw RoomRTCError.webRTCOperationFailed("Client RTC config is unavailable.")
+        }
+        let snapshot: NativeMediaQualitySnapshot
+        do {
+            snapshot = try await rtc.mediaQualitySnapshot()
+        } catch {
+            await reportMediaError(stage: "turn_relay_observation", error: error)
+            throw error
+        }
+        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
+        currentMediaEvidenceSnapshot = evidence
+        await mediaEvidenceHandler?(evidence)
+        return try NativeTurnRelayObservation(
+            evidence: evidence,
+            iceReadiness: NativeICEReadinessSummary(rtcConfiguration: clientConfig.rtcConfiguration),
+            network: trimmedNetwork
+        )
+    }
+
     public func leave() async {
         stopReceiveLoop()
         stopMediaQualityReporting()

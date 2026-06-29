@@ -19,6 +19,7 @@ public struct NativeRoomView: View {
     @State private var scoutChatDraft = ""
     @State private var roomScoutDraft = ""
     @State private var mediaEvidenceCopied = false
+    @State private var turnRelayObservationCopied = false
 
     public init(model: NativeRoomViewModel = NativeRoomViewModel()) {
         _model = StateObject(wrappedValue: model)
@@ -33,7 +34,7 @@ public struct NativeRoomView: View {
                 if model.canUseRoomControls || !model.roomParticipants.isEmpty {
                     roomState
                 }
-                if model.canUseRoomControls || model.latestMediaEvidence != nil {
+                if model.canUseRoomControls || model.latestMediaEvidence != nil || model.latestTurnRelayObservation != nil {
                     mediaEvidencePanel
                 }
                 if model.canUseRoomControls || !model.boardCards.isEmpty {
@@ -283,6 +284,56 @@ public struct NativeRoomView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("TURN Relay", systemImage: "network")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button {
+                        turnRelayObservationCopied = false
+                        Task { await model.captureTurnRelayObservation() }
+                    } label: {
+                        Label("Capture", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.canUseRoomControls || model.isCapturingTurnRelayObservation || model.turnRelayNetwork.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        copyTurnRelayObservationJSON()
+                    } label: {
+                        Label(turnRelayObservationCopied ? "Copied" : "Copy", systemImage: turnRelayObservationCopied ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.latestTurnRelayObservationJSON == nil)
+                }
+
+                TextField("Network", text: $model.turnRelayNetwork)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.canUseRoomControls)
+
+                if let observation = model.latestTurnRelayObservation {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], spacing: 8) {
+                        mediaEvidenceFlag("Relay", observation.selectedCandidate.relayCandidateSelected)
+                        mediaEvidenceFlag("ICE", observation.iceReadiness.ok)
+                    }
+                    Text(turnRelayCandidateSummary(observation))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    if let json = model.latestTurnRelayObservationJSON {
+                        Text(json)
+                            .font(.caption.monospaced())
+                            .lineLimit(12)
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
         }
     }
 
@@ -529,6 +580,12 @@ public struct NativeRoomView: View {
         return "Candidate \(candidate.protocol)/\(candidate.networkType) local \(candidate.localCandidateType) remote \(candidate.remoteCandidateType), RTT \(rtt)"
     }
 
+    private func turnRelayCandidateSummary(_ observation: NativeTurnRelayObservation) -> String {
+        let candidate = observation.selectedCandidate
+        let rtt = String(format: "%.0f ms", candidate.currentRoundTripTime * 1_000)
+        return "\(observation.network): \(candidate.relayProtocol) relay, local \(candidate.localCandidateType), remote \(candidate.remoteCandidateType), RTT \(rtt)"
+    }
+
     private func copyMediaEvidenceJSON() {
         guard let json = model.latestMediaEvidenceJSON else { return }
         #if os(iOS)
@@ -539,6 +596,18 @@ public struct NativeRoomView: View {
         pasteboard.setString(json, forType: .string)
         #endif
         mediaEvidenceCopied = true
+    }
+
+    private func copyTurnRelayObservationJSON() {
+        guard let json = model.latestTurnRelayObservationJSON else { return }
+        #if os(iOS)
+        UIPasteboard.general.string = json
+        #elseif os(macOS)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(json, forType: .string)
+        #endif
+        turnRelayObservationCopied = true
     }
 
     private func boardRow(_ card: KanbanCard) -> some View {

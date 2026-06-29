@@ -316,6 +316,344 @@ public struct NativeMediaEvidenceCaptureContext: Codable, Equatable, Sendable {
     }
 }
 
+public struct NativeICEReadinessSummary: Codable, Equatable, Sendable {
+    public var ok: Bool
+    public var hasIceServers: Bool
+    public var iceServerCount: Int
+    public var knownUrlCount: Int
+    public var unknownUrlCount: Int
+    public var stunCount: Int
+    public var stunsCount: Int
+    public var turnCount: Int
+    public var turnsCount: Int
+    public var turnServersWithCredentials: Int
+    public var turnServersMissingCredentials: Int
+    public var relayTransports: [String]
+    public var warnings: [String]
+    public var errors: [String]
+
+    public init(
+        ok: Bool = false,
+        hasIceServers: Bool = false,
+        iceServerCount: Int = 0,
+        knownUrlCount: Int = 0,
+        unknownUrlCount: Int = 0,
+        stunCount: Int = 0,
+        stunsCount: Int = 0,
+        turnCount: Int = 0,
+        turnsCount: Int = 0,
+        turnServersWithCredentials: Int = 0,
+        turnServersMissingCredentials: Int = 0,
+        relayTransports: [String] = [],
+        warnings: [String] = [],
+        errors: [String] = []
+    ) {
+        self.ok = ok
+        self.hasIceServers = hasIceServers
+        self.iceServerCount = iceServerCount
+        self.knownUrlCount = knownUrlCount
+        self.unknownUrlCount = unknownUrlCount
+        self.stunCount = stunCount
+        self.stunsCount = stunsCount
+        self.turnCount = turnCount
+        self.turnsCount = turnsCount
+        self.turnServersWithCredentials = turnServersWithCredentials
+        self.turnServersMissingCredentials = turnServersMissingCredentials
+        self.relayTransports = relayTransports
+        self.warnings = warnings
+        self.errors = errors
+    }
+
+    public init(rtcConfiguration: [String: JSONValue], requireTURN: Bool = true) {
+        guard case .array(let serverValues)? = rtcConfiguration["iceServers"] else {
+            self.init(
+                ok: !requireTURN,
+                hasIceServers: false,
+                errors: requireTURN ? ["No ICE servers were found."] : []
+            )
+            return
+        }
+
+        var iceServerCount = 0
+        var knownUrlCount = 0
+        var unknownUrlCount = 0
+        var stunCount = 0
+        var stunsCount = 0
+        var turnCount = 0
+        var turnsCount = 0
+        var turnServersWithCredentials = 0
+        var turnServersMissingCredentials = 0
+        var malformedServerCount = 0
+        var relayTransportSet = Set<String>()
+
+        for value in serverValues {
+            guard case .object(let server) = value else {
+                malformedServerCount += 1
+                continue
+            }
+            let urls = Self.stringList(from: server["urls"])
+            if urls.isEmpty {
+                malformedServerCount += 1
+                continue
+            }
+
+            iceServerCount += 1
+            let hasCredentials = Self.nonEmptyString(from: server["username"]) != nil
+                && Self.nonEmptyString(from: server["credential"]) != nil
+            var serverHasTURN = false
+
+            for url in urls {
+                switch Self.classifyRelayURL(url) {
+                case "stun":
+                    knownUrlCount += 1
+                    stunCount += 1
+                case "stuns":
+                    knownUrlCount += 1
+                    stunsCount += 1
+                case "turn":
+                    knownUrlCount += 1
+                    turnCount += 1
+                    serverHasTURN = true
+                    relayTransportSet.insert(Self.relayTransport(url: url, secure: false))
+                case "turns":
+                    knownUrlCount += 1
+                    turnsCount += 1
+                    serverHasTURN = true
+                    relayTransportSet.insert(Self.relayTransport(url: url, secure: true))
+                default:
+                    unknownUrlCount += 1
+                }
+            }
+
+            if serverHasTURN {
+                if hasCredentials {
+                    turnServersWithCredentials += 1
+                } else {
+                    turnServersMissingCredentials += 1
+                }
+            }
+        }
+
+        var warnings: [String] = []
+        var errors: [String] = []
+        let hasIceServers = iceServerCount > 0
+        let turnRelayCount = turnCount + turnsCount
+        if malformedServerCount > 0 {
+            warnings.append("\(malformedServerCount) ICE server entries were ignored because they were malformed or blank.")
+        }
+        if unknownUrlCount > 0 {
+            warnings.append("\(unknownUrlCount) ICE server URLs used an unknown scheme.")
+        }
+        if !hasIceServers {
+            errors.append("No usable ICE servers were found.")
+        }
+        if knownUrlCount == 0 {
+            errors.append("No STUN, STUNS, TURN, or TURNS ICE server URLs were found.")
+        }
+        if requireTURN && turnRelayCount == 0 {
+            errors.append("No TURN or TURNS relay URLs were found.")
+        }
+        if requireTURN && turnRelayCount > 0 && turnServersWithCredentials == 0 {
+            errors.append("TURN relay URLs were found, but none have both username and credential.")
+        }
+        if requireTURN && turnServersMissingCredentials > 0 {
+            warnings.append("\(turnServersMissingCredentials) TURN server entries are missing username or credential.")
+        }
+
+        self.init(
+            ok: warnings.isEmpty && errors.isEmpty,
+            hasIceServers: hasIceServers,
+            iceServerCount: iceServerCount,
+            knownUrlCount: knownUrlCount,
+            unknownUrlCount: unknownUrlCount,
+            stunCount: stunCount,
+            stunsCount: stunsCount,
+            turnCount: turnCount,
+            turnsCount: turnsCount,
+            turnServersWithCredentials: turnServersWithCredentials,
+            turnServersMissingCredentials: turnServersMissingCredentials,
+            relayTransports: relayTransportSet.sorted(),
+            warnings: warnings,
+            errors: errors
+        )
+    }
+
+    public var unambiguousRelayProtocol: String? {
+        switch (turnCount > 0, turnsCount > 0) {
+        case (true, false):
+            return "turn"
+        case (false, true):
+            return "turns"
+        default:
+            return nil
+        }
+    }
+
+    private static func stringList(from value: JSONValue?) -> [String] {
+        switch value {
+        case .string(let string):
+            return normalizedStrings([string])
+        case .array(let values):
+            return normalizedStrings(values.compactMap { item in
+                if case .string(let string) = item { return string }
+                return nil
+            })
+        default:
+            return []
+        }
+    }
+
+    private static func normalizedStrings(_ values: [String]) -> [String] {
+        values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func nonEmptyString(from value: JSONValue?) -> String? {
+        guard case .string(let string) = value else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func classifyRelayURL(_ url: String) -> String {
+        let normalized = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.hasPrefix("turns:") { return "turns" }
+        if normalized.hasPrefix("turn:") { return "turn" }
+        if normalized.hasPrefix("stuns:") { return "stuns" }
+        if normalized.hasPrefix("stun:") { return "stun" }
+        return "unknown"
+    }
+
+    private static func relayTransport(url: String, secure: Bool) -> String {
+        let normalized = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let queryStart = normalized.firstIndex(of: "?") else {
+            return secure ? "tls" : "udp"
+        }
+        let query = normalized[normalized.index(after: queryStart)...]
+        for item in query.split(separator: "&") {
+            let parts = item.split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2 && parts[0] == "transport" {
+                let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { return value }
+            }
+        }
+        return secure ? "tls" : "udp"
+    }
+}
+
+public struct NativeTurnRelaySelectedCandidate: Codable, Equatable, Sendable {
+    public var relayProtocol: String
+    public var relayCandidateType: String
+    public var relayCandidateSelected: Bool
+    public var localCandidateType: String
+    public var remoteCandidateType: String
+    public var currentRoundTripTime: Double
+    public var `protocol`: String
+    public var networkType: String
+
+    public init(
+        relayProtocol: String = "",
+        relayCandidateType: String = "",
+        relayCandidateSelected: Bool = false,
+        localCandidateType: String = "",
+        remoteCandidateType: String = "",
+        currentRoundTripTime: Double = 0,
+        protocol: String = "",
+        networkType: String = ""
+    ) {
+        self.relayProtocol = relayProtocol
+        self.relayCandidateType = relayCandidateType
+        self.relayCandidateSelected = relayCandidateSelected
+        self.localCandidateType = localCandidateType
+        self.remoteCandidateType = remoteCandidateType
+        self.currentRoundTripTime = currentRoundTripTime
+        self.protocol = `protocol`
+        self.networkType = networkType
+    }
+
+    public init(source: NativeMediaEvidenceCandidatePair, iceReadiness: NativeICEReadinessSummary) {
+        let localType = source.localCandidateType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let remoteType = source.remoteCandidateType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let selected = localType == "relay" || remoteType == "relay" || source.relayCandidateSelected
+        self.init(
+            relayProtocol: selected ? iceReadiness.unambiguousRelayProtocol ?? "" : "",
+            relayCandidateType: selected ? "relay" : "",
+            relayCandidateSelected: selected,
+            localCandidateType: source.localCandidateType,
+            remoteCandidateType: source.remoteCandidateType,
+            currentRoundTripTime: source.currentRoundTripTime,
+            protocol: source.protocol,
+            networkType: source.networkType
+        )
+    }
+}
+
+public enum NativeTurnRelayObservationError: Error, Equatable, Sendable {
+    case missingNetwork
+    case uncleanICEReadiness
+    case nonRelaySelectedCandidate
+    case ambiguousRelayProtocol
+    case missingRelayProtocol
+    case invalidRoundTripTime
+}
+
+public struct NativeTurnRelayObservation: Codable, Equatable, Sendable {
+    public var schemaVersion: Int
+    public var artifactType: String
+    public var status: String
+    public var runId: String
+    public var roomId: String
+    public var network: String
+    public var capturedAt: String
+    public var app: NativeMediaEvidenceAppContext
+    public var device: NativeMediaEvidenceDeviceContext
+    public var selectedCandidate: NativeTurnRelaySelectedCandidate
+    public var iceReadiness: NativeICEReadinessSummary
+    public var sanitization: NativeMediaEvidenceSanitization
+
+    public init(
+        evidence: NativeMediaEvidenceSnapshot,
+        iceReadiness: NativeICEReadinessSummary,
+        network: String
+    ) throws {
+        let trimmedNetwork = network.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNetwork.isEmpty else {
+            throw NativeTurnRelayObservationError.missingNetwork
+        }
+        guard iceReadiness.ok, iceReadiness.warnings.isEmpty, iceReadiness.errors.isEmpty else {
+            throw NativeTurnRelayObservationError.uncleanICEReadiness
+        }
+        if iceReadiness.turnCount > 0 && iceReadiness.turnsCount > 0 {
+            throw NativeTurnRelayObservationError.ambiguousRelayProtocol
+        }
+        schemaVersion = 1
+        artifactType = "native_turn_relay_observation"
+        status = "observed"
+        runId = evidence.runId
+        roomId = evidence.roomId
+        self.network = trimmedNetwork
+        capturedAt = evidence.capturedAt
+        app = evidence.app
+        device = evidence.device
+        let candidate = NativeTurnRelaySelectedCandidate(
+            source: evidence.selectedCandidate,
+            iceReadiness: iceReadiness
+        )
+        guard candidate.relayCandidateSelected else {
+            throw NativeTurnRelayObservationError.nonRelaySelectedCandidate
+        }
+        guard !candidate.relayProtocol.isEmpty else {
+            throw NativeTurnRelayObservationError.missingRelayProtocol
+        }
+        guard candidate.currentRoundTripTime > 0 else {
+            throw NativeTurnRelayObservationError.invalidRoundTripTime
+        }
+        selectedCandidate = candidate
+        self.iceReadiness = iceReadiness
+        sanitization = NativeMediaEvidenceSanitization()
+    }
+}
+
 public struct NativeMediaEvidenceReleaseSummary: Codable, Equatable, Sendable {
     public var status: String
     public var runId: String

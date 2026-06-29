@@ -2305,3 +2305,84 @@ What worked:
 - Rendering post-run promotion commands next to the archive/export/notary
   commands reduces the chance that TestFlight or notarization screenshots/logs
   are mistaken for release evidence without promotion and strict readiness.
+
+## Wave 32
+
+Status: `wave32_native_turn_relay_observation_export_validated`
+
+Scope:
+- Continued the restrictive-network TURN proof path by adding a native app export
+  for sanitized `native_turn_relay_observation` artifacts.
+- Assigned a read-only media QA reviewer. The reviewer flagged that selected
+  relay observations must stay separate from `native_device_media`, must derive
+  ICE readiness from counts rather than raw config, and must fail ambiguous
+  `turn:` plus `turns:` protocol mixes instead of guessing.
+- Added `NativeICEReadinessSummary`, `NativeTurnRelaySelectedCandidate`, and
+  `NativeTurnRelayObservation` in the RTC module. The observation rejects blank
+  network labels, unclean ICE readiness, ambiguous relay protocol config,
+  non-relay selected candidates, missing relay protocol, and zero RTT.
+- Added `NativeRoomSessionCoordinator.captureTurnRelayObservation(network:)` so
+  the app builds the observation from a fresh native media-stat snapshot plus
+  the joined room's stored `ClientRTCConfig`.
+- Added a separate TURN Relay capture/copy flow in the shared native room UI and
+  ViewModel state. It does not reuse the existing media-evidence JSON export.
+- Updated operator docs and protocol docs to direct copied app observations into
+  `artifacts/native-apple/<run-id>/inbox/turn-relay-observation.json` before
+  running the existing TURN promoter.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomRTCClientTests` passed 21
+  tests.
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests`
+  passed 30 tests.
+- `swift test --package-path apple --filter NativeRoomViewModelTests` passed 32
+  tests.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with blockers for Apple development team, privacy manifest, and release
+  evidence file.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 8 checks.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 90 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This is still not real restrictive-network TURN proof. A physical iPhone,
+  iPad, or Mac must join on the actual restrictive network, capture the
+  observation, and promote it with operator confirmations.
+- Physical mixed-room media proof, Apple signing/team setup, final privacy
+  manifest, real TestFlight upload, and macOS notarization remain external
+  release blockers.
+- If production config intentionally includes both `turn:` and `turns:` relay
+  URLs, this export will reject the observation until the operator can provide
+  unambiguous selected-relay proof.
+
+What worked:
+- Keeping ICE readiness as counts and booleans made the native app useful for
+  proof capture without copying raw TURN URLs or credentials.
+- Reusing the existing media-stat snapshot for selected-candidate facts kept the
+  observation tied to the same WebRTC source as media QA while preserving a
+  separate artifact type.
+- Running the app-export JSON through the existing promoter contract prevented a
+  quiet schema drift between native UI and release proof tooling.

@@ -263,6 +263,162 @@ final class NativeRoomRTCClientTests: XCTestCase {
         }
     }
 
+    func testNativeICEReadinessSummaryRedactsTURNConfigToCounts() throws {
+        let readiness = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object(["urls": .string("stun:stun.example.com:19302")]),
+                .object([
+                    "urls": .array([
+                        .string("turns:relay.example.com:5349?transport=tcp"),
+                    ]),
+                    "username": .string("alice"),
+                    "credential": .string("secret"),
+                ]),
+            ]),
+        ])
+
+        XCTAssertTrue(readiness.ok)
+        XCTAssertTrue(readiness.hasIceServers)
+        XCTAssertEqual(readiness.iceServerCount, 2)
+        XCTAssertEqual(readiness.knownUrlCount, 2)
+        XCTAssertEqual(readiness.stunCount, 1)
+        XCTAssertEqual(readiness.turnsCount, 1)
+        XCTAssertEqual(readiness.turnServersWithCredentials, 1)
+        XCTAssertEqual(readiness.turnServersMissingCredentials, 0)
+        XCTAssertEqual(readiness.relayTransports, ["tcp"])
+
+        let encoded = String(data: try JSONEncoder().encode(readiness), encoding: .utf8) ?? ""
+        for leaked in Self.disallowedEvidenceLeakTokens {
+            XCTAssertFalse(encoded.localizedCaseInsensitiveContains(leaked), "leaked sensitive ICE readiness detail: \(leaked)")
+        }
+    }
+
+    func testNativeICEReadinessSummaryReportsWarningsAndErrors() {
+        let readiness = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object(["urls": .array([])]),
+                .object(["urls": .string("relay.example.com")]),
+                .object(["urls": .string("turn:relay.example.com:3478")]),
+            ]),
+        ])
+
+        XCTAssertFalse(readiness.ok)
+        XCTAssertEqual(readiness.iceServerCount, 2)
+        XCTAssertEqual(readiness.unknownUrlCount, 1)
+        XCTAssertEqual(readiness.turnCount, 1)
+        XCTAssertEqual(readiness.turnServersWithCredentials, 0)
+        XCTAssertEqual(readiness.turnServersMissingCredentials, 1)
+        XCTAssertTrue(readiness.warnings.contains { $0.contains("malformed") })
+        XCTAssertTrue(readiness.warnings.contains { $0.contains("unknown scheme") })
+        XCTAssertTrue(readiness.errors.contains { $0.contains("none have both username and credential") })
+    }
+
+    func testNativeTurnRelayObservationMatchesPromoterInputShape() throws {
+        let evidence = Self.turnRelayEvidence(
+            candidatePair: NativeMediaQualityCandidatePair(
+                protocol: "udp",
+                networkType: "wifi",
+                localCandidateType: "host",
+                remoteCandidateType: "relay",
+                currentRoundTripTime: 0.082
+            )
+        )
+        let readiness = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object([
+                    "urls": .string("turns:relay.example.com:5349?transport=tcp"),
+                    "username": .string("alice"),
+                    "credential": .string("secret"),
+                ]),
+            ]),
+        ])
+
+        let observation = try NativeTurnRelayObservation(
+            evidence: evidence,
+            iceReadiness: readiness,
+            network: "restricted guest network"
+        )
+
+        XCTAssertEqual(observation.schemaVersion, 1)
+        XCTAssertEqual(observation.artifactType, "native_turn_relay_observation")
+        XCTAssertEqual(observation.status, "observed")
+        XCTAssertEqual(observation.runId, "native-apple-run-test")
+        XCTAssertEqual(observation.roomId, "release-room-test")
+        XCTAssertEqual(observation.network, "restricted guest network")
+        XCTAssertEqual(observation.app.version, "1.0")
+        XCTAssertEqual(observation.device.kind, "iphone")
+        XCTAssertTrue(observation.device.physical)
+        XCTAssertEqual(observation.selectedCandidate.relayProtocol, "turns")
+        XCTAssertEqual(observation.selectedCandidate.relayCandidateType, "relay")
+        XCTAssertTrue(observation.selectedCandidate.relayCandidateSelected)
+        XCTAssertEqual(observation.selectedCandidate.remoteCandidateType, "relay")
+        XCTAssertEqual(observation.selectedCandidate.currentRoundTripTime, 0.082)
+        XCTAssertTrue(observation.iceReadiness.ok)
+
+        let encoded = String(data: try JSONEncoder().encode(observation), encoding: .utf8) ?? ""
+        XCTAssertTrue(encoded.contains("\"native_turn_relay_observation\""))
+        for leaked in Self.disallowedEvidenceLeakTokens {
+            XCTAssertFalse(encoded.localizedCaseInsensitiveContains(leaked), "leaked sensitive TURN observation detail: \(leaked)")
+        }
+    }
+
+    func testNativeTurnRelayObservationRejectsUnsafeOrAmbiguousInputs() {
+        let relayEvidence = Self.turnRelayEvidence(
+            candidatePair: NativeMediaQualityCandidatePair(
+                localCandidateType: "relay",
+                currentRoundTripTime: 0.082
+            )
+        )
+        let cleanTurn = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object([
+                    "urls": .string("turn:relay.example.com:3478"),
+                    "username": .string("alice"),
+                    "credential": .string("secret"),
+                ]),
+            ]),
+        ])
+
+        XCTAssertThrowsError(try NativeTurnRelayObservation(evidence: relayEvidence, iceReadiness: cleanTurn, network: "")) { error in
+            XCTAssertEqual(error as? NativeTurnRelayObservationError, .missingNetwork)
+        }
+
+        let nonRelayEvidence = Self.turnRelayEvidence(candidatePair: NativeMediaQualityCandidatePair(localCandidateType: "host", remoteCandidateType: "srflx", currentRoundTripTime: 0.082))
+        XCTAssertThrowsError(try NativeTurnRelayObservation(evidence: nonRelayEvidence, iceReadiness: cleanTurn, network: "restricted")) { error in
+            XCTAssertEqual(error as? NativeTurnRelayObservationError, .nonRelaySelectedCandidate)
+        }
+
+        let zeroRttEvidence = Self.turnRelayEvidence(candidatePair: NativeMediaQualityCandidatePair(localCandidateType: "relay", currentRoundTripTime: 0))
+        XCTAssertThrowsError(try NativeTurnRelayObservation(evidence: zeroRttEvidence, iceReadiness: cleanTurn, network: "restricted")) { error in
+            XCTAssertEqual(error as? NativeTurnRelayObservationError, .invalidRoundTripTime)
+        }
+
+        let ambiguousReadiness = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object([
+                    "urls": .array([
+                        .string("turn:relay.example.com:3478"),
+                        .string("turns:relay.example.com:5349"),
+                    ]),
+                    "username": .string("alice"),
+                    "credential": .string("secret"),
+                ]),
+            ]),
+        ])
+        XCTAssertThrowsError(try NativeTurnRelayObservation(evidence: relayEvidence, iceReadiness: ambiguousReadiness, network: "restricted")) { error in
+            XCTAssertEqual(error as? NativeTurnRelayObservationError, .ambiguousRelayProtocol)
+        }
+
+        let uncleanReadiness = NativeICEReadinessSummary(rtcConfiguration: [
+            "iceServers": .array([
+                .object(["urls": .string("turn:relay.example.com:3478")]),
+            ]),
+        ])
+        XCTAssertThrowsError(try NativeTurnRelayObservation(evidence: relayEvidence, iceReadiness: uncleanReadiness, network: "restricted")) { error in
+            XCTAssertEqual(error as? NativeTurnRelayObservationError, .uncleanICEReadiness)
+        }
+    }
+
     func testNativeMediaEvidenceDoesNotTreatEncodedFramesAsCameraProof() {
         let source = NativeMediaQualitySnapshot(
             outboundVideoFramesEncoded: 300,
@@ -488,6 +644,40 @@ final class NativeRoomRTCClientTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    private static func turnRelayEvidence(
+        candidatePair: NativeMediaQualityCandidatePair
+    ) -> NativeMediaEvidenceSnapshot {
+        NativeMediaEvidenceSnapshot(
+            source: NativeMediaQualitySnapshot(
+                at: 1_000,
+                outboundAudioPacketsSent: 12,
+                outboundVideoFramesSent: 24,
+                inboundAudioPacketsReceived: 36,
+                inboundVideoDecoded: 48,
+                candidatePair: candidatePair
+            ),
+            capturedAt: "2026-06-29T17:00:00Z",
+            client: NativeMediaEvidenceClient(platform: "ios", version: "test"),
+            app: NativeMediaEvidenceAppContext(
+                version: "1.0",
+                build: "15",
+                target: "MeetingAssistAppleApp",
+                clientPlatform: "ios",
+                clientVersion: "test"
+            ),
+            device: NativeMediaEvidenceDeviceContext(
+                kind: "iphone",
+                model: "iPhone physical",
+                os: "iOS 26.5",
+                physical: true
+            ),
+            lifecycle: .connected,
+            remoteVideoTiles: 1,
+            runId: "native-apple-run-test",
+            roomId: "release-room-test"
+        )
     }
 }
 

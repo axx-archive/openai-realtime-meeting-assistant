@@ -126,7 +126,11 @@ Restrictive-network TURN proof follows the same rule. The app/operator may
 export a sanitized `native_turn_relay_observation`, but it is not release proof
 until `scripts/native-apple-promote-turn-evidence.mjs` validates the same-room
 native app version/build, physical device context, selected relay candidate-pair
-facts, and sanitized ICE-readiness summary. The promoted
+facts, and sanitized ICE-readiness summary. Native UI exports must derive that
+observation from native media stats plus `ClientRTCConfig` ICE server counts,
+not from raw ICE config serialization. They should reject blank network labels,
+unclean ICE readiness, ambiguous `turn:` plus `turns:` protocol mixes,
+non-relay selected candidates, and zero or missing RTT. The promoted
 `native_restrictive_turn` artifact may include only safe summary fields such as
 relay protocol/type, local/remote candidate type labels, RTT, app/build/device
 metadata, and TURN-readiness counts. It must not include raw SDP, raw ICE

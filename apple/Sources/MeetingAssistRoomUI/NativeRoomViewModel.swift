@@ -28,6 +28,7 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setScreenSharing(_ sharing: Bool) async throws
     func requestICERestart(reason: String) async throws
     func captureMediaEvidenceSnapshot() async throws -> NativeMediaEvidenceSnapshot
+    func captureTurnRelayObservation(network: String) async throws -> NativeTurnRelayObservation
     func setRecordingEnabled(_ enabled: Bool) async throws
     func archiveMeeting() async throws
     func askAssistant(_ query: String) async throws
@@ -83,7 +84,10 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var scoutChatEvents: [ScoutChatEvent] = []
     @Published public private(set) var isScoutChatSending = false
     @Published public private(set) var latestMediaEvidence: NativeMediaEvidenceSnapshot?
+    @Published public private(set) var latestTurnRelayObservation: NativeTurnRelayObservation?
     @Published public private(set) var isCapturingMediaEvidence = false
+    @Published public private(set) var isCapturingTurnRelayObservation = false
+    @Published public var turnRelayNetwork = "restricted guest network"
 
     public let boardStatuses = ["Backlog", "In Progress", "Blocked", "Done"]
 
@@ -142,6 +146,14 @@ public final class NativeRoomViewModel: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(latestMediaEvidence) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    public var latestTurnRelayObservationJSON: String? {
+        guard let latestTurnRelayObservation else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(latestTurnRelayObservation) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -222,7 +234,9 @@ public final class NativeRoomViewModel: ObservableObject {
         errorMessage = nil
         resetRoomState()
         latestMediaEvidence = nil
+        latestTurnRelayObservation = nil
         isCapturingMediaEvidence = false
+        isCapturingTurnRelayObservation = false
         statusText = "Joining"
         lifecycle = .authenticated
 
@@ -307,6 +321,22 @@ public final class NativeRoomViewModel: ObservableObject {
             let evidence = try await session.captureMediaEvidenceSnapshot()
             applyMediaEvidence(evidence)
             statusText = "Media evidence captured"
+        } catch {
+            setError(displayMessage(for: error))
+        }
+    }
+
+    public func captureTurnRelayObservation() async {
+        guard let session, canUseRoomControls else { return }
+
+        isCapturingTurnRelayObservation = true
+        errorMessage = nil
+        statusText = "Capturing TURN observation"
+        defer { isCapturingTurnRelayObservation = false }
+
+        do {
+            latestTurnRelayObservation = try await session.captureTurnRelayObservation(network: turnRelayNetwork)
+            statusText = "TURN observation captured"
         } catch {
             setError(displayMessage(for: error))
         }
@@ -550,6 +580,7 @@ public final class NativeRoomViewModel: ObservableObject {
         latestArchive = nil
         scoutChatEvents = []
         isScoutChatSending = false
+        latestTurnRelayObservation = nil
     }
 
     private func applyRoomSnapshot(_ snapshot: RoomSnapshot) {
