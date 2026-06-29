@@ -193,6 +193,7 @@ function pendingTurnArtifact(runId, roomId, createdAt) {
 
 function pendingTestFlightArtifact(runId, createdAt) {
   return {
+    schemaVersion: 1,
     artifactType: "native_testflight_upload",
     status: "pending",
     runId,
@@ -203,11 +204,13 @@ function pendingTestFlightArtifact(runId, createdAt) {
       "Record only the App Store Connect build id and processing status; do not include API keys or profiles.",
     ],
     appStoreConnectBuildId: "",
+    notes: "Use scripts/native-apple-promote-distribution-evidence.mjs --kind testflight with a sanitized native_testflight_upload_observation before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
   };
 }
 
 function pendingNotarizationArtifact(runId, createdAt) {
   return {
+    schemaVersion: 1,
     artifactType: "native_macos_notarization",
     status: "pending",
     runId,
@@ -219,6 +222,7 @@ function pendingNotarizationArtifact(runId, createdAt) {
     ],
     requestId: "",
     stapled: false,
+    notes: "Use scripts/native-apple-promote-distribution-evidence.mjs --kind notarization with a sanitized native_macos_notarization_observation before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
   };
 }
 
@@ -388,7 +392,8 @@ function createProofpack(args) {
     nextSteps: [
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
-      "Replace remaining pending TestFlight and notarization artifacts with real non-secret proof.",
+      "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
+      "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],

@@ -865,6 +865,511 @@ function collectRestrictiveTurnArtifactContentProblems(evidence, evidenceRootDir
   );
 }
 
+const testFlightEvidenceStatuses = ["ready", "uploaded", "processing", "accepted"];
+
+function collectUnsafeDistributionArtifactContent(value, path = "$") {
+  const problems = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      problems.push(...collectUnsafeDistributionArtifactContent(item, `${path}[${index}]`));
+    });
+    return problems;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(trimmed) ||
+        /-----BEGIN CERTIFICATE-----/.test(trimmed) ||
+        /\bAKIA[0-9A-Z]{16}\b/.test(trimmed) ||
+        /\bsk-[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
+        /\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
+        /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed) ||
+        /\/Users\/[^/\s]+/i.test(trimmed) ||
+        /Developer ID (Application|Installer):.+\([A-Z0-9]{10}\)/.test(trimmed) ||
+        /\.(p8|p12|mobileprovision|provisionprofile)\b/i.test(trimmed)
+      ) {
+        problems.push(path);
+      }
+    }
+    return problems;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const isSafeDistributionConfirmation = /^operatorConfirmedNoSecrets$/i.test(key);
+    if (
+      !isSafeDistributionConfirmation &&
+      /(secret|password|passwd|token|credential|api_?key|apikey|private_?key|provision|certificate|cert|p8|p12|team_?id|development_?team|issuer_?id|key_?id|keychain|profile|authorization|jwt|apple_?id|username|raw(Log|Output)|uploadLog|log|stdout|stderr|command|args|env|notarytool(Output|Log)?|altool(Output|Log)?|codesign(Output|Log)?|spctl(Output|Log)?|headers?|cookies?)/i.test(
+        key
+      )
+    ) {
+      problems.push(`${path}.${key}`);
+    }
+    problems.push(...collectUnsafeDistributionArtifactContent(item, `${path}.${key}`));
+  }
+  return problems;
+}
+
+function distributionArtifactPathProblems(path) {
+  if (!path || path.startsWith("__") || !existsSync(path)) {
+    return { skip: true, problems: [] };
+  }
+  if (!path.toLowerCase().endsWith(".json")) {
+    return { skip: false, problems: ["artifact:not_json"] };
+  }
+  return { skip: false, problems: [] };
+}
+
+function testFlightArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId }) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["artifact:not_object"];
+  }
+  problems.push(
+    ...collectUnexpectedKeys(
+      artifact,
+      [
+        "schemaVersion",
+        "artifactType",
+        "claimScope",
+        "releaseEligible",
+        "status",
+        "runId",
+        "uploadedAt",
+        "app",
+        "appStoreConnect",
+        "releaseEvidenceSummary",
+        "promotion",
+      ],
+      "artifact"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.app,
+      ["version", "build", "target", "clientPlatform", "bundleIdentifier"],
+      "artifact.app"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.appStoreConnect,
+      ["buildId", "processingStatus"],
+      "artifact.appStoreConnect"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.releaseEvidenceSummary,
+      ["status", "runId", "version", "build", "appStoreConnectBuildId", "uploadedAt"],
+      "artifact.releaseEvidenceSummary"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.promotion,
+      [
+        "promotedAt",
+        "sourceArtifactType",
+        "sourceStatus",
+        "sourceArtifact",
+        "operatorConfirmedAppStoreConnectUpload",
+        "operatorConfirmedNoSecrets",
+        "operatorConfirmedCurrentBuild",
+        "releaseEvidenceArtifactRef",
+      ],
+      "artifact.promotion"
+    )
+  );
+  if (artifact.schemaVersion !== 1) {
+    problems.push("artifact:schemaVersion");
+  }
+  if (artifact.artifactType !== "native_testflight_upload") {
+    problems.push("artifact:artifactType");
+  }
+  if (artifact.claimScope !== "app_store_connect_upload") {
+    problems.push("artifact:claimScope");
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push("artifact:releaseEligible");
+  }
+  const status = String(artifact.status ?? "").trim();
+  if (!testFlightEvidenceStatuses.includes(status)) {
+    problems.push("artifact:status");
+  } else if (!strictStringEqual(status, item.status)) {
+    problems.push("artifact:status.match");
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push("artifact:runId");
+  }
+  if (!validTimestamp(artifact.uploadedAt)) {
+    problems.push("artifact:uploadedAt");
+  } else if (!strictStringEqual(artifact.uploadedAt, item.uploadedAt)) {
+    problems.push("artifact:uploadedAt.match");
+  }
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push("artifact:app");
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push("artifact:app.version");
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push("artifact:app.build");
+    }
+    if (artifact.app.target !== "MeetingAssistAppleApp") {
+      problems.push("artifact:app.target");
+    }
+    if (!["ios", "ipados"].includes(String(artifact.app.clientPlatform ?? "").trim())) {
+      problems.push("artifact:app.clientPlatform");
+    }
+    if (!nonPlaceholderString(artifact.app.bundleIdentifier)) {
+      problems.push("artifact:app.bundleIdentifier");
+    }
+  }
+  if (!artifact.appStoreConnect || typeof artifact.appStoreConnect !== "object" || Array.isArray(artifact.appStoreConnect)) {
+    problems.push("artifact:appStoreConnect");
+  } else {
+    if (!expectedIdentity(artifact.appStoreConnect.buildId, item.appStoreConnectBuildId)) {
+      problems.push("artifact:appStoreConnect.buildId");
+    }
+    if (!strictStringEqual(artifact.appStoreConnect.processingStatus, item.status)) {
+      problems.push("artifact:appStoreConnect.processingStatus");
+    }
+  }
+  const summary = artifact.releaseEvidenceSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    problems.push("artifact:releaseEvidenceSummary");
+  } else {
+    if (!strictStringEqual(summary.status, item.status)) {
+      problems.push("artifact:releaseEvidenceSummary.status");
+    }
+    if (!expectedIdentity(summary.runId, runId)) {
+      problems.push("artifact:releaseEvidenceSummary.runId");
+    }
+    if (!expectedIdentity(summary.version, expectedVersion)) {
+      problems.push("artifact:releaseEvidenceSummary.version");
+    }
+    if (!expectedIdentity(summary.build, expectedBuild)) {
+      problems.push("artifact:releaseEvidenceSummary.build");
+    }
+    if (!expectedIdentity(summary.appStoreConnectBuildId, item.appStoreConnectBuildId)) {
+      problems.push("artifact:releaseEvidenceSummary.appStoreConnectBuildId");
+    }
+    if (!validTimestamp(summary.uploadedAt) || !strictStringEqual(summary.uploadedAt, item.uploadedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.uploadedAt");
+    }
+  }
+  const promotion = artifact.promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) {
+    problems.push("artifact:promotion");
+  } else {
+    if (!validTimestamp(promotion.promotedAt)) {
+      problems.push("artifact:promotion.promotedAt");
+    }
+    if (promotion.sourceStatus !== "observed") {
+      problems.push("artifact:promotion.sourceStatus");
+    }
+    if (promotion.operatorConfirmedAppStoreConnectUpload !== true) {
+      problems.push("artifact:promotion.operatorConfirmedAppStoreConnectUpload");
+    }
+    if (promotion.operatorConfirmedNoSecrets !== true) {
+      problems.push("artifact:promotion.operatorConfirmedNoSecrets");
+    }
+    if (promotion.operatorConfirmedCurrentBuild !== true) {
+      problems.push("artifact:promotion.operatorConfirmedCurrentBuild");
+    }
+    if (!strictStringEqual(promotion.releaseEvidenceArtifactRef, item.artifactRef)) {
+      problems.push("artifact:promotion.releaseEvidenceArtifactRef");
+    }
+  }
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, "$.testFlight.artifact"),
+    ...collectUnsafeDistributionArtifactContent(artifact, "$.testFlight.artifact"),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function notarizationArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId }) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["artifact:not_object"];
+  }
+  problems.push(
+    ...collectUnexpectedKeys(
+      artifact,
+      [
+        "schemaVersion",
+        "artifactType",
+        "claimScope",
+        "releaseEligible",
+        "status",
+        "runId",
+        "checkedAt",
+        "distributionArtifact",
+        "app",
+        "signing",
+        "notarization",
+        "staple",
+        "gatekeeper",
+        "releaseEvidenceSummary",
+        "promotion",
+      ],
+      "artifact"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.distributionArtifact,
+      ["kind", "filename", "sha256"],
+      "artifact.distributionArtifact"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.app,
+      ["version", "build", "target", "clientPlatform", "bundleIdentifier"],
+      "artifact.app"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.signing,
+      ["style", "signed", "hardenedRuntime", "timestamped"],
+      "artifact.signing"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.notarization,
+      ["requestId", "status", "issueCount"],
+      "artifact.notarization"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.staple,
+      ["stapled", "validated"],
+      "artifact.staple"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.gatekeeper,
+      ["assessment", "source"],
+      "artifact.gatekeeper"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.releaseEvidenceSummary,
+      ["status", "runId", "version", "build", "requestId", "stapled", "checkedAt"],
+      "artifact.releaseEvidenceSummary"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.promotion,
+      [
+        "promotedAt",
+        "sourceArtifactType",
+        "sourceStatus",
+        "sourceArtifact",
+        "operatorConfirmedDeveloperIdArchive",
+        "operatorConfirmedNotaryAccepted",
+        "operatorConfirmedStapledApp",
+        "operatorConfirmedGatekeeperAccepted",
+        "operatorConfirmedCurrentBuild",
+        "releaseEvidenceArtifactRef",
+      ],
+      "artifact.promotion"
+    )
+  );
+  if (artifact.schemaVersion !== 1) {
+    problems.push("artifact:schemaVersion");
+  }
+  if (artifact.artifactType !== "native_macos_notarization") {
+    problems.push("artifact:artifactType");
+  }
+  if (artifact.claimScope !== "macos_notarization") {
+    problems.push("artifact:claimScope");
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push("artifact:releaseEligible");
+  }
+  if (artifact.status !== "accepted") {
+    problems.push("artifact:status");
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push("artifact:runId");
+  }
+  if (!validTimestamp(artifact.checkedAt)) {
+    problems.push("artifact:checkedAt");
+  } else if (!strictStringEqual(artifact.checkedAt, item.checkedAt)) {
+    problems.push("artifact:checkedAt.match");
+  }
+  if (!artifact.distributionArtifact || typeof artifact.distributionArtifact !== "object" || Array.isArray(artifact.distributionArtifact)) {
+    problems.push("artifact:distributionArtifact");
+  } else {
+    if (!["zip", "dmg", "pkg", "app"].includes(String(artifact.distributionArtifact.kind ?? "").trim())) {
+      problems.push("artifact:distributionArtifact.kind");
+    }
+    if (!nonPlaceholderString(artifact.distributionArtifact.filename) || String(artifact.distributionArtifact.filename).includes("/")) {
+      problems.push("artifact:distributionArtifact.filename");
+    }
+    if (!/^[a-f0-9]{64}$/i.test(String(artifact.distributionArtifact.sha256 ?? "").trim())) {
+      problems.push("artifact:distributionArtifact.sha256");
+    }
+  }
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push("artifact:app");
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push("artifact:app.version");
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push("artifact:app.build");
+    }
+    if (artifact.app.target !== "MeetingAssistMacApp") {
+      problems.push("artifact:app.target");
+    }
+    if (artifact.app.clientPlatform !== "macos") {
+      problems.push("artifact:app.clientPlatform");
+    }
+    if (!nonPlaceholderString(artifact.app.bundleIdentifier)) {
+      problems.push("artifact:app.bundleIdentifier");
+    }
+  }
+  if (!artifact.signing || typeof artifact.signing !== "object" || Array.isArray(artifact.signing)) {
+    problems.push("artifact:signing");
+  } else {
+    if (artifact.signing.style !== "developer_id") {
+      problems.push("artifact:signing.style");
+    }
+    if (artifact.signing.signed !== true) {
+      problems.push("artifact:signing.signed");
+    }
+    if (artifact.signing.hardenedRuntime !== true) {
+      problems.push("artifact:signing.hardenedRuntime");
+    }
+    if (artifact.signing.timestamped !== true) {
+      problems.push("artifact:signing.timestamped");
+    }
+  }
+  if (!artifact.notarization || typeof artifact.notarization !== "object" || Array.isArray(artifact.notarization)) {
+    problems.push("artifact:notarization");
+  } else {
+    if (!expectedIdentity(artifact.notarization.requestId, item.requestId)) {
+      problems.push("artifact:notarization.requestId");
+    }
+    if (artifact.notarization.status !== "accepted") {
+      problems.push("artifact:notarization.status");
+    }
+    if (Number(artifact.notarization.issueCount) !== 0) {
+      problems.push("artifact:notarization.issueCount");
+    }
+  }
+  if (!artifact.staple || typeof artifact.staple !== "object" || Array.isArray(artifact.staple)) {
+    problems.push("artifact:staple");
+  } else {
+    if (artifact.staple.stapled !== true) {
+      problems.push("artifact:staple.stapled");
+    }
+    if (artifact.staple.validated !== true) {
+      problems.push("artifact:staple.validated");
+    }
+  }
+  if (!artifact.gatekeeper || typeof artifact.gatekeeper !== "object" || Array.isArray(artifact.gatekeeper)) {
+    problems.push("artifact:gatekeeper");
+  } else {
+    if (artifact.gatekeeper.assessment !== "accepted") {
+      problems.push("artifact:gatekeeper.assessment");
+    }
+    if (!nonPlaceholderString(artifact.gatekeeper.source)) {
+      problems.push("artifact:gatekeeper.source");
+    }
+  }
+  const summary = artifact.releaseEvidenceSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    problems.push("artifact:releaseEvidenceSummary");
+  } else {
+    if (summary.status !== "accepted") {
+      problems.push("artifact:releaseEvidenceSummary.status");
+    }
+    if (!expectedIdentity(summary.runId, runId)) {
+      problems.push("artifact:releaseEvidenceSummary.runId");
+    }
+    if (!expectedIdentity(summary.version, expectedVersion)) {
+      problems.push("artifact:releaseEvidenceSummary.version");
+    }
+    if (!expectedIdentity(summary.build, expectedBuild)) {
+      problems.push("artifact:releaseEvidenceSummary.build");
+    }
+    if (!expectedIdentity(summary.requestId, item.requestId)) {
+      problems.push("artifact:releaseEvidenceSummary.requestId");
+    }
+    if (summary.stapled !== true) {
+      problems.push("artifact:releaseEvidenceSummary.stapled");
+    }
+    if (!validTimestamp(summary.checkedAt) || !strictStringEqual(summary.checkedAt, item.checkedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.checkedAt");
+    }
+  }
+  const promotion = artifact.promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) {
+    problems.push("artifact:promotion");
+  } else {
+    if (!validTimestamp(promotion.promotedAt)) {
+      problems.push("artifact:promotion.promotedAt");
+    }
+    if (promotion.sourceStatus !== "accepted") {
+      problems.push("artifact:promotion.sourceStatus");
+    }
+    if (promotion.operatorConfirmedDeveloperIdArchive !== true) {
+      problems.push("artifact:promotion.operatorConfirmedDeveloperIdArchive");
+    }
+    if (promotion.operatorConfirmedNotaryAccepted !== true) {
+      problems.push("artifact:promotion.operatorConfirmedNotaryAccepted");
+    }
+    if (promotion.operatorConfirmedStapledApp !== true) {
+      problems.push("artifact:promotion.operatorConfirmedStapledApp");
+    }
+    if (promotion.operatorConfirmedGatekeeperAccepted !== true) {
+      problems.push("artifact:promotion.operatorConfirmedGatekeeperAccepted");
+    }
+    if (promotion.operatorConfirmedCurrentBuild !== true) {
+      problems.push("artifact:promotion.operatorConfirmedCurrentBuild");
+    }
+    if (!strictStringEqual(promotion.releaseEvidenceArtifactRef, item.artifactRef)) {
+      problems.push("artifact:promotion.releaseEvidenceArtifactRef");
+    }
+  }
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, "$.macNotarization.artifact"),
+    ...collectUnsafeDistributionArtifactContent(artifact, "$.macNotarization.artifact"),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function collectTestFlightArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const item = evidence.testFlight;
+  const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+  const pathCheck = distributionArtifactPathProblems(path);
+  if (pathCheck.skip) {
+    return [];
+  }
+  if (pathCheck.problems.length > 0) {
+    return pathCheck.problems;
+  }
+  let artifact;
+  try {
+    artifact = readJSONFile(path);
+  } catch {
+    return ["artifact:not_valid_json"];
+  }
+  return uniqueLabels(testFlightArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId }));
+}
+
+function collectNotarizationArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const item = evidence.macNotarization;
+  const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+  const pathCheck = distributionArtifactPathProblems(path);
+  if (pathCheck.skip) {
+    return [];
+  }
+  if (pathCheck.problems.length > 0) {
+    return pathCheck.problems;
+  }
+  let artifact;
+  try {
+    artifact = readJSONFile(path);
+  } catch {
+    return ["artifact:not_valid_json"];
+  }
+  return uniqueLabels(notarizationArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId }));
+}
+
 function expectedIdentity(value, expected) {
   return nonPlaceholderString(value) && strictStringEqual(value, expected);
 }
@@ -906,9 +1411,11 @@ function collectSecretLikeEvidence(value, path = "$") {
   }
 
   for (const [key, item] of Object.entries(value)) {
-    const isSafeCountField = /^(turnServersWithCredentials|turnServersMissingCredentials)$/i.test(key);
+    const isSafeEvidenceKey = /^(turnServersWithCredentials|turnServersMissingCredentials|operatorConfirmedNoSecrets)$/i.test(
+      key
+    );
     if (
-      !isSafeCountField &&
+      !isSafeEvidenceKey &&
       /(secret|password|passwd|token|credential|api_?key|apikey|private_?key|provision|certificate|cert|p8|p12|team_?id|development_?team|turn_?(user|pass|credential))/i.test(
         key
       )
@@ -1170,7 +1677,9 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
   }
 
   const testFlight = evidence.testFlight;
-  const testFlightProblems = [];
+  const testFlightProblems = [
+    ...collectTestFlightArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
   if (!testFlight || typeof testFlight !== "object" || Array.isArray(testFlight)) {
     testFlightProblems.push("missing");
   } else {
@@ -1196,7 +1705,9 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
   }
 
   const mac = evidence.macNotarization;
-  const macProblems = [];
+  const macProblems = [
+    ...collectNotarizationArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
   if (!mac || typeof mac !== "object" || Array.isArray(mac)) {
     macProblems.push("missing");
   } else {

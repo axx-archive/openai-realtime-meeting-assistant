@@ -456,6 +456,136 @@ function promotedTurnArtifact(evidence, overrides = {}) {
   };
 }
 
+function promotedTestFlightArtifact(evidence, overrides = {}) {
+  const item = evidence.testFlight;
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_testflight_upload",
+    claimScope: "app_store_connect_upload",
+    releaseEligible: true,
+    status: item.status,
+    runId: evidence.runId,
+    uploadedAt: item.uploadedAt,
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+      bundleIdentifier: "co.thebonfire.meetingassist.ios",
+    },
+    appStoreConnect: {
+      buildId: item.appStoreConnectBuildId,
+      processingStatus: item.status,
+    },
+    releaseEvidenceSummary: {
+      status: item.status,
+      runId: evidence.runId,
+      version: evidence.version,
+      build: evidence.build,
+      appStoreConnectBuildId: item.appStoreConnectBuildId,
+      uploadedAt: item.uploadedAt,
+    },
+    promotion: {
+      promotedAt: "2026-06-29T12:31:00Z",
+      sourceArtifactType: "native_testflight_upload_observation",
+      sourceStatus: "observed",
+      sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/testflight-observation.json",
+      operatorConfirmedAppStoreConnectUpload: true,
+      operatorConfirmedNoSecrets: true,
+      operatorConfirmedCurrentBuild: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    appStoreConnect: { ...base.appStoreConnect, ...(overrides.appStoreConnect ?? {}) },
+    releaseEvidenceSummary: { ...base.releaseEvidenceSummary, ...(overrides.releaseEvidenceSummary ?? {}) },
+    promotion: { ...base.promotion, ...(overrides.promotion ?? {}) },
+  };
+}
+
+function promotedNotarizationArtifact(evidence, overrides = {}) {
+  const item = evidence.macNotarization;
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_macos_notarization",
+    claimScope: "macos_notarization",
+    releaseEligible: true,
+    status: "accepted",
+    runId: evidence.runId,
+    checkedAt: item.checkedAt,
+    distributionArtifact: {
+      kind: "zip",
+      filename: "MeetingAssistMacApp.zip",
+      sha256: "9cde1a328d7a4e80b3c577f9e0f536b89cde1a328d7a4e80b3c577f9e0f536b8",
+    },
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+      target: "MeetingAssistMacApp",
+      clientPlatform: "macos",
+      bundleIdentifier: "co.thebonfire.meetingassist.mac",
+    },
+    signing: {
+      style: "developer_id",
+      signed: true,
+      hardenedRuntime: true,
+      timestamped: true,
+    },
+    notarization: {
+      requestId: item.requestId,
+      status: "accepted",
+      issueCount: 0,
+    },
+    staple: {
+      stapled: true,
+      validated: true,
+    },
+    gatekeeper: {
+      assessment: "accepted",
+      source: "Notarized Developer ID",
+    },
+    releaseEvidenceSummary: {
+      status: "accepted",
+      runId: evidence.runId,
+      version: evidence.version,
+      build: evidence.build,
+      requestId: item.requestId,
+      stapled: true,
+      checkedAt: item.checkedAt,
+    },
+    promotion: {
+      promotedAt: "2026-06-29T12:41:00Z",
+      sourceArtifactType: "native_macos_notarization_observation",
+      sourceStatus: "accepted",
+      sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/notarization-observation.json",
+      operatorConfirmedDeveloperIdArchive: true,
+      operatorConfirmedNotaryAccepted: true,
+      operatorConfirmedStapledApp: true,
+      operatorConfirmedGatekeeperAccepted: true,
+      operatorConfirmedCurrentBuild: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    distributionArtifact: {
+      ...base.distributionArtifact,
+      ...(overrides.distributionArtifact ?? {}),
+    },
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    signing: { ...base.signing, ...(overrides.signing ?? {}) },
+    notarization: { ...base.notarization, ...(overrides.notarization ?? {}) },
+    staple: { ...base.staple, ...(overrides.staple ?? {}) },
+    gatekeeper: { ...base.gatekeeper, ...(overrides.gatekeeper ?? {}) },
+    releaseEvidenceSummary: { ...base.releaseEvidenceSummary, ...(overrides.releaseEvidenceSummary ?? {}) },
+    promotion: { ...base.promotion, ...(overrides.promotion ?? {}) },
+  };
+}
+
 function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   const rootDir = evidenceRootForPath(path);
   for (const platform of ["iphone", "ipad", "mac"]) {
@@ -473,11 +603,23 @@ function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
     const artifact = options.turnArtifact ?? promotedTurnArtifact(evidence, options.turnArtifactOverrides);
     writeFixtureFile(resolve(rootDir, turnRef), `${JSON.stringify(artifact, null, 2)}\n`);
   }
-  for (const ref of [evidence.testFlight?.artifactRef, evidence.macNotarization?.artifactRef]) {
-    if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
-      continue;
-    }
-    writeFixtureFile(resolve(rootDir, ref), `${JSON.stringify({ artifactRef: ref, fixture: true }, null, 2)}\n`);
+  const testFlightRef = evidence.testFlight?.artifactRef;
+  if (
+    typeof testFlightRef === "string" &&
+    /^(artifacts\/|evidence\/)/.test(testFlightRef) &&
+    !testFlightRef.split("/").includes("..")
+  ) {
+    const artifact = options.testFlightArtifact ?? promotedTestFlightArtifact(evidence, options.testFlightArtifactOverrides);
+    writeFixtureFile(resolve(rootDir, testFlightRef), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  const notarizationRef = evidence.macNotarization?.artifactRef;
+  if (
+    typeof notarizationRef === "string" &&
+    /^(artifacts\/|evidence\/)/.test(notarizationRef) &&
+    !notarizationRef.split("/").includes("..")
+  ) {
+    const artifact = options.notarizationArtifact ?? promotedNotarizationArtifact(evidence, options.notarizationArtifactOverrides);
+    writeFixtureFile(resolve(rootDir, notarizationRef), `${JSON.stringify(artifact, null, 2)}\n`);
   }
 }
 
@@ -1169,6 +1311,150 @@ assert.equal(
   true
 );
 
+const placeholderTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(placeholderTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  testFlightArtifact: { artifactRef: "artifacts/native-release-run-20260629-a/testflight-build.json", fixture: true },
+});
+const placeholderTestFlightArtifactFixture = runReadiness(
+  ["--apple-dir", placeholderTestFlightArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(placeholderTestFlightArtifactFixture.status, 1);
+assert.equal(placeholderTestFlightArtifactFixture.output.ok, true);
+assert.equal(placeholderTestFlightArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  placeholderTestFlightArtifactFixture.output.blockers.some((blocker) => blocker.id === "testflight_evidence"),
+  true
+);
+
+const nonJsonTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const nonJsonTestFlightArtifactPath = resolve(nonJsonTestFlightArtifactFixturePath, "testflight-artifact.txt");
+writeFixtureFile(nonJsonTestFlightArtifactPath, "uploaded in App Store Connect\n");
+writeReleaseEvidenceFixture(resolve(nonJsonTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {
+  testFlight: { artifactRef: pathToFileURL(nonJsonTestFlightArtifactPath).href },
+});
+const nonJsonTestFlightArtifactFixture = runReadiness(
+  ["--apple-dir", nonJsonTestFlightArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(nonJsonTestFlightArtifactFixture.status, 1);
+assert.equal(nonJsonTestFlightArtifactFixture.output.ok, true);
+assert.equal(nonJsonTestFlightArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  nonJsonTestFlightArtifactFixture.output.blockers.some((blocker) => blocker.id === "testflight_evidence"),
+  true
+);
+
+const staleTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(staleTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  testFlightArtifactOverrides: {
+    app: { build: "14" },
+    appStoreConnect: { buildId: "asc-stale-build" },
+    releaseEvidenceSummary: { appStoreConnectBuildId: "asc-stale-build" },
+  },
+});
+const staleTestFlightArtifactFixture = runReadiness(
+  ["--apple-dir", staleTestFlightArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(staleTestFlightArtifactFixture.status, 1);
+assert.equal(staleTestFlightArtifactFixture.output.ok, true);
+assert.equal(staleTestFlightArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  staleTestFlightArtifactFixture.output.blockers.some((blocker) => blocker.id === "testflight_evidence"),
+  true
+);
+
+const unsafeTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unsafeTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  testFlightArtifactOverrides: {
+    uploadLog: "xcodebuild uploaded with API key /Users/example/AuthKey_ABC123DEFG.p8",
+  },
+});
+const unsafeTestFlightArtifactFixture = runReadiness(
+  ["--apple-dir", unsafeTestFlightArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unsafeTestFlightArtifactFixture.status, 1);
+assert.equal(unsafeTestFlightArtifactFixture.output.ok, true);
+assert.equal(unsafeTestFlightArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unsafeTestFlightArtifactFixture.output.blockers.some((blocker) => blocker.id === "testflight_evidence"),
+  true
+);
+
+const placeholderNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(placeholderNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  notarizationArtifact: { artifactRef: "artifacts/native-release-run-20260629-a/notarization.json", fixture: true },
+});
+const placeholderNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", placeholderNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(placeholderNotarizationArtifactFixture.status, 1);
+assert.equal(placeholderNotarizationArtifactFixture.output.ok, true);
+assert.equal(placeholderNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  placeholderNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const nonJsonNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const nonJsonNotarizationArtifactPath = resolve(nonJsonNotarizationArtifactFixturePath, "notarization-artifact.txt");
+writeFixtureFile(nonJsonNotarizationArtifactPath, "notarytool accepted\n");
+writeReleaseEvidenceFixture(resolve(nonJsonNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {
+  macNotarization: { artifactRef: pathToFileURL(nonJsonNotarizationArtifactPath).href },
+});
+const nonJsonNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", nonJsonNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(nonJsonNotarizationArtifactFixture.status, 1);
+assert.equal(nonJsonNotarizationArtifactFixture.output.ok, true);
+assert.equal(nonJsonNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  nonJsonNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const rejectedNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(rejectedNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  notarizationArtifactOverrides: {
+    staple: { stapled: false, validated: false },
+    gatekeeper: { assessment: "rejected" },
+    releaseEvidenceSummary: { stapled: false },
+  },
+});
+const rejectedNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", rejectedNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(rejectedNotarizationArtifactFixture.status, 1);
+assert.equal(rejectedNotarizationArtifactFixture.output.ok, true);
+assert.equal(rejectedNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  rejectedNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const missingHashNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingHashNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  notarizationArtifactOverrides: {
+    distributionArtifact: { sha256: "" },
+  },
+});
+const missingHashNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", missingHashNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingHashNotarizationArtifactFixture.status, 1);
+assert.equal(missingHashNotarizationArtifactFixture.output.ok, true);
+assert.equal(missingHashNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  missingHashNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
 const unstapledNotarizationEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(unstapledNotarizationEvidenceFixturePath, "ReleaseEvidence.local.json"), {
   macNotarization: { stapled: false },
@@ -1336,4 +1622,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 44 checks passed");
+console.log("native-apple-release-readiness: 52 checks passed");

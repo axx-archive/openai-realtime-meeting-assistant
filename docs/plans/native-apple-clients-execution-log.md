@@ -1875,3 +1875,100 @@ What worked:
 - Reusing the media-promotion pattern kept the operator workflow predictable:
   scaffold pending proof, capture sanitized observation, promote explicitly,
   then let strict readiness decide.
+
+## Wave 27
+
+Status: `wave27_native_distribution_evidence_promotion_checkpoint_validated`
+
+Scope:
+- Continued the Apple distribution release-gate path by adding an explicit
+  operator promotion workflow for sanitized App Store Connect/TestFlight upload
+  observations and accepted macOS notarization observations.
+- Assigned two read-only reviewers for TestFlight and notarization evidence
+  shape. They recommended compact draft summaries, local JSON content
+  validation, explicit operator confirmations, and rejection of raw logs,
+  Apple account identifiers, keys, profiles, certificates, or stale build/run
+  proof.
+- Added `scripts/native-apple-promote-distribution-evidence.mjs`. It promotes
+  one `native_testflight_upload_observation` or
+  `native_macos_notarization_observation` into the matching proof-pack artifact
+  and updates only `testFlight` or `macNotarization` in
+  `ReleaseEvidence.draft.json`.
+- Required explicit `--confirm-current-build` for both kinds, plus
+  `--confirm-app-store-connect-upload` and `--confirm-no-secrets` for
+  TestFlight, and Developer ID archive, notary accepted, stapled app, and
+  Gatekeeper accepted confirmations for macOS notarization.
+- Tightened strict readiness so local TestFlight and notarization artifact refs
+  must point at promoted, build-matched, release-eligible JSON artifacts with
+  expected claim scopes, summaries, operator confirmations, and safe field
+  shapes. Placeholder JSON, non-JSON files, stale build proof, rejected or
+  unstapled notarization, missing hashes, and secret/log-bearing artifacts now
+  fail under the existing distribution blockers.
+- Updated proof-pack pending artifacts and next steps plus README/protocol docs
+  to point operators at the distribution promotion command instead of hand
+  replacing TestFlight/notarization proof.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-promote-distribution-evidence.mjs` passed.
+- `node --check scripts/native-apple-promote-distribution-evidence.test.mjs`
+  passed.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 52 checks.
+- `node --check scripts/native-apple-release-proofpack.mjs` passed.
+- `node --check scripts/native-apple-release-proofpack.test.mjs` passed.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 6 checks.
+- `node --check scripts/native-apple-promote-media-evidence.mjs` passed.
+- `node --check scripts/native-apple-promote-turn-evidence.mjs` passed.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-ice-readiness.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with external blockers for Apple development team, privacy manifest, and
+  release evidence file.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 84 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+- Delegated critic review was attempted but hit an external usage limit before
+  returning. Standalone critic-loop fallback accepted the wave at 9.1/10, with
+  the remaining risk limited to external Apple-account and physical-run proof
+  that this wave intentionally does not claim.
+
+Risks / blockers:
+- This wave does not upload an app to App Store Connect/TestFlight, sign with a
+  real Apple Developer team, notarize a macOS archive, staple an app, or validate
+  Gatekeeper on a real distributed artifact.
+- Physical iPhone/iPad/Mac mixed-room proof, restrictive-network TURN relay
+  proof, Apple signing/team setup, final privacy manifest, real TestFlight
+  upload, and real macOS notarization remain external release gates.
+- Strict readiness still inspects local JSON artifact content only. Remote
+  evidence refs remain an operator review responsibility.
+
+What worked:
+- Mirroring the media and TURN promotion pattern kept distribution proof
+  explicit: scaffold pending proof, complete the real Apple workflow externally,
+  capture sanitized observation, promote intentionally, then let strict readiness
+  decide.
+- Keeping rich upload/notarization details in local artifacts while preserving a
+  compact `ReleaseEvidence.draft.json` avoided turning the draft into a place
+  where Apple credentials or raw logs might accidentally land.

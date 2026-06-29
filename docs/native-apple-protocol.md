@@ -126,6 +126,20 @@ metadata, and TURN-readiness counts. It must not include raw SDP, raw ICE
 candidates, candidate IDs, IP addresses, TURN URLs, usernames, credentials,
 cookies, headers, API keys, Team IDs, certificates, profiles, or private keys.
 
+Distribution proof is also operator-only. Sanitized App Store Connect/TestFlight
+and macOS notarization observations are local proof-pack inputs, not websocket
+events and not app-exported media diagnostics. `scripts/native-apple-promote-distribution-evidence.mjs`
+promotes those observations only after an operator confirms the current build,
+completed upload or notarization/stapling/Gatekeeper checks, and absence of
+secret-bearing fields. TestFlight proof may include app version/build, target,
+bundle id, App Store Connect build id, processing status, and timestamps. macOS
+notarization proof may include app version/build, target, bundle id, distribution
+artifact filename/hash, Developer ID signing booleans, notary request id/status,
+stapling validation, Gatekeeper acceptance, and timestamps. It must not include
+raw upload/notary/codesign/spctl logs, API keys, Apple IDs, Team IDs, p8 or p12
+files, provisioning profiles, certificates, private keys, keychain identities,
+usernames, headers, cookies, or other account identifiers.
+
 The server may send `kanban/media_disconnected` when media negotiation has
 failed or stalled. Native clients should treat that as a terminal media session
 event, leave the broken peer connection, and return the UI to a rejoinable

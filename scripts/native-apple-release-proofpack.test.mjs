@@ -85,10 +85,18 @@ const proofpack = JSON.parse(readFileSync(created.output.proofpackPath, "utf8"))
 assert.equal(proofpack.schemaVersion, 1);
 assert.equal(proofpack.runId, runId);
 assert.equal(proofpack.roomId, roomId);
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind testflight")));
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind notarization")));
 for (const ref of Object.values(proofpack.evidenceArtifacts)) {
   assert.match(ref, new RegExp(`^artifacts/native-apple/${runId}/evidence/`));
   assert.ok(existsSync(resolve(rootDir, ref)));
 }
+const testFlightArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.testFlight), "utf8"));
+assert.equal(testFlightArtifact.schemaVersion, 1);
+assert.match(testFlightArtifact.notes, /native-apple-promote-distribution-evidence\.mjs --kind testflight/);
+const notarizationArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.notarization), "utf8"));
+assert.equal(notarizationArtifact.schemaVersion, 1);
+assert.match(notarizationArtifact.notes, /native-apple-promote-distribution-evidence\.mjs --kind notarization/);
 
 const draft = JSON.parse(readFileSync(created.output.evidenceDraft, "utf8"));
 assert.equal(draft.version, "1.0");

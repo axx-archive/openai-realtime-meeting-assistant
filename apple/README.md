@@ -188,6 +188,38 @@ ICE candidates, TURN URLs, usernames, credentials, IP addresses, or account
 identifiers. It updates only `restrictiveNetworkTurn` and the matching
 `selected-turn-relay.json` artifact.
 
+Promote the App Store Connect/TestFlight upload observation with a sanitized
+operator artifact after a real archive/upload:
+
+```bash
+node scripts/native-apple-promote-distribution-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --kind testflight \
+  --input artifacts/native-apple/<run-id>/inbox/testflight-observation.json \
+  --confirm-app-store-connect-upload \
+  --confirm-no-secrets \
+  --confirm-current-build
+```
+
+Promote accepted, stapled macOS notarization proof separately:
+
+```bash
+node scripts/native-apple-promote-distribution-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --kind notarization \
+  --input artifacts/native-apple/<run-id>/inbox/notarization-observation.json \
+  --confirm-developer-id-archive \
+  --confirm-notary-accepted \
+  --confirm-stapled-app \
+  --confirm-gatekeeper-accepted \
+  --confirm-current-build
+```
+
+The distribution helper does not upload to TestFlight, notarize, staple, or
+access Apple credentials. It promotes already-completed, non-secret operator
+observations into the proof pack and updates only `testFlight` or
+`macNotarization` in `ReleaseEvidence.draft.json`.
+
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must
@@ -217,6 +249,20 @@ readiness also inspects that content. The artifact must be promoted
 app/device metadata for the current build, selected relay candidate-pair facts,
 and a sanitized ICE-readiness summary with credentialed TURN/TURNS servers and
 no warnings or errors.
+
+When a TestFlight `artifactRef` points to a local JSON file, strict readiness
+requires promoted `native_testflight_upload` proof with
+`claimScope: "app_store_connect_upload"`, `releaseEligible: true`, current
+version/build, the matching App Store Connect build id, processing status, and
+operator confirmations for upload, current build, and no secret-bearing fields.
+
+When a macOS notarization `artifactRef` points to a local JSON file, strict
+readiness requires promoted `native_macos_notarization` proof with
+`claimScope: "macos_notarization"`, `releaseEligible: true`, current
+version/build, Developer ID signing assertions, accepted notary status, zero
+issues, stapling validation, Gatekeeper acceptance, distribution artifact
+filename/hash, and operator confirmations for the current build and completed
+notarization/stapling/Gatekeeper checks.
 
 The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
 
