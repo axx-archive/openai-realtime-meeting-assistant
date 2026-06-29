@@ -515,6 +515,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.latestMediaEvidence, evidence)
         XCTAssertEqual(model.statusText, "Media evidence captured")
         XCTAssertFalse(model.isCapturingMediaEvidence)
+        XCTAssertEqual(model.latestMediaEvidenceSuggestedFilename, "iphone-qa_snapshot.json")
         let json = model.latestMediaEvidenceJSON ?? ""
         XCTAssertTrue(json.contains("\"mediaAssertions\""))
         XCTAssertTrue(json.contains("\"cameraPublished\""))
@@ -549,6 +550,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.latestTurnRelayObservation, observation)
         XCTAssertEqual(model.statusText, "TURN observation captured")
         XCTAssertFalse(model.isCapturingTurnRelayObservation)
+        XCTAssertEqual(model.latestTurnRelayObservationSuggestedFilename, "turn-relay-observation.json")
 
         let mediaJSON = model.latestMediaEvidenceJSON ?? ""
         let turnJSON = model.latestTurnRelayObservationJSON ?? ""
@@ -601,6 +603,25 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(device.kind, "mac")
         XCTAssertTrue(device.physical)
         #endif
+    }
+
+    func testMediaEvidenceInboxFilenamesMatchProofpackInputs() {
+        XCTAssertEqual(
+            NativeRoomViewModel.mediaEvidenceInboxFilename(appClientPlatform: "ios", deviceKind: "iphone"),
+            "iphone-qa_snapshot.json"
+        )
+        XCTAssertEqual(
+            NativeRoomViewModel.mediaEvidenceInboxFilename(appClientPlatform: "ipados", deviceKind: "simulator"),
+            "ipad-qa_snapshot.json"
+        )
+        XCTAssertEqual(
+            NativeRoomViewModel.mediaEvidenceInboxFilename(appClientPlatform: "macos", deviceKind: "mac"),
+            "mac-qa_snapshot.json"
+        )
+        XCTAssertEqual(
+            NativeRoomViewModel.mediaEvidenceInboxFilename(appClientPlatform: "", deviceKind: "ipad"),
+            "ipad-qa_snapshot.json"
+        )
     }
 
     func testRoomAndBoardSnapshotsUpdateNativeState() async {
@@ -838,7 +859,14 @@ final class NativeRoomViewModelTests: XCTestCase {
             capturedAt: "2026-06-29T17:00:00Z",
             client: NativeMediaEvidenceClient(platform: "ios", version: "test"),
             lifecycle: .connected,
-            remoteVideoTiles: 1
+            remoteVideoTiles: 1,
+            renderer: NativeMediaEvidenceRendererContext(
+                remoteVideoFramesRendered: 3,
+                observedRemoteVideoTracks: 1,
+                latestFrameWidth: 1280,
+                latestFrameHeight: 720,
+                latestRenderedAt: "2026-06-29T17:00:01Z"
+            )
         )
     }
 
@@ -1180,7 +1208,14 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
                         currentRoundTripTime: 0.05
                     )
                 ),
-                remoteVideoTiles: 1
+                remoteVideoTiles: 1,
+                renderer: NativeMediaEvidenceRendererContext(
+                    remoteVideoFramesRendered: 1,
+                    observedRemoteVideoTracks: 1,
+                    latestFrameWidth: 1280,
+                    latestFrameHeight: 720,
+                    latestRenderedAt: "2026-06-29T17:00:01Z"
+                )
             ),
             iceReadiness: NativeICEReadinessSummary(rtcConfiguration: [
                 "iceServers": .array([

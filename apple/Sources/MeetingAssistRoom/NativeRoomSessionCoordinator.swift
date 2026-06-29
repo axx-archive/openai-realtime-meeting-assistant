@@ -842,6 +842,9 @@ public actor NativeRoomSessionCoordinator {
             device: context.device,
             lifecycle: lifecycle,
             remoteVideoTiles: remoteVideoTracksByID.count,
+            renderer: NativeMediaEvidenceRendererContext(
+                trackObservations: remoteVideoTracksByID.values.map(\.renderedFrameObservation)
+            ),
             runId: context.runId,
             roomId: context.roomId
         )

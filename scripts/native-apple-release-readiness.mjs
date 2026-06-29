@@ -286,7 +286,7 @@ const assertionEvidenceSources = {
   cameraPublished: "outboundVideoFramesSent",
   microphonePublished: "outboundAudioPacketsSent",
   remoteAudioReceived: "inboundAudioPacketsReceived",
-  remoteVideoRendered: "remoteVideoTiles+inboundVideoDecoded",
+  remoteVideoRendered: "nativeRemoteVideoRenderer+inboundVideoDecoded",
 };
 
 function mediaAssertionsAllTrue(assertions) {
@@ -296,6 +296,35 @@ function mediaAssertionsAllTrue(assertions) {
   return ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"].every(
     (key) => assertions[key] === true
   );
+}
+
+function collectRendererEvidenceProblems(renderer, platform) {
+  if (!renderer || typeof renderer !== "object" || Array.isArray(renderer)) {
+    return [`${platform}:renderer`];
+  }
+  const problems = [];
+  if (renderer.source !== "native_remote_video_renderer") {
+    problems.push(`${platform}:renderer.source`);
+  }
+  if (!(Number(renderer.remoteVideoFramesRendered) > 0)) {
+    problems.push(`${platform}:renderer.remoteVideoFramesRendered`);
+  }
+  if (!(Number(renderer.observedRemoteVideoTracks) > 0)) {
+    problems.push(`${platform}:renderer.observedRemoteVideoTracks`);
+  }
+  if (!(Number(renderer.latestFrameWidth) > 0)) {
+    problems.push(`${platform}:renderer.latestFrameWidth`);
+  }
+  if (!(Number(renderer.latestFrameHeight) > 0)) {
+    problems.push(`${platform}:renderer.latestFrameHeight`);
+  }
+  if (!validTimestamp(renderer.latestRenderedAt)) {
+    problems.push(`${platform}:renderer.latestRenderedAt`);
+  }
+  if (renderer.capturesPixels !== false) {
+    problems.push(`${platform}:renderer.capturesPixels`);
+  }
+  return problems;
 }
 
 function collectUnsafeMediaArtifactContent(value, path = "$") {
@@ -455,6 +484,7 @@ function nativeDeviceMediaArtifactProblems({
   if (!(Number(artifact.remoteVideoTiles) > 0)) {
     problems.push(`${platform}:remoteVideoTiles`);
   }
+  problems.push(...collectRendererEvidenceProblems(artifact.renderer, platform));
   if (!artifact.releaseEvidenceSummary || typeof artifact.releaseEvidenceSummary !== "object") {
     problems.push(`${platform}:releaseEvidenceSummary`);
   } else {

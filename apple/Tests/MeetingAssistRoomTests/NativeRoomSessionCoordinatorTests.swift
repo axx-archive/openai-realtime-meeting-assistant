@@ -347,7 +347,9 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
         await coordinator.setMuted(true)
         await coordinator.setCameraOff(true)
-        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"]))
+        let remoteTrack = NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"])
+        remoteTrack.recordRenderedFrame(width: 1280, height: 720)
+        await rtc.emitRemoteVideoTrack(remoteTrack)
         let evidence = try await coordinator.captureMediaEvidenceSnapshot()
 
         XCTAssertEqual(evidence.artifactType, "native_device_media")
@@ -371,12 +373,15 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(evidence.releaseEvidenceSummary.roomId, "release-room-test")
         XCTAssertEqual(evidence.lifecycle, .connected)
         XCTAssertEqual(evidence.remoteVideoTiles, 1)
+        XCTAssertEqual(evidence.renderer.remoteVideoFramesRendered, 1)
+        XCTAssertEqual(evidence.renderer.latestFrameWidth, 1280)
+        XCTAssertEqual(evidence.renderer.latestFrameHeight, 720)
         XCTAssertTrue(evidence.mediaAssertions.microphonePublished)
         XCTAssertTrue(evidence.mediaAssertions.cameraPublished)
         XCTAssertTrue(evidence.mediaAssertions.remoteAudioReceived)
         XCTAssertTrue(evidence.mediaAssertions.remoteVideoRendered)
         XCTAssertEqual(evidence.assertionEvidence.cameraPublished.value, 90)
-        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "remoteVideoTiles+inboundVideoDecoded")
+        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "nativeRemoteVideoRenderer+inboundVideoDecoded")
         XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
 
         let encoded = String(data: try JSONEncoder().encode(evidence), encoding: .utf8) ?? ""
@@ -503,7 +508,9 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         }
 
         _ = try await coordinator.joinWithCamera(name: "Tom", password: "B0NFIRE!")
-        await rtc.emitRemoteVideoTrack(NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"]))
+        let remoteTrack = NativeRemoteVideoTrack(id: "remote-video-1", streamIds: ["stream-1"])
+        remoteTrack.recordRenderedFrame(width: 1280, height: 720)
+        await rtc.emitRemoteVideoTrack(remoteTrack)
         try await coordinator.sendMediaQualityReport()
 
         let values = await collector.values()

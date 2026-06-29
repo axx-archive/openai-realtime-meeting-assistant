@@ -210,7 +210,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
         XCTAssertEqual(snapshot.outboundRtt, 0.082)
     }
 
-    func testNativeMediaEvidenceSnapshotDerivesAssertionsFromStatsOnly() throws {
+    func testNativeMediaEvidenceSnapshotDerivesAssertionsFromStatsAndRendererObservation() throws {
         let source = NativeMediaQualitySnapshot(
             at: 4_000,
             outboundAudioBytesSent: 12_000,
@@ -236,7 +236,8 @@ final class NativeRoomRTCClientTests: XCTestCase {
             capturedAt: "2026-06-29T17:00:00Z",
             client: NativeMediaEvidenceClient(platform: "ios", version: "test"),
             lifecycle: .connected,
-            remoteVideoTiles: 1
+            remoteVideoTiles: 1,
+            renderer: Self.rendererEvidence()
         )
 
         XCTAssertEqual(evidence.schemaVersion, 1)
@@ -249,11 +250,14 @@ final class NativeRoomRTCClientTests: XCTestCase {
         XCTAssertTrue(evidence.mediaAssertions.cameraPublished)
         XCTAssertTrue(evidence.mediaAssertions.remoteAudioReceived)
         XCTAssertTrue(evidence.mediaAssertions.remoteVideoRendered)
+        XCTAssertEqual(evidence.renderer.remoteVideoFramesRendered, 3)
+        XCTAssertEqual(evidence.renderer.observedRemoteVideoTracks, 1)
+        XCTAssertFalse(evidence.renderer.capturesPixels)
         XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
         XCTAssertEqual(evidence.counters.outboundVideoFramesSent, 280)
         XCTAssertEqual(evidence.stats.observationWindow, "cumulative_peer_connection_stats")
         XCTAssertEqual(evidence.assertionEvidence.cameraPublished.source, "outboundVideoFramesSent")
-        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "remoteVideoTiles+inboundVideoDecoded")
+        XCTAssertEqual(evidence.assertionEvidence.remoteVideoRendered.source, "nativeRemoteVideoRenderer+inboundVideoDecoded")
         XCTAssertTrue(evidence.limitations.contains("Do not mark ReleaseEvidence physicalDeviceMedia as passed from a qa_snapshot artifact."))
         XCTAssertEqual(evidence.client.platform, "ios")
 
@@ -426,7 +430,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
             candidatePair: NativeMediaQualityCandidatePair(localCandidateType: "relay")
         )
 
-        let evidence = NativeMediaEvidenceSnapshot(source: source, remoteVideoTiles: 1)
+        let evidence = NativeMediaEvidenceSnapshot(source: source, remoteVideoTiles: 1, renderer: Self.rendererEvidence())
 
         XCTAssertFalse(evidence.mediaAssertions.cameraPublished)
         XCTAssertFalse(evidence.mediaAssertions.microphonePublished)
@@ -436,18 +440,25 @@ final class NativeRoomRTCClientTests: XCTestCase {
         XCTAssertTrue(evidence.selectedCandidate.relayCandidateSelected)
     }
 
-    func testNativeMediaEvidenceRequiresRemoteTileAndDecodedVideoForRemoteVideoRendered() {
+    func testNativeMediaEvidenceRequiresRemoteTileDecodedVideoAndRendererForRemoteVideoRendered() {
         let decodedWithoutTile = NativeMediaEvidenceSnapshot(
             source: NativeMediaQualitySnapshot(inboundVideoDecoded: 250),
-            remoteVideoTiles: 0
+            remoteVideoTiles: 0,
+            renderer: Self.rendererEvidence()
         )
         let tileWithoutDecoded = NativeMediaEvidenceSnapshot(
             source: NativeMediaQualitySnapshot(inboundVideoPacketsReceived: 250),
+            remoteVideoTiles: 1,
+            renderer: Self.rendererEvidence()
+        )
+        let decodedAndTileWithoutRenderer = NativeMediaEvidenceSnapshot(
+            source: NativeMediaQualitySnapshot(inboundVideoDecoded: 250),
             remoteVideoTiles: 1
         )
 
         XCTAssertFalse(decodedWithoutTile.mediaAssertions.remoteVideoRendered)
         XCTAssertFalse(tileWithoutDecoded.mediaAssertions.remoteVideoRendered)
+        XCTAssertFalse(decodedAndTileWithoutRenderer.mediaAssertions.remoteVideoRendered)
     }
 
     func testMediaQualitySnapshotFallsBackToSucceededCandidatePairAndMediaType() {
@@ -675,8 +686,19 @@ final class NativeRoomRTCClientTests: XCTestCase {
             ),
             lifecycle: .connected,
             remoteVideoTiles: 1,
+            renderer: Self.rendererEvidence(),
             runId: "native-apple-run-test",
             roomId: "release-room-test"
+        )
+    }
+
+    private static func rendererEvidence() -> NativeMediaEvidenceRendererContext {
+        NativeMediaEvidenceRendererContext(
+            remoteVideoFramesRendered: 3,
+            observedRemoteVideoTracks: 1,
+            latestFrameWidth: 1280,
+            latestFrameHeight: 720,
+            latestRenderedAt: "2026-06-29T17:00:01Z"
         )
     }
 }

@@ -1,4 +1,5 @@
 import MeetingAssistRoomRTC
+import Foundation
 import SwiftUI
 
 #if canImport(LiveKitWebRTC)
@@ -50,9 +51,11 @@ private struct NativeVideoRenderer: UIViewRepresentable {
 
     final class Coordinator {
         let track: NativeRemoteVideoTrack
+        let observer: NativeVideoRenderObserver
 
         init(track: NativeRemoteVideoTrack) {
             self.track = track
+            self.observer = NativeVideoRenderObserver(track: track)
         }
     }
 
@@ -65,6 +68,7 @@ private struct NativeVideoRenderer: UIViewRepresentable {
         view.videoContentMode = .scaleAspectFill
         view.isEnabled = true
         track.addRenderer(view)
+        track.addRenderer(context.coordinator.observer)
         return view
     }
 
@@ -72,6 +76,7 @@ private struct NativeVideoRenderer: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: LKRTCMTLVideoView, coordinator: Coordinator) {
         coordinator.track.removeRenderer(uiView)
+        coordinator.track.removeRenderer(coordinator.observer)
     }
 }
 #elseif canImport(LiveKitWebRTC) && os(macOS)
@@ -80,9 +85,11 @@ private struct NativeVideoRenderer: NSViewRepresentable {
 
     final class Coordinator {
         let track: NativeRemoteVideoTrack
+        let observer: NativeVideoRenderObserver
 
         init(track: NativeRemoteVideoTrack) {
             self.track = track
+            self.observer = NativeVideoRenderObserver(track: track)
         }
     }
 
@@ -94,6 +101,7 @@ private struct NativeVideoRenderer: NSViewRepresentable {
         let view = LKRTCMTLVideoView(frame: .zero)
         view.isEnabled = true
         track.addRenderer(view)
+        track.addRenderer(context.coordinator.observer)
         return view
     }
 
@@ -101,6 +109,33 @@ private struct NativeVideoRenderer: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: LKRTCMTLVideoView, coordinator: Coordinator) {
         coordinator.track.removeRenderer(nsView)
+        coordinator.track.removeRenderer(coordinator.observer)
+    }
+}
+#endif
+
+#if canImport(LiveKitWebRTC)
+private final class NativeVideoRenderObserver: NSObject, LKRTCVideoRenderer {
+    private let track: NativeRemoteVideoTrack
+    private let lock = NSLock()
+    private var latestSize = CGSize.zero
+
+    init(track: NativeRemoteVideoTrack) {
+        self.track = track
+    }
+
+    func setSize(_ size: CGSize) {
+        lock.withLock {
+            latestSize = size
+        }
+    }
+
+    func renderFrame(_ frame: LKRTCVideoFrame?) {
+        guard let frame else { return }
+        let size = lock.withLock { latestSize }
+        let width = Int(frame.width) > 0 ? Int(frame.width) : Int(size.width)
+        let height = Int(frame.height) > 0 ? Int(frame.height) : Int(size.height)
+        track.recordRenderedFrame(width: width, height: height)
     }
 }
 #endif

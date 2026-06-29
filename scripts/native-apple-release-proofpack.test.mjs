@@ -124,12 +124,18 @@ assert.match(inboxReadme, new RegExp(`runId=${runId}`));
 assert.match(inboxReadme, new RegExp(`roomId=${roomId}`));
 assert.match(inboxReadme, /Replace only <participant-name>/);
 assert.match(inboxReadme, /Do not add passwords, tokens, cookies/);
+assert.match(inboxReadme, /iPhone media: iphone-qa_snapshot\.json/);
+assert.match(inboxReadme, /iPad media: ipad-qa_snapshot\.json/);
+assert.match(inboxReadme, /Mac media: mac-qa_snapshot\.json/);
+assert.match(inboxReadme, /Restrictive TURN: turn-relay-observation\.json/);
 const iphoneTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.iphoneMedia), "utf8"));
 assert.equal(iphoneTemplate.artifactType, "native_device_media");
 assert.equal(iphoneTemplate.status, "template");
 assert.equal(iphoneTemplate.releaseEligible, false);
 assert.equal(iphoneTemplate.app.target, "MeetingAssistAppleApp");
 assert.equal(iphoneTemplate.device.physical, false);
+assert.equal(iphoneTemplate.renderer.source, "native_remote_video_renderer");
+assert.equal(iphoneTemplate.renderer.remoteVideoFramesRendered, 0);
 const turnTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.turnRelay), "utf8"));
 assert.equal(turnTemplate.artifactType, "native_turn_relay_observation");
 assert.equal(turnTemplate.status, "template");
@@ -199,7 +205,7 @@ for (const platform of ["iphone", "ipad", "mac"]) {
       cameraPublished: { passed: true, value: 12, source: "cumulative_peer_connection_stats" },
       microphonePublished: { passed: true, value: 24, source: "cumulative_peer_connection_stats" },
       remoteAudioReceived: { passed: true, value: 36, source: "cumulative_peer_connection_stats" },
-      remoteVideoRendered: { passed: true, value: 48, source: "cumulative_peer_connection_stats" },
+      remoteVideoRendered: { passed: true, value: 3, source: "nativeRemoteVideoRenderer+inboundVideoDecoded" },
     },
     counters: {
       outboundAudioPacketsSent: 24,
@@ -208,6 +214,15 @@ for (const platform of ["iphone", "ipad", "mac"]) {
       inboundVideoDecoded: 48,
     },
     remoteVideoTiles: 1,
+    renderer: {
+      source: "native_remote_video_renderer",
+      remoteVideoFramesRendered: 3,
+      observedRemoteVideoTracks: 1,
+      latestFrameWidth: 1280,
+      latestFrameHeight: 720,
+      latestRenderedAt: "2026-06-29T17:45:01Z",
+      capturesPixels: false,
+    },
   });
   const promoted = runScript(promoteMediaScriptPath, [
     "--proofpack-dir",

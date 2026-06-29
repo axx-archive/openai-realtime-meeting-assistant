@@ -107,6 +107,15 @@ function qaSnapshot(platform, overrides = {}) {
     device: config.device,
     lifecycle: "connected",
     remoteVideoTiles: 1,
+    renderer: {
+      source: "native_remote_video_renderer",
+      remoteVideoFramesRendered: 3,
+      observedRemoteVideoTracks: 1,
+      latestFrameWidth: 1280,
+      latestFrameHeight: 720,
+      latestRenderedAt: "2026-06-29T17:45:01Z",
+      capturesPixels: false,
+    },
     mediaAssertions: {
       cameraPublished: true,
       microphonePublished: true,
@@ -131,7 +140,7 @@ function qaSnapshot(platform, overrides = {}) {
       cameraPublished: { source: "outboundVideoFramesSent", value: 90, passed: true },
       microphonePublished: { source: "outboundAudioPacketsSent", value: 120, passed: true },
       remoteAudioReceived: { source: "inboundAudioPacketsReceived", value: 180, passed: true },
-      remoteVideoRendered: { source: "remoteVideoTiles+inboundVideoDecoded", value: 140, passed: true },
+      remoteVideoRendered: { source: "nativeRemoteVideoRenderer+inboundVideoDecoded", value: 3, passed: true },
     },
     counters: {
       outboundAudioPacketsSent: 120,
@@ -145,6 +154,7 @@ function qaSnapshot(platform, overrides = {}) {
     ...overrides,
     app: { ...base.app, ...(overrides.app ?? {}) },
     device: { ...base.device, ...(overrides.device ?? {}) },
+    renderer: overrides.renderer === null ? null : { ...base.renderer, ...(overrides.renderer ?? {}) },
     mediaAssertions: { ...base.mediaAssertions, ...(overrides.mediaAssertions ?? {}) },
     assertionEvidence: { ...base.assertionEvidence, ...(overrides.assertionEvidence ?? {}) },
     counters: { ...base.counters, ...(overrides.counters ?? {}) },
@@ -271,7 +281,7 @@ const falseAssertionRejected = promote([
     "mac-false-assertion.json",
     boundSnapshot("mac", {
       mediaAssertions: { remoteVideoRendered: false },
-      assertionEvidence: { remoteVideoRendered: { source: "remoteVideoTiles+inboundVideoDecoded", value: 0, passed: false } },
+      assertionEvidence: { remoteVideoRendered: { source: "nativeRemoteVideoRenderer+inboundVideoDecoded", value: 0, passed: false } },
       counters: { inboundVideoDecoded: 0 },
     })
   ),
@@ -280,6 +290,19 @@ const falseAssertionRejected = promote([
 ]);
 assert.equal(falseAssertionRejected.status, 1);
 assert.match(falseAssertionRejected.output.error, /mediaAssertions|assertionEvidence|counters/);
+
+const missingRendererRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--platform",
+  "mac",
+  "--input",
+  writeSnapshot(fixture.dir, "mac-missing-renderer.json", boundSnapshot("mac", { renderer: null })),
+  "--confirm-physical-device",
+  "--confirm-same-room",
+]);
+assert.equal(missingRendererRejected.status, 1);
+assert.match(missingRendererRejected.output.error, /renderer/);
 
 const wrongBuildRejected = promote([
   "--proofpack-dir",
@@ -330,4 +353,4 @@ assert.match(mismatchedRunRejected.output.error, /runId/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-media-evidence: 9 checks passed");
+console.log("native-apple-promote-media-evidence: 10 checks passed");

@@ -150,12 +150,37 @@ public final class NativeRoomViewModel: ObservableObject {
         return String(data: data, encoding: .utf8)
     }
 
+    public var latestMediaEvidenceSuggestedFilename: String? {
+        guard let latestMediaEvidence else { return nil }
+        return Self.mediaEvidenceInboxFilename(
+            appClientPlatform: latestMediaEvidence.app.clientPlatform,
+            deviceKind: latestMediaEvidence.device.kind
+        )
+    }
+
     public var latestTurnRelayObservationJSON: String? {
         guard let latestTurnRelayObservation else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(latestTurnRelayObservation) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    public var latestTurnRelayObservationSuggestedFilename: String? {
+        guard latestTurnRelayObservation != nil else { return nil }
+        return "turn-relay-observation.json"
+    }
+
+    public static func mediaEvidenceInboxFilename(appClientPlatform: String, deviceKind: String) -> String {
+        let platform = appClientPlatform.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let kind = deviceKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if platform == "ipados" || kind == "ipad" {
+            return "ipad-qa_snapshot.json"
+        }
+        if platform == "macos" || kind == "mac" {
+            return "mac-qa_snapshot.json"
+        }
+        return "iphone-qa_snapshot.json"
     }
 
     public var activeBoardCards: [KanbanCard] {

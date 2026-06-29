@@ -288,7 +288,7 @@ function deviceObservationTemplate(platform, runId, roomId, createdAt, version, 
       cameraPublished: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
       microphonePublished: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
       remoteAudioReceived: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
-      remoteVideoRendered: { passed: false, value: 0, source: "cumulative_peer_connection_stats" },
+      remoteVideoRendered: { passed: false, value: 0, source: "nativeRemoteVideoRenderer+inboundVideoDecoded" },
     },
     counters: {
       outboundAudioPacketsSent: 0,
@@ -297,6 +297,15 @@ function deviceObservationTemplate(platform, runId, roomId, createdAt, version, 
       inboundVideoDecoded: 0,
     },
     remoteVideoTiles: 0,
+    renderer: {
+      source: "native_remote_video_renderer",
+      remoteVideoFramesRendered: 0,
+      observedRemoteVideoTracks: 0,
+      latestFrameWidth: 0,
+      latestFrameHeight: 0,
+      latestRenderedAt: "",
+      capturesPixels: false,
+    },
   };
 }
 
@@ -435,6 +444,14 @@ Replace only <participant-name>. Do not add passwords, tokens, cookies, signed
 URLs, raw logs, TURN credentials, Apple account identifiers, Team IDs,
 provisioning details, certificates, or private key material to launch links or
 inbox files.
+
+In the native app QA Evidence panel, use Save after capture to export the exact
+inbox filename for each observation:
+
+- iPhone media: iphone-qa_snapshot.json
+- iPad media: ipad-qa_snapshot.json
+- Mac media: mac-qa_snapshot.json
+- Restrictive TURN: turn-relay-observation.json
 
 Files ending in .template.json are scaffolds, not release proof. Copy a template
 to the same folder without .template.json only after replacing placeholders with

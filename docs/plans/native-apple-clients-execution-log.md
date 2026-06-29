@@ -2618,3 +2618,106 @@ What worked:
 - Tightening promotion after adding native-side run/room binding keeps manual
   operator confirmation as an attestation, not a substitute for artifact
   identity.
+
+## Wave 36
+
+Status: `wave36_native_renderer_evidence_and_inbox_export_validated`
+
+Scope:
+- Continued the physical-device proof path by removing two operator-risk gaps
+  before the real TestFlight/device run.
+- Assigned a read-only native/release reviewer. The reviewer identified the
+  highest-leverage repo-owned gap: `remoteVideoRendered` could still be inferred
+  from decoded inbound video plus a remote tile, without proof that the native
+  renderer actually displayed a frame.
+- Added count-only native renderer observation to `NativeRemoteVideoTrack`. The
+  SwiftUI Metal renderer now attaches a second lightweight observer that records
+  rendered frame count, latest dimensions, and timestamp without retaining
+  pixels, screenshots, raw frame data, SDP, ICE, IP addresses, or credentials.
+- Added `renderer` context to `native_device_media` QA snapshots. Remote video
+  proof now requires remote tile presence, decoded inbound video, and native
+  renderer observation.
+- Tightened media promotion and strict readiness so physical-device media
+  evidence rejects missing or stale renderer proof and the old
+  `remoteVideoTiles+inboundVideoDecoded` source.
+- Added Save buttons to the native QA Evidence panel. Device operators can now
+  export exact proof-pack inbox filenames from the app:
+  `iphone-qa_snapshot.json`, `ipad-qa_snapshot.json`, `mac-qa_snapshot.json`,
+  and `turn-relay-observation.json`.
+- Updated proof-pack inbox README/templates, Apple handoff docs, protocol notes,
+  and privacy review notes for the stricter renderer-observed evidence contract.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoom/NativeRoomSessionCoordinator.swift`
+- `apple/Sources/MeetingAssistRoomRTC/RoomRTCClient.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRemoteVideoTrackView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomRTCTests/NativeRoomRTCClientTests.swift`
+- `apple/Tests/MeetingAssistRoomTests/NativeRoomSessionCoordinatorTests.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `docs/native-apple-privacy-review.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-media-evidence.mjs`
+- `scripts/native-apple-promote-media-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomRTCClientTests` passed 21
+  tests.
+- `swift test --package-path apple --filter NativeRoomSessionCoordinatorTests`
+  passed 30 tests.
+- `swift test --package-path apple --filter NativeRoomViewModelTests` passed 37
+  tests.
+- `swift test --package-path apple` passed 95 tests.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 55 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `go test ./...` passed.
+- `git diff --check` passed.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  exited nonzero as expected with `ok:true`, `readyForDistribution:false`, and
+  blockers for Apple development team/signing, privacy manifest, and release
+  evidence.
+- Started a throwaway local server on `http://127.0.0.1:3100` with temporary
+  memory, users, and sessions under `/tmp/ma-native-gates.7xBs7m`; `/readyz`
+  returned `ok:true` with the expected `openai_api_key_missing` degradation.
+- `node scripts/native-apple-local-gates.mjs --live-url http://127.0.0.1:3100 --participants Tom,Caitlyn --live-timeout-ms 100000 --require-live-media-smoke --run-xcode`
+  passed with `ok:true`, `complete:true`, and no warnings.
+- The full runner passed:
+  - `node scripts/media-fix-verification.mjs`
+  - `node scripts/voice-focus-benchmark.mjs`
+  - `go test ./...`
+  - `swift test --package-path apple` with 95 tests
+  - `node scripts/native-apple-release-readiness.mjs --apple-dir apple`
+  - `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`
+  - `xcodegen generate --spec project.yml`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test CODE_SIGNING_ALLOWED=NO`
+- Critic gate accepted the checkpoint at 9.3/10 with no blocking findings and
+  confirmed it is shippable to `main` as a guarded checkpoint, not as
+  TestFlight or macOS distribution readiness.
+
+Risks / blockers:
+- This does not create real physical iPhone/iPad/Mac proof, restrictive-network
+  TURN proof, Apple signing/team setup, final privacy manifest, real TestFlight
+  upload, or macOS notarization.
+- Renderer observation is count-only metadata. It proves that the native
+  renderer received frames, not subjective video quality, audio audibility, long
+  soak stability, or restrictive-network behavior.
+
+What worked:
+- Adding a renderer observer beside the Metal view kept proof collection close
+  to the actual display path while preserving the no-pixels/no-screenshots
+  privacy boundary.
+- Making the app export exact inbox filenames removes a manual copy/rename step
+  from the physical-device proof-pack run.

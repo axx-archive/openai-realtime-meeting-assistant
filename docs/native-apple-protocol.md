@@ -92,15 +92,16 @@ addresses, or full WebRTC stats in `media_error`.
 Native clients may also export a local `native_device_media` QA evidence
 snapshot from the same summarized `media_quality` counters. The export is a
 local operator artifact, not a websocket event. It includes only assertion
-booleans, safe RTP counters, remote tile count, lifecycle, app
-version/build/target, device kind/hardware model/OS, platform/version, and
-selected candidate-pair type/RTT summary; it must not include raw SDP, raw ICE
-candidates, candidate IDs, IP addresses, TURN URLs, TURN usernames, TURN
-credentials, cookies, headers, API keys, Team IDs, provisioning data, iPhone or
-iPad device names, or macOS host names. Release `runId` and `roomId` are
-operator/proof-pack fields, not auto-discovered room state. The snapshot status
-remains `observed` for QA exports, and the assertion source is cumulative
-peer-connection stats rather than a fresh current-health interval.
+booleans, safe RTP counters, remote tile count, renderer-observed remote frame
+counts/dimensions/timestamp, lifecycle, app version/build/target, device
+kind/hardware model/OS, platform/version, and selected candidate-pair type/RTT
+summary; it must not include raw SDP, raw ICE candidates, candidate IDs, IP
+addresses, TURN URLs, TURN usernames, TURN credentials, cookies, headers, API
+keys, Team IDs, provisioning data, iPhone or iPad device names, macOS host
+names, screenshots, pixels, or raw video frames. Release `runId` and `roomId`
+are operator/proof-pack fields, not auto-discovered room state. The snapshot
+status remains `observed` for QA exports. Remote video proof requires native
+renderer observation plus decoded inbound video, not decoded stats alone.
 
 If an operator promotes a local `native_device_media` JSON artifact into
 physical-device release evidence, it must be a distinct release-proof artifact

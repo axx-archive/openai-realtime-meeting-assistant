@@ -163,6 +163,82 @@ public struct NativeMediaEvidenceClient: Codable, Equatable, Sendable {
     }
 }
 
+public struct NativeRemoteVideoRenderObservation: Codable, Equatable, Sendable {
+    public var renderedFrames: Int
+    public var firstRenderedAt: String
+    public var latestRenderedAt: String
+    public var latestFrameWidth: Int
+    public var latestFrameHeight: Int
+
+    public init(
+        renderedFrames: Int = 0,
+        firstRenderedAt: String = "",
+        latestRenderedAt: String = "",
+        latestFrameWidth: Int = 0,
+        latestFrameHeight: Int = 0
+    ) {
+        self.renderedFrames = renderedFrames
+        self.firstRenderedAt = firstRenderedAt
+        self.latestRenderedAt = latestRenderedAt
+        self.latestFrameWidth = latestFrameWidth
+        self.latestFrameHeight = latestFrameHeight
+    }
+
+    public var hasRenderedFrame: Bool {
+        renderedFrames > 0 && latestFrameWidth > 0 && latestFrameHeight > 0
+    }
+}
+
+public struct NativeMediaEvidenceRendererContext: Codable, Equatable, Sendable {
+    public var source: String
+    public var remoteVideoFramesRendered: Int
+    public var observedRemoteVideoTracks: Int
+    public var latestFrameWidth: Int
+    public var latestFrameHeight: Int
+    public var latestRenderedAt: String
+    public var capturesPixels: Bool
+
+    public init(
+        source: String = "native_remote_video_renderer",
+        remoteVideoFramesRendered: Int = 0,
+        observedRemoteVideoTracks: Int = 0,
+        latestFrameWidth: Int = 0,
+        latestFrameHeight: Int = 0,
+        latestRenderedAt: String = "",
+        capturesPixels: Bool = false
+    ) {
+        self.source = source
+        self.remoteVideoFramesRendered = remoteVideoFramesRendered
+        self.observedRemoteVideoTracks = observedRemoteVideoTracks
+        self.latestFrameWidth = latestFrameWidth
+        self.latestFrameHeight = latestFrameHeight
+        self.latestRenderedAt = latestRenderedAt
+        self.capturesPixels = capturesPixels
+    }
+
+    public init(trackObservations: [NativeRemoteVideoRenderObservation]) {
+        let rendered = trackObservations.filter(\.hasRenderedFrame)
+        let latest = rendered.max { lhs, rhs in
+            lhs.latestRenderedAt < rhs.latestRenderedAt
+        }
+        self.init(
+            remoteVideoFramesRendered: rendered.reduce(0) { $0 + $1.renderedFrames },
+            observedRemoteVideoTracks: rendered.count,
+            latestFrameWidth: latest?.latestFrameWidth ?? 0,
+            latestFrameHeight: latest?.latestFrameHeight ?? 0,
+            latestRenderedAt: latest?.latestRenderedAt ?? ""
+        )
+    }
+
+    public var remoteVideoRendered: Bool {
+        remoteVideoFramesRendered > 0
+            && observedRemoteVideoTracks > 0
+            && latestFrameWidth > 0
+            && latestFrameHeight > 0
+            && !capturesPixels
+    }
+}
+
 public struct NativeMediaEvidenceAssertions: Codable, Equatable, Sendable {
     public var cameraPublished: Bool
     public var microphonePublished: Bool
@@ -703,6 +779,7 @@ public struct NativeMediaEvidenceAssertionEvidence: Codable, Equatable, Sendable
     public init(
         source: NativeMediaQualitySnapshot,
         remoteVideoTiles: Int,
+        renderer: NativeMediaEvidenceRendererContext,
         assertions: NativeMediaEvidenceAssertions
     ) {
         cameraPublished = NativeMediaEvidenceAssertionDetail(
@@ -721,8 +798,8 @@ public struct NativeMediaEvidenceAssertionEvidence: Codable, Equatable, Sendable
             passed: assertions.remoteAudioReceived
         )
         remoteVideoRendered = NativeMediaEvidenceAssertionDetail(
-            source: "remoteVideoTiles+inboundVideoDecoded",
-            value: min(Double(remoteVideoTiles), source.inboundVideoDecoded),
+            source: "nativeRemoteVideoRenderer+inboundVideoDecoded",
+            value: min(Double(renderer.remoteVideoFramesRendered), source.inboundVideoDecoded),
             passed: assertions.remoteVideoRendered
         )
     }
@@ -803,6 +880,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
     public var client: NativeMediaEvidenceClient
     public var lifecycle: RoomLifecycleState
     public var remoteVideoTiles: Int
+    public var renderer: NativeMediaEvidenceRendererContext
     public var mediaAssertions: NativeMediaEvidenceAssertions
     public var releaseEvidenceSummary: NativeMediaEvidenceReleaseSummary
     public var assertionEvidence: NativeMediaEvidenceAssertionEvidence
@@ -821,6 +899,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
         device: NativeMediaEvidenceDeviceContext = NativeMediaEvidenceDeviceContext(),
         lifecycle: RoomLifecycleState = .signedOut,
         remoteVideoTiles: Int = 0,
+        renderer: NativeMediaEvidenceRendererContext = NativeMediaEvidenceRendererContext(),
         runId: String = "",
         roomId: String = ""
     ) {
@@ -828,7 +907,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
             cameraPublished: source.outboundVideoFramesSent > 0,
             microphonePublished: source.outboundAudioPacketsSent > 0,
             remoteAudioReceived: source.inboundAudioPacketsReceived > 0,
-            remoteVideoRendered: remoteVideoTiles > 0 && source.inboundVideoDecoded > 0
+            remoteVideoRendered: remoteVideoTiles > 0 && source.inboundVideoDecoded > 0 && renderer.remoteVideoRendered
         )
         let candidate = NativeMediaEvidenceCandidatePair(source: source.candidatePair)
         let safeCounters = NativeMediaEvidenceCounters(source: source)
@@ -853,6 +932,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
         self.client = client
         self.lifecycle = lifecycle
         self.remoteVideoTiles = remoteVideoTiles
+        self.renderer = renderer
         mediaAssertions = assertions
         releaseEvidenceSummary = NativeMediaEvidenceReleaseSummary(
             status: "pending",
@@ -866,6 +946,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
         assertionEvidence = NativeMediaEvidenceAssertionEvidence(
             source: source,
             remoteVideoTiles: remoteVideoTiles,
+            renderer: renderer,
             assertions: assertions
         )
         selectedCandidate = candidate
@@ -879,6 +960,7 @@ public struct NativeMediaEvidenceSnapshot: Codable, Equatable, Sendable {
         sanitization = NativeMediaEvidenceSanitization()
         limitations = [
             "QA snapshots are cumulative peer-connection observations, not proof of current media health over a fresh interval.",
+            "Remote video evidence requires native renderer frame observation and does not include pixels, screenshots, or raw frame data.",
             "QA snapshots are not physical-device release proof unless captured and promoted through the release proof-pack process.",
             "Do not mark ReleaseEvidence physicalDeviceMedia as passed from a qa_snapshot artifact.",
         ]
@@ -955,6 +1037,8 @@ struct NativeICEServerDescriptor: Equatable, Sendable {
 public final class NativeRemoteVideoTrack: Identifiable, @unchecked Sendable {
     public let id: String
     public let streamIds: [String]
+    private let renderLock = NSLock()
+    private var renderObservation = NativeRemoteVideoRenderObservation()
 
     #if canImport(LiveKitWebRTC)
     fileprivate let track: LKRTCVideoTrack?
@@ -984,6 +1068,31 @@ public final class NativeRemoteVideoTrack: Identifiable, @unchecked Sendable {
         self.streamIds = streamIds
     }
     #endif
+
+    public var renderedFrameObservation: NativeRemoteVideoRenderObservation {
+        renderLock.withLock { renderObservation }
+    }
+
+    public func recordRenderedFrame(width: Int, height: Int, renderedAt: Date = Date()) {
+        let normalizedWidth = max(0, width)
+        let normalizedHeight = max(0, height)
+        let timestamp = Self.iso8601String(renderedAt)
+        renderLock.withLock {
+            if renderObservation.firstRenderedAt.isEmpty {
+                renderObservation.firstRenderedAt = timestamp
+            }
+            renderObservation.renderedFrames += 1
+            renderObservation.latestRenderedAt = timestamp
+            renderObservation.latestFrameWidth = normalizedWidth
+            renderObservation.latestFrameHeight = normalizedHeight
+        }
+    }
+
+    private static func iso8601String(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
 }
 
 public protocol RoomRTCClient: AnyObject, Sendable {

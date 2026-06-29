@@ -179,6 +179,40 @@ function positiveAssertionEvidence(snapshot, key) {
   return assertion && typeof assertion === "object" && assertion.passed === true && Number(assertion.value) > 0;
 }
 
+function rendererEvidenceProblems(snapshot) {
+  const problems = [];
+  const renderer = snapshot.renderer;
+  if (!renderer || typeof renderer !== "object" || Array.isArray(renderer)) {
+    return ["renderer"];
+  }
+  if (renderer.source !== "native_remote_video_renderer") {
+    problems.push("renderer.source");
+  }
+  if (!(Number(renderer.remoteVideoFramesRendered) > 0)) {
+    problems.push("renderer.remoteVideoFramesRendered");
+  }
+  if (!(Number(renderer.observedRemoteVideoTracks) > 0)) {
+    problems.push("renderer.observedRemoteVideoTracks");
+  }
+  if (!(Number(renderer.latestFrameWidth) > 0)) {
+    problems.push("renderer.latestFrameWidth");
+  }
+  if (!(Number(renderer.latestFrameHeight) > 0)) {
+    problems.push("renderer.latestFrameHeight");
+  }
+  if (!validTimestamp(renderer.latestRenderedAt)) {
+    problems.push("renderer.latestRenderedAt");
+  }
+  if (renderer.capturesPixels !== false) {
+    problems.push("renderer.capturesPixels");
+  }
+  const remoteVideoEvidence = snapshot.assertionEvidence?.remoteVideoRendered;
+  if (remoteVideoEvidence?.source !== "nativeRemoteVideoRenderer+inboundVideoDecoded") {
+    problems.push("assertionEvidence.remoteVideoRendered.source");
+  }
+  return problems;
+}
+
 function validateSnapshot(snapshot, draft, platform, args) {
   const problems = [];
   const config = platformConfig[platform];
@@ -280,6 +314,7 @@ function validateSnapshot(snapshot, draft, platform, args) {
   if (!(Number(snapshot.remoteVideoTiles) > 0)) {
     problems.push("remoteVideoTiles");
   }
+  problems.push(...rendererEvidenceProblems(snapshot));
   const unsafe = collectUnsafeContent(snapshot);
   if (unsafe.length > 0) {
     problems.push(`unsafeContent:${unsafe.slice(0, 4).join("|")}`);

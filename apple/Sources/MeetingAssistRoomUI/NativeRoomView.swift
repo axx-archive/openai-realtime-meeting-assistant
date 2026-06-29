@@ -3,6 +3,7 @@ import MeetingAssistDesign
 import MeetingAssistRoomRTC
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(iOS)
 import UIKit
@@ -19,7 +20,14 @@ public struct NativeRoomView: View {
     @State private var scoutChatDraft = ""
     @State private var roomScoutDraft = ""
     @State private var mediaEvidenceCopied = false
+    @State private var mediaEvidenceSaved = false
     @State private var turnRelayObservationCopied = false
+    @State private var turnRelayObservationSaved = false
+    @State private var evidenceExportDocument = NativeEvidenceExportDocument()
+    @State private var evidenceExportFilename = "native-evidence.json"
+    @State private var evidenceExportKind: NativeEvidenceExportKind?
+    @State private var isShowingEvidenceExporter = false
+    @State private var evidenceExportError: String?
 
     public init(model: NativeRoomViewModel = NativeRoomViewModel()) {
         _model = StateObject(wrappedValue: model)
@@ -74,6 +82,13 @@ public struct NativeRoomView: View {
             audioRecoveryMonitor.stop()
             connectivityMonitor.stop()
         }
+        .fileExporter(
+            isPresented: $isShowingEvidenceExporter,
+            document: evidenceExportDocument,
+            contentType: .json,
+            defaultFilename: evidenceExportFilename,
+            onCompletion: handleEvidenceExport
+        )
         .sheet(item: $boardEditorDraft) { draft in
             BoardCardEditor(
                 draft: draft,
@@ -243,6 +258,8 @@ public struct NativeRoomView: View {
                 Spacer()
                 Button {
                     mediaEvidenceCopied = false
+                    mediaEvidenceSaved = false
+                    evidenceExportError = nil
                     Task { await model.captureMediaEvidence() }
                 } label: {
                     Label("Capture", systemImage: "waveform.path.ecg.rectangle")
@@ -254,6 +271,14 @@ public struct NativeRoomView: View {
                     copyMediaEvidenceJSON()
                 } label: {
                     Label(mediaEvidenceCopied ? "Copied" : "Copy", systemImage: mediaEvidenceCopied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.latestMediaEvidenceJSON == nil)
+
+                Button {
+                    saveMediaEvidenceJSON()
+                } label: {
+                    Label(mediaEvidenceSaved ? "Saved" : "Save", systemImage: mediaEvidenceSaved ? "checkmark.circle" : "square.and.arrow.down")
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.latestMediaEvidenceJSON == nil)
@@ -306,6 +331,8 @@ public struct NativeRoomView: View {
                     Spacer()
                     Button {
                         turnRelayObservationCopied = false
+                        turnRelayObservationSaved = false
+                        evidenceExportError = nil
                         Task { await model.captureTurnRelayObservation() }
                     } label: {
                         Label("Capture", systemImage: "antenna.radiowaves.left.and.right")
@@ -317,6 +344,14 @@ public struct NativeRoomView: View {
                         copyTurnRelayObservationJSON()
                     } label: {
                         Label(turnRelayObservationCopied ? "Copied" : "Copy", systemImage: turnRelayObservationCopied ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.latestTurnRelayObservationJSON == nil)
+
+                    Button {
+                        saveTurnRelayObservationJSON()
+                    } label: {
+                        Label(turnRelayObservationSaved ? "Saved" : "Save", systemImage: turnRelayObservationSaved ? "checkmark.circle" : "square.and.arrow.down")
                     }
                     .buttonStyle(.bordered)
                     .disabled(model.latestTurnRelayObservationJSON == nil)
@@ -345,6 +380,12 @@ public struct NativeRoomView: View {
                             .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                 }
+            }
+
+            if let evidenceExportError {
+                Label(evidenceExportError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }
@@ -610,6 +651,16 @@ public struct NativeRoomView: View {
         mediaEvidenceCopied = true
     }
 
+    private func saveMediaEvidenceJSON() {
+        guard let json = model.latestMediaEvidenceJSON,
+              let filename = model.latestMediaEvidenceSuggestedFilename else { return }
+        evidenceExportDocument = NativeEvidenceExportDocument(json: json)
+        evidenceExportFilename = filename
+        evidenceExportKind = .media
+        evidenceExportError = nil
+        isShowingEvidenceExporter = true
+    }
+
     private func copyTurnRelayObservationJSON() {
         guard let json = model.latestTurnRelayObservationJSON else { return }
         #if os(iOS)
@@ -620,6 +671,34 @@ public struct NativeRoomView: View {
         pasteboard.setString(json, forType: .string)
         #endif
         turnRelayObservationCopied = true
+    }
+
+    private func saveTurnRelayObservationJSON() {
+        guard let json = model.latestTurnRelayObservationJSON,
+              let filename = model.latestTurnRelayObservationSuggestedFilename else { return }
+        evidenceExportDocument = NativeEvidenceExportDocument(json: json)
+        evidenceExportFilename = filename
+        evidenceExportKind = .turnRelay
+        evidenceExportError = nil
+        isShowingEvidenceExporter = true
+    }
+
+    private func handleEvidenceExport(_ result: Result<URL, Error>) {
+        defer { evidenceExportKind = nil }
+        switch result {
+        case .success:
+            evidenceExportError = nil
+            switch evidenceExportKind {
+            case .media:
+                mediaEvidenceSaved = true
+            case .turnRelay:
+                turnRelayObservationSaved = true
+            case nil:
+                break
+            }
+        case .failure(let error):
+            evidenceExportError = error.localizedDescription
+        }
     }
 
     private func boardRow(_ card: KanbanCard) -> some View {
@@ -863,6 +942,34 @@ public struct NativeRoomView: View {
         default:
             return action.type.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+    }
+}
+
+private enum NativeEvidenceExportKind {
+    case media
+    case turnRelay
+}
+
+private struct NativeEvidenceExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var json: String
+
+    init(json: String = "") {
+        self.json = json
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents,
+           let json = String(data: data, encoding: .utf8) {
+            self.json = json
+        } else {
+            json = ""
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(json.utf8))
     }
 }
 

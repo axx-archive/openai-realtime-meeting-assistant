@@ -320,6 +320,15 @@ function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
     capturedAt: item.testedAt,
     lifecycle: "connected",
     remoteVideoTiles: 1,
+    renderer: {
+      source: "native_remote_video_renderer",
+      remoteVideoFramesRendered: 3,
+      observedRemoteVideoTracks: 1,
+      latestFrameWidth: 1280,
+      latestFrameHeight: 720,
+      latestRenderedAt: "2026-06-29T12:00:01Z",
+      capturesPixels: false,
+    },
     app: {
       version: evidence.version,
       build: evidence.build,
@@ -338,7 +347,7 @@ function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
       cameraPublished: { source: "outboundVideoFramesSent", value: 90, passed: true },
       microphonePublished: { source: "outboundAudioPacketsSent", value: 120, passed: true },
       remoteAudioReceived: { source: "inboundAudioPacketsReceived", value: 180, passed: true },
-      remoteVideoRendered: { source: "remoteVideoTiles+inboundVideoDecoded", value: 140, passed: true },
+      remoteVideoRendered: { source: "nativeRemoteVideoRenderer+inboundVideoDecoded", value: 3, passed: true },
     },
     counters: {
       outboundAudioPacketsSent: 120,
@@ -361,6 +370,7 @@ function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
     ...overrides,
     app: { ...base.app, ...(overrides.app ?? {}) },
     device: { ...base.device, ...(overrides.device ?? {}) },
+    renderer: overrides.renderer === null ? null : { ...base.renderer, ...(overrides.renderer ?? {}) },
     mediaAssertions: { ...base.mediaAssertions, ...(overrides.mediaAssertions ?? {}) },
     releaseEvidenceSummary: {
       ...base.releaseEvidenceSummary,
@@ -1145,6 +1155,28 @@ assert.equal(
   true
 );
 
+const missingRendererEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingRendererEvidenceFixturePath, "ReleaseEvidence.local.json"), {}, {
+  physicalMediaArtifactOverrides: {
+    mac: {
+      renderer: null,
+    },
+  },
+});
+const missingRendererEvidenceFixture = runReadiness(
+  ["--apple-dir", missingRendererEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingRendererEvidenceFixture.status, 1);
+assert.equal(missingRendererEvidenceFixture.output.ok, true);
+assert.equal(missingRendererEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingRendererEvidenceFixture.output.blockers.some(
+    (blocker) => blocker.id === "physical_device_media_evidence"
+  ),
+  true
+);
+
 const placeholderDeviceArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(placeholderDeviceArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifacts: {
@@ -1692,4 +1724,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 54 checks passed");
+console.log("native-apple-release-readiness: 55 checks passed");
