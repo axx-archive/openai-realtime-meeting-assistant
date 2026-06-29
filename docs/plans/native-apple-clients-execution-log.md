@@ -2386,3 +2386,90 @@ What worked:
   separate artifact type.
 - Running the app-export JSON through the existing promoter contract prevented a
   quiet schema drift between native UI and release proof tooling.
+
+## Wave 33
+
+Status: `wave33_native_operator_preflight_rehearsal_validated`
+
+Scope:
+- Continued the external Apple-account handoff by adding an offline operator
+  preflight that can be run before archive, TestFlight upload, Developer ID
+  export, and macOS notarization.
+- Assigned a read-only release/SRE reviewer. The reviewer recommended a
+  credential-free Release archive/build rehearsal because privacy, physical
+  media, TestFlight upload, and notarization remain external, while Release
+  configuration failures are still repo-owned and catchable here.
+- Added `scripts/native-apple-release-operator-preflight.mjs`. It checks local
+  Xcode tooling, notarytool/stapler/ditto/spctl availability, app schemes,
+  ignored signing config, default release readiness, proof-pack command-plan
+  consistency, export option plists, optional notary profile environment
+  presence, and optional Release generic iOS/macOS builds with signing disabled.
+- Wired `operatorPreflight` into `scripts/native-apple-release-package-plan.mjs`
+  so every generated command pack starts with the offline preflight plus the
+  Release build rehearsal.
+- Documented the preflight in `apple/README.md` and kept the warning clear that
+  it does not contact Apple or prove App Store Connect login, provisioning
+  downloads, notary profile validity, physical devices, upload, or notarization.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-operator-preflight.mjs` passed.
+- `node --check scripts/native-apple-release-operator-preflight.test.mjs`
+  passed.
+- `node --check scripts/native-apple-release-package-plan.mjs` passed.
+- `node --check scripts/native-apple-release-package-plan.test.mjs` passed.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 3
+  checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 9 checks.
+- Generated ignored validation proof pack
+  `artifacts/native-apple/native-apple-operator-preflight-validation-20260629-a`
+  and command plan.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> NOTARYTOOL_KEYCHAIN_PROFILE=<synthetic profile name> node scripts/native-apple-release-operator-preflight.mjs --proofpack-dir artifacts/native-apple/native-apple-operator-preflight-validation-20260629-a --require-notary-profile --run-build-rehearsal`
+  passed. It verified Release generic iOS/iPadOS and macOS builds with
+  `CODE_SIGNING_ALLOWED=NO`.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with blockers for Apple development team, privacy manifest, and release
+  evidence file.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 53 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 8 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 90 tests.
+- XcodeBuildMCP `test_sim` passed the `MeetingAssistAppleApp` simulator test
+  with `CODE_SIGNING_ALLOWED=NO`.
+- `xcodebuild -quiet -project apple/MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO`
+  passed.
+- `git diff --check` passed.
+
+Risks / blockers:
+- This does not archive, upload, notarize, staple, contact Apple, validate the
+  actual notarytool keychain profile, download provisioning profiles, or prove
+  real physical-device media.
+- Apple signing/team setup, final privacy manifest, physical iPhone/iPad/Mac
+  media proof, restrictive-network TURN proof, real TestFlight upload, and
+  macOS notarization remain external release blockers.
+- The preflight accepts synthetic Team ID/profile values for local rehearsal
+  because it is intentionally offline; the real Apple-account run still needs
+  actual credentials configured outside git.
+
+What worked:
+- Running the rehearsal through a generated proof pack caught that verbose
+  `xcodebuild` output could look like a build failure in Node; switching the
+  rehearsal to quiet output and a larger buffer made the gate report the real
+  build status.
+- Keeping the preflight as an explicit command in the generated command pack
+  gives the operator a first step that is machine-checkable without exposing
+  account secrets.

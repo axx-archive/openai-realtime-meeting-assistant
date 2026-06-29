@@ -117,6 +117,10 @@ assert.equal(plan.observationInputs.testFlightTemplate, `artifacts/native-apple/
 assert.equal(plan.observationInputs.testFlightInput, `artifacts/native-apple/${runId}/inbox/testflight-observation.json`);
 assert.equal(plan.observationInputs.notarizationTemplate, `artifacts/native-apple/${runId}/inbox/notarization-observation.template.json`);
 assert.equal(plan.observationInputs.notarizationInput, `artifacts/native-apple/${runId}/inbox/notarization-observation.json`);
+assert.match(plan.commands.operatorPreflight.shell, /native-apple-release-operator-preflight\.mjs/);
+assert.match(plan.commands.operatorPreflight.shell, /--run-build-rehearsal/);
+assert.match(plan.commands.operatorPreflight.shell, /--require-notary-profile/);
+assert.match(plan.nextSteps[0], /operatorPreflight/);
 assert.match(plan.commands.iosArchive.shell, /generic\/platform=iOS/);
 assert.match(plan.commands.testflightUpload.shell, /ExportOptions\.testflight\.plist/);
 assert.match(plan.commands.macArchive.shell, /generic\/platform=macOS/);
@@ -207,4 +211,4 @@ const mismatch = runNode(packagePlanScriptPath, [
 assert.equal(mismatch.status, 1);
 assert.match(mismatch.output.error, /does not match/);
 
-console.log("native-apple-release-package-plan: 8 checks passed");
+console.log("native-apple-release-package-plan: 9 checks passed");

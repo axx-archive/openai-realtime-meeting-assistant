@@ -372,6 +372,20 @@ function buildPlan(args) {
     : null;
 
   const commands = {
+    operatorPreflight: commandSpec(
+      [
+        "node",
+        "scripts/native-apple-release-operator-preflight.mjs",
+        "--apple-dir",
+        repoRelative(appleDir),
+        ...(proofpack ? ["--proofpack-dir", artifactRef(proofpack.proofpackDir)] : []),
+        "--configuration",
+        configuration,
+        "--require-notary-profile",
+        "--run-build-rehearsal",
+      ],
+      "Runs the offline Apple-account machine preflight, including tool checks, proof-pack command-plan consistency, notary profile presence, and Release generic iOS/macOS build rehearsals with signing disabled."
+    ),
     preflightSigning: commandSpec(
       ["node", "scripts/native-apple-configure-signing.mjs", "--apple-dir", repoRelative(appleDir), "--validate-only"],
       "Validate the ignored local Apple Team ID configuration before archive/export."
@@ -566,7 +580,7 @@ function buildPlan(args) {
     blockers,
     warnings,
     nextSteps: [
-      "Run preflightSigning and defaultReadiness.",
+      "Run operatorPreflight on the Apple-account machine before archive/upload/notarization.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",
