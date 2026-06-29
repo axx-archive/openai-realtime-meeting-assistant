@@ -36,6 +36,10 @@ targets:
         CFBundleDisplayName: MeetingAssist
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: co.thebonfire.meetingassist
+            CFBundleURLSchemes:
+              - meetingassist
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -89,6 +93,10 @@ targets:
         CFBundleDisplayName: MeetingAssist
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: co.thebonfire.meetingassist
+            CFBundleURLSchemes:
+              - meetingassist
         NSCameraUsageDescription: MeetingAssist uses the camera when you join a video room.
         NSMicrophoneUsageDescription: MeetingAssist uses the microphone when you join a video room.
   MeetingAssistMacAppTests:

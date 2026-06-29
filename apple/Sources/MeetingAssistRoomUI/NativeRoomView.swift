@@ -67,6 +67,9 @@ public struct NativeRoomView: View {
             guard phase == .active else { return }
             Task { await model.requestMediaRecovery(reason: NativeMediaRecoveryReason.appForegrounded.rawValue) }
         }
+        .onOpenURL { url in
+            model.applyLaunchURL(url)
+        }
         .onDisappear {
             audioRecoveryMonitor.stop()
             connectivityMonitor.stop()
@@ -283,6 +286,15 @@ public struct NativeRoomView: View {
                 Text("No evidence captured")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Release run ID", text: $model.releaseRunId)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(model.canUseRoomControls)
+                TextField("Release room ID", text: $model.releaseRoomId)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(model.canUseRoomControls)
             }
 
             Divider()

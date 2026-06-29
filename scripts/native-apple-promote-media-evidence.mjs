@@ -217,10 +217,10 @@ function validateSnapshot(snapshot, draft, platform, args) {
     ["roomId", draft.roomId],
   ]) {
     const value = String(snapshot[key] ?? "").trim();
-    if (value && value !== expected) {
-      problems.push(key);
-    } else if (!value && !args.confirmSameRoom) {
+    if (!value) {
       problems.push(`${key}:empty`);
+    } else if (value !== expected) {
+      problems.push(key);
     }
   }
   if (!snapshot.app || typeof snapshot.app !== "object") {

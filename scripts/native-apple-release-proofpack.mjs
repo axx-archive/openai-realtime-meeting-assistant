@@ -412,10 +412,29 @@ function notarizationObservationTemplate(runId, createdAt, version, build, bundl
   };
 }
 
-function inboxReadme(runId) {
+function nativeLaunchLinkTemplate(runId, roomId) {
+  return `meetingassist://room?url=https%3A%2F%2Fthebonfire.xyz&name=<participant-name>&runId=${encodeURIComponent(runId)}&roomId=${encodeURIComponent(roomId)}`;
+}
+
+function inboxReadme(runId, roomId, version, build) {
   return `# Native Apple Proof-Pack Inbox
 
 This folder is for real external-run observations for ${runId}.
+
+Version/build: ${version} (${build})
+Release room ID: ${roomId}
+
+Use this non-secret launch-link template on iPhone, iPad, or Mac to prefill the
+room URL, participant name, and release evidence binding:
+
+\`\`\`text
+${nativeLaunchLinkTemplate(runId, roomId)}
+\`\`\`
+
+Replace only <participant-name>. Do not add passwords, tokens, cookies, signed
+URLs, raw logs, TURN credentials, Apple account identifiers, Team IDs,
+provisioning details, certificates, or private key material to launch links or
+inbox files.
 
 Files ending in .template.json are scaffolds, not release proof. Copy a template
 to the same folder without .template.json only after replacing placeholders with
@@ -681,7 +700,7 @@ function createProofpack(args) {
   writeJSON(templatePaths.turnRelay, turnObservationTemplate(runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.testFlight, testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
   writeJSON(templatePaths.notarization, notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.macos));
-  writeText(join(inboxDir, "README.md"), inboxReadme(runId));
+  writeText(join(inboxDir, "README.md"), inboxReadme(runId, roomId, version, build));
 
   const gates = args.skipGates ? [] : runGates(args.fullGates);
   const draftPath = join(proofpackDir, "ReleaseEvidence.draft.json");
@@ -701,6 +720,7 @@ function createProofpack(args) {
     gates,
     nextSteps: [
       "Copy generated inbox/*.template.json files to non-template JSON files only after replacing placeholders with real external-run observations.",
+      "Open the inbox README launch-link template on each native device so copied QA evidence is bound to this runId and roomId.",
       "Create the non-secret Apple-account machine command pack with scripts/native-apple-release-package-plan.mjs --proofpack-dir <proofpack> --write.",
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",

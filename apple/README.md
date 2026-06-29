@@ -189,6 +189,20 @@ hand; copy a generated `inbox/*.template.json` file to the matching non-template
 name only after replacing placeholders with values from the real run, then let
 the promoter rewrite `evidence/` and `ReleaseEvidence.draft.json`.
 
+The generated `inbox/README.md` includes a non-secret native launch-link
+template:
+
+```text
+meetingassist://room?url=https%3A%2F%2Fthebonfire.xyz&name=<participant-name>&runId=<run-id>&roomId=<room-id>
+```
+
+Open that link on each TestFlight/device-run app, replacing only
+`<participant-name>`. The app pre-fills the room URL, participant, release
+run ID, and release room ID, but it does not include a password and does not
+auto-join. Passwords, tokens, cookies, signed URLs, TURN credentials, Apple
+account identifiers, Team IDs, provisioning details, certificates, private keys,
+and raw logs must stay out of launch links and inbox files.
+
 Before moving to the Apple-account machine, generate the non-secret operator
 command pack for the proof pack:
 
@@ -228,20 +242,22 @@ actual upload/notarization.
 
 The native room UI includes a QA evidence panel that captures a non-secret
 `native_device_media` JSON snapshot from summarized WebRTC stats. The snapshot
-can be copied into the matching
-`artifacts/native-apple/<run-id>/evidence/{iphone,ipad,mac}-media.json` file
-during a real device run. These snapshots carry `claimScope: "qa_snapshot"`,
-`releaseEligible: false`, and `status: "observed"` even when all media
-assertions are true. Their assertion sources are cumulative peer-connection
-counters, so they are diagnostic observations, not fresh-interval current-health
-proof. The native app auto-fills app version/build/target plus device kind,
-hardware model, OS version, and physical-vs-simulator metadata; it deliberately
-does not collect iPhone/iPad device names or macOS host names. Release `runId`
-and `roomId` still come from the proof-pack/operator workflow. Do not promote a
-snapshot into `ReleaseEvidence.local.json` as passed physical proof unless it
-was captured on the matching physical iPhone, iPad, or Mac for the same run,
-room, version, and build. Simulator or repo-only snapshots are diagnostic
-artifacts only.
+can be copied into the matching `inbox/{iphone,ipad,mac}-qa_snapshot.json`
+file during a real device run, then promoted with
+`scripts/native-apple-promote-media-evidence.mjs`. These snapshots carry
+`claimScope: "qa_snapshot"`, `releaseEligible: false`, and `status: "observed"`
+even when all media assertions are true. Their assertion sources are cumulative
+peer-connection counters, so they are diagnostic observations, not
+fresh-interval current-health proof. The native app auto-fills app
+version/build/target plus device kind, hardware model, OS version,
+physical-vs-simulator metadata, and the proof-pack `runId`/`roomId` from the
+launch link or QA evidence fields; it deliberately does not collect iPhone/iPad
+device names or macOS host names. The media promoter now rejects blank or
+mismatched `runId`/`roomId` even when the operator confirms same-room manually.
+Do not promote a snapshot into `ReleaseEvidence.local.json` as passed physical
+proof unless it was captured on the matching physical iPhone, iPad, or Mac for
+the same run, room, version, and build. Simulator or repo-only snapshots are
+diagnostic artifacts only.
 
 The same QA panel also has a separate TURN Relay capture flow for restrictive
 network runs. After joining the room on the restrictive network, enter the

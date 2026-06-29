@@ -82,6 +82,87 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, "Room is full.")
     }
 
+    func testLaunchURLPrefillsRoomURLAndParticipantWithoutJoining() {
+        let model = NativeRoomViewModel(
+            baseURLString: "https://old.example.com",
+            selectedName: "",
+            password: "typed-locally",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in MockRoomSession() }
+        )
+
+        model.applyLaunchURL(URL(string: "meetingassist://room?url=https%3A%2F%2Fthebonfire.xyz&name=Caitlyn&runId=native-apple-run-20260629&roomId=release-room-smoke")!)
+
+        XCTAssertEqual(model.baseURLString, "https://thebonfire.xyz")
+        XCTAssertEqual(model.selectedName, "Caitlyn")
+        XCTAssertEqual(model.releaseRunId, "native-apple-run-20260629")
+        XCTAssertEqual(model.releaseRoomId, "release-room-smoke")
+        XCTAssertEqual(model.password, "typed-locally")
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertEqual(model.statusText, "Launch link loaded")
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.currentMediaEvidenceCaptureContext.runId, "native-apple-run-20260629")
+        XCTAssertEqual(model.currentMediaEvidenceCaptureContext.roomId, "release-room-smoke")
+    }
+
+    func testLaunchURLRejectsSecretBearingLinks() {
+        let model = NativeRoomViewModel(
+            baseURLString: "https://old.example.com",
+            selectedName: "Tom",
+            password: "typed-locally",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in MockRoomSession() }
+        )
+
+        model.applyLaunchURL(URL(string: "meetingassist://room?url=https%3A%2F%2Fthebonfire.xyz&name=Caitlyn&password=B0NFIRE!")!)
+
+        XCTAssertEqual(model.baseURLString, "https://old.example.com")
+        XCTAssertEqual(model.selectedName, "Tom")
+        XCTAssertEqual(model.releaseRunId, "")
+        XCTAssertEqual(model.releaseRoomId, "")
+        XCTAssertEqual(model.password, "typed-locally")
+        XCTAssertEqual(model.errorMessage, "Launch links cannot contain passwords, tokens, cookies, or other secrets.")
+        XCTAssertEqual(model.statusText, "Needs attention")
+    }
+
+    func testLaunchURLRejectsInvalidEvidenceBinding() {
+        let model = NativeRoomViewModel(
+            baseURLString: "https://old.example.com",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in MockRoomSession() }
+        )
+
+        model.applyLaunchURL(URL(string: "meetingassist://room?runId=../wrong-pack&roomId=release-room-smoke")!)
+
+        XCTAssertEqual(model.releaseRunId, "")
+        XCTAssertEqual(model.releaseRoomId, "")
+        XCTAssertEqual(model.errorMessage, "Launch link run and room IDs must be short non-secret identifiers.")
+    }
+
+    func testLaunchURLDoesNotMutateConnectedRoom() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://example.com",
+            selectedName: "Tom",
+            password: "B0NFIRE!",
+            releaseRunId: "native-apple-run-1",
+            releaseRoomId: "release-room-1",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        model.applyLaunchURL(URL(string: "meetingassist://room?url=https%3A%2F%2Fother.example.com&name=Caitlyn&runId=native-apple-run-2&roomId=release-room-2")!)
+
+        XCTAssertEqual(model.baseURLString, "https://example.com")
+        XCTAssertEqual(model.selectedName, "Tom")
+        XCTAssertEqual(model.releaseRunId, "native-apple-run-1")
+        XCTAssertEqual(model.releaseRoomId, "release-room-1")
+        XCTAssertEqual(model.joinedParticipant?.name, "Tom")
+        XCTAssertEqual(model.errorMessage, "Leave the current room before opening a launch link.")
+    }
+
     func testMutePublishesParticipantMediaState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(

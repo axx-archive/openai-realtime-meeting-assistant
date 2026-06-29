@@ -57,6 +57,12 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public var baseURLString: String
     @Published public var selectedName: String
     @Published public var password: String
+    @Published public var releaseRunId: String {
+        didSet { evidenceContextStore.update(runId: releaseRunId, roomId: releaseRoomId) }
+    }
+    @Published public var releaseRoomId: String {
+        didSet { evidenceContextStore.update(runId: releaseRunId, roomId: releaseRoomId) }
+    }
     @Published public private(set) var roster: [Participant] = []
     @Published public private(set) var lifecycle: RoomLifecycleState = .signedOut
     @Published public private(set) var statusText = "Ready"
@@ -92,13 +98,16 @@ public final class NativeRoomViewModel: ObservableObject {
     public let boardStatuses = ["Backlog", "In Progress", "Blocked", "Done"]
 
     private let configLoaderFactory: NativeRoomConfigLoaderFactory
-    private let sessionFactory: NativeRoomSessionFactory
+    private let injectedSessionFactory: NativeRoomSessionFactory?
+    private let evidenceContextStore = NativeRoomEvidenceContextStore()
     private var session: NativeRoomSessionControlling?
 
     public init(
         baseURLString: String = "https://thebonfire.xyz",
         selectedName: String = "",
         password: String = "",
+        releaseRunId: String = "",
+        releaseRoomId: String = "",
         configLoaderFactory: @escaping NativeRoomConfigLoaderFactory = { baseURL in
             MeetingAssistAPIClient(baseURL: baseURL)
         },
@@ -107,19 +116,11 @@ public final class NativeRoomViewModel: ObservableObject {
         self.baseURLString = baseURLString
         self.selectedName = selectedName
         self.password = password
+        self.releaseRunId = releaseRunId
+        self.releaseRoomId = releaseRoomId
         self.configLoaderFactory = configLoaderFactory
-        let clientIdentity = NativeRoomClientIdentity.current
-        self.sessionFactory = sessionFactory ?? { baseURL in
-            NativeRoomSessionCoordinator(
-                api: MeetingAssistAPIClient(baseURL: baseURL),
-                clientIdentity: clientIdentity,
-                mediaEvidenceContextProvider: {
-                    await MainActor.run {
-                        NativeMediaEvidenceCaptureContext.current
-                    }
-                }
-            )
-        }
+        self.injectedSessionFactory = sessionFactory
+        evidenceContextStore.update(runId: releaseRunId, roomId: releaseRoomId)
     }
 
     public var canJoin: Bool {
@@ -190,6 +191,40 @@ public final class NativeRoomViewModel: ObservableObject {
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
 
+    public func applyLaunchURL(_ url: URL) {
+        guard !canUseRoomControls else {
+            setError("Leave the current room before opening a launch link.")
+            return
+        }
+
+        do {
+            let launchContext = try NativeRoomLaunchContext(url: url)
+            if let baseURLString = launchContext.baseURLString {
+                self.baseURLString = baseURLString
+            }
+            if let selectedName = launchContext.selectedName {
+                self.selectedName = selectedName
+            }
+            if let releaseRunId = launchContext.releaseRunId {
+                self.releaseRunId = releaseRunId
+            }
+            if let releaseRoomId = launchContext.releaseRoomId {
+                self.releaseRoomId = releaseRoomId
+            }
+            errorMessage = nil
+            statusText = "Launch link loaded"
+        } catch {
+            setError(error.localizedDescription)
+        }
+    }
+
+    public var currentMediaEvidenceCaptureContext: NativeMediaEvidenceCaptureContext {
+        var context = NativeMediaEvidenceCaptureContext.current
+        context.runId = releaseRunId.trimmingCharacters(in: .whitespacesAndNewlines)
+        context.roomId = releaseRoomId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return context
+    }
+
     public func refreshRoster() async {
         guard let baseURL = normalizedBaseURL() else {
             setError("Enter a valid MeetingAssist URL.")
@@ -240,7 +275,7 @@ public final class NativeRoomViewModel: ObservableObject {
         statusText = "Joining"
         lifecycle = .authenticated
 
-        let newSession = sessionFactory(baseURL)
+        let newSession = makeSession(baseURL: baseURL)
         await newSession.setRemoteVideoTrackHandler { [weak self] trackInfo in
             await self?.upsertRemoteVideoTrack(trackInfo)
         }
@@ -557,6 +592,22 @@ public final class NativeRoomViewModel: ObservableObject {
         return url
     }
 
+    private func makeSession(baseURL: URL) -> NativeRoomSessionControlling {
+        if let injectedSessionFactory {
+            return injectedSessionFactory(baseURL)
+        }
+
+        let clientIdentity = NativeRoomClientIdentity.current
+        let evidenceContextStore = evidenceContextStore
+        return NativeRoomSessionCoordinator(
+            api: MeetingAssistAPIClient(baseURL: baseURL),
+            clientIdentity: clientIdentity,
+            mediaEvidenceContextProvider: {
+                await evidenceContextStore.context()
+            }
+        )
+    }
+
     private func setError(_ message: String) {
         errorMessage = message
         statusText = "Needs attention"
@@ -709,4 +760,29 @@ public final class NativeRoomViewModel: ObservableObject {
         return error.localizedDescription
     }
 
+}
+
+private final class NativeRoomEvidenceContextStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var runId = ""
+    private var roomId = ""
+
+    func update(runId: String, roomId: String) {
+        let normalizedRunId = runId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedRoomId = roomId.trimmingCharacters(in: .whitespacesAndNewlines)
+        lock.withLock {
+            self.runId = normalizedRunId
+            self.roomId = normalizedRoomId
+        }
+    }
+
+    func context() async -> NativeMediaEvidenceCaptureContext {
+        let values = lock.withLock { (runId, roomId) }
+        return await MainActor.run {
+            var context = NativeMediaEvidenceCaptureContext.current
+            context.runId = values.0
+            context.roomId = values.1
+            return context
+        }
+    }
 }

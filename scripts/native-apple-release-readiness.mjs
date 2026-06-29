@@ -71,6 +71,14 @@ function nonEmptyPlistString(plist, key) {
   return typeof plist[key] === "string" && plist[key].trim() !== "";
 }
 
+function plistHasURLScheme(plist, scheme) {
+  const types = Array.isArray(plist.CFBundleURLTypes) ? plist.CFBundleURLTypes : [];
+  return types.some((type) => {
+    const schemes = Array.isArray(type?.CFBundleURLSchemes) ? type.CFBundleURLSchemes : [];
+    return schemes.some((value) => String(value ?? "").trim().toLowerCase() === scheme);
+  });
+}
+
 function walk(dir, visit) {
   if (!existsSync(dir)) {
     return;
@@ -2012,6 +2020,14 @@ function analyze(options) {
       nonEmptyPlistString(macInfo, "NSMicrophoneUsageDescription"),
     "mac_camera_microphone_usage_strings",
     "macOS app needs camera and microphone usage descriptions."
+  );
+  addCheck(
+    checks,
+    plistHasURLScheme(iosInfo, "meetingassist") &&
+      plistHasURLScheme(macInfo, "meetingassist") &&
+      (projectYml.match(/CFBundleURLSchemes:\s*\n\s*-\s*meetingassist/g) ?? []).length >= 2,
+    "app_launch_url_scheme",
+    "iOS/iPadOS and macOS apps should register meetingassist:// launch links for non-secret release run context."
   );
   addCheck(
     checks,

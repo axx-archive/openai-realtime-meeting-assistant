@@ -2536,3 +2536,85 @@ What worked:
 - Running the live smoke against an isolated local server kept the durable repo
   `data/` files untouched while still exercising two browser participants,
   recording toggles, screen share start/stop, speaker view, and board view.
+
+## Wave 35
+
+Status: `wave35_native_proofpack_launch_context_validated`
+
+Scope:
+- Continued the physical-device/TestFlight handoff track by binding native QA
+  evidence captures to the active proof-pack run and room before operators copy
+  JSON out of the app.
+- Assigned a read-only native/release reviewer. The reviewer identified that
+  app-copied QA evidence could still depend on the operator manually knowing
+  the proof-pack `runId` and `roomId`, while the media promoter tolerated blank
+  run/room IDs when `--confirm-same-room` was supplied.
+- Added `meetingassist://room` launch-link handling for iOS/iPadOS and macOS.
+  The link can prefill room URL, participant, `runId`, and `roomId`, but it
+  rejects password/token/cookie/auth query fields, invalid evidence IDs, and
+  active-room mutation.
+- Added release run/room fields to the native QA evidence panel and wired the
+  default native session so media and TURN evidence capture reads those values
+  through the existing `NativeMediaEvidenceCaptureContext`.
+- Registered the `meetingassist` URL scheme in both app Info plists and
+  `project.yml`, and added a default readiness check for that scheme.
+- Updated proof-pack inbox README generation to include a non-secret native
+  launch-link template containing the exact `runId` and `roomId`.
+- Tightened `scripts/native-apple-promote-media-evidence.mjs` so blank
+  snapshot `runId`/`roomId` no longer promotes even when the operator confirms
+  same-room manually.
+
+Files changed:
+- `apple/README.md`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomLaunchContext.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomView.swift`
+- `apple/Sources/MeetingAssistRoomUI/NativeRoomViewModel.swift`
+- `apple/Tests/MeetingAssistRoomUITests/NativeRoomViewModelTests.swift`
+- `apple/Xcode/MeetingAssistAppleApp-Info.plist`
+- `apple/Xcode/MeetingAssistMacApp-Info.plist`
+- `apple/project.yml`
+- `scripts/native-apple-promote-media-evidence.mjs`
+- `scripts/native-apple-promote-media-evidence.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `swift test --package-path apple --filter NativeRoomViewModelTests` passed 36
+  tests.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode, including the new `app_launch_url_scheme` check.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 54 checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 9 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 11 checks.
+- Started a throwaway local server on `http://127.0.0.1:3100` with temporary
+  memory, users, and sessions under `/tmp/ma-native-gates.O5tVk7`; `/readyz`
+  returned `ok:true` with the expected `openai_api_key_missing` degradation.
+- `node scripts/native-apple-local-gates.mjs --live-url http://127.0.0.1:3100 --participants Tom,Caitlyn --live-timeout-ms 100000 --require-live-media-smoke --run-xcode`
+  passed with `ok:true`, `complete:true`, and no warnings.
+- The full runner passed:
+  - `node scripts/media-fix-verification.mjs`
+  - `node scripts/voice-focus-benchmark.mjs`
+  - `go test ./...`
+  - `swift test --package-path apple` with 94 tests
+  - `node scripts/native-apple-release-readiness.mjs --apple-dir apple`
+  - `node scripts/live-media-smoke.mjs --url http://127.0.0.1:3100 --participants Tom,Caitlyn --timeout-ms 100000`
+  - `xcodegen generate --spec project.yml`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistAppleApp -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO`
+  - `xcodebuild -project MeetingAssist.xcodeproj -scheme MeetingAssistMacApp -destination 'platform=macOS,arch=arm64' test CODE_SIGNING_ALLOWED=NO`
+
+Risks / blockers:
+- This reduces wrong-proof-pack and wrong-room promotion risk, but it still does
+  not prove real iPhone/iPad/Mac media quality or restrictive-network TURN use.
+- Apple signing/team setup, final privacy manifest, real physical-device media
+  proof, restrictive-network TURN proof, real TestFlight upload, and macOS
+  notarization remain external release blockers.
+
+What worked:
+- Using a non-secret launch link lets TestFlight/device operators bind the app
+  to a proof-pack run without embedding passwords or auto-joining a room.
+- Tightening promotion after adding native-side run/room binding keeps manual
+  operator confirmation as an attestation, not a substitute for artifact
+  identity.

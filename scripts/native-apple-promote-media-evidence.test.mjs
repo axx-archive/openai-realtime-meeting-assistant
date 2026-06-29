@@ -85,14 +85,16 @@ function qaSnapshot(platform, overrides = {}) {
       device: { kind: "mac", model: "MacBookPro18,3", os: "macOS 26.5", physical: true },
     },
   }[platform];
+  const snapshotRunId = overrides.runId ?? "";
+  const snapshotRoomId = overrides.roomId ?? "";
   const base = {
     schemaVersion: 1,
     artifactType: "native_device_media",
     claimScope: "qa_snapshot",
     releaseEligible: false,
     status: "observed",
-    runId: "",
-    roomId: "",
+    runId: snapshotRunId,
+    roomId: snapshotRoomId,
     platform: config.clientPlatform,
     capturedAt: "2026-06-29T17:45:00Z",
     app: {
@@ -113,8 +115,8 @@ function qaSnapshot(platform, overrides = {}) {
     },
     releaseEvidenceSummary: {
       status: "pending",
-      runId: "",
-      roomId: "",
+      runId: snapshotRunId,
+      roomId: snapshotRoomId,
       device: config.device.model,
       os: config.device.os,
       testedAt: "2026-06-29T17:45:00Z",
@@ -161,11 +163,16 @@ function promote(args) {
 
 const fixture = makeAppleFixture();
 const runId = `native-apple-promote-test-${process.pid}`;
+const roomId = "promotion-room-test";
 const created = createProofpack(fixture.appleDir, runId);
 assert.equal(created.status, 0);
 assert.equal(created.output.ok, true);
 
-const iphoneSnapshotPath = writeSnapshot(fixture.dir, "iphone-qa.json", qaSnapshot("iphone"));
+function boundSnapshot(platform, overrides = {}) {
+  return qaSnapshot(platform, { runId, roomId, ...overrides });
+}
+
+const iphoneSnapshotPath = writeSnapshot(fixture.dir, "iphone-qa.json", boundSnapshot("iphone"));
 const promoted = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -218,10 +225,23 @@ const missingConfirm = promote([
   "--platform",
   "ipad",
   "--input",
-  writeSnapshot(fixture.dir, "ipad-qa.json", qaSnapshot("ipad")),
+  writeSnapshot(fixture.dir, "ipad-qa.json", boundSnapshot("ipad")),
 ]);
 assert.equal(missingConfirm.status, 1);
 assert.match(missingConfirm.output.error, /confirmPhysicalDevice/);
+
+const blankRunRoomRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--platform",
+  "ipad",
+  "--input",
+  writeSnapshot(fixture.dir, "ipad-blank-run-room.json", qaSnapshot("ipad")),
+  "--confirm-physical-device",
+  "--confirm-same-room",
+]);
+assert.equal(blankRunRoomRejected.status, 1);
+assert.match(blankRunRoomRejected.output.error, /runId:empty|roomId:empty/);
 
 const simulatorRejected = promote([
   "--proofpack-dir",
@@ -232,7 +252,7 @@ const simulatorRejected = promote([
   writeSnapshot(
     fixture.dir,
     "ipad-simulator.json",
-    qaSnapshot("ipad", { device: { kind: "simulator", model: "iPad Simulator", physical: false } })
+    boundSnapshot("ipad", { device: { kind: "simulator", model: "iPad Simulator", physical: false } })
   ),
   "--confirm-physical-device",
   "--confirm-same-room",
@@ -249,7 +269,7 @@ const falseAssertionRejected = promote([
   writeSnapshot(
     fixture.dir,
     "mac-false-assertion.json",
-    qaSnapshot("mac", {
+    boundSnapshot("mac", {
       mediaAssertions: { remoteVideoRendered: false },
       assertionEvidence: { remoteVideoRendered: { source: "remoteVideoTiles+inboundVideoDecoded", value: 0, passed: false } },
       counters: { inboundVideoDecoded: 0 },
@@ -267,7 +287,7 @@ const wrongBuildRejected = promote([
   "--platform",
   "mac",
   "--input",
-  writeSnapshot(fixture.dir, "mac-wrong-build.json", qaSnapshot("mac", { app: { build: "14" } })),
+  writeSnapshot(fixture.dir, "mac-wrong-build.json", boundSnapshot("mac", { app: { build: "14" } })),
   "--confirm-physical-device",
   "--confirm-same-room",
 ]);
@@ -283,7 +303,7 @@ const unsafeRejected = promote([
   writeSnapshot(
     fixture.dir,
     "mac-unsafe.json",
-    qaSnapshot("mac", {
+    boundSnapshot("mac", {
       diagnostics: {
         rawSdp: "v=0\r\na=candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host\r\n",
       },
@@ -301,7 +321,7 @@ const mismatchedRunRejected = promote([
   "--platform",
   "mac",
   "--input",
-  writeSnapshot(fixture.dir, "mac-wrong-run.json", qaSnapshot("mac", { runId: "native-apple-other-run" })),
+  writeSnapshot(fixture.dir, "mac-wrong-run.json", boundSnapshot("mac", { runId: "native-apple-other-run" })),
   "--confirm-physical-device",
   "--confirm-same-room",
 ]);
@@ -310,4 +330,4 @@ assert.match(mismatchedRunRejected.output.error, /runId/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-media-evidence: 8 checks passed");
+console.log("native-apple-promote-media-evidence: 9 checks passed");

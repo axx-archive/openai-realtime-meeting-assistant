@@ -120,6 +120,10 @@ assert.equal(proofpack.observationTemplates.testFlight, `artifacts/native-apple/
 const inboxReadme = readFileSync(resolve(rootDir, "artifacts", "native-apple", runId, "inbox", "README.md"), "utf8");
 assert.match(inboxReadme, /scaffolds, not release proof/);
 assert.match(inboxReadme, /Do not edit \.\.\/evidence\//);
+assert.match(inboxReadme, new RegExp(`runId=${runId}`));
+assert.match(inboxReadme, new RegExp(`roomId=${roomId}`));
+assert.match(inboxReadme, /Replace only <participant-name>/);
+assert.match(inboxReadme, /Do not add passwords, tokens, cookies/);
 const iphoneTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.iphoneMedia), "utf8"));
 assert.equal(iphoneTemplate.artifactType, "native_device_media");
 assert.equal(iphoneTemplate.status, "template");

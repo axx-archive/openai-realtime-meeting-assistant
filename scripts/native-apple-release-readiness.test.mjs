@@ -659,10 +659,19 @@ ${body}
   );
 }
 
-function makeFixture({ includeIcons, includePrivacy, localTeam = "" }) {
+function makeFixture({ includeIcons, includePrivacy, localTeam = "", includeLaunchScheme = true }) {
   const dir = mkdtempSync(resolve(tmpdir(), "meetingassist-apple-release-"));
   const appleDir = resolve(dir, "apple");
   mkdirSync(resolve(appleDir, "MeetingAssist.xcodeproj"), { recursive: true });
+  const launchSchemeYaml = includeLaunchScheme
+    ? `    info:
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: co.thebonfire.meetingassist
+            CFBundleURLSchemes:
+              - meetingassist
+`
+    : "";
 
   writeFixtureFile(
     resolve(appleDir, "project.yml"),
@@ -681,7 +690,7 @@ function makeFixture({ includeIcons, includePrivacy, localTeam = "" }) {
         MARKETING_VERSION: 1.0
         PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.ios
         TARGETED_DEVICE_FAMILY: "1,2"
-  MeetingAssistMacApp:
+${launchSchemeYaml}  MeetingAssistMacApp:
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
@@ -695,7 +704,7 @@ function makeFixture({ includeIcons, includePrivacy, localTeam = "" }) {
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: 1.0
         PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac
-`
+${launchSchemeYaml}`
   );
   writeFixtureFile(
     resolve(appleDir, "MeetingAssist.xcodeproj", "project.pbxproj"),
@@ -712,10 +721,24 @@ Signing.xcconfig;
 `
   );
   writeSigningFixture(appleDir, localTeam);
+  const launchSchemePlist = includeLaunchScheme
+    ? `  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>co.thebonfire.meetingassist</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>meetingassist</string>
+      </array>
+    </dict>
+  </array>
+`
+    : "";
   const infoBody = `<dict>
   <key>CFBundleShortVersionString</key>
   <string>$(MARKETING_VERSION)</string>
-  <key>CFBundleVersion</key>
+${launchSchemePlist}  <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
   <key>NSCameraUsageDescription</key>
   <string>MeetingAssist uses the camera when you join a video room.</string>
@@ -773,6 +796,20 @@ assert.equal(readyFixture.status, 0);
 assert.equal(readyFixture.output.ok, true);
 assert.equal(readyFixture.output.readyForDistribution, true);
 assert.deepEqual(readyFixture.output.blockers, []);
+
+const missingLaunchSchemeFixturePath = makeFixture({ includeIcons: true, includePrivacy: true, includeLaunchScheme: false });
+writeReleaseEvidenceFixture(resolve(missingLaunchSchemeFixturePath, "ReleaseEvidence.local.json"));
+const missingLaunchSchemeFixture = runReadiness(["--apple-dir", missingLaunchSchemeFixturePath], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(missingLaunchSchemeFixture.status, 1);
+assert.equal(missingLaunchSchemeFixture.output.ok, false);
+assert.equal(
+  missingLaunchSchemeFixture.output.checks.some(
+    (check) => check.id === "app_launch_url_scheme" && !check.ok
+  ),
+  true
+);
 
 const localTeamFixturePath = makeFixture({
   includeIcons: true,
@@ -1655,4 +1692,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 53 checks passed");
+console.log("native-apple-release-readiness: 54 checks passed");
