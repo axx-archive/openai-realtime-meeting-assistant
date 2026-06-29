@@ -11,5 +11,6 @@ apple/.build/
 apple/.swiftpm/
 apple/DerivedData/
 apple/Config/Signing.local.xcconfig
+apple/ReleaseEvidence.local.json
 xcuserdata/
 *.xcuserstate

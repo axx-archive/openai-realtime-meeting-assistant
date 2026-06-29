@@ -101,6 +101,27 @@ Do not add `Xcode/PrivacyInfo.xcprivacy` until the product-owned answers in
 missing, empty, or shape-incomplete privacy manifests because this client sends
 user, room, media, and diagnostic data to the MeetingAssist service.
 
+Strict mode also requires build-bound distribution proof before it can report
+`readyForDistribution: true`. Copy `ReleaseEvidence.example.json` to ignored
+`ReleaseEvidence.local.json` after the real run, or pass an explicit evidence
+file:
+
+```bash
+node scripts/native-apple-release-readiness.mjs --strict --evidence-file /path/to/ReleaseEvidence.json
+```
+
+Evidence must match the current `MARKETING_VERSION` and
+`CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
+artifact references for the underlying proof. Physical-device entries must
+cover iPhone, iPad, and Mac in the same mixed-room run and assert camera,
+microphone, remote-audio, and remote-video success. Restrictive-network TURN
+evidence must be tied to the same run and include a selected relay-candidate
+artifact. TestFlight/App Store Connect upload and accepted/stapled macOS
+notarization also need artifact references. Keep raw TURN credentials, App
+Store Connect API keys, provisioning profiles, cert private keys, and real Team
+IDs out of evidence files; the strict checker rejects unknown or secret-shaped
+evidence fields.
+
 The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
 
 ```bash

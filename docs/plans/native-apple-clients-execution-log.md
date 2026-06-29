@@ -1278,3 +1278,86 @@ What worked:
 - The synthetic-team strict check proved the team blocker can be removed
   independently from the privacy blocker, which keeps the next execution slice
   clear.
+
+## Wave 19
+
+Status: `wave19_native_distribution_evidence_gate_checkpoint_validated`
+
+Scope:
+- Continued the native Apple release-readiness track by aligning strict
+  readiness with the remaining external gates documented across the Apple
+  README and execution log.
+- Assigned two read-only explorers. One mapped the unproven evidence categories:
+  physical iPhone/iPad/Mac mixed-room media, restrictive-network TURN relay use,
+  TestFlight/App Store Connect upload, and macOS signing/notarization. The
+  other recommended a strict-only release evidence file contract that keeps
+  default repo health checks usable.
+- Added `apple/ReleaseEvidence.example.json` as a non-passing template and
+  ignored `apple/ReleaseEvidence.local.json` for real machine/account evidence.
+- Added `--evidence-file` to `scripts/native-apple-release-readiness.mjs` and a
+  default lookup order of ignored `ReleaseEvidence.local.json`, then tracked
+  `ReleaseEvidence.json` if deliberately provided.
+- Strengthened strict readiness so it requires evidence matching the current
+  `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, one shared release `runId`
+  and `roomId`, explicit physical device media assertions for camera,
+  microphone, remote audio, and remote video, restrictive TURN selected-relay
+  proof, TestFlight/App Store Connect upload proof, and accepted/stapled macOS
+  notarization proof.
+- Rejected placeholders, stale build evidence, partial device matrices,
+  incomplete media assertions, non-relay TURN evidence, missing TURN artifacts,
+  missing TestFlight build IDs, missing notarization request/stapling proof,
+  invalid evidence JSON/root shape, and `--evidence-file` flag misuse. A single
+  `ready: true` flag is not accepted.
+- Updated docs and checker guardrails to make clear that release evidence must
+  not contain raw TURN credentials, App Store Connect API keys, provisioning
+  profiles, private cert keys, or real Apple Team IDs; unknown or secret-shaped
+  evidence fields are strict blockers.
+
+Files changed:
+- `.gitignore`
+- `apple/README.md`
+- `apple/ReleaseEvidence.example.json`
+- `docs/native-apple-privacy-review.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check scripts/native-apple-release-readiness.mjs` passed.
+- `node --check scripts/native-apple-release-readiness.test.mjs` passed.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 26 checks.
+- `node scripts/native-apple-release-readiness.mjs` passed default mode with
+  repo-owned checks green.
+- `node scripts/native-apple-release-readiness.mjs --strict` failed as expected
+  with `apple_development_team`, `privacy_manifest`, and
+  `release_evidence_file`.
+- `APPLE_DEVELOPMENT_TEAM=<synthetic valid test Team ID> node scripts/native-apple-release-readiness.mjs --strict`
+  failed as expected with `privacy_manifest` and `release_evidence_file`.
+- `node scripts/native-apple-release-readiness.mjs --strict --evidence-file apple/ReleaseEvidence.example.json`
+  failed as expected because the example contains placeholders.
+- The stricter test matrix covers invalid evidence JSON/root shape, stale
+  version/build, partial physical device media, incomplete media assertions,
+  non-relay TURN evidence, missing TURN artifacts, missing/unstapled macOS
+  notarization proof, secret-shaped evidence fields/values, explicit external
+  evidence files, tracked fallback evidence, and `--evidence-file` flag misuse.
+- `git diff --check` passed.
+
+Risks / blockers:
+- The evidence gate is intentionally not proof by itself; it is a build-bound
+  place to record results from real device, network, TestFlight, and notarized
+  macOS runs.
+- The current repo still lacks Apple team/signing credentials,
+  `PrivacyInfo.xcprivacy`, physical iPhone/iPad/Mac mixed-room proof,
+  restrictive-network TURN relay proof, TestFlight upload, and macOS
+  notarization evidence.
+
+What worked:
+- Moving physical/TestFlight/notarization requirements into strict blockers
+  prevents strict readiness from turning green after only signing and privacy
+  files are added.
+- Keeping `ReleaseEvidence.local.json` ignored gives the release operator a
+  concrete place to capture account/device proof without committing secrets.
+- Adding a shared release run identity plus artifact references makes the gate a
+  proof manifest rather than a loose self-attestation checklist.
+- Making the example evidence intentionally non-passing prevents template files
+  from becoming accidental release evidence.

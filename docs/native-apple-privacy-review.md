@@ -59,3 +59,9 @@ Only after those answers are final:
 The readiness script intentionally rejects a missing, empty, or shape-incomplete
 privacy manifest because this app already transmits user, room, media, and
 diagnostic data to the MeetingAssist service.
+
+After privacy is approved, strict release readiness still requires
+`apple/ReleaseEvidence.local.json` or an explicit `--evidence-file` with
+physical-device, restrictive-TURN, TestFlight, and macOS notarization proof for
+the same version/build, tied to one release run and backed by non-secret
+artifact references.

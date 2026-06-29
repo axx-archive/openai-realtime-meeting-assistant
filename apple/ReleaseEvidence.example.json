@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "build": "15",
+  "runId": "<native release run ID>",
+  "roomId": "<mixed-room smoke room ID or label>",
+  "physicalDeviceMedia": {
+    "iphone": {
+      "status": "passed",
+      "runId": "<same native release run ID>",
+      "roomId": "<same mixed-room smoke room ID or label>",
+      "device": "<iPhone model and label>",
+      "os": "<iOS version>",
+      "testedAt": "2026-06-29T12:00:00Z",
+      "artifactRef": "<artifacts/run-id/iphone-media.json>",
+      "mediaAssertions": {
+        "cameraPublished": true,
+        "microphonePublished": true,
+        "remoteAudioReceived": true,
+        "remoteVideoRendered": true
+      }
+    },
+    "ipad": {
+      "status": "passed",
+      "runId": "<same native release run ID>",
+      "roomId": "<same mixed-room smoke room ID or label>",
+      "device": "<iPad model and label>",
+      "os": "<iPadOS version>",
+      "testedAt": "2026-06-29T12:10:00Z",
+      "artifactRef": "<artifacts/run-id/ipad-media.json>",
+      "mediaAssertions": {
+        "cameraPublished": true,
+        "microphonePublished": true,
+        "remoteAudioReceived": true,
+        "remoteVideoRendered": true
+      }
+    },
+    "mac": {
+      "status": "passed",
+      "runId": "<same native release run ID>",
+      "roomId": "<same mixed-room smoke room ID or label>",
+      "device": "<Mac model and label>",
+      "os": "<macOS version>",
+      "testedAt": "2026-06-29T12:20:00Z",
+      "artifactRef": "<artifacts/run-id/mac-media.json>",
+      "mediaAssertions": {
+        "cameraPublished": true,
+        "microphonePublished": true,
+        "remoteAudioReceived": true,
+        "remoteVideoRendered": true
+      }
+    }
+  },
+  "restrictiveNetworkTurn": {
+    "status": "passed",
+    "runId": "<same native release run ID>",
+    "roomId": "<same mixed-room smoke room ID or label>",
+    "network": "<restricted network name or run label>",
+    "relayProtocol": "turns",
+    "relayCandidateType": "relay",
+    "testedAt": "2026-06-29T12:25:00Z",
+    "artifactRef": "<artifacts/run-id/selected-turn-relay.json>"
+  },
+  "testFlight": {
+    "status": "ready",
+    "appStoreConnectBuildId": "<App Store Connect build ID>",
+    "uploadedAt": "2026-06-29T12:30:00Z",
+    "artifactRef": "<artifacts/run-id/testflight-build.json>"
+  },
+  "macNotarization": {
+    "status": "accepted",
+    "requestId": "<notarytool request ID>",
+    "stapled": true,
+    "checkedAt": "2026-06-29T12:40:00Z",
+    "artifactRef": "<artifacts/run-id/notarization.json>"
+  }
+}

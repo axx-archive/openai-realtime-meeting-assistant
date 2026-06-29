@@ -6,17 +6,20 @@ import { dirname, join, resolve } from "node:path";
 function usage() {
   return [
     "Usage:",
-    "  node scripts/native-apple-release-readiness.mjs [--apple-dir apple] [--strict]",
+    "  node scripts/native-apple-release-readiness.mjs [--apple-dir apple] [--evidence-file path] [--strict]",
     "",
     "Default mode exits nonzero only for broken repo prerequisites.",
     "--strict also exits nonzero for external distribution blockers such as missing",
-    "Apple team configuration, app icons, or privacy manifest metadata.",
+    "Apple team configuration, app icons, privacy manifest metadata, physical",
+    "device media proof, restrictive-network TURN proof, TestFlight upload, or",
+    "macOS notarization evidence.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
   const args = {
     appleDir: "apple",
+    evidenceFile: "",
     strict: false,
     help: false,
   };
@@ -25,6 +28,15 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--apple-dir") {
       args.appleDir = argv[index + 1] ?? "";
+      if (!args.appleDir || args.appleDir.startsWith("--")) {
+        throw new Error("--apple-dir requires a path.");
+      }
+      index += 1;
+    } else if (arg === "--evidence-file") {
+      args.evidenceFile = argv[index + 1] ?? "";
+      if (!args.evidenceFile || args.evidenceFile.startsWith("--")) {
+        throw new Error("--evidence-file requires a path.");
+      }
       index += 1;
     } else if (arg === "--strict") {
       args.strict = true;
@@ -33,10 +45,6 @@ function parseArgs(argv) {
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
-  }
-
-  if (!args.appleDir) {
-    throw new Error("--apple-dir requires a path.");
   }
 
   return args;
@@ -157,6 +165,117 @@ function validDevelopmentTeam(value) {
   return /^[A-Z0-9]{10}$/.test(normalized) && !placeholders.has(normalized);
 }
 
+function nonPlaceholderString(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (/^<[^>]+>$/.test(trimmed)) {
+    return false;
+  }
+  if (/^0+$/.test(trimmed)) {
+    return false;
+  }
+  if (/^([A-Za-z0-9])\1{5,}$/.test(trimmed)) {
+    return false;
+  }
+  const normalized = trimmed.toUpperCase().replace(/[\s-]+/g, "_");
+  return ![
+    "TODO",
+    "TBD",
+    "FIXME",
+    "CHANGE_ME",
+    "YOUR_TEAM_ID",
+    "YOUR_VALUE",
+    "PLACEHOLDER",
+    "EXAMPLE",
+    "SAMPLE",
+    "DUMMY",
+    "UNKNOWN",
+    "N_A",
+    "NA",
+    "NONE",
+    "NULL",
+    "00000000_0000_0000_0000_000000000000",
+  ].includes(normalized);
+}
+
+function validTimestamp(value) {
+  return nonPlaceholderString(value) && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+function strictStringEqual(actual, expected) {
+  return String(actual ?? "").trim() === String(expected ?? "").trim();
+}
+
+function uniqueLabels(labels) {
+  return [...new Set(labels)];
+}
+
+function validArtifactRef(value) {
+  if (!nonPlaceholderString(value)) {
+    return false;
+  }
+  const trimmed = value.trim();
+  return /^(artifacts\/|evidence\/|s3:\/\/|gs:\/\/|https?:\/\/|file:\/)/.test(trimmed);
+}
+
+function expectedIdentity(value, expected) {
+  return nonPlaceholderString(value) && strictStringEqual(value, expected);
+}
+
+function collectUnexpectedKeys(value, allowedKeys, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value)
+    .filter((key) => !allowedKeys.includes(key))
+    .map((key) => `${label}.${key}`);
+}
+
+function collectSecretLikeEvidence(value, path = "$") {
+  const problems = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      problems.push(...collectSecretLikeEvidence(item, `${path}[${index}]`));
+    });
+    return problems;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (
+        validDevelopmentTeam(trimmed) ||
+        /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(trimmed) ||
+        /-----BEGIN CERTIFICATE-----/.test(trimmed) ||
+        /\bAKIA[0-9A-Z]{16}\b/.test(trimmed) ||
+        /\bsk-[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
+        /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/.test(trimmed) ||
+        /\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
+        /\.(p8|p12|mobileprovision|provisionprofile)\b/i.test(trimmed)
+      ) {
+        problems.push(path);
+      }
+    }
+    return problems;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      /(secret|password|passwd|token|credential|api_?key|apikey|private_?key|provision|certificate|cert|p8|p12|team_?id|development_?team|turn_?(user|pass|credential))/i.test(
+        key
+      )
+    ) {
+      problems.push(`${path}.${key}`);
+    }
+    problems.push(...collectSecretLikeEvidence(item, `${path}.${key}`));
+  }
+  return problems;
+}
+
 function developmentTeamValuesFromText(text) {
   const values = [];
   const patterns = [
@@ -173,6 +292,283 @@ function developmentTeamValuesFromText(text) {
     }
   }
   return values;
+}
+
+function releaseEvidencePath(appleDir, requestedPath) {
+  if (requestedPath) {
+    return resolve(requestedPath);
+  }
+
+  const localPath = join(appleDir, "ReleaseEvidence.local.json");
+  if (existsSync(localPath)) {
+    return localPath;
+  }
+
+  const trackedPath = join(appleDir, "ReleaseEvidence.json");
+  if (existsSync(trackedPath)) {
+    return trackedPath;
+  }
+
+  return localPath;
+}
+
+function readJSONFile(path) {
+  return JSON.parse(readText(path));
+}
+
+function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion, expectedBuild }) {
+  const path = releaseEvidencePath(appleDir, requestedPath);
+  if (!existsSync(path)) {
+    return [
+      {
+        id: "release_evidence_file",
+        detail:
+          "Add ignored apple/ReleaseEvidence.local.json or pass --evidence-file with physical device, TURN relay, TestFlight, and macOS notarization proof for this build.",
+      },
+    ];
+  }
+
+  let evidence;
+  try {
+    evidence = readJSONFile(path);
+  } catch {
+    return [{ id: "release_evidence_file", detail: `Release evidence is not valid JSON: ${path}` }];
+  }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    return [{ id: "release_evidence_file", detail: `Release evidence must be a JSON object: ${path}` }];
+  }
+
+  const blockers = [];
+  const schemaProblems = [
+    ...collectUnexpectedKeys(
+      evidence,
+      [
+        "version",
+        "build",
+        "runId",
+        "roomId",
+        "physicalDeviceMedia",
+        "restrictiveNetworkTurn",
+        "testFlight",
+        "macNotarization",
+      ],
+      "$"
+    ),
+    ...collectUnexpectedKeys(evidence.physicalDeviceMedia, ["iphone", "ipad", "mac"], "$.physicalDeviceMedia"),
+  ];
+  for (const platform of ["iphone", "ipad", "mac"]) {
+    const item = evidence.physicalDeviceMedia?.[platform];
+    schemaProblems.push(
+      ...collectUnexpectedKeys(
+        item,
+        ["status", "runId", "roomId", "device", "os", "testedAt", "artifactRef", "mediaAssertions"],
+        `$.physicalDeviceMedia.${platform}`
+      ),
+      ...collectUnexpectedKeys(
+        item?.mediaAssertions,
+        ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"],
+        `$.physicalDeviceMedia.${platform}.mediaAssertions`
+      )
+    );
+  }
+  schemaProblems.push(
+    ...collectUnexpectedKeys(
+      evidence.restrictiveNetworkTurn,
+      ["status", "runId", "roomId", "network", "relayProtocol", "relayCandidateType", "testedAt", "artifactRef"],
+      "$.restrictiveNetworkTurn"
+    ),
+    ...collectUnexpectedKeys(
+      evidence.testFlight,
+      ["status", "appStoreConnectBuildId", "uploadedAt", "artifactRef"],
+      "$.testFlight"
+    ),
+    ...collectUnexpectedKeys(
+      evidence.macNotarization,
+      ["status", "requestId", "stapled", "checkedAt", "artifactRef"],
+      "$.macNotarization"
+    )
+  );
+  if (schemaProblems.length > 0) {
+    blockers.push({
+      id: "release_evidence_schema",
+      detail: `Release evidence must use the known non-secret schema. Unexpected fields: ${schemaProblems.slice(0, 6).join(", ")}`,
+    });
+  }
+
+  const secretProblems = collectSecretLikeEvidence(evidence);
+  if (secretProblems.length > 0) {
+    blockers.push({
+      id: "release_evidence_secret_safety",
+      detail: `Release evidence must not contain Team IDs, API keys, tokens, TURN credentials, private keys, certificates, or provisioning profiles. Problem fields: ${secretProblems.slice(0, 6).join(", ")}`,
+    });
+  }
+
+  const hasExpectedVersion = strictStringEqual(evidence.version, expectedVersion);
+  const hasExpectedBuild = strictStringEqual(evidence.build, expectedBuild);
+  if (!hasExpectedVersion || !hasExpectedBuild) {
+    blockers.push({
+      id: "release_evidence_version_build",
+      detail: `Release evidence must match MARKETING_VERSION=${expectedVersion} and CURRENT_PROJECT_VERSION=${expectedBuild}.`,
+    });
+  }
+
+  const runId = evidence.runId;
+  const roomId = evidence.roomId;
+  const identityProblems = [];
+  if (!nonPlaceholderString(runId)) {
+    identityProblems.push("runId");
+  }
+  if (!nonPlaceholderString(roomId)) {
+    identityProblems.push("roomId");
+  }
+  if (identityProblems.length > 0) {
+    blockers.push({
+      id: "release_evidence_run_identity",
+      detail: `Release evidence must include a shared non-placeholder runId and roomId. Missing or invalid: ${identityProblems.join(", ")}`,
+    });
+  }
+
+  const media = evidence.physicalDeviceMedia;
+  const deviceProblems = [];
+  for (const platform of ["iphone", "ipad", "mac"]) {
+    const item = media?.[platform];
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      deviceProblems.push(`${platform}:missing`);
+      continue;
+    }
+    if (item.status !== "passed") {
+      deviceProblems.push(`${platform}:status`);
+    }
+    for (const key of ["runId", "roomId"]) {
+      const expected = key === "runId" ? runId : roomId;
+      if (!expectedIdentity(item[key], expected)) {
+        deviceProblems.push(`${platform}:${key}`);
+      }
+    }
+    for (const key of ["device", "os", "artifactRef"]) {
+      if (!nonPlaceholderString(item[key])) {
+        deviceProblems.push(`${platform}:${key}`);
+      }
+    }
+    if (!validArtifactRef(item.artifactRef)) {
+      deviceProblems.push(`${platform}:artifactRef`);
+    }
+    if (!validTimestamp(item.testedAt)) {
+      deviceProblems.push(`${platform}:testedAt`);
+    }
+    const assertions = item.mediaAssertions;
+    if (!assertions || typeof assertions !== "object" || Array.isArray(assertions)) {
+      deviceProblems.push(`${platform}:mediaAssertions`);
+    } else {
+      for (const key of ["cameraPublished", "microphonePublished", "remoteAudioReceived", "remoteVideoRendered"]) {
+        if (assertions[key] !== true) {
+          deviceProblems.push(`${platform}:mediaAssertions.${key}`);
+        }
+      }
+    }
+  }
+  if (deviceProblems.length > 0) {
+    const missing = uniqueLabels(deviceProblems);
+    blockers.push({
+      id: "physical_device_media_evidence",
+      detail: `Add passed physical iPhone, iPad, and Mac mixed-room media evidence. Missing or invalid: ${missing.slice(0, 6).join(", ")}`,
+    });
+  }
+
+  const turn = evidence.restrictiveNetworkTurn;
+  const turnProblems = [];
+  if (!turn || typeof turn !== "object" || Array.isArray(turn)) {
+    turnProblems.push("missing");
+  } else {
+    if (turn.status !== "passed") {
+      turnProblems.push("status");
+    }
+    if (!validTimestamp(turn.testedAt)) {
+      turnProblems.push("testedAt");
+    }
+    if (!expectedIdentity(turn.runId, runId)) {
+      turnProblems.push("runId");
+    }
+    if (!expectedIdentity(turn.roomId, roomId)) {
+      turnProblems.push("roomId");
+    }
+    if (!nonPlaceholderString(turn.network)) {
+      turnProblems.push("network");
+    }
+    if (!validArtifactRef(turn.artifactRef)) {
+      turnProblems.push("artifactRef");
+    }
+    if (!["turn", "turns"].includes(String(turn.relayProtocol ?? "").trim().toLowerCase())) {
+      turnProblems.push("relayProtocol");
+    }
+    if (String(turn.relayCandidateType ?? "").trim().toLowerCase() !== "relay") {
+      turnProblems.push("relayCandidateType");
+    }
+  }
+  if (turnProblems.length > 0) {
+    const missing = uniqueLabels(turnProblems);
+    blockers.push({
+      id: "restrictive_turn_evidence",
+      detail: `Add restrictive-network proof that native media used a selected TURN relay, tied to the release run, with a log/artifact reference. Missing or invalid: ${missing.join(", ")}`,
+    });
+  }
+
+  const testFlight = evidence.testFlight;
+  const testFlightProblems = [];
+  if (!testFlight || typeof testFlight !== "object" || Array.isArray(testFlight)) {
+    testFlightProblems.push("missing");
+  } else {
+    if (!["ready", "uploaded", "processing", "accepted"].includes(String(testFlight.status ?? "").trim())) {
+      testFlightProblems.push("status");
+    }
+    if (!nonPlaceholderString(testFlight.appStoreConnectBuildId)) {
+      testFlightProblems.push("appStoreConnectBuildId");
+    }
+    if (!validTimestamp(testFlight.uploadedAt)) {
+      testFlightProblems.push("uploadedAt");
+    }
+    if (!validArtifactRef(testFlight.artifactRef)) {
+      testFlightProblems.push("artifactRef");
+    }
+  }
+  if (testFlightProblems.length > 0) {
+    const missing = uniqueLabels(testFlightProblems);
+    blockers.push({
+      id: "testflight_evidence",
+      detail: `Add App Store Connect/TestFlight upload evidence for this build. Missing or invalid: ${missing.join(", ")}`,
+    });
+  }
+
+  const mac = evidence.macNotarization;
+  const macProblems = [];
+  if (!mac || typeof mac !== "object" || Array.isArray(mac)) {
+    macProblems.push("missing");
+  } else {
+    if (mac.status !== "accepted") {
+      macProblems.push("status");
+    }
+    if (!nonPlaceholderString(mac.requestId)) {
+      macProblems.push("requestId");
+    }
+    if (mac.stapled !== true) {
+      macProblems.push("stapled");
+    }
+    if (!validTimestamp(mac.checkedAt)) {
+      macProblems.push("checkedAt");
+    }
+    if (!validArtifactRef(mac.artifactRef)) {
+      macProblems.push("artifactRef");
+    }
+  }
+  if (macProblems.length > 0) {
+    const missing = uniqueLabels(macProblems);
+    blockers.push({
+      id: "mac_notarization_evidence",
+      detail: `Add accepted and stapled macOS notarization evidence for this build. Missing or invalid: ${missing.join(", ")}`,
+    });
+  }
+
+  return blockers;
 }
 
 function stripXcconfigComment(line) {
@@ -509,6 +905,13 @@ function analyze(options) {
     "App targets should use Config/Signing.xcconfig while keeping local team IDs out of git."
   );
 
+  const marketingVersion = extractSetting(projectYml, "MARKETING_VERSION", /MARKETING_VERSION = ([^;]+);/);
+  const currentProjectVersion = extractSetting(
+    projectYml,
+    "CURRENT_PROJECT_VERSION",
+    /CURRENT_PROJECT_VERSION = ([^;]+);/
+  );
+
   const signingSettings = parseXcconfigSettings(signingConfigPath);
   const signingTeamValue = expandBuildSettingValue(signingSettings.DEVELOPMENT_TEAM, signingSettings);
   const trackedSigningText = existsSync(signingConfigPath) ? readText(signingConfigPath) : "";
@@ -571,6 +974,15 @@ function analyze(options) {
       "privacy_manifest",
       `Add apple/Xcode/PrivacyInfo.xcprivacy only after docs/native-apple-privacy-review.md decisions are final. Missing or invalid: ${privacyStatus.missing.slice(0, 6).join(", ")}`
     );
+  }
+
+  for (const blocker of distributionEvidenceBlockers({
+    appleDir,
+    requestedPath: options.evidenceFile,
+    expectedVersion: marketingVersion,
+    expectedBuild: currentProjectVersion,
+  })) {
+    addBlocker(blockers, blocker.id, blocker.detail);
   }
 
   const failedChecks = checks.filter((check) => !check.ok);

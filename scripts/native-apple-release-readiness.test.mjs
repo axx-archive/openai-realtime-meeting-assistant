@@ -14,6 +14,10 @@ function syntheticTeamId(...parts) {
   return parts.join("");
 }
 
+function syntheticUuid() {
+  return ["8d7a1a32", "9cde", "4e80", "b3c5", "77f9e0f536b8"].join("-");
+}
+
 function runReadiness(args = [], env = {}) {
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: rootDir,
@@ -178,6 +182,112 @@ function writePrivacyManifestFixture(appleDir, body = "complete") {
   );
 }
 
+function releaseEvidence(overrides = {}) {
+  const runId = "native-release-run-20260629-a";
+  const roomId = "release-room-smoke-20260629";
+  const base = {
+    version: "1.0",
+    build: "15",
+    runId,
+    roomId,
+    physicalDeviceMedia: {
+      iphone: {
+        status: "passed",
+        runId,
+        roomId,
+        device: "iPhone 17 physical",
+        os: "iOS 26.5",
+        testedAt: "2026-06-29T12:00:00Z",
+        artifactRef: "artifacts/native-release-run-20260629-a/iphone-media.json",
+        mediaAssertions: {
+          cameraPublished: true,
+          microphonePublished: true,
+          remoteAudioReceived: true,
+          remoteVideoRendered: true,
+        },
+      },
+      ipad: {
+        status: "passed",
+        runId,
+        roomId,
+        device: "iPad Pro physical",
+        os: "iPadOS 26.5",
+        testedAt: "2026-06-29T12:10:00Z",
+        artifactRef: "artifacts/native-release-run-20260629-a/ipad-media.json",
+        mediaAssertions: {
+          cameraPublished: true,
+          microphonePublished: true,
+          remoteAudioReceived: true,
+          remoteVideoRendered: true,
+        },
+      },
+      mac: {
+        status: "passed",
+        runId,
+        roomId,
+        device: "MacBook Pro physical",
+        os: "macOS 26.5",
+        testedAt: "2026-06-29T12:20:00Z",
+        artifactRef: "artifacts/native-release-run-20260629-a/mac-media.json",
+        mediaAssertions: {
+          cameraPublished: true,
+          microphonePublished: true,
+          remoteAudioReceived: true,
+          remoteVideoRendered: true,
+        },
+      },
+    },
+    restrictiveNetworkTurn: {
+      status: "passed",
+      runId,
+      roomId,
+      network: "restricted guest network",
+      relayProtocol: "turns",
+      relayCandidateType: "relay",
+      testedAt: "2026-06-29T12:25:00Z",
+      artifactRef: "artifacts/native-release-run-20260629-a/turn-selected-relay.json",
+    },
+    testFlight: {
+      status: "ready",
+      appStoreConnectBuildId: `asc-${syntheticTeamId("82", "91", "74", "65", "02")}`,
+      uploadedAt: "2026-06-29T12:30:00Z",
+      artifactRef: "artifacts/native-release-run-20260629-a/testflight-build.json",
+    },
+    macNotarization: {
+      status: "accepted",
+      requestId: syntheticUuid(),
+      stapled: true,
+      checkedAt: "2026-06-29T12:40:00Z",
+      artifactRef: "artifacts/native-release-run-20260629-a/notarization.json",
+    },
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    physicalDeviceMedia: {
+      ...base.physicalDeviceMedia,
+      ...(overrides.physicalDeviceMedia ?? {}),
+    },
+    restrictiveNetworkTurn: {
+      ...base.restrictiveNetworkTurn,
+      ...(overrides.restrictiveNetworkTurn ?? {}),
+    },
+    testFlight: {
+      ...base.testFlight,
+      ...(overrides.testFlight ?? {}),
+    },
+    macNotarization: {
+      ...base.macNotarization,
+      ...(overrides.macNotarization ?? {}),
+    },
+  };
+}
+
+function writeReleaseEvidenceFixture(path, overrides = {}) {
+  writeFixtureFile(path, `${JSON.stringify(releaseEvidence(overrides), null, 2)}\n`);
+}
+
 function writePlist(path, body) {
   writeFixtureFile(
     path,
@@ -286,7 +396,7 @@ assert.equal(blockedFixture.output.ok, true);
 assert.equal(blockedFixture.output.readyForDistribution, false);
 assert.deepEqual(
   blockedFixture.output.blockers.map((blocker) => blocker.id).sort(),
-  ["apple_development_team", "ios_app_icon", "mac_app_icon", "privacy_manifest"]
+  ["apple_development_team", "ios_app_icon", "mac_app_icon", "privacy_manifest", "release_evidence_file"]
 );
 
 const strictBlockedFixture = runReadiness(["--apple-dir", blockedFixturePath, "--strict"]);
@@ -295,6 +405,7 @@ assert.equal(strictBlockedFixture.output.ok, true);
 assert.equal(strictBlockedFixture.output.readyForDistribution, false);
 
 const readyFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(readyFixturePath, "ReleaseEvidence.local.json"));
 const readyFixture = runReadiness(["--apple-dir", readyFixturePath, "--strict"], {
   DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
 });
@@ -308,6 +419,7 @@ const localTeamFixturePath = makeFixture({
   includePrivacy: true,
   localTeam: syntheticTeamId("B1", "C2", "D3", "E4", "F5"),
 });
+writeReleaseEvidenceFixture(resolve(localTeamFixturePath, "ReleaseEvidence.local.json"));
 const localTeamFixture = runReadiness(["--apple-dir", localTeamFixturePath, "--strict"]);
 assert.equal(localTeamFixture.status, 0);
 assert.equal(localTeamFixture.output.ok, true);
@@ -315,6 +427,7 @@ assert.equal(localTeamFixture.output.readyForDistribution, true);
 assert.deepEqual(localTeamFixture.output.blockers, []);
 
 const emptyPrivacyFixturePath = makeFixture({ includeIcons: true, includePrivacy: "empty" });
+writeReleaseEvidenceFixture(resolve(emptyPrivacyFixturePath, "ReleaseEvidence.local.json"));
 const emptyPrivacyFixture = runReadiness(["--apple-dir", emptyPrivacyFixturePath, "--strict"], {
   DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
 });
@@ -324,6 +437,7 @@ assert.equal(emptyPrivacyFixture.output.readyForDistribution, false);
 assert.equal(emptyPrivacyFixture.output.blockers.some((blocker) => blocker.id === "privacy_manifest"), true);
 
 const incompletePrivacyFixturePath = makeFixture({ includeIcons: true, includePrivacy: "incomplete" });
+writeReleaseEvidenceFixture(resolve(incompletePrivacyFixturePath, "ReleaseEvidence.local.json"));
 const incompletePrivacyFixture = runReadiness(["--apple-dir", incompletePrivacyFixturePath, "--strict"], {
   DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
 });
@@ -332,7 +446,237 @@ assert.equal(incompletePrivacyFixture.output.ok, true);
 assert.equal(incompletePrivacyFixture.output.readyForDistribution, false);
 assert.equal(incompletePrivacyFixture.output.blockers.some((blocker) => blocker.id === "privacy_manifest"), true);
 
+const missingEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const missingEvidenceFixture = runReadiness(["--apple-dir", missingEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(missingEvidenceFixture.status, 1);
+assert.equal(missingEvidenceFixture.output.ok, true);
+assert.equal(missingEvidenceFixture.output.readyForDistribution, false);
+assert.equal(missingEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_file"), true);
+
+const invalidJsonEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeFixtureFile(resolve(invalidJsonEvidenceFixturePath, "ReleaseEvidence.local.json"), "{\n");
+const invalidJsonEvidenceFixture = runReadiness(["--apple-dir", invalidJsonEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(invalidJsonEvidenceFixture.status, 1);
+assert.equal(invalidJsonEvidenceFixture.output.ok, true);
+assert.equal(invalidJsonEvidenceFixture.output.readyForDistribution, false);
+assert.equal(invalidJsonEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_file"), true);
+
+const arrayEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeFixtureFile(resolve(arrayEvidenceFixturePath, "ReleaseEvidence.local.json"), "[]\n");
+const arrayEvidenceFixture = runReadiness(["--apple-dir", arrayEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(arrayEvidenceFixture.status, 1);
+assert.equal(arrayEvidenceFixture.output.ok, true);
+assert.equal(arrayEvidenceFixture.output.readyForDistribution, false);
+assert.equal(arrayEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_file"), true);
+
+const placeholderEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(placeholderEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  testFlight: { appStoreConnectBuildId: "<App Store Connect build ID>" },
+});
+const placeholderEvidenceFixture = runReadiness(["--apple-dir", placeholderEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(placeholderEvidenceFixture.status, 1);
+assert.equal(placeholderEvidenceFixture.output.ok, true);
+assert.equal(placeholderEvidenceFixture.output.readyForDistribution, false);
+assert.equal(placeholderEvidenceFixture.output.blockers.some((blocker) => blocker.id === "testflight_evidence"), true);
+
+const staleEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(staleEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  build: "14",
+});
+const staleEvidenceFixture = runReadiness(["--apple-dir", staleEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(staleEvidenceFixture.status, 1);
+assert.equal(staleEvidenceFixture.output.ok, true);
+assert.equal(staleEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  staleEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_version_build"),
+  true
+);
+
+const partialDeviceEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(partialDeviceEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  physicalDeviceMedia: { ipad: null },
+});
+const partialDeviceEvidenceFixture = runReadiness(["--apple-dir", partialDeviceEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(partialDeviceEvidenceFixture.status, 1);
+assert.equal(partialDeviceEvidenceFixture.output.ok, true);
+assert.equal(partialDeviceEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  partialDeviceEvidenceFixture.output.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"),
+  true
+);
+
+const incompleteAssertionEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(incompleteAssertionEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  physicalDeviceMedia: {
+    iphone: {
+      status: "passed",
+      runId: "native-release-run-20260629-a",
+      roomId: "release-room-smoke-20260629",
+      device: "iPhone 17 physical",
+      os: "iOS 26.5",
+      testedAt: "2026-06-29T12:00:00Z",
+      artifactRef: "artifacts/native-release-run-20260629-a/iphone-media.json",
+      mediaAssertions: {
+        cameraPublished: true,
+        microphonePublished: true,
+        remoteAudioReceived: true,
+        remoteVideoRendered: false,
+      },
+    },
+  },
+});
+const incompleteAssertionEvidenceFixture = runReadiness(
+  ["--apple-dir", incompleteAssertionEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(incompleteAssertionEvidenceFixture.status, 1);
+assert.equal(incompleteAssertionEvidenceFixture.output.ok, true);
+assert.equal(incompleteAssertionEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  incompleteAssertionEvidenceFixture.output.blockers.some(
+    (blocker) => blocker.id === "physical_device_media_evidence"
+  ),
+  true
+);
+
+const nonRelayTurnEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(nonRelayTurnEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: { relayProtocol: "stun", relayCandidateType: "host" },
+});
+const nonRelayTurnEvidenceFixture = runReadiness(["--apple-dir", nonRelayTurnEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(nonRelayTurnEvidenceFixture.status, 1);
+assert.equal(nonRelayTurnEvidenceFixture.output.ok, true);
+assert.equal(nonRelayTurnEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  nonRelayTurnEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const missingTurnArtifactEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingTurnArtifactEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  restrictiveNetworkTurn: { artifactRef: "" },
+});
+const missingTurnArtifactEvidenceFixture = runReadiness(
+  ["--apple-dir", missingTurnArtifactEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingTurnArtifactEvidenceFixture.status, 1);
+assert.equal(missingTurnArtifactEvidenceFixture.output.ok, true);
+assert.equal(missingTurnArtifactEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingTurnArtifactEvidenceFixture.output.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"),
+  true
+);
+
+const unstapledNotarizationEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unstapledNotarizationEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  macNotarization: { stapled: false },
+});
+const unstapledNotarizationEvidenceFixture = runReadiness(
+  ["--apple-dir", unstapledNotarizationEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unstapledNotarizationEvidenceFixture.status, 1);
+assert.equal(unstapledNotarizationEvidenceFixture.output.ok, true);
+assert.equal(unstapledNotarizationEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  unstapledNotarizationEvidenceFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const missingNotaryRequestEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingNotaryRequestEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  macNotarization: { requestId: "" },
+});
+const missingNotaryRequestEvidenceFixture = runReadiness(
+  ["--apple-dir", missingNotaryRequestEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingNotaryRequestEvidenceFixture.status, 1);
+assert.equal(missingNotaryRequestEvidenceFixture.output.ok, true);
+assert.equal(missingNotaryRequestEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingNotaryRequestEvidenceFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const secretKeyEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(secretKeyEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  turnPassword: "redacted but should not be here",
+});
+const secretKeyEvidenceFixture = runReadiness(["--apple-dir", secretKeyEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(secretKeyEvidenceFixture.status, 1);
+assert.equal(secretKeyEvidenceFixture.output.ok, true);
+assert.equal(secretKeyEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  secretKeyEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_secret_safety"),
+  true
+);
+
+const teamIdValueEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(teamIdValueEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  testFlight: { appStoreConnectBuildId: syntheticTeamId("A1", "B2", "C3", "D4", "E5") },
+});
+const teamIdValueEvidenceFixture = runReadiness(["--apple-dir", teamIdValueEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("B1", "C2", "D3", "E4", "F5"),
+});
+assert.equal(teamIdValueEvidenceFixture.status, 1);
+assert.equal(teamIdValueEvidenceFixture.output.ok, true);
+assert.equal(teamIdValueEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  teamIdValueEvidenceFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_secret_safety"),
+  true
+);
+
+const explicitEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const explicitEvidencePath = resolve(dirname(explicitEvidenceFixturePath), "ExternalReleaseEvidence.json");
+writeReleaseEvidenceFixture(explicitEvidencePath);
+const explicitEvidenceFixture = runReadiness(
+  ["--apple-dir", explicitEvidenceFixturePath, "--strict", "--evidence-file", explicitEvidencePath],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(explicitEvidenceFixture.status, 0);
+assert.equal(explicitEvidenceFixture.output.ok, true);
+assert.equal(explicitEvidenceFixture.output.readyForDistribution, true);
+
+const trackedEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(trackedEvidenceFixturePath, "ReleaseEvidence.json"));
+const trackedEvidenceFixture = runReadiness(["--apple-dir", trackedEvidenceFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(trackedEvidenceFixture.status, 0);
+assert.equal(trackedEvidenceFixture.output.ok, true);
+assert.equal(trackedEvidenceFixture.output.readyForDistribution, true);
+
+const flagAsEvidenceValueFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const flagAsEvidenceValueFixture = runReadiness([
+  "--apple-dir",
+  flagAsEvidenceValueFixturePath,
+  "--evidence-file",
+  "--strict",
+]);
+assert.equal(flagAsEvidenceValueFixture.status, 1);
+assert.equal(flagAsEvidenceValueFixture.output.ok, false);
+assert.match(flagAsEvidenceValueFixture.output.error, /--evidence-file requires a path/);
+
 const committedTeamFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(committedTeamFixturePath, "ReleaseEvidence.local.json"));
 appendFileSync(
   resolve(committedTeamFixturePath, "MeetingAssist.xcodeproj", "project.pbxproj"),
   `DEVELOPMENT_TEAM = ${syntheticTeamId("C1", "D2", "E3", "F4", "G5")};\n`
@@ -348,6 +692,7 @@ assert.equal(
 );
 
 const committedXcodeTeamFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(committedXcodeTeamFixturePath, "ReleaseEvidence.local.json"));
 appendFileSync(
   resolve(committedXcodeTeamFixturePath, "MeetingAssist.xcodeproj", "project.pbxproj"),
   `DevelopmentTeam = ${syntheticTeamId("D1", "E2", "F3", "G4", "H5")};\n`
@@ -363,6 +708,7 @@ assert.equal(
 );
 
 const committedXcconfigTeamFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(committedXcconfigTeamFixturePath, "ReleaseEvidence.local.json"));
 writeSigningFixture(committedXcconfigTeamFixturePath, "");
 writeFixtureFile(
   resolve(committedXcconfigTeamFixturePath, "Config", "Signing.xcconfig"),
@@ -385,6 +731,7 @@ assert.equal(
 );
 
 const committedXcconfigTrailingTeamFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(committedXcconfigTrailingTeamFixturePath, "ReleaseEvidence.local.json"));
 appendFileSync(
   resolve(committedXcconfigTrailingTeamFixturePath, "Config", "Signing.xcconfig"),
   `DEVELOPMENT_TEAM = ${syntheticTeamId("F1", "G2", "H3", "J4", "K5")}\n`
@@ -402,4 +749,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 10 checks passed");
+console.log("native-apple-release-readiness: 26 checks passed");
