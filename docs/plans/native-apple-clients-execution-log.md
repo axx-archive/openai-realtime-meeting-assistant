@@ -3447,3 +3447,55 @@ What worked:
   made the workflow durable instead of relying on handwritten README memory.
 - The sidecar schema pass caught the important release risk: raw smoke output
   must be reduced to booleans/counts before it enters proof-pack evidence.
+
+## 2026-06-30 - Wave 45 release-stage plan and Xcode checkpoint
+
+Goal:
+- Convert the current post-rails state into an explicit release-stage plan and
+  verify the native app targets through Xcode before moving to Apple-account and
+  physical-device gates.
+
+Changes:
+- Added `docs/plans/native-apple-release-stage-plan.md`, an ordered checklist
+  from local Xcode app-target tests through Apple signing, privacy manifest,
+  proof-pack physical-device evidence, TestFlight upload, macOS notarization,
+  and final strict readiness.
+- Linked the stage checklist from `apple/README.md` so operators can find the
+  next-stage flow from the Apple handoff docs.
+- Kept the plan explicit that simulator/macOS XCTest evidence proves local
+  build health only, not physical media quality, TestFlight availability,
+  App Store review readiness, notarization, or end-user shipping readiness.
+
+Files changed:
+- `apple/README.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `docs/plans/native-apple-release-stage-plan.md`
+
+Validation:
+- `git status --short --branch` was clean before this wave.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `readyForDistribution:false` and blockers for
+  `apple_development_team`, `privacy_manifest`, and `release_evidence_file`.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on
+  `iPhone 17` Simulator.
+- XcodeBuildMCP `test_sim` passed `MeetingAssistAppleAppTests` on
+  `iPad Pro 13-inch (M5)` Simulator.
+- `xcodebuild test -project apple/MeetingAssist.xcodeproj -scheme
+  MeetingAssistMacApp -configuration Debug -destination 'platform=macOS'`
+  passed `MeetingAssistMacAppTests`.
+
+Risks / blockers:
+- No Apple account variables or local signing config were found in the current
+  shell, tracked Apple config, or VPS environment check.
+- The privacy manifest remains intentionally uncreated until product/legal
+  approves `PrivacyManifest.decisions.local.json`.
+- The goal remains active: real Apple signing, approved privacy manifest,
+  physical iPhone/iPad/Mac media proof, restrictive TURN proof, browser/native
+  room proof, TestFlight upload, App Store metadata, and macOS notarization are
+  still required before strict readiness can pass.
+
+What worked:
+- Running both iPhone and iPad simulator app-target tests made the universal
+  iOS/iPadOS claim concrete without claiming physical-device proof.
+- Keeping the release-stage plan separate from the execution log gives
+  operators a compact checklist while preserving the detailed wave history.

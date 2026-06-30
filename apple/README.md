@@ -99,6 +99,12 @@ resolved:
 node scripts/native-apple-release-readiness.mjs --strict
 ```
 
+The current stage checklist lives in
+`../docs/plans/native-apple-release-stage-plan.md`. Use it after local Xcode
+tests pass to move through Apple-account setup, privacy approval, proof-pack
+capture, TestFlight, macOS notarization, and final strict readiness without
+mixing simulator proof with distribution proof.
+
 Current strict blockers are intentionally explicit: Apple development team or
 private signing configuration, `PrivacyInfo.xcprivacy` after product-owned
 privacy answers are final, physical device media proof, restrictive-network
