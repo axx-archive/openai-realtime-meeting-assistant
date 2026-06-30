@@ -94,6 +94,41 @@ function testFlightObservation(overrides = {}) {
   };
 }
 
+function appStoreReviewObservation(overrides = {}) {
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_app_store_review_metadata_observation",
+    status: "observed",
+    runId: "",
+    reviewedAt: "2026-06-29T20:18:00Z",
+    app: {
+      version: "1.0",
+      build: "15",
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+      bundleIdentifier: "co.thebonfire.meetingassist.ios",
+    },
+    metadata: {
+      supportURL: "https://thebonfire.xyz/support",
+      privacyPolicyURL: "https://thebonfire.xyz/privacy",
+      descriptionReady: true,
+      keywordsReady: true,
+      screenshotsReady: true,
+      appPrivacyReady: true,
+      ageRatingComplete: true,
+      exportComplianceComplete: true,
+      testInformationReady: true,
+      externalTestingGroupReady: true,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    metadata: { ...base.metadata, ...(overrides.metadata ?? {}) },
+  };
+}
+
 function notarizationObservation(overrides = {}) {
   const base = {
     schemaVersion: 1,
@@ -165,6 +200,10 @@ function boundTestFlightObservation(overrides = {}) {
   return testFlightObservation({ runId, ...overrides });
 }
 
+function boundAppStoreReviewObservation(overrides = {}) {
+  return appStoreReviewObservation({ runId, ...overrides });
+}
+
 function boundNotarizationObservation(overrides = {}) {
   return notarizationObservation({ runId, ...overrides });
 }
@@ -200,6 +239,41 @@ assert.equal(testFlightArtifact.promotion.sourceRunId, runId);
 assert.equal(testFlightArtifact.promotion.sourceUploadedAt, "2026-06-29T20:15:00Z");
 assert.equal(testFlightArtifact.promotion.operatorConfirmedAppStoreConnectUpload, true);
 assert.equal(testFlightArtifact.promotion.operatorConfirmedNoSecrets, true);
+
+const appStoreReviewPath = writeObservation(fixture.dir, "app-store-review-observation.json", boundAppStoreReviewObservation());
+const promotedAppStoreReview = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "app-review",
+  "--input",
+  appStoreReviewPath,
+  "--confirm-review-metadata-complete",
+  "--confirm-app-privacy-complete",
+  "--confirm-external-testing-ready",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--promoted-at",
+  "2026-06-29T20:21:00Z",
+]);
+assert.equal(promotedAppStoreReview.status, 0);
+assert.equal(promotedAppStoreReview.output.ok, true);
+assert.equal(promotedAppStoreReview.output.kind, "app-review");
+
+draft = JSON.parse(readFileSync(promotedAppStoreReview.output.evidenceDraft, "utf8"));
+assert.equal(draft.appStoreReview.status, "ready");
+assert.equal(draft.appStoreReview.supportURL, "https://thebonfire.xyz/support");
+assert.equal(draft.appStoreReview.privacyPolicyURL, "https://thebonfire.xyz/privacy");
+assert.equal(draft.appStoreReview.externalTestingGroupReady, true);
+const appStoreReviewArtifact = JSON.parse(readFileSync(promotedAppStoreReview.output.artifactPath, "utf8"));
+assert.equal(appStoreReviewArtifact.claimScope, "app_store_external_testing_review");
+assert.equal(appStoreReviewArtifact.releaseEligible, true);
+assert.equal(appStoreReviewArtifact.metadata.keywordsReady, true);
+assert.equal(appStoreReviewArtifact.releaseEvidenceSummary.externalTestingReady, true);
+assert.equal(appStoreReviewArtifact.promotion.sourceRunId, runId);
+assert.equal(appStoreReviewArtifact.promotion.sourceReviewedAt, "2026-06-29T20:18:00Z");
+assert.equal(appStoreReviewArtifact.promotion.operatorConfirmedReviewMetadataComplete, true);
+assert.equal(appStoreReviewArtifact.promotion.operatorConfirmedAppPrivacyComplete, true);
 
 const duplicateTestFlight = promote([
   "--proofpack-dir",
@@ -315,6 +389,40 @@ const unsafeTestFlightRejected = promote([
 assert.equal(unsafeTestFlightRejected.status, 1);
 assert.match(unsafeTestFlightRejected.output.error, /unsafeContent/);
 
+const missingAppReviewConfirm = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "app-review",
+  "--input",
+  writeObservation(fixture.dir, "missing-app-review-confirm.json", boundAppStoreReviewObservation()),
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(missingAppReviewConfirm.status, 1);
+assert.match(missingAppReviewConfirm.output.error, /confirmReviewMetadataComplete|confirmAppPrivacyComplete|confirmExternalTestingReady|confirmNoSecrets/);
+
+const unsafeAppReviewRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "app-review",
+  "--input",
+  writeObservation(
+    fixture.dir,
+    "unsafe-app-review.json",
+    boundAppStoreReviewObservation({ metadata: { supportURL: "http://thebonfire.xyz/support", reviewerContact: "operator@example.com" } })
+  ),
+  "--confirm-review-metadata-complete",
+  "--confirm-app-privacy-complete",
+  "--confirm-external-testing-ready",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(unsafeAppReviewRejected.status, 1);
+assert.match(unsafeAppReviewRejected.output.error, /metadata.supportURL|unsafeContent/);
+
 const missingNotaryConfirm = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -372,4 +480,4 @@ assert.match(unsafeNotarizationRejected.output.error, /unsafeContent/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-distribution-evidence: 11 checks passed");
+console.log("native-apple-promote-distribution-evidence: 14 checks passed");

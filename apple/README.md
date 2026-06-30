@@ -103,8 +103,9 @@ Current strict blockers are intentionally explicit: Apple development team or
 private signing configuration, `PrivacyInfo.xcprivacy` after product-owned
 privacy answers are final, physical device media proof, restrictive-network
 TURN proof, browser/native 3+ participant room-gate proof, and actual
-TestFlight/notarization evidence. Do not treat a passing default preflight as a
-TestFlight upload or notarized macOS app.
+App Store review metadata, TestFlight upload, and notarization evidence. Do
+not treat a passing default preflight as App Store review readiness, a
+TestFlight upload, or a notarized macOS app.
 
 Signing is wired through `Config/Signing.xcconfig` for both app targets. To
 enable local archive or device builds, either provide `DEVELOPMENT_TEAM` /
@@ -181,8 +182,8 @@ The proof-pack runner is an evidence workflow, not a release claim.
 `--write-evidence` refuses incomplete drafts by default; `--force` exists only
 for diagnostic local checks. Strict readiness still fails until the draft
 contains completed statuses, local artifact references point at files that
-exist, signing/privacy blockers are resolved, and Apple/TestFlight/notarization
-proof is real.
+exist, signing/privacy blockers are resolved, and App Store review metadata,
+TestFlight, and notarization proof is real.
 
 Files under `inbox/` are operator inputs. Files under `evidence/` are the
 pending or promoted release artifacts. Do not edit promoted `evidence/` files by
@@ -218,9 +219,9 @@ This writes `operator/release-command-plan.json`,
 ignored proof-pack directory. The command pack contains the Xcode archive,
 TestFlight export/upload, Developer ID export, notarytool, stapler, Gatekeeper,
 physical iPhone/iPad/Mac media-promotion commands, restrictive-network TURN
-promotion, browser/native room-gate promotion, TestFlight/macOS distribution
-promotion, local evidence handoff, final strict readiness, and an offline
-operator preflight. It does not run the
+promotion, browser/native room-gate promotion, App Store review metadata
+promotion, TestFlight/macOS distribution promotion, local evidence handoff,
+final strict readiness, and an offline operator preflight. It does not run the
 archive/upload/notarization commands, does not contact Apple, and does not write
 Team IDs, certificate names, provisioning profiles, App Store Connect keys,
 notarytool profile names, or raw command logs. `--proofpack-dir` is required for
@@ -251,7 +252,7 @@ and is bundled. It also includes `--require-proofpack`, so preflight hard-stops
 if it is separated from the generated proof pack. It still does not prove App
 Store Connect login,
 provisioning-profile download, notary profile validity, physical devices, or
-actual upload/notarization.
+actual review metadata completion/upload/notarization.
 
 The native room UI includes a QA evidence panel that captures a non-secret
 `native_device_media` JSON snapshot from summarized WebRTC stats. Use the
@@ -363,6 +364,28 @@ leave with `/participants` empty, and recording-off transcript/Realtime
 forwarding stopped. It rejects raw SDP, ICE candidates, TURN URLs, credentials,
 account data, raw logs, screenshots, pixels, and frames.
 
+Promote the App Store review metadata observation after App Store Connect
+metadata is complete for external testing/review readiness:
+
+```bash
+node scripts/native-apple-promote-distribution-evidence.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --kind app-review \
+  --input artifacts/native-apple/<run-id>/inbox/app-store-review-observation.json \
+  --confirm-review-metadata-complete \
+  --confirm-app-privacy-complete \
+  --confirm-external-testing-ready \
+  --confirm-no-secrets \
+  --confirm-current-build
+```
+
+The App Store review inbox observation must have `status: "observed"`, matching
+`runId`, current iOS/iPad app version/build/bundle id, HTTPS support and privacy
+policy URLs, and true readiness booleans for description, keywords,
+screenshots, App Privacy, age rating, export compliance, test information, and
+external testing group setup. This proves sanitized metadata readiness, not
+Apple review approval or TestFlight upload.
+
 Promote the App Store Connect/TestFlight upload observation with a sanitized
 operator artifact after a real archive/upload:
 
@@ -392,8 +415,8 @@ node scripts/native-apple-promote-distribution-evidence.mjs \
 
 The distribution helper does not upload to TestFlight, notarize, staple, or
 access Apple credentials. It promotes already-completed, non-secret operator
-observations into the proof pack and updates only `testFlight` or
-`macNotarization` in `ReleaseEvidence.draft.json`.
+observations into the proof pack and updates only `appStoreReview`,
+`testFlight`, or `macNotarization` in `ReleaseEvidence.draft.json`.
 
 The TestFlight inbox observation must have `status: "observed"`, matching
 `runId`, current iOS/iPad app version/build/bundle id, an App Store Connect
@@ -415,10 +438,10 @@ microphone, remote-audio, and remote-video success. Restrictive-network TURN
 evidence must be tied to the same run and include a selected relay-candidate
 artifact. Browser/native room-gate evidence must prove the same run has at
 least three participants, browser/native platform mix, remote audio/video,
-clean leave, and recording-off forwarding stopped. TestFlight/App Store Connect
-upload and accepted/stapled macOS notarization also need artifact references.
-Keep raw TURN credentials, App
-Store Connect API keys, provisioning profiles, cert private keys, and real Team
+clean leave, and recording-off forwarding stopped. App Store review metadata,
+TestFlight/App Store Connect upload, and accepted/stapled macOS notarization
+also need artifact references. Keep raw TURN credentials, App Store Connect API
+keys, provisioning profiles, cert private keys, reviewer emails, and real Team
 IDs out of evidence files; the strict checker rejects unknown or secret-shaped
 evidence fields.
 
@@ -448,6 +471,14 @@ three or more participants, remote audio/video assertions, clean leave with no
 remaining `/participants`, recording-off transcript/Realtime forwarding false,
 source run/room binding, and operator confirmations for current build and no
 secret-bearing fields.
+
+When an App Store review metadata `artifactRef` points to a local JSON file,
+strict readiness requires promoted `native_app_store_review_metadata` proof with
+`claimScope: "app_store_external_testing_review"`, `releaseEligible: true`,
+current version/build, matching run/timestamp, HTTPS support and privacy-policy
+URLs, description, keywords, screenshots, App Privacy, age rating, export
+compliance, test information, and external testing group readiness, plus
+operator confirmations for current build and no secret-bearing fields.
 
 When a TestFlight `artifactRef` points to a local JSON file, strict readiness
 requires promoted `native_testflight_upload` proof with

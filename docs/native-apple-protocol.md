@@ -153,19 +153,24 @@ operator confirmations. It must not include raw SDP, raw ICE candidates, TURN
 URLs, credentials, account data, raw logs, screenshots, pixels, frames, cookies,
 headers, API keys, Team IDs, certificates, profiles, or private keys.
 
-Distribution proof is also operator-only. Sanitized App Store Connect/TestFlight
-and macOS notarization observations are local proof-pack inputs, not websocket
-events and not app-exported media diagnostics. `scripts/native-apple-promote-distribution-evidence.mjs`
-promotes those observations only after an operator confirms the current build,
-completed upload or notarization/stapling/Gatekeeper checks, and absence of
-secret-bearing fields. TestFlight proof may include app version/build, target,
-bundle id, App Store Connect build id, processing status, and timestamps. macOS
-notarization proof may include app version/build, target, bundle id, distribution
-artifact filename/hash, Developer ID signing booleans, notary request id/status,
-stapling validation, Gatekeeper acceptance, and timestamps. It must not include
-raw upload/notary/codesign/spctl logs, API keys, Apple IDs, Team IDs, p8 or p12
+Distribution proof is also operator-only. Sanitized App Store review metadata,
+App Store Connect/TestFlight, and macOS notarization observations are local
+proof-pack inputs, not websocket events and not app-exported media diagnostics.
+`scripts/native-apple-promote-distribution-evidence.mjs` promotes those
+observations only after an operator confirms the current build, review metadata
+or upload/notarization/stapling/Gatekeeper checks, and absence of
+secret-bearing fields. App Store review metadata proof may include app
+version/build, target, bundle id, HTTPS support/privacy URLs, description,
+keywords, screenshots, App Privacy, age rating, export compliance, test
+information, external testing group readiness, and timestamps. TestFlight proof
+may include app version/build, target, bundle id, App Store Connect build id,
+processing status, and timestamps. macOS notarization proof may include app
+version/build, target, bundle id, distribution artifact filename/hash,
+Developer ID signing booleans, notary request id/status, stapling validation,
+Gatekeeper acceptance, and timestamps. It must not include raw
+upload/notary/codesign/spctl logs, API keys, Apple IDs, Team IDs, p8 or p12
 files, provisioning profiles, certificates, private keys, keychain identities,
-usernames, headers, cookies, or other account identifiers.
+reviewer emails, usernames, headers, cookies, or other account identifiers.
 
 Copying `ReleaseEvidence.draft.json` to `apple/ReleaseEvidence.local.json` is a
 local evidence handoff, not a release claim. The proof-pack script refuses to

@@ -10,14 +10,17 @@ function usage() {
   return [
     "Usage:",
     "  node scripts/native-apple-promote-distribution-evidence.mjs --proofpack-dir path",
-    "    --kind testflight|notarization --input path --confirm-current-build",
+    "    --kind testflight|notarization|app-review --input path --confirm-current-build",
     "    [--confirm-app-store-connect-upload] [--confirm-no-secrets]",
+    "    [--confirm-review-metadata-complete] [--confirm-app-privacy-complete]",
+    "    [--confirm-external-testing-ready]",
     "    [--confirm-developer-id-archive] [--confirm-notary-accepted]",
     "    [--confirm-stapled-app] [--confirm-gatekeeper-accepted]",
     "    [--promoted-at iso] [--force]",
     "",
-    "Promotes one sanitized App Store Connect/TestFlight or macOS notarization",
-    "observation into the matching proof-pack artifact and updates",
+    "Promotes one sanitized App Store Connect/TestFlight upload, App Store",
+    "review metadata, or macOS notarization observation into the matching",
+    "proof-pack artifact and updates",
     "ReleaseEvidence.draft.json. The command rejects secret-bearing upload logs,",
     "API keys, provisioning profiles, certificates, private keys, and mismatched",
     "build or run evidence.",
@@ -31,6 +34,9 @@ function parseArgs(argv) {
     input: "",
     promotedAt: "",
     confirmAppleUpload: false,
+    confirmReviewMetadataComplete: false,
+    confirmAppPrivacyComplete: false,
+    confirmExternalTestingReady: false,
     confirmNoSecrets: false,
     confirmDeveloperIdArchive: false,
     confirmNotarizedApp: false,
@@ -57,6 +63,12 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "--confirm-apple-upload" || arg === "--confirm-app-store-connect-upload") {
       args.confirmAppleUpload = true;
+    } else if (arg === "--confirm-review-metadata-complete") {
+      args.confirmReviewMetadataComplete = true;
+    } else if (arg === "--confirm-app-privacy-complete") {
+      args.confirmAppPrivacyComplete = true;
+    } else if (arg === "--confirm-external-testing-ready") {
+      args.confirmExternalTestingReady = true;
     } else if (arg === "--confirm-no-secrets") {
       args.confirmNoSecrets = true;
     } else if (arg === "--confirm-developer-id-archive") {
@@ -122,6 +134,18 @@ function nonPlaceholderString(value) {
 
 function normalizedStatus(value) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function validHttpsURL(value) {
+  if (!nonPlaceholderString(value)) {
+    return false;
+  }
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === "https:" && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function collectUnsafeContent(value, path = "$") {
@@ -281,6 +305,63 @@ function validateTestFlightObservation(observation, draft, args) {
   return problems;
 }
 
+function validateAppStoreReviewObservation(observation, draft, args) {
+  const problems = validateSharedObservation(
+    observation,
+    draft,
+    args,
+    "native_app_store_review_metadata_observation",
+    "observed",
+    "reviewedAt"
+  );
+  if (!args.confirmReviewMetadataComplete) {
+    problems.push("confirmReviewMetadataComplete");
+  }
+  if (!args.confirmAppPrivacyComplete) {
+    problems.push("confirmAppPrivacyComplete");
+  }
+  if (!args.confirmExternalTestingReady) {
+    problems.push("confirmExternalTestingReady");
+  }
+  if (!args.confirmNoSecrets) {
+    problems.push("confirmNoSecrets");
+  }
+  if (observation?.app && typeof observation.app === "object" && !Array.isArray(observation.app)) {
+    if (observation.app.target !== "MeetingAssistAppleApp") {
+      problems.push("app.target");
+    }
+    if (!["ios", "ipados"].includes(String(observation.app.clientPlatform ?? "").trim())) {
+      problems.push("app.clientPlatform");
+    }
+  }
+  const metadata = observation?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    problems.push("metadata");
+  } else {
+    if (!validHttpsURL(metadata.supportURL)) {
+      problems.push("metadata.supportURL");
+    }
+    if (!validHttpsURL(metadata.privacyPolicyURL)) {
+      problems.push("metadata.privacyPolicyURL");
+    }
+    for (const key of [
+      "descriptionReady",
+      "keywordsReady",
+      "screenshotsReady",
+      "appPrivacyReady",
+      "ageRatingComplete",
+      "exportComplianceComplete",
+      "testInformationReady",
+      "externalTestingGroupReady",
+    ]) {
+      if (metadata[key] !== true) {
+        problems.push(`metadata.${key}`);
+      }
+    }
+  }
+  return problems;
+}
+
 function validateNotarizationObservation(observation, draft, args) {
   const problems = validateSharedObservation(
     observation,
@@ -425,6 +506,62 @@ function promotedTestFlightArtifact(observation, draft, item, promotedAt, inputP
   };
 }
 
+function promotedAppStoreReviewArtifact(observation, draft, item, promotedAt, inputPath) {
+  const metadata = observation.metadata;
+  return {
+    schemaVersion: 1,
+    artifactType: "native_app_store_review_metadata",
+    claimScope: "app_store_external_testing_review",
+    releaseEligible: true,
+    status: "ready",
+    runId: draft.runId,
+    reviewedAt: observation.reviewedAt,
+    app: {
+      version: String(observation.app.version ?? "").trim(),
+      build: String(observation.app.build ?? "").trim(),
+      target: "MeetingAssistAppleApp",
+      clientPlatform: String(observation.app.clientPlatform ?? "").trim(),
+      bundleIdentifier: String(observation.app.bundleIdentifier ?? "").trim(),
+    },
+    metadata: {
+      supportURL: String(metadata.supportURL ?? "").trim(),
+      privacyPolicyURL: String(metadata.privacyPolicyURL ?? "").trim(),
+      descriptionReady: true,
+      keywordsReady: true,
+      screenshotsReady: true,
+      appPrivacyReady: true,
+      ageRatingComplete: true,
+      exportComplianceComplete: true,
+      testInformationReady: true,
+      externalTestingGroupReady: true,
+    },
+    releaseEvidenceSummary: {
+      status: "ready",
+      runId: draft.runId,
+      version: draft.version,
+      build: draft.build,
+      reviewedAt: observation.reviewedAt,
+      supportURL: String(metadata.supportURL ?? "").trim(),
+      privacyPolicyURL: String(metadata.privacyPolicyURL ?? "").trim(),
+      externalTestingReady: true,
+    },
+    promotion: {
+      promotedAt,
+      sourceArtifactType: observation.artifactType,
+      sourceStatus: observation.status,
+      sourceRunId: String(observation.runId ?? "").trim(),
+      sourceReviewedAt: observation.reviewedAt,
+      sourceArtifact: repoSafeSourceLabel(inputPath),
+      operatorConfirmedReviewMetadataComplete: true,
+      operatorConfirmedAppPrivacyComplete: true,
+      operatorConfirmedExternalTestingReady: true,
+      operatorConfirmedNoSecrets: true,
+      operatorConfirmedCurrentBuild: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+}
+
 function promotedNotarizationArtifact(observation, draft, item, promotedAt, inputPath) {
   const requestId = String(observation.notarization.requestId ?? "").trim();
   return {
@@ -514,6 +651,36 @@ function kindConfig(kind) {
       },
     };
   }
+  if (kind === "app-review") {
+    return {
+      itemKey: "appStoreReview",
+      artifactKey: "appStoreReview",
+      label: "appStoreReview",
+      validate: validateAppStoreReviewObservation,
+      promote: promotedAppStoreReviewArtifact,
+      alreadyPassed(item) {
+        return item.status === "ready";
+      },
+      updateDraft(item, artifact) {
+        return {
+          ...item,
+          status: "ready",
+          reviewedAt: artifact.reviewedAt,
+          supportURL: artifact.metadata.supportURL,
+          privacyPolicyURL: artifact.metadata.privacyPolicyURL,
+          descriptionReady: true,
+          keywordsReady: true,
+          screenshotsReady: true,
+          appPrivacyReady: true,
+          ageRatingComplete: true,
+          exportComplianceComplete: true,
+          testInformationReady: true,
+          externalTestingGroupReady: true,
+          artifactRef: item.artifactRef,
+        };
+      },
+    };
+  }
   if (kind === "notarization") {
     return {
       itemKey: "macNotarization",
@@ -536,7 +703,7 @@ function kindConfig(kind) {
       },
     };
   }
-  throw new Error("--kind must be testflight or notarization.");
+  throw new Error("--kind must be testflight, app-review, or notarization.");
 }
 
 function promote(args) {
@@ -619,7 +786,7 @@ function promote(args) {
     runId: draft.runId,
     promotedAt,
     nextSteps: proofpack.nextSteps ?? [
-      "Complete remaining physical device, TURN, TestFlight, and notarization evidence.",
+      "Complete remaining physical device, TURN, room, app review metadata, TestFlight, and notarization evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict --evidence-file <proofpack>/ReleaseEvidence.draft.json.",
     ],
   };

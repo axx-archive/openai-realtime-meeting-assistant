@@ -522,7 +522,7 @@ function promote(args) {
     relayCandidateType: artifact.selectedCandidate.relayCandidateType,
     promotedAt,
     nextSteps: proofpack.nextSteps ?? [
-      "Complete remaining device, TestFlight, and notarization evidence.",
+      "Complete remaining device, room, App Store review metadata, TestFlight, and notarization evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict --evidence-file <proofpack>/ReleaseEvidence.draft.json.",
     ],
   };

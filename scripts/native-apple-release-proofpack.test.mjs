@@ -104,6 +104,7 @@ const proofpack = JSON.parse(readFileSync(created.output.proofpackPath, "utf8"))
 assert.equal(proofpack.schemaVersion, 1);
 assert.equal(proofpack.runId, runId);
 assert.equal(proofpack.roomId, roomId);
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind app-review")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind testflight")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind notarization")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-release-package-plan.mjs")));
@@ -118,6 +119,7 @@ for (const ref of Object.values(proofpack.observationTemplates)) {
 }
 assert.equal(proofpack.observationTemplates.iphoneMedia, `artifacts/native-apple/${runId}/inbox/iphone-qa_snapshot.template.json`);
 assert.equal(proofpack.observationTemplates.roomInterop, `artifacts/native-apple/${runId}/inbox/room-interop-observation.template.json`);
+assert.equal(proofpack.observationTemplates.appStoreReview, `artifacts/native-apple/${runId}/inbox/app-store-review-observation.template.json`);
 assert.equal(proofpack.observationTemplates.testFlight, `artifacts/native-apple/${runId}/inbox/testflight-observation.template.json`);
 const inboxReadme = readFileSync(resolve(rootDir, "artifacts", "native-apple", runId, "inbox", "README.md"), "utf8");
 assert.match(inboxReadme, /scaffolds, not release proof/);
@@ -131,6 +133,7 @@ assert.match(inboxReadme, /iPad media: ipad-qa_snapshot\.json/);
 assert.match(inboxReadme, /Mac media: mac-qa_snapshot\.json/);
 assert.match(inboxReadme, /Restrictive TURN: turn-relay-observation\.json/);
 assert.match(inboxReadme, /Browser\/native room gate: room-interop-observation\.json/);
+assert.match(inboxReadme, /App Store review metadata: app-store-review-observation\.json/);
 const iphoneTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.iphoneMedia), "utf8"));
 assert.equal(iphoneTemplate.artifactType, "native_device_media");
 assert.equal(iphoneTemplate.status, "template");
@@ -151,6 +154,15 @@ assert.equal(roomInteropTemplate.artifactType, "native_room_interop_observation"
 assert.equal(roomInteropTemplate.status, "template");
 assert.equal(roomInteropTemplate.room.participantCount, 0);
 assert.equal(roomInteropTemplate.recording.recordingOffRealtimeForwarded, true);
+const appStoreReviewArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.appStoreReview), "utf8"));
+assert.equal(appStoreReviewArtifact.schemaVersion, 1);
+assert.match(appStoreReviewArtifact.notes, /native-apple-promote-distribution-evidence\.mjs --kind app-review/);
+const appStoreReviewTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.appStoreReview), "utf8"));
+assert.equal(appStoreReviewTemplate.artifactType, "native_app_store_review_metadata_observation");
+assert.equal(appStoreReviewTemplate.status, "template");
+assert.equal(appStoreReviewTemplate.app.bundleIdentifier, "co.thebonfire.meetingassist.ios");
+assert.equal(appStoreReviewTemplate.metadata.supportURL, "");
+assert.equal(appStoreReviewTemplate.metadata.keywordsReady, false);
 const testFlightArtifact = JSON.parse(readFileSync(resolve(rootDir, proofpack.evidenceArtifacts.testFlight), "utf8"));
 assert.equal(testFlightArtifact.schemaVersion, 1);
 assert.match(testFlightArtifact.notes, /native-apple-promote-distribution-evidence\.mjs --kind testflight/);
@@ -174,6 +186,8 @@ assert.equal(draft.build, "15");
 assert.equal(draft.physicalDeviceMedia.iphone.status, "pending");
 assert.equal(draft.physicalDeviceMedia.iphone.mediaAssertions.cameraPublished, false);
 assert.equal(draft.restrictiveNetworkTurn.status, "pending");
+assert.equal(draft.appStoreReview.status, "pending");
+assert.equal(draft.appStoreReview.keywordsReady, false);
 assert.equal(draft.testFlight.status, "pending");
 assert.equal(draft.macNotarization.status, "pending");
 
@@ -342,6 +356,41 @@ const promotedRoomInterop = runScript(promoteRoomScriptPath, [
 ]);
 assert.equal(promotedRoomInterop.status, 0);
 
+const appStoreReviewObservation = JSON.parse(readFileSync(resolve(rootDir, promotionManifest.observationTemplates.appStoreReview), "utf8"));
+const appStoreReviewInputPath = writeJSONFile(
+  resolve(promotionProofpack.output.proofpackDir, "inbox", "app-store-review-observation.json"),
+  {
+    ...appStoreReviewObservation,
+    status: "observed",
+    metadata: {
+      supportURL: "https://thebonfire.xyz/support",
+      privacyPolicyURL: "https://thebonfire.xyz/privacy",
+      descriptionReady: true,
+      keywordsReady: true,
+      screenshotsReady: true,
+      appPrivacyReady: true,
+      ageRatingComplete: true,
+      exportComplianceComplete: true,
+      testInformationReady: true,
+      externalTestingGroupReady: true,
+    },
+  }
+);
+const promotedAppStoreReview = runScript(promoteDistributionScriptPath, [
+  "--proofpack-dir",
+  promotionProofpack.output.proofpackDir,
+  "--kind",
+  "app-review",
+  "--input",
+  appStoreReviewInputPath,
+  "--confirm-review-metadata-complete",
+  "--confirm-app-privacy-complete",
+  "--confirm-external-testing-ready",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+]);
+assert.equal(promotedAppStoreReview.status, 0);
+
 const testFlightObservation = JSON.parse(readFileSync(resolve(rootDir, promotionManifest.observationTemplates.testFlight), "utf8"));
 const testFlightInputPath = writeJSONFile(
   resolve(promotionProofpack.output.proofpackDir, "inbox", "testflight-observation.json"),
@@ -419,6 +468,9 @@ assert.equal(promotedDraft.physicalDeviceMedia.ipad.status, "passed");
 assert.equal(promotedDraft.physicalDeviceMedia.mac.status, "passed");
 assert.equal(promotedDraft.restrictiveNetworkTurn.status, "passed");
 assert.equal(promotedDraft.roomInterop.status, "passed");
+assert.equal(promotedDraft.appStoreReview.status, "ready");
+assert.equal(promotedDraft.appStoreReview.supportURL, "https://thebonfire.xyz/support");
+assert.equal(promotedDraft.appStoreReview.keywordsReady, true);
 assert.equal(promotedDraft.testFlight.status, "ready");
 assert.equal(promotedDraft.macNotarization.status, "accepted");
 
@@ -455,6 +507,7 @@ assert.equal(strictReadinessOutput.readyForDistribution, false);
 assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "physical_device_media_evidence"));
 assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "restrictive_turn_evidence"));
 assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "room_interop_evidence"));
+assert.ok(strictReadinessOutput.blockers.some((blocker) => blocker.id === "app_store_review_metadata"));
 
 const localEvidencePath = resolve(fixture.appleDir, "ReleaseEvidence.local.json");
 const pendingWrite = runProofpack([
@@ -542,6 +595,20 @@ const completedDraft = {
     cleanLeaveParticipantsEmpty: true,
     recordingOffStopsForwarding: true,
   },
+  appStoreReview: {
+    ...draft.appStoreReview,
+    status: "ready",
+    supportURL: "https://thebonfire.xyz/support",
+    privacyPolicyURL: "https://thebonfire.xyz/privacy",
+    descriptionReady: true,
+    keywordsReady: true,
+    screenshotsReady: true,
+    appPrivacyReady: true,
+    ageRatingComplete: true,
+    exportComplianceComplete: true,
+    testInformationReady: true,
+    externalTestingGroupReady: true,
+  },
   testFlight: {
     ...draft.testFlight,
     status: "ready",
@@ -556,7 +623,7 @@ const completedDraft = {
 };
 writeFileSync(created.output.evidenceDraft, `${JSON.stringify(completedDraft, null, 2)}\n`);
 
-const wroteEvidence = runProofpack([
+const manualCompletedWrite = runProofpack([
   "--apple-dir",
   fixture.appleDir,
   "--proofpack-dir",
@@ -564,11 +631,24 @@ const wroteEvidence = runProofpack([
   "--write-evidence",
   "--skip-gates",
 ]);
+assert.equal(manualCompletedWrite.status, 1);
+assert.match(manualCompletedWrite.output.error, /incomplete/);
+assert.equal(existsSync(localEvidencePath), false);
+
+const wroteEvidence = runProofpack([
+  "--apple-dir",
+  fixture.appleDir,
+  "--proofpack-dir",
+  promotionProofpack.output.proofpackDir,
+  "--write-evidence",
+  "--skip-gates",
+]);
 assert.equal(wroteEvidence.status, 0);
 assert.ok(wroteEvidence.output.localEvidenceWritten.endsWith("apple/ReleaseEvidence.local.json"));
 assert.equal(wroteEvidence.output.releaseEvidenceComplete, true);
 assert.deepEqual(wroteEvidence.output.releaseEvidenceMissing, []);
-assert.deepEqual(JSON.parse(readFileSync(wroteEvidence.output.localEvidenceWritten, "utf8")), completedDraft);
+assert.deepEqual(JSON.parse(readFileSync(wroteEvidence.output.localEvidenceWritten, "utf8")), promotedDraft);
+rmSync(localEvidencePath, { force: true });
 
 const duplicate = runProofpack([
   "--apple-dir",

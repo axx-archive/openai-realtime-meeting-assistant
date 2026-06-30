@@ -12,8 +12,8 @@ function usage() {
     "Default mode exits nonzero only for broken repo prerequisites.",
     "--strict also exits nonzero for external distribution blockers such as missing",
     "Apple team configuration, app icons, privacy manifest metadata, physical",
-    "device media proof, restrictive-network TURN proof, TestFlight upload, or",
-    "macOS notarization evidence.",
+    "device media proof, restrictive-network TURN proof, App Store review",
+    "metadata, TestFlight upload, or macOS notarization evidence.",
   ].join("\n");
 }
 
@@ -216,6 +216,18 @@ function validTimestamp(value) {
   return nonPlaceholderString(value) && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
 }
 
+function validHttpsURL(value) {
+  if (!nonPlaceholderString(value)) {
+    return false;
+  }
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === "https:" && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function strictStringEqual(actual, expected) {
   return String(actual ?? "").trim() === String(expected ?? "").trim();
 }
@@ -260,6 +272,7 @@ function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
     ["physicalDeviceMedia.mac.artifactRef", evidence.physicalDeviceMedia?.mac?.artifactRef],
     ["restrictiveNetworkTurn.artifactRef", evidence.restrictiveNetworkTurn?.artifactRef],
     ["roomInterop.artifactRef", evidence.roomInterop?.artifactRef],
+    ["appStoreReview.artifactRef", evidence.appStoreReview?.artifactRef],
     ["testFlight.artifactRef", evidence.testFlight?.artifactRef],
     ["macNotarization.artifactRef", evidence.macNotarization?.artifactRef],
   ];
@@ -1244,6 +1257,17 @@ function collectRoomInteropArtifactContentProblems(evidence, evidenceRootDir, ex
   return uniqueLabels(roomInteropArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId, roomId: evidence.roomId }));
 }
 
+const appStoreReviewBooleanFields = [
+  "descriptionReady",
+  "keywordsReady",
+  "screenshotsReady",
+  "appPrivacyReady",
+  "ageRatingComplete",
+  "exportComplianceComplete",
+  "testInformationReady",
+  "externalTestingGroupReady",
+];
+
 const testFlightEvidenceStatuses = ["ready", "uploaded", "processing", "accepted"];
 
 function collectUnsafeDistributionArtifactContent(value, path = "$") {
@@ -1464,6 +1488,191 @@ function testFlightArtifactProblems({ item, artifact, expectedVersion, expectedB
   const unsafeContent = [
     ...collectSecretLikeEvidence(artifact, "$.testFlight.artifact"),
     ...collectUnsafeDistributionArtifactContent(artifact, "$.testFlight.artifact"),
+  ];
+  if (unsafeContent.length > 0) {
+    problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
+  }
+  return problems;
+}
+
+function appStoreReviewArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId }) {
+  const problems = [];
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["artifact:not_object"];
+  }
+  problems.push(
+    ...collectUnexpectedKeys(
+      artifact,
+      [
+        "schemaVersion",
+        "artifactType",
+        "claimScope",
+        "releaseEligible",
+        "status",
+        "runId",
+        "reviewedAt",
+        "app",
+        "metadata",
+        "releaseEvidenceSummary",
+        "promotion",
+      ],
+      "artifact"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.app,
+      ["version", "build", "target", "clientPlatform", "bundleIdentifier"],
+      "artifact.app"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.metadata,
+      ["supportURL", "privacyPolicyURL", ...appStoreReviewBooleanFields],
+      "artifact.metadata"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.releaseEvidenceSummary,
+      ["status", "runId", "version", "build", "reviewedAt", "supportURL", "privacyPolicyURL", "externalTestingReady"],
+      "artifact.releaseEvidenceSummary"
+    ),
+    ...collectUnexpectedKeys(
+      artifact.promotion,
+      [
+        "promotedAt",
+        "sourceArtifactType",
+        "sourceStatus",
+        "sourceRunId",
+        "sourceReviewedAt",
+        "sourceArtifact",
+        "operatorConfirmedReviewMetadataComplete",
+        "operatorConfirmedAppPrivacyComplete",
+        "operatorConfirmedExternalTestingReady",
+        "operatorConfirmedNoSecrets",
+        "operatorConfirmedCurrentBuild",
+        "releaseEvidenceArtifactRef",
+      ],
+      "artifact.promotion"
+    )
+  );
+  if (artifact.schemaVersion !== 1) {
+    problems.push("artifact:schemaVersion");
+  }
+  if (artifact.artifactType !== "native_app_store_review_metadata") {
+    problems.push("artifact:artifactType");
+  }
+  if (artifact.claimScope !== "app_store_external_testing_review") {
+    problems.push("artifact:claimScope");
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push("artifact:releaseEligible");
+  }
+  if (artifact.status !== "ready") {
+    problems.push("artifact:status");
+  }
+  if (!expectedIdentity(artifact.runId, runId)) {
+    problems.push("artifact:runId");
+  }
+  if (!validTimestamp(artifact.reviewedAt)) {
+    problems.push("artifact:reviewedAt");
+  } else if (!strictStringEqual(artifact.reviewedAt, item.reviewedAt)) {
+    problems.push("artifact:reviewedAt.match");
+  }
+  if (!artifact.app || typeof artifact.app !== "object" || Array.isArray(artifact.app)) {
+    problems.push("artifact:app");
+  } else {
+    if (!expectedIdentity(artifact.app.version, expectedVersion)) {
+      problems.push("artifact:app.version");
+    }
+    if (!expectedIdentity(artifact.app.build, expectedBuild)) {
+      problems.push("artifact:app.build");
+    }
+    if (artifact.app.target !== "MeetingAssistAppleApp") {
+      problems.push("artifact:app.target");
+    }
+    if (!["ios", "ipados"].includes(String(artifact.app.clientPlatform ?? "").trim())) {
+      problems.push("artifact:app.clientPlatform");
+    }
+    if (!nonPlaceholderString(artifact.app.bundleIdentifier)) {
+      problems.push("artifact:app.bundleIdentifier");
+    }
+  }
+  const metadata = artifact.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    problems.push("artifact:metadata");
+  } else {
+    if (!validHttpsURL(metadata.supportURL) || !strictStringEqual(metadata.supportURL, item.supportURL)) {
+      problems.push("artifact:metadata.supportURL");
+    }
+    if (!validHttpsURL(metadata.privacyPolicyURL) || !strictStringEqual(metadata.privacyPolicyURL, item.privacyPolicyURL)) {
+      problems.push("artifact:metadata.privacyPolicyURL");
+    }
+    for (const key of appStoreReviewBooleanFields) {
+      if (metadata[key] !== true || item[key] !== true) {
+        problems.push(`artifact:metadata.${key}`);
+      }
+    }
+  }
+  const summary = artifact.releaseEvidenceSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    problems.push("artifact:releaseEvidenceSummary");
+  } else {
+    if (summary.status !== "ready") {
+      problems.push("artifact:releaseEvidenceSummary.status");
+    }
+    if (!expectedIdentity(summary.runId, runId)) {
+      problems.push("artifact:releaseEvidenceSummary.runId");
+    }
+    if (!expectedIdentity(summary.version, expectedVersion)) {
+      problems.push("artifact:releaseEvidenceSummary.version");
+    }
+    if (!expectedIdentity(summary.build, expectedBuild)) {
+      problems.push("artifact:releaseEvidenceSummary.build");
+    }
+    if (!validTimestamp(summary.reviewedAt) || !strictStringEqual(summary.reviewedAt, item.reviewedAt)) {
+      problems.push("artifact:releaseEvidenceSummary.reviewedAt");
+    }
+    if (!validHttpsURL(summary.supportURL) || !strictStringEqual(summary.supportURL, item.supportURL)) {
+      problems.push("artifact:releaseEvidenceSummary.supportURL");
+    }
+    if (!validHttpsURL(summary.privacyPolicyURL) || !strictStringEqual(summary.privacyPolicyURL, item.privacyPolicyURL)) {
+      problems.push("artifact:releaseEvidenceSummary.privacyPolicyURL");
+    }
+    if (summary.externalTestingReady !== true) {
+      problems.push("artifact:releaseEvidenceSummary.externalTestingReady");
+    }
+  }
+  const promotion = artifact.promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) {
+    problems.push("artifact:promotion");
+  } else {
+    if (!validTimestamp(promotion.promotedAt)) {
+      problems.push("artifact:promotion.promotedAt");
+    }
+    if (promotion.sourceStatus !== "observed") {
+      problems.push("artifact:promotion.sourceStatus");
+    }
+    if (!expectedIdentity(promotion.sourceRunId, runId)) {
+      problems.push("artifact:promotion.sourceRunId");
+    }
+    if (!validTimestamp(promotion.sourceReviewedAt) || !strictStringEqual(promotion.sourceReviewedAt, item.reviewedAt)) {
+      problems.push("artifact:promotion.sourceReviewedAt");
+    }
+    for (const key of [
+      "operatorConfirmedReviewMetadataComplete",
+      "operatorConfirmedAppPrivacyComplete",
+      "operatorConfirmedExternalTestingReady",
+      "operatorConfirmedNoSecrets",
+      "operatorConfirmedCurrentBuild",
+    ]) {
+      if (promotion[key] !== true) {
+        problems.push(`artifact:promotion.${key}`);
+      }
+    }
+    if (!strictStringEqual(promotion.releaseEvidenceArtifactRef, item.artifactRef)) {
+      problems.push("artifact:promotion.releaseEvidenceArtifactRef");
+    }
+  }
+  const unsafeContent = [
+    ...collectSecretLikeEvidence(artifact, "$.appStoreReview.artifact"),
+    ...collectUnsafeDistributionArtifactContent(artifact, "$.appStoreReview.artifact"),
   ];
   if (unsafeContent.length > 0) {
     problems.push(`artifact:unsafeContent:${unsafeContent.slice(0, 3).join("|")}`);
@@ -1746,6 +1955,25 @@ function collectTestFlightArtifactContentProblems(evidence, evidenceRootDir, exp
   return uniqueLabels(testFlightArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId }));
 }
 
+function collectAppStoreReviewArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
+  const item = evidence.appStoreReview;
+  const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
+  const pathCheck = distributionArtifactPathProblems(path);
+  if (pathCheck.skip) {
+    return [];
+  }
+  if (pathCheck.problems.length > 0) {
+    return pathCheck.problems;
+  }
+  let artifact;
+  try {
+    artifact = readJSONFile(path);
+  } catch {
+    return ["artifact:not_valid_json"];
+  }
+  return uniqueLabels(appStoreReviewArtifactProblems({ item, artifact, expectedVersion, expectedBuild, runId: evidence.runId }));
+}
+
 function collectNotarizationArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
   const item = evidence.macNotarization;
   const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
@@ -1869,7 +2097,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
       {
         id: "release_evidence_file",
         detail:
-          "Add ignored apple/ReleaseEvidence.local.json or pass --evidence-file with physical device, TURN relay, browser/native room-gate, TestFlight, and macOS notarization proof for this build.",
+          "Add ignored apple/ReleaseEvidence.local.json or pass --evidence-file with physical device, TURN relay, browser/native room-gate, App Store review metadata, TestFlight, and macOS notarization proof for this build.",
       },
     ];
   }
@@ -1896,6 +2124,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
         "physicalDeviceMedia",
         "restrictiveNetworkTurn",
         "roomInterop",
+        "appStoreReview",
         "testFlight",
         "macNotarization",
       ],
@@ -1941,6 +2170,19 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
         "artifactRef",
       ],
       "$.roomInterop"
+    ),
+    ...collectUnexpectedKeys(
+      evidence.appStoreReview,
+      [
+        "status",
+        "runId",
+        "reviewedAt",
+        "supportURL",
+        "privacyPolicyURL",
+        ...appStoreReviewBooleanFields,
+        "artifactRef",
+      ],
+      "$.appStoreReview"
     ),
     ...collectUnexpectedKeys(
       evidence.testFlight,
@@ -2133,6 +2375,50 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     blockers.push({
       id: "room_interop_evidence",
       detail: `Add browser/native 3+ participant room gate evidence for the same release run, including clean leave and recording-off forwarding proof. Missing or invalid: ${missing.join(", ")}`,
+    });
+  }
+
+  const appStoreReview = evidence.appStoreReview;
+  const appStoreReviewProblems = [
+    ...collectAppStoreReviewArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
+  ];
+  if (!appStoreReview || typeof appStoreReview !== "object" || Array.isArray(appStoreReview)) {
+    appStoreReviewProblems.push("missing");
+  } else {
+    if (appStoreReview.status !== "ready") {
+      appStoreReviewProblems.push("status");
+    }
+    if (!validTimestamp(appStoreReview.reviewedAt)) {
+      appStoreReviewProblems.push("reviewedAt");
+    }
+    if (!expectedIdentity(appStoreReview.runId, runId)) {
+      appStoreReviewProblems.push("runId");
+    }
+    if (!validHttpsURL(appStoreReview.supportURL)) {
+      appStoreReviewProblems.push("supportURL");
+    }
+    if (!validHttpsURL(appStoreReview.privacyPolicyURL)) {
+      appStoreReviewProblems.push("privacyPolicyURL");
+    }
+    for (const key of appStoreReviewBooleanFields) {
+      if (appStoreReview[key] !== true) {
+        appStoreReviewProblems.push(key);
+      }
+    }
+    if (!validArtifactRef(appStoreReview.artifactRef)) {
+      appStoreReviewProblems.push("artifactRef");
+    } else {
+      const artifactPath = localArtifactPath(appStoreReview.artifactRef, dirname(appleDir));
+      if (!artifactPath || artifactPath.startsWith("__")) {
+        appStoreReviewProblems.push("artifactRef.localJsonRequired");
+      }
+    }
+  }
+  if (appStoreReviewProblems.length > 0) {
+    const missing = uniqueLabels(appStoreReviewProblems);
+    blockers.push({
+      id: "app_store_review_metadata",
+      detail: `Add App Store review metadata evidence before external TestFlight/App Store readiness claims. Missing or invalid: ${missing.join(", ")}`,
     });
   }
 

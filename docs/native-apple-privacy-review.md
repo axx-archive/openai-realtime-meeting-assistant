@@ -86,6 +86,6 @@ present on disk but not wired into the generated Xcode app-target resources.
 
 After privacy is approved, strict release readiness still requires
 `apple/ReleaseEvidence.local.json` or an explicit `--evidence-file` with
-physical-device, restrictive-TURN, TestFlight, and macOS notarization proof for
-the same version/build, tied to one release run and backed by non-secret
-artifact references.
+physical-device, restrictive-TURN, browser/native room-gate, App Store review
+metadata, TestFlight, and macOS notarization proof for the same version/build,
+tied to one release run and backed by non-secret artifact references.

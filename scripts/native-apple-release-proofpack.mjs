@@ -253,6 +253,23 @@ function pendingTestFlightArtifact(runId, createdAt) {
   };
 }
 
+function pendingAppStoreReviewArtifact(runId, createdAt) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_app_store_review_metadata",
+    status: "pending",
+    runId,
+    capturedAt: createdAt,
+    operatorChecklist: [
+      "Complete non-secret App Store Connect app review metadata for the current iOS/iPadOS build.",
+      "Confirm support URL and privacy policy URL are HTTPS and public.",
+      "Confirm description, keywords, screenshots, App Privacy answers, age rating, export compliance, test information, and external testing group setup are ready.",
+      "Record only status booleans and public URLs; do not include Apple IDs, Team IDs, API keys, reviewer contact emails, or raw App Store Connect logs.",
+    ],
+    notes: "Use scripts/native-apple-promote-distribution-evidence.mjs --kind app-review with a sanitized native_app_store_review_metadata_observation before copying ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json.",
+  };
+}
+
 function pendingNotarizationArtifact(runId, createdAt) {
   return {
     schemaVersion: 1,
@@ -437,6 +454,35 @@ function testFlightObservationTemplate(runId, createdAt, version, build, bundleI
   };
 }
 
+function appStoreReviewObservationTemplate(runId, createdAt, version, build, bundleIdentifier) {
+  return {
+    schemaVersion: 1,
+    artifactType: "native_app_store_review_metadata_observation",
+    status: "template",
+    runId,
+    reviewedAt: createdAt,
+    app: {
+      version,
+      build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+      bundleIdentifier,
+    },
+    metadata: {
+      supportURL: "",
+      privacyPolicyURL: "",
+      descriptionReady: false,
+      keywordsReady: false,
+      screenshotsReady: false,
+      appPrivacyReady: false,
+      ageRatingComplete: false,
+      exportComplianceComplete: false,
+      testInformationReady: false,
+      externalTestingGroupReady: false,
+    },
+  };
+}
+
 function notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifier) {
   return {
     schemaVersion: 1,
@@ -514,13 +560,14 @@ template, fill only the sanitized fields, and promote it with the named helper:
 
 - Restrictive TURN: turn-relay-observation.json
 - Browser/native room gate: room-interop-observation.json
+- App Store review metadata: app-store-review-observation.json
 - TestFlight upload: testflight-observation.json
 - macOS notarization: notarization-observation.json
 
 Files ending in .template.json are scaffolds, not release proof. Copy a template
 to the same folder without .template.json only after replacing placeholders with
 values from the real physical-device, restrictive-network, browser/native room,
-TestFlight, or notarization run.
+App Store review metadata, TestFlight, or notarization run.
 
 Promotion helpers validate inbox observations and then write the release proof
 under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
@@ -609,6 +656,22 @@ function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }
       recordingOffStopsForwarding: false,
       artifactRef: refs.roomInterop,
     },
+    appStoreReview: {
+      status: "pending",
+      runId,
+      reviewedAt: createdAt,
+      supportURL: "",
+      privacyPolicyURL: "",
+      descriptionReady: false,
+      keywordsReady: false,
+      screenshotsReady: false,
+      appPrivacyReady: false,
+      ageRatingComplete: false,
+      exportComplianceComplete: false,
+      testInformationReady: false,
+      externalTestingGroupReady: false,
+      artifactRef: refs.appStoreReview,
+    },
     testFlight: {
       status: "pending",
       appStoreConnectBuildId: "",
@@ -627,6 +690,52 @@ function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function localArtifactPathForCompletion(ref) {
+  if (!nonEmptyString(ref) || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
+    return "";
+  }
+  return resolve(rootDir, ref);
+}
+
+function artifactCompletionProblems(ref, label, expected) {
+  const problems = [];
+  const path = localArtifactPathForCompletion(ref);
+  if (!path) {
+    return [`${label}.artifactRef.local`];
+  }
+  if (!existsSync(path)) {
+    return [`${label}.artifactRef.exists`];
+  }
+  if (!path.toLowerCase().endsWith(".json")) {
+    return [`${label}.artifactRef.json`];
+  }
+  let artifact;
+  try {
+    artifact = readJSON(path);
+  } catch {
+    return [`${label}.artifactRef.validJson`];
+  }
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return [`${label}.artifact.object`];
+  }
+  if (artifact.artifactType !== expected.artifactType) {
+    problems.push(`${label}.artifact.artifactType`);
+  }
+  if (artifact.claimScope !== expected.claimScope) {
+    problems.push(`${label}.artifact.claimScope`);
+  }
+  if (artifact.releaseEligible !== true) {
+    problems.push(`${label}.artifact.releaseEligible`);
+  }
+  const status = String(artifact.status ?? "").trim();
+  if (expected.statuses && !expected.statuses.includes(status)) {
+    problems.push(`${label}.artifact.status`);
+  } else if (expected.status && status !== expected.status) {
+    problems.push(`${label}.artifact.status`);
+  }
+  return problems;
 }
 
 function releaseEvidenceCompletion(draft) {
@@ -660,6 +769,13 @@ function releaseEvidenceCompletion(draft) {
         missing.push(`physicalDeviceMedia.${platform}.mediaAssertions.${key}`);
       }
     }
+    missing.push(
+      ...artifactCompletionProblems(item.artifactRef, `physicalDeviceMedia.${platform}`, {
+        artifactType: "native_device_media",
+        claimScope: "physical_device",
+        status: "passed",
+      })
+    );
   }
 
   const turn = draft.restrictiveNetworkTurn;
@@ -674,20 +790,13 @@ function releaseEvidenceCompletion(draft) {
         missing.push(`restrictiveNetworkTurn.${key}`);
       }
     }
-  }
-
-  const testFlight = draft.testFlight;
-  if (!testFlight || typeof testFlight !== "object" || Array.isArray(testFlight)) {
-    missing.push("testFlight");
-  } else {
-    if (!["ready", "uploaded", "processing", "accepted"].includes(String(testFlight.status ?? "").trim())) {
-      missing.push("testFlight.status");
-    }
-    for (const key of ["appStoreConnectBuildId", "uploadedAt", "artifactRef"]) {
-      if (!nonEmptyString(testFlight[key])) {
-        missing.push(`testFlight.${key}`);
-      }
-    }
+    missing.push(
+      ...artifactCompletionProblems(turn.artifactRef, "restrictiveNetworkTurn", {
+        artifactType: "native_restrictive_turn",
+        claimScope: "restrictive_network_turn",
+        status: "passed",
+      })
+    );
   }
 
   const roomInterop = draft.roomInterop;
@@ -717,6 +826,69 @@ function releaseEvidenceCompletion(draft) {
         missing.push(`roomInterop.${key}`);
       }
     }
+    missing.push(
+      ...artifactCompletionProblems(roomInterop.artifactRef, "roomInterop", {
+        artifactType: "native_room_interop",
+        claimScope: "browser_native_room_gate",
+        status: "passed",
+      })
+    );
+  }
+
+  const appStoreReview = draft.appStoreReview;
+  if (!appStoreReview || typeof appStoreReview !== "object" || Array.isArray(appStoreReview)) {
+    missing.push("appStoreReview");
+  } else {
+    if (appStoreReview.status !== "ready") {
+      missing.push("appStoreReview.status");
+    }
+    for (const key of ["runId", "reviewedAt", "supportURL", "privacyPolicyURL", "artifactRef"]) {
+      if (!nonEmptyString(appStoreReview[key])) {
+        missing.push(`appStoreReview.${key}`);
+      }
+    }
+    for (const key of [
+      "descriptionReady",
+      "keywordsReady",
+      "screenshotsReady",
+      "appPrivacyReady",
+      "ageRatingComplete",
+      "exportComplianceComplete",
+      "testInformationReady",
+      "externalTestingGroupReady",
+    ]) {
+      if (appStoreReview[key] !== true) {
+        missing.push(`appStoreReview.${key}`);
+      }
+    }
+    missing.push(
+      ...artifactCompletionProblems(appStoreReview.artifactRef, "appStoreReview", {
+        artifactType: "native_app_store_review_metadata",
+        claimScope: "app_store_external_testing_review",
+        status: "ready",
+      })
+    );
+  }
+
+  const testFlight = draft.testFlight;
+  if (!testFlight || typeof testFlight !== "object" || Array.isArray(testFlight)) {
+    missing.push("testFlight");
+  } else {
+    if (!["ready", "uploaded", "processing", "accepted"].includes(String(testFlight.status ?? "").trim())) {
+      missing.push("testFlight.status");
+    }
+    for (const key of ["appStoreConnectBuildId", "uploadedAt", "artifactRef"]) {
+      if (!nonEmptyString(testFlight[key])) {
+        missing.push(`testFlight.${key}`);
+      }
+    }
+    missing.push(
+      ...artifactCompletionProblems(testFlight.artifactRef, "testFlight", {
+        artifactType: "native_testflight_upload",
+        claimScope: "app_store_connect_upload",
+        statuses: ["ready", "uploaded", "processing", "accepted"],
+      })
+    );
   }
 
   const mac = draft.macNotarization;
@@ -734,6 +906,13 @@ function releaseEvidenceCompletion(draft) {
         missing.push(`macNotarization.${key}`);
       }
     }
+    missing.push(
+      ...artifactCompletionProblems(mac.artifactRef, "macNotarization", {
+        artifactType: "native_macos_notarization",
+        claimScope: "macos_notarization",
+        status: "accepted",
+      })
+    );
   }
 
   return { complete: missing.length === 0, missing };
@@ -799,6 +978,7 @@ function createProofpack(args) {
     mac: join(evidenceDir, "mac-media.json"),
     turn: join(evidenceDir, "selected-turn-relay.json"),
     roomInterop: join(evidenceDir, "room-interop.json"),
+    appStoreReview: join(evidenceDir, "app-store-review.json"),
     testFlight: join(evidenceDir, "testflight-build.json"),
     notarization: join(evidenceDir, "mac-notarization.json"),
   };
@@ -809,6 +989,7 @@ function createProofpack(args) {
     macMedia: join(inboxDir, "mac-qa_snapshot.template.json"),
     turnRelay: join(inboxDir, "turn-relay-observation.template.json"),
     roomInterop: join(inboxDir, "room-interop-observation.template.json"),
+    appStoreReview: join(inboxDir, "app-store-review-observation.template.json"),
     testFlight: join(inboxDir, "testflight-observation.template.json"),
     notarization: join(inboxDir, "notarization-observation.template.json"),
   };
@@ -819,6 +1000,7 @@ function createProofpack(args) {
   writeJSON(artifactPaths.mac, pendingDeviceArtifact("mac", runId, roomId, createdAt));
   writeJSON(artifactPaths.turn, pendingTurnArtifact(runId, roomId, createdAt));
   writeJSON(artifactPaths.roomInterop, pendingRoomInteropArtifact(runId, roomId, createdAt));
+  writeJSON(artifactPaths.appStoreReview, pendingAppStoreReviewArtifact(runId, createdAt));
   writeJSON(artifactPaths.testFlight, pendingTestFlightArtifact(runId, createdAt));
   writeJSON(artifactPaths.notarization, pendingNotarizationArtifact(runId, createdAt));
   writeJSON(templatePaths.iphoneMedia, deviceObservationTemplate("iphone", runId, roomId, createdAt, version, build));
@@ -826,6 +1008,7 @@ function createProofpack(args) {
   writeJSON(templatePaths.macMedia, deviceObservationTemplate("mac", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.turnRelay, turnObservationTemplate(runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.roomInterop, roomInteropObservationTemplate(runId, roomId, createdAt, version, build));
+  writeJSON(templatePaths.appStoreReview, appStoreReviewObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
   writeJSON(templatePaths.testFlight, testFlightObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
   writeJSON(templatePaths.notarization, notarizationObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.macos));
   writeText(join(inboxDir, "README.md"), inboxReadme(runId, roomId, version, build));
@@ -853,6 +1036,7 @@ function createProofpack(args) {
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
       "Promote sanitized browser/native 3+ participant room gate observations with scripts/native-apple-promote-room-gate-evidence.mjs.",
+      "Promote sanitized App Store review metadata observations with scripts/native-apple-promote-distribution-evidence.mjs --kind app-review.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
       "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",

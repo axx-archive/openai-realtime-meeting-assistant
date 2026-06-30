@@ -74,6 +74,22 @@
     "recordingOffStopsForwarding": true,
     "artifactRef": "<artifacts/run-id/room-interop.json>"
   },
+  "appStoreReview": {
+    "status": "ready",
+    "runId": "<same native release run ID>",
+    "reviewedAt": "2026-06-29T12:29:00Z",
+    "supportURL": "https://thebonfire.xyz/support",
+    "privacyPolicyURL": "https://thebonfire.xyz/privacy",
+    "descriptionReady": true,
+    "keywordsReady": true,
+    "screenshotsReady": true,
+    "appPrivacyReady": true,
+    "ageRatingComplete": true,
+    "exportComplianceComplete": true,
+    "testInformationReady": true,
+    "externalTestingGroupReady": true,
+    "artifactRef": "<artifacts/run-id/app-store-review.json>"
+  },
   "testFlight": {
     "status": "ready",
     "appStoreConnectBuildId": "<App Store Connect build ID>",

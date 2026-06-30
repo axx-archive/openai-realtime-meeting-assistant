@@ -2974,3 +2974,90 @@ What worked:
   gap where an operator flag could overstate blank or stale evidence.
 - Extending the proof-pack and command-plan tests first made the new strict
   readiness blocker straightforward to validate without real Apple credentials.
+
+## Wave 40 - App Store Review Metadata Proof Lane
+
+Status: `wave40_app_store_review_metadata_gate_validated`
+
+Scope:
+- Continued the native Apple release objective through the requested
+  multi-agent loop. The sidecar release explorer identified that TestFlight
+  upload evidence was not the same as App Store review metadata/external testing
+  readiness.
+- Added a distinct `appStoreReview` release-evidence lane to proof-pack
+  generation, distribution promotion, strict readiness, operator package plans,
+  preflight stale-command checks, examples, and docs.
+- Kept `testFlight` scoped to App Store Connect upload/processing evidence.
+  App Store review metadata now covers public HTTPS support/privacy URLs,
+  description, keywords, screenshots, App Privacy, age rating, export
+  compliance, test information, and external testing group readiness.
+- Tightened strict readiness so `appStoreReview.artifactRef` must be a local
+  JSON artifact that strict readiness can inspect. Remote or opaque artifact
+  refs cannot satisfy the gate.
+- Tightened proof-pack `--write-evidence` completion so hand-flipped top-level
+  fields do not count as complete unless local promoted artifacts are present
+  with the expected artifact type, claim scope, release eligibility, and status.
+- Updated media, TURN, and room promoter fallback next steps so stale
+  proof-pack manifests still point operators at App Store review metadata before
+  TestFlight/App Store readiness claims.
+
+Files changed:
+- `apple/README.md`
+- `apple/ReleaseEvidence.example.json`
+- `docs/native-apple-privacy-review.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-promote-media-evidence.mjs`
+- `scripts/native-apple-promote-room-gate-evidence.mjs`
+- `scripts/native-apple-promote-turn-evidence.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check` passed for the changed native Apple evidence scripts and tests.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 14
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 65 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 7
+  checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10 checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 8
+  checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true`.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `ok:true`, `readyForDistribution:false`, and external
+  blockers for Apple signing/team setup, privacy manifest, and release evidence
+  now naming App Store review metadata.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+- Critic gate first rejected the patch for a remote app-review artifact bypass,
+  stale fallback next steps, and shape-only proof-pack completion. After fixes,
+  the second critic pass accepted the checkpoint at 9.2/10.
+
+Risks / blockers:
+- This wave does not complete App Store review metadata in App Store Connect,
+  upload to TestFlight, notarize macOS, or prove physical-device media quality.
+- Apple signing/team setup, approved privacy manifest, real physical
+  iPhone/iPad/Mac proof, restrictive TURN proof, browser/native room proof,
+  real TestFlight upload, real App Store review metadata, and macOS
+  notarization/stapling/Gatekeeper proof remain external release blockers.
+
+What worked:
+- Keeping App Store review metadata as its own proof-pack lane avoided
+  overloading TestFlight upload evidence with external testing readiness.
+- Requiring local promoted artifacts before `--write-evidence` made the proof
+  pack fail closed when someone edits only summary fields.
+- The critic loop caught the exact kind of shortcut the release gate is meant
+  to prevent.

@@ -466,7 +466,7 @@ function promote(args) {
     roomId: draft.roomId,
     promotedAt,
     nextSteps: proofpack.nextSteps ?? [
-      "Complete remaining physical device, TURN, TestFlight, and notarization evidence.",
+      "Complete remaining physical device, TURN, App Store review metadata, TestFlight, and notarization evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict --evidence-file <proofpack>/ReleaseEvidence.draft.json.",
     ],
   };

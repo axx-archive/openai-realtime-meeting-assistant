@@ -478,7 +478,7 @@ function promote(args) {
     promotedAt,
     physicalDeviceMediaComplete: Object.values(draft.physicalDeviceMedia).every((entry) => entry?.status === "passed"),
     nextSteps: proofpack.nextSteps ?? [
-      "Complete remaining device, TURN, TestFlight, and notarization evidence.",
+      "Complete remaining device, TURN, room, App Store review metadata, TestFlight, and notarization evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict --evidence-file <proofpack>/ReleaseEvidence.draft.json.",
     ],
   };

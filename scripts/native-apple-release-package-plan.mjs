@@ -375,6 +375,8 @@ function buildPlan(args) {
         turnRelayInput: artifactRef(join(proofpack.proofpackDir, "inbox", "turn-relay-observation.json")),
         roomInteropTemplate: proofpack.proofpack.observationTemplates?.roomInterop ?? null,
         roomInteropInput: artifactRef(join(proofpack.proofpackDir, "inbox", "room-interop-observation.json")),
+        appStoreReviewTemplate: proofpack.proofpack.observationTemplates?.appStoreReview ?? null,
+        appStoreReviewInput: artifactRef(join(proofpack.proofpackDir, "inbox", "app-store-review-observation.json")),
         testFlightTemplate: proofpack.proofpack.observationTemplates?.testFlight ?? null,
         testFlightInput: artifactRef(join(proofpack.proofpackDir, "inbox", "testflight-observation.json")),
         notarizationTemplate: proofpack.proofpack.observationTemplates?.notarization ?? null,
@@ -566,6 +568,24 @@ function buildPlan(args) {
       ],
       "Promotes the browser/native 3+ participant room gate observation after clean leave and recording-off forwarding behavior are verified."
     );
+    commands.promoteAppStoreReviewObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-promote-distribution-evidence.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--kind",
+        "app-review",
+        "--input",
+        observationInputs.appStoreReviewInput,
+        "--confirm-review-metadata-complete",
+        "--confirm-app-privacy-complete",
+        "--confirm-external-testing-ready",
+        "--confirm-no-secrets",
+        "--confirm-current-build",
+      ],
+      "Promotes the sanitized App Store review metadata observation after App Store Connect metadata, public URLs, privacy answers, and external testing group setup are ready."
+    );
     commands.promoteTestFlightObservation = commandSpec(
       [
         "node",
@@ -699,11 +719,12 @@ function buildPlan(args) {
       "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
       "Capture and promote restrictive-network TURN relay evidence.",
       "Capture and promote browser/native 3+ participant room gate evidence.",
+      "Complete and promote sanitized App Store review metadata evidence.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",
-      "Fill proof-pack inbox TestFlight and macOS notarization observations from the real operator run.",
-      "Promote sanitized TestFlight and macOS notarization observations into the proof pack.",
+      "Fill proof-pack inbox App Store review, TestFlight, and macOS notarization observations from the real operator run.",
+      "Promote sanitized App Store review, TestFlight, and macOS notarization observations into the proof pack.",
       "Copy the completed proof-pack draft into ignored local release evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],
@@ -746,9 +767,10 @@ function packageReadme(plan) {
   }
   lines.push(
     "After physical-device media, restrictive TURN, browser/native room-gate,",
-    "TestFlight upload, and macOS notarization observations are captured, promote",
-    "sanitized proof-pack inbox files, copy the completed draft into local release",
-    "evidence, and run strict readiness before claiming release readiness.",
+    "App Store review metadata, TestFlight upload, and macOS notarization",
+    "observations are captured, promote sanitized proof-pack inbox files, copy",
+    "the completed draft into local release evidence, and run strict readiness",
+    "before claiming release readiness.",
     ""
   );
   return `${lines.join("\n")}\n`;

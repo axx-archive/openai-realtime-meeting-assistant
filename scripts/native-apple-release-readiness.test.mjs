@@ -278,6 +278,22 @@ function releaseEvidence(overrides = {}) {
       recordingOffStopsForwarding: true,
       artifactRef: "artifacts/native-release-run-20260629-a/room-interop.json",
     },
+    appStoreReview: {
+      status: "ready",
+      runId,
+      reviewedAt: "2026-06-29T12:29:00Z",
+      supportURL: "https://thebonfire.xyz/support",
+      privacyPolicyURL: "https://thebonfire.xyz/privacy",
+      descriptionReady: true,
+      keywordsReady: true,
+      screenshotsReady: true,
+      appPrivacyReady: true,
+      ageRatingComplete: true,
+      exportComplianceComplete: true,
+      testInformationReady: true,
+      externalTestingGroupReady: true,
+      artifactRef: "artifacts/native-release-run-20260629-a/app-store-review.json",
+    },
     testFlight: {
       status: "ready",
       appStoreConnectBuildId: `asc-${syntheticTeamId("82", "91", "74", "65", "02")}`,
@@ -307,6 +323,10 @@ function releaseEvidence(overrides = {}) {
     roomInterop: {
       ...base.roomInterop,
       ...(overrides.roomInterop ?? {}),
+    },
+    appStoreReview: {
+      ...base.appStoreReview,
+      ...(overrides.appStoreReview ?? {}),
     },
     testFlight: {
       ...base.testFlight,
@@ -587,6 +607,70 @@ function promotedRoomInteropArtifact(evidence, overrides = {}) {
   };
 }
 
+function promotedAppStoreReviewArtifact(evidence, overrides = {}) {
+  const item = evidence.appStoreReview;
+  const base = {
+    schemaVersion: 1,
+    artifactType: "native_app_store_review_metadata",
+    claimScope: "app_store_external_testing_review",
+    releaseEligible: true,
+    status: "ready",
+    runId: evidence.runId,
+    reviewedAt: item.reviewedAt,
+    app: {
+      version: evidence.version,
+      build: evidence.build,
+      target: "MeetingAssistAppleApp",
+      clientPlatform: "ios",
+      bundleIdentifier: "co.thebonfire.meetingassist.ios",
+    },
+    metadata: {
+      supportURL: item.supportURL,
+      privacyPolicyURL: item.privacyPolicyURL,
+      descriptionReady: true,
+      keywordsReady: true,
+      screenshotsReady: true,
+      appPrivacyReady: true,
+      ageRatingComplete: true,
+      exportComplianceComplete: true,
+      testInformationReady: true,
+      externalTestingGroupReady: true,
+    },
+    releaseEvidenceSummary: {
+      status: "ready",
+      runId: evidence.runId,
+      version: evidence.version,
+      build: evidence.build,
+      reviewedAt: item.reviewedAt,
+      supportURL: item.supportURL,
+      privacyPolicyURL: item.privacyPolicyURL,
+      externalTestingReady: true,
+    },
+    promotion: {
+      promotedAt: "2026-06-29T12:29:30Z",
+      sourceArtifactType: "native_app_store_review_metadata_observation",
+      sourceStatus: "observed",
+      sourceRunId: evidence.runId,
+      sourceReviewedAt: item.reviewedAt,
+      sourceArtifact: "artifacts/native-release-run-20260629-a/inbox/app-store-review-observation.json",
+      operatorConfirmedReviewMetadataComplete: true,
+      operatorConfirmedAppPrivacyComplete: true,
+      operatorConfirmedExternalTestingReady: true,
+      operatorConfirmedNoSecrets: true,
+      operatorConfirmedCurrentBuild: true,
+      releaseEvidenceArtifactRef: item.artifactRef,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    app: { ...base.app, ...(overrides.app ?? {}) },
+    metadata: { ...base.metadata, ...(overrides.metadata ?? {}) },
+    releaseEvidenceSummary: { ...base.releaseEvidenceSummary, ...(overrides.releaseEvidenceSummary ?? {}) },
+    promotion: { ...base.promotion, ...(overrides.promotion ?? {}) },
+  };
+}
+
 function promotedTestFlightArtifact(evidence, overrides = {}) {
   const item = evidence.testFlight;
   const base = {
@@ -746,6 +830,15 @@ function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   ) {
     const artifact = options.roomInteropArtifact ?? promotedRoomInteropArtifact(evidence, options.roomInteropArtifactOverrides);
     writeFixtureFile(resolve(rootDir, roomInteropRef), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  const appStoreReviewRef = evidence.appStoreReview?.artifactRef;
+  if (
+    typeof appStoreReviewRef === "string" &&
+    /^(artifacts\/|evidence\/)/.test(appStoreReviewRef) &&
+    !appStoreReviewRef.split("/").includes("..")
+  ) {
+    const artifact = options.appStoreReviewArtifact ?? promotedAppStoreReviewArtifact(evidence, options.appStoreReviewArtifactOverrides);
+    writeFixtureFile(resolve(rootDir, appStoreReviewRef), `${JSON.stringify(artifact, null, 2)}\n`);
   }
   const testFlightRef = evidence.testFlight?.artifactRef;
   if (
@@ -1637,6 +1730,103 @@ assert.equal(
   true
 );
 
+const missingAppStoreReviewEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+const missingAppStoreReviewEvidencePath = resolve(missingAppStoreReviewEvidenceFixturePath, "ReleaseEvidence.local.json");
+const missingAppStoreReviewEvidence = releaseEvidence();
+delete missingAppStoreReviewEvidence.appStoreReview;
+writeFixtureFile(missingAppStoreReviewEvidencePath, `${JSON.stringify(missingAppStoreReviewEvidence, null, 2)}\n`);
+writeEvidenceArtifactFixtures(missingAppStoreReviewEvidencePath, missingAppStoreReviewEvidence);
+const missingAppStoreReviewEvidenceFixture = runReadiness(
+  ["--apple-dir", missingAppStoreReviewEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingAppStoreReviewEvidenceFixture.status, 1);
+assert.equal(missingAppStoreReviewEvidenceFixture.output.ok, true);
+assert.equal(missingAppStoreReviewEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  missingAppStoreReviewEvidenceFixture.output.blockers.some((blocker) => blocker.id === "app_store_review_metadata"),
+  true
+);
+
+const incompleteAppStoreReviewEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(incompleteAppStoreReviewEvidenceFixturePath, "ReleaseEvidence.local.json"), {
+  appStoreReview: {
+    supportURL: "http://thebonfire.xyz/support",
+    appPrivacyReady: false,
+    externalTestingGroupReady: false,
+  },
+});
+const incompleteAppStoreReviewEvidenceFixture = runReadiness(
+  ["--apple-dir", incompleteAppStoreReviewEvidenceFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(incompleteAppStoreReviewEvidenceFixture.status, 1);
+assert.equal(incompleteAppStoreReviewEvidenceFixture.output.ok, true);
+assert.equal(incompleteAppStoreReviewEvidenceFixture.output.readyForDistribution, false);
+assert.equal(
+  incompleteAppStoreReviewEvidenceFixture.output.blockers.some((blocker) => blocker.id === "app_store_review_metadata"),
+  true
+);
+
+const remoteAppStoreReviewArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(remoteAppStoreReviewArtifactFixturePath, "ReleaseEvidence.local.json"), {
+  appStoreReview: {
+    artifactRef: "https://example.com/native-release-run-20260629-a/app-store-review.json",
+  },
+});
+const remoteAppStoreReviewArtifactFixture = runReadiness(
+  ["--apple-dir", remoteAppStoreReviewArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(remoteAppStoreReviewArtifactFixture.status, 1);
+assert.equal(remoteAppStoreReviewArtifactFixture.output.ok, true);
+assert.equal(remoteAppStoreReviewArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  remoteAppStoreReviewArtifactFixture.output.blockers.some((blocker) => blocker.id === "app_store_review_metadata"),
+  true
+);
+
+const unboundAppStoreReviewArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unboundAppStoreReviewArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  appStoreReviewArtifactOverrides: {
+    promotion: {
+      sourceRunId: "",
+      sourceReviewedAt: "",
+    },
+  },
+});
+const unboundAppStoreReviewArtifactFixture = runReadiness(
+  ["--apple-dir", unboundAppStoreReviewArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unboundAppStoreReviewArtifactFixture.status, 1);
+assert.equal(unboundAppStoreReviewArtifactFixture.output.ok, true);
+assert.equal(unboundAppStoreReviewArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unboundAppStoreReviewArtifactFixture.output.blockers.some((blocker) => blocker.id === "app_store_review_metadata"),
+  true
+);
+
+const unsafeAppStoreReviewArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(unsafeAppStoreReviewArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  appStoreReviewArtifactOverrides: {
+    metadata: {
+      reviewerContact: "operator@example.com",
+    },
+  },
+});
+const unsafeAppStoreReviewArtifactFixture = runReadiness(
+  ["--apple-dir", unsafeAppStoreReviewArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(unsafeAppStoreReviewArtifactFixture.status, 1);
+assert.equal(unsafeAppStoreReviewArtifactFixture.output.ok, true);
+assert.equal(unsafeAppStoreReviewArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  unsafeAppStoreReviewArtifactFixture.output.blockers.some((blocker) => blocker.id === "app_store_review_metadata"),
+  true
+);
+
 const placeholderTestFlightArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(placeholderTestFlightArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
   testFlightArtifact: { artifactRef: "artifacts/native-release-run-20260629-a/testflight-build.json", fixture: true },
@@ -1948,4 +2138,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 60 checks passed");
+console.log("native-apple-release-readiness: 65 checks passed");
