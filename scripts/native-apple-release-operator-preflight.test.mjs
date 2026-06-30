@@ -345,6 +345,44 @@ assert.ok(
 );
 assert.ok(staleTestFlightPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
 
+const staleNotarizationRunId = `native-apple-operator-preflight-stale-notarization-test-${process.pid}`;
+const staleNotarizationProofpackDir = createProofpack(appleDir, staleNotarizationRunId);
+createPackagePlan(appleDir, staleNotarizationProofpackDir);
+const staleNotarizationPlanPath = resolve(rootDir, staleNotarizationProofpackDir, "operator", "release-command-plan.json");
+const staleNotarizationPlan = JSON.parse(readFileSync(staleNotarizationPlanPath, "utf8"));
+const staleNotarizationProofpackRef = relative(rootDir, staleNotarizationProofpackDir).split(/[/\\]/).join("/");
+staleNotarizationPlan.commands.createMacNotarizationObservation.shell = staleNotarizationPlan.commands.createMacNotarizationObservation.shell
+  .replace(staleNotarizationProofpackRef, "artifacts/native-apple/wrong-proofpack")
+  .replace("--distribution-artifact-sha256 ", "");
+writeFileSync(staleNotarizationPlanPath, `${JSON.stringify(staleNotarizationPlan, null, 2)}\n`);
+const staleNotarizationPreflight = runNode(
+  preflightScriptPath,
+  [
+    "--apple-dir",
+    appleDir,
+    "--proofpack-dir",
+    staleNotarizationProofpackDir,
+    "--require-proofpack",
+    "--require-notary-profile",
+  ],
+  {
+    APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5",
+    NOTARYTOOL_KEYCHAIN_PROFILE: "meetingassist-notary-profile",
+  }
+);
+assert.equal(staleNotarizationPreflight.status, 1);
+assert.equal(staleNotarizationPreflight.output.readyForOperator, false);
+assert.ok(
+  staleNotarizationPreflight.output.checks.some(
+    (check) =>
+      check.id === "operator_commands" &&
+      !check.ok &&
+      /createMacNotarizationObservation/.test(check.detail) &&
+      /--distribution-artifact-sha256|native-apple-operator-preflight-stale-notarization-test/.test(check.detail)
+  )
+);
+assert.ok(staleNotarizationPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
+
 const staleCurrentProjectFixture = makeAppleFixture({ build: "15" });
 const staleCurrentProjectRunId = `native-apple-operator-preflight-current-project-test-${process.pid}`;
 const staleCurrentProjectProofpackDir = createProofpack(staleCurrentProjectFixture.appleDir, staleCurrentProjectRunId);
@@ -399,4 +437,4 @@ const noProject = runNode(
 assert.equal(noProject.status, 1);
 assert.ok(noProject.output.blockers.some((blocker) => blocker.id === "xcode_project"));
 
-console.log("native-apple-release-operator-preflight: 10 checks passed");
+console.log("native-apple-release-operator-preflight: 11 checks passed");

@@ -575,6 +575,10 @@ readiness confirmations are validated before promotion.
 For TestFlight upload evidence, prefer generating the inbox observation with
 scripts/native-apple-create-testflight-observation.mjs so the App Store Connect
 build id and processing status are validated before promotion.
+For macOS notarization evidence, prefer generating the inbox observation with
+scripts/native-apple-create-notarization-observation.mjs so the distribution
+artifact, notary request, stapling, and Gatekeeper fields are validated before
+promotion.
 
 Promotion helpers validate inbox observations and then write the release proof
 under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
@@ -1047,6 +1051,7 @@ function createProofpack(args) {
       "Promote sanitized App Store review metadata observations with scripts/native-apple-promote-distribution-evidence.mjs --kind app-review.",
       "Create sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-create-testflight-observation.mjs.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
+      "Create sanitized macOS notarization observations with scripts/native-apple-create-notarization-observation.mjs.",
       "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",

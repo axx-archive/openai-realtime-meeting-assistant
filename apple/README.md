@@ -449,7 +449,40 @@ node scripts/native-apple-promote-distribution-evidence.mjs \
   --confirm-current-build
 ```
 
-Promote accepted, stapled macOS notarization proof separately:
+Create the accepted, stapled macOS notarization observation with a sanitized
+operator artifact after a real Developer ID export, notary acceptance,
+stapling, and Gatekeeper verification:
+
+```bash
+export NATIVE_APPLE_MAC_DISTRIBUTION_KIND=zip
+export NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME=MeetingAssistMacApp.zip
+export NATIVE_APPLE_MAC_DISTRIBUTION_SHA256=<64-character-sha256>
+export NATIVE_APPLE_NOTARY_REQUEST_ID=<notary-request-id>
+export NATIVE_APPLE_GATEKEEPER_SOURCE="Notarized Developer ID"
+node scripts/native-apple-create-notarization-observation.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --distribution-artifact-kind "$NATIVE_APPLE_MAC_DISTRIBUTION_KIND" \
+  --distribution-artifact-filename "$NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME" \
+  --distribution-artifact-sha256 "$NATIVE_APPLE_MAC_DISTRIBUTION_SHA256" \
+  --notary-request-id "$NATIVE_APPLE_NOTARY_REQUEST_ID" \
+  --gatekeeper-source "$NATIVE_APPLE_GATEKEEPER_SOURCE" \
+  --confirm-developer-id-archive \
+  --confirm-notary-accepted \
+  --confirm-stapled-app \
+  --confirm-gatekeeper-accepted \
+  --confirm-current-build \
+  --confirm-no-secrets
+```
+
+The notarization creator validates matching proof-pack/template identity,
+current macOS app build, distribution artifact basename and SHA-256, non-secret
+notary request id, Developer ID signing assertions, stapling validation,
+Gatekeeper acceptance, and secret-shaped content. It only writes
+`inbox/notarization-observation.json`; it does not submit to Apple, staple an
+app, run Gatekeeper assessment, promote evidence, or prove end-user macOS
+distribution.
+
+Promote the created macOS notarization observation separately:
 
 ```bash
 node scripts/native-apple-promote-distribution-evidence.mjs \
@@ -460,6 +493,7 @@ node scripts/native-apple-promote-distribution-evidence.mjs \
   --confirm-notary-accepted \
   --confirm-stapled-app \
   --confirm-gatekeeper-accepted \
+  --confirm-no-secrets \
   --confirm-current-build
 ```
 

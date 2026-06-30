@@ -1780,6 +1780,7 @@ function notarizationArtifactProblems({ item, artifact, expectedVersion, expecte
         "operatorConfirmedNotaryAccepted",
         "operatorConfirmedStapledApp",
         "operatorConfirmedGatekeeperAccepted",
+        "operatorConfirmedNoSecrets",
         "operatorConfirmedCurrentBuild",
         "releaseEvidenceArtifactRef",
       ],
@@ -1943,6 +1944,9 @@ function notarizationArtifactProblems({ item, artifact, expectedVersion, expecte
     }
     if (promotion.operatorConfirmedGatekeeperAccepted !== true) {
       problems.push("artifact:promotion.operatorConfirmedGatekeeperAccepted");
+    }
+    if (promotion.operatorConfirmedNoSecrets !== true) {
+      problems.push("artifact:promotion.operatorConfirmedNoSecrets");
     }
     if (promotion.operatorConfirmedCurrentBuild !== true) {
       problems.push("artifact:promotion.operatorConfirmedCurrentBuild");

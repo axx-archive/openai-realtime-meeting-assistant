@@ -3241,3 +3241,101 @@ What worked:
 - The sidecar review caught two useful release-evidence details before critic:
   include `roomId` in creator identity checks and normalize operator-supplied
   processing status casing.
+
+## Wave 43 - macOS Notarization Observation Creator
+
+Status: `wave43_macos_notarization_observation_creator_validated`
+
+Scope:
+- Continued the native Apple release objective through the requested
+  multi-agent loop by removing the last manual distribution inbox JSON step
+  from the Apple-account release path.
+- Added `scripts/native-apple-create-notarization-observation.mjs`, a
+  credential-free helper that creates only
+  `inbox/notarization-observation.json` from the current proof pack after the
+  operator supplies a distribution artifact basename/hash, non-secret notary
+  request id, non-secret Gatekeeper source label, and explicit Developer ID,
+  notarization, stapling, Gatekeeper, current-build, and no-secrets
+  confirmations.
+- Wired the creator into proof-pack next steps, the Apple-account command pack,
+  operator preflight, and docs so the macOS distribution flow is now explicitly:
+  Developer ID export, notary acceptance, staple, Gatekeeper verify, create
+  sanitized macOS notarization inbox observation, then promote with
+  `native-apple-promote-distribution-evidence.mjs --kind notarization`.
+- Tightened macOS notarization promotion so hand-edited inbox observations must
+  match the exact schema, require `--confirm-no-secrets`, persist
+  `operatorConfirmedNoSecrets`, and pass strict readiness checks, matching the
+  App Store review and TestFlight evidence lanes.
+- Added current project metadata, proof-pack/draft `roomId`, template shape,
+  distribution artifact, request id, and Gatekeeper-source checks so the
+  creator rejects stale or unsafe proof packs before it writes an inbox
+  observation.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-create-notarization-observation.mjs`
+- `scripts/native-apple-create-notarization-observation.test.mjs`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+
+Validation:
+- `node --check` passed for the changed native Apple evidence scripts and
+  tests.
+- `node scripts/native-apple-create-notarization-observation.test.mjs` passed
+  14 checks.
+- `node scripts/native-apple-create-testflight-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-create-app-review-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 21
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 11
+  checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 69 checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 8
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true`.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `ok:true`, `readyForDistribution:false`, and external
+  blockers for Apple signing/team setup, privacy manifest, and release
+  evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with `ok:true`.
+- `git diff --check` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+
+Risks / blockers:
+- This wave does not archive or export a Developer ID app, submit to Apple,
+  staple an app, run Gatekeeper assessment, upload to TestFlight, enable
+  external testing, or prove physical-device media quality.
+- Apple signing/team setup, approved privacy manifest, real physical
+  iPhone/iPad/Mac proof, restrictive TURN proof, browser/native room proof,
+  real TestFlight upload, real App Store review metadata, and macOS
+  notarization/stapling/Gatekeeper proof remain external release blockers.
+
+What worked:
+- Treating the creator as a local observation writer kept the macOS evidence
+  lane useful without claiming notarization from repo-only evidence.
+- The sidecar schema review caught the promoter bypass risk: hand-edited
+  notarization inbox files now need exact schema keys and a no-secrets
+  confirmation before promotion.
+- The critic gate caught two release-boundary gaps before shipping: promoted
+  notarization artifacts now retain the no-secrets operator confirmation, and
+  the creator validates the `MeetingAssistMacApp` target build/version instead
+  of relying on the first project-level version string.

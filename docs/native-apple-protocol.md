@@ -164,6 +164,13 @@ promote evidence, upload builds, submit review, or prove Apple approval.
 TestFlight inbox observation after an operator confirms the uploaded build is
 visible in App Store Connect and supplies a non-secret build id and processing
 status, but it does not upload builds or prove tester availability.
+`scripts/native-apple-create-notarization-observation.mjs` can create the local
+macOS notarization inbox observation after an operator confirms Developer ID
+archive/export, notary acceptance, stapling, and Gatekeeper acceptance and
+supplies only the distribution artifact basename/hash, non-secret notary
+request id, and non-secret Gatekeeper source label, but it does not submit to
+Apple, staple an app, run Gatekeeper assessment, or prove end-user
+distribution.
 `scripts/native-apple-promote-distribution-evidence.mjs` promotes those
 observations only after an operator confirms the current build, review metadata
 or upload/notarization/stapling/Gatekeeper checks, and absence of

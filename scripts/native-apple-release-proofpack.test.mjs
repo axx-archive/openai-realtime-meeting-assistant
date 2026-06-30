@@ -108,6 +108,7 @@ assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind app-review")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-testflight-observation.mjs")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind testflight")));
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-notarization-observation.mjs")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind notarization")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-release-package-plan.mjs")));
 for (const ref of Object.values(proofpack.evidenceArtifacts)) {
@@ -138,6 +139,7 @@ assert.match(inboxReadme, /Browser\/native room gate: room-interop-observation\.
 assert.match(inboxReadme, /App Store review metadata: app-store-review-observation\.json/);
 assert.match(inboxReadme, /native-apple-create-app-review-observation\.mjs/);
 assert.match(inboxReadme, /native-apple-create-testflight-observation\.mjs/);
+assert.match(inboxReadme, /native-apple-create-notarization-observation\.mjs/);
 const iphoneTemplate = JSON.parse(readFileSync(resolve(rootDir, proofpack.observationTemplates.iphoneMedia), "utf8"));
 assert.equal(iphoneTemplate.artifactType, "native_device_media");
 assert.equal(iphoneTemplate.status, "template");
@@ -463,6 +465,7 @@ const promotedNotarization = runScript(promoteDistributionScriptPath, [
   "--confirm-notary-accepted",
   "--confirm-stapled-app",
   "--confirm-gatekeeper-accepted",
+  "--confirm-no-secrets",
   "--confirm-current-build",
 ]);
 assert.equal(promotedNotarization.status, 0);

@@ -316,6 +316,7 @@ const promotedNotarization = promote([
   "--confirm-notary-accepted",
   "--confirm-stapled-app",
   "--confirm-gatekeeper-accepted",
+  "--confirm-no-secrets",
   "--confirm-current-build",
   "--promoted-at",
   "2026-06-29T20:30:00Z",
@@ -341,6 +342,7 @@ assert.equal(notarizationArtifact.promotion.sourceRunId, runId);
 assert.equal(notarizationArtifact.promotion.sourceCheckedAt, "2026-06-29T20:25:00Z");
 assert.equal(notarizationArtifact.promotion.operatorConfirmedStapledApp, true);
 assert.equal(notarizationArtifact.promotion.operatorConfirmedGatekeeperAccepted, true);
+assert.equal(notarizationArtifact.promotion.operatorConfirmedNoSecrets, true);
 
 const missingUploadConfirm = promote([
   "--proofpack-dir",
@@ -502,7 +504,7 @@ const missingNotaryConfirm = promote([
   "--force",
 ]);
 assert.equal(missingNotaryConfirm.status, 1);
-assert.match(missingNotaryConfirm.output.error, /confirmDeveloperIdArchive|confirmNotarizedApp|confirmStapledApp|confirmGatekeeperAccepted/);
+assert.match(missingNotaryConfirm.output.error, /confirmDeveloperIdArchive|confirmNotarizedApp|confirmStapledApp|confirmGatekeeperAccepted|confirmNoSecrets/);
 
 const unstapledRejected = promote([
   "--proofpack-dir",
@@ -519,11 +521,34 @@ const unstapledRejected = promote([
   "--confirm-notary-accepted",
   "--confirm-stapled-app",
   "--confirm-gatekeeper-accepted",
+  "--confirm-no-secrets",
   "--confirm-current-build",
   "--force",
 ]);
 assert.equal(unstapledRejected.status, 1);
 assert.match(unstapledRejected.output.error, /staple.stapled|staple.validated|gatekeeper.assessment/);
+
+const unexpectedNotarizationRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "notarization",
+  "--input",
+  writeObservation(
+    fixture.dir,
+    "unexpected-notarization.json",
+    boundNotarizationObservation({ notarytoolLog: "not allowed", notarization: { profile: "not allowed" } })
+  ),
+  "--confirm-developer-id-archive",
+  "--confirm-notary-accepted",
+  "--confirm-stapled-app",
+  "--confirm-gatekeeper-accepted",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(unexpectedNotarizationRejected.status, 1);
+assert.match(unexpectedNotarizationRejected.output.error, /input\.notarytoolLog|input\.notarization\.profile/);
 
 const unsafeNotarizationRejected = promote([
   "--proofpack-dir",
@@ -540,6 +565,7 @@ const unsafeNotarizationRejected = promote([
   "--confirm-notary-accepted",
   "--confirm-stapled-app",
   "--confirm-gatekeeper-accepted",
+  "--confirm-no-secrets",
   "--confirm-current-build",
   "--force",
 ]);
@@ -548,4 +574,4 @@ assert.match(unsafeNotarizationRejected.output.error, /unsafeContent/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-distribution-evidence: 20 checks passed");
+console.log("native-apple-promote-distribution-evidence: 21 checks passed");

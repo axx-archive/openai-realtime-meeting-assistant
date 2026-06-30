@@ -164,7 +164,16 @@ assert.match(plan.commands.createTestFlightObservation.shell, /"\$NATIVE_APPLE_T
 assert.match(plan.commands.createTestFlightObservation.shell, /--confirm-app-store-connect-upload/);
 assert.match(plan.commands.createTestFlightObservation.shell, /--confirm-current-build/);
 assert.match(plan.commands.promoteTestFlightObservation.shell, /testflight-observation\.json/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /native-apple-create-notarization-observation\.mjs/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /"\$NATIVE_APPLE_MAC_DISTRIBUTION_KIND"/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /"\$NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME"/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /"\$NATIVE_APPLE_MAC_DISTRIBUTION_SHA256"/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /"\$NATIVE_APPLE_NOTARY_REQUEST_ID"/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /"\$NATIVE_APPLE_GATEKEEPER_SOURCE"/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /--confirm-gatekeeper-accepted/);
+assert.match(plan.commands.createMacNotarizationObservation.shell, /--confirm-no-secrets/);
 assert.match(plan.commands.promoteMacNotarizationObservation.shell, /notarization-observation\.json/);
+assert.match(plan.commands.promoteMacNotarizationObservation.shell, /--confirm-no-secrets/);
 assert.match(plan.commands.writeLocalReleaseEvidence.shell, /--write-evidence/);
 assert.match(plan.commands.strictReleaseReadiness.shell, /--strict/);
 assert.match(plan.commands.strictReleaseReadiness.shell, /ReleaseEvidence\.draft\.json/);
@@ -191,6 +200,7 @@ assert.match(readme, /promoteRoomInteropObservation/);
 assert.match(readme, /createAppStoreReviewObservation/);
 assert.match(readme, /promoteAppStoreReviewObservation/);
 assert.match(readme, /createTestFlightObservation/);
+assert.match(readme, /createMacNotarizationObservation/);
 assert.match(readme, /notarytool/);
 assert.match(readme, /strict readiness/);
 

@@ -439,6 +439,19 @@ function validateNotarizationObservation(observation, draft, args) {
     "accepted",
     "checkedAt"
   );
+  problems.push(
+    ...collectUnexpectedKeys(
+      observation,
+      ["schemaVersion", "artifactType", "status", "runId", "checkedAt", "distributionArtifact", "app", "signing", "notarization", "staple", "gatekeeper"],
+      "input"
+    ),
+    ...collectUnexpectedKeys(observation?.distributionArtifact, ["kind", "filename", "sha256"], "input.distributionArtifact"),
+    ...collectUnexpectedKeys(observation?.app, ["version", "build", "target", "clientPlatform", "bundleIdentifier"], "input.app"),
+    ...collectUnexpectedKeys(observation?.signing, ["style", "signed", "hardenedRuntime", "timestamped"], "input.signing"),
+    ...collectUnexpectedKeys(observation?.notarization, ["requestId", "status", "issueCount"], "input.notarization"),
+    ...collectUnexpectedKeys(observation?.staple, ["stapled", "validated"], "input.staple"),
+    ...collectUnexpectedKeys(observation?.gatekeeper, ["assessment", "source"], "input.gatekeeper")
+  );
   if (!args.confirmDeveloperIdArchive) {
     problems.push("confirmDeveloperIdArchive");
   }
@@ -450,6 +463,9 @@ function validateNotarizationObservation(observation, draft, args) {
   }
   if (!args.confirmGatekeeperAccepted) {
     problems.push("confirmGatekeeperAccepted");
+  }
+  if (!args.confirmNoSecrets) {
+    problems.push("confirmNoSecrets");
   }
   if (observation?.app && typeof observation.app === "object" && !Array.isArray(observation.app)) {
     if (observation.app.target !== "MeetingAssistMacApp") {
@@ -691,6 +707,7 @@ function promotedNotarizationArtifact(observation, draft, item, promotedAt, inpu
       operatorConfirmedNotaryAccepted: true,
       operatorConfirmedStapledApp: true,
       operatorConfirmedGatekeeperAccepted: true,
+      operatorConfirmedNoSecrets: true,
       operatorConfirmedCurrentBuild: true,
       releaseEvidenceArtifactRef: item.artifactRef,
     },

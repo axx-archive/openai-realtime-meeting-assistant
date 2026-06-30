@@ -641,6 +641,31 @@ function buildPlan(args) {
       ],
       "Promotes the sanitized TestFlight observation into ReleaseEvidence.draft.json after the upload is visible in App Store Connect."
     );
+    commands.createMacNotarizationObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-create-notarization-observation.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--distribution-artifact-kind",
+        "$NATIVE_APPLE_MAC_DISTRIBUTION_KIND",
+        "--distribution-artifact-filename",
+        "$NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME",
+        "--distribution-artifact-sha256",
+        "$NATIVE_APPLE_MAC_DISTRIBUTION_SHA256",
+        "--notary-request-id",
+        "$NATIVE_APPLE_NOTARY_REQUEST_ID",
+        "--gatekeeper-source",
+        "$NATIVE_APPLE_GATEKEEPER_SOURCE",
+        "--confirm-developer-id-archive",
+        "--confirm-notary-accepted",
+        "--confirm-stapled-app",
+        "--confirm-gatekeeper-accepted",
+        "--confirm-current-build",
+        "--confirm-no-secrets",
+      ],
+      "Creates the sanitized macOS notarization inbox observation after notary acceptance, stapling, and Gatekeeper verification."
+    );
     commands.promoteMacNotarizationObservation = commandSpec(
       [
         "node",
@@ -655,6 +680,7 @@ function buildPlan(args) {
         "--confirm-notary-accepted",
         "--confirm-stapled-app",
         "--confirm-gatekeeper-accepted",
+        "--confirm-no-secrets",
         "--confirm-current-build",
       ],
       "Promotes the sanitized macOS notarization observation after notary acceptance, stapling, and Gatekeeper verification."
@@ -754,6 +780,11 @@ function buildPlan(args) {
       appReviewPrivacyPolicyURL: "Set NATIVE_APPLE_PRIVACY_POLICY_URL to the public HTTPS privacy policy URL before creating App Store review metadata evidence.",
       appStoreConnectBuildId: "Set NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID to the non-secret App Store Connect build id before creating TestFlight evidence.",
       testFlightProcessingStatus: "Set NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS to ready, uploaded, processing, or accepted before creating TestFlight evidence.",
+      macDistributionKind: "Set NATIVE_APPLE_MAC_DISTRIBUTION_KIND to zip, dmg, pkg, or app before creating macOS notarization evidence.",
+      macDistributionFilename: "Set NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME to the basename of the notarized macOS distribution artifact.",
+      macDistributionSHA256: "Set NATIVE_APPLE_MAC_DISTRIBUTION_SHA256 to the 64-character SHA-256 of the notarized macOS distribution artifact.",
+      notaryRequestId: "Set NATIVE_APPLE_NOTARY_REQUEST_ID to the non-secret notary request id before creating macOS notarization evidence.",
+      gatekeeperSource: "Set NATIVE_APPLE_GATEKEEPER_SOURCE to the non-secret Gatekeeper source label before creating macOS notarization evidence.",
     },
     blockers,
     warnings,
@@ -765,8 +796,8 @@ function buildPlan(args) {
       "Complete App Store Connect review metadata, create the sanitized observation, and promote it.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine, then create and promote the sanitized TestFlight observation.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
-      "Submit, staple, and Gatekeeper-verify the macOS app.",
-      "Fill proof-pack inbox App Store review, TestFlight, and macOS notarization observations from the real operator run.",
+      "Submit, staple, and Gatekeeper-verify the macOS app, then create and promote the sanitized macOS notarization observation.",
+      "Create proof-pack inbox App Store review, TestFlight, and macOS notarization observations from the real operator run.",
       "Promote sanitized App Store review, TestFlight, and macOS notarization observations into the proof pack.",
       "Copy the completed proof-pack draft into ignored local release evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",

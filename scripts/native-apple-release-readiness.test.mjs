@@ -784,6 +784,7 @@ function promotedNotarizationArtifact(evidence, overrides = {}) {
       operatorConfirmedNotaryAccepted: true,
       operatorConfirmedStapledApp: true,
       operatorConfirmedGatekeeperAccepted: true,
+      operatorConfirmedNoSecrets: true,
       operatorConfirmedCurrentBuild: true,
       releaseEvidenceArtifactRef: item.artifactRef,
     },
@@ -2010,6 +2011,24 @@ assert.equal(
   true
 );
 
+const missingNoSecretsNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(missingNoSecretsNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  notarizationArtifactOverrides: {
+    promotion: { operatorConfirmedNoSecrets: false },
+  },
+});
+const missingNoSecretsNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", missingNoSecretsNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(missingNoSecretsNotarizationArtifactFixture.status, 1);
+assert.equal(missingNoSecretsNotarizationArtifactFixture.output.ok, true);
+assert.equal(missingNoSecretsNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  missingNoSecretsNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
 const unstapledNotarizationEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(unstapledNotarizationEvidenceFixturePath, "ReleaseEvidence.local.json"), {
   macNotarization: { stapled: false },
@@ -2177,4 +2196,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 68 checks passed");
+console.log("native-apple-release-readiness: 69 checks passed");
