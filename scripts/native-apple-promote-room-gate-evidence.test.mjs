@@ -222,6 +222,25 @@ const weakRoom = promote([
 assert.equal(weakRoom.status, 1);
 assert.match(weakRoom.output.error, /room\.participantCount|room\.clientPlatforms\.browser|room\.browserNativeMixed/);
 
+const unsupportedPlatform = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--input",
+  writeJSONFile(
+    resolve(fixture.dir, "unsupported-platform.json"),
+    roomObservation({ runId, room: { clientPlatforms: ["browser", "ios", "android"] } })
+  ),
+  "--confirm-browser-native-mixed-room",
+  "--confirm-three-plus-participants",
+  "--confirm-clean-leave",
+  "--confirm-recording-off",
+  "--confirm-current-build",
+  "--confirm-no-secrets",
+  "--force",
+]);
+assert.equal(unsupportedPlatform.status, 1);
+assert.match(unsupportedPlatform.output.error, /room\.clientPlatforms\.allowed/);
+
 const badLifecycle = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -296,6 +315,25 @@ const unsafeObservation = promote([
 assert.equal(unsafeObservation.status, 1);
 assert.match(unsafeObservation.output.error, /unsafeContent/);
 
+const unexpectedObservation = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--input",
+  writeJSONFile(
+    resolve(fixture.dir, "unexpected-room.json"),
+    roomObservation({ runId, screenshots: ["not allowed"], media: { rawLog: "not allowed" } })
+  ),
+  "--confirm-browser-native-mixed-room",
+  "--confirm-three-plus-participants",
+  "--confirm-clean-leave",
+  "--confirm-recording-off",
+  "--confirm-current-build",
+  "--confirm-no-secrets",
+  "--force",
+]);
+assert.equal(unexpectedObservation.status, 1);
+assert.match(unexpectedObservation.output.error, /input\.screenshots|input\.media\.rawLog/);
+
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-room-gate-evidence: 8 checks passed");
+console.log("native-apple-promote-room-gate-evidence: 10 checks passed");

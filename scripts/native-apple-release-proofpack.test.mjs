@@ -104,6 +104,7 @@ const proofpack = JSON.parse(readFileSync(created.output.proofpackPath, "utf8"))
 assert.equal(proofpack.schemaVersion, 1);
 assert.equal(proofpack.runId, runId);
 assert.equal(proofpack.roomId, roomId);
+assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-room-interop-observation.mjs")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-app-review-observation.mjs")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-promote-distribution-evidence.mjs --kind app-review")));
 assert.ok(proofpack.nextSteps.some((step) => step.includes("native-apple-create-testflight-observation.mjs")));
@@ -137,6 +138,7 @@ assert.match(inboxReadme, /Mac media: mac-qa_snapshot\.json/);
 assert.match(inboxReadme, /Restrictive TURN: turn-relay-observation\.json/);
 assert.match(inboxReadme, /Browser\/native room gate: room-interop-observation\.json/);
 assert.match(inboxReadme, /App Store review metadata: app-store-review-observation\.json/);
+assert.match(inboxReadme, /native-apple-create-room-interop-observation\.mjs/);
 assert.match(inboxReadme, /native-apple-create-app-review-observation\.mjs/);
 assert.match(inboxReadme, /native-apple-create-testflight-observation\.mjs/);
 assert.match(inboxReadme, /native-apple-create-notarization-observation\.mjs/);

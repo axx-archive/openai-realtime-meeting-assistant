@@ -3135,6 +3135,10 @@ Validation:
 - `git diff --check` passed.
 - `go test ./...` passed.
 - `swift test --package-path apple` passed 95 tests.
+- Critic gate initially rejected the wave for looser direct-promoter platform
+  validation and one README overclaim. After adding the room platform allowlist,
+  regression coverage, and wording fix, the re-review accepted the wave with
+  9.3/10 and no release-boundary blockers.
 
 Risks / blockers:
 - This wave does not complete App Store Connect metadata in the Apple account,
@@ -3339,3 +3343,107 @@ What worked:
   notarization artifacts now retain the no-secrets operator confirmation, and
   the creator validates the `MeetingAssistMacApp` target build/version instead
   of relying on the first project-level version string.
+
+## 2026-06-30 - Wave 44 room-gate observation creator
+
+Goal:
+- Close the repo-owned gap between the real browser/native same-room smoke and
+  the promoted `roomInterop` release evidence by adding a safe local creator
+  for `room-interop-observation.json`.
+
+Agents:
+- Main agent implemented the helper, workflow wiring, docs, and validation.
+- Sidecar schema reviewer inspected the room-gate evidence boundary read-only
+  and confirmed the desired reduced schema, no-claim helper contract, and
+  package-plan/preflight/doc wiring.
+
+Changes:
+- Added `scripts/native-apple-create-room-interop-observation.mjs`, a
+  create-only proof-pack inbox helper that writes a sanitized
+  `native_room_interop_observation` after explicit operator confirmations.
+- Added tests covering happy path, duplicate protection, forced rewrite,
+  platform normalization, missing confirmations, weak participant/platform
+  mixes, bad timestamps, stale templates, unexpected template fields, stale
+  draft identity, and stale current project build/version.
+- Hardened `scripts/native-apple-promote-room-gate-evidence.mjs` so
+  hand-edited room observations must match exact top-level and nested schema
+  keys before promotion.
+- Wired `createRoomInteropObservation` into the generated release package plan
+  before `promoteRoomInteropObservation`, including required
+  `NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT` and
+  `NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS` operator environment entries.
+- Updated operator preflight so stale or missing room-interop creator commands
+  fail the Apple-account machine command-pack gate.
+- Updated the proof-pack README, `apple/README.md`, and
+  `docs/native-apple-protocol.md` to document the create-then-promote
+  room-gate flow and the evidence boundary.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-create-room-interop-observation.mjs`
+- `scripts/native-apple-create-room-interop-observation.test.mjs`
+- `scripts/native-apple-promote-room-gate-evidence.mjs`
+- `scripts/native-apple-promote-room-gate-evidence.test.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+
+Validation:
+- `node --check` passed for the changed native Apple evidence scripts and
+  tests.
+- `node scripts/native-apple-create-room-interop-observation.test.mjs` passed
+  12 checks.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-create-app-review-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-create-testflight-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-create-notarization-observation.test.mjs` passed
+  14 checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 21
+  checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 69 checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true`.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `ok:true`, `readyForDistribution:false`, and external
+  blockers for Apple signing/team setup, privacy manifest, and release
+  evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with `ok:true`.
+- `git diff --check` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+
+Risks / blockers:
+- The new creator records operator-confirmed facts; it does not join a room,
+  run smoke, prove media, verify the live VPS, upload to TestFlight, notarize
+  macOS, staple an app, or run Gatekeeper assessment.
+- Apple signing/team setup, privacy manifest finalization, real physical
+  iPhone/iPad/Mac media proof, restrictive TURN proof, real browser/native
+  3+ participant room proof, TestFlight upload/external testing, App Store
+  review metadata, and macOS Developer ID notarization remain external release
+  blockers.
+
+What worked:
+- Keeping the room-gate creator create-only made the claim boundary crisp: the
+  repo can validate and reduce the operator's proof without pretending to run
+  the live browser/native smoke.
+- Adding the creator to both generated package plans and operator preflight
+  made the workflow durable instead of relying on handwritten README memory.
+- The sidecar schema pass caught the important release risk: raw smoke output
+  must be reduced to booleans/counts before it enters proof-pack evidence.

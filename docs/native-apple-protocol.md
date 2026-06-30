@@ -140,14 +140,16 @@ cookies, headers, API keys, Team IDs, certificates, profiles, or private keys.
 
 Browser/native room-gate proof is operator-only as well. A sanitized
 `native_room_interop_observation` is a local proof-pack input, not a websocket
-event and not app media diagnostics. `scripts/native-apple-promote-room-gate-evidence.mjs`
-promotes it only when it matches the proof-pack run, room, version, and build,
-and when the operator confirms a same-room smoke with at least three
-participants, at least one browser peer, at least one native Apple peer, remote
-audio/video working, no missing/duplicate/stalled remote media health, clean
-leave with `/participants` empty, and recording-off transcript and Realtime
-forwarding stopped. The promoted `native_room_interop` artifact may include
-only safe summary fields such as participant count, platform labels, boolean
+event and not app media diagnostics. `scripts/native-apple-create-room-interop-observation.mjs`
+can create that local inbox observation after the operator confirms the same
+release room had at least three participants, browser plus native Apple clients,
+remote audio/video, no missing/duplicate/stalled remote media health, clean
+leave with `/participants` empty, recording-off transcript/Realtime forwarding
+stopped, current build, and no secrets. It does not join a room, run smoke, or
+promote evidence by itself. `scripts/native-apple-promote-room-gate-evidence.mjs`
+promotes it only when it matches the proof-pack run, room, version, and build.
+The promoted `native_room_interop` artifact may include only safe summary
+fields such as participant count, platform labels, boolean
 media/lifecycle/recording assertions, timestamps, source run/room binding, and
 operator confirmations. It must not include raw SDP, raw ICE candidates, TURN
 URLs, credentials, account data, raw logs, screenshots, pixels, frames, cookies,

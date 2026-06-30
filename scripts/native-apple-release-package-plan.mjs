@@ -551,6 +551,30 @@ function buildPlan(args) {
       ],
       "Promotes the restrictive-network TURN observation. Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret network label before running."
     );
+    commands.createRoomInteropObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-create-room-interop-observation.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--participant-count",
+        "$NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT",
+        "--client-platforms",
+        "$NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS",
+        "--confirm-browser-native-mixed-room",
+        "--confirm-three-plus-participants",
+        "--confirm-remote-audio-audible",
+        "--confirm-remote-video-rendered",
+        "--confirm-no-missing-remote-health",
+        "--confirm-no-duplicate-participants",
+        "--confirm-no-stalled-remote-media",
+        "--confirm-clean-leave",
+        "--confirm-recording-off",
+        "--confirm-current-build",
+        "--confirm-no-secrets",
+      ],
+      "Creates the sanitized browser/native 3+ participant room gate inbox observation after the real same-room smoke is complete."
+    );
     commands.promoteRoomInteropObservation = commandSpec(
       [
         "node",
@@ -776,6 +800,8 @@ function buildPlan(args) {
       appleDevelopmentTeam: "Configure through apple/Config/Signing.local.xcconfig or APPLE_DEVELOPMENT_TEAM; this plan intentionally does not print the Team ID.",
       notarytoolKeychainProfile: "Set NOTARYTOOL_KEYCHAIN_PROFILE in the local shell before running the notarytool command.",
       restrictiveNetworkLabel: "Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret label before promoting TURN evidence.",
+      roomInteropParticipantCount: "Set NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT to the total browser/native participant count before creating room-gate evidence.",
+      roomInteropClientPlatforms: "Set NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS to a comma-separated browser/native Apple platform list such as browser,ios,ipados,macos before creating room-gate evidence.",
       appReviewSupportURL: "Set NATIVE_APPLE_SUPPORT_URL to the public HTTPS support URL before creating App Store review metadata evidence.",
       appReviewPrivacyPolicyURL: "Set NATIVE_APPLE_PRIVACY_POLICY_URL to the public HTTPS privacy policy URL before creating App Store review metadata evidence.",
       appStoreConnectBuildId: "Set NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID to the non-secret App Store Connect build id before creating TestFlight evidence.",
@@ -792,13 +818,13 @@ function buildPlan(args) {
       "Run operatorPreflight on the Apple-account machine before archive/upload/notarization.",
       "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
       "Capture and promote restrictive-network TURN relay evidence.",
-      "Capture and promote browser/native 3+ participant room gate evidence.",
+      "Capture browser/native 3+ participant room gate evidence, create the sanitized observation, and promote it.",
       "Complete App Store Connect review metadata, create the sanitized observation, and promote it.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine, then create and promote the sanitized TestFlight observation.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app, then create and promote the sanitized macOS notarization observation.",
-      "Create proof-pack inbox App Store review, TestFlight, and macOS notarization observations from the real operator run.",
-      "Promote sanitized App Store review, TestFlight, and macOS notarization observations into the proof pack.",
+      "Create proof-pack inbox room-gate, App Store review, TestFlight, and macOS notarization observations from the real operator run.",
+      "Promote sanitized room-gate, App Store review, TestFlight, and macOS notarization observations into the proof pack.",
       "Copy the completed proof-pack draft into ignored local release evidence.",
       "Run node scripts/native-apple-release-readiness.mjs --strict.",
     ],

@@ -145,9 +145,17 @@ assert.match(plan.commands.promoteIPadMediaEvidence.shell, /ipad-qa_snapshot\.js
 assert.match(plan.commands.promoteMacMediaEvidence.shell, /mac-qa_snapshot\.json/);
 assert.match(plan.commands.promoteTurnRelayObservation.shell, /turn-relay-observation\.json/);
 assert.match(plan.commands.promoteTurnRelayObservation.shell, /"\$NATIVE_APPLE_RESTRICTIVE_NETWORK"/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /native-apple-create-room-interop-observation\.mjs/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /"\$NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT"/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /"\$NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS"/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /--confirm-remote-audio-audible/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /--confirm-no-stalled-remote-media/);
+assert.match(plan.commands.createRoomInteropObservation.shell, /--confirm-no-secrets/);
 assert.match(plan.commands.promoteRoomInteropObservation.shell, /room-interop-observation\.json/);
 assert.match(plan.commands.promoteRoomInteropObservation.shell, /--confirm-browser-native-mixed-room/);
 assert.match(plan.commands.promoteRoomInteropObservation.shell, /--confirm-recording-off/);
+assert.match(plan.operatorEnvironment.roomInteropParticipantCount, /NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT/);
+assert.match(plan.operatorEnvironment.roomInteropClientPlatforms, /NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS/);
 assert.match(plan.commands.createAppStoreReviewObservation.shell, /native-apple-create-app-review-observation\.mjs/);
 assert.match(plan.commands.createAppStoreReviewObservation.shell, /"\$NATIVE_APPLE_SUPPORT_URL"/);
 assert.match(plan.commands.createAppStoreReviewObservation.shell, /"\$NATIVE_APPLE_PRIVACY_POLICY_URL"/);
@@ -196,6 +204,7 @@ const readme = readFileSync(resolve(rootDir, plan.outputDir, "release-commands.m
 assert.match(readme, /non-secret command plan/);
 assert.match(readme, /promoteIPhoneMediaEvidence/);
 assert.match(readme, /promoteTurnRelayObservation/);
+assert.match(readme, /createRoomInteropObservation/);
 assert.match(readme, /promoteRoomInteropObservation/);
 assert.match(readme, /createAppStoreReviewObservation/);
 assert.match(readme, /promoteAppStoreReviewObservation/);

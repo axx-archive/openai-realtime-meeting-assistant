@@ -269,6 +269,44 @@ assert.equal(stalePlanPreflight.output.readyForOperator, false);
 assert.ok(stalePlanPreflight.output.checks.some((check) => check.id === "operator_commands" && !check.ok && /promoteIPhoneMediaEvidence/.test(check.detail)));
 assert.ok(stalePlanPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
 
+const staleRoomInteropRunId = `native-apple-operator-preflight-stale-room-interop-test-${process.pid}`;
+const staleRoomInteropProofpackDir = createProofpack(appleDir, staleRoomInteropRunId);
+createPackagePlan(appleDir, staleRoomInteropProofpackDir);
+const staleRoomInteropPlanPath = resolve(rootDir, staleRoomInteropProofpackDir, "operator", "release-command-plan.json");
+const staleRoomInteropPlan = JSON.parse(readFileSync(staleRoomInteropPlanPath, "utf8"));
+const staleRoomInteropProofpackRef = relative(rootDir, staleRoomInteropProofpackDir).split(/[/\\]/).join("/");
+staleRoomInteropPlan.commands.createRoomInteropObservation.shell = staleRoomInteropPlan.commands.createRoomInteropObservation.shell
+  .replace(staleRoomInteropProofpackRef, "artifacts/native-apple/wrong-proofpack")
+  .replace("--client-platforms ", "");
+writeFileSync(staleRoomInteropPlanPath, `${JSON.stringify(staleRoomInteropPlan, null, 2)}\n`);
+const staleRoomInteropPreflight = runNode(
+  preflightScriptPath,
+  [
+    "--apple-dir",
+    appleDir,
+    "--proofpack-dir",
+    staleRoomInteropProofpackDir,
+    "--require-proofpack",
+    "--require-notary-profile",
+  ],
+  {
+    APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5",
+    NOTARYTOOL_KEYCHAIN_PROFILE: "meetingassist-notary-profile",
+  }
+);
+assert.equal(staleRoomInteropPreflight.status, 1);
+assert.equal(staleRoomInteropPreflight.output.readyForOperator, false);
+assert.ok(
+  staleRoomInteropPreflight.output.checks.some(
+    (check) =>
+      check.id === "operator_commands" &&
+      !check.ok &&
+      /createRoomInteropObservation/.test(check.detail) &&
+      /--client-platforms|native-apple-operator-preflight-stale-room-interop-test/.test(check.detail)
+  )
+);
+assert.ok(staleRoomInteropPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
+
 const staleAppReviewRunId = `native-apple-operator-preflight-stale-app-review-test-${process.pid}`;
 const staleAppReviewProofpackDir = createProofpack(appleDir, staleAppReviewRunId);
 createPackagePlan(appleDir, staleAppReviewProofpackDir);
@@ -437,4 +475,4 @@ const noProject = runNode(
 assert.equal(noProject.status, 1);
 assert.ok(noProject.output.blockers.some((blocker) => blocker.id === "xcode_project"));
 
-console.log("native-apple-release-operator-preflight: 11 checks passed");
+console.log("native-apple-release-operator-preflight: 12 checks passed");

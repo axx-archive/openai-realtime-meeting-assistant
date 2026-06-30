@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const allowedClientPlatforms = new Set(["browser", "ios", "ipados", "macos"]);
 const nativePlatforms = new Set(["ios", "ipados", "macos"]);
 
 function usage() {
@@ -18,7 +19,8 @@ function usage() {
     "Promotes one sanitized native_room_interop_observation into the proof-pack",
     "roomInterop artifact and updates ReleaseEvidence.draft.json. The command",
     "rejects raw logs, SDP, ICE candidates, TURN credentials, account data, and",
-    "observations that do not prove the browser/native 3+ participant release gate.",
+    "operator-confirmed observations that do not satisfy the browser/native",
+    "3+ participant release gate.",
   ].join("\n");
 }
 
@@ -109,6 +111,16 @@ function nonPlaceholderString(value) {
   );
 }
 
+function collectUnexpectedKeys(value, allowedKeys, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value)
+    .filter((key) => !allowed.has(key))
+    .map((key) => `${path}.${key}`);
+}
+
 function collectUnsafeContent(value, path = "$") {
   const problems = [];
   if (Array.isArray(value)) {
@@ -196,6 +208,26 @@ function validateObservation(observation, draft, args) {
   if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
     return ["input:not_object"];
   }
+  problems.push(
+    ...collectUnexpectedKeys(
+      observation,
+      ["schemaVersion", "artifactType", "status", "runId", "roomId", "testedAt", "app", "room", "media", "lifecycle", "recording"],
+      "input"
+    ),
+    ...collectUnexpectedKeys(observation?.app, ["version", "build"], "input.app"),
+    ...collectUnexpectedKeys(observation?.room, ["participantCount", "clientPlatforms", "browserNativeMixed", "threePlusParticipants"], "input.room"),
+    ...collectUnexpectedKeys(
+      observation?.media,
+      ["remoteAudioAudible", "remoteVideoRendered", "noMissingRemoteHealth", "noDuplicateParticipants", "noStalledRemoteMedia"],
+      "input.media"
+    ),
+    ...collectUnexpectedKeys(observation?.lifecycle, ["cleanLeaveParticipantsEmpty", "participantsAfterLeave"], "input.lifecycle"),
+    ...collectUnexpectedKeys(
+      observation?.recording,
+      ["recordingOffStopsForwarding", "recordingOffTranscriptForwarded", "recordingOffRealtimeForwarded"],
+      "input.recording"
+    )
+  );
   if (observation.schemaVersion !== 1) {
     problems.push("schemaVersion");
   }
@@ -255,6 +287,9 @@ function validateObservation(observation, draft, args) {
     }
     if (room.threePlusParticipants !== true) {
       problems.push("room.threePlusParticipants");
+    }
+    if (platforms.some((platform) => !allowedClientPlatforms.has(platform))) {
+      problems.push("room.clientPlatforms.allowed");
     }
     if (!platforms.includes("browser")) {
       problems.push("room.clientPlatforms.browser");

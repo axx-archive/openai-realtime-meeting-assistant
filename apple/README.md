@@ -340,11 +340,29 @@ The TURN inbox observation must have `status: "observed"`, matching `runId` and
 candidate-pair facts, positive RTT, and a clean ICE-readiness summary with
 credentialed TURN/TURNS and no warnings or errors.
 
-Promote the browser/native room-gate observation after a same-room smoke with at
-least three total participants, at least one browser peer, and at least one
-native Apple peer:
+Create and promote the browser/native room-gate observation after a same-room
+smoke with at least three total participants, at least one browser peer, and at
+least one native Apple peer:
 
 ```bash
+export NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT=4
+export NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS=browser,ios,ipados,macos
+node scripts/native-apple-create-room-interop-observation.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --participant-count "$NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT" \
+  --client-platforms "$NATIVE_APPLE_ROOM_INTEROP_CLIENT_PLATFORMS" \
+  --confirm-browser-native-mixed-room \
+  --confirm-three-plus-participants \
+  --confirm-remote-audio-audible \
+  --confirm-remote-video-rendered \
+  --confirm-no-missing-remote-health \
+  --confirm-no-duplicate-participants \
+  --confirm-no-stalled-remote-media \
+  --confirm-clean-leave \
+  --confirm-recording-off \
+  --confirm-current-build \
+  --confirm-no-secrets
+
 node scripts/native-apple-promote-room-gate-evidence.mjs \
   --proofpack-dir artifacts/native-apple/<run-id> \
   --input artifacts/native-apple/<run-id>/inbox/room-interop-observation.json \
@@ -356,13 +374,16 @@ node scripts/native-apple-promote-room-gate-evidence.mjs \
   --confirm-no-secrets
 ```
 
-The room-gate helper does not read room logs or media frames. It promotes a
-sanitized operator observation only after the observation matches the proof-pack
-`runId`, `roomId`, version, and build, proves browser/native platform mix,
-remote audio/video, no missing/duplicate/stalled remote media health, clean
-leave with `/participants` empty, and recording-off transcript/Realtime
-forwarding stopped. It rejects raw SDP, ICE candidates, TURN URLs, credentials,
-account data, raw logs, screenshots, pixels, and frames.
+The room-gate creator writes only the sanitized inbox observation; it does not
+join a room, run media smoke, mutate release evidence, or prove the assertions
+by itself. The promoter then accepts that observation only after it matches the
+proof-pack `runId`, `roomId`, version, and build and validates the
+operator-confirmed browser/native platform mix, remote audio/video, no
+missing/duplicate/stalled remote media health, clean leave with `/participants`
+empty, and recording-off transcript/Realtime forwarding stopped. Both helpers
+reject raw SDP, ICE
+candidates, TURN URLs, credentials, account data, raw logs, screenshots,
+pixels, and frames.
 
 Create the App Store review metadata observation after App Store Connect
 metadata is complete for external testing/review readiness:
