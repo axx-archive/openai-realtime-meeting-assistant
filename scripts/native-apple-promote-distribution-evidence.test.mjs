@@ -389,6 +389,25 @@ const unsafeTestFlightRejected = promote([
 assert.equal(unsafeTestFlightRejected.status, 1);
 assert.match(unsafeTestFlightRejected.output.error, /unsafeContent/);
 
+const unexpectedTestFlightRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "testflight",
+  "--input",
+  writeObservation(
+    fixture.dir,
+    "unexpected-testflight.json",
+    boundTestFlightObservation({ externalTestingAvailable: true, appStoreConnect: { uploadLog: "not allowed" } })
+  ),
+  "--confirm-app-store-connect-upload",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(unexpectedTestFlightRejected.status, 1);
+assert.match(unexpectedTestFlightRejected.output.error, /input\.externalTestingAvailable|input\.appStoreConnect\.uploadLog/);
+
 const missingAppReviewConfirm = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -529,4 +548,4 @@ assert.match(unsafeNotarizationRejected.output.error, /unsafeContent/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-distribution-evidence: 19 checks passed");
+console.log("native-apple-promote-distribution-evidence: 20 checks passed");

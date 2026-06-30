@@ -414,8 +414,30 @@ screenshots, App Privacy, age rating, export compliance, test information, and
 external testing group setup. This proves sanitized metadata readiness, not
 Apple review approval or TestFlight upload.
 
-Promote the App Store Connect/TestFlight upload observation with a sanitized
-operator artifact after a real archive/upload:
+Create the App Store Connect/TestFlight upload observation with a sanitized
+operator artifact after a real archive/upload is visible in App Store Connect:
+
+```bash
+export NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID=asc-build-20260630-15
+export NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS=ready
+node scripts/native-apple-create-testflight-observation.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --app-store-connect-build-id "$NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID" \
+  --processing-status "$NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS" \
+  --confirm-app-store-connect-upload \
+  --confirm-current-build \
+  --confirm-no-secrets
+```
+
+The TestFlight creator validates matching proof-pack/template identity, current
+iOS/iPad app build, non-secret App Store Connect build id, accepted processing
+status, and secret-shaped content. It only writes
+`inbox/testflight-observation.json`; it does not upload to TestFlight, contact
+Apple, promote evidence, or prove external tester availability. If
+`--uploaded-at` is omitted, the timestamp is the local observation creation
+time.
+
+Promote the created TestFlight upload observation separately:
 
 ```bash
 node scripts/native-apple-promote-distribution-evidence.mjs \

@@ -1018,6 +1018,19 @@ assert.equal(readyFixture.output.ok, true);
 assert.equal(readyFixture.output.readyForDistribution, true);
 assert.deepEqual(readyFixture.output.blockers, []);
 
+const numericTestFlightBuildFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(numericTestFlightBuildFixturePath, "ReleaseEvidence.local.json"), {
+  testFlight: {
+    appStoreConnectBuildId: "1234567890",
+  },
+});
+const numericTestFlightBuildFixture = runReadiness(["--apple-dir", numericTestFlightBuildFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(numericTestFlightBuildFixture.status, 0);
+assert.equal(numericTestFlightBuildFixture.output.ok, true);
+assert.equal(numericTestFlightBuildFixture.output.readyForDistribution, true);
+
 const missingLaunchSchemeFixturePath = makeFixture({ includeIcons: true, includePrivacy: true, includeLaunchScheme: false });
 writeReleaseEvidenceFixture(resolve(missingLaunchSchemeFixturePath, "ReleaseEvidence.local.json"));
 const missingLaunchSchemeFixture = runReadiness(["--apple-dir", missingLaunchSchemeFixturePath], {
@@ -2164,4 +2177,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 67 checks passed");
+console.log("native-apple-release-readiness: 68 checks passed");

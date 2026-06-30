@@ -158,6 +158,11 @@ assert.match(plan.commands.promoteAppStoreReviewObservation.shell, /--kind app-r
 assert.match(plan.commands.promoteAppStoreReviewObservation.shell, /--confirm-review-metadata-complete/);
 assert.match(plan.commands.promoteAppStoreReviewObservation.shell, /--confirm-app-privacy-complete/);
 assert.match(plan.commands.promoteAppStoreReviewObservation.shell, /--confirm-external-testing-ready/);
+assert.match(plan.commands.createTestFlightObservation.shell, /native-apple-create-testflight-observation\.mjs/);
+assert.match(plan.commands.createTestFlightObservation.shell, /"\$NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID"/);
+assert.match(plan.commands.createTestFlightObservation.shell, /"\$NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS"/);
+assert.match(plan.commands.createTestFlightObservation.shell, /--confirm-app-store-connect-upload/);
+assert.match(plan.commands.createTestFlightObservation.shell, /--confirm-current-build/);
 assert.match(plan.commands.promoteTestFlightObservation.shell, /testflight-observation\.json/);
 assert.match(plan.commands.promoteMacNotarizationObservation.shell, /notarization-observation\.json/);
 assert.match(plan.commands.writeLocalReleaseEvidence.shell, /--write-evidence/);
@@ -185,6 +190,7 @@ assert.match(readme, /promoteTurnRelayObservation/);
 assert.match(readme, /promoteRoomInteropObservation/);
 assert.match(readme, /createAppStoreReviewObservation/);
 assert.match(readme, /promoteAppStoreReviewObservation/);
+assert.match(readme, /createTestFlightObservation/);
 assert.match(readme, /notarytool/);
 assert.match(readme, /strict readiness/);
 

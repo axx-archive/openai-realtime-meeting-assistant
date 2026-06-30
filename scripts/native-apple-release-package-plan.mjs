@@ -609,6 +609,22 @@ function buildPlan(args) {
       ],
       "Promotes the sanitized App Store review metadata observation after App Store Connect metadata, public URLs, privacy answers, and external testing group setup are ready."
     );
+    commands.createTestFlightObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-create-testflight-observation.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--app-store-connect-build-id",
+        "$NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID",
+        "--processing-status",
+        "$NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS",
+        "--confirm-app-store-connect-upload",
+        "--confirm-current-build",
+        "--confirm-no-secrets",
+      ],
+      "Creates the sanitized TestFlight upload inbox observation after the uploaded build is visible in App Store Connect."
+    );
     commands.promoteTestFlightObservation = commandSpec(
       [
         "node",
@@ -736,6 +752,8 @@ function buildPlan(args) {
       restrictiveNetworkLabel: "Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret label before promoting TURN evidence.",
       appReviewSupportURL: "Set NATIVE_APPLE_SUPPORT_URL to the public HTTPS support URL before creating App Store review metadata evidence.",
       appReviewPrivacyPolicyURL: "Set NATIVE_APPLE_PRIVACY_POLICY_URL to the public HTTPS privacy policy URL before creating App Store review metadata evidence.",
+      appStoreConnectBuildId: "Set NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID to the non-secret App Store Connect build id before creating TestFlight evidence.",
+      testFlightProcessingStatus: "Set NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS to ready, uploaded, processing, or accepted before creating TestFlight evidence.",
     },
     blockers,
     warnings,
@@ -745,7 +763,7 @@ function buildPlan(args) {
       "Capture and promote restrictive-network TURN relay evidence.",
       "Capture and promote browser/native 3+ participant room gate evidence.",
       "Complete App Store Connect review metadata, create the sanitized observation, and promote it.",
-      "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
+      "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine, then create and promote the sanitized TestFlight observation.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",
       "Fill proof-pack inbox App Store review, TestFlight, and macOS notarization observations from the real operator run.",

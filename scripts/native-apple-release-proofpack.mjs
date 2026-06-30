@@ -572,6 +572,9 @@ App Store review metadata, TestFlight, or notarization run.
 For App Store review metadata, prefer generating the inbox observation with
 scripts/native-apple-create-app-review-observation.mjs so the public URLs and
 readiness confirmations are validated before promotion.
+For TestFlight upload evidence, prefer generating the inbox observation with
+scripts/native-apple-create-testflight-observation.mjs so the App Store Connect
+build id and processing status are validated before promotion.
 
 Promotion helpers validate inbox observations and then write the release proof
 under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
@@ -1042,6 +1045,7 @@ function createProofpack(args) {
       "Promote sanitized browser/native 3+ participant room gate observations with scripts/native-apple-promote-room-gate-evidence.mjs.",
       "Create sanitized App Store review metadata observations with scripts/native-apple-create-app-review-observation.mjs.",
       "Promote sanitized App Store review metadata observations with scripts/native-apple-promote-distribution-evidence.mjs --kind app-review.",
+      "Create sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-create-testflight-observation.mjs.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
       "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",
       "Copy the completed ReleaseEvidence.draft.json to apple/ReleaseEvidence.local.json with --write-evidence.",

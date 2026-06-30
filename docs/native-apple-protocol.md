@@ -160,6 +160,10 @@ proof-pack inputs, not websocket events and not app-exported media diagnostics.
 App Store review inbox observation after an operator supplies public HTTPS
 support/privacy URLs and confirms each metadata readiness item, but it does not
 promote evidence, upload builds, submit review, or prove Apple approval.
+`scripts/native-apple-create-testflight-observation.mjs` can create the local
+TestFlight inbox observation after an operator confirms the uploaded build is
+visible in App Store Connect and supplies a non-secret build id and processing
+status, but it does not upload builds or prove tester availability.
 `scripts/native-apple-promote-distribution-evidence.mjs` promotes those
 observations only after an operator confirms the current build, review metadata
 or upload/notarization/stapling/Gatekeeper checks, and absence of

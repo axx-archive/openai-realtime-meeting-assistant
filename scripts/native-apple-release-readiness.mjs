@@ -172,7 +172,7 @@ function expandBuildSettingValue(value, settings, options = {}) {
 function validDevelopmentTeam(value) {
   const normalized = cleanBuildSettingValue(value);
   const placeholders = new Set(["ABCDE12345", "YOURTEAMID", "YOUR_TEAM_ID", "TEAMID1234"]);
-  return /^[A-Z0-9]{10}$/.test(normalized) && !placeholders.has(normalized);
+  return /^(?=[A-Z0-9]*[A-Z])[A-Z0-9]{10}$/.test(normalized) && !placeholders.has(normalized);
 }
 
 function nonPlaceholderString(value) {

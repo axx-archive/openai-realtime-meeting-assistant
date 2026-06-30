@@ -3152,3 +3152,92 @@ What worked:
 - Keeping creation and promotion separate lets an operator prepare the
   sanitized App Store review metadata observation without mutating release
   evidence or implying Apple approval.
+
+## Wave 42 - TestFlight Observation Creator
+
+Status: `wave42_testflight_observation_creator_validated`
+
+Scope:
+- Continued the native Apple release objective through the requested
+  multi-agent loop by removing another manual inbox JSON step from the
+  Apple-account release path.
+- Added `scripts/native-apple-create-testflight-observation.mjs`, a non-secret
+  helper that creates only `inbox/testflight-observation.json` from the current
+  proof pack after the operator supplies a non-secret App Store Connect build
+  id, a valid processing status, and explicit upload/current-build/no-secrets
+  confirmations.
+- Wired the creator into proof-pack next steps, the Apple-account command pack,
+  operator preflight, and docs so the release flow is now explicitly:
+  archive/upload on the Apple-account machine, create sanitized TestFlight inbox
+  observation, then promote with
+  `native-apple-promote-distribution-evidence.mjs --kind testflight`.
+- Tightened the TestFlight promotion boundary so hand-edited inbox observations
+  cannot carry unexpected fields such as external tester availability, raw
+  upload logs, command output, credentials, or other non-schema claims.
+- Added current project metadata and proof-pack/draft `roomId` checks so the
+  creator rejects stale or mismatched proof packs before it writes an inbox
+  observation.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-create-testflight-observation.mjs`
+- `scripts/native-apple-create-testflight-observation.test.mjs`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+
+Validation:
+- `node --check` passed for the changed native Apple evidence scripts and
+  tests.
+- `node scripts/native-apple-create-testflight-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-create-app-review-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 20
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 68 checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 8
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true`.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `ok:true`, `readyForDistribution:false`, and external
+  blockers for Apple signing/team setup, privacy manifest, and release
+  evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with `ok:true`.
+- `git diff --check` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+
+Risks / blockers:
+- This wave does not archive or upload a build to App Store Connect, enable
+  internal or external testing, contact Apple, notarize macOS, or prove physical
+  device media quality.
+- Apple signing/team setup, approved privacy manifest, real physical
+  iPhone/iPad/Mac proof, restrictive TURN proof, browser/native room proof,
+  real TestFlight upload, real App Store review metadata, and macOS
+  notarization/stapling/Gatekeeper proof remain external release blockers.
+
+What worked:
+- Mirroring the App Store review creator pattern kept the TestFlight helper
+  small and fail-closed while preserving the existing promotion/readiness
+  contract.
+- The sidecar review caught two useful release-evidence details before critic:
+  include `roomId` in creator identity checks and normalize operator-supplied
+  processing status casing.

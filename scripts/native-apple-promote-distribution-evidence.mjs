@@ -197,7 +197,7 @@ function collectUnsafeContent(value, path = "$") {
       if (
         /\bsk-[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
         /\bAKIA[0-9A-Z]{16}\b/.test(trimmed) ||
-        /\b[A-Z0-9]{10}\b/.test(trimmed) ||
+        /\b(?=[A-Z0-9]*[A-Z])[A-Z0-9]{10}\b/.test(trimmed) ||
         /\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/.test(trimmed) ||
         /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(trimmed) ||
         /\/Users\/[^/\s]+/i.test(trimmed) ||
@@ -310,6 +310,15 @@ function validateTestFlightObservation(observation, draft, args) {
     "native_testflight_upload_observation",
     "observed",
     "uploadedAt"
+  );
+  problems.push(
+    ...collectUnexpectedKeys(
+      observation,
+      ["schemaVersion", "artifactType", "status", "runId", "uploadedAt", "app", "appStoreConnect"],
+      "input"
+    ),
+    ...collectUnexpectedKeys(observation?.app, ["version", "build", "target", "clientPlatform", "bundleIdentifier"], "input.app"),
+    ...collectUnexpectedKeys(observation?.appStoreConnect, ["buildId", "processingStatus"], "input.appStoreConnect")
   );
   if (!args.confirmAppleUpload) {
     problems.push("confirmAppleUpload");
