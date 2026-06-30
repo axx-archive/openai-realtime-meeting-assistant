@@ -423,6 +423,55 @@ const unsafeAppReviewRejected = promote([
 assert.equal(unsafeAppReviewRejected.status, 1);
 assert.match(unsafeAppReviewRejected.output.error, /metadata.supportURL|unsafeContent/);
 
+for (const [label, url] of [
+  ["localhost", "https://localhost/support"],
+  ["private-ipv4", "https://192.168.1.2/support"],
+  ["ipv6-loopback", "https://[::1]/support"],
+  ["ipv6-private", "https://[fd00::1]/support"],
+]) {
+  const privateURLRejected = promote([
+    "--proofpack-dir",
+    created.output.proofpackDir,
+    "--kind",
+    "app-review",
+    "--input",
+    writeObservation(
+      fixture.dir,
+      `private-${label}-app-review.json`,
+      boundAppStoreReviewObservation({ metadata: { supportURL: url } })
+    ),
+    "--confirm-review-metadata-complete",
+    "--confirm-app-privacy-complete",
+    "--confirm-external-testing-ready",
+    "--confirm-no-secrets",
+    "--confirm-current-build",
+    "--force",
+  ]);
+  assert.equal(privateURLRejected.status, 1);
+  assert.match(privateURLRejected.output.error, /metadata.supportURL/);
+}
+
+const unexpectedAppReviewRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--kind",
+  "app-review",
+  "--input",
+  writeObservation(
+    fixture.dir,
+    "unexpected-app-review.json",
+    boundAppStoreReviewObservation({ appleReviewStatus: "approved", metadata: { reviewerNotes: "not allowed" } })
+  ),
+  "--confirm-review-metadata-complete",
+  "--confirm-app-privacy-complete",
+  "--confirm-external-testing-ready",
+  "--confirm-no-secrets",
+  "--confirm-current-build",
+  "--force",
+]);
+assert.equal(unexpectedAppReviewRejected.status, 1);
+assert.match(unexpectedAppReviewRejected.output.error, /input\.appleReviewStatus|input\.metadata\.reviewerNotes/);
+
 const missingNotaryConfirm = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -480,4 +529,4 @@ assert.match(unsafeNotarizationRejected.output.error, /unsafeContent/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-distribution-evidence: 14 checks passed");
+console.log("native-apple-promote-distribution-evidence: 19 checks passed");

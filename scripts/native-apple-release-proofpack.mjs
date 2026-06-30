@@ -569,6 +569,10 @@ to the same folder without .template.json only after replacing placeholders with
 values from the real physical-device, restrictive-network, browser/native room,
 App Store review metadata, TestFlight, or notarization run.
 
+For App Store review metadata, prefer generating the inbox observation with
+scripts/native-apple-create-app-review-observation.mjs so the public URLs and
+readiness confirmations are validated before promotion.
+
 Promotion helpers validate inbox observations and then write the release proof
 under ../evidence/ plus ReleaseEvidence.draft.json. Do not edit ../evidence/
 directly except to inspect generated pending or promoted artifacts.
@@ -1036,6 +1040,7 @@ function createProofpack(args) {
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",
       "Promote sanitized browser/native 3+ participant room gate observations with scripts/native-apple-promote-room-gate-evidence.mjs.",
+      "Create sanitized App Store review metadata observations with scripts/native-apple-create-app-review-observation.mjs.",
       "Promote sanitized App Store review metadata observations with scripts/native-apple-promote-distribution-evidence.mjs --kind app-review.",
       "Promote sanitized App Store Connect/TestFlight upload observations with scripts/native-apple-promote-distribution-evidence.mjs --kind testflight.",
       "Promote sanitized macOS notarization observations with scripts/native-apple-promote-distribution-evidence.mjs --kind notarization.",

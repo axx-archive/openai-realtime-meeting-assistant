@@ -1768,6 +1768,32 @@ assert.equal(
   true
 );
 
+for (const [label, supportURL, privacyPolicyURL] of [
+  ["localhost", "https://localhost/support", "https://thebonfire.xyz/privacy"],
+  ["private-ipv6", "https://thebonfire.xyz/support", "https://[fd00::1]/privacy"],
+]) {
+  const privateAppStoreReviewFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+  writeReleaseEvidenceFixture(resolve(privateAppStoreReviewFixturePath, "ReleaseEvidence.local.json"), {
+    appStoreReview: {
+      supportURL,
+      privacyPolicyURL,
+    },
+  });
+  const privateAppStoreReviewFixture = runReadiness(
+    ["--apple-dir", privateAppStoreReviewFixturePath, "--strict"],
+    { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+  );
+  assert.equal(privateAppStoreReviewFixture.status, 1);
+  assert.equal(privateAppStoreReviewFixture.output.ok, true);
+  assert.equal(privateAppStoreReviewFixture.output.readyForDistribution, false);
+  assert.equal(
+    privateAppStoreReviewFixture.output.blockers.some(
+      (blocker) => blocker.id === "app_store_review_metadata" && blocker.detail.includes(label === "localhost" ? "supportURL" : "privacyPolicyURL")
+    ),
+    true
+  );
+}
+
 const remoteAppStoreReviewArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(remoteAppStoreReviewArtifactFixturePath, "ReleaseEvidence.local.json"), {
   appStoreReview: {
@@ -2138,4 +2164,4 @@ assert.equal(
   true
 );
 
-console.log("native-apple-release-readiness: 65 checks passed");
+console.log("native-apple-release-readiness: 67 checks passed");

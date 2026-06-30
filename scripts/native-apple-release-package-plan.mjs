@@ -568,6 +568,29 @@ function buildPlan(args) {
       ],
       "Promotes the browser/native 3+ participant room gate observation after clean leave and recording-off forwarding behavior are verified."
     );
+    commands.createAppStoreReviewObservation = commandSpec(
+      [
+        "node",
+        "scripts/native-apple-create-app-review-observation.mjs",
+        "--proofpack-dir",
+        artifactRef(proofpack.proofpackDir),
+        "--support-url",
+        "$NATIVE_APPLE_SUPPORT_URL",
+        "--privacy-policy-url",
+        "$NATIVE_APPLE_PRIVACY_POLICY_URL",
+        "--confirm-description-ready",
+        "--confirm-keywords-ready",
+        "--confirm-screenshots-ready",
+        "--confirm-app-privacy-ready",
+        "--confirm-age-rating-complete",
+        "--confirm-export-compliance-complete",
+        "--confirm-test-information-ready",
+        "--confirm-external-testing-group-ready",
+        "--confirm-current-build",
+        "--confirm-no-secrets",
+      ],
+      "Creates the sanitized App Store review metadata inbox observation after the public support/privacy URLs and App Store Connect metadata are ready."
+    );
     commands.promoteAppStoreReviewObservation = commandSpec(
       [
         "node",
@@ -711,6 +734,8 @@ function buildPlan(args) {
       appleDevelopmentTeam: "Configure through apple/Config/Signing.local.xcconfig or APPLE_DEVELOPMENT_TEAM; this plan intentionally does not print the Team ID.",
       notarytoolKeychainProfile: "Set NOTARYTOOL_KEYCHAIN_PROFILE in the local shell before running the notarytool command.",
       restrictiveNetworkLabel: "Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret label before promoting TURN evidence.",
+      appReviewSupportURL: "Set NATIVE_APPLE_SUPPORT_URL to the public HTTPS support URL before creating App Store review metadata evidence.",
+      appReviewPrivacyPolicyURL: "Set NATIVE_APPLE_PRIVACY_POLICY_URL to the public HTTPS privacy policy URL before creating App Store review metadata evidence.",
     },
     blockers,
     warnings,
@@ -719,7 +744,7 @@ function buildPlan(args) {
       "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
       "Capture and promote restrictive-network TURN relay evidence.",
       "Capture and promote browser/native 3+ participant room gate evidence.",
-      "Complete and promote sanitized App Store review metadata evidence.",
+      "Complete App Store Connect review metadata, create the sanitized observation, and promote it.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
       "Submit, staple, and Gatekeeper-verify the macOS app.",

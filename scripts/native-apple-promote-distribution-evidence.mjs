@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -136,16 +137,50 @@ function normalizedStatus(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function validHttpsURL(value) {
+function isPrivateIPv4(hostname) {
+  const parts = hostname.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [first, second] = parts;
+  return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
+}
+
+function validPublicHttpsURL(value) {
   if (!nonPlaceholderString(value)) {
     return false;
   }
   try {
     const url = new URL(String(value).trim());
-    return url.protocol === "https:" && Boolean(url.hostname);
+    const hostname = url.hostname.toLowerCase();
+    const ipHostname = hostname.replace(/^\[|\]$/g, "");
+    if (url.protocol !== "https:" || !hostname || url.username || url.password) {
+      return false;
+    }
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+      return false;
+    }
+    const ipVersion = isIP(ipHostname);
+    if (ipVersion === 4 && isPrivateIPv4(ipHostname)) {
+      return false;
+    }
+    if (ipVersion === 6 && (ipHostname === "::1" || ipHostname.startsWith("fc") || ipHostname.startsWith("fd") || ipHostname.startsWith("fe80"))) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
+}
+
+function collectUnexpectedKeys(value, allowedKeys, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value)
+    .filter((key) => !allowed.has(key))
+    .map((key) => `${path}.${key}`);
 }
 
 function collectUnsafeContent(value, path = "$") {
@@ -314,6 +349,30 @@ function validateAppStoreReviewObservation(observation, draft, args) {
     "observed",
     "reviewedAt"
   );
+  problems.push(
+    ...collectUnexpectedKeys(
+      observation,
+      ["schemaVersion", "artifactType", "status", "runId", "reviewedAt", "app", "metadata"],
+      "input"
+    ),
+    ...collectUnexpectedKeys(observation?.app, ["version", "build", "target", "clientPlatform", "bundleIdentifier"], "input.app"),
+    ...collectUnexpectedKeys(
+      observation?.metadata,
+      [
+        "supportURL",
+        "privacyPolicyURL",
+        "descriptionReady",
+        "keywordsReady",
+        "screenshotsReady",
+        "appPrivacyReady",
+        "ageRatingComplete",
+        "exportComplianceComplete",
+        "testInformationReady",
+        "externalTestingGroupReady",
+      ],
+      "input.metadata"
+    )
+  );
   if (!args.confirmReviewMetadataComplete) {
     problems.push("confirmReviewMetadataComplete");
   }
@@ -338,10 +397,10 @@ function validateAppStoreReviewObservation(observation, draft, args) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     problems.push("metadata");
   } else {
-    if (!validHttpsURL(metadata.supportURL)) {
+    if (!validPublicHttpsURL(metadata.supportURL)) {
       problems.push("metadata.supportURL");
     }
-    if (!validHttpsURL(metadata.privacyPolicyURL)) {
+    if (!validPublicHttpsURL(metadata.privacyPolicyURL)) {
       problems.push("metadata.privacyPolicyURL");
     }
     for (const key of [

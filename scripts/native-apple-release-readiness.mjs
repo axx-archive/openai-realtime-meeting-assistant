@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -216,13 +217,37 @@ function validTimestamp(value) {
   return nonPlaceholderString(value) && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
 }
 
-function validHttpsURL(value) {
+function isPrivateIPv4(hostname) {
+  const parts = hostname.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [first, second] = parts;
+  return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
+}
+
+function validPublicHttpsURL(value) {
   if (!nonPlaceholderString(value)) {
     return false;
   }
   try {
     const url = new URL(String(value).trim());
-    return url.protocol === "https:" && Boolean(url.hostname);
+    const hostname = url.hostname.toLowerCase();
+    const ipHostname = hostname.replace(/^\[|\]$/g, "");
+    if (url.protocol !== "https:" || !hostname || url.username || url.password) {
+      return false;
+    }
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+      return false;
+    }
+    const ipVersion = isIP(ipHostname);
+    if (ipVersion === 4 && isPrivateIPv4(ipHostname)) {
+      return false;
+    }
+    if (ipVersion === 6 && (ipHostname === "::1" || ipHostname.startsWith("fc") || ipHostname.startsWith("fd") || ipHostname.startsWith("fe80"))) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -1598,10 +1623,10 @@ function appStoreReviewArtifactProblems({ item, artifact, expectedVersion, expec
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     problems.push("artifact:metadata");
   } else {
-    if (!validHttpsURL(metadata.supportURL) || !strictStringEqual(metadata.supportURL, item.supportURL)) {
+    if (!validPublicHttpsURL(metadata.supportURL) || !strictStringEqual(metadata.supportURL, item.supportURL)) {
       problems.push("artifact:metadata.supportURL");
     }
-    if (!validHttpsURL(metadata.privacyPolicyURL) || !strictStringEqual(metadata.privacyPolicyURL, item.privacyPolicyURL)) {
+    if (!validPublicHttpsURL(metadata.privacyPolicyURL) || !strictStringEqual(metadata.privacyPolicyURL, item.privacyPolicyURL)) {
       problems.push("artifact:metadata.privacyPolicyURL");
     }
     for (const key of appStoreReviewBooleanFields) {
@@ -1629,10 +1654,10 @@ function appStoreReviewArtifactProblems({ item, artifact, expectedVersion, expec
     if (!validTimestamp(summary.reviewedAt) || !strictStringEqual(summary.reviewedAt, item.reviewedAt)) {
       problems.push("artifact:releaseEvidenceSummary.reviewedAt");
     }
-    if (!validHttpsURL(summary.supportURL) || !strictStringEqual(summary.supportURL, item.supportURL)) {
+    if (!validPublicHttpsURL(summary.supportURL) || !strictStringEqual(summary.supportURL, item.supportURL)) {
       problems.push("artifact:releaseEvidenceSummary.supportURL");
     }
-    if (!validHttpsURL(summary.privacyPolicyURL) || !strictStringEqual(summary.privacyPolicyURL, item.privacyPolicyURL)) {
+    if (!validPublicHttpsURL(summary.privacyPolicyURL) || !strictStringEqual(summary.privacyPolicyURL, item.privacyPolicyURL)) {
       problems.push("artifact:releaseEvidenceSummary.privacyPolicyURL");
     }
     if (summary.externalTestingReady !== true) {
@@ -2394,10 +2419,10 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     if (!expectedIdentity(appStoreReview.runId, runId)) {
       appStoreReviewProblems.push("runId");
     }
-    if (!validHttpsURL(appStoreReview.supportURL)) {
+    if (!validPublicHttpsURL(appStoreReview.supportURL)) {
       appStoreReviewProblems.push("supportURL");
     }
-    if (!validHttpsURL(appStoreReview.privacyPolicyURL)) {
+    if (!validPublicHttpsURL(appStoreReview.privacyPolicyURL)) {
       appStoreReviewProblems.push("privacyPolicyURL");
     }
     for (const key of appStoreReviewBooleanFields) {

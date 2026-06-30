@@ -364,8 +364,36 @@ leave with `/participants` empty, and recording-off transcript/Realtime
 forwarding stopped. It rejects raw SDP, ICE candidates, TURN URLs, credentials,
 account data, raw logs, screenshots, pixels, and frames.
 
-Promote the App Store review metadata observation after App Store Connect
+Create the App Store review metadata observation after App Store Connect
 metadata is complete for external testing/review readiness:
+
+```bash
+export NATIVE_APPLE_SUPPORT_URL=https://thebonfire.xyz/support
+export NATIVE_APPLE_PRIVACY_POLICY_URL=https://thebonfire.xyz/privacy
+node scripts/native-apple-create-app-review-observation.mjs \
+  --proofpack-dir artifacts/native-apple/<run-id> \
+  --support-url "$NATIVE_APPLE_SUPPORT_URL" \
+  --privacy-policy-url "$NATIVE_APPLE_PRIVACY_POLICY_URL" \
+  --confirm-description-ready \
+  --confirm-keywords-ready \
+  --confirm-screenshots-ready \
+  --confirm-app-privacy-ready \
+  --confirm-age-rating-complete \
+  --confirm-export-compliance-complete \
+  --confirm-test-information-ready \
+  --confirm-external-testing-group-ready \
+  --confirm-current-build \
+  --confirm-no-secrets
+```
+
+The creator validates matching proof-pack/template identity, current build,
+public HTTPS support and privacy URLs, explicit readiness confirmations, and
+secret-shaped content. It only writes
+`inbox/app-store-review-observation.json`; it does not promote evidence, upload
+to TestFlight, contact Apple, or prove review approval. If `--reviewed-at` is
+omitted, the timestamp is the local observation creation time.
+
+Promote the created App Store review metadata observation separately:
 
 ```bash
 node scripts/native-apple-promote-distribution-evidence.mjs \

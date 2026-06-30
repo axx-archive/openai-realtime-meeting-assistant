@@ -97,6 +97,42 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function cleanBuildValue(value) {
+  return clean(value).replace(/^["']|["']$/g, "").replace(/;$/, "").trim();
+}
+
+function bundleIdentifierForTarget(projectText, targetName) {
+  const start = projectText.indexOf(`  ${targetName}:`);
+  if (start === -1) {
+    return "";
+  }
+  const targetBlock = projectText.slice(start + targetName.length + 4);
+  const nextTarget = targetBlock.search(/\n  [A-Za-z0-9_]+:/);
+  const block = nextTarget >= 0 ? targetBlock.slice(0, nextTarget) : targetBlock;
+  return cleanBuildValue(/PRODUCT_BUNDLE_IDENTIFIER:\s*([^\n#]+)/.exec(block)?.[1] ?? "");
+}
+
+function readProjectMetadata(appleDir) {
+  const projectYml = join(appleDir, "project.yml");
+  if (!existsSync(projectYml)) {
+    return null;
+  }
+  const projectText = readFileSync(projectYml, "utf8");
+  const marketing = /MARKETING_VERSION:\s*([^\n#]+)/.exec(projectText)?.[1];
+  const build = /CURRENT_PROJECT_VERSION:\s*([^\n#]+)/.exec(projectText)?.[1];
+  if (!marketing || !build) {
+    return null;
+  }
+  return {
+    version: cleanBuildValue(marketing),
+    build: cleanBuildValue(build),
+    bundleIdentifiers: {
+      ios: bundleIdentifierForTarget(projectText, "MeetingAssistAppleApp"),
+      macos: bundleIdentifierForTarget(projectText, "MeetingAssistMacApp"),
+    },
+  };
+}
+
 function checkTool(name, command, args, checks, blockers, options = {}) {
   const result = run(command, args, { timeout: options.timeout ?? 20_000 });
   const ok = result.status === 0;
@@ -278,7 +314,7 @@ function checkReleaseBuildRehearsal(projectPath, configuration, checks, blockers
   }
 }
 
-function checkProofpack(proofpackDir, configuration, checks, blockers, warnings) {
+function checkProofpack(proofpackDir, appleDir, configuration, checks, blockers, warnings) {
   const proofpackPath = join(proofpackDir, "proofpack.json");
   const draftPath = join(proofpackDir, "ReleaseEvidence.draft.json");
   const planPath = join(proofpackDir, "operator", "release-command-plan.json");
@@ -302,6 +338,23 @@ function checkProofpack(proofpackDir, configuration, checks, blockers, warnings)
   const draft = readJSON(draftPath);
   const plan = readJSON(planPath);
   const identityProblems = [];
+  const currentMetadata = readProjectMetadata(appleDir);
+  if (!currentMetadata) {
+    identityProblems.push("currentProject");
+  } else {
+    if (String(proofpack.version ?? "") !== currentMetadata.version || String(draft.version ?? "") !== currentMetadata.version || String(plan.version ?? "") !== currentMetadata.version) {
+      identityProblems.push("currentProject.version");
+    }
+    if (String(proofpack.build ?? "") !== currentMetadata.build || String(draft.build ?? "") !== currentMetadata.build || String(plan.build ?? "") !== currentMetadata.build) {
+      identityProblems.push("currentProject.build");
+    }
+    if (String(plan.bundleIdentifiers?.ios ?? "") !== currentMetadata.bundleIdentifiers.ios) {
+      identityProblems.push("currentProject.bundleIdentifiers.ios");
+    }
+    if (String(plan.bundleIdentifiers?.macos ?? "") !== currentMetadata.bundleIdentifiers.macos) {
+      identityProblems.push("currentProject.bundleIdentifiers.macos");
+    }
+  }
   for (const key of ["runId", "roomId", "version", "build"]) {
     if (proofpack[key] && draft[key] && String(proofpack[key]) !== String(draft[key])) {
       identityProblems.push(`proofpack/draft ${key}`);
@@ -344,6 +397,7 @@ function checkProofpack(proofpackDir, configuration, checks, blockers, warnings)
     "promoteMacMediaEvidence",
     "promoteTurnRelayObservation",
     "promoteRoomInteropObservation",
+    "createAppStoreReviewObservation",
     "promoteAppStoreReviewObservation",
     "promoteTestFlightObservation",
     "promoteMacNotarizationObservation",
@@ -351,6 +405,7 @@ function checkProofpack(proofpackDir, configuration, checks, blockers, warnings)
     "strictReleaseReadiness",
   ];
   const missingCommands = requiredCommands.filter((name) => !plan.commands?.[name]?.shell);
+  const expectedProofpackRef = repoRelative(proofpackDir);
   const requiredCommandFragments = {
     operatorPreflight: [
       "native-apple-release-operator-preflight.mjs",
@@ -387,6 +442,25 @@ function checkProofpack(proofpackDir, configuration, checks, blockers, warnings)
       "--confirm-three-plus-participants",
       "--confirm-clean-leave",
       "--confirm-recording-off",
+      "--confirm-current-build",
+      "--confirm-no-secrets",
+    ],
+    createAppStoreReviewObservation: [
+      "native-apple-create-app-review-observation.mjs",
+      "--proofpack-dir",
+      expectedProofpackRef,
+      "--support-url",
+      "$NATIVE_APPLE_SUPPORT_URL",
+      "--privacy-policy-url",
+      "$NATIVE_APPLE_PRIVACY_POLICY_URL",
+      "--confirm-description-ready",
+      "--confirm-keywords-ready",
+      "--confirm-screenshots-ready",
+      "--confirm-app-privacy-ready",
+      "--confirm-age-rating-complete",
+      "--confirm-export-compliance-complete",
+      "--confirm-test-information-ready",
+      "--confirm-external-testing-group-ready",
       "--confirm-current-build",
       "--confirm-no-secrets",
     ],
@@ -568,7 +642,7 @@ function buildPreflight(args) {
   }
 
   if (args.proofpackDir) {
-    checkProofpack(resolve(rootDir, args.proofpackDir), args.configuration, checks, blockers, warnings);
+    checkProofpack(resolve(rootDir, args.proofpackDir), appleDir, args.configuration, checks, blockers, warnings);
   } else if (args.requireProofpack) {
     checks.push({
       id: "proofpack_required",

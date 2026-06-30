@@ -156,6 +156,10 @@ headers, API keys, Team IDs, certificates, profiles, or private keys.
 Distribution proof is also operator-only. Sanitized App Store review metadata,
 App Store Connect/TestFlight, and macOS notarization observations are local
 proof-pack inputs, not websocket events and not app-exported media diagnostics.
+`scripts/native-apple-create-app-review-observation.mjs` can create the local
+App Store review inbox observation after an operator supplies public HTTPS
+support/privacy URLs and confirms each metadata readiness item, but it does not
+promote evidence, upload builds, submit review, or prove Apple approval.
 `scripts/native-apple-promote-distribution-evidence.mjs` promotes those
 observations only after an operator confirms the current build, review metadata
 or upload/notarization/stapling/Gatekeeper checks, and absence of

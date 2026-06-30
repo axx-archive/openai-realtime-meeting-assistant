@@ -269,6 +269,89 @@ assert.equal(stalePlanPreflight.output.readyForOperator, false);
 assert.ok(stalePlanPreflight.output.checks.some((check) => check.id === "operator_commands" && !check.ok && /promoteIPhoneMediaEvidence/.test(check.detail)));
 assert.ok(stalePlanPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
 
+const staleAppReviewRunId = `native-apple-operator-preflight-stale-app-review-test-${process.pid}`;
+const staleAppReviewProofpackDir = createProofpack(appleDir, staleAppReviewRunId);
+createPackagePlan(appleDir, staleAppReviewProofpackDir);
+const staleAppReviewPlanPath = resolve(rootDir, staleAppReviewProofpackDir, "operator", "release-command-plan.json");
+const staleAppReviewPlan = JSON.parse(readFileSync(staleAppReviewPlanPath, "utf8"));
+const staleAppReviewProofpackRef = relative(rootDir, staleAppReviewProofpackDir).split(/[/\\]/).join("/");
+staleAppReviewPlan.commands.createAppStoreReviewObservation.shell = staleAppReviewPlan.commands.createAppStoreReviewObservation.shell
+  .replace(staleAppReviewProofpackRef, "artifacts/native-apple/wrong-proofpack")
+  .replace("--support-url ", "");
+writeFileSync(staleAppReviewPlanPath, `${JSON.stringify(staleAppReviewPlan, null, 2)}\n`);
+const staleAppReviewPreflight = runNode(
+  preflightScriptPath,
+  [
+    "--apple-dir",
+    appleDir,
+    "--proofpack-dir",
+    staleAppReviewProofpackDir,
+    "--require-proofpack",
+    "--require-notary-profile",
+  ],
+  {
+    APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5",
+    NOTARYTOOL_KEYCHAIN_PROFILE: "meetingassist-notary-profile",
+  }
+);
+assert.equal(staleAppReviewPreflight.status, 1);
+assert.equal(staleAppReviewPreflight.output.readyForOperator, false);
+assert.ok(
+  staleAppReviewPreflight.output.checks.some(
+    (check) =>
+      check.id === "operator_commands" &&
+      !check.ok &&
+      /createAppStoreReviewObservation/.test(check.detail) &&
+      /--support-url|native-apple-operator-preflight-stale-app-review-test/.test(check.detail)
+  )
+);
+assert.ok(staleAppReviewPreflight.output.blockers.some((blocker) => blocker.id === "operator_commands"));
+
+const staleCurrentProjectFixture = makeAppleFixture({ build: "15" });
+const staleCurrentProjectRunId = `native-apple-operator-preflight-current-project-test-${process.pid}`;
+const staleCurrentProjectProofpackDir = createProofpack(staleCurrentProjectFixture.appleDir, staleCurrentProjectRunId);
+createPackagePlan(staleCurrentProjectFixture.appleDir, staleCurrentProjectProofpackDir);
+writeFixtureFile(
+  resolve(staleCurrentProjectFixture.appleDir, "project.yml"),
+  `targets:
+  MeetingAssistAppleApp:
+    settings:
+      base:
+        CURRENT_PROJECT_VERSION: 16
+        MARKETING_VERSION: 1.0
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.ios
+  MeetingAssistMacApp:
+    settings:
+      base:
+        CURRENT_PROJECT_VERSION: 16
+        MARKETING_VERSION: 1.0
+        PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac
+`
+);
+const staleCurrentProjectPreflight = runNode(
+  preflightScriptPath,
+  [
+    "--apple-dir",
+    staleCurrentProjectFixture.appleDir,
+    "--proofpack-dir",
+    staleCurrentProjectProofpackDir,
+    "--require-proofpack",
+    "--require-notary-profile",
+  ],
+  {
+    APPLE_DEVELOPMENT_TEAM: "A1B2C3D4E5",
+    NOTARYTOOL_KEYCHAIN_PROFILE: "meetingassist-notary-profile",
+  }
+);
+assert.equal(staleCurrentProjectPreflight.status, 1);
+assert.equal(staleCurrentProjectPreflight.output.readyForOperator, false);
+assert.ok(
+  staleCurrentProjectPreflight.output.checks.some(
+    (check) => check.id === "proofpack_identity" && !check.ok && /currentProject\.build/.test(check.detail)
+  )
+);
+assert.ok(staleCurrentProjectPreflight.output.blockers.some((blocker) => blocker.id === "proofpack_identity"));
+
 const noProjectFixture = makeAppleFixture({ project: false });
 const noProject = runNode(
   preflightScriptPath,
@@ -278,4 +361,4 @@ const noProject = runNode(
 assert.equal(noProject.status, 1);
 assert.ok(noProject.output.blockers.some((blocker) => blocker.id === "xcode_project"));
 
-console.log("native-apple-release-operator-preflight: 7 checks passed");
+console.log("native-apple-release-operator-preflight: 9 checks passed");

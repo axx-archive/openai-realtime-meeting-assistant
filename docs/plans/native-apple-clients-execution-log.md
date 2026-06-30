@@ -3061,3 +3061,94 @@ What worked:
   pack fail closed when someone edits only summary fields.
 - The critic loop caught the exact kind of shortcut the release gate is meant
   to prevent.
+
+## Wave 41 - App Store Review Observation Creator
+
+Status: `wave41_app_store_review_observation_creator_validated`
+
+Scope:
+- Continued the native Apple release objective through the requested
+  multi-agent loop after the Expo/tooling clarification. This wave stayed on
+  the repo-owned release path: SwiftUI/Xcode remain the implementation track,
+  while Expo/EAS is only a possible future iOS/iPadOS testing workflow and does
+  not cover the native macOS release lane.
+- Added `scripts/native-apple-create-app-review-observation.mjs`, a
+  non-secret helper that creates only
+  `inbox/app-store-review-observation.json` from the current proof pack after
+  the operator supplies public HTTPS support/privacy URLs and confirms every
+  App Store Connect metadata readiness item.
+- Wired the creator into proof-pack next steps, the Apple-account command pack,
+  operator preflight, and docs so the release flow is now explicitly:
+  create sanitized inbox observation, then promote with
+  `native-apple-promote-distribution-evidence.mjs --kind app-review`.
+- Tightened the app-review evidence boundary after critic review: creator,
+  promotion, and strict readiness now reject localhost, private IPv4, bracketed
+  local/private IPv6, `.local`, and credentialed support/privacy URLs. The
+  creator and promoter also reject unexpected app-review schema fields that
+  could imply Apple approval or TestFlight upload.
+- Added current project metadata checks so creator/preflight reject proof packs
+  that no longer match the active Apple project version/build/bundle identity.
+
+Files changed:
+- `apple/README.md`
+- `docs/native-apple-protocol.md`
+- `docs/plans/native-apple-clients-execution-log.md`
+- `scripts/native-apple-create-app-review-observation.mjs`
+- `scripts/native-apple-create-app-review-observation.test.mjs`
+- `scripts/native-apple-promote-distribution-evidence.mjs`
+- `scripts/native-apple-promote-distribution-evidence.test.mjs`
+- `scripts/native-apple-release-operator-preflight.mjs`
+- `scripts/native-apple-release-operator-preflight.test.mjs`
+- `scripts/native-apple-release-package-plan.mjs`
+- `scripts/native-apple-release-package-plan.test.mjs`
+- `scripts/native-apple-release-proofpack.mjs`
+- `scripts/native-apple-release-proofpack.test.mjs`
+- `scripts/native-apple-release-readiness.mjs`
+- `scripts/native-apple-release-readiness.test.mjs`
+
+Validation:
+- `node --check` passed for the changed native Apple evidence scripts and
+  tests.
+- `node scripts/native-apple-create-app-review-observation.test.mjs` passed 12
+  checks.
+- `node scripts/native-apple-release-proofpack.test.mjs` passed 7 checks.
+- `node scripts/native-apple-release-package-plan.test.mjs` passed 11 checks.
+- `node scripts/native-apple-release-operator-preflight.test.mjs` passed 9
+  checks.
+- `node scripts/native-apple-promote-distribution-evidence.test.mjs` passed 19
+  checks.
+- `node scripts/native-apple-release-readiness.test.mjs` passed 67 checks.
+- `node scripts/native-apple-local-gates.test.mjs` passed 5 checks.
+- `node scripts/native-apple-promote-media-evidence.test.mjs` passed 10
+  checks.
+- `node scripts/native-apple-promote-turn-evidence.test.mjs` passed 12 checks.
+- `node scripts/native-apple-promote-room-gate-evidence.test.mjs` passed 8
+  checks.
+- `node scripts/native-apple-release-readiness.mjs --apple-dir apple` passed
+  default mode with `ok:true`.
+- `node scripts/native-apple-release-readiness.mjs --strict --apple-dir apple`
+  failed as expected with `ok:true`, `readyForDistribution:false`, and external
+  blockers for Apple signing/team setup, privacy manifest, and release
+  evidence.
+- `node scripts/media-fix-verification.mjs` passed 21 checks.
+- `node scripts/voice-focus-benchmark.mjs` passed with `ok:true`.
+- `git diff --check` passed.
+- `go test ./...` passed.
+- `swift test --package-path apple` passed 95 tests.
+
+Risks / blockers:
+- This wave does not complete App Store Connect metadata in the Apple account,
+  upload to TestFlight, notarize macOS, or prove Apple review approval.
+- Apple signing/team setup, approved privacy manifest, real physical
+  iPhone/iPad/Mac proof, restrictive TURN proof, browser/native room proof,
+  real TestFlight upload, real App Store review metadata, and macOS
+  notarization/stapling/Gatekeeper proof remain external release blockers.
+
+What worked:
+- The first critic pass rejected the wave for final-gate URL bypasses,
+  overclaimable template fields, stale-command gaps, and assertion-only current
+  build checks; fixing those at the creator, promoter, readiness, and preflight
+  layers made the evidence path fail closed.
+- Keeping creation and promotion separate lets an operator prepare the
+  sanitized App Store review metadata observation without mutating release
+  evidence or implying Apple approval.
