@@ -1041,7 +1041,49 @@
         background: var(--bg-stage);
       }
 
-      #localVideo { transform: scaleX(-1); }
+      #localVideo {
+        transform: scaleX(-1);
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+      }
+
+      .is-mobile-device #localVideo,
+      .is-mobile-device .hearth-speaker video.is-local,
+      .is-mobile-device .screen-stage__pip video.is-local,
+      .is-mobile-device .pip-tile video.is-local,
+      .is-mobile-device .board-video-tile video.is-local,
+      .is-mobile-device .board-huddle__media video.is-local {
+        transform: none;
+        -webkit-transform: none;
+      }
+
+      .is-mobile-device .video-tile video,
+      .is-mobile-device .hearth-speaker video,
+      .is-mobile-device .screen-stage__pip video {
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+        contain: paint;
+      }
+
+      .local-video-mirror-canvas {
+        display: none;
+      }
+
+      .is-mobile-device .local-video-mirror-canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--bg-stage);
+        pointer-events: none;
+      }
+
+      .is-mobile-device #localVideo.local-mirror-source {
+        opacity: 0;
+      }
 
       .video-label {
         position: absolute;
@@ -11523,6 +11565,7 @@
               <div id="videoStack" class="video-stack hearth-seats">
                 <div class="video-tile hearth-seat is-local" data-participant="">
                   <video id="localVideo" autoplay muted playsinline></video>
+                  <canvas id="localVideoMirrorCanvas" class="local-video-mirror-canvas" aria-hidden="true" hidden></canvas>
                   <span id="localTileAvatar" class="tile-avatar" aria-hidden="true"></span>
                   <span class="media-flags" aria-hidden="true">
                     <span class="media-flag media-flag--muted" title="muted">
@@ -12329,6 +12372,7 @@
       const stageModeButtons = Array.from(document.querySelectorAll('button[data-stage-mode]'))
       const pinActiveSpeakerButton = document.getElementById('pinActiveSpeaker')
       const localVideo = document.getElementById('localVideo')
+      const localVideoMirrorCanvas = document.getElementById('localVideoMirrorCanvas')
       const localTileAvatar = document.getElementById('localTileAvatar')
       const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
@@ -12636,6 +12680,7 @@
       let lastMediaQualityReportAt = 0
       let auxiliaryVideoRepairTimer = 0
       let videoAttachmentRevision = 0
+      let localMirrorFrame = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`
@@ -12654,6 +12699,7 @@
       // but exposes touch points, so fold that in.)
       const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
         || (/Macintosh/.test(navigator.userAgent) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1)
+      document.documentElement.classList.toggle('is-mobile-device', isMobileDevice)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
         'standard-cleanup': 'standard cleanup',
@@ -22617,6 +22663,88 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (nextStream && !video.hidden) {
           ensureVideoElementPlayback(video)
         }
+        if (video === localVideo) {
+          syncLocalMirrorPreview()
+        }
+      }
+
+      function localMirrorPreviewEnabled() {
+        return Boolean(isMobileDevice
+          && localVideo
+          && localVideoMirrorCanvas
+          && localVideo.srcObject
+          && !localVideo.hidden
+          && !isCameraOff
+          && videoElementHasLiveVideoTrack(localVideo))
+      }
+
+      function syncLocalMirrorPreview() {
+        const enabled = localMirrorPreviewEnabled()
+        localVideo?.classList.toggle('local-mirror-source', enabled)
+        if (localVideoMirrorCanvas) {
+          localVideoMirrorCanvas.hidden = !enabled
+        }
+        if (enabled && !localMirrorFrame) {
+          localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
+        } else if (!enabled) {
+          stopLocalMirrorPreview()
+        }
+      }
+
+      function stopLocalMirrorPreview() {
+        if (localMirrorFrame) {
+          window.cancelAnimationFrame(localMirrorFrame)
+          localMirrorFrame = 0
+        }
+        localVideo?.classList.remove('local-mirror-source')
+        if (localVideoMirrorCanvas) {
+          const context = localVideoMirrorCanvas.getContext?.('2d')
+          context?.clearRect(0, 0, localVideoMirrorCanvas.width || 0, localVideoMirrorCanvas.height || 0)
+          localVideoMirrorCanvas.hidden = true
+        }
+      }
+
+      function drawLocalMirrorPreviewFrame() {
+        localMirrorFrame = 0
+        if (!localMirrorPreviewEnabled()) {
+          stopLocalMirrorPreview()
+          return
+        }
+        localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
+        const rect = localVideoMirrorCanvas.getBoundingClientRect()
+        const sourceWidth = localVideo.videoWidth || 0
+        const sourceHeight = localVideo.videoHeight || 0
+        if (!rect.width || !rect.height || !sourceWidth || !sourceHeight) {
+          return
+        }
+        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        const width = Math.max(1, Math.round(rect.width * dpr))
+        const height = Math.max(1, Math.round(rect.height * dpr))
+        if (localVideoMirrorCanvas.width !== width || localVideoMirrorCanvas.height !== height) {
+          localVideoMirrorCanvas.width = width
+          localVideoMirrorCanvas.height = height
+        }
+        const context = localVideoMirrorCanvas.getContext?.('2d', { alpha: false })
+        if (!context) {
+          return
+        }
+        const scale = Math.max(width / sourceWidth, height / sourceHeight)
+        const drawWidth = sourceWidth * scale
+        const drawHeight = sourceHeight * scale
+        const dx = (width - drawWidth) / 2
+        const dy = (height - drawHeight) / 2
+        try {
+          context.save()
+          context.clearRect(0, 0, width, height)
+          context.translate(width, 0)
+          context.scale(-1, 1)
+          context.drawImage(localVideo, dx, dy, drawWidth, drawHeight)
+        } catch (error) {
+          // Safari can throw while the camera surface is warming. The next frame
+          // usually succeeds once metadata is available.
+        } finally {
+          context.restore()
+        }
       }
 
       function mediaStreamTrackSignature(stream) {
@@ -22705,6 +22833,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function clearVideoElementStream(video) {
         if (!video) {
           return
+        }
+        if (video === localVideo) {
+          stopLocalMirrorPreview()
         }
         pendingRemotePlaybackElements.delete(video)
         video.pause?.()
@@ -22906,6 +23037,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const video = tile.querySelector('video')
         if (video) {
           video.hidden = cameraOff && video.dataset.remotePlayback !== 'synced'
+          if (video === localVideo) {
+            syncLocalMirrorPreview()
+          }
         }
         let avatar = tile.querySelector('.tile-avatar')
         if (!avatar && video) {
