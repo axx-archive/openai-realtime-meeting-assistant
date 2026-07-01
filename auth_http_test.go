@@ -236,6 +236,48 @@ func TestClientConfigEndpointRequiresSession(t *testing.T) {
 	}
 }
 
+func TestIceTestEndpointRequiresSessionAndRedactsConfig(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/ice-test", nil)
+	recorder := httptest.NewRecorder()
+	iceTestHandler(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected /ice-test without session to return 401, got %d", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	req = httptest.NewRequest(http.MethodGet, "/ice-test", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	iceTestHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /ice-test with session to return 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{
+		"ICE candidate test",
+		"fetch('/client-config'",
+		"RTCPeerConnection",
+		"relay",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("/ice-test missing %q", want)
+		}
+	}
+	for _, secretShape := range []string{
+		"credential",
+		"username",
+		"iceServers",
+	} {
+		if strings.Contains(body, secretShape) {
+			t.Fatalf("/ice-test should not inline RTC config field %q", secretShape)
+		}
+	}
+}
+
 func TestNativeClientConfigPublishesRosterAndProtocol(t *testing.T) {
 	setupAuthTestEnv(t)
 

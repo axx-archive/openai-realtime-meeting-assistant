@@ -987,6 +987,8 @@ async function snapshotPage(page) {
         stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
         stageParticipant: typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : '',
         activeSpeaker: typeof activeSpeakerDisplayName === 'function' ? activeSpeakerDisplayName() : '',
+        serverActiveSpeaker: typeof serverActiveSpeakerName !== 'undefined' ? serverActiveSpeakerName : '',
+        serverActiveSpeakerFresh: typeof authoritativeActiveSpeakerName === 'function' ? Boolean(authoritativeActiveSpeakerName()) : false,
         stageVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
         stageMirrorCanvas: canvasProbe(document.getElementById('activeSpeakerMirrorCanvas')),
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),

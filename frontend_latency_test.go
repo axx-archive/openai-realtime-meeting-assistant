@@ -80,6 +80,39 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	}
 }
 
+func TestIndexProvidesRoomRecoveryAndAuthoritativeActiveSpeaker(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function openRoomWebSocket(options = {})",
+		"function handleRoomWebSocketClose(event, options = {})",
+		"function scheduleSignalingReconnect(reason, options = {})",
+		"const signalingReconnectDelaysMs = [500, 1000, 2000, 4000, 8000, 12000]",
+		"keeping your mic and camera while the room reconnects.",
+		"await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })",
+		"const maxIceRestartAttempts = 5",
+		"function performIceRestart(reason, attempt)",
+		"setConnectionState('connecting', `reconnecting media ${attempt}/${maxIceRestartAttempts}`)",
+		"case 'active_speaker':",
+		"function handleAuthoritativeActiveSpeaker(payload)",
+		"function authoritativeActiveSpeakerName()",
+		"if (!serverSpeaker && visibleSpeakerName && loudestLevel > 0.045 && visibleSpeakerName !== activeSpeakerName)",
+		"case 'server_shutdown':",
+		"function handleServerShutdown(payload)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing room recovery or authoritative speaker behavior %q", want)
+		}
+	}
+	if strings.Contains(html, "ws.onclose = () => leaveRoom()") {
+		t.Fatal("unexpected websocket close should enter reconnect state, not immediately leave the room")
+	}
+}
+
 func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {

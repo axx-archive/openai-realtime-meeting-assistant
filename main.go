@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -490,6 +492,7 @@ func main() {
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
 	http.HandleFunc("/native/config", nativeClientConfigHandler)
+	http.HandleFunc("/ice-test", iceTestHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
 
 	// index.html handler
@@ -518,9 +521,34 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	if err = srv.ListenAndServe(); err != nil {
+	shutdownCtx, stopShutdownSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopShutdownSignal()
+	go func() {
+		<-shutdownCtx.Done()
+		stopShutdownSignal()
+		broadcastServerShutdown(3000)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if shutdownErr := srv.Shutdown(ctx); shutdownErr != nil {
+			log.Errorf("Failed to gracefully shut down http server: %v", shutdownErr)
+		}
+	}()
+	if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Errorf("Failed to start http server: %v", err)
 	}
+}
+
+func broadcastServerShutdown(retryAfterMs int) {
+	if kanbanApp != nil {
+		kanbanApp.mu.Lock()
+		kanbanApp.restarting = true
+		kanbanApp.mu.Unlock()
+	}
+	log.Infof("room_server_shutdown retry_after_ms=%d", retryAfterMs)
+	broadcastKanbanEvent("server_shutdown", map[string]any{
+		"message":      "Server restarting",
+		"retryAfterMs": retryAfterMs,
+	})
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -2600,6 +2628,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if assistantStatus := kanbanApp.assistantStatusSnapshot(); assistantStatus != nil {
 				if err := sendKanbanEvent(c, "assistant_event", assistantStatus); err != nil {
 					log.Errorf("Failed to send assistant status: %v", err)
+				}
+			}
+			if activeSpeaker := kanbanApp.activeSpeakerSnapshot(); activeSpeaker != nil {
+				if err := sendKanbanEvent(c, "active_speaker", activeSpeaker); err != nil {
+					log.Errorf("Failed to send active speaker snapshot: %v", err)
 				}
 			}
 			broadcastKanbanEvent("participant_joined", map[string]any{

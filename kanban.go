@@ -202,6 +202,10 @@ type kanbanBoardApp struct {
 	audioActivity            []participantAudioFrame
 	currentSpeechStartedAt   time.Time
 	currentSpeechStoppedAt   time.Time
+	activeSpeakerName        string
+	activeSpeakerCandidate   string
+	activeSpeakerCandidateAt time.Time
+	activeSpeakerPayload     *activeSpeakerPayload
 	proactiveReconnectCancel chan struct{}
 	agentCancels             map[string]chan struct{}
 	agentDones               map[string]chan struct{}

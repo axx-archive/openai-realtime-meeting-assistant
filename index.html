@@ -12666,6 +12666,8 @@
       const scoutChatMaxNodes = 200
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
+      let serverActiveSpeakerName = ''
+      let serverActiveSpeakerSeenAt = 0
       let pinnedSpeakerName = ''
       let stageMode = 'gallery'
       let mobileStageParticipantsOpen = false
@@ -12688,8 +12690,16 @@
       let roomStartedAt = 0
       let roomClockTimer = 0
       let connectionRecoveryTimer = 0
+      let signalingReconnectTimer = 0
+      let signalingReconnectAttempts = 0
+      let signalingReconnectStartedAt = 0
+      let isSignalReconnecting = false
+      let lastSignalReconnectReason = ''
       let signalChain = Promise.resolve()
       let lastIceRestartRequestAt = 0
+      let iceRestartAttempts = 0
+      let iceRestartRetryTimer = 0
+      let iceRestartRecoveryStartedAt = 0
       let isLeavingRoom = false
       let clientConfigPromise = null
       let lastParticipantTrackRefreshAt = 0
@@ -12859,6 +12869,11 @@
       const screenShareSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)
       const connectionRecoveryDelayMs = 20000
       const iceRestartThrottleMs = 3500
+      const maxIceRestartAttempts = 5
+      const iceRestartRetryBackoffMs = [0, 1000, 2000, 4000, 8000]
+      const signalingReconnectDelaysMs = [500, 1000, 2000, 4000, 8000, 12000]
+      const signalingReconnectMaxElapsedMs = 45000
+      const serverActiveSpeakerStaleMs = 3000
 
       joinButton.addEventListener('click', joinRoom)
       // the login gate is a real form — password managers + Enter-to-submit
@@ -17536,45 +17551,214 @@
         setLog('checking room access')
 
         try {
-          const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-          ws = new WebSocket(`${scheme}://${window.location.host}/websocket`)
-          ws.onopen = () => {
-            accessState.textContent = 'checking'
-            accessHint.textContent = 'checking room access.'
-            ws.send(JSON.stringify({
-              event: 'participant',
-              data: JSON.stringify({
-                name: currentParticipantName
-              })
-            }))
-          }
-          ws.onmessage = event => {
-            let message
-            try {
-              message = JSON.parse(event.data)
-            } catch (error) {
-              console.warn('Signal parse failed', error)
-              setLog('could not read room signal')
-              return
-            }
-            signalChain = signalChain
-              .catch(() => {})
-              .then(() => handleSignal(message))
-              .catch(error => {
-                console.warn('Signal handling failed', error)
-                setLog(error.message || String(error))
-              })
-          }
-          ws.onclose = () => leaveRoom()
-          ws.onerror = () => {
-            setLog('websocket error')
-            // an expired session cookie rejects the upgrade with 401 — resync
-            // the login card so the password field comes back
-            refreshAuthState()
-          }
+          openRoomWebSocket()
         } catch (error) {
           setLog(error.message || String(error))
           leaveRoom()
+        }
+      }
+
+      function openRoomWebSocket(options = {}) {
+        const reconnect = Boolean(options.reconnect)
+        const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket`)
+        ws = socket
+        socket.onopen = () => {
+          if (ws !== socket) {
+            return
+          }
+          accessState.textContent = reconnect ? 'restoring' : 'checking'
+          accessHint.textContent = reconnect ? 'restoring room connection.' : 'checking room access.'
+          socket.send(JSON.stringify({
+            event: 'participant',
+            data: JSON.stringify({
+              name: currentParticipantName
+            })
+          }))
+        }
+        socket.onmessage = event => {
+          if (ws !== socket) {
+            return
+          }
+          let message
+          try {
+            message = JSON.parse(event.data)
+          } catch (error) {
+            console.warn('Signal parse failed', error)
+            setLog('could not read room signal')
+            return
+          }
+          signalChain = signalChain
+            .catch(() => {})
+            .then(() => handleSignal(message))
+            .catch(error => {
+              console.warn('Signal handling failed', error)
+              setLog(error.message || String(error))
+            })
+        }
+        socket.onclose = event => {
+          if (ws === socket) {
+            ws = undefined
+          }
+          handleRoomWebSocketClose(event, { reconnect })
+        }
+        socket.onerror = () => {
+          setLog(reconnect ? 'room signal reconnect failed' : 'websocket error')
+          // an expired session cookie rejects the upgrade with 401 — resync
+          // the login card so the password field comes back
+          refreshAuthState()
+        }
+      }
+
+      function roomCanReconnectSignal() {
+        return Boolean(!isLeavingRoom && authedUser && currentParticipantName && localStream)
+      }
+
+      function clearSignalingReconnectTimer() {
+        if (signalingReconnectTimer) {
+          window.clearTimeout(signalingReconnectTimer)
+          signalingReconnectTimer = 0
+        }
+      }
+
+      function resetSignalingReconnectState() {
+        clearSignalingReconnectTimer()
+        signalingReconnectAttempts = 0
+        signalingReconnectStartedAt = 0
+        isSignalReconnecting = false
+        lastSignalReconnectReason = ''
+      }
+
+      function handleRoomWebSocketClose(event, options = {}) {
+        if (isLeavingRoom) {
+          return
+        }
+        if (!roomCanReconnectSignal()) {
+          if (!options.reconnect) {
+            leaveRoom()
+          } else {
+            failSignalingReconnect('room signal could not reconnect')
+          }
+          return
+        }
+
+        const reason = event?.code === 1001
+          ? 'server is restarting'
+          : 'room signal interrupted'
+        prepareRoomForSignalingReconnect(reason)
+        scheduleSignalingReconnect(reason)
+      }
+
+      function prepareRoomForSignalingReconnect(reason) {
+        if (isSignalReconnecting) {
+          return
+        }
+        isSignalReconnecting = true
+        lastSignalReconnectReason = reason || 'room signal interrupted'
+        clearConnectionRecoveryTimer()
+        clearIceRestartRetryTimer()
+        stopMediaQualityMonitor()
+        stopRoomStateRefresh()
+        queuedRemoteCandidates = []
+        signalChain = Promise.resolve()
+
+        const peer = pc
+        pc = undefined
+        if (peer) {
+          peer.onconnectionstatechange = null
+          peer.oniceconnectionstatechange = null
+          peer.ontrack = null
+          try {
+            peer.close()
+          } catch (error) {
+            console.warn('Could not close stale peer connection during reconnect', error)
+          }
+        }
+
+        clearRemoteMediaForReconnect()
+        setConnectionState('connecting', 'reconnecting…')
+        setLog(lastSignalReconnectReason)
+        accessState.textContent = 'restoring'
+        accessHint.textContent = 'keeping your mic and camera while the room reconnects.'
+        logRoomRecovery('signal_reconnect_start', { reason: lastSignalReconnectReason })
+      }
+
+      function clearRemoteMediaForReconnect() {
+        clearAudioMonitors()
+        remoteTiles().forEach(tile => disposeRemoteTile(tile))
+        remoteElements.clear()
+        remoteStreamsByParticipant.clear()
+        remoteVideoTracksByParticipant.clear()
+        remoteLabelsByStream.clear()
+        remoteLabelConflictsByStream.clear()
+        remoteLabelsByTrack.clear()
+        unlabeledRemoteVideoSightings.clear()
+        pendingRemotePlaybackElements.clear()
+        participantPlaceholders.forEach(tile => tile.remove())
+        participantPlaceholders.clear()
+        boardVideoTilesByParticipant.forEach(tile => disposeBoardVideoTile(tile))
+        boardVideoTilesByParticipant.clear()
+        activeScreenShareParticipant = ''
+        serverActiveSpeakerName = ''
+        serverActiveSpeakerSeenAt = 0
+        activeSpeakerName = ''
+        pendingActiveSpeakerName = ''
+        pendingActiveSpeakerSince = 0
+        renderScreenStage()
+        updateHearthParticipants()
+      }
+
+      function scheduleSignalingReconnect(reason, options = {}) {
+        clearSignalingReconnectTimer()
+        if (!roomCanReconnectSignal()) {
+          failSignalingReconnect(reason)
+          return
+        }
+        if (!signalingReconnectStartedAt) {
+          signalingReconnectStartedAt = Date.now()
+        }
+        const elapsed = Date.now() - signalingReconnectStartedAt
+        if (elapsed > signalingReconnectMaxElapsedMs || signalingReconnectAttempts >= signalingReconnectDelaysMs.length) {
+          failSignalingReconnect(reason)
+          return
+        }
+        const delay = Number.isFinite(options.retryAfterMs)
+          ? Math.max(0, Number(options.retryAfterMs))
+          : signalingReconnectDelaysMs[signalingReconnectAttempts]
+        signalingReconnectAttempts += 1
+        const attempt = signalingReconnectAttempts
+        setConnectionState('connecting', `reconnecting ${attempt}/${signalingReconnectDelaysMs.length}`)
+        setLog(`${reason || 'room signal interrupted'}; reconnecting…`)
+        logRoomRecovery('signal_reconnect_scheduled', { attempt, delay, reason })
+        signalingReconnectTimer = window.setTimeout(() => {
+          signalingReconnectTimer = 0
+          try {
+            openRoomWebSocket({ reconnect: true })
+          } catch (error) {
+            console.warn('Could not reopen room signal', error)
+            scheduleSignalingReconnect(reason)
+          }
+        }, delay)
+      }
+
+      function failSignalingReconnect(reason) {
+        clearSignalingReconnectTimer()
+        logRoomRecovery('signal_reconnect_failed', {
+          attempts: signalingReconnectAttempts,
+          reason: reason || lastSignalReconnectReason
+        })
+        leaveRoom()
+        setConnectionState('offline', 'room offline')
+        setLog('room connection lost; join again when ready')
+        accessState.textContent = 'offline'
+        accessHint.textContent = 'room connection was lost. Join again when ready.'
+      }
+
+      function logRoomRecovery(event, payload = {}) {
+        try {
+          console.info('[room-recovery]', event, payload)
+        } catch {
+          // Console may be unavailable in embedded browser surfaces.
         }
       }
 
@@ -17750,11 +17934,14 @@
         }
 
         const voiceOnly = Boolean(options.voiceOnly)
+        const canReuseLocalMedia = Boolean((options.reuseLocalMedia || isSignalReconnecting) && localStream?.getTracks?.().some(liveTrack))
         setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
-        isMicMuted = false
-        isCameraOff = voiceOnly
-        const captureStream = voiceOnly ? await getPreferredAudioOnlyUserMedia() : await getPreferredUserMedia()
-        localStream = await createLocalMediaStream(captureStream)
+        if (!canReuseLocalMedia) {
+          isMicMuted = false
+          isCameraOff = voiceOnly
+          const captureStream = voiceOnly ? await getPreferredAudioOnlyUserMedia() : await getPreferredUserMedia()
+          localStream = await createLocalMediaStream(captureStream)
+        }
         isMicMuted = localStream.getAudioTracks().length === 0
         isCameraOff = voiceOnly || localStream.getVideoTracks().length === 0
         setVideoElementStream(localVideo, localStream, { local: true, force: true })
@@ -17783,6 +17970,7 @@
           const state = sessionPeer.connectionState
           if (state === 'connected') {
             clearConnectionRecoveryTimer()
+            resetIceRestartRecovery()
             if (!statusPillEl.classList.contains('pill--listening')) {
               setRoomListeningConnectionState()
             }
@@ -17808,6 +17996,8 @@
           if (sessionPeer.iceConnectionState === 'failed') {
             requestIceRestart('ICE connection failed')
             scheduleConnectionRecovery(sessionPeer)
+          } else if (sessionPeer.iceConnectionState === 'connected' || sessionPeer.iceConnectionState === 'completed') {
+            resetIceRestartRecovery()
           }
         }
 
@@ -17832,6 +18022,20 @@
         }
       }
 
+      function clearIceRestartRetryTimer() {
+        if (iceRestartRetryTimer) {
+          window.clearTimeout(iceRestartRetryTimer)
+          iceRestartRetryTimer = 0
+        }
+      }
+
+      function resetIceRestartRecovery() {
+        clearIceRestartRetryTimer()
+        iceRestartAttempts = 0
+        iceRestartRecoveryStartedAt = 0
+        lastIceRestartRequestAt = 0
+      }
+
       function scheduleConnectionRecovery(sessionPeer) {
         clearConnectionRecoveryTimer()
         connectionRecoveryTimer = window.setTimeout(() => {
@@ -17843,14 +18047,42 @@
       }
 
       function requestIceRestart(reason) {
-        if (!pc || !ws || ws.readyState !== WebSocket.OPEN) {
+        if (!pc) {
+          return
+        }
+        if (!iceRestartRecoveryStartedAt) {
+          iceRestartRecoveryStartedAt = Date.now()
+        }
+        if (iceRestartAttempts >= maxIceRestartAttempts) {
+          setConnectionState('offline', 'media stalled')
+          setLog('media reconnect failed; rejoin the room')
+          logRoomRecovery('ice_restart_exhausted', { attempts: iceRestartAttempts, reason })
+          return
+        }
+        if (iceRestartRetryTimer) {
+          return
+        }
+        const nextAttempt = iceRestartAttempts + 1
+        const now = Date.now()
+        const throttleDelay = Math.max(0, iceRestartThrottleMs - (now - lastIceRestartRequestAt))
+        const retryDelay = iceRestartRetryBackoffMs[Math.min(nextAttempt - 1, iceRestartRetryBackoffMs.length - 1)] || 0
+        const delay = Math.max(throttleDelay, retryDelay)
+        iceRestartRetryTimer = window.setTimeout(() => performIceRestart(reason, nextAttempt), delay)
+      }
+
+      function performIceRestart(reason, attempt) {
+        iceRestartRetryTimer = 0
+        if (!pc) {
+          return
+        }
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          setLog('waiting for room signal to reconnect media…')
+          iceRestartRetryTimer = window.setTimeout(() => performIceRestart(reason, attempt), 1000)
           return
         }
         const now = Date.now()
-        if (now - lastIceRestartRequestAt < iceRestartThrottleMs) {
-          return
-        }
         lastIceRestartRequestAt = now
+        iceRestartAttempts = attempt
         try {
           pc.restartIce?.()
         } catch (error) {
@@ -17860,7 +18092,12 @@
           event: 'restart_ice',
           data: JSON.stringify({ reason })
         }))
+        setConnectionState('connecting', `reconnecting media ${attempt}/${maxIceRestartAttempts}`)
         setLog('reconnecting media…')
+        logRoomRecovery('ice_restart_requested', { attempt, reason })
+        if (iceRestartAttempts < maxIceRestartAttempts && pc && ['disconnected', 'failed'].includes(pc.connectionState)) {
+          requestIceRestart(reason)
+        }
       }
 
       function stopMediaQualityMonitor() {
@@ -19890,6 +20127,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'participant_track':
             handleParticipantTrack(message.data)
             break
+          case 'active_speaker':
+            handleAuthoritativeActiveSpeaker(message.data)
+            break
           case 'access_denied':
             handleAccessDenied(String(message.data || 'access denied'))
             break
@@ -19903,6 +20143,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             setLog(String(message.data || 'media connection ended.'))
             leaveRoom()
             break
+          case 'server_shutdown':
+            handleServerShutdown(message.data)
+            break
           case 'meeting_archived':
             handleMeetingArchived(message.data)
             break
@@ -19913,6 +20156,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             handleScreenShareStopped(message.data)
             break
         }
+      }
+
+      function handleAuthoritativeActiveSpeaker(payload) {
+        const speakerName = participantDisplayNameInRoom(payload?.name)
+        if (!speakerName) {
+          return
+        }
+        serverActiveSpeakerName = speakerName
+        serverActiveSpeakerSeenAt = performance.now()
+        activeSpeakerName = speakerName
+        pendingActiveSpeakerName = ''
+        pendingActiveSpeakerSince = 0
+        updateHearthParticipants()
+      }
+
+      function authoritativeActiveSpeakerName() {
+        if (!serverActiveSpeakerName || !serverActiveSpeakerSeenAt) {
+          return ''
+        }
+        if (performance.now() - serverActiveSpeakerSeenAt > serverActiveSpeakerStaleMs) {
+          return ''
+        }
+        return participantDisplayNameInRoom(serverActiveSpeakerName)
+      }
+
+      function handleServerShutdown(payload) {
+        const retryAfterMs = Math.max(0, Number(payload?.retryAfterMs || 3000))
+        const message = String(payload?.message || 'Server restarting')
+        setLog(message)
+        if (!roomCanReconnectSignal()) {
+          leaveRoom()
+          return
+        }
+        const socket = ws
+        ws = undefined
+        if (socket) {
+          socket.onclose = null
+          try {
+            socket.close()
+          } catch {
+            // Socket is already going away.
+          }
+        }
+        prepareRoomForSignalingReconnect(message)
+        scheduleSignalingReconnect(message, { retryAfterMs })
       }
 
       function handleStatusMessage(message) {
@@ -20033,6 +20321,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!nextKeys.has(name.toLowerCase())) {
             removeRemoteParticipantMediaByName(name)
             participantMediaStates.delete(name)
+            clearSpeakerStateForParticipant(name)
           }
         }
         pruneRemoteMediaOutsideRoom()
@@ -20069,6 +20358,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         removeRemoteParticipantMediaByName(name)
         participantMediaStates.delete(name)
+        clearSpeakerStateForParticipant(name)
         participantsInRoom = normalizeParticipantList(participantsInRoom.filter(participantName => participantName.toLowerCase() !== name.toLowerCase()))
         participantPreview = participantsInRoom
         pruneRemoteMediaOutsideRoom()
@@ -20080,6 +20370,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         pruneStaleUnidentifiedRemoteVideoTiles()
         updateParticipantPreviewText()
         updateHearthParticipants()
+      }
+
+      function clearSpeakerStateForParticipant(name) {
+        const participantName = String(name || '').trim().toLowerCase()
+        if (!participantName) {
+          return
+        }
+        if (String(activeSpeakerName || '').trim().toLowerCase() === participantName) {
+          activeSpeakerName = ''
+        }
+        if (String(serverActiveSpeakerName || '').trim().toLowerCase() === participantName) {
+          serverActiveSpeakerName = ''
+          serverActiveSpeakerSeenAt = 0
+        }
+        if (String(pendingActiveSpeakerName || '').trim().toLowerCase() === participantName) {
+          pendingActiveSpeakerName = ''
+          pendingActiveSpeakerSince = 0
+        }
       }
 
       function normalizeRemoteTrackKeys(keys) {
@@ -21098,6 +21406,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
         const voiceOnly = Boolean(realtimeVoiceOnlyPending)
+        const reconnectingSignal = isSignalReconnecting
         currentParticipantName = name
         saveCachedIdentity(name)
         railAvatarEl.title = 'Sign out'
@@ -21105,13 +21414,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         accessState.textContent = 'verified'
-        accessHint.textContent = `${name} is verified. Starting ${voiceOnly ? 'microphone' : 'camera and microphone'}.`
+        accessHint.textContent = reconnectingSignal
+          ? `${name} is verified. Restoring room media.`
+          : `${name} is verified. Starting ${voiceOnly ? 'microphone' : 'camera and microphone'}.`
         setRoomListeningConnectionState()
-        setLog(`${name} is verified`)
+        setLog(reconnectingSignal ? `${name} reconnected` : `${name} is verified`)
         try {
-          await beginMediaSession({ voiceOnly })
+          await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
           roomEntryInProgress = false
+          if (reconnectingSignal) {
+            resetSignalingReconnectState()
+            requestParticipantTrackRefresh('signal reconnected')
+            showToast({ text: 'room connection restored', kind: 'done' })
+          }
           syncOSAssistantAvailability()
           accessHint.textContent = `${name} is in the room.`
           setLog(`${name} is in the room`)
@@ -22711,7 +23027,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const explicit = value.match(/^([A-Z][A-Za-z]+)\s*:/)
         const candidate = explicit?.[1]
         const speakerName = participantDisplayNameInRoom(candidate)
-        if (speakerName) {
+        if (speakerName && !authoritativeActiveSpeakerName()) {
           activeSpeakerName = speakerName
           pendingActiveSpeakerName = ''
           pendingActiveSpeakerSince = 0
@@ -22723,6 +23039,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const names = visibleParticipantNames()
         if (options.includePinned && !options.ignorePinned && pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
           return pinnedSpeakerName
+        }
+        const authoritativeSpeaker = authoritativeActiveSpeakerName()
+        if (authoritativeSpeaker && names.includes(authoritativeSpeaker)) {
+          return authoritativeSpeaker
         }
         if (activeSpeakerName && names.includes(activeSpeakerName)) {
           return activeSpeakerName
@@ -23822,6 +24142,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           let loudestName = ''
           let loudestLevel = 0
           let hasLiveAnalyser = false
+          const serverSpeaker = authoritativeActiveSpeakerName()
           for (const monitor of audioMonitors.values()) {
             if (!monitor.setsActiveSpeaker || !monitor.analyser || !liveTrack(monitor.track)) {
               continue
@@ -23845,7 +24166,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             }
           }
           const visibleSpeakerName = participantDisplayNameInRoom(loudestName)
-          if (visibleSpeakerName && loudestLevel > 0.045 && visibleSpeakerName !== activeSpeakerName) {
+          if (!serverSpeaker && visibleSpeakerName && loudestLevel > 0.045 && visibleSpeakerName !== activeSpeakerName) {
             if (pendingActiveSpeakerName !== visibleSpeakerName) {
               pendingActiveSpeakerName = visibleSpeakerName
               pendingActiveSpeakerSince = now
@@ -26244,6 +26565,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         isLeavingRoom = true
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
+        clearIceRestartRetryTimer()
+        resetSignalingReconnectState()
         stopMediaQualityMonitor()
         stopRoomStateRefresh()
         stopRoomAudioUnlockRetry()
@@ -26319,12 +26642,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         participantMediaStates.clear()
         activeScreenShareParticipant = ''
         activeSpeakerName = ''
+        serverActiveSpeakerName = ''
+        serverActiveSpeakerSeenAt = 0
         pinnedSpeakerName = ''
         stageMode = 'gallery'
         pendingActiveSpeakerName = ''
         pendingActiveSpeakerSince = 0
         signalChain = Promise.resolve()
         lastIceRestartRequestAt = 0
+        iceRestartAttempts = 0
+        iceRestartRecoveryStartedAt = 0
         participantsInRoom = []
         currentParticipantName = ''
         canEditBoard = false
