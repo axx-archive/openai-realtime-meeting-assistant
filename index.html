@@ -11555,6 +11555,7 @@
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
                 <video id="activeSpeakerVideo" autoplay muted playsinline></video>
+                <canvas id="activeSpeakerMirrorCanvas" class="local-video-mirror-canvas" aria-hidden="true" hidden></canvas>
                 <span id="activeSpeakerAvatar" class="speaker-avatar"></span>
                 <span class="speaker-name-pill">
                   <span class="speaker-dot"></span>
@@ -12366,6 +12367,7 @@
       const screenSpeakerLabel = document.getElementById('screenSpeakerLabel')
       const activeSpeakerTile = document.getElementById('activeSpeakerTile')
       const activeSpeakerVideo = document.getElementById('activeSpeakerVideo')
+      const activeSpeakerMirrorCanvas = document.getElementById('activeSpeakerMirrorCanvas')
       const activeSpeakerAvatar = document.getElementById('activeSpeakerAvatar')
       const activeSpeakerLabel = document.getElementById('activeSpeakerLabel')
       const hearthStage = document.getElementById('hearthStage')
@@ -22668,26 +22670,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function localMirrorPreviewEnabled() {
+      function localMirrorPreviewSourceReady() {
         return Boolean(isMobileDevice
           && localVideo
-          && localVideoMirrorCanvas
           && localVideo.srcObject
           && !localVideo.hidden
           && !isCameraOff
           && videoElementHasLiveVideoTrack(localVideo))
       }
 
+      function localMirrorCanvases() {
+        const sourceReady = localMirrorPreviewSourceReady()
+        const speakerStageVisible = stageMode === 'speaker' && !presentationTile.classList.contains('is-screen-sharing')
+        const activeSpeakerIsLocal = activeSpeakerDisplayName() === currentParticipantName
+        return [
+          { canvas: localVideoMirrorCanvas, enabled: sourceReady },
+          { canvas: activeSpeakerMirrorCanvas, enabled: sourceReady && speakerStageVisible && activeSpeakerIsLocal }
+        ].filter(target => target.canvas)
+      }
+
+      function hasActiveLocalMirrorCanvas() {
+        return localMirrorCanvases().some(target => target.enabled)
+      }
+
       function syncLocalMirrorPreview() {
-        const enabled = localMirrorPreviewEnabled()
-        localVideo?.classList.toggle('local-mirror-source', enabled)
-        if (localVideoMirrorCanvas) {
-          localVideoMirrorCanvas.hidden = !enabled
+        const targets = localMirrorCanvases()
+        let enabled = false
+        for (const target of targets) {
+          target.canvas.hidden = !target.enabled
+          enabled = enabled || target.enabled
         }
         if (enabled && !localMirrorFrame) {
+          localVideo?.classList.add('local-mirror-source')
           localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
         } else if (!enabled) {
           stopLocalMirrorPreview()
+        } else {
+          localVideo?.classList.add('local-mirror-source')
         }
       }
 
@@ -22697,21 +22716,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           localMirrorFrame = 0
         }
         localVideo?.classList.remove('local-mirror-source')
-        if (localVideoMirrorCanvas) {
-          const context = localVideoMirrorCanvas.getContext?.('2d')
-          context?.clearRect(0, 0, localVideoMirrorCanvas.width || 0, localVideoMirrorCanvas.height || 0)
-          localVideoMirrorCanvas.hidden = true
+        for (const target of [localVideoMirrorCanvas, activeSpeakerMirrorCanvas]) {
+          if (!target) {
+            continue
+          }
+          const context = target.getContext?.('2d')
+          context?.clearRect(0, 0, target.width || 0, target.height || 0)
+          target.hidden = true
         }
       }
 
       function drawLocalMirrorPreviewFrame() {
         localMirrorFrame = 0
-        if (!localMirrorPreviewEnabled()) {
+        if (!hasActiveLocalMirrorCanvas()) {
           stopLocalMirrorPreview()
           return
         }
         localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
-        const rect = localVideoMirrorCanvas.getBoundingClientRect()
+        for (const target of localMirrorCanvases()) {
+          if (target.enabled) {
+            drawLocalMirrorPreviewToCanvas(target.canvas)
+          }
+        }
+      }
+
+      function drawLocalMirrorPreviewToCanvas(canvas) {
+        const rect = canvas.getBoundingClientRect()
         const sourceWidth = localVideo.videoWidth || 0
         const sourceHeight = localVideo.videoHeight || 0
         if (!rect.width || !rect.height || !sourceWidth || !sourceHeight) {
@@ -22720,11 +22750,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const dpr = Math.min(window.devicePixelRatio || 1, 2)
         const width = Math.max(1, Math.round(rect.width * dpr))
         const height = Math.max(1, Math.round(rect.height * dpr))
-        if (localVideoMirrorCanvas.width !== width || localVideoMirrorCanvas.height !== height) {
-          localVideoMirrorCanvas.width = width
-          localVideoMirrorCanvas.height = height
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width
+          canvas.height = height
         }
-        const context = localVideoMirrorCanvas.getContext?.('2d', { alpha: false })
+        const context = canvas.getContext?.('2d', { alpha: false })
         if (!context) {
           return
         }
@@ -22902,10 +22932,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const speakerVideoStream = speakerStageVisible && shouldAttachParticipantVideo(activeSpeakerVideo, speaker, stream)
           ? stream
           : null
+        const speakerMirrorVisible = speakerStageVisible && speakerIsLocal && localMirrorPreviewSourceReady()
 
         setVideoElementStream(activeSpeakerVideo, speakerVideoStream, { local: speakerIsLocal, hidden: !speakerVideoStream || speakerCameraOff })
-        activeSpeakerAvatar.hidden = Boolean(speakerVideoStream && !speakerCameraOff)
-        if (!speakerVideoStream || speakerCameraOff) {
+        activeSpeakerAvatar.hidden = Boolean((speakerVideoStream || speakerMirrorVisible) && !speakerCameraOff)
+        if ((!speakerVideoStream && !speakerMirrorVisible) || speakerCameraOff) {
           activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
         const speakerStateLabel = [
@@ -22915,7 +22946,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         activeSpeakerLabel.textContent = speaker === 'the room'
           ? 'the room · waiting'
           : `${speaker}${speakerIsLocal ? ' · you' : ''} · ${speakerStateLabel}`
-        activeSpeakerTile.classList.toggle('has-video', Boolean(speakerVideoStream))
+        activeSpeakerTile.classList.toggle('has-video', Boolean(speakerVideoStream || speakerMirrorVisible))
+        syncLocalMirrorPreview()
 
         const localTile = localVideo.closest('.video-tile')
         if (localTile) {
