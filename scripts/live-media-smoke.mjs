@@ -81,18 +81,18 @@ try {
 
   await sleep(6000)
   for (const page of pages) {
-    const stageTarget = expectedNames.find(name => name !== page.name) || page.name
-    await showStageView(page, stageTarget)
+    const pinTarget = expectedNames.find(name => name !== page.name) || page.name
+    await showPinnedView(page, pinTarget)
   }
   await sleep(5000)
-  const stageSnapshots = await collectSnapshots('stage')
-  let mobileStageDrawerSnapshots = []
+  const pinSnapshots = await collectSnapshots('pin')
+  let mobileToolLauncherSnapshots = []
   if (config.mobileViewport) {
     for (const page of pages) {
-      await openStageParticipantsDrawer(page)
+      await openMobileToolLauncher(page)
     }
     await sleep(1000)
-    mobileStageDrawerSnapshots = await collectSnapshots('mobile-stage-drawer')
+    mobileToolLauncherSnapshots = await collectSnapshots('mobile-tool-launcher')
   }
 
   for (const page of pages) {
@@ -109,13 +109,13 @@ try {
     ...validateLateJoinSnapshots(lateJoinSnapshots, expectedNames),
     ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name, expectedNames),
     ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
-    ...validateSnapshots(stageSnapshots, expectedNames.length, { view: 'stage', requireStageView: true, expectedNames }),
-    ...validateMobileStageDrawerSnapshots(mobileStageDrawerSnapshots),
+    ...validateSnapshots(pinSnapshots, expectedNames.length, { view: 'pin', requirePinnedView: true, expectedNames }),
+    ...validateMobileToolLauncherSnapshots(mobileToolLauncherSnapshots),
     ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
     ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, stageSnapshots, mobileStageDrawerSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, pinSnapshots, mobileToolLauncherSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
   await emitReport(result)
   console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
@@ -666,32 +666,36 @@ async function installFakeDisplayMedia(page) {
   `)
 }
 
-async function showStageView(page, targetName = '') {
+async function showPinnedView(page, targetName = '') {
   await evaluate(page, `
     (() => {
+      if (typeof setActiveTool === 'function') {
+        setActiveTool('room')
+      }
+      if (typeof setBoardExpanded === 'function') {
+        setBoardExpanded(false)
+      }
       const target = ${JSON.stringify(targetName)}
       if (target && typeof togglePinnedSpeaker === 'function') {
         const current = typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : ''
         if (current !== target) {
           togglePinnedSpeaker(target)
         }
-      } else if (typeof setStageMode === 'function') {
-        setStageMode('stage')
       }
       if (typeof repairAuxiliaryVideoPlayback === 'function') {
-        repairAuxiliaryVideoPlayback('live media smoke stage view')
+        repairAuxiliaryVideoPlayback('live media smoke pinned view')
       }
       return true
     })()
   `)
 }
 
-async function openStageParticipantsDrawer(page) {
+async function openMobileToolLauncher(page) {
   await evaluate(page, `
     (() => {
-      const toggle = document.getElementById('stageParticipantsToggle')
-      if (toggle && !toggle.hidden && toggle.getAttribute('aria-expanded') !== 'true') {
-        toggle.click()
+      const launcher = document.getElementById('mobileToolLauncher')
+      if (launcher && launcher.getAttribute('aria-expanded') !== 'true') {
+        launcher.click()
       }
       return true
     })()
@@ -984,7 +988,8 @@ async function snapshotPage(page) {
         audioProcessorState: typeof audioProcessorDiagnosticsSnapshot === 'function' ? audioProcessorDiagnosticsSnapshot() : null,
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
         remoteHealth: typeof remoteMediaHealthSnapshot === 'function' ? remoteMediaHealthSnapshot() : null,
-        stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
+        roomLayout: typeof currentRoomLayout === 'function' ? currentRoomLayout() : (document.getElementById('hearthStage')?.dataset.roomLayout || ''),
+        gridSize: document.getElementById('hearthStage')?.dataset.gridSize || '',
         stageParticipant: typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : '',
         activeSpeaker: typeof activeSpeakerDisplayName === 'function' ? activeSpeakerDisplayName() : '',
         serverActiveSpeaker: typeof serverActiveSpeakerName !== 'undefined' ? serverActiveSpeakerName : '',
@@ -993,10 +998,15 @@ async function snapshotPage(page) {
         stageMirrorCanvas: canvasProbe(document.getElementById('activeSpeakerMirrorCanvas')),
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
         screenSharing: Boolean(document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')),
-        mobileStageDrawerOpen: Boolean(document.getElementById('presentationTile')?.classList.contains('is-mobile-stage-roster-open')),
-        stageParticipantsToggle: {
-          hidden: Boolean(document.getElementById('stageParticipantsToggle')?.hidden),
-          expanded: document.getElementById('stageParticipantsToggle')?.getAttribute('aria-expanded') || ''
+        mobileToolLauncher: {
+          expanded: document.getElementById('mobileToolLauncher')?.getAttribute('aria-expanded') || '',
+          rect: rectProbe(document.getElementById('mobileToolLauncher')),
+          visible: Boolean(document.getElementById('mobileToolLauncher')?.getClientRects?.().length)
+        },
+        toolRail: {
+          open: Boolean(document.getElementById('appShell')?.classList.contains('is-mobile-tool-rail-open')),
+          rect: rectProbe(document.getElementById('toolRail')),
+          visible: Boolean(document.getElementById('toolRail')?.getClientRects?.().length)
         },
         activeScreenShareParticipant: typeof activeScreenShareParticipant !== 'undefined' ? activeScreenShareParticipant : '',
         screenStageVideo: videoProbe(document.getElementById('screenStageVideo')),
@@ -1142,15 +1152,22 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
     if (audioProfile === 'standard-cleanup' && snapshot.audioProcessorState?.browserProcessing !== true) {
       failures.push(`${prefix} standard cleanup is not using browser processing`)
     }
-    if (options.requireStageView) {
-      if (snapshot.stageMode !== 'stage') {
-        failures.push(`${prefix} stage mode is ${snapshot.stageMode}`)
+    if (options.requirePinnedView) {
+      if (snapshot.roomLayout !== 'pinned') {
+        failures.push(`${prefix} room layout is ${snapshot.roomLayout}`)
       }
       if (!snapshot.stageParticipant) {
-        failures.push(`${prefix} has no pinned stage participant`)
+        failures.push(`${prefix} has no pinned participant`)
       }
-      if (!videoProbeRendered(snapshot.stageVideo) && !canvasProbeRendered(snapshot.stageMirrorCanvas)) {
-        failures.push(`${prefix} stage surface did not render for ${snapshot.stageParticipant || 'pinned participant'}`)
+      const pinnedTile = snapshot.tiles.find(tile => tile.participant === snapshot.stageParticipant)
+      if (!pinnedTile) {
+        failures.push(`${prefix} is missing pinned tile for ${snapshot.stageParticipant}`)
+      } else if (pinnedTile.renderedVideos <= 0 && pinnedTile.decodedFrames <= 0) {
+        failures.push(`${prefix} pinned tile did not render for ${snapshot.stageParticipant}`)
+      }
+      const visibleTiles = snapshot.tiles.filter(tile => rectProbeVisible(tile.rect))
+      if (visibleTiles.length !== 1 || visibleTiles[0]?.participant !== snapshot.stageParticipant) {
+        failures.push(`${prefix} pinned view has ${visibleTiles.length} visible participant tiles`)
       }
     }
     if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits && !usesMobileBoardDockBreakpoint(snapshot)) {
@@ -1227,19 +1244,15 @@ function validateScreenShareSnapshots(snapshots, sharerName, expectedNames = con
     if (!snapshot.screenSharing || snapshot.activeScreenShareParticipant !== sharerName) {
       failures.push(`${prefix} is not showing ${sharerName}'s share`)
     }
+    if (snapshot.roomLayout !== 'screen-share') {
+      failures.push(`${prefix} room layout is ${snapshot.roomLayout}`)
+    }
     if (!videoProbeRendered(snapshot.screenStageVideo)) {
       failures.push(`${prefix} stage video did not render`)
     }
-    const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => !tile.classes.includes('is-sharing-screen'))
-    if (visibleStripTiles.length < Math.max(0, expectedNames.length - 1)) {
-      failures.push(`${prefix} participant strip has ${visibleStripTiles.length} visible tiles`)
-    }
-    if (visibleStripTiles.some(tile => tile.participant === sharerName)) {
-      failures.push(`${prefix} duplicates the sharer in the participant strip`)
-    }
-    const renderedStripVideos = visibleStripTiles.filter(tile => tile.renderedVideos > 0 || tile.decodedFrames > 0)
-    if (renderedStripVideos.length < visibleStripTiles.length) {
-      failures.push(`${prefix} participant strip rendered ${renderedStripVideos.length}/${visibleStripTiles.length} videos`)
+    const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => rectProbeVisible(tile.rect))
+    if (visibleStripTiles.length > 0) {
+      failures.push(`${prefix} participant strip should be collapsed, found ${visibleStripTiles.length} visible tiles`)
     }
   }
   return failures
@@ -1292,18 +1305,18 @@ function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
   return failures
 }
 
-function validateMobileStageDrawerSnapshots(snapshots) {
+function validateMobileToolLauncherSnapshots(snapshots) {
   const failures = []
   for (const snapshot of snapshots) {
-    const prefix = `${snapshot.name} mobile stage drawer`
-    if (snapshot.stageMode !== 'stage') {
-      failures.push(`${prefix} stage mode is ${snapshot.stageMode}`)
+    const prefix = `${snapshot.name} mobile tool launcher`
+    if (!snapshot.mobileToolLauncher?.visible) {
+      failures.push(`${prefix} launcher is not visible`)
     }
-    if (snapshot.stageParticipantsToggle?.hidden) {
-      failures.push(`${prefix} people control is hidden`)
+    if (snapshot.mobileToolLauncher?.expanded !== 'true') {
+      failures.push(`${prefix} launcher did not expand`)
     }
-    if (!snapshot.mobileStageDrawerOpen || snapshot.stageParticipantsToggle?.expanded !== 'true') {
-      failures.push(`${prefix} people drawer did not open`)
+    if (!snapshot.toolRail?.open || !snapshot.toolRail?.visible) {
+      failures.push(`${prefix} tool rail did not open`)
     }
   }
   return failures
@@ -1329,6 +1342,11 @@ function videoProbeRendered(probe) {
     && probe.visible
     && probe.hasLiveVideo
     && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
+}
+
+function rectProbeVisible(probe) {
+  const rect = probe?.rect || {}
+  return (Number(rect.width) || 0) > 0 && (Number(rect.height) || 0) > 0
 }
 
 function canvasProbeRendered(probe) {

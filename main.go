@@ -1653,7 +1653,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	videoSettings := mapFromPayload(video, "settings")
 	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
 	fmt.Printf(
-		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v stage=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		stringFromPayload(client, "platform"),
@@ -1667,6 +1667,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 		stringFromPayload(viewport, "orientationType"),
 		int(floatFromPayload(viewport, "orientationAngle")),
 		boolFromPayload(viewport, "mobile"),
+		stringFromPayload(render, "roomLayout"),
 		stringFromPayload(render, "stageMode"),
 		boolFromPayload(render, "boardExpanded"),
 		stringFromPayload(render, "activeScreenShareParticipant"),

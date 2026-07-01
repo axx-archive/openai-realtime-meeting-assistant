@@ -546,11 +546,14 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"max-width: 44px;",
 		"padding: 0 12px 0 0;",
 		"position: fixed;",
-		"inset: auto auto max(12px, env(safe-area-inset-bottom)) 50%;",
+		`id="mobileToolLauncher" class="mobile-tool-launcher"`,
+		"right: max(12px, env(safe-area-inset-right));",
 		"bottom: max(12px, env(safe-area-inset-bottom));",
+		"#appShell.is-mobile-tool-rail-open .tool-rail",
+		"inset: auto max(74px, calc(env(safe-area-inset-right) + 74px)) max(16px, env(safe-area-inset-bottom)) auto;",
 		"width: max-content;",
-		"max-width: calc(100dvw - 24px);",
-		"transform: translateX(-50%);",
+		"max-width: calc(100dvw - 98px);",
+		"transform: translate3d(16px, 0, 0) scale(0.96);",
 		"backdrop-filter: blur(22px) saturate(1.45);",
 		"#appShell:not(.is-rail-hidden) .workspace",
 		"padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
@@ -567,7 +570,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		t.Fatal("brand flame should stay anchored in the topbar above the rail")
 	}
 	if strings.Contains(html, `id="toolRail" class="tool-rail mount-stagger"`) {
-		t.Fatal("tool rail must not use mount-stagger; its transform anchors desktop left-center and mobile bottom-center positioning")
+		t.Fatal("tool rail must not use mount-stagger; its transform anchors desktop left-center and mobile launcher positioning")
 	}
 	if strings.Contains(html, `id="topbarAccountEmail"`) || strings.Contains(html, `class="topbar__account-email"`) {
 		t.Fatal("topbar account trigger should not render an email line")
@@ -587,13 +590,15 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
+		`id="mobileToolLauncher" class="mobile-tool-launcher"`,
 		"left: max(16px, env(safe-area-inset-left));",
 		"transform: translateY(-50%);",
-		"inset: auto auto max(12px, env(safe-area-inset-bottom)) 50%;",
-		"left: 50%;",
+		"right: max(12px, env(safe-area-inset-right));",
+		"inset: auto max(74px, calc(env(safe-area-inset-right) + 74px)) max(16px, env(safe-area-inset-bottom)) auto;",
 		"width: max-content;",
-		"max-width: calc(100dvw - 24px);",
-		"transform: translateX(-50%);",
+		"max-width: calc(100dvw - 98px);",
+		"transform: translate3d(16px, 0, 0) scale(0.96);",
+		"#appShell.is-mobile-tool-rail-open .tool-rail",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing floating rail viewport-safe anchor %q", want)
@@ -604,12 +609,12 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	}
 
 	const phoneViewport = 390.0
-	const horizontalInset = 24.0
-	maxRailWidth := phoneViewport - horizontalInset
-	left := phoneViewport/2 - maxRailWidth/2
-	right := phoneViewport/2 + maxRailWidth/2
-	if left < 0 || right > phoneViewport {
-		t.Fatalf("worst-case centered mobile rail bounds left=%v right=%v viewport=%v", left, right, phoneViewport)
+	const launcher = 54.0
+	const gap = 20.0
+	const railMaxWidth = phoneViewport - 98.0
+	railLeft := phoneViewport - 12.0 - launcher - gap - railMaxWidth
+	if railLeft < 0 {
+		t.Fatalf("worst-case right-expanding mobile rail starts offscreen left=%v viewport=%v", railLeft, phoneViewport)
 	}
 }
 
@@ -696,7 +701,7 @@ func TestMediaFixesBehaveCorrectly(t *testing.T) {
 	}
 }
 
-func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
+func TestIndexKeepsScreenShareTrackAndFullscreenPresentation(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -713,11 +718,13 @@ func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
 		"return kind === 'video' ? outboundVideoTrack() : localAudioTrack()",
 		"const track = outboundTrackForKind(section.kind)",
 		".presentation-tile.is-screen-sharing {",
-		"grid-template-columns: minmax(0, 1fr) 200px;",
+		"grid-template-columns: minmax(0, 1fr);",
+		"gap: 0;",
 		".presentation-tile.is-screen-sharing .hearth-stage {",
-		".presentation-tile.is-screen-sharing .hearth-seats,",
+		"display: none;",
 		".presentation-tile.is-screen-sharing .hearth-seat.is-sharing-screen",
-		"grid-template-rows: minmax(0, 1fr) auto;",
+		"function currentRoomLayout()",
+		"return 'screen-share'",
 		"video: screenStageVideo",
 		"? screenShareStream",
 		"function scheduleScreenShareMediaRepair(reason, participantName = '')",
@@ -736,8 +743,8 @@ func TestIndexKeepsScreenShareTrackAndParticipantStrip(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(html, ".presentation-tile.is-screen-sharing .hearth-stage {\n        display: none;") {
-		t.Fatal("screen sharing must keep the room video strip mounted, not hide the hearth stage")
+	if strings.Contains(html, "grid-template-columns: minmax(0, 1fr) 200px;") {
+		t.Fatal("screen sharing should be full-screen instead of reserving a participant strip column")
 	}
 }
 
@@ -1015,21 +1022,34 @@ func TestIndexLocksControlsAndUsesGreenSpeakerAccent(t *testing.T) {
 	for _, want := range []string{
 		"--speaker-accent: #30D158",
 		"--glow-speaker-md:",
-		"data-stage-mode=\"stage\"",
+		`data-room-layout="grid"`,
+		"function currentRoomLayout()",
+		"return 'grid'",
+		"return 'pinned'",
 		"function stageParticipantDisplayName()",
-		"presentationTile.classList.toggle('is-stage-focused'",
-		"presentationTile.classList.toggle('is-mobile-stage-roster-open'",
+		"presentationTile.classList.toggle('is-pinned-view'",
 		"activeSpeakerDisplayName({ ignorePinned: true })",
 		"#appShell.is-in-room:not(.is-board-expanded) .meeting-bar",
 		"position: fixed;",
 		"width: fit-content;",
 		".video-tile.is-active-speaker",
-		".hearth-stage:not([data-stage-mode=\"gallery\"]) .hearth-seat.is-on-stage",
-		".hearth-stage[data-stage-mode=\"gallery\"] .hearth-seat.is-active-speaker",
+		".hearth-stage[data-room-layout=\"pinned\"] .hearth-seat.is-on-stage",
+		".hearth-stage[data-room-layout=\"grid\"] .hearth-seat.is-active-speaker",
 		".board-video-tile.is-speaker",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing locked controls or green speaker accent %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		`data-stage-mode="gallery"`,
+		`data-stage-mode="stage"`,
+		`aria-label="Video layout"`,
+		`>gallery</button>`,
+		`>stage</button>`,
+	} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("index.html still exposes gallery/stage selector marker %q", unwanted)
 		}
 	}
 }
