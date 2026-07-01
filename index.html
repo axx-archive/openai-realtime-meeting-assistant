@@ -23093,10 +23093,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return false
         }
         // iOS Safari can flicker or paint black when one live camera track is
-        // decoded by multiple video elements. Keep the phone's own camera on
-        // the canonical local tile and let hidden/auxiliary self views fall
-        // back to the avatar.
-        return !(isMobileDevice && name === currentParticipantName && video !== localVideo)
+        // decoded by multiple video elements. Keep each participant's camera on
+        // the canonical tile and let auxiliary/stage/dock views fall back to
+        // avatars on phones instead of competing for the same decoder.
+        if (safariBrowser && isMobileDevice) {
+          const primaryVideo = primaryVideoElementForParticipant(name)
+          if (primaryVideo && primaryVideo !== video && videoElementHasLiveVideoTrack(primaryVideo)) {
+            return false
+          }
+        }
+        return true
+      }
+
+      function primaryVideoElementForParticipant(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'the room') {
+          return null
+        }
+        if (participantName === currentParticipantName) {
+          return localVideo
+        }
+        return remoteVideoElementForParticipant(participantName)
       }
 
       function setVideoElementStream(video, stream, { hidden = false, local = false, force = false } = {}) {
