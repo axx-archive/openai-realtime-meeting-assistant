@@ -17561,7 +17561,7 @@
         localStream = await createLocalMediaStream(captureStream)
         isMicMuted = localStream.getAudioTracks().length === 0
         isCameraOff = voiceOnly || localStream.getVideoTracks().length === 0
-        localVideo.srcObject = localStream
+        setVideoElementStream(localVideo, localStream, { local: true, force: true })
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
         updateMuteButton()
@@ -19142,7 +19142,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!localStream.getVideoTracks().includes(nextTrack)) {
           localStream.addTrack(nextTrack)
         }
-        localVideo.srcObject = localStream
+        setVideoElementStream(localVideo, localStream, { local: true, force: true })
         wireLocalVideoTrack(nextTrack)
         if (previousTrack && previousTrack !== nextTrack) {
           previousTrack.stop()
@@ -20471,7 +20471,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         for (const target of auxiliaryVideoPlaybackTargets()) {
           const video = target.video
           const stream = target.stream
-          if (!video || !stream || (!target.ignoreCameraOff && participantMediaState(target.name).cameraOff)) {
+          if (!video || !stream || !shouldAttachParticipantVideo(video, target.name, stream) || (!target.ignoreCameraOff && participantMediaState(target.name).cameraOff)) {
+            if (video && target.local && video !== localVideo) {
+              setVideoElementStream(video, null, { local: true, hidden: true })
+            }
             continue
           }
           const hadStream = Boolean(video.srcObject)
@@ -22568,8 +22571,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return direct || null
       }
 
+      function shouldAttachParticipantVideo(video, name, stream) {
+        if (!video || !stream) {
+          return false
+        }
+        // iOS Safari can flicker or paint black when one live camera track is
+        // decoded by multiple video elements. Keep the phone's own camera on
+        // the canonical local tile and let hidden/auxiliary self views fall
+        // back to the avatar.
+        return !(isMobileDevice && name === currentParticipantName && video !== localVideo)
+      }
+
       function setVideoElementStream(video, stream, { hidden = false, local = false, force = false } = {}) {
         const wasHidden = video.hidden
+        if (video?.tagName?.toLowerCase?.() === 'video') {
+          video.autoplay = true
+          video.muted = true
+          video.defaultMuted = true
+          video.playsInline = true
+          video.setAttribute('playsinline', '')
+          video.setAttribute('webkit-playsinline', '')
+        }
         if (force) {
           delete video.dataset.sourceStreamSignature
         }
@@ -22745,10 +22767,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const speakerIsLocal = speaker === currentParticipantName
         const speakerMedia = participantMediaState(speaker)
         const speakerCameraOff = Boolean(speakerMedia.cameraOff)
+        const speakerStageVisible = stageMode === 'speaker' && !presentationTile.classList.contains('is-screen-sharing')
+        const speakerVideoStream = speakerStageVisible && shouldAttachParticipantVideo(activeSpeakerVideo, speaker, stream)
+          ? stream
+          : null
 
-        setVideoElementStream(activeSpeakerVideo, stream, { local: speakerIsLocal, hidden: speakerCameraOff })
-        activeSpeakerAvatar.hidden = Boolean(stream && !speakerCameraOff)
-        if (!stream || speakerCameraOff) {
+        setVideoElementStream(activeSpeakerVideo, speakerVideoStream, { local: speakerIsLocal, hidden: !speakerVideoStream || speakerCameraOff })
+        activeSpeakerAvatar.hidden = Boolean(speakerVideoStream && !speakerCameraOff)
+        if (!speakerVideoStream || speakerCameraOff) {
           activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
         const speakerStateLabel = [
@@ -22758,7 +22784,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         activeSpeakerLabel.textContent = speaker === 'the room'
           ? 'the room · waiting'
           : `${speaker}${speakerIsLocal ? ' · you' : ''} · ${speakerStateLabel}`
-        activeSpeakerTile.classList.toggle('has-video', Boolean(stream))
+        activeSpeakerTile.classList.toggle('has-video', Boolean(speakerVideoStream))
 
         const localTile = localVideo.closest('.video-tile')
         if (localTile) {
@@ -22787,9 +22813,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
         const speakerCameraOff = Boolean(participantMediaState(speaker).cameraOff)
-        setVideoElementStream(screenSpeakerVideo, stream, { local: speakerIsLocal, hidden: speakerCameraOff })
-        screenSpeakerAvatar.hidden = Boolean(stream && !speakerCameraOff)
-        if (!stream || speakerCameraOff) {
+        const pipContainer = screenSpeakerVideo.closest('.screen-stage__pip')
+        const pipVisible = Boolean(activeScreenShareParticipant && pipContainer && window.getComputedStyle(pipContainer).display !== 'none')
+        const pipStream = pipVisible && shouldAttachParticipantVideo(screenSpeakerVideo, speaker, stream)
+          ? stream
+          : null
+        setVideoElementStream(screenSpeakerVideo, pipStream, { local: speakerIsLocal, hidden: !pipStream || speakerCameraOff })
+        screenSpeakerAvatar.hidden = Boolean(pipStream && !speakerCameraOff)
+        if (!pipStream || speakerCameraOff) {
           screenSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
         screenSpeakerLabel.textContent = speaker === 'the room' ? 'speaker' : speaker.toLowerCase()
@@ -23008,7 +23039,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           tile.appendChild(label)
         }
 
-        if (stream && !state.cameraOff && shouldRenderBoardDockVideo()) {
+        if (stream && !state.cameraOff && shouldRenderBoardDockVideo() && shouldAttachParticipantVideo(tile.querySelector('video') || tile, name, stream)) {
           tile.querySelector('.owner-avatar')?.remove()
           let video = tile.querySelector('video')
           if (!video) {
@@ -25946,7 +25977,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateMuteButton()
         updateCameraButton()
         renderAudioSettings()
-        localVideo.srcObject = null
+        clearVideoElementStream(localVideo)
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.classList.remove('is-muted', 'is-camera-off', 'is-sharing-screen')
         clearAudioMonitors()
