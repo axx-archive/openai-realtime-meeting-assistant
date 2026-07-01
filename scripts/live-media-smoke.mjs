@@ -81,10 +81,19 @@ try {
 
   await sleep(6000)
   for (const page of pages) {
-    await showSpeakerView(page)
+    const stageTarget = expectedNames.find(name => name !== page.name) || page.name
+    await showStageView(page, stageTarget)
   }
   await sleep(5000)
-  const speakerSnapshots = await collectSnapshots('speaker')
+  const stageSnapshots = await collectSnapshots('stage')
+  let mobileStageDrawerSnapshots = []
+  if (config.mobileViewport) {
+    for (const page of pages) {
+      await openStageParticipantsDrawer(page)
+    }
+    await sleep(1000)
+    mobileStageDrawerSnapshots = await collectSnapshots('mobile-stage-drawer')
+  }
 
   for (const page of pages) {
     await showExpandedBoardView(page)
@@ -100,12 +109,13 @@ try {
     ...validateLateJoinSnapshots(lateJoinSnapshots, expectedNames),
     ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name, expectedNames),
     ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
-    ...validateSnapshots(speakerSnapshots, expectedNames.length, { view: 'speaker', requireSpeakerView: true, expectedNames }),
+    ...validateSnapshots(stageSnapshots, expectedNames.length, { view: 'stage', requireStageView: true, expectedNames }),
+    ...validateMobileStageDrawerSnapshots(mobileStageDrawerSnapshots),
     ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
     ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, stageSnapshots, mobileStageDrawerSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
   await emitReport(result)
   console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
@@ -552,6 +562,10 @@ async function exerciseScreenShare(sharer) {
   if (!sharer) {
     return { started: [], stopped: [] }
   }
+  if (config.mobileViewport) {
+    log('screen-share-skip', 'mobile viewport smoke does not initiate fake display capture')
+    return { started: [], stopped: [], skipped: true }
+  }
   await installFakeDisplayMedia(sharer)
   await evaluate(sharer, `
     (async () => {
@@ -652,14 +666,32 @@ async function installFakeDisplayMedia(page) {
   `)
 }
 
-async function showSpeakerView(page) {
+async function showStageView(page, targetName = '') {
   await evaluate(page, `
     (() => {
-      if (typeof setStageMode === 'function') {
-        setStageMode('speaker')
+      const target = ${JSON.stringify(targetName)}
+      if (target && typeof togglePinnedSpeaker === 'function') {
+        const current = typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : ''
+        if (current !== target) {
+          togglePinnedSpeaker(target)
+        }
+      } else if (typeof setStageMode === 'function') {
+        setStageMode('stage')
       }
       if (typeof repairAuxiliaryVideoPlayback === 'function') {
-        repairAuxiliaryVideoPlayback('live media smoke speaker view')
+        repairAuxiliaryVideoPlayback('live media smoke stage view')
+      }
+      return true
+    })()
+  `)
+}
+
+async function openStageParticipantsDrawer(page) {
+  await evaluate(page, `
+    (() => {
+      const toggle = document.getElementById('stageParticipantsToggle')
+      if (toggle && !toggle.hidden && toggle.getAttribute('aria-expanded') !== 'true') {
+        toggle.click()
       }
       return true
     })()
@@ -800,6 +832,22 @@ async function snapshotPage(page) {
           hasLiveVideo: Boolean(video.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended'))
         }
       }
+      const canvasProbe = canvas => {
+        if (!canvas) {
+          return null
+        }
+        return {
+          id: canvas.id || '',
+          className: canvas.className || '',
+          isConnected: Boolean(canvas.isConnected),
+          inDocument: document.contains(canvas),
+          hidden: Boolean(canvas.hidden),
+          visible: Boolean(canvas.getClientRects().length),
+          width: canvas.width || 0,
+          height: canvas.height || 0,
+          rect: rectProbe(canvas)
+        }
+      }
       const mediaElementForValue = value => {
         if (!value) {
           return null
@@ -937,9 +985,17 @@ async function snapshotPage(page) {
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
         remoteHealth: typeof remoteMediaHealthSnapshot === 'function' ? remoteMediaHealthSnapshot() : null,
         stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
+        stageParticipant: typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : '',
         activeSpeaker: typeof activeSpeakerDisplayName === 'function' ? activeSpeakerDisplayName() : '',
+        stageVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
+        stageMirrorCanvas: canvasProbe(document.getElementById('activeSpeakerMirrorCanvas')),
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
         screenSharing: Boolean(document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')),
+        mobileStageDrawerOpen: Boolean(document.getElementById('presentationTile')?.classList.contains('is-mobile-stage-roster-open')),
+        stageParticipantsToggle: {
+          hidden: Boolean(document.getElementById('stageParticipantsToggle')?.hidden),
+          expanded: document.getElementById('stageParticipantsToggle')?.getAttribute('aria-expanded') || ''
+        },
         activeScreenShareParticipant: typeof activeScreenShareParticipant !== 'undefined' ? activeScreenShareParticipant : '',
         screenStageVideo: videoProbe(document.getElementById('screenStageVideo')),
         screenShareStripTiles: Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile')).map(tile => ({
@@ -1084,12 +1140,15 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
     if (audioProfile === 'standard-cleanup' && snapshot.audioProcessorState?.browserProcessing !== true) {
       failures.push(`${prefix} standard cleanup is not using browser processing`)
     }
-    if (options.requireSpeakerView) {
-      if (snapshot.stageMode !== 'speaker') {
+    if (options.requireStageView) {
+      if (snapshot.stageMode !== 'stage') {
         failures.push(`${prefix} stage mode is ${snapshot.stageMode}`)
       }
-      if (!videoProbeRendered(snapshot.speakerVideo)) {
-        failures.push(`${prefix} speaker video did not render for ${snapshot.activeSpeaker || 'active speaker'}`)
+      if (!snapshot.stageParticipant) {
+        failures.push(`${prefix} has no pinned stage participant`)
+      }
+      if (!videoProbeRendered(snapshot.stageVideo) && !canvasProbeRendered(snapshot.stageMirrorCanvas)) {
+        failures.push(`${prefix} stage surface did not render for ${snapshot.stageParticipant || 'pinned participant'}`)
       }
     }
     if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits && !usesMobileBoardDockBreakpoint(snapshot)) {
@@ -1231,6 +1290,23 @@ function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
   return failures
 }
 
+function validateMobileStageDrawerSnapshots(snapshots) {
+  const failures = []
+  for (const snapshot of snapshots) {
+    const prefix = `${snapshot.name} mobile stage drawer`
+    if (snapshot.stageMode !== 'stage') {
+      failures.push(`${prefix} stage mode is ${snapshot.stageMode}`)
+    }
+    if (snapshot.stageParticipantsToggle?.hidden) {
+      failures.push(`${prefix} people control is hidden`)
+    }
+    if (!snapshot.mobileStageDrawerOpen || snapshot.stageParticipantsToggle?.expanded !== 'true') {
+      failures.push(`${prefix} people drawer did not open`)
+    }
+  }
+  return failures
+}
+
 function validatePostLeaveParticipants(postLeave) {
   if (!postLeave || postLeave.skipped) {
     return []
@@ -1251,6 +1327,14 @@ function videoProbeRendered(probe) {
     && probe.visible
     && probe.hasLiveVideo
     && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
+}
+
+function canvasProbeRendered(probe) {
+  return Boolean(probe
+    && !probe.hidden
+    && probe.visible
+    && probe.width > 0
+    && probe.height > 0)
 }
 
 function selectedCandidateRtt(stats) {

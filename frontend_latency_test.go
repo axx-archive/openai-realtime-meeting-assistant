@@ -979,10 +979,16 @@ func TestIndexLocksControlsAndUsesGreenSpeakerAccent(t *testing.T) {
 	for _, want := range []string{
 		"--speaker-accent: #30D158",
 		"--glow-speaker-md:",
+		"data-stage-mode=\"stage\"",
+		"function stageParticipantDisplayName()",
+		"presentationTile.classList.toggle('is-stage-focused'",
+		"presentationTile.classList.toggle('is-mobile-stage-roster-open'",
+		"activeSpeakerDisplayName({ ignorePinned: true })",
 		"#appShell.is-in-room:not(.is-board-expanded) .meeting-bar",
 		"position: fixed;",
 		"width: fit-content;",
 		".video-tile.is-active-speaker",
+		".hearth-stage:not([data-stage-mode=\"gallery\"]) .hearth-seat.is-on-stage",
 		".hearth-stage[data-stage-mode=\"gallery\"] .hearth-seat.is-active-speaker",
 		".board-video-tile.is-speaker",
 	} {

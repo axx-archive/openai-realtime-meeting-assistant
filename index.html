@@ -8399,7 +8399,7 @@
         padding: 0;
       }
 
-      /* speaker mode (the base layout): big tile + 200px strip per kit */
+      /* Stage mode (the base layout): big tile + 200px strip per kit */
       .hearth-center {
         position: relative;
         z-index: 1;
@@ -8552,7 +8552,19 @@
         cursor: not-allowed;
       }
 
-      /* the resting top bar holds gallery|speaker · Board · Copy link only;
+      .stage-participants-toggle {
+        display: none;
+        justify-content: center;
+        min-width: 30px;
+        width: 30px;
+        padding: 0;
+      }
+
+      .stage-participants-toggle[hidden] {
+        display: none;
+      }
+
+      /* the resting top bar holds gallery|stage · Board · Copy link only;
          pinning stays a per-tile hover affordance */
       #pinActiveSpeaker {
         display: none;
@@ -8609,6 +8621,16 @@
         opacity: 1;
       }
 
+      .is-mobile-device .pin-speaker {
+        opacity: 1;
+      }
+
+      @media (hover: none) {
+        .pin-speaker {
+          opacity: 1;
+        }
+      }
+
       .pin-speaker:hover {
         background: rgba(0, 0, 0, 0.7);
       }
@@ -8660,8 +8682,8 @@
         aspect-ratio: auto;
       }
 
-      /* the active speaker holds the stage — the signal ring is the loudest
-         color on screen */
+      /* the pinned participant holds the stage; active-speaker remains a
+         separate signal ring on the strip/gallery tiles. */
       .hearth-speaker {
         position: relative;
         width: 100%;
@@ -8761,7 +8783,7 @@
         flex: none;
       }
 
-      /* speaker-mode strip — a quiet 200px column of tiles */
+      /* Stage strip — a quiet 200px column of tiles */
       .hearth-seats {
         display: flex;
         flex-direction: column;
@@ -8785,7 +8807,7 @@
         overflow: hidden;
       }
 
-      .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat.is-active-speaker {
+      .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seat.is-on-stage {
         display: none;
       }
 
@@ -9800,7 +9822,7 @@
           display: none;
         }
 
-        /* speaker strip drops below the stage and scrolls sideways */
+        /* Stage strip drops below the stage and scrolls sideways */
         .hearth-stage:not([data-stage-mode="gallery"]) .hearth-center {
           grid-template-columns: minmax(0, 1fr);
           grid-template-rows: minmax(0, 1fr) auto;
@@ -9818,8 +9840,9 @@
         }
 
         .presentation-tile.is-screen-sharing {
+          position: relative;
           grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: minmax(0, 1fr) auto;
+          grid-template-rows: minmax(0, 1fr);
         }
 
         .presentation-tile.is-screen-sharing .screen-stage,
@@ -9828,8 +9851,16 @@
         }
 
         .presentation-tile.is-screen-sharing .hearth-stage {
-          height: auto;
+          position: absolute;
+          inset: 0;
+          z-index: 7;
+          height: 100%;
           min-height: 0;
+          pointer-events: none;
+        }
+
+        .presentation-tile.is-screen-sharing.is-mobile-stage-roster-open .hearth-stage {
+          pointer-events: auto;
         }
 
         .presentation-tile.is-screen-sharing .hearth-seats,
@@ -9845,6 +9876,42 @@
         .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seat {
           width: clamp(140px, 24vw, 180px);
           flex: 0 0 auto;
+        }
+
+        .presentation-tile.is-stage-focused .stage-participants-toggle,
+        .presentation-tile.is-screen-sharing .stage-participants-toggle {
+          display: inline-flex;
+        }
+
+        .presentation-tile.is-stage-focused .hearth-stage:not([data-stage-mode="gallery"]) .hearth-center {
+          grid-template-rows: minmax(0, 1fr);
+        }
+
+        .presentation-tile.is-stage-focused .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seats,
+        .presentation-tile.is-screen-sharing .hearth-seats,
+        .presentation-tile.is-screen-sharing .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+          position: absolute;
+          left: var(--sp-2);
+          right: var(--sp-2);
+          bottom: var(--sp-2);
+          z-index: 7;
+          max-height: clamp(112px, 22svh, 164px);
+          padding: var(--sp-2);
+          border-radius: var(--r-lg);
+          background: rgba(8, 11, 17, 0.84);
+          box-shadow: var(--shadow-2);
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(calc(100% + var(--sp-3)));
+          transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease);
+        }
+
+        .presentation-tile.is-stage-focused.is-mobile-stage-roster-open .hearth-stage:not([data-stage-mode="gallery"]) .hearth-seats,
+        .presentation-tile.is-screen-sharing.is-mobile-stage-roster-open .hearth-seats,
+        .presentation-tile.is-screen-sharing.is-mobile-stage-roster-open .hearth-stage[data-stage-mode="gallery"] .hearth-seats {
+          opacity: 1;
+          pointer-events: auto;
+          transform: translateY(0);
         }
 
         .board-rail,
@@ -11522,9 +11589,17 @@
           <div class="stage-toolbar" aria-label="Stage layout">
             <div class="stage-segmented" role="group" aria-label="Video layout">
               <button type="button" data-stage-mode="gallery" aria-pressed="true">gallery</button>
-              <button type="button" data-stage-mode="speaker" aria-pressed="false">speaker</button>
+              <button type="button" data-stage-mode="stage" aria-pressed="false">stage</button>
             </div>
-            <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin speaker</button>
+            <button id="stageParticipantsToggle" class="stage-tool stage-participants-toggle" type="button" aria-expanded="false" aria-controls="videoStack" aria-label="Show participants" title="show participants" hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </button>
+            <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false">pin to stage</button>
           </div>
           <div id="screenStage" class="screen-stage" aria-label="Shared screen">
             <video id="screenStageVideo" autoplay muted playsinline></video>
@@ -11553,7 +11628,7 @@
               <button id="roomEmptyJoin" type="button" class="btn btn--primary" data-join-room>Join the room</button>
             </div>
             <div class="hearth-center">
-              <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Current speaker">
+              <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Stage participant">
                 <video id="activeSpeakerVideo" autoplay muted playsinline></video>
                 <canvas id="activeSpeakerMirrorCanvas" class="local-video-mirror-canvas" aria-hidden="true" hidden></canvas>
                 <span id="activeSpeakerAvatar" class="speaker-avatar"></span>
@@ -11594,7 +11669,7 @@
                       </svg>
                     </span>
                   </span>
-                  <button class="pin-speaker" type="button" aria-label="Pin speaker" aria-pressed="false" title="pin to stage">
+                  <button class="pin-speaker" type="button" aria-label="Pin to stage" aria-pressed="false" title="pin to stage">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 2v6"></path>
                       <path d="M5 8h14l-2 6H7L5 8Z"></path>
@@ -12372,6 +12447,7 @@
       const activeSpeakerLabel = document.getElementById('activeSpeakerLabel')
       const hearthStage = document.getElementById('hearthStage')
       const stageModeButtons = Array.from(document.querySelectorAll('button[data-stage-mode]'))
+      const stageParticipantsToggle = document.getElementById('stageParticipantsToggle')
       const pinActiveSpeakerButton = document.getElementById('pinActiveSpeaker')
       const localVideo = document.getElementById('localVideo')
       const localVideoMirrorCanvas = document.getElementById('localVideoMirrorCanvas')
@@ -12592,6 +12668,7 @@
       let activeSpeakerName = ''
       let pinnedSpeakerName = ''
       let stageMode = 'gallery'
+      let mobileStageParticipantsOpen = false
       let pendingActiveSpeakerName = ''
       let pendingActiveSpeakerSince = 0
       let participantsInRoom = []
@@ -12907,6 +12984,11 @@
       stageModeButtons.forEach(button => {
         button.addEventListener('click', () => setStageMode(button.dataset.stageMode || 'gallery'))
       })
+      stageParticipantsToggle?.addEventListener('click', () => {
+        mobileStageParticipantsOpen = !mobileStageParticipantsOpen
+        updateStageControls()
+        scheduleAuxiliaryVideoPlaybackRepair(mobileStageParticipantsOpen ? 'stage participants opened' : 'stage participants closed', 120)
+      })
       videoStack.addEventListener('pointerdown', beginVideoTilePointerDrag)
       videoStack.addEventListener('keydown', handleVideoReorderKey)
       videoStack.addEventListener('dragstart', event => event.preventDefault())
@@ -13113,7 +13195,7 @@
       renderAudioSettings()
       updateRoomClock()
       renderBoardPreview()
-      setStageMode('speaker')
+      setStageMode('gallery')
       updateHearthParticipants()
       loadParticipantPreview()
       window.setInterval(loadParticipantPreview, 15000)
@@ -16896,9 +16978,69 @@
         scheduleAuxiliaryVideoPlaybackRepair(expanded ? 'board expanded' : 'board collapsed', 120)
       }
 
-      function setStageMode(mode) {
-        stageMode = mode === 'speaker' ? 'speaker' : 'gallery'
+      function normalizeStageMode(mode) {
+        return mode === 'stage' || mode === 'speaker' ? 'stage' : 'gallery'
+      }
+
+      function stageParticipantDisplayName() {
+        const names = visibleParticipantNames()
+        if (pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
+          return pinnedSpeakerName
+        }
+        return ''
+      }
+
+      function defaultStageParticipantName() {
+        const names = visibleParticipantNames().filter(name => name && name !== 'the room')
+        if (currentParticipantName && names.includes(currentParticipantName)) {
+          return currentParticipantName
+        }
+        const active = activeSpeakerDisplayName({ ignorePinned: true })
+        if (active && active !== 'the room' && names.includes(active)) {
+          return active
+        }
+        return names[0] || ''
+      }
+
+      function reconcileStageLayoutState() {
+        if (pinnedSpeakerName && !visibleParticipantNames().includes(pinnedSpeakerName)) {
+          pinnedSpeakerName = ''
+        }
+        const hasScreenShare = Boolean(activeScreenShareParticipant || presentationTile.classList.contains('is-screen-sharing'))
+        const hasStageParticipant = Boolean(stageParticipantDisplayName())
+        if (!hasScreenShare && stageMode === 'stage' && !hasStageParticipant) {
+          stageMode = 'gallery'
+        }
+        const stageFocused = Boolean(stageMode === 'stage' && !hasScreenShare && hasStageParticipant)
+        const drawerAvailable = Boolean(hasScreenShare || stageFocused)
+        if (!drawerAvailable) {
+          mobileStageParticipantsOpen = false
+        }
         hearthStage.dataset.stageMode = stageMode
+        presentationTile.classList.toggle('is-stage-focused', stageFocused)
+        presentationTile.classList.toggle('is-mobile-stage-roster-open', drawerAvailable && mobileStageParticipantsOpen)
+        if (stageParticipantsToggle) {
+          const drawerOpen = drawerAvailable && mobileStageParticipantsOpen
+          stageParticipantsToggle.hidden = !drawerAvailable
+          stageParticipantsToggle.setAttribute('aria-expanded', drawerOpen ? 'true' : 'false')
+          stageParticipantsToggle.setAttribute('aria-label', drawerOpen ? 'Hide participants' : 'Show participants')
+          stageParticipantsToggle.title = drawerOpen ? 'hide participants' : 'show participants'
+        }
+      }
+
+      function setStageMode(mode) {
+        const nextMode = normalizeStageMode(mode)
+        if (nextMode === 'stage' && !activeScreenShareParticipant && !stageParticipantDisplayName()) {
+          pinnedSpeakerName = defaultStageParticipantName()
+        }
+        if (nextMode === 'gallery') {
+          pinnedSpeakerName = ''
+          mobileStageParticipantsOpen = false
+        }
+        stageMode = nextMode === 'stage' && (activeScreenShareParticipant || stageParticipantDisplayName())
+          ? 'stage'
+          : 'gallery'
+        reconcileStageLayoutState()
         updateStageControls()
         updateHearthParticipants()
         scheduleAuxiliaryVideoPlaybackRepair(`stage ${stageMode}`, 120)
@@ -16911,29 +17053,35 @@
         }
         pinnedSpeakerName = pinnedSpeakerName === participantName ? '' : participantName
         if (pinnedSpeakerName) {
-          stageMode = 'speaker'
-          hearthStage.dataset.stageMode = stageMode
+          stageMode = 'stage'
+          mobileStageParticipantsOpen = false
+        } else if (!activeScreenShareParticipant) {
+          stageMode = 'gallery'
+          mobileStageParticipantsOpen = false
         }
+        reconcileStageLayoutState()
         updateStageControls()
         updateHearthParticipants()
       }
 
       function updateStageControls() {
-        const effectiveMode = presentationTile.classList.contains('is-screen-sharing') ? 'screenshare' : stageMode
-        hearthStage.dataset.stageMode = stageMode
+        reconcileStageLayoutState()
+        const effectiveMode = activeScreenShareParticipant || presentationTile.classList.contains('is-screen-sharing') ? 'stage' : stageMode
         stageModeButtons.forEach(button => {
-          const pressed = button.dataset.stageMode === stageMode
+          const buttonMode = normalizeStageMode(button.dataset.stageMode || 'gallery')
+          const pressed = buttonMode === effectiveMode
           button.setAttribute('aria-pressed', pressed ? 'true' : 'false')
+          button.title = buttonMode === 'stage' ? 'stage pinned participant' : 'show gallery'
         })
         const pinned = Boolean(pinnedSpeakerName)
         const active = pinnedSpeakerName || activeSpeakerDisplayName({ ignorePinned: true })
         pinActiveSpeakerButton.setAttribute('aria-pressed', pinned ? 'true' : 'false')
-        pinActiveSpeakerButton.textContent = pinned ? `unpin ${pinnedSpeakerName}` : `pin ${active === 'the room' ? 'speaker' : active}`
-        pinActiveSpeakerButton.disabled = effectiveMode === 'screenshare' || active === 'the room'
+        pinActiveSpeakerButton.textContent = pinned ? `unpin ${pinnedSpeakerName}` : `pin ${active === 'the room' ? 'stage' : active}`
+        pinActiveSpeakerButton.disabled = Boolean(activeScreenShareParticipant) || active === 'the room'
         for (const button of videoStack.querySelectorAll('.pin-speaker')) {
           const name = button.closest('.video-tile')?.dataset.participant || ''
           button.setAttribute('aria-pressed', pinnedSpeakerName && name === pinnedSpeakerName ? 'true' : 'false')
-          button.title = pinnedSpeakerName && name === pinnedSpeakerName ? 'unpin speaker' : 'pin to stage'
+          button.title = pinnedSpeakerName && name === pinnedSpeakerName ? 'unpin from stage' : 'pin to stage'
           button.setAttribute('aria-label', pinnedSpeakerName && name === pinnedSpeakerName ? `Unpin ${name}` : `Pin ${name || 'speaker'} to stage`)
         }
       }
@@ -18034,7 +18182,8 @@
         return {
           attachmentRevision: videoAttachmentRevision,
           stageMode,
-          activeSpeaker: activeSpeakerDisplayName(),
+          stageParticipant: stageParticipantDisplayName(),
+          activeSpeaker: activeSpeakerDisplayName({ ignorePinned: true }),
           activeScreenShareParticipant,
           boardExpanded: Boolean(appShell.classList.contains('is-board-expanded')),
           pipVisible: Boolean(pipMeeting && !pipMeeting.hidden),
@@ -20474,13 +20623,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ignoreCameraOff: true
           })
         }
-        const speaker = activeSpeakerDisplayName()
-        if (stageMode === 'speaker' && speaker && speaker !== 'the room') {
+        const stageParticipant = stageParticipantDisplayName()
+        if (stageMode === 'stage' && stageParticipant && stageParticipant !== 'the room') {
           targets.push({
             video: activeSpeakerVideo,
-            name: speaker,
-            stream: participantStream(speaker),
-            local: speaker === currentParticipantName
+            name: stageParticipant,
+            stream: participantStream(stageParticipant),
+            local: stageParticipant === currentParticipantName
           })
         }
         if (appShell.classList.contains('is-board-expanded') && boardVideoStrip) {
@@ -22572,7 +22721,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function activeSpeakerDisplayName(options = {}) {
         const names = visibleParticipantNames()
-        if (!options.ignorePinned && pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
+        if (options.includePinned && !options.ignorePinned && pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
           return pinnedSpeakerName
         }
         if (activeSpeakerName && names.includes(activeSpeakerName)) {
@@ -22681,11 +22830,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function localMirrorCanvases() {
         const sourceReady = localMirrorPreviewSourceReady()
-        const speakerStageVisible = stageMode === 'speaker' && !presentationTile.classList.contains('is-screen-sharing')
-        const activeSpeakerIsLocal = activeSpeakerDisplayName() === currentParticipantName
+        const stageVisible = stageMode === 'stage' && !presentationTile.classList.contains('is-screen-sharing')
+        const stageParticipantIsLocal = stageParticipantDisplayName() === currentParticipantName
         return [
           { canvas: localVideoMirrorCanvas, enabled: sourceReady },
-          { canvas: activeSpeakerMirrorCanvas, enabled: sourceReady && speakerStageVisible && activeSpeakerIsLocal }
+          { canvas: activeSpeakerMirrorCanvas, enabled: sourceReady && stageVisible && stageParticipantIsLocal }
         ].filter(target => target.canvas)
       }
 
@@ -22920,33 +23069,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function updateHearthParticipants() {
-        if (pinnedSpeakerName && !visibleParticipantNames().includes(pinnedSpeakerName)) {
-          pinnedSpeakerName = ''
-        }
-        const speaker = activeSpeakerDisplayName()
-        const stream = participantStream(speaker)
-        const speakerIsLocal = speaker === currentParticipantName
-        const speakerMedia = participantMediaState(speaker)
-        const speakerCameraOff = Boolean(speakerMedia.cameraOff)
-        const speakerStageVisible = stageMode === 'speaker' && !presentationTile.classList.contains('is-screen-sharing')
-        const speakerVideoStream = speakerStageVisible && shouldAttachParticipantVideo(activeSpeakerVideo, speaker, stream)
+        reconcileStageLayoutState()
+        const activeSpeaker = activeSpeakerDisplayName({ ignorePinned: true })
+        const stageParticipant = stageParticipantDisplayName()
+        const stageName = stageParticipant || activeSpeaker || 'the room'
+        const stream = participantStream(stageName)
+        const stageParticipantIsLocal = stageName === currentParticipantName
+        const stageMedia = participantMediaState(stageName)
+        const stageCameraOff = Boolean(stageMedia.cameraOff)
+        const stageParticipantVisible = Boolean(stageParticipant && stageMode === 'stage' && !presentationTile.classList.contains('is-screen-sharing'))
+        const stageVideoStream = stageParticipantVisible && shouldAttachParticipantVideo(activeSpeakerVideo, stageName, stream)
           ? stream
           : null
-        const speakerMirrorVisible = speakerStageVisible && speakerIsLocal && localMirrorPreviewSourceReady()
+        const stageMirrorVisible = stageParticipantVisible && stageParticipantIsLocal && localMirrorPreviewSourceReady()
 
-        setVideoElementStream(activeSpeakerVideo, speakerVideoStream, { local: speakerIsLocal, hidden: !speakerVideoStream || speakerCameraOff })
-        activeSpeakerAvatar.hidden = Boolean((speakerVideoStream || speakerMirrorVisible) && !speakerCameraOff)
-        if ((!speakerVideoStream && !speakerMirrorVisible) || speakerCameraOff) {
-          activeSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
+        setVideoElementStream(activeSpeakerVideo, stageVideoStream, { local: stageParticipantIsLocal, hidden: !stageVideoStream || stageCameraOff })
+        activeSpeakerAvatar.hidden = Boolean((stageVideoStream || stageMirrorVisible) && !stageCameraOff)
+        if ((!stageVideoStream && !stageMirrorVisible) || stageCameraOff) {
+          activeSpeakerAvatar.replaceChildren(renderIdenticon(stageName))
         }
-        const speakerStateLabel = [
-          speakerMedia.micMuted ? 'muted' : '',
-          speakerCameraOff ? 'camera off' : ''
-        ].filter(Boolean).join(' · ') || 'speaking'
-        activeSpeakerLabel.textContent = speaker === 'the room'
+        const stageStateLabel = [
+          stageMedia.micMuted ? 'muted' : '',
+          stageCameraOff ? 'camera off' : ''
+        ].filter(Boolean).join(' · ') || (stageParticipant ? 'pinned' : 'waiting')
+        activeSpeakerLabel.textContent = stageName === 'the room'
           ? 'the room · waiting'
-          : `${speaker}${speakerIsLocal ? ' · you' : ''} · ${speakerStateLabel}`
-        activeSpeakerTile.classList.toggle('has-video', Boolean(speakerVideoStream || speakerMirrorVisible))
+          : `${stageName}${stageParticipantIsLocal ? ' · you' : ''} · ${stageStateLabel}`
+        activeSpeakerTile.classList.toggle('has-video', Boolean(stageVideoStream || stageMirrorVisible))
+        activeSpeakerTile.classList.toggle('is-active-speaker', Boolean(stageName && stageName === activeSpeaker))
         syncLocalMirrorPreview()
 
         const localTile = localVideo.closest('.video-tile')
@@ -22958,7 +23108,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         applyVideoTileOrder()
         for (const tile of videoStack.querySelectorAll('.video-tile:not(.video-drag-slot)')) {
           const name = tile.dataset.participant || ''
-          tile.classList.toggle('is-active-speaker', Boolean(name && name === speaker))
+          tile.classList.toggle('is-active-speaker', Boolean(name && name === activeSpeaker))
+          tile.classList.toggle('is-on-stage', Boolean(name && name === stageParticipant && stageParticipantVisible))
           ensureVideoTileReorderControl(tile, name)
           ensurePinButton(tile, name)
           applyParticipantMediaStateToTile(tile, name)
@@ -22972,7 +23123,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function updateSpeakerPictureInPicture() {
-        const speaker = activeSpeakerDisplayName()
+        const speaker = activeSpeakerDisplayName({ ignorePinned: true })
         const stream = participantStream(speaker)
         const speakerIsLocal = speaker === currentParticipantName
         const speakerCameraOff = Boolean(participantMediaState(speaker).cameraOff)
@@ -23051,7 +23202,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const isPinned = pinnedSpeakerName && name === pinnedSpeakerName
         button.setAttribute('aria-pressed', isPinned ? 'true' : 'false')
         button.setAttribute('aria-label', isPinned ? `Unpin ${name}` : `Pin ${name} to stage`)
-        button.title = isPinned ? 'unpin speaker' : 'pin to stage'
+        button.title = isPinned ? 'unpin from stage' : 'pin to stage'
       }
 
       function applyParticipantMediaStateToTile(tile, name) {
@@ -23165,8 +23316,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             boardVideoTilesByParticipant.delete(name)
           }
         }
-        const speaker = activeSpeakerDisplayName()
-        const tiles = names.map(name => renderBoardVideoTile(name, name === speaker))
+        const speaker = activeSpeakerDisplayName({ ignorePinned: true })
+        const stageParticipant = stageParticipantDisplayName()
+        const tiles = names.map(name => renderBoardVideoTile(name, name === speaker, name === stageParticipant))
         if (tiles.length === 0) {
           const empty = document.createElement('span')
           empty.className = 'board-dock-now'
@@ -23177,14 +23329,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         scheduleAuxiliaryVideoPlaybackRepair('board dock render', 0)
         if (boardDockNow) {
-          boardDockNow.textContent = speaker === 'the room'
+          boardDockNow.textContent = stageParticipant
+            ? `${stageParticipant.toLowerCase()} pinned`
+            : speaker === 'the room'
             ? 'room visible'
-            : `${speaker.toLowerCase()} ${pinnedSpeakerName === speaker ? 'pinned' : 'speaking'}`
+            : `${speaker.toLowerCase()} speaking`
         }
         updateBoardDockControls()
       }
 
-      function renderBoardVideoTile(name, isSpeaker) {
+      function renderBoardVideoTile(name, isSpeaker, isOnStage = false) {
         let tile = boardVideoTilesByParticipant.get(name)
         if (!tile) {
           tile = document.createElement('button')
@@ -23194,7 +23348,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         tile.dataset.participant = name
         tile.className = `board-video-tile${isSpeaker ? ' is-speaker' : ''}`
-        tile.title = isSpeaker ? `${name} is on stage` : `pin ${name}`
+        tile.title = isOnStage ? `${name} is on stage` : isSpeaker ? `${name} is speaking` : `pin ${name}`
 
         const stream = participantStream(name)
         const state = participantMediaState(name)
