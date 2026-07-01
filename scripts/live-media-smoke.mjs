@@ -86,13 +86,10 @@ try {
   }
   await sleep(5000)
   const pinSnapshots = await collectSnapshots('pin')
-  let mobileToolLauncherSnapshots = []
+  let mobileToolRailSnapshots = []
   if (config.mobileViewport) {
-    for (const page of pages) {
-      await openMobileToolLauncher(page)
-    }
     await sleep(1000)
-    mobileToolLauncherSnapshots = await collectSnapshots('mobile-tool-launcher')
+    mobileToolRailSnapshots = await collectSnapshots('mobile-tool-rail')
   }
 
   for (const page of pages) {
@@ -110,12 +107,12 @@ try {
     ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name, expectedNames),
     ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
     ...validateSnapshots(pinSnapshots, expectedNames.length, { view: 'pin', requirePinnedView: true, expectedNames }),
-    ...validateMobileToolLauncherSnapshots(mobileToolLauncherSnapshots),
+    ...validateMobileToolRailSnapshots(mobileToolRailSnapshots),
     ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
     ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, pinSnapshots, mobileToolLauncherSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
   await emitReport(result)
   console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
@@ -690,18 +687,6 @@ async function showPinnedView(page, targetName = '') {
   `)
 }
 
-async function openMobileToolLauncher(page) {
-  await evaluate(page, `
-    (() => {
-      const launcher = document.getElementById('mobileToolLauncher')
-      if (launcher && launcher.getAttribute('aria-expanded') !== 'true') {
-        launcher.click()
-      }
-      return true
-    })()
-  `)
-}
-
 async function showExpandedBoardView(page) {
   await waitFor(page, `${page.name} board ready`, `
     (() => typeof isBoardReady !== 'undefined' && isBoardReady)()
@@ -998,13 +983,7 @@ async function snapshotPage(page) {
         stageMirrorCanvas: canvasProbe(document.getElementById('activeSpeakerMirrorCanvas')),
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
         screenSharing: Boolean(document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')),
-        mobileToolLauncher: {
-          expanded: document.getElementById('mobileToolLauncher')?.getAttribute('aria-expanded') || '',
-          rect: rectProbe(document.getElementById('mobileToolLauncher')),
-          visible: Boolean(document.getElementById('mobileToolLauncher')?.getClientRects?.().length)
-        },
         toolRail: {
-          open: Boolean(document.getElementById('appShell')?.classList.contains('is-mobile-tool-rail-open')),
           rect: rectProbe(document.getElementById('toolRail')),
           visible: Boolean(document.getElementById('toolRail')?.getClientRects?.().length)
         },
@@ -1305,18 +1284,23 @@ function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
   return failures
 }
 
-function validateMobileToolLauncherSnapshots(snapshots) {
+function validateMobileToolRailSnapshots(snapshots) {
   const failures = []
   for (const snapshot of snapshots) {
-    const prefix = `${snapshot.name} mobile tool launcher`
-    if (!snapshot.mobileToolLauncher?.visible) {
-      failures.push(`${prefix} launcher is not visible`)
+    const prefix = `${snapshot.name} mobile tool rail`
+    const rail = snapshot.toolRail
+    if (!rail?.visible) {
+      failures.push(`${prefix} is not visible`)
+      continue
     }
-    if (snapshot.mobileToolLauncher?.expanded !== 'true') {
-      failures.push(`${prefix} launcher did not expand`)
+    const box = rail.rect?.rect
+    if (!box || box.width <= 0 || box.height <= 0) {
+      failures.push(`${prefix} has invalid geometry`)
+      continue
     }
-    if (!snapshot.toolRail?.open || !snapshot.toolRail?.visible) {
-      failures.push(`${prefix} tool rail did not open`)
+    const viewportWidth = snapshot.viewport?.innerWidth || snapshot.viewport?.documentSize?.clientWidth || 0
+    if (viewportWidth > 0 && (box.left < 0 || box.right > viewportWidth)) {
+      failures.push(`${prefix} overflows the viewport`)
     }
   }
   return failures

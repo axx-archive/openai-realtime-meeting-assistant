@@ -292,30 +292,17 @@
       }
 
       main {
-        --shell-topbar-height: 62px;
+        --shell-topbar-height: 0px;
         display: grid;
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr) auto;
         grid-template-areas:
-          "topbar"
           "workspace"
           "dock";
         min-height: 100vh;
         min-height: 100svh;
         position: relative;
         isolation: isolate;
-      }
-
-      #appShell.is-rail-hidden {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-areas:
-          "topbar"
-          "workspace"
-          "dock";
-      }
-
-      #appShell.is-rail-hidden .tool-rail {
-        display: none;
       }
 
       /* the shell (rail + topbar) only exists once you're signed in;
@@ -523,6 +510,25 @@
         transform: translate(-50%, -50%) scale(0.25);
       }
 
+      .tool-rail__account {
+        position: relative;
+        width: 100%;
+      }
+
+      .tool-rail__account-button .tool-rail__account-icon {
+        flex: 0 0 auto;
+      }
+
+      .tool-rail__account-button .topbar__avatar {
+        display: none;
+      }
+
+      .tool-rail__account-button[aria-expanded="true"] {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-1);
+      }
+
       .tool-rail__avatar {
         display: inline-flex;
         align-items: center;
@@ -560,48 +566,13 @@
         display: none;
       }
 
-      .mobile-tool-launcher__icon {
-        position: absolute;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        transition:
-          opacity var(--dur-med) var(--ease),
-          transform var(--dur-med) var(--ease),
-          filter var(--dur-med) var(--ease);
-      }
-
-      .mobile-tool-launcher__icon--open {
-        opacity: 1;
-        filter: blur(0);
-        transform: scale(1);
-      }
-
-      .mobile-tool-launcher__icon--close {
-        opacity: 0;
-        filter: blur(4px);
-        transform: scale(0.25);
-      }
-
-      #appShell.is-mobile-tool-rail-open .mobile-tool-launcher__icon--open {
-        opacity: 0;
-        filter: blur(4px);
-        transform: scale(0.25);
-      }
-
-      #appShell.is-mobile-tool-rail-open .mobile-tool-launcher__icon--close {
-        opacity: 1;
-        filter: blur(0);
-        transform: scale(1);
-      }
-
       /* ---------- Topbar (kit chrome glass) ---------- */
       .topbar {
         grid-area: topbar;
         position: sticky;
         top: 0;
         z-index: 70;
-        display: flex;
+        display: none;
         align-items: center;
         gap: 20px;
         min-height: var(--shell-topbar-height);
@@ -691,17 +662,6 @@
 
       .topbar__spacer {
         flex: 1;
-      }
-
-      .topbar__nav-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        flex: none;
-        color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        white-space: nowrap;
       }
 
       .topbar > .pill {
@@ -867,10 +827,16 @@
         z-index: 90;
       }
 
+      #appShell:has(#accountMenuButton[aria-expanded="true"]) .tool-rail {
+        z-index: 1000;
+      }
+
       .account-menu {
         position: absolute;
-        top: calc(100% + 10px);
-        right: 0;
+        top: auto;
+        right: auto;
+        bottom: 0;
+        left: calc(100% + 12px);
         z-index: 80;
         display: grid;
         gap: var(--sp-3);
@@ -1043,11 +1009,22 @@
         border-radius: var(--r-xl);
         background: var(--ink-900);
         border: 0;
-        box-shadow: inset 0 0 0 1px var(--line-2);
+        box-shadow: none;
         aspect-ratio: 16 / 10;
         cursor: grab;
         user-select: none;
         transition: box-shadow var(--dur-med) var(--ease), opacity var(--dur-med) var(--ease);
+      }
+
+      .video-tile::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        border-radius: inherit;
+        box-shadow: inset 0 0 0 1px var(--line-2);
+        pointer-events: none;
+        transition: box-shadow var(--dur-med) var(--ease);
       }
 
       .video-tile:active {
@@ -1056,6 +1033,12 @@
 
       .video-tile.is-active-speaker {
         box-shadow: var(--glow-speaker-md);
+      }
+
+      .video-tile.is-active-speaker::after {
+        box-shadow:
+          inset 0 0 0 2px var(--speaker-accent),
+          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
       }
 
       /* shadow appears on lift only */
@@ -1070,6 +1053,10 @@
         background: var(--accent-soft);
         box-shadow: none;
         cursor: default;
+      }
+
+      .video-drag-slot::after {
+        box-shadow: none;
       }
 
       video {
@@ -4018,7 +4005,7 @@
       }
 
       @media (min-width: 641px) {
-        #appShell.is-authed:not(.is-rail-hidden) .workspace {
+        #appShell.is-authed .workspace {
           padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));
         }
       }
@@ -4034,12 +4021,12 @@
       }
 
       @media (min-width: 641px) {
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="chat"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="memory"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="research"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="design"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room:not(.is-rail-hidden)[data-tool="grill"]:not(.is-board-expanded) .workspace {
+        #appShell.is-authed.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
+        #appShell.is-authed.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
+        #appShell.is-authed.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
+        #appShell.is-authed.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
+        #appShell.is-authed.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
+        #appShell.is-authed.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
           padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));
         }
       }
@@ -4178,60 +4165,6 @@
         justify-content: center;
         overflow: hidden;
         padding: clamp(24px, 5vw, 56px);
-      }
-
-      .office-launch__nav-toggle {
-        position: absolute;
-        top: 18px;
-        right: 22px;
-        z-index: 5;
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-      }
-
-      .rail-switch {
-        position: relative;
-        width: 44px;
-        height: 26px;
-        flex: none;
-        padding: 0;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--live);
-        cursor: pointer;
-        transition:
-          background var(--dur-med) var(--ease),
-          transform var(--dur-fast) var(--ease);
-      }
-
-      .rail-switch:active {
-        transform: scale(var(--press-scale));
-      }
-
-      .rail-switch::after {
-        content: "";
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 20px;
-        height: 20px;
-        border-radius: var(--r-full);
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-        transform: translateX(18px);
-        transition: transform var(--dur-med) var(--ease);
-      }
-
-      #appShell.is-rail-hidden .rail-switch {
-        background: var(--surface-3);
-      }
-
-      #appShell.is-rail-hidden .rail-switch::after {
-        transform: translateX(0);
       }
 
       .office-launch__wrap {
@@ -8770,6 +8703,19 @@
         box-shadow: var(--glow-speaker-md);
       }
 
+      .hearth-speaker::after,
+      .screen-stage__pip::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        border-radius: inherit;
+        box-shadow:
+          inset 0 0 0 2px var(--speaker-accent),
+          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
+        pointer-events: none;
+      }
+
       .hearth-speaker video,
       .screen-stage__pip video {
         position: absolute;
@@ -8880,6 +8826,13 @@
       .hearth-stage[data-room-layout="grid"] .hearth-seat.is-active-speaker,
       .hearth-seat.is-active-speaker {
         box-shadow: var(--glow-speaker-md);
+      }
+
+      .hearth-stage[data-room-layout="grid"] .hearth-seat.is-active-speaker::after,
+      .hearth-seat.is-active-speaker::after {
+        box-shadow:
+          inset 0 0 0 2px var(--speaker-accent),
+          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
       }
 
       .hearth-seat.is-placeholder {
@@ -10116,13 +10069,12 @@
 
       @media (max-width: 640px) {
         main {
-          --shell-topbar-height: 52px;
+          --shell-topbar-height: 0px;
         }
 
         #appShell {
           grid-template-columns: minmax(0, 1fr);
           grid-template-areas:
-            "topbar"
             "workspace"
             "dock";
         }
@@ -10132,70 +10084,30 @@
           padding: var(--sp-2) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
         }
 
-        #appShell:not(.is-rail-hidden) .workspace {
+        #appShell.is-authed .workspace {
           padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));
         }
 
-        #appShell.is-rail-hidden .tool-rail {
-          display: flex;
-        }
-
         .mobile-tool-launcher {
-          position: fixed;
-          right: max(12px, env(safe-area-inset-right));
-          bottom: max(12px, env(safe-area-inset-bottom));
-          z-index: 96;
-          display: inline-grid;
-          place-items: center;
-          width: 54px;
-          height: 54px;
-          min-width: 54px;
-          min-height: 54px;
-          padding: 0;
-          border: 1px solid color-mix(in srgb, var(--glass-border) 82%, transparent);
-          border-radius: var(--r-full);
-          background: color-mix(in srgb, var(--glass-chrome) 90%, transparent);
-          color: var(--text-1);
-          box-shadow:
-            var(--glass-highlight),
-            0 18px 42px rgb(0 0 0 / 0.26),
-            inset 0 1px 0 rgb(255 255 255 / 0.18);
-          backdrop-filter: blur(22px) saturate(1.45);
-          -webkit-backdrop-filter: blur(22px) saturate(1.45);
-          transition:
-            transform var(--dur-fast) var(--ease),
-            background var(--dur-med) var(--ease),
-            box-shadow var(--dur-med) var(--ease);
-        }
-
-        #appShell:not(.is-authed) .mobile-tool-launcher {
           display: none;
-        }
-
-        #appShell.is-in-room:not(.is-board-expanded) .mobile-tool-launcher {
-          bottom: max(122px, calc(env(safe-area-inset-bottom) + 122px));
-        }
-
-        .mobile-tool-launcher:active {
-          transform: scale(var(--press-scale));
         }
 
         #appShell.is-authed[data-tool="office"] .tool-rail,
         .tool-rail {
           position: fixed;
-          inset: auto max(74px, calc(env(safe-area-inset-right) + 74px)) max(16px, env(safe-area-inset-bottom)) auto;
+          inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;
           top: auto;
-          right: max(74px, calc(env(safe-area-inset-right) + 74px));
+          right: auto;
           bottom: max(16px, env(safe-area-inset-bottom));
-          left: auto;
+          left: 50%;
           z-index: 90;
           flex-direction: row;
           align-items: center;
           justify-content: center;
           gap: 6px;
           width: max-content;
-          max-width: calc(100vw - 98px);
-          max-width: calc(100dvw - 98px);
+          max-width: calc(100vw - 24px);
+          max-width: calc(100dvw - 24px);
           height: auto;
           max-height: none;
           padding: 7px;
@@ -10208,28 +10120,13 @@
             var(--glass-highlight),
             0 18px 42px rgb(0 0 0 / 0.24),
             inset 0 1px 0 rgb(255 255 255 / 0.18);
-          opacity: 0;
-          visibility: hidden;
-          pointer-events: none;
-          transform: translate3d(16px, 0, 0) scale(0.96);
-          backdrop-filter: blur(22px) saturate(1.45);
-          -webkit-backdrop-filter: blur(22px) saturate(1.45);
-          transition:
-            opacity var(--dur-med) var(--ease),
-            visibility 0s linear var(--dur-med),
-            transform var(--dur-med) var(--ease),
-            background var(--dur-med) var(--ease),
-            box-shadow var(--dur-med) var(--ease);
-        }
-
-        #appShell.is-mobile-tool-rail-open .tool-rail {
           opacity: 1;
           visibility: visible;
           pointer-events: auto;
-          transform: translate3d(0, 0, 0) scale(1);
+          transform: translateX(-50%);
+          backdrop-filter: blur(22px) saturate(1.45);
+          -webkit-backdrop-filter: blur(22px) saturate(1.45);
           transition:
-            opacity var(--dur-med) var(--ease),
-            visibility 0s,
             transform var(--dur-med) var(--ease),
             background var(--dur-med) var(--ease),
             box-shadow var(--dur-med) var(--ease);
@@ -10294,15 +10191,15 @@
           margin-top: 0;
         }
 
+        .tool-rail__account {
+          width: auto;
+        }
+
         /* the live clock can never be squeezed */
         .topbar {
           min-height: 52px;
           gap: var(--sp-2);
           padding: 0 12px 0 0;
-        }
-
-        .topbar__nav-toggle > span {
-          display: none;
         }
 
         .topbar__mark {
@@ -10361,8 +10258,15 @@
         }
 
         .account-menu {
-          right: 0;
-          width: min(340px, calc(100vw - 76px));
+          position: fixed;
+          right: max(12px, env(safe-area-inset-right));
+          bottom: calc(76px + env(safe-area-inset-bottom));
+          left: max(12px, env(safe-area-inset-left));
+          width: auto;
+        }
+
+        #appShell.is-in-room:not(.is-board-expanded) .account-menu {
+          bottom: calc(186px + env(safe-area-inset-bottom));
         }
 
         .pill {
@@ -11308,7 +11212,7 @@
     </style>
   </head>
   <body>
-    <main id="appShell" class="is-rail-hidden" data-tool="office">
+    <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
@@ -11370,72 +11274,14 @@
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
-        <button id="railAvatar" class="tool-rail__tool tool-rail__signout" type="button" aria-label="Sign out" title="Sign out" aria-pressed="false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
-          <span class="tool-rail__label">sign out</span>
-        </button>
-      </nav>
-      <button id="mobileToolLauncher" class="mobile-tool-launcher" type="button" aria-label="Open tools" aria-expanded="false" aria-controls="toolRail" title="tools">
-        <span class="mobile-tool-launcher__icon mobile-tool-launcher__icon--open" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
-            <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
-            <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
-            <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
-          </svg>
-        </span>
-        <span class="mobile-tool-launcher__icon mobile-tool-launcher__icon--close" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 6 6 18"></path>
-            <path d="m6 6 12 12"></path>
-          </svg>
-        </span>
-      </button>
-      <header class="topbar mount-stagger">
-        <span id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire">
-          <svg viewBox="0 0 64 64">
-            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
-          </svg>
-        </span>
-        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span><span id="topbarToolTitle" hidden></span></h1>
-        <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
-          <span class="topbar__meta-item" id="topbarDate">—</span>
-          <span class="topbar__meta-sep" aria-hidden="true">·</span>
-          <span class="topbar__meta-item" id="topbarElapsed" data-started="false">not started</span>
-          <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true">·</span>
-          <span id="topbarRoomPill" class="topbar__meta-item" data-state="waiting">
-            <span class="pill__dot"></span>
-            <span id="topbarRoomState">waiting room</span>
-          </span>
-          <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
-        </div>
-        <span class="topbar__spacer" aria-hidden="true"></span>
-        <span class="topbar__nav-toggle">
-          <span>nav bar</span>
-          <button id="topbarRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"></button>
-        </span>
-        <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
-          Board
-        </button>
-        <button id="copyRoomLink" class="topbar__copy-link" type="button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-          Copy link
-        </button>
-        <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
-          <span class="pill__dot"></span>
-          <span id="statusText">not connected</span>
-        </span>
-        <div id="topbarAccount" class="topbar__account" hidden>
-          <button id="accountMenuButton" class="topbar__account-button" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <span id="topbarAccount" class="tool-rail__slot tool-rail__account" hidden>
+          <button id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings" title="User settings">
+            <svg class="tool-rail__account-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 19.79 6.2l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
             <span class="topbar__avatar" aria-hidden="true">
               <img id="topbarAvatarImage" alt="" hidden>
               <span id="topbarAvatarInitials">TC</span>
             </span>
-            <span class="topbar__account-copy">
-              <span id="topbarAccountName" class="topbar__account-name">team captain</span>
-            </span>
-            <svg class="topbar__account-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            <span id="topbarAccountName" class="tool-rail__label topbar__account-name">team captain</span>
           </button>
           <section id="accountMenu" class="account-menu" role="dialog" aria-label="Account menu" hidden>
             <div class="account-menu__identity">
@@ -11464,7 +11310,7 @@
             <span class="account-menu__divider" aria-hidden="true"></span>
             <div class="account-menu__actions">
               <button id="accountMenuSettings" class="account-menu__link" type="button">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 19.79 6.2l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
                 settings
               </button>
               <button id="accountMenuSignOut" class="account-menu__link" type="button">
@@ -11473,16 +11319,44 @@
               </button>
             </div>
           </section>
+        </span>
+      </nav>
+      <header class="topbar mount-stagger">
+        <span id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire">
+          <svg viewBox="0 0 64 64">
+            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
+          </svg>
+        </span>
+        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span><span id="topbarToolTitle" hidden></span></h1>
+        <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
+          <span class="topbar__meta-item" id="topbarDate">—</span>
+          <span class="topbar__meta-sep" aria-hidden="true">·</span>
+          <span class="topbar__meta-item" id="topbarElapsed" data-started="false">not started</span>
+          <span class="topbar__meta-sep topbar__meta-sep--room" aria-hidden="true">·</span>
+          <span id="topbarRoomPill" class="topbar__meta-item" data-state="waiting">
+            <span class="pill__dot"></span>
+            <span id="topbarRoomState">waiting room</span>
+          </span>
+          <span class="topbar__meta-item" id="topbarToolMeta" hidden></span>
         </div>
+        <span class="topbar__spacer" aria-hidden="true"></span>
+        <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
+          Board
+        </button>
+        <button id="copyRoomLink" class="topbar__copy-link" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+          Copy link
+        </button>
+        <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
+          <span class="pill__dot"></span>
+          <span id="statusText">not connected</span>
+        </span>
       </header>
 
       <div class="workspace">
         <section id="officeTool" class="office-tool" aria-label="Office">
           <div class="office-launch bf-view">
-            <div class="office-launch__nav-toggle">
-              <span>nav bar</span>
-              <button id="officeRailToggle" class="rail-switch" type="button" role="switch" aria-label="toggle nav bar" aria-checked="false"></button>
-            </div>
             <span class="office-launch__glow" aria-hidden="true"></span>
             <div class="office-launch__wrap">
               <div class="office-launch__island">
@@ -12388,7 +12262,6 @@
          The pre-paint script in <head> applies the stored/system theme before
          first render; these helpers switch + persist it at runtime. */
       const themeStorageKey = 'bonfire.theme.v1'
-      const railHiddenStorageKey = 'bonfire.rail.hidden.v1'
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       const artifactAdminEmail = 'aj@shareability.com'
@@ -12418,13 +12291,9 @@
       const appShell = document.getElementById('appShell')
       const toolRail = document.getElementById('toolRail')
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
-      const mobileToolLauncher = document.getElementById('mobileToolLauncher')
       const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))
       const toolBoardButton = document.getElementById('toolBoard')
       const themeToggleButton = document.getElementById('themeToggle')
-      const topbarRailToggle = document.getElementById('topbarRailToggle')
-      const officeRailToggle = document.getElementById('officeRailToggle')
-      const railAvatarEl = document.getElementById('railAvatar')
       const boardEl = document.getElementById('board')
       const boardSurface = document.getElementById('boardSurface')
       const boardHero = document.getElementById('boardHero')
@@ -12721,8 +12590,7 @@
       }
 
       let lastNonBoardTool = 'office'
-      let railHidden = loadRailHiddenPreference()
-      let mobileToolRailOpen = false
+      let railHidden = false
       const pipVideoTilesByParticipant = new Map()
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
@@ -13014,65 +12882,26 @@
       pipMute.addEventListener('click', () => muteMicButton.click())
       pipCamera.addEventListener('click', () => toggleCameraButton.click())
       pipHandle.addEventListener('pointerdown', startPipDrag)
-      topbarRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
-      officeRailToggle.addEventListener('click', () => setRailHidden(!railHidden))
-      mobileToolLauncher?.addEventListener('click', event => {
-        event.stopPropagation()
-        setMobileToolRailOpen(!mobileToolRailOpen)
-      })
-      document.addEventListener('pointerdown', event => {
-        if (!mobileToolRailOpen) {
-          return
-        }
-        const target = event.target
-        if (toolRail?.contains(target) || mobileToolLauncher?.contains(target)) {
-          return
-        }
-        setMobileToolRailOpen(false)
-      })
-      document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && mobileToolRailOpen) {
-          setMobileToolRailOpen(false)
-        }
-      })
       function loadRailHiddenPreference() {
-        try {
-          const saved = window.localStorage?.getItem(railHiddenStorageKey)
-          if (saved === 'visible') return false
-          if (saved === 'hidden') return true
-        } catch (err) { /* private mode */ }
-        return true
+        return false
       }
-      function persistRailHiddenPreference(hidden) {
+      function persistRailHiddenPreference() {
         try {
-          window.localStorage?.setItem(railHiddenStorageKey, hidden ? 'hidden' : 'visible')
+          window.localStorage?.removeItem('bonfire.rail.hidden.v1')
         } catch (err) { /* private mode */ }
       }
       function setRailHidden(hidden, options = {}) {
         const persist = options.persist !== false
-        railHidden = Boolean(hidden)
-        appShell.classList.toggle('is-rail-hidden', railHidden)
-        for (const control of [topbarRailToggle, officeRailToggle]) {
-          control.setAttribute('aria-checked', railHidden ? 'false' : 'true')
-        }
+        railHidden = false
         if (persist) {
-          persistRailHiddenPreference(railHidden)
+          persistRailHiddenPreference()
         }
         syncVoiceIslandVisibility()
       }
-      function setMobileToolRailOpen(open) {
-        mobileToolRailOpen = Boolean(open)
-        appShell.classList.toggle('is-mobile-tool-rail-open', mobileToolRailOpen)
-        if (mobileToolLauncher) {
-          mobileToolLauncher.setAttribute('aria-expanded', mobileToolRailOpen ? 'true' : 'false')
-          mobileToolLauncher.setAttribute('aria-label', mobileToolRailOpen ? 'Close tools' : 'Open tools')
-          mobileToolLauncher.title = mobileToolRailOpen ? 'close tools' : 'tools'
-        }
+      function setMobileToolRailOpen() {
       }
       function closeMobileToolRailForSelection() {
-        if (window.matchMedia?.('(max-width: 640px)').matches) {
-          setMobileToolRailOpen(false)
-        }
+        setMobileToolRailOpen(false)
       }
       setRailHidden(railHidden, { persist: false })
       function syncThemeToggles(theme) {
@@ -13143,12 +12972,6 @@
         openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })
       })
       accountMenuSignOut.addEventListener('click', signOutOfAccount)
-      if (railAvatarEl) {
-        railAvatarEl.addEventListener('click', () => {
-          closeMobileToolRailForSelection()
-          if (authedUser) signOutOfAccount()
-        })
-      }
       assistantForm.addEventListener('submit', sendAssistantQuery)
       scoutTabButtons.forEach(button => {
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
@@ -14162,16 +13985,12 @@
         appShell.classList.toggle('is-authed', authed)
         syncOSAssistantAvailability()
         syncArtifactLibraryAccess()
-        if (railAvatarEl) {
-          railAvatarEl.title = 'Sign out'
-          railAvatarEl.setAttribute('aria-label', 'Sign out')
-        }
         syncAccountChrome()
         if (authed) {
-          setRailHidden(loadRailHiddenPreference(), { persist: false })
+          setRailHidden(false, { persist: false })
         } else {
           setMobileToolRailOpen(false)
-          setRailHidden(true, { persist: false })
+          setRailHidden(false, { persist: false })
           appShell.classList.remove('is-in-room', 'is-board-expanded')
           if ((appShell.dataset.tool || 'office') !== 'office') {
             applyToolState('office')
@@ -21484,8 +21303,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const reconnectingSignal = isSignalReconnecting
         currentParticipantName = name
         saveCachedIdentity(name)
-        railAvatarEl.title = 'Sign out'
-        railAvatarEl.setAttribute('aria-label', 'Sign out')
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         accessState.textContent = 'verified'
