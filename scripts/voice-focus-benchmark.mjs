@@ -55,6 +55,11 @@ const results = [
   benchmarkSpeechRecovery(),
   benchmarkNoisySpeechRecovery(),
   benchmarkConcurrentNoiseReduction('speech over fan', makeFanFrame, { maxResidualRatio: 0.95, minSpeechRatio: 0.72 }),
+  benchmarkNoiseSuppression('hvac fan', makeHVACFrame, { maxRatio: 0.08, maxGain: 0.05 }),
+  benchmarkSoftSpeechRecovery(),
+  benchmarkEchoFixture(),
+  benchmarkPlosiveFixture(),
+  benchmarkOverlappingSpeakersFixture(),
   benchmarkPostSpeechSuppression('post-speech fan', makeFanFrame, { maxRatio: 0.12, maxGain: 0.45 }),
   benchmarkPostSpeechSuppression('post-speech keyboard', makeKeyboardFrame, { maxRatio: 0.12, maxGain: 0.45 }),
   ...rnnoiseResults
@@ -218,6 +223,111 @@ function benchmarkNoisySpeechRecovery() {
   }
 }
 
+function benchmarkSoftSpeechRecovery() {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  for (let frameIndex = 0; frameIndex < 90; frameIndex++) {
+    processFrame(state, makeHVACFrame(frameIndex))
+  }
+  const speechFrames = []
+  for (let frameIndex = 0; frameIndex < 34; frameIndex++) {
+    speechFrames.push(processFrame(state, mixFrames(makeSoftSpeechFrame(frameIndex), makeHVACFrame(frameIndex + 90))))
+  }
+  const settled = speechFrames.slice(-14)
+  const outputRatio = average(settled.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const averageGain = average(settled.map(frame => frame.gain))
+  const failures = []
+  if (outputRatio < 0.45) {
+    failures.push(`soft speech output ratio ${outputRatio.toFixed(4)} below 0.45`)
+  }
+  if (averageGain < 0.62) {
+    failures.push(`soft speech gain ${averageGain.toFixed(4)} below 0.62`)
+  }
+  return {
+    name: 'soft speech with hvac',
+    outputRatio,
+    averageGain,
+    inputRms: average(settled.map(frame => frame.inputRms)),
+    outputRms: average(settled.map(frame => frame.outputRms)),
+    failures
+  }
+}
+
+function benchmarkEchoFixture() {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  const frames = []
+  let previousSpeech = makeSilentFrame()
+  for (let frameIndex = 0; frameIndex < 42; frameIndex++) {
+    const speech = makeSpeechFrame(frameIndex)
+    const echo = previousSpeech.map(sample => sample * 0.28)
+    frames.push(processFrame(state, mixFrames(speech, echo)))
+    previousSpeech = speech
+  }
+  const settled = frames.slice(-16)
+  const outputRatio = average(settled.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const averageGain = average(settled.map(frame => frame.gain))
+  const failures = []
+  if (outputRatio < 0.68) {
+    failures.push(`echo fixture output ratio ${outputRatio.toFixed(4)} below 0.68`)
+  }
+  if (averageGain < 0.75) {
+    failures.push(`echo fixture gain ${averageGain.toFixed(4)} below 0.75`)
+  }
+  return {
+    name: 'speech with echo tail',
+    outputRatio,
+    averageGain,
+    failures
+  }
+}
+
+function benchmarkPlosiveFixture() {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  const frames = []
+  for (let frameIndex = 0; frameIndex < 38; frameIndex++) {
+    frames.push(processFrame(state, mixFrames(makeSpeechFrame(frameIndex), makePlosiveFrame(frameIndex))))
+  }
+  const settled = frames.slice(-16)
+  const outputRatio = average(settled.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const averageGain = average(settled.map(frame => frame.gain))
+  const failures = []
+  if (outputRatio < 0.58) {
+    failures.push(`plosive fixture output ratio ${outputRatio.toFixed(4)} below 0.58`)
+  }
+  if (averageGain < 0.7) {
+    failures.push(`plosive fixture gain ${averageGain.toFixed(4)} below 0.70`)
+  }
+  return {
+    name: 'speech with plosives',
+    outputRatio,
+    averageGain,
+    failures
+  }
+}
+
+function benchmarkOverlappingSpeakersFixture() {
+  const state = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
+  const frames = []
+  for (let frameIndex = 0; frameIndex < 40; frameIndex++) {
+    frames.push(processFrame(state, mixFrames(makeSpeechFrame(frameIndex), makeSecondSpeakerFrame(frameIndex))))
+  }
+  const settled = frames.slice(-16)
+  const outputRatio = average(settled.map(frame => frame.outputRms / Math.max(frame.inputRms, 0.000001)))
+  const averageGain = average(settled.map(frame => frame.gain))
+  const failures = []
+  if (outputRatio < 0.64) {
+    failures.push(`overlapping speakers output ratio ${outputRatio.toFixed(4)} below 0.64`)
+  }
+  if (averageGain < 0.74) {
+    failures.push(`overlapping speakers gain ${averageGain.toFixed(4)} below 0.74`)
+  }
+  return {
+    name: 'overlapping speakers',
+    outputRatio,
+    averageGain,
+    failures
+  }
+}
+
 function benchmarkConcurrentNoiseReduction(name, noiseFactory, limits) {
   const cleanState = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
   const noisyState = sandbox.createVoiceFocusState(sandbox.voiceFocusConfig())
@@ -315,7 +425,8 @@ async function benchmarkRNNoiseWasm() {
   const concurrent = await benchmarkRNNoiseConcurrentNoise(wasmPath)
   const fan = await benchmarkRNNoiseNoiseOnly(wasmPath, 'rnnoise fan-only gate', rnnoiseFanSample, { maxRatio: 0.18 })
   const keyboard = await benchmarkRNNoiseNoiseOnly(wasmPath, 'rnnoise keyboard-only gate', rnnoiseKeyboardSample, { maxRatio: 0.2 })
-  return [concurrent, fan, keyboard]
+  const non48k = await benchmarkRNNoiseNon48kHz(wasmPath)
+  return [concurrent, fan, keyboard, non48k]
 }
 
 async function createRNNoiseProcessor(wasmPath) {
@@ -470,6 +581,31 @@ async function benchmarkRNNoiseNoiseOnly(wasmPath, name, sampleFactory, limits) 
   }
 }
 
+async function benchmarkRNNoiseNon48kHz(wasmPath) {
+  const processor = await createRNNoiseProcessor(wasmPath)
+  const sampleRate = 44100
+  const ratios = []
+  for (let frameIndex = 0; frameIndex < 80; frameIndex++) {
+    const speech = makeRNNoiseFrame(processor.frameSize, sampleRate, frameIndex, rnnoiseSpeechSample)
+    const result = processor.process(speech)
+    const ratio = rms(result.output) / Math.max(rms(speech), 0.000001)
+    if (Number.isFinite(ratio)) {
+      ratios.push(ratio)
+    }
+  }
+  const outputRatio = average(ratios.slice(-30))
+  const failures = []
+  if (!Number.isFinite(outputRatio) || outputRatio <= 0) {
+    failures.push('rnnoise non-48khz produced no finite output')
+  }
+  return {
+    name: 'rnnoise non-48khz speech path',
+    sampleRate,
+    outputRatio,
+    failures
+  }
+}
+
 function rnnoiseForcedNoiseFrame(frame) {
   let sum = 0
   let peak = 0
@@ -583,6 +719,14 @@ function makeKeyboardFrame(frameIndex) {
   })
 }
 
+function makeHVACFrame(frameIndex) {
+  return makeFrame((index, t) => {
+    return Math.sin(2 * Math.PI * 58 * t + frameIndex * 0.03) * 0.012
+      + Math.sin(2 * Math.PI * 117 * t) * 0.008
+      + Math.sin(2 * Math.PI * 240 * t + 0.7) * 0.005
+  })
+}
+
 function makeSpeechFrame(frameIndex) {
   return makeFrame((index, t) => {
     const envelope = 0.92 + Math.sin((frameIndex * 512 + index) / 900) * 0.08
@@ -592,6 +736,41 @@ function makeSpeechFrame(frameIndex) {
       + Math.sin(2 * Math.PI * 1320 * t + 1.2) * 0.018
     )
   })
+}
+
+function makeSoftSpeechFrame(frameIndex) {
+  return makeFrame((index, t) => {
+    const envelope = 0.86 + Math.sin((frameIndex * 512 + index) / 1200) * 0.1
+    return envelope * (
+      Math.sin(2 * Math.PI * 175 * t) * 0.052
+      + Math.sin(2 * Math.PI * 700 * t + 0.4) * 0.02
+      + Math.sin(2 * Math.PI * 1180 * t + 1.1) * 0.013
+    )
+  })
+}
+
+function makeSecondSpeakerFrame(frameIndex) {
+  return makeFrame((index, t) => {
+    const envelope = 0.8 + Math.sin((frameIndex * 512 + index) / 760) * 0.12
+    return envelope * (
+      Math.sin(2 * Math.PI * 132 * t + 0.5) * 0.042
+      + Math.sin(2 * Math.PI * 510 * t + 0.2) * 0.019
+      + Math.sin(2 * Math.PI * 980 * t + 1.5) * 0.012
+    )
+  })
+}
+
+function makePlosiveFrame(frameIndex) {
+  return makeFrame((index, t) => {
+    const burst = frameIndex % 9 === 0 && index < 32
+      ? Math.exp(-index / 9) * 0.11
+      : 0
+    return burst + Math.sin(2 * Math.PI * 92 * t) * 0.002
+  })
+}
+
+function makeSilentFrame() {
+  return makeFrame(() => 0)
 }
 
 function mixFrames(...frames) {

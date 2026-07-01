@@ -12135,14 +12135,14 @@
               <span class="noise-mode-control" aria-hidden="true"></span>
               <span class="noise-mode-text">
                 <strong>voice focus</strong>
-                <span>browser cleanup plus an adaptive local voice gate.</span>
+                <span>stronger local RNNoise cleanup for noisy rooms.</span>
               </span>
             </label>
             <label class="noise-mode-option">
               <input type="radio" name="audioNoiseMode" value="standard">
               <span class="noise-mode-control" aria-hidden="true"></span>
               <span class="noise-mode-text">
-                <strong>standard</strong>
+                <strong>standard cleanup</strong>
                 <span>browser echo cancellation and noise suppression only.</span>
               </span>
             </label>
@@ -12610,7 +12610,14 @@
         gain: 1,
         noiseBias: 0,
         speechConfidence: 0,
-        suppressionDb: 0
+        suppressionDb: 0,
+        processor: '',
+        rnnoiseReady: false,
+        rnnoiseError: '',
+        fallbackReason: '',
+        sampleRate: 0,
+        frameSize: 0,
+        workletHealth: ''
       }
       let voiceFocusWorkletPromise
       let voiceFocusRNNoiseWorkletPromise
@@ -12627,10 +12634,12 @@
       let mediaQualityLagSamples = 0
       let previousMediaQualityStats = null
       let lastMediaQualityReportAt = 0
+      let auxiliaryVideoRepairTimer = 0
+      let videoAttachmentRevision = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`
-      const audioSettingsSchemaVersion = 6
+      const audioSettingsSchemaVersion = 7
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
       const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
@@ -12647,6 +12656,7 @@
         || (/Macintosh/.test(navigator.userAgent) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
+        'standard-cleanup': 'standard cleanup',
         standard: 'standard cleanup',
         off: 'raw mic'
       }
@@ -12962,6 +12972,13 @@
         })
       })
       window.addEventListener('beforeunload', leaveRoom)
+      window.addEventListener('resize', () => scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160))
+      window.addEventListener('orientationchange', () => scheduleAuxiliaryVideoPlaybackRepair('orientation change', 260))
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          scheduleAuxiliaryVideoPlaybackRepair('visibility restored', 120)
+        }
+      })
       window.addEventListener('pointerdown', unlockRoomAudioPlayback, { passive: true })
       window.addEventListener('keydown', unlockRoomAudioPlayback)
       window.addEventListener('click', event => {
@@ -13059,7 +13076,7 @@
 
       function loadAudioSettings() {
         const defaults = {
-          mode: 'voice-focus',
+          mode: 'standard',
           version: audioSettingsSchemaVersion,
           profile: { ...defaultVoiceProfile },
           preferredInput: null
@@ -13084,7 +13101,7 @@
         }
         const saved = JSON.parse(raw)
         const savedVersion = Number(saved?.version) || 0
-        const savedMode = Object.prototype.hasOwnProperty.call(audioModeLabels, saved?.mode) ? saved.mode : ''
+        const savedMode = canonicalAudioMode(saved?.mode)
         const mode = savedVersion >= audioSettingsSchemaVersion
           ? (savedMode || defaults.mode)
           : (savedMode === 'voice-focus' || savedMode === 'off' ? savedMode : defaults.mode)
@@ -13097,6 +13114,14 @@
           : { ...defaultVoiceProfile }
         const preferredInput = normalizePreferredAudioInput(saved?.preferredInput)
         return { mode, version: audioSettingsSchemaVersion, profile, preferredInput }
+      }
+
+      function canonicalAudioMode(mode) {
+        const value = String(mode || '').trim()
+        if (value === 'standard-cleanup') {
+          return 'standard'
+        }
+        return Object.prototype.hasOwnProperty.call(audioModeLabels, value) ? value : ''
       }
 
       function normalizePreferredAudioInput(input) {
@@ -13201,12 +13226,22 @@
       }
 
       function audioModeLabel() {
-        return audioModeLabels[audioSettings.mode] || audioModeLabels['voice-focus']
+        return audioModeLabels[canonicalAudioMode(audioSettings.mode)] || audioModeLabels.standard
+      }
+
+      function audioProfileName() {
+        if (voiceFocusEnabled()) {
+          return 'voice-focus'
+        }
+        if (!audioProcessingEnabled()) {
+          return 'raw'
+        }
+        return 'standard-cleanup'
       }
 
       function renderAudioSettings() {
         audioNoiseModeInputs.forEach(input => {
-          input.checked = input.value === audioSettings.mode
+          input.checked = input.value === canonicalAudioMode(audioSettings.mode)
         })
 
         const inRoom = roomMediaActive()
@@ -13296,12 +13331,13 @@
       }
 
       function setAudioNoiseMode(mode) {
-        if (!Object.prototype.hasOwnProperty.call(audioModeLabels, mode) || audioSettings.mode === mode) {
+        const nextMode = canonicalAudioMode(mode)
+        if (!nextMode || audioSettings.mode === nextMode) {
           return
         }
         audioSettings = {
           ...audioSettings,
-          mode
+          mode: nextMode
         }
         saveAudioSettings()
         renderAudioSettings()
@@ -16674,7 +16710,7 @@
         pipCamera.disabled = toggleCameraButton.disabled
 
         if (wasHidden) {
-          window.requestAnimationFrame(() => repairAuxiliaryVideoPlayback('pip shown'))
+          scheduleAuxiliaryVideoPlaybackRepair('pip shown', 0)
         }
         if (!pipRenderTimer) {
           pipRenderTimer = window.setInterval(renderPipMeeting, 1000)
@@ -16809,6 +16845,7 @@
         renderBoardHuddle()
         renderBoardDock()
         closeBoardDockMenu()
+        scheduleAuxiliaryVideoPlaybackRepair(expanded ? 'board expanded' : 'board collapsed', 120)
       }
 
       function setStageMode(mode) {
@@ -16816,6 +16853,7 @@
         hearthStage.dataset.stageMode = stageMode
         updateStageControls()
         updateHearthParticipants()
+        scheduleAuxiliaryVideoPlaybackRepair(`stage ${stageMode}`, 120)
       }
 
       function togglePinnedSpeaker(name) {
@@ -17831,7 +17869,14 @@
           gain: clampNumber(metrics.gain, 0, 1.25, voiceFocusDiagnostics.gain),
           noiseBias: clampNumber(metrics.noiseBias, 0, 0.2, voiceFocusDiagnostics.noiseBias),
           speechConfidence: clampNumber(metrics.speechConfidence, 0, 1, voiceFocusDiagnostics.speechConfidence),
-          suppressionDb
+          suppressionDb,
+          processor: String(metrics.processor || voiceFocusDiagnostics.processor || ''),
+          rnnoiseReady: Boolean(metrics.rnnoiseReady ?? voiceFocusDiagnostics.rnnoiseReady),
+          rnnoiseError: String(metrics.rnnoiseError || voiceFocusDiagnostics.rnnoiseError || ''),
+          fallbackReason: String(metrics.fallbackReason || voiceFocusDiagnostics.fallbackReason || ''),
+          sampleRate: Number(metrics.sampleRate || voiceFocusDiagnostics.sampleRate || 0),
+          frameSize: Number(metrics.frameSize || voiceFocusDiagnostics.frameSize || 0),
+          workletHealth: String(metrics.workletHealth || voiceFocusDiagnostics.workletHealth || '')
         }
       }
 
@@ -17846,7 +17891,112 @@
           gain: Number(voiceFocusDiagnostics.gain.toFixed(4)),
           noiseBias: Number(voiceFocusDiagnostics.noiseBias.toFixed(5)),
           speechConfidence: Number(voiceFocusDiagnostics.speechConfidence.toFixed(3)),
-          suppressionDb: Number(voiceFocusDiagnostics.suppressionDb.toFixed(1))
+          suppressionDb: Number(voiceFocusDiagnostics.suppressionDb.toFixed(1)),
+          processor: voiceFocusDiagnostics.processor || voiceFocusProcessorType(),
+          rnnoiseReady: Boolean(voiceFocusDiagnostics.rnnoiseReady),
+          rnnoiseError: voiceFocusDiagnostics.rnnoiseError || '',
+          fallbackReason: voiceFocusDiagnostics.fallbackReason || '',
+          sampleRate: Number(voiceFocusDiagnostics.sampleRate || 0),
+          frameSize: Number(voiceFocusDiagnostics.frameSize || 0),
+          workletHealth: voiceFocusDiagnostics.workletHealth || ''
+        }
+      }
+
+      function audioProcessorDiagnosticsSnapshot() {
+        const processor = localAudioProcessor || {}
+        const sourceSettings = localAudioSourceTrack?.getSettings?.() || {}
+        const outputSettings = localAudioTrack()?.getSettings?.() || {}
+        const rnnoiseError = String(processor.rnnoiseError || processor.rnnoiseNode?.bonfireError || '')
+        return {
+          profile: audioProfileName(),
+          mode: canonicalAudioMode(audioSettings.mode),
+          browserProcessing: audioProcessingEnabled(),
+          customVoiceFocus: voiceFocusEnabled(),
+          processor: voiceFocusProcessorType(),
+          rnnoiseReady: Boolean(processor.rnnoiseReady || processor.rnnoiseNode?.bonfireReady),
+          rnnoiseError,
+          fallbackReason: rnnoiseError || '',
+          sampleRate: Number(processor.sampleRate || sourceSettings.sampleRate || outputSettings.sampleRate || audioContext?.sampleRate || 0),
+          frameSize: Number(processor.frameSize || processor.rnnoiseNode?.bonfireFrameSize || 0),
+          workletHealth: processor.rnnoiseNode
+            ? (rnnoiseError ? 'rnnoise-fallback' : (processor.rnnoiseReady ? 'rnnoise-ready' : 'rnnoise-loading'))
+            : processor.voiceFocusNode
+              ? 'voice-focus-worklet'
+              : processor.voiceFocusScriptNode
+                ? 'script-processor'
+                : (voiceFocusEnabled() ? 'browser-or-unavailable' : 'browser-cleanup')
+        }
+      }
+
+      function viewportDiagnosticsSnapshot() {
+        const orientation = screen.orientation || {}
+        const visual = window.visualViewport || null
+        return {
+          width: window.innerWidth || 0,
+          height: window.innerHeight || 0,
+          visualWidth: Math.round(visual?.width || 0),
+          visualHeight: Math.round(visual?.height || 0),
+          devicePixelRatio: Number(window.devicePixelRatio || 1),
+          orientationType: String(orientation.type || ''),
+          orientationAngle: Number(orientation.angle) || 0,
+          mobile: Boolean(isMobileDevice)
+        }
+      }
+
+      function videoElementDiagnosticsSnapshot(video) {
+        if (!video) {
+          return null
+        }
+        const tracks = video.srcObject?.getVideoTracks?.() || []
+        const now = performance.now()
+        const age = value => {
+          const number = Number(value || 0)
+          return number ? Math.round(Math.max(0, now - number)) : 0
+        }
+        return {
+          id: video.id || '',
+          participant: video.dataset.participant || video.closest?.('[data-participant]')?.dataset?.participant || '',
+          hidden: Boolean(video.hidden),
+          visible: mediaElementIsVisible(video),
+          readyState: video.readyState || 0,
+          paused: Boolean(video.paused),
+          muted: Boolean(video.muted),
+          videoWidth: video.videoWidth || 0,
+          videoHeight: video.videoHeight || 0,
+          currentTime: Number((Number(video.currentTime) || 0).toFixed(2)),
+          rendered: videoElementHasRenderedFrame(video),
+          hasLiveVideo: tracks.some(liveTrack),
+          trackIds: tracks.map(track => track.id),
+          trackStates: tracks.map(track => track.readyState || ''),
+          sourceSignature: video.dataset.sourceStreamSignature || '',
+          attachmentRevision: Number(video.dataset.videoAttachmentRevision || 0),
+          attachedAgeMs: age(video.dataset.videoStreamAttachedAt),
+          lastFrameAgeMs: age(video.dataset.lastVideoFrameAt),
+          progressAgeMs: age(video.dataset.videoProgressAt)
+        }
+      }
+
+      function renderMediaDiagnosticsSnapshot(remoteHealth = remoteMediaHealthSnapshot()) {
+        const auxiliaryTargets = auxiliaryVideoPlaybackTargets().map(target => ({
+          role: target.video?.id || target.video?.closest?.('.board-video-tile, .pip-tile, .screen-stage__pip')?.className || 'auxiliary-video',
+          name: target.name || '',
+          local: Boolean(target.local),
+          video: videoElementDiagnosticsSnapshot(target.video)
+        }))
+        return {
+          attachmentRevision: videoAttachmentRevision,
+          stageMode,
+          activeSpeaker: activeSpeakerDisplayName(),
+          activeScreenShareParticipant,
+          boardExpanded: Boolean(appShell.classList.contains('is-board-expanded')),
+          pipVisible: Boolean(pipMeeting && !pipMeeting.hidden),
+          remoteStreamNames: Array.from(remoteStreamsByParticipant.keys()),
+          remoteVideoTrackNames: Array.from(remoteVideoTracksByParticipant.keys()),
+          auxiliaryTargets,
+          galleryVideos: Array.from(videoStack.querySelectorAll('.video-tile video')).map(videoElementDiagnosticsSnapshot),
+          boardDockVideos: Array.from(boardVideoStrip?.querySelectorAll?.('.board-video-tile video') || []).map(videoElementDiagnosticsSnapshot),
+          pipVideos: Array.from(pipTiles?.querySelectorAll?.('.pip-tile video') || []).map(videoElementDiagnosticsSnapshot),
+          remoteHealth
         }
       }
 
@@ -17860,12 +18010,15 @@
             userAgent: String(navigator.userAgent || '').slice(0, 180),
             platform: navigator.platform || '',
             safari: safariBrowser,
+            viewport: viewportDiagnosticsSnapshot(),
             supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.() || {}
           },
           audio: {
             mode: audioSettings.mode,
+            profile: audioProfileName(),
             voiceFocus: voiceFocusEnabled(),
-            processor: voiceFocusProcessorType()
+            processor: voiceFocusProcessorType(),
+            processorState: audioProcessorDiagnosticsSnapshot()
           },
           error: {
             name: error?.name || '',
@@ -17900,13 +18053,16 @@
             safari: safariBrowser,
             userAgent: String(navigator.userAgent || '').slice(0, 180),
             visibilityState: document.visibilityState || '',
-            audioContextState: audioContext?.state || ''
+            audioContextState: audioContext?.state || '',
+            viewport: viewportDiagnosticsSnapshot()
           },
           audio: {
             mode: audioSettings.mode,
+            profile: audioProfileName(),
             voiceFocus: voiceFocusEnabled(),
             processing: audioProcessingEnabled(),
             processor: voiceFocusProcessorType(),
+            processorState: audioProcessorDiagnosticsSnapshot(),
             voiceFocusMetrics: voiceFocusDiagnosticsSnapshot(),
             sourceSettings: trackSettingsSnapshot(localAudioSourceTrack || localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency']),
             outputSettings: trackSettingsSnapshot(localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency'])
@@ -17916,6 +18072,7 @@
             settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode'])
           },
           remote: remoteHealth,
+          render: renderMediaDiagnosticsSnapshot(remoteHealth),
           stats: snapshot,
           deltas: mediaQualityDelta(snapshot, previous)
         }
@@ -18305,6 +18462,8 @@
               rnnoiseNode,
               rnnoiseReady: Boolean(rnnoiseNode?.bonfireReady),
               rnnoiseError: rnnoiseNode?.bonfireError || '',
+              frameSize: Number(rnnoiseNode?.bonfireFrameSize || 0),
+              sampleRate: Number(context.sampleRate || 0),
               voiceFocusNode,
               voiceFocusScriptNode,
               destination
@@ -18327,7 +18486,8 @@
           track: outputTrack,
           processor: {
             sourceTrack,
-            outputTrack
+            outputTrack,
+            sampleRate: Number(sourceTrack.getSettings?.().sampleRate || audioContext?.sampleRate || 0)
           }
         }
       }
@@ -18391,7 +18551,7 @@
         const peakSpeech = peak >= threshold * 2.5 && rms >= closeAt && crest < 7.2 && zeroCrossingRate < 0.28
         const speechLike = (voiceCrossing || steadyVoice) && crest < 8.4
         const instantConfidence = Math.min(1, levelBlend * (speechLike ? 1 : 0.35) + (peakSpeech ? 0.35 : 0))
-        const open = !forcedNoise && instantConfidence >= 0.5
+        const open = !forcedNoise && instantConfidence >= 0.34
         if (open) {
           state.holdFrames = state.calibrated ? 16 : 12
         } else if (forcedNoise) {
@@ -18448,7 +18608,11 @@
               outputRms: rmsFromFloatSamples(output),
               gain,
               noiseBias,
-              speechConfidence: state.speechConfidence
+              speechConfidence: state.speechConfidence,
+              processor: 'script',
+              sampleRate: Number(context.sampleRate || 0),
+              frameSize: Number(input.length || 0),
+              workletHealth: 'script-processor'
             })
           }
         }
@@ -18517,15 +18681,21 @@
             if (data.type === 'ready') {
               node.bonfireReady = true
               node.bonfireError = ''
+              node.bonfireFrameSize = Number(data.frameSize) || 0
               if (localAudioProcessor?.rnnoiseNode === node) {
                 localAudioProcessor.rnnoiseReady = true
                 localAudioProcessor.rnnoiseError = ''
+                localAudioProcessor.frameSize = node.bonfireFrameSize
               }
               updateVoiceFocusDiagnostics({
                 gain: 1,
                 noiseBias: 0,
                 speechConfidence: 1,
-                processor: data.processor || 'rnnoise-wasm'
+                processor: data.processor || 'rnnoise-wasm',
+                rnnoiseReady: true,
+                frameSize: node.bonfireFrameSize,
+                sampleRate: localAudioProcessor?.sampleRate || audioContext?.sampleRate || 0,
+                workletHealth: 'rnnoise-ready'
               })
               return
             }
@@ -18536,6 +18706,15 @@
                 localAudioProcessor.rnnoiseReady = false
                 localAudioProcessor.rnnoiseError = node.bonfireError
               }
+              updateVoiceFocusDiagnostics({
+                processor: data.processor || 'rnnoise-wasm',
+                rnnoiseReady: false,
+                rnnoiseError: node.bonfireError,
+                fallbackReason: node.bonfireError,
+                frameSize: Number(data.frameSize || node.bonfireFrameSize || 0),
+                sampleRate: localAudioProcessor?.sampleRate || audioContext?.sampleRate || 0,
+                workletHealth: 'rnnoise-fallback'
+              })
               console.warn('RNNoise voice focus fell back', node.bonfireError)
               return
             }
@@ -18543,8 +18722,16 @@
               if (localAudioProcessor?.rnnoiseNode === node) {
                 localAudioProcessor.rnnoiseReady = data.processor === 'rnnoise-wasm'
                 localAudioProcessor.rnnoiseError = data.processor === 'rnnoise-wasm' ? '' : localAudioProcessor.rnnoiseError
+                localAudioProcessor.frameSize = Number(data.frameSize || node.bonfireFrameSize || localAudioProcessor.frameSize || 0)
               }
-              updateVoiceFocusDiagnostics(data)
+              updateVoiceFocusDiagnostics({
+                ...data,
+                sampleRate: localAudioProcessor?.sampleRate || audioContext?.sampleRate || 0,
+                frameSize: Number(data.frameSize || node.bonfireFrameSize || 0),
+                rnnoiseReady: data.processor === 'rnnoise-wasm',
+                rnnoiseError: data.processor === 'rnnoise-wasm' ? '' : localAudioProcessor?.rnnoiseError || '',
+                workletHealth: data.processor === 'rnnoise-wasm' ? 'rnnoise-ready' : 'rnnoise-fallback'
+              })
             }
           }
         }
@@ -18630,7 +18817,7 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
     const peakSpeech = peak >= threshold * 2.5 && rms >= closeAt && crest < 7.2 && zeroCrossingRate < 0.28
     const speechLike = (voiceCrossing || steadyVoice) && crest < 8.4
     const instantConfidence = Math.min(1, levelBlend * (speechLike ? 1 : 0.35) + (peakSpeech ? 0.35 : 0))
-    const open = !forcedNoise && instantConfidence >= 0.5
+    const open = !forcedNoise && instantConfidence >= 0.34
     if (open) {
       this.holdFrames = this.calibrated ? 16 : 12
     } else if (forcedNoise) {
@@ -18689,7 +18876,8 @@ class BonfireVoiceFocusProcessor extends AudioWorkletProcessor {
         outputRms: Math.sqrt(outputSum / Math.max(1, outputCount)),
         gain: this.gain,
         noiseBias: this.noiseBias,
-        speechConfidence: this.speechConfidence
+        speechConfidence: this.speechConfidence,
+        frameSize: reference.length
       })
     }
     return true
@@ -18721,7 +18909,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (node?.port) {
           node.port.onmessage = event => {
             if (event.data?.type === 'metrics') {
-              updateVoiceFocusDiagnostics(event.data)
+              updateVoiceFocusDiagnostics({
+                ...event.data,
+                processor: 'worklet',
+                sampleRate: Number(context.sampleRate || 0),
+                workletHealth: 'voice-focus-worklet'
+              })
             }
           }
         }
@@ -19263,7 +19456,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               const answer = await pc.createAnswer()
               await pc.setLocalDescription(answer)
               if (ws?.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ event: 'answer', data: JSON.stringify(answer) }))
+                ws.send(JSON.stringify({
+                  event: 'answer',
+                  data: JSON.stringify(answer),
+                  offerId: message.offerId || '',
+                  revision: Number(message.revision) || 0
+                }))
               }
             } catch (error) {
               // Return to stable so the server's re-offer can apply instead of
@@ -20291,6 +20489,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return repaired
       }
 
+      function scheduleAuxiliaryVideoPlaybackRepair(reason = '', delayMs = 80) {
+        if (auxiliaryVideoRepairTimer) {
+          window.clearTimeout(auxiliaryVideoRepairTimer)
+        }
+        auxiliaryVideoRepairTimer = window.setTimeout(() => {
+          auxiliaryVideoRepairTimer = 0
+          repairAuxiliaryVideoPlayback(reason)
+        }, Math.max(0, Number(delayMs) || 0))
+      }
+
       function scheduleUnidentifiedRemoteTileRepair(tile) {
         if (!tile || tile.dataset.participant !== 'participant') {
           return
@@ -20798,13 +21006,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!name) {
           return null
         }
-        const direct = remoteStreamsByParticipant.get(name)
-        if (direct) {
+        const participantName = String(name).trim()
+        const direct = remoteStreamsByParticipant.get(participantName)
+        if (direct && (!direct.getVideoTracks || direct.getVideoTracks().some(liveTrack))) {
           return direct
         }
-        const target = String(name).trim().toLowerCase()
+        const target = participantName.toLowerCase()
         for (const [key, stream] of remoteStreamsByParticipant) {
-          if (String(key).trim().toLowerCase() === target) {
+          if (String(key).trim().toLowerCase() === target && stream && (!stream.getVideoTracks || stream.getVideoTracks().some(liveTrack))) {
             return stream
           }
         }
@@ -20813,7 +21022,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return new MediaStream([track])
           }
         }
-        return null
+        return direct || null
       }
 
       function handleScreenShareStopped(event) {
@@ -22246,6 +22455,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           screenSpeakerLabel.textContent = 'speaker'
           updateStageControls()
           updateBoardDockControls()
+          scheduleAuxiliaryVideoPlaybackRepair('screen stage cleared', 120)
           return
         }
 
@@ -22259,6 +22469,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           updateSpeakerPictureInPicture()
           updateStageControls()
           updateBoardDockControls()
+          scheduleAuxiliaryVideoPlaybackRepair('screen stage waiting', 120)
           return
         }
         presentationTile.classList.add('is-screen-sharing')
@@ -22267,6 +22478,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateSpeakerPictureInPicture()
         updateStageControls()
         updateBoardDockControls()
+        scheduleAuxiliaryVideoPlaybackRepair('screen stage render', 120)
       }
 
       function participantNamesForRoom() {
@@ -22315,7 +22527,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (activeSpeakerName && names.includes(activeSpeakerName)) {
           return activeSpeakerName
         }
-        const remoteName = names.find(name => name !== currentParticipantName && remoteStreamsByParticipant.has(name))
+        const remoteName = names.find(name => name !== currentParticipantName && (remoteStreamsByParticipant.has(name) || liveTrack(remoteVideoTracksByParticipant.get(name))))
         if (remoteName) {
           return remoteName
         }
@@ -22332,7 +22544,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (name === currentParticipantName) {
           return localStream
         }
-        return remoteStreamsByParticipant.get(name) || null
+        const participantName = String(name).trim()
+        const direct = remoteStreamsByParticipant.get(participantName)
+        const directVideoTrack = direct?.getVideoTracks?.().find(liveTrack)
+        if (directVideoTrack) {
+          return direct
+        }
+        const liveVideoTrack = remoteVideoTracksByParticipant.get(participantName)
+        if (liveTrack(liveVideoTrack)) {
+          return new MediaStream([liveVideoTrack])
+        }
+        const target = participantName.toLowerCase()
+        for (const [key, stream] of remoteStreamsByParticipant) {
+          if (String(key).trim().toLowerCase() === target && stream?.getVideoTracks?.().some(liveTrack)) {
+            return stream
+          }
+        }
+        for (const [key, track] of remoteVideoTracksByParticipant) {
+          if (String(key).trim().toLowerCase() === target && liveTrack(track)) {
+            return new MediaStream([track])
+          }
+        }
+        return direct || null
       }
 
       function setVideoElementStream(video, stream, { hidden = false, local = false, force = false } = {}) {
@@ -22347,6 +22580,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             video.pause?.()
           }
           video.srcObject = nextStream
+          videoAttachmentRevision += 1
+          video.dataset.videoAttachmentRevision = String(videoAttachmentRevision)
           markVideoElementStreamAttached(video, nextStream)
           if (nextStream) {
             ensureVideoElementPlayback(video)
@@ -22558,6 +22793,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           screenSpeakerAvatar.replaceChildren(renderIdenticon(speaker))
         }
         screenSpeakerLabel.textContent = speaker === 'the room' ? 'speaker' : speaker.toLowerCase()
+        scheduleAuxiliaryVideoPlaybackRepair('speaker picture in picture', 120)
       }
 
       function syncParticipantPlaceholders() {
@@ -22742,7 +22978,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else {
           boardVideoStrip.replaceChildren(...tiles)
         }
-        window.requestAnimationFrame(() => repairAuxiliaryVideoPlayback('board dock render'))
+        scheduleAuxiliaryVideoPlaybackRepair('board dock render', 0)
         if (boardDockNow) {
           boardDockNow.textContent = speaker === 'the room'
             ? 'room visible'
@@ -22963,7 +23199,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!element) {
           return
         }
-        const nextStream = videoPlaybackStreamForElement(element, stream)
         element.autoplay = true
         element.playsInline = true
         element.muted = muted
@@ -22971,9 +23206,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         element.volume = muted ? 0 : 1
         element.dataset.participant = name || 'participant'
         element.dataset.remotePlayback = muted ? 'muted' : 'synced'
-        if (element.srcObject !== nextStream) {
-          element.srcObject = nextStream
-        }
+        setVideoElementStream(element, stream, { local: false, force: true })
         playRemoteMedia(element)
       }
 
@@ -23431,14 +23664,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (currentTracks.includes(track)) {
           return false
         }
-        video.srcObject = new MediaStream([track])
+        const stream = new MediaStream([track])
+        setVideoElementStream(video, stream, { force: true })
         playRemoteMedia(video)
         tile.classList.remove('is-video-stalled')
         watchRemoteVideoTrackStall(tile, track)
         const name = String(tile.dataset.participant || participantName || '').trim()
         if (name && name !== 'participant') {
           remoteVideoTracksByParticipant.set(name, track)
-          remoteStreamsByParticipant.set(name, video.srcObject)
+          remoteStreamsByParticipant.set(name, video.srcObject || stream)
         }
         if (name && activeScreenShareParticipant
             && name.toLowerCase() === String(activeScreenShareParticipant).toLowerCase()) {
@@ -23446,6 +23680,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // the presentation stage now that the live track is rebound.
           renderScreenStage()
         }
+        scheduleAuxiliaryVideoPlaybackRepair('remote video rebind', 120)
         const removeForTrack = remoteTileRemovers.get(tile)
         if (removeForTrack) {
           track.addEventListener?.('ended', () => removeForTrack(track), { once: true })

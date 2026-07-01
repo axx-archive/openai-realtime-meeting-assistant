@@ -498,6 +498,9 @@ func waitForServerOffer(t *testing.T, conn *websocket.Conn, timeout time.Duratio
 		if offer.Type != "offer" || offer.SDP == "" {
 			t.Fatalf("unexpected server offer payload: %+v", offer)
 		}
+		if message.OfferID == "" || message.Revision == 0 {
+			t.Fatalf("server offer missing optional signaling metadata: %+v", message)
+		}
 		return webrtc.SessionDescription{
 			Type: webrtc.SDPTypeOffer,
 			SDP:  offer.SDP,

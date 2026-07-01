@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 const defaults = {
   chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   password: process.env.ROOM_PASSWORD || 'B0NFIRE!',
   participants: ['Tom', 'Caitlyn'],
+  externalParticipants: [],
   rejoin: '',
   separateBrowsers: true,
+  durationMs: 0,
+  emitReport: '',
+  interactive: false,
+  lateJoin: '',
+  mobileViewport: null,
   timeoutMs: 45000,
   url: 'https://thebonfire.xyz'
 }
@@ -19,8 +25,13 @@ const options = parseArgs(process.argv.slice(2))
 const config = {
   ...defaults,
   ...options,
-  participants: options.participants || defaults.participants
+  participants: options.participants || defaults.participants,
+  externalParticipants: options.externalParticipants || defaults.externalParticipants
 }
+const lateJoinPlan = resolveLateJoinPlan(config)
+const initialParticipantNames = config.participants.filter(name => !(lateJoinPlan.type === 'automated' && name === lateJoinPlan.name))
+const initialExternalParticipantNames = config.externalParticipants.filter(name => !(lateJoinPlan.type === 'external' && name === lateJoinPlan.name))
+const reportStartedAt = new Date().toISOString()
 
 const pages = []
 const browsers = []
@@ -31,11 +42,21 @@ process.on('SIGINT', () => finish(130))
 process.on('SIGTERM', () => finish(143))
 
 try {
+  if (lateJoinPlan.name) {
+    log('late-join-plan', lateJoinPlan.type, lateJoinPlan.name)
+  }
+  if (config.externalParticipants.length) {
+    log('external-participants', config.externalParticipants.join(','))
+  }
+  if (config.mobileViewport) {
+    log('mobile-viewport', `${config.mobileViewport.width}x${config.mobileViewport.height}`, config.mobileViewport.orientation)
+  }
+
   if (!config.separateBrowsers) {
     sharedBrowser = await createBrowser('shared')
   }
 
-  for (const name of config.participants) {
+  for (const name of initialParticipantNames) {
     const browser = config.separateBrowsers ? await createBrowser(name) : sharedBrowser
     pages.push(await openPage(name, browser))
   }
@@ -44,17 +65,16 @@ try {
     await joinRoom(page)
   }
 
-  for (const page of pages) {
-    await waitForRoomMedia(page, pages.length)
-  }
+  await waitForExpectedRoomMedia(expectedParticipantNames({ includeLate: false }))
+
+  const lateJoinSnapshots = lateJoinPlan.name ? await performLateJoin(lateJoinPlan) : []
+  const expectedNames = expectedParticipantNames({ includeLate: true })
 
   const recordingSnapshots = await exerciseRecordingToggle(pages[0])
 
   if (config.rejoin) {
     await rejoinParticipant(config.rejoin)
-    for (const page of pages) {
-      await waitForRoomMedia(page, pages.length)
-    }
+    await waitForExpectedRoomMedia(expectedNames)
   }
 
   const screenShareSnapshots = await exerciseScreenShare(pages[0])
@@ -64,30 +84,40 @@ try {
     await showSpeakerView(page)
   }
   await sleep(5000)
-  const speakerSnapshots = await collectSnapshots()
+  const speakerSnapshots = await collectSnapshots('speaker')
 
   for (const page of pages) {
     await showExpandedBoardView(page)
   }
   await sleep(5000)
-  const boardSnapshots = await collectSnapshots()
+  const boardSnapshots = await collectSnapshots('board')
+  const soakSnapshots = await collectSoakSnapshots(expectedNames)
+  const postLeaveParticipants = await closePagesAndCollectParticipants(pages)
 
   const failures = [
     ...validateRecordingSnapshots(recordingSnapshots.off, 'off'),
     ...validateRecordingSnapshots(recordingSnapshots.on, 'on'),
-    ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name),
+    ...validateLateJoinSnapshots(lateJoinSnapshots, expectedNames),
+    ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name, expectedNames),
     ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
-    ...validateSnapshots(speakerSnapshots, pages.length, { view: 'speaker', requireSpeakerView: true }),
-    ...validateSnapshots(boardSnapshots, pages.length, { view: 'board', requireBoardDock: true })
+    ...validateSnapshots(speakerSnapshots, expectedNames.length, { view: 'speaker', requireSpeakerView: true, expectedNames }),
+    ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
+    ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
+    ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  console.log(JSON.stringify({ ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots, recordingSnapshots }, null, 2))
-  await closePages(pages)
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, speakerSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+  await emitReport(result)
+  console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
 } catch (error) {
+  const failures = [error?.stack || error?.message || String(error)]
+  const failureSnapshots = []
   if (pages.length) {
     for (const page of pages) {
       try {
-        log('failure-snapshot', page.name, JSON.stringify(await basicPageState(page)))
+        const snapshot = await basicPageState(page)
+        failureSnapshots.push({ name: page.name, snapshot })
+        log('failure-snapshot', page.name, JSON.stringify(snapshot))
       } catch (snapshotError) {
         log('failure-snapshot-error', page.name, snapshotError.message)
       }
@@ -104,6 +134,7 @@ try {
   } catch {
     // DevTools may already be down.
   }
+  await emitReport({ ok: false, failures, failureSnapshots })
   console.error('live media smoke failed:', error?.stack || error?.message || error)
   await finish(1)
 }
@@ -122,20 +153,117 @@ function parseArgs(args) {
     } else if (arg === '--participants' && next) {
       parsed.participants = next.split(',').map(value => value.trim()).filter(Boolean)
       index++
+    } else if (arg === '--external-participant' && next) {
+      parsed.externalParticipants = [
+        ...(parsed.externalParticipants || []),
+        ...next.split(',').map(value => value.trim()).filter(Boolean)
+      ]
+      index++
     } else if (arg === '--rejoin' && next) {
       parsed.rejoin = next.trim()
       index++
+    } else if (arg === '--late-join') {
+      if (next && !next.startsWith('--')) {
+        parsed.lateJoin = next.trim() || true
+        index++
+      } else {
+        parsed.lateJoin = true
+      }
     } else if (arg === '--chrome' && next) {
       parsed.chromePath = next
       index++
     } else if (arg === '--separate-browsers') {
       parsed.separateBrowsers = true
+    } else if (arg === '--interactive') {
+      parsed.interactive = true
+    } else if (arg === '--duration-ms' && next) {
+      parsed.durationMs = Math.max(0, Number(next) || 0)
+      index++
+    } else if (arg === '--emit-report') {
+      if (next && !next.startsWith('--')) {
+        parsed.emitReport = next
+        index++
+      } else {
+        parsed.emitReport = true
+      }
+    } else if (arg === '--mobile-viewport') {
+      if (next && !next.startsWith('--')) {
+        parsed.mobileViewport = parseMobileViewport(next)
+        index++
+      } else {
+        parsed.mobileViewport = parseMobileViewport('')
+      }
     } else if (arg === '--timeout-ms' && next) {
       parsed.timeoutMs = Number(next) || defaults.timeoutMs
       index++
     }
   }
   return parsed
+}
+
+function parseMobileViewport(value) {
+  const defaults = {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 3,
+    orientation: 'portrait'
+  }
+  const raw = String(value || '').trim().toLowerCase()
+  if (!raw || raw === 'phone' || raw === 'mobile' || raw === 'iphone') {
+    return defaults
+  }
+  if (raw === 'landscape') {
+    return { ...defaults, width: 844, height: 390, orientation: 'landscape' }
+  }
+  const match = raw.match(/^(\d{3,4})x(\d{3,4})(?:@([1-9](?:\.\d+)?))?(?::(portrait|landscape))?$/)
+  if (!match) {
+    log('mobile-viewport-warning', `could not parse ${JSON.stringify(value)}, using 390x844 portrait`)
+    return defaults
+  }
+  const width = Number(match[1])
+  const height = Number(match[2])
+  return {
+    width,
+    height,
+    deviceScaleFactor: Number(match[3]) || defaults.deviceScaleFactor,
+    orientation: match[4] || (width > height ? 'landscape' : 'portrait')
+  }
+}
+
+function resolveLateJoinPlan(config) {
+  if (!config.lateJoin) {
+    return { name: '', type: '' }
+  }
+  const requestedName = config.lateJoin === true ? '' : String(config.lateJoin || '').trim()
+  const name = requestedName || config.participants[config.participants.length - 1] || config.externalParticipants[config.externalParticipants.length - 1] || ''
+  if (!name) {
+    return { name: '', type: '' }
+  }
+  if (config.externalParticipants.includes(name)) {
+    return { name, type: 'external' }
+  }
+  if (!config.participants.includes(name)) {
+    config.participants = [...config.participants, name]
+  }
+  const remainingAutomatedParticipants = config.participants.filter(participantName => participantName !== name)
+  if (remainingAutomatedParticipants.length === 0) {
+    throw new Error(`--late-join ${name} would leave no automated participant to hold the room`)
+  }
+  return { name, type: 'automated' }
+}
+
+function expectedParticipantNames({ includeLate }) {
+  const automatedNames = includeLate
+    ? config.participants
+    : initialParticipantNames
+  const externalNames = includeLate
+    ? config.externalParticipants
+    : initialExternalParticipantNames
+  return uniqueNames([...automatedNames, ...externalNames])
+}
+
+function uniqueNames(names) {
+  return Array.from(new Set(names.map(name => String(name || '').trim()).filter(Boolean)))
 }
 
 async function findDebugPort() {
@@ -159,8 +287,7 @@ async function findDebugPort() {
 async function createBrowser(label) {
   const userDataDir = await mkdtemp(join(tmpdir(), 'meetingassist-live-smoke-'))
   const debugPort = await findDebugPort()
-  const chrome = spawn(config.chromePath, [
-    '--headless=new',
+  const chromeArgs = [
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${userDataDir}`,
     '--use-fake-device-for-media-stream',
@@ -170,7 +297,11 @@ async function createBrowser(label) {
     '--no-default-browser-check',
     '--disable-features=MediaRouter',
     'about:blank'
-  ], { stdio: ['ignore', 'ignore', 'pipe'] })
+  ]
+  if (!config.interactive) {
+    chromeArgs.unshift('--headless=new')
+  }
+  const chrome = spawn(config.chromePath, chromeArgs, { stdio: ['ignore', 'ignore', 'pipe'] })
   chrome.stderr.on('data', data => {
     for (const line of String(data).split('\n')) {
       if (line.includes('DevTools listening') || line.includes('ERROR')) {
@@ -203,6 +334,7 @@ async function openPage(name, browser) {
   await client.send('Runtime.enable')
   await client.send('Page.enable')
   const page = { name, client, events: [], browser }
+  await applyPageEmulation(page)
   client.on('Runtime.consoleAPICalled', event => {
     page.events.push({
       type: 'console',
@@ -219,6 +351,28 @@ async function openPage(name, browser) {
   await client.send('Page.navigate', { url: config.url })
   log('page', name, target.id)
   return page
+}
+
+async function applyPageEmulation(page) {
+  if (!config.mobileViewport) {
+    return
+  }
+  const viewport = config.mobileViewport
+  await page.client.send('Emulation.setDeviceMetricsOverride', {
+    width: viewport.width,
+    height: viewport.height,
+    deviceScaleFactor: viewport.deviceScaleFactor,
+    mobile: true,
+    screenWidth: viewport.width,
+    screenHeight: viewport.height,
+    screenOrientation: viewport.orientation === 'landscape'
+      ? { type: 'landscapePrimary', angle: 90 }
+      : { type: 'portraitPrimary', angle: 0 }
+  })
+  await page.client.send('Emulation.setTouchEmulationEnabled', {
+    enabled: true,
+    maxTouchPoints: 5
+  })
 }
 
 async function joinRoom(page) {
@@ -284,7 +438,18 @@ async function joinRoom(page) {
   `)
 }
 
-async function waitForRoomMedia(page, expectedClientCount) {
+async function waitForExpectedRoomMedia(expectedNames) {
+  if (expectedNames.length > pages.length) {
+    const externalNames = expectedNames.filter(name => !pages.some(page => page.name === name))
+    log('waiting-for-external-participants', externalNames.join(','))
+  }
+  for (const page of pages) {
+    await waitForRoomMedia(page, expectedNames)
+  }
+}
+
+async function waitForRoomMedia(page, expectedNames) {
+  const expectedClientCount = expectedNames.length
   await waitFor(page, `${page.name} remote media`, `
     (() => {
       const remoteAudioCount = typeof remoteAudioMonitors === 'function'
@@ -296,7 +461,7 @@ async function waitForRoomMedia(page, expectedClientCount) {
   `)
   await waitFor(page, `${page.name} participant labels`, `
     (() => {
-      const expected = ${JSON.stringify(config.participants)}
+      const expected = ${JSON.stringify(expectedNames)}
       const participants = typeof participantsInRoom !== 'undefined' ? participantsInRoom : []
       const labels = Array.from(document.querySelectorAll('.video-tile'))
         .map(tile => tile.dataset.participant || '')
@@ -329,6 +494,24 @@ async function rejoinParticipant(name) {
   pages.splice(pageIndex, 0, newPage)
   await joinRoom(newPage)
   log('rejoin-complete', name)
+}
+
+async function performLateJoin(plan) {
+  log('late-join-start', plan.type, plan.name)
+  if (plan.type === 'automated') {
+    const browser = config.separateBrowsers ? await createBrowser(plan.name) : sharedBrowser
+    const page = await openPage(plan.name, browser)
+    pages.push(page)
+    await joinRoom(page)
+  } else {
+    log('late-join-external-wait', `${plan.name} should join ${config.url}`)
+  }
+  const expectedNames = expectedParticipantNames({ includeLate: true })
+  await waitForExpectedRoomMedia(expectedNames)
+  await sleep(2000)
+  const snapshots = await collectSnapshots('late-join')
+  log('late-join-complete', plan.type, plan.name)
+  return snapshots
 }
 
 async function exerciseRecordingToggle(controller) {
@@ -396,7 +579,7 @@ async function exerciseScreenShare(sharer) {
     `)
   }
   await sleep(3500)
-  const started = await collectSnapshots()
+  const started = await collectSnapshots('screen-share-started')
 
   await evaluate(sharer, `
     (async () => {
@@ -411,7 +594,7 @@ async function exerciseScreenShare(sharer) {
     `)
   }
   await sleep(3500)
-  const stopped = await collectSnapshots()
+  const stopped = await collectSnapshots('screen-share-stopped')
   return { started, stopped }
 }
 
@@ -500,10 +683,45 @@ async function showExpandedBoardView(page) {
   `)
 }
 
-async function collectSnapshots() {
+async function collectSnapshots(phase = 'snapshot') {
   const snapshots = []
+  const capturedAt = new Date().toISOString()
   for (const page of pages) {
-    snapshots.push(await snapshotPage(page))
+    snapshots.push({
+      phase,
+      capturedAt,
+      ...(await snapshotPage(page))
+    })
+  }
+  return snapshots
+}
+
+async function collectSoakSnapshots(expectedNames) {
+  if (!config.durationMs) {
+    return []
+  }
+  const startedAt = Date.now()
+  const snapshots = []
+  const intervalMs = Math.min(5000, Math.max(1000, Math.floor(config.durationMs / 3) || 1000))
+  let iteration = 0
+  while (Date.now() - startedAt <= config.durationMs) {
+    iteration += 1
+    const elapsedMs = Date.now() - startedAt
+    log('soak-snapshot', iteration, `${elapsedMs}ms/${config.durationMs}ms`)
+    const batch = await collectSnapshots(`soak-${iteration}`)
+    for (const snapshot of batch) {
+      snapshots.push({
+        ...snapshot,
+        soakIteration: iteration,
+        soakElapsedMs: elapsedMs,
+        expectedParticipants: expectedNames
+      })
+    }
+    const remainingMs = config.durationMs - (Date.now() - startedAt)
+    if (remainingMs <= 0) {
+      break
+    }
+    await sleep(Math.min(intervalMs, remainingMs))
   }
   return snapshots
 }
@@ -511,6 +729,45 @@ async function collectSnapshots() {
 async function snapshotPage(page) {
   return evaluate(page, `
     (async () => {
+      const rectProbe = element => {
+        if (!element) {
+          return null
+        }
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        return {
+          isConnected: Boolean(element.isConnected),
+          inDocument: document.contains(element),
+          clientRects: element.getClientRects().length,
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            top: rect.top,
+            left: rect.left,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height
+          },
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+          pointerEvents: style.pointerEvents,
+          position: style.position,
+          overflow: style.overflow,
+          zIndex: style.zIndex
+        }
+      }
+      const trackProbe = track => ({
+        id: track.id || '',
+        kind: track.kind || '',
+        label: track.label || '',
+        enabled: Boolean(track.enabled),
+        muted: Boolean(track.muted),
+        readyState: track.readyState || '',
+        settings: track.getSettings?.() || {},
+        constraints: track.getConstraints?.() || {}
+      })
       const videoProbe = video => {
         if (!video) {
           return null
@@ -522,14 +779,44 @@ async function snapshotPage(page) {
           frames = Number(video.webkitDecodedFrameCount) || 0
         }
         return {
+          id: video.id || '',
+          className: video.className || '',
+          isConnected: Boolean(video.isConnected),
+          inDocument: document.contains(video),
           hidden: Boolean(video.hidden),
           visible: Boolean(video.getClientRects().length),
+          rect: rectProbe(video),
+          paused: Boolean(video.paused),
+          ended: Boolean(video.ended),
+          muted: Boolean(video.muted),
+          autoplay: Boolean(video.autoplay),
+          playsInline: Boolean(video.playsInline),
+          currentTime: Number(video.currentTime) || 0,
           readyState: video.readyState,
           videoWidth: video.videoWidth,
           videoHeight: video.videoHeight,
           frames,
+          srcObjectTracks: video.srcObject?.getTracks?.().map(trackProbe) || [],
           hasLiveVideo: Boolean(video.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended'))
         }
+      }
+      const mediaElementForValue = value => {
+        if (!value) {
+          return null
+        }
+        if (value instanceof HTMLMediaElement) {
+          return value
+        }
+        if (value.video instanceof HTMLMediaElement) {
+          return value.video
+        }
+        if (value.videoElement instanceof HTMLMediaElement) {
+          return value.videoElement
+        }
+        if (value.element instanceof HTMLMediaElement) {
+          return value.element
+        }
+        return null
       }
       const stats = typeof pc !== 'undefined' && pc
         ? Array.from((await pc.getStats()).values()).map(stat => ({
@@ -571,18 +858,59 @@ async function snapshotPage(page) {
           : [])
       return {
         name: ${JSON.stringify(page.name)},
+        viewport: {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          outerHeight: window.outerHeight,
+          devicePixelRatio: window.devicePixelRatio,
+          visualViewport: window.visualViewport ? {
+            width: window.visualViewport.width,
+            height: window.visualViewport.height,
+            scale: window.visualViewport.scale,
+            offsetLeft: window.visualViewport.offsetLeft,
+            offsetTop: window.visualViewport.offsetTop,
+            pageLeft: window.visualViewport.pageLeft,
+            pageTop: window.visualViewport.pageTop
+          } : null,
+          screen: {
+            width: window.screen?.width || 0,
+            height: window.screen?.height || 0,
+            availWidth: window.screen?.availWidth || 0,
+            availHeight: window.screen?.availHeight || 0,
+            orientationType: window.screen?.orientation?.type || '',
+            orientationAngle: Number(window.screen?.orientation?.angle) || 0
+          },
+          orientation: window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape',
+          coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+          hoverNone: window.matchMedia('(hover: none)').matches,
+          maxTouchPoints: navigator.maxTouchPoints || 0,
+          userAgentMobile: Boolean(navigator.userAgentData?.mobile),
+          documentVisibility: document.visibilityState,
+          documentSize: {
+            clientWidth: document.documentElement.clientWidth,
+            clientHeight: document.documentElement.clientHeight,
+            scrollWidth: document.documentElement.scrollWidth,
+            scrollHeight: document.documentElement.scrollHeight,
+            bodyScrollWidth: document.body?.scrollWidth || 0,
+            bodyScrollHeight: document.body?.scrollHeight || 0
+          }
+        },
         log: document.getElementById('log')?.textContent || '',
         connectionState: typeof pc !== 'undefined' && pc ? pc.connectionState : '',
         iceConnectionState: typeof pc !== 'undefined' && pc ? pc.iceConnectionState : '',
         localTracks: typeof localStream !== 'undefined' && localStream
-          ? localStream.getTracks().map(track => ({
-              kind: track.kind,
-              enabled: track.enabled,
-              readyState: track.readyState,
-              settings: track.getSettings?.() || {}
-            }))
+          ? localStream.getTracks().map(trackProbe)
           : [],
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
+        remoteElementAttachments: typeof remoteElements !== 'undefined'
+          ? Array.from(remoteElements.entries()).map(([name, value]) => ({
+              name,
+              keys: value && typeof value === 'object' ? Object.keys(value).sort() : [],
+              video: videoProbe(mediaElementForValue(value)),
+              audioAttached: Boolean((value instanceof HTMLAudioElement) || value?.audio instanceof HTMLAudioElement || value?.audioElement instanceof HTMLAudioElement)
+            }))
+          : [],
         audioMonitors: typeof audioMonitors !== 'undefined' ? remoteMonitorList.length : -1,
         audioMonitorNames: remoteMonitorList.map(monitor => monitor.name || ''),
         pendingRemotePlayback: typeof pendingRemotePlaybackElements !== 'undefined' ? pendingRemotePlaybackElements.size : -1,
@@ -604,6 +932,8 @@ async function snapshotPage(page) {
         usesCrowdedVideoLimits: typeof useCrowdedVideoLimits === 'function' ? useCrowdedVideoLimits() : null,
         mediaQualityConstrained: typeof mediaQualityConstrained !== 'undefined' ? mediaQualityConstrained : null,
         audioMode: typeof audioSettings !== 'undefined' ? audioSettings.mode : '',
+        audioProfile: typeof audioProfileName === 'function' ? audioProfileName() : '',
+        audioProcessorState: typeof audioProcessorDiagnosticsSnapshot === 'function' ? audioProcessorDiagnosticsSnapshot() : null,
         voiceProcessor: typeof voiceFocusProcessorType === 'function' ? voiceFocusProcessorType() : '',
         remoteHealth: typeof remoteMediaHealthSnapshot === 'function' ? remoteMediaHealthSnapshot() : null,
         stageMode: document.getElementById('hearthStage')?.dataset.stageMode || '',
@@ -615,7 +945,9 @@ async function snapshotPage(page) {
         screenShareStripTiles: Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           classes: tile.className,
+          rect: rectProbe(tile),
           videos: tile.querySelectorAll('video').length,
+          videoDetails: Array.from(tile.querySelectorAll('video')).map(videoProbe),
           renderedVideos: Array.from(tile.querySelectorAll('video')).filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0).length,
           decodedFrames: Array.from(tile.querySelectorAll('video')).reduce((total, video) => {
             if (typeof video.getVideoPlaybackQuality === 'function') {
@@ -629,12 +961,15 @@ async function snapshotPage(page) {
         boardDockVideos: Array.from(document.querySelectorAll('.board-video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 80),
+          rect: rectProbe(tile),
           video: videoProbe(tile.querySelector('video'))
         })),
         tiles: Array.from(document.querySelectorAll('.video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           classes: tile.className,
+          rect: rectProbe(tile),
           videos: tile.querySelectorAll('video').length,
+          videoDetails: Array.from(tile.querySelectorAll('video')).map(videoProbe),
           renderedVideos: Array.from(tile.querySelectorAll('video')).filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0).length,
           decodedFrames: Array.from(tile.querySelectorAll('video')).reduce((total, video) => {
             if (typeof video.getVideoPlaybackQuality === 'function') {
@@ -671,7 +1006,7 @@ async function basicPageState(page) {
 
 function validateSnapshots(snapshots, expectedClientCount, options = {}) {
   const failures = []
-  const expectedNames = config.participants
+  const expectedNames = options.expectedNames || config.participants
   for (const snapshot of snapshots) {
     const prefix = options.view ? `${snapshot.name} ${options.view}` : snapshot.name
     const localAudio = snapshot.localTracks.find(track => track.kind === 'audio')
@@ -739,11 +1074,15 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
         failures.push(`${prefix} remote health is not using native audio playback`)
       }
     }
-    if (snapshot.audioMode !== 'voice-focus') {
-      failures.push(`${prefix} audio mode is ${snapshot.audioMode}`)
+    const audioProfile = snapshot.audioProfile || (snapshot.audioMode === 'standard' ? 'standard-cleanup' : snapshot.audioMode)
+    if (!['standard-cleanup', 'voice-focus'].includes(audioProfile)) {
+      failures.push(`${prefix} audio profile is ${audioProfile || snapshot.audioMode}`)
     }
-    if (!snapshot.voiceProcessor || snapshot.voiceProcessor === 'disabled') {
+    if (audioProfile === 'voice-focus' && (!snapshot.voiceProcessor || snapshot.voiceProcessor === 'disabled')) {
       failures.push(`${prefix} voice processor is ${snapshot.voiceProcessor}`)
+    }
+    if (audioProfile === 'standard-cleanup' && snapshot.audioProcessorState?.browserProcessing !== true) {
+      failures.push(`${prefix} standard cleanup is not using browser processing`)
     }
     if (options.requireSpeakerView) {
       if (snapshot.stageMode !== 'speaker') {
@@ -753,7 +1092,7 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
         failures.push(`${prefix} speaker video did not render for ${snapshot.activeSpeaker || 'active speaker'}`)
       }
     }
-    if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits) {
+    if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits && !usesMobileBoardDockBreakpoint(snapshot)) {
       if (!snapshot.boardExpanded) {
         failures.push(`${prefix} board is not expanded`)
       }
@@ -801,7 +1140,26 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
   return failures
 }
 
-function validateScreenShareSnapshots(snapshots, sharerName) {
+function usesMobileBoardDockBreakpoint(snapshot) {
+  const viewport = snapshot?.viewport || {}
+  const visualWidth = Number(viewport.visualViewport?.width) || 0
+  const innerWidth = Number(viewport.innerWidth) || 0
+  const documentWidth = Number(viewport.documentSize?.clientWidth) || 0
+  const width = visualWidth || innerWidth || documentWidth
+  return Boolean(width > 0 && width <= 700 && (viewport.coarsePointer || viewport.maxTouchPoints > 0 || viewport.hoverNone))
+}
+
+function validateLateJoinSnapshots(snapshots, expectedNames) {
+  if (snapshots.length === 0) {
+    return []
+  }
+  return validateSnapshots(snapshots, expectedNames.length, {
+    view: 'late join',
+    expectedNames
+  })
+}
+
+function validateScreenShareSnapshots(snapshots, sharerName, expectedNames = config.participants) {
   const failures = []
   for (const snapshot of snapshots) {
     const prefix = `${snapshot.name} screen share`
@@ -812,7 +1170,7 @@ function validateScreenShareSnapshots(snapshots, sharerName) {
       failures.push(`${prefix} stage video did not render`)
     }
     const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => !tile.classes.includes('is-sharing-screen'))
-    if (visibleStripTiles.length < Math.max(0, config.participants.length - 1)) {
+    if (visibleStripTiles.length < Math.max(0, expectedNames.length - 1)) {
       failures.push(`${prefix} participant strip has ${visibleStripTiles.length} visible tiles`)
     }
     if (visibleStripTiles.some(tile => tile.participant === sharerName)) {
@@ -873,6 +1231,20 @@ function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
   return failures
 }
 
+function validatePostLeaveParticipants(postLeave) {
+  if (!postLeave || postLeave.skipped) {
+    return []
+  }
+  const failures = []
+  if (postLeave.error) {
+    failures.push(`post-leave participants fetch failed: ${postLeave.error}`)
+  }
+  if (postLeave.names.length > 0) {
+    failures.push(`post-leave participants still present: ${postLeave.names.join(',')}`)
+  }
+  return failures
+}
+
 function videoProbeRendered(probe) {
   return Boolean(probe
     && !probe.hidden
@@ -899,11 +1271,115 @@ function selectedCandidateRtt(stats) {
   return nominatedPairs[0]?.currentRoundTripTime || 0
 }
 
+async function emitReport(result) {
+  if (!config.emitReport) {
+    return
+  }
+  const reportPath = reportOutputPath(config.emitReport)
+  const report = {
+    startedAt: reportStartedAt,
+    generatedAt: new Date().toISOString(),
+    config: {
+      url: config.url,
+      participants: config.participants,
+      initialParticipants: initialParticipantNames,
+      externalParticipants: config.externalParticipants,
+      initialExternalParticipants: initialExternalParticipantNames,
+      lateJoin: lateJoinPlan,
+      rejoin: config.rejoin,
+      separateBrowsers: config.separateBrowsers,
+      timeoutMs: config.timeoutMs,
+      durationMs: config.durationMs,
+      interactive: config.interactive,
+      mobileViewport: config.mobileViewport,
+      chromePath: config.chromePath,
+      passwordLength: String(config.password || '').length
+    },
+    result
+  }
+  await mkdir(dirname(reportPath), { recursive: true })
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+  log('report-written', reportPath)
+}
+
+function reportOutputPath(value) {
+  if (value === true) {
+    const stamp = reportStartedAt.replace(/[:.]/g, '-')
+    return resolve(process.cwd(), `live-media-smoke-report-${stamp}.json`)
+  }
+  const rawPath = String(value || '').trim()
+  if (!rawPath) {
+    const stamp = reportStartedAt.replace(/[:.]/g, '-')
+    return resolve(process.cwd(), `live-media-smoke-report-${stamp}.json`)
+  }
+  return isAbsolute(rawPath) ? rawPath : resolve(process.cwd(), rawPath)
+}
+
 async function closePages(pages) {
   await Promise.all(pages.map(page => evaluate(page, 'leaveRoom?.(); true').catch(() => {})))
   for (const page of pages) {
     page.client.close()
   }
+}
+
+async function closePagesAndCollectParticipants(pages) {
+  if (!pages.length) {
+    return { skipped: true, reason: 'no automated pages', names: [], snapshot: null, error: '' }
+  }
+  await Promise.all(pages.map(page => evaluate(page, 'leaveRoom?.(); true').catch(() => {})))
+  await sleep(2200)
+
+  let snapshot = null
+  let error = ''
+  try {
+    snapshot = await evaluate(pages[0], `
+      (async () => {
+        const response = await fetch('/participants', {
+          credentials: 'include',
+          cache: 'no-store'
+        })
+        if (!response.ok) {
+          return {
+            fetchError: response.status + ' ' + response.statusText
+          }
+        }
+        return response.json()
+      })()
+    `)
+    if (snapshot?.fetchError) {
+      error = snapshot.fetchError
+    }
+  } catch (participantsError) {
+    error = participantsError?.message || String(participantsError)
+  }
+
+  for (const page of pages) {
+    page.client.close()
+  }
+  return {
+    skipped: config.externalParticipants.length > 0,
+    reason: config.externalParticipants.length > 0 ? 'external participant may still be present' : '',
+    names: participantNamesFromSnapshot(snapshot),
+    snapshot,
+    error
+  }
+}
+
+function participantNamesFromSnapshot(snapshot) {
+  const participants = Array.isArray(snapshot)
+    ? snapshot
+    : Array.isArray(snapshot?.participants)
+      ? snapshot.participants
+      : []
+  return participants
+    .map(participant => {
+      if (typeof participant === 'string') {
+        return participant
+      }
+      return participant?.name || participant?.displayName || ''
+    })
+    .map(name => String(name || '').trim())
+    .filter(Boolean)
 }
 
 function connectCDP(wsURL) {

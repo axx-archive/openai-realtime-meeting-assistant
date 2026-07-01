@@ -17,6 +17,7 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
     this.calibrated = false
     this.ready = false
     this.failed = false
+    this.sampleRate = Number(processorOptions.sampleRate) || sampleRate || 0
     this.frameSize = 480
     this.inputFrame = new Float32Array(this.frameSize)
     this.inputFill = 0
@@ -134,13 +135,13 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
     }
     this.ready = true
     this.failed = false
-    this.port.postMessage({ type: 'ready', processor: 'rnnoise-wasm', frameSize: this.frameSize })
+    this.port.postMessage({ type: 'ready', processor: 'rnnoise-wasm', frameSize: this.frameSize, sampleRate: this.sampleRate })
   }
 
   failRNNoise(message) {
     this.ready = false
     this.failed = true
-    this.port.postMessage({ type: 'error', processor: 'rnnoise-wasm', message: String(message || 'rnnoise-unavailable') })
+    this.port.postMessage({ type: 'error', processor: 'rnnoise-wasm', message: String(message || 'rnnoise-unavailable'), frameSize: this.frameSize, sampleRate: this.sampleRate })
   }
 
   destroyRNNoise() {
@@ -189,7 +190,7 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
     const levelBlend = clamp((rms - closeAt) / Math.max(0.0001, threshold * 1.35 - closeAt), 0, 1)
     const speechLike = zcr >= 0.006 && zcr <= 0.28 && crest < 8.4
     const instantSpeech = clamp(levelBlend * (speechLike ? 1 : 0.35), 0, 1)
-    const open = !forcedNoise && instantSpeech >= 0.5
+    const open = !forcedNoise && instantSpeech >= 0.34
     if (open) {
       this.fallbackHoldFrames = this.calibrated ? 16 : 12
     } else if (forcedNoise) {
@@ -371,7 +372,9 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
         gain: this.ready ? this.rnnoiseGate : this.fallbackGain,
         noiseBias: this.noiseBias,
         speechConfidence: this.ready ? this.rnnoiseSpeech : this.fallbackSpeech,
-        processor: this.ready ? 'rnnoise-wasm' : (this.failed ? 'voice-focus-fallback' : 'rnnoise-loading')
+        processor: this.ready ? 'rnnoise-wasm' : (this.failed ? 'voice-focus-fallback' : 'rnnoise-loading'),
+        frameSize: this.frameSize,
+        sampleRate: this.sampleRate
       })
       this.inputMetricSum = 0
       this.outputMetricSum = 0

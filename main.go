@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -124,8 +125,19 @@ func iceStateNeedsRecovery(state webrtc.ICEConnectionState) bool {
 }
 
 type websocketMessage struct {
-	Event string `json:"event"`
-	Data  string `json:"data"`
+	Event    string `json:"event"`
+	Data     string `json:"data"`
+	OfferID  string `json:"offerId,omitempty"`
+	Revision uint64 `json:"revision,omitempty"`
+}
+
+type signalingOfferMetadata struct {
+	OfferID  string
+	Revision uint64
+}
+
+func (m signalingOfferMetadata) empty() bool {
+	return strings.TrimSpace(m.OfferID) == "" && m.Revision == 0
 }
 
 type peerConnectionState struct {
@@ -141,6 +153,12 @@ type peerConnectionState struct {
 	// signalPeerConnectionsWithRestart.
 	nonStableSince time.Time
 	offerResent    bool
+
+	// Optional signaling correlation for newer clients. Legacy clients ignore
+	// these fields and can still answer with plain SDP in websocketMessage.Data.
+	signalingRevision    uint64
+	pendingOfferID       string
+	pendingOfferRevision uint64
 }
 
 type participantTrackSnapshot struct {
@@ -174,6 +192,197 @@ func (p peerConnectionState) shouldSignalWithDesiredTrackCount(desiredTrackCount
 	}
 
 	return p.shouldSignal(desiredTrackCount)
+}
+
+func startPendingOfferMetadata(peer *peerConnectionState) signalingOfferMetadata {
+	if peer == nil {
+		return signalingOfferMetadata{}
+	}
+	peer.signalingRevision++
+	metadata := signalingOfferMetadata{
+		OfferID:  signalingOfferID(peer.sessionID, peer.signalingRevision),
+		Revision: peer.signalingRevision,
+	}
+	peer.pendingOfferID = metadata.OfferID
+	peer.pendingOfferRevision = metadata.Revision
+
+	return metadata
+}
+
+func pendingOfferMetadata(peer *peerConnectionState) signalingOfferMetadata {
+	if peer == nil {
+		return signalingOfferMetadata{}
+	}
+
+	return signalingOfferMetadata{OfferID: peer.pendingOfferID, Revision: peer.pendingOfferRevision}
+}
+
+func signalingOfferID(sessionID string, revision uint64) string {
+	return fmt.Sprintf("%s-offer-%d", mediaIDPart(sessionID, "session"), revision)
+}
+
+func signalingMetadataFromMessage(message websocketMessage) signalingOfferMetadata {
+	metadata := signalingOfferMetadata{
+		OfferID:  strings.TrimSpace(message.OfferID),
+		Revision: message.Revision,
+	}
+	if strings.TrimSpace(message.Data) == "" {
+		return metadata
+	}
+
+	var payload struct {
+		OfferID  string `json:"offerId"`
+		Revision uint64 `json:"revision"`
+	}
+	if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
+		return metadata
+	}
+	if metadata.OfferID == "" {
+		metadata.OfferID = strings.TrimSpace(payload.OfferID)
+	}
+	if metadata.Revision == 0 {
+		metadata.Revision = payload.Revision
+	}
+
+	return metadata
+}
+
+func shouldIgnoreAnswerForPendingOffer(answerMetadata signalingOfferMetadata, pendingMetadata signalingOfferMetadata) (bool, string) {
+	if answerMetadata.empty() {
+		return false, ""
+	}
+	if pendingMetadata.empty() {
+		return true, "no pending offer"
+	}
+	if answerMetadata.OfferID != "" && pendingMetadata.OfferID != "" && answerMetadata.OfferID != pendingMetadata.OfferID {
+		return true, "offer id mismatch"
+	}
+	if answerMetadata.Revision != 0 && pendingMetadata.Revision != 0 && answerMetadata.Revision != pendingMetadata.Revision {
+		return true, "revision mismatch"
+	}
+
+	return false, ""
+}
+
+func currentPendingOfferMetadata(peerConnection *webrtc.PeerConnection) signalingOfferMetadata {
+	if peerConnection == nil {
+		return signalingOfferMetadata{}
+	}
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection == peerConnection {
+			return pendingOfferMetadata(&peerConnections[i])
+		}
+	}
+
+	return signalingOfferMetadata{}
+}
+
+func clearPendingOfferMetadata(peerConnection *webrtc.PeerConnection) {
+	if peerConnection == nil {
+		return
+	}
+
+	listLock.Lock()
+	defer listLock.Unlock()
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection == peerConnection {
+			peerConnections[i].pendingOfferID = ""
+			peerConnections[i].pendingOfferRevision = 0
+			return
+		}
+	}
+}
+
+func countPeerSenders(peerConnection *webrtc.PeerConnection) int {
+	if peerConnection == nil {
+		return 0
+	}
+	count := 0
+	for _, sender := range peerConnection.GetSenders() {
+		if sender.Track() != nil {
+			count++
+		}
+	}
+
+	return count
+}
+
+func countPeerReceivers(peerConnection *webrtc.PeerConnection) int {
+	if peerConnection == nil {
+		return 0
+	}
+	count := 0
+	for _, receiver := range peerConnection.GetReceivers() {
+		if receiver.Track() != nil {
+			count++
+		}
+	}
+
+	return count
+}
+
+func forwardedTrackCountsLocked() (total int, audio int, video int) {
+	for _, trackLocal := range trackLocals {
+		if trackLocal == nil {
+			continue
+		}
+		total++
+		switch trackLocal.Kind() {
+		case webrtc.RTPCodecTypeAudio:
+			audio++
+		case webrtc.RTPCodecTypeVideo:
+			video++
+		default:
+		}
+	}
+
+	return total, audio, video
+}
+
+func snapshotForwardedTrackCounts() (total int, audio int, video int) {
+	listLock.RLock()
+	defer listLock.RUnlock()
+
+	return forwardedTrackCountsLocked()
+}
+
+func rtcpFeedbackSummary(feedback []webrtc.RTCPFeedback) string {
+	if len(feedback) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(feedback))
+	for _, item := range feedback {
+		value := strings.TrimSpace(item.Type)
+		if item.Parameter != "" {
+			value += "/" + strings.TrimSpace(item.Parameter)
+		}
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	sort.Strings(parts)
+	if len(parts) == 0 {
+		return "[]"
+	}
+
+	return strings.Join(parts, ",")
+}
+
+func rtpExtensionIDSummary(ids []uint8) string {
+	if len(ids) == 0 {
+		return "[]"
+	}
+	copied := append([]uint8(nil), ids...)
+	sort.Slice(copied, func(i, j int) bool { return copied[i] < copied[j] })
+	parts := make([]string, 0, len(copied))
+	for _, id := range copied {
+		parts = append(parts, strconv.Itoa(int(id)))
+	}
+
+	return strings.Join(parts, ",")
 }
 
 // sourceGroupLayersLocked returns the simulcast layers that belong to the same
@@ -1096,7 +1305,12 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	trackSourceIDs[trackLocal.ID()] = t.ID()
 	trackLayerRIDs[trackLocal.ID()] = t.RID()
 	trackLayerGroups[trackLocal.ID()] = groupKey
+	totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
 	listLock.Unlock()
+
+	codec := t.Codec()
+	log.Infof("room_track_added participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
+		canonicalParticipantName(participantName), sessionID, t.Kind(), trackLocal.ID(), t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), totalTracks, audioTracks, videoTracks)
 
 	return trackLocal, nil
 }
@@ -1168,18 +1382,26 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 		return
 	}
 
+	var participantName string
+	var sessionID string
+	var totalTracks, audioTracks, videoTracks int
 	listLock.Lock()
 	defer func() {
 		listLock.Unlock()
+		log.Infof("room_track_removed participant=%s session=%s kind=%s track_id=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
+			participantName, sessionID, t.Kind(), t.ID(), totalTracks, audioTracks, videoTracks)
 		signalPeerConnections()
 	}()
 
+	participantName = trackParticipants[t.ID()]
+	sessionID = trackParticipantSessions[t.ID()]
 	delete(trackLocals, t.ID())
 	delete(trackParticipants, t.ID())
 	delete(trackParticipantSessions, t.ID())
 	delete(trackSourceIDs, t.ID())
 	delete(trackLayerRIDs, t.ID())
 	delete(trackLayerGroups, t.ID())
+	totalTracks, audioTracks, videoTracks = forwardedTrackCountsLocked()
 }
 
 func removeParticipantTracksLocked(name string, sessionID string) bool {
@@ -1305,13 +1527,14 @@ func nativeRoomClientConfig() map[string]any {
 		"signalingRole":    "server-offer",
 		"supportedLayers":  []string{string(layerTierLow), string(layerTierMedium), string(layerTierHigh)},
 		"nativeHints": map[string]any{
-			"participantEvent":  "participant",
-			"mediaReadyEvent":   "media_ready",
-			"answerEvent":       "answer",
-			"candidateEvent":    "candidate",
-			"restartIceEvent":   "restart_ice",
-			"roomEventEnvelope": "kanban",
-			"mediaCodecs":       []string{webrtc.MimeTypeOpus, webrtc.MimeTypeH264, webrtc.MimeTypeVP8},
+			"participantEvent":    "participant",
+			"mediaReadyEvent":     "media_ready",
+			"answerEvent":         "answer",
+			"candidateEvent":      "candidate",
+			"restartIceEvent":     "restart_ice",
+			"roomEventEnvelope":   "kanban",
+			"offerMetadataFields": []string{"offerId", "revision"},
+			"mediaCodecs":         []string{webrtc.MimeTypeOpus, webrtc.MimeTypeH264, webrtc.MimeTypeVP8},
 		},
 	}
 }
@@ -1391,25 +1614,45 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	audio := mapFromPayload(payload, "audio")
 	video := mapFromPayload(payload, "video")
 	remote := mapFromPayload(payload, "remote")
+	render := mapFromPayload(payload, "render")
 	stats := mapFromPayload(payload, "stats")
 	deltas := mapFromPayload(payload, "deltas")
+	viewport := mapFromPayload(browser, "viewport")
 	candidatePair := mapFromPayload(stats, "candidatePair")
 	audioOutput := mapFromPayload(audio, "outputSettings")
+	audioProcessorState := mapFromPayload(audio, "processorState")
 	voiceFocusMetrics := mapFromPayload(audio, "voiceFocusMetrics")
 	videoSettings := mapFromPayload(video, "settings")
 	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
 	fmt.Printf(
-		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v constrained=%v audioMode=%s voiceFocus=%v processor=%s vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v stage=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		stringFromPayload(client, "platform"),
 		stringFromPayload(client, "version"),
 		boolFromPayload(browser, "safari"),
 		boolFromPayload(payload, "laggy"),
+		int(floatFromPayload(viewport, "width")),
+		int(floatFromPayload(viewport, "height")),
+		int(floatFromPayload(viewport, "visualWidth")),
+		int(floatFromPayload(viewport, "visualHeight")),
+		stringFromPayload(viewport, "orientationType"),
+		int(floatFromPayload(viewport, "orientationAngle")),
+		boolFromPayload(viewport, "mobile"),
+		stringFromPayload(render, "stageMode"),
+		boolFromPayload(render, "boardExpanded"),
+		stringFromPayload(render, "activeScreenShareParticipant"),
+		int(floatFromPayload(render, "attachmentRevision")),
+		arrayLenFromPayload(render, "auxiliaryTargets"),
 		boolFromPayload(video, "constrained"),
 		stringFromPayload(audio, "mode"),
+		stringFromPayload(audio, "profile"),
 		boolFromPayload(audio, "voiceFocus"),
 		stringFromPayload(audio, "processor"),
+		stringFromPayload(audioProcessorState, "workletHealth"),
+		boolFromPayload(audioProcessorState, "rnnoiseReady"),
+		int(floatFromPayload(audioProcessorState, "sampleRate")),
+		int(floatFromPayload(audioProcessorState, "frameSize")),
 		floatFromPayload(voiceFocusMetrics, "gain"),
 		floatFromPayload(voiceFocusMetrics, "suppressionDb"),
 		floatFromPayload(voiceFocusMetrics, "noiseBias"),
@@ -1858,12 +2101,17 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				retryLater = true
 				return true
 			}
+			offerMetadata := startPendingOfferMetadata(peer)
 
 			if peer.websocket != nil {
 				for _, snapshot := range participantTrackSnapshotsLocked(peer.participantName) {
 					sendParticipantTrackSnapshot(peer.websocket, snapshot)
 				}
 			}
+
+			totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
+			log.Infof("room_signal_offer participant=%s session=%s offer_id=%s revision=%d restart=%t desired_tracks=%d sender_tracks=%d receiver_tracks=%d total_tracks=%d audio_tracks=%d video_tracks=%d signaling_state=%s",
+				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceSignal, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
 
 			if peer.signal != nil {
 				if err = peer.signal(gatherComplete); err != nil {
@@ -1881,11 +2129,14 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				return true
 			}
 
-			log.Infof("Send offer to client: %v", offer)
+			log.Infof("room_signal_offer_payload participant=%s session=%s offer_id=%s revision=%d sdp_bytes=%d",
+				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, len(offer.SDP))
 
 			if err = peer.websocket.WriteJSON(&websocketMessage{
-				Event: "offer",
-				Data:  string(offerString),
+				Event:    "offer",
+				Data:     string(offerString),
+				OfferID:  offerMetadata.OfferID,
+				Revision: offerMetadata.Revision,
 			}); err != nil {
 				return true
 			}
@@ -1940,10 +2191,16 @@ func resendPendingOffer(peer *peerConnectionState) {
 		return
 	}
 
-	log.Infof("Negotiation stuck >%s for participant=%s session=%s; re-sending pending offer", negotiationResendAfter, peer.participantName, peer.sessionID)
+	metadata := pendingOfferMetadata(peer)
+	if metadata.empty() {
+		metadata = startPendingOfferMetadata(peer)
+	}
+	log.Infof("Negotiation stuck >%s for participant=%s session=%s offer_id=%s revision=%d; re-sending pending offer", negotiationResendAfter, peer.participantName, peer.sessionID, metadata.OfferID, metadata.Revision)
 	if err := peer.websocket.WriteJSON(&websocketMessage{
-		Event: "offer",
-		Data:  string(offerString),
+		Event:    "offer",
+		Data:     string(offerString),
+		OfferID:  metadata.OfferID,
+		Revision: metadata.Revision,
 	}); err != nil {
 		log.Errorf("Failed to re-send pending offer: %v", err)
 	}
@@ -2057,6 +2314,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	// When this frame returns close the Websocket
 	defer c.Close() //nolint
+	stopHeartbeat := startRoomWebsocketHeartbeat(c, currentParticipantName, participantSessionID)
+	defer stopHeartbeat()
 	defer cleanupParticipantSession("", false)
 
 	// Create new PeerConnection
@@ -2132,10 +2391,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	})
 
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		log.Infof("Got remote track: Kind=%s, ID=%s, PayloadType=%d", t.Kind(), t.ID(), t.PayloadType())
 		trackParticipantName := currentParticipantName()
 		trackParticipantSessionID := participantSessionID
 		forwardedTrackID := forwardedRemoteTrackID(t)
+		codec := t.Codec()
+		log.Infof("room_ontrack_start participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
+			trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
 		broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
 			"participant":   trackParticipantName,
 			"trackId":       forwardedTrackID,
@@ -2165,11 +2426,26 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		audioDecodeBuffer := make([]int16, roomAudioDecodeBufferSize(audioChannels))
 		announcedAudioPacket := false
 		announcedDecodedAudio := false
+		announcedRTPDetails := false
+		onTrackStartedAt := time.Now()
+		packetsForwarded := 0
+		payloadBytesForwarded := 0
+		defer func() {
+			log.Infof("room_ontrack_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s packets=%d payload_bytes=%d duration=%s",
+				trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), packetsForwarded, payloadBytesForwarded, time.Since(onTrackStartedAt).Round(time.Millisecond))
+		}()
 
 		for {
 			packet, _, err := t.ReadRTP()
 			if err != nil {
+				log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
+					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
 				return
+			}
+			if !announcedRTPDetails {
+				announcedRTPDetails = true
+				log.Infof("room_ontrack_first_rtp participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d marker=%t payload_type=%d payload_bytes=%d extension_profile=0x%x extension_ids=%s",
+					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
 			}
 
 			if audioDecoder != nil {
@@ -2197,8 +2473,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// can carry video orientation/rotation and congestion metadata there;
 			// stripping them makes phone video look unstable to subscribers.
 			if err = trackLocal.WriteRTP(packet); err != nil {
+				log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
+					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
 				return
 			}
+			packetsForwarded++
+			payloadBytesForwarded += len(packet.Payload)
 		}
 	})
 
@@ -2236,7 +2516,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !iceStateNeedsRecovery(peerConnection.ICEConnectionState()) {
 				return // recovered on its own during the grace window
 			}
-			log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s", currentParticipantName(), participantSessionID)
+			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
+			log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
 			signalPeerConnectionICE(peerConnection)
 		})
 	}
@@ -2255,7 +2536,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	for {
 		_, raw, err := c.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+			if isWebsocketReadTimeout(err) {
+				log.Infof("room_ws_read_timeout participant=%s session=%s timeout=%s; cleaning up half-open session", currentParticipantName(), participantSessionID, websocketReadTimeout)
+			} else if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
 				log.Errorf("Failed to read message: %v", err)
 			} else {
 				log.Infof("WebSocket closed: %v", err)
@@ -2383,7 +2666,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				return
 			}
 
-			log.Infof("Got answer: %v", answer)
+			answerMetadata := signalingMetadataFromMessage(*message)
+			pendingMetadata := currentPendingOfferMetadata(peerConnection)
+			if ignore, reason := shouldIgnoreAnswerForPendingOffer(answerMetadata, pendingMetadata); ignore {
+				log.Infof("room_signal_answer_stale participant=%s session=%s reason=%q answer_offer_id=%s answer_revision=%d pending_offer_id=%s pending_revision=%d signaling_state=%s",
+					currentParticipantName(), participantSessionID, reason, answerMetadata.OfferID, answerMetadata.Revision, pendingMetadata.OfferID, pendingMetadata.Revision, peerConnection.SignalingState())
+				continue
+			}
+
+			log.Infof("room_signal_answer participant=%s session=%s answer_offer_id=%s answer_revision=%d pending_offer_id=%s pending_revision=%d signaling_state=%s sdp_bytes=%d",
+				currentParticipantName(), participantSessionID, answerMetadata.OfferID, answerMetadata.Revision, pendingMetadata.OfferID, pendingMetadata.Revision, peerConnection.SignalingState(), len(answer.SDP))
 
 			if err := peerConnection.SetRemoteDescription(answer); err != nil {
 				// A failed answer must not kill the websocket session. The
@@ -2400,6 +2692,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 				continue
 			}
+			clearPendingOfferMetadata(peerConnection)
 			for _, candidate := range pendingRemoteCandidates {
 				if err := peerConnection.AddICECandidate(candidate); err != nil {
 					log.Errorf("Failed to add queued ICE candidate: %v", err)
@@ -2411,7 +2704,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted || !mediaJoined {
 				continue
 			}
-			log.Infof("Client requested ICE restart for participant=%s session=%s", currentParticipantName(), participantSessionID)
+			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
+			log.Infof("Client requested ICE restart for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
 			signalPeerConnectionICE(peerConnection)
 		case "select_layer":
 			if !participantAccepted || !mediaJoined {
@@ -2719,7 +3013,73 @@ func (t *threadSafeWriter) Close() error {
 // the stalled-socket population) write under listLock; without a deadline one
 // wedged client's full send buffer could block that write for minutes and
 // freeze signaling for every participant.
-const websocketWriteTimeout = 5 * time.Second
+const (
+	websocketWriteTimeout = 5 * time.Second
+	websocketReadTimeout  = 75 * time.Second
+	websocketPingInterval = 25 * time.Second
+)
+
+func roomWebsocketHeartbeatTimingsValid() bool {
+	return websocketWriteTimeout > 0 &&
+		websocketPingInterval > websocketWriteTimeout &&
+		websocketReadTimeout > websocketPingInterval+websocketWriteTimeout
+}
+
+func isWebsocketReadTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return true
+	}
+
+	return false
+}
+
+func startRoomWebsocketHeartbeat(c *threadSafeWriter, participantName func() string, sessionID string) func() {
+	if c == nil || c.Conn == nil {
+		return func() {}
+	}
+	if participantName == nil {
+		participantName = func() string { return "" }
+	}
+	if err := c.Conn.SetReadDeadline(time.Now().Add(websocketReadTimeout)); err != nil {
+		log.Errorf("room_ws_heartbeat_set_deadline_failed session=%s error=%v", sessionID, err)
+	}
+	c.Conn.SetPongHandler(func(string) error {
+		if err := c.Conn.SetReadDeadline(time.Now().Add(websocketReadTimeout)); err != nil {
+			log.Errorf("room_ws_pong_deadline_failed participant=%s session=%s error=%v", participantName(), sessionID, err)
+			return err
+		}
+
+		return nil
+	})
+
+	done := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		ticker := time.NewTicker(websocketPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := c.WriteControl(websocket.PingMessage, []byte("room"), time.Now().Add(websocketWriteTimeout)); err != nil {
+					log.Infof("room_ws_heartbeat_failed participant=%s session=%s error=%v", participantName(), sessionID, err)
+					_ = c.Close()
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(done)
+		})
+	}
+}
 
 func (t *threadSafeWriter) WriteJSON(v any) error {
 	if t == nil || t.Conn == nil {
@@ -2734,4 +3094,15 @@ func (t *threadSafeWriter) WriteJSON(v any) error {
 	_ = t.Conn.SetWriteDeadline(time.Time{})
 
 	return err
+}
+
+func (t *threadSafeWriter) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	if t == nil || t.Conn == nil {
+		return fmt.Errorf("websocket is closed")
+	}
+
+	t.Lock()
+	defer t.Unlock()
+
+	return t.Conn.WriteControl(messageType, data, deadline)
 }
