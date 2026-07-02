@@ -1444,6 +1444,66 @@ func TestRoomRelayPreservesRTPHeaderExtensions(t *testing.T) {
 	}
 }
 
+// Frontend wiring guard for the 2026-07 simulation quick fixes: completion
+// reaches the requester's thread card, board/memory read without a room join,
+// unread signals surface outside the room, proposal toasts respect the PiP,
+// channel agent launches need an explicit prefix, the refresh cooldown counts
+// down, the meeting label derives from the brain, and signed-out tabs stay
+// quiet on the network.
+func TestIndexSimulationQuickFixWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// completion notifications land on the originating thread card
+		"function chatThreadForArtifactId(artifactId)",
+		// board + memory reads over authed HTTP without joining the call
+		"async function loadBoardSnapshot()",
+		"async function loadMemorySnapshot()",
+		"fetch('/assistant/board', { cache: 'no-store' })",
+		"fetch('/assistant/memory', { cache: 'no-store' })",
+		"function applyBoardSnapshot(data)",
+		"function applyMemorySnapshot(data)",
+		// the bell badge fills at sign-in and clears when the popover opens
+		"loadNotifications().then(() => markAllNotificationsRead())",
+		// room-chat unread rides the rail icon and the meeting PiP
+		"function renderRoomChatUnreadBadges()",
+		`id="roomRailUnread"`,
+		`id="pipUnread"`,
+		// per-channel unread dots from the device-local lastSeen map
+		"const chatThreadSeenStorageKey = 'bonfire.chat.lastSeen.v1'",
+		"function chatThreadHasUnread(thread)",
+		// proposal toasts stack below the PiP and dock into the bell
+		"body:has(#pipMeeting:not([hidden])) .proposal-deck",
+		"function scheduleCodexProposalDock(id)",
+		"function resolveCodexProposalBellEntry(proposal)",
+		// channel agent launches require an explicit "mode:" prefix
+		"function scoutChannelModePrefixForText(text)",
+		"mention @scout to launch this",
+		// own-message detection keys on the session email, not display name
+		"if (kind === 'user' && authorEmail && authorEmail !== selfEmail) {",
+		// refresh-themes 429 disables the button with a countdown
+		"function beginIntelRefreshCooldown(seconds)",
+		"response.headers.get('Retry-After')",
+		// meeting identity derives from the brain's dominant theme
+		"function meetingDisplayName()",
+		"function syncMeetingIdentityLabel()",
+		// signed-out tabs must not poll authed endpoints into 401 noise
+		"// A signed-out tab must not poll authed endpoints into 401 noise.",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing simulation quick-fix marker %q", want)
+		}
+	}
+
+	if strings.Contains(html, "platform standup") {
+		t.Fatal("the meeting label must derive from the brain's dominant theme (or a dated fallback), not a hardcoded standup name")
+	}
+}
+
 func functionBody(source string, signature string) string {
 	start := strings.Index(source, signature)
 	if start == -1 {

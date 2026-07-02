@@ -137,3 +137,28 @@ Ranked by wow-per-hour. Each of these is mostly wiring, not building.
 ## Sequencing note
 
 The horizons compound deliberately: NOW #1/#2/#5 make Scout feel alive this week; NEXT #1 (Packages) and #3 (Decision Ledger) are the two structural investments everything in LATER stands on — the ledger unlocks interjections and consensus capture, packages unlock war rooms, the memo, and the market twin; the commitments engine and research autopilot ride speaker attribution and the ambient-agent recipe as they exist today. If only two NEXT items ship, ship Packages and the Ledger.
+
+---
+
+## Learned from simulation (2026-07-02)
+
+A three-scene live simulation of real team usage (kickoff meeting → async work → package sprint) produced a split verdict: **the intelligence half genuinely works — the delivery half was broken**, so end-to-end value landed for exactly one person (the admin). The upstream loop closed unprompted with verifiable quality (accurate themes in ~3 min, board cards with the exact spoken owner assignments, proposals matching the called-out action items, artifacts quoting room chat verbatim, an A-grade hallucination refusal), but three stacked last-mile failures made 3 of 4 employees experience "agents that never finish" while the server had finished in 35 seconds. The 14 quick fixes from that synthesis shipped alongside this note; the structural items below did not.
+
+### Structural items (not quick fixes)
+
+1. **Artifact delivery/permissions model.** The library is admin-gated to one hardcoded email, artifacts list by raw prompt text with empty titles, and the only non-admin surface is the thread card. Needs a first-class shared artifact surface: titles, a read-only reader for everyone, and a publish action that pushes a readable card into the originating channel/room.
+2. **Agent threads are one-shot with no memory of their own outputs.** No in-thread reply composer; answers to a scorecard's questions land as unattached channel messages and every follow-up spawns a fresh run. Needs rerun-with-context (prior artifact body + user replies feed the next run).
+3. **Scout retrieval cannot read completed artifact bodies.** Grade A on chat-history grounding, grade D when asked to reconcile channel numbers with an artifact — it returns board-card metadata instead. Index artifact bodies into retrieval and rank them above card metadata for comparison questions.
+4. **No event linkage between proposals, threads, artifacts, and board cards.** The proposal→thread→artifact chain exists; the artifact→card hop (attach + advance column) is missing, so the board actively lies about package state.
+5. **Office-mode sessions don't consume room-scoped events.** One coupling behind three symptoms: missing completion events, board/memory requiring a room join, and no room-chat unread outside the room. The always-on office needs a unified push channel every authenticated session consumes. (The quick fixes paper over this with polling + HTTP snapshot reads.)
+6. **IA/naming: two different "chat"s** (rail chat vs the room-chat dock) and team-shared threads under a tab labeled "private". The word-to-surface mapping and the private/team ownership model need a rethink, not a copy tweak.
+7. **Contribution lens measures message count**, and stale kanban cards put ex-participants on the leaderboard. Weight fuel by synthesized contribution (whose lines became themes/consensus) or people learn to spam short messages.
+8. **Meetings lack stable identity:** hardcoded name, join-relative per-participant clocks, no meeting ID memory/search can key on. First-class meeting objects are the prerequisite for "return the artifact to the meeting it came from". (The label now derives from the brain's dominant theme; the shared meeting clock is deferred on this item.)
+
+### Top ideas surfaced by the simulation
+
+1. **Auto-title meetings from brain themes** (near-zero effort, feels sentient) — the OS knew the meeting was "EMBERS format development" while its own label said "platform standup". *Shipped in the quick-fix pass.*
+2. **Close the loop where it started:** post finished agent work back into the channel/room where the need was born — this emerged independently in all three scenes. A "share to #channel" action (or Scout auto-offering it) converts the pipeline's biggest weakness into its signature move.
+3. **Re-grill readiness dial:** feed the team's answers back into a rerun and track the score delta (6.2 → 7.1) — turns a one-shot report into the team's pitch-readiness metric.
+4. **Board cards auto-advance from artifact events:** attach the completed artifact to its card and move Backlog→Done, making the board self-updating.
+5. **The "Package" binder:** a mission-scoped surface pinning the one-pager, grill scorecard, rights map, economics scan, and open gaps — the artifact the studio actually sells. Highest effort of the five.

@@ -145,13 +145,26 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 		t.Fatalf("answer=%#v, want scout reply", response["answer"])
 	}
 
-	// Agent-mode keyword launches in channels also require the mention.
+	// A conversational @scout message that merely contains mode keywords must
+	// stay a chat answer: channel launches require an explicit "mode:" prefix.
 	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research the rodeo creator market", nil)
+	if err != nil {
+		t.Fatalf("append mention keyword message: %v", err)
+	}
+	if _, ok := response["agentThread"]; ok {
+		t.Fatalf("response keys=%v, want conversational answer instead of a keyword-hijacked agent launch", responseKeys(response))
+	}
+	if modelCalls != 2 {
+		t.Fatalf("modelCalls=%d, want conversational answer for keyword-only @scout message", modelCalls)
+	}
+
+	// The explicit prefix after the mention launches an agent run.
+	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil)
 	if err != nil {
 		t.Fatalf("append mention launch message: %v", err)
 	}
 	if _, ok := response["agentThread"]; !ok {
-		t.Fatalf("response keys=%v, want agent thread launch on @scout research", responseKeys(response))
+		t.Fatalf("response keys=%v, want agent thread launch on @scout research: prefix", responseKeys(response))
 	}
 
 	// Private threads keep always-answer behavior with no mention.
@@ -249,6 +262,143 @@ func TestDecodeScoutChatThreadEntryDefaultsVisibilityPrivate(t *testing.T) {
 	}
 	if thread.Visibility != scoutChatVisibilityPublic {
 		t.Fatalf("visibility=%q, want metadata fallback to normalize public", thread.Visibility)
+	}
+}
+
+func TestScoutChatChannelModePrefixDetection(t *testing.T) {
+	for _, tt := range []struct {
+		text string
+		want string
+	}{
+		{text: "@scout grill: pressure-test the EMBERS pitch", want: "grill"},
+		{text: "grill: pressure-test the pitch @scout", want: "grill"},
+		{text: "@scout research: the rodeo creator market", want: "research"},
+		{text: "@scout Design: onboarding flow for the package", want: "design"},
+		{text: "@scout workflow: ship the EMBERS package", want: "workflow"},
+		// Conversational messages containing mode keywords stay conversational.
+		{text: "@scout the grill run finished but I can't open the scorecard from here", want: ""},
+		{text: "@scout from the pressure-test scorecard artifact, list the three hardest questions", want: ""},
+		{text: "@scout can you research the market for us?", want: ""},
+		{text: "let's discuss the pitch brief at 3pm @scout thoughts?", want: ""},
+		{text: "@scout what's in the design doc?", want: ""},
+	} {
+		if got := scoutChatThreadModeForChannelText(tt.text); got != tt.want {
+			t.Fatalf("scoutChatThreadModeForChannelText(%q)=%q, want %q", tt.text, got, tt.want)
+		}
+	}
+}
+
+func TestAgentThreadCompletionUpdatesPersistedChatThreadRef(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "test-key"
+	kanbanApp.mu.Unlock()
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	// Capture the launched thread instead of running it async so the test can
+	// drive the worker to completion deterministically.
+	var launched scoutAgentThread
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched = thread }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		return "Vision: rodeo creator market.\n\nGoal: research complete.\n\nVerification: artifact complete.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	channel, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "embers", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil); err != nil {
+		t.Fatalf("append launch message: %v", err)
+	}
+	if launched.ID == "" {
+		t.Fatal("expected an agent thread launch")
+	}
+
+	ref := persistedAgentThreadRef(t, channel.ID, launched.ID)
+	if ref.Status != "running" {
+		t.Fatalf("ref status=%q, want running before the worker lands", ref.Status)
+	}
+
+	// The worker lands while the requester is outside the room: the persisted
+	// ref must flip so the 12s chat poll completes the card.
+	kanbanApp.runAgentThread(launched)
+
+	ref = persistedAgentThreadRef(t, channel.ID, launched.ID)
+	if ref.Status != "complete" {
+		t.Fatalf("ref status=%q, want complete after the worker lands", ref.Status)
+	}
+	if ref.ArtifactID == "" {
+		t.Fatal("completed ref should carry the artifact id")
+	}
+}
+
+func persistedAgentThreadRef(t *testing.T, chatThreadID string, agentThreadID string) scoutChatThreadRef {
+	t.Helper()
+	saved, _, err := kanbanApp.scoutChatThreadByID("tim@shareability.com", chatThreadID)
+	if err != nil {
+		t.Fatalf("reload chat thread: %v", err)
+	}
+	for _, message := range saved.Messages {
+		if message.Thread != nil && message.Thread.ID == agentThreadID {
+			return *message.Thread
+		}
+	}
+	t.Fatalf("chat thread %s has no persisted ref for agent thread %s", chatThreadID, agentThreadID)
+	return scoutChatThreadRef{}
+}
+
+func TestScoutChatChannelAttributionSurvivesDisplayNameChange(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "embers", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	seeded := accountStore().findUser("aj@shareability.com")
+	if seeded == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	renamed := *seeded
+	renamed.Name = "AJ (Founder)"
+
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), &renamed, channel.ID, "the package lives in 4 tools", nil)
+	if err != nil {
+		t.Fatalf("append channel message: %v", err)
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	message := saved.Messages[len(saved.Messages)-1]
+	if message.AuthorName != "AJ (Founder)" {
+		t.Fatalf("authorName=%q, want the changed display name instead of a blank author", message.AuthorName)
+	}
+	if message.AuthorEmail != "aj@shareability.com" {
+		t.Fatalf("authorEmail=%q, want the session email", message.AuthorEmail)
+	}
+
+	// The seeded roster names still canonicalize.
+	rosterUser := *seeded
+	rosterUser.Name = "aj"
+	if got := scoutChatAuthorName(&rosterUser); got != "AJ" {
+		t.Fatalf("scoutChatAuthorName roster=%q, want canonical AJ", got)
+	}
+	// A blank display name still resolves through the account email.
+	blankName := *seeded
+	blankName.Name = "   "
+	if got := scoutChatAuthorName(&blankName); got != "AJ" {
+		t.Fatalf("scoutChatAuthorName blank=%q, want roster name by email", got)
 	}
 }
 

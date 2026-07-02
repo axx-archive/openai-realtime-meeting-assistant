@@ -160,6 +160,9 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		"actions":    actions,
 		"voiceState": "listening",
 	})
+	// Terminal status must reach requesters who launched from chat: the
+	// persisted message's thread ref is what the 12s chat poll re-renders.
+	app.updateScoutChatThreadRefs(thread.ID, status, artifact.ID)
 	// Durable milestone: the creator learns the thread finished (or failed)
 	// even if they are outside the room when the worker lands.
 	app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
@@ -216,6 +219,8 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 		"actions":    actions,
 		"voiceState": "listening",
 	})
+	// Keep chat-side thread cards in step with queued/approval states too.
+	app.updateScoutChatThreadRefs(thread.ID, status, artifact.ID)
 	// Approval gates stall silently otherwise: the creator gets a durable
 	// nudge that the worker is waiting on them.
 	if status == codexJobStatusApprovalRequired {

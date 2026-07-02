@@ -595,6 +595,80 @@ func TestArtifactsHandlerRejectsNonAdminUser(t *testing.T) {
 	}
 }
 
+func TestAssistantBoardAndMemoryReadableWithoutRoomJoin(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	for _, tc := range []struct {
+		name    string
+		path    string
+		handler http.HandlerFunc
+		key     string
+	}{
+		{name: "board", path: "/assistant/board", handler: assistantBoardHandler, key: "board"},
+		{name: "memory", path: "/assistant/memory", handler: assistantMemoryHandler, key: "memory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Signed-out reads stay rejected.
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			recorder := httptest.NewRecorder()
+			tc.handler(recorder, req)
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("signed-out status=%d, want %d", recorder.Code, http.StatusUnauthorized)
+			}
+
+			// Any authenticated session reads without joining the video call —
+			// non-admin accounts included.
+			req = httptest.NewRequest(http.MethodGet, tc.path, nil)
+			for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+				req.AddCookie(cookie)
+			}
+			recorder = httptest.NewRecorder()
+			tc.handler(recorder, req)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if _, ok := payload[tc.key]; !ok {
+				t.Fatalf("response=%s, want %q payload", recorder.Body.String(), tc.key)
+			}
+		})
+	}
+}
+
+func TestShouldServeIndexHTMLGatesAPIishPaths(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		path   string
+		accept string
+		want   bool
+	}{
+		{method: http.MethodGet, path: "/", accept: "", want: true},
+		{method: http.MethodGet, path: "/index.html", accept: "", want: true},
+		{method: http.MethodGet, path: "/some-page", accept: "text/html,application/xhtml+xml", want: true},
+		// API-ish paths must 404 instead of serving the SPA, even to browsers.
+		{method: http.MethodGet, path: "/assistant/unknown", accept: "text/html", want: false},
+		{method: http.MethodGet, path: "/brain/state", accept: "*/*", want: false},
+		{method: http.MethodGet, path: "/api/anything", accept: "text/html", want: false},
+		// fetch() calls without a text/html accept get a real 404.
+		{method: http.MethodGet, path: "/some.json", accept: "application/json", want: false},
+		{method: http.MethodPost, path: "/", accept: "text/html", want: false},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		if tc.accept != "" {
+			req.Header.Set("Accept", tc.accept)
+		}
+		if got := shouldServeIndexHTML(req); got != tc.want {
+			t.Fatalf("shouldServeIndexHTML(%s %s accept=%q)=%v, want %v", tc.method, tc.path, tc.accept, got, tc.want)
+		}
+	}
+}
+
 func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousRunner := startAgentThreadAsync

@@ -465,6 +465,28 @@
         opacity: 1;
       }
 
+      /* room-chat unread count on the room rail icon — visible from any tool */
+      .tool-rail__unread {
+        position: absolute;
+        top: -2px;
+        right: 2px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-label);
+        letter-spacing: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+      .tool-rail__unread[hidden] {
+        display: none;
+      }
+
       .tool-rail__spacer {
         flex: 1;
       }
@@ -5985,6 +6007,16 @@
         justify-content: center;
       }
 
+      /* per-channel unread dot — activity since this device last opened it */
+      .chat-thread-item__unread-dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+        align-self: center;
+      }
+
       .chat-conversation {
         flex: 1;
         min-width: 0;
@@ -6555,6 +6587,16 @@
         padding: 2px 0;
       }
 
+      /* inline hint chip — a bare "mode:" prefix posted to a channel is a
+         plain message, not an agent launch */
+      .scout-chat-hint {
+        align-self: center;
+        padding: 4px 10px;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+      }
+
       /* ThinkingIndicator — searching memory… */
       .scout-chat-thinking {
         display: inline-flex;
@@ -7083,6 +7125,12 @@
       #appShell.is-in-room ~ .proposal-deck:not([hidden]),
       #appShell.is-authed[data-tool="room"] ~ .proposal-deck:not([hidden]) {
         display: flex;
+      }
+
+      /* the meeting PiP owns the top-right slot; while it is visible the
+         proposal cards stack below it instead of covering the meeting */
+      body:has(#pipMeeting:not([hidden])) .proposal-deck {
+        top: calc(76px + 272px + var(--sp-3));
       }
 
       .proposal-deck__list {
@@ -9217,6 +9265,25 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
+      }
+
+      /* room-chat unread count while the meeting rides in the PiP */
+      .pip-meeting__unread {
+        flex: none;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-label);
+        letter-spacing: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .pip-meeting__unread[hidden] {
+        display: none;
       }
 
       .pip-meeting__expand {
@@ -12361,6 +12428,7 @@
             <span class="tool-rail__label">the room</span>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
+          <span id="roomRailUnread" class="tool-rail__unread" aria-hidden="true" hidden>0</span>
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" aria-pressed="false">
@@ -12454,7 +12522,7 @@
             <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
           </svg>
         </span>
-        <h1 class="topbar__heading"><span id="topbarProject">platform standup</span><span id="topbarToolTitle" hidden></span></h1>
+        <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true">·</span>
@@ -12714,7 +12782,7 @@
                 </svg>
               </span>
               <div class="room-empty__text">
-                <div id="roomEmptyName" class="room-empty__title">platform standup</div>
+                <div id="roomEmptyName" class="room-empty__title">meeting</div>
                 <div id="roomEmptyMeta" class="room-empty__meta">not connected · 4 invited</div>
               </div>
               <button id="roomEmptyJoin" type="button" class="btn btn--primary" data-join-room>Join the room</button>
@@ -13372,6 +13440,7 @@
       <div id="pipHandle" class="pip-meeting__head">
         <span class="pip-meeting__dot" aria-hidden="true"></span>
         <span id="pipTitle" class="pip-meeting__title">room</span>
+        <span id="pipUnread" class="pip-meeting__unread" aria-label="unread room chat" hidden>0</span>
         <button id="pipExpand" class="pip-meeting__expand" type="button" aria-label="Return to the room" title="Return to the room">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M15 3h6v6"></path>
@@ -13813,6 +13882,8 @@
       const roomChatSend = document.getElementById('roomChatSend')
       const roomChatToggle = document.getElementById('roomChatToggle')
       const roomChatUnread = document.getElementById('roomChatUnread')
+      const roomRailUnread = document.getElementById('roomRailUnread')
+      const pipUnread = document.getElementById('pipUnread')
       const roomChatClose = document.getElementById('roomChatClose')
       const notificationBell = document.getElementById('notificationBell')
       const notificationBadge = document.getElementById('notificationBadge')
@@ -13998,6 +14069,7 @@
       let codexProposals = []
       const codexProposalPendingActions = new Set()
       const codexProposalRemovalTimers = new Map()
+      const codexProposalDockTimers = new Map()
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
       let serverActiveSpeakerName = ''
@@ -15282,6 +15354,9 @@
         }
         syncAudioSettingsForAccount()
         renderLoginMode()
+	        // Behind the /auth/me await, so it runs after the script block has
+	        // fully executed and the theme label state is initialized.
+	        syncMeetingIdentityLabel()
 	        if (canUseArtifactLibrary()) {
 	          loadArtifacts()
 	        } else {
@@ -15290,6 +15365,10 @@
 	        }
 	        if (authedUser) {
 	          loadScoutChatThreads()
+	          loadParticipantPreview()
+	          // Themes drive the meeting label; load once so it speaks the
+	          // company's language before the intel tool is ever opened.
+	          loadMissionIntelligence()
 	        } else {
 	          resetPersistedScoutChatState()
 	          setNotificationPanelOpen(false)
@@ -15589,6 +15668,11 @@
           saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
 	          loadScoutChatThreads()
+	          // Pre-existing unread items must badge the bell before the panel
+	          // is ever opened.
+	          loadNotifications()
+	          loadParticipantPreview()
+	          loadMissionIntelligence()
 	          if (canUseArtifactLibrary()) {
 	            loadArtifacts()
 	          }
@@ -15651,6 +15735,11 @@
 	          saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
 	          loadScoutChatThreads()
+	          // Pre-existing unread items must badge the bell before the panel
+	          // is ever opened.
+	          loadNotifications()
+	          loadParticipantPreview()
+	          loadMissionIntelligence()
 	          if (canUseArtifactLibrary()) {
 	            loadArtifacts()
 	          }
@@ -15880,6 +15969,10 @@
       })
 
       async function loadParticipantPreview() {
+        // A signed-out tab must not poll authed endpoints into 401 noise.
+        if (!authedUser) {
+          return
+        }
         try {
           const response = await fetch('/participants', { cache: 'no-store' })
           if (!response.ok) {
@@ -16127,6 +16220,10 @@
           updateOfficeHome()
         } else if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+        } else if (tool === 'memory') {
+          // Reads work without joining the call; the room websocket keeps
+          // ownership whenever it is connected.
+          loadMemorySnapshot()
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
           if (tool === 'artifacts') {
             loadMissionIntelligence()
@@ -18477,6 +18574,11 @@
       function setBoardExpanded(expanded) {
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
+        if (expanded) {
+          // Board reads work without joining the call (HTTP snapshot); the
+          // websocket keeps ownership whenever it is connected.
+          loadBoardSnapshot()
+        }
         applyToolState(expanded
           ? 'board'
           : (appShell.dataset.tool === 'board' ? lastNonBoardTool : appShell.dataset.tool || 'room'))
@@ -21544,26 +21646,71 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return sections
       }
 
+      function applyBoardSnapshot(data) {
+        isBoardReady = true
+        cards = Array.isArray(data?.cards) ? data.cards : []
+        const changes = cardChanges(cards)
+        renderBoard(changes)
+        updateBoardControls()
+        changes.toasts.forEach(showToast)
+        changes.commentPreviews.forEach(showCommentPreview)
+      }
+
+      function applyMemorySnapshot(data) {
+        memoryEntries = Array.isArray(data) ? data : []
+        renderMemory()
+      }
+
+      // Board and memory state normally ride the room websocket; office/chat
+      // sessions read the same snapshots over authed HTTP so the tools work
+      // without joining a call. Reads only — edits keep their room gates.
+      async function loadBoardSnapshot() {
+        if (!authedUser || ws?.readyState === WebSocket.OPEN) {
+          return
+        }
+        try {
+          const response = await fetch('/assistant/board', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          if (payload?.board && ws?.readyState !== WebSocket.OPEN) {
+            applyBoardSnapshot(payload.board)
+          }
+        } catch {
+          // The board loads again on the next open or on socket admission.
+        }
+      }
+
+      async function loadMemorySnapshot() {
+        if (!authedUser || ws?.readyState === WebSocket.OPEN) {
+          return
+        }
+        try {
+          const response = await fetch('/assistant/memory', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          if (Array.isArray(payload?.memory) && ws?.readyState !== WebSocket.OPEN) {
+            applyMemorySnapshot(payload.memory)
+          }
+        } catch {
+          // The timeline loads again on the next open or on socket admission.
+        }
+      }
+
       function handleKanbanMessage(message) {
         switch (message.event) {
           case 'board':
-            isBoardReady = true
-            cards = Array.isArray(message.data?.cards) ? message.data.cards : []
-            {
-              const changes = cardChanges(cards)
-              renderBoard(changes)
-              updateBoardControls()
-              changes.toasts.forEach(showToast)
-              changes.commentPreviews.forEach(showCommentPreview)
-            }
+            applyBoardSnapshot(message.data)
             break
           case 'undo_available':
             canUndoDelete = Boolean(message.data)
             updateBoardControls()
             break
           case 'memory':
-            memoryEntries = Array.isArray(message.data) ? message.data : []
-            renderMemory()
+            applyMemorySnapshot(message.data)
             break
           case 'memory_transcript':
             addMemoryEntry(message.data)
@@ -21630,10 +21777,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'mission_insight':
             if (message.data) {
+              latestMissionInsight = message.data
               if (intelData) {
                 intelData.themes = message.data
                 intelData.themesAvailable = true
               }
+              syncMeetingIdentityLabel()
               if ((appShell.dataset.tool || '') === 'artifacts') {
                 intelData ? renderMissionIntelligence() : loadMissionIntelligence(true)
               }
@@ -23211,6 +23360,44 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}:${(thread?.messages || []).length}`).join('|')
 	      }
 
+	      // Per-thread unread dots ride a device-local lastSeen map: the poll
+	      // already returns updatedAt, so anything newer than the last open on
+	      // this device counts as unread.
+	      const chatThreadSeenStorageKey = 'bonfire.chat.lastSeen.v1'
+
+	      function chatThreadSeenMap() {
+	        try {
+	          return JSON.parse(window.localStorage?.getItem(chatThreadSeenStorageKey) || '{}') || {}
+	        } catch {
+	          return {}
+	        }
+	      }
+
+	      function markChatThreadSeen(thread) {
+	        if (!thread?.id) {
+	          return
+	        }
+	        const seen = chatThreadSeenMap()
+	        seen[String(thread.id)] = String(thread.updatedAt || thread.createdAt || new Date().toISOString())
+	        try {
+	          window.localStorage?.setItem(chatThreadSeenStorageKey, JSON.stringify(seen))
+	        } catch {
+	          // Storage failures just skip the unread dots.
+	        }
+	      }
+
+	      function chatThreadHasUnread(thread) {
+	        if (!thread?.id) {
+	          return false
+	        }
+	        const updated = String(thread.updatedAt || thread.createdAt || '')
+	        if (!updated) {
+	          return false
+	        }
+	        const seen = String(chatThreadSeenMap()[String(thread.id)] || '')
+	        return !seen || updated > seen
+	      }
+
 	      async function loadScoutChatThreads(options = {}) {
 	        if (!authedUser) {
 	          resetPersistedScoutChatState()
@@ -23270,8 +23457,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const message = payload.message
 	        if (message?.id) {
 	          const messages = Array.isArray(existing.messages) ? existing.messages : []
-	          if (!messages.some(candidate => String(candidate?.id || '') === String(message.id))) {
+	          const messageIndex = messages.findIndex(candidate => String(candidate?.id || '') === String(message.id))
+	          if (messageIndex === -1) {
 	            messages.push(message)
+	          } else {
+	            // A re-broadcast of an existing message (e.g. a thread ref whose
+	            // status just flipped to complete) replaces it in place.
+	            messages[messageIndex] = message
 	          }
 	          existing.messages = messages
 	        }
@@ -23321,8 +23513,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        updateChatThreadItem(text || attachedFilesPreview(files), ts)
 	        // Channels only summon Scout on an @scout mention (server-enforced);
 	        // skip the thinking indicator for plain human-to-human messages.
-	        const scoutEngaged = !chatThreadIsChannel(selectedScoutChatThread()) || /@scout/i.test(text)
-	        const threadMode = scoutEngaged ? scoutThreadModeForText(text) : ''
+	        // Channel agent launches additionally require an explicit "mode:"
+	        // prefix — conversational keywords must not read as a launch.
+	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
+	        const scoutEngaged = !isChannel || /@scout/i.test(text)
+	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
+	        const threadMode = !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
 	        if (scoutEngaged) {
 	          showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
 	        }
@@ -23348,6 +23544,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          } else if (payload.answer?.text) {
 	            appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
 	            updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
+	          }
+	          // A bare "mode:" prefix without @scout posts as a plain channel
+	          // message — say so instead of silently doing nothing.
+	          if (isChannel && !scoutEngaged && channelPrefixMode) {
+	            appendScoutChatHintChip(`mention @scout to launch this ${channelPrefixMode} as an agent run`)
 	          }
 	        } catch (error) {
 	          hideScoutChatThinking()
@@ -23695,10 +23896,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         markNotificationsRead(notificationEntries.filter(entry => !entry.read).map(entry => entry.id))
       }
 
+      function chatThreadForArtifactId(artifactId) {
+        const wanted = String(artifactId || '')
+        if (!wanted) {
+          return null
+        }
+        return scoutChatThreads.find(thread =>
+          (thread?.messages || []).some(message => String(message?.thread?.artifactId || '') === wanted)) || null
+      }
+
       function openNotificationEntry(entry) {
         markNotificationsRead([entry.id])
         setNotificationPanelOpen(false)
         if (entry.artifactId) {
+          // Completion notifications land on the originating thread card —
+          // the top of the intel canvas is a dead end for the requester.
+          const thread = chatThreadForArtifactId(entry.artifactId)
+          if (thread) {
+            selectScoutChatThread(thread.id)
+            setActiveTool('chat')
+            return
+          }
           openAgentArtifact({ id: entry.artifactId })
         } else if (entry.tool && TOOL_IDS.includes(entry.tool)) {
           setActiveTool(entry.tool)
@@ -23709,7 +23927,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         notificationPanel.hidden = !open
         notificationBell.setAttribute('aria-expanded', String(Boolean(open)))
         if (open) {
-          loadNotifications()
+          // Opening the bell acknowledges the backlog: refresh the list, then
+          // clear the unread badge.
+          loadNotifications().then(() => markAllNotificationsRead())
         }
       }
 
@@ -23795,9 +24015,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (String(next.status || '') !== 'proposed') {
           // Settled cards linger briefly so the room sees the outcome.
+          cancelCodexProposalDock(id)
+          resolveCodexProposalBellEntry(next)
           scheduleCodexProposalRemoval(id)
+        } else {
+          // Unactioned cards must not cover the meeting for 10+ minutes:
+          // after 30s they dock into the bell and leave the floating deck.
+          scheduleCodexProposalDock(id)
         }
         renderCodexProposals()
+      }
+
+      function cancelCodexProposalDock(id) {
+        const timer = codexProposalDockTimers.get(id)
+        if (timer) {
+          window.clearTimeout(timer)
+          codexProposalDockTimers.delete(id)
+        }
+      }
+
+      function scheduleCodexProposalDock(id) {
+        if (codexProposalDockTimers.has(id)) {
+          return
+        }
+        codexProposalDockTimers.set(id, window.setTimeout(() => {
+          codexProposalDockTimers.delete(id)
+          const proposal = codexProposals.find(candidate => candidate.id === id)
+          if (!proposal || String(proposal.status || '') !== 'proposed') {
+            return
+          }
+          codexProposals = codexProposals.filter(candidate => candidate.id !== id)
+          renderCodexProposals()
+          appendNotificationEntry({
+            id: `proposal-${id}`,
+            kind: 'task',
+            tool: 'room',
+            text: `scout proposes: ${proposal.title || 'agent task'} — confirm from the room`,
+            createdAt: new Date().toISOString()
+          })
+        }, 30000))
+      }
+
+      // Bell hygiene: a docked proposal entry flips to its outcome instead of
+      // advertising a stale "confirm" call to action.
+      function resolveCodexProposalBellEntry(proposal) {
+        const entry = notificationEntries.find(candidate => candidate.id === `proposal-${proposal.id}`)
+        if (!entry) {
+          return
+        }
+        const by = String(proposal.confirmedBy || proposal.dismissedBy || '').toLowerCase()
+        entry.text = String(proposal.status || '') === 'confirmed'
+          ? `${proposal.title || 'agent task'} — confirmed${by ? ' by ' + by : ''} · thread launched`
+          : `${proposal.title || 'agent task'} — dismissed${by ? ' by ' + by : ''}`
+        entry.read = true
+        renderNotifications()
       }
 
       function scheduleCodexProposalRemoval(id) {
@@ -23860,7 +24131,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomChatToggle.setAttribute('aria-label', open ? 'Close room chat' : 'Open room chat')
         if (open) {
           clearRoomChatUnread()
+          // Pin to the latest message: messages appended while the panel was
+          // hidden left scrollTop at 0, so reopening showed the oldest line.
           roomChatThread.scrollTop = roomChatThread.scrollHeight
+          window.requestAnimationFrame(() => {
+            roomChatThread.scrollTop = roomChatThread.scrollHeight
+          })
           if (!roomChatInput.disabled) {
             roomChatInput.focus()
           }
@@ -23871,12 +24147,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomChatUnreadCount = 0
         roomChatUnread.hidden = true
         roomChatUnread.textContent = '0'
+        renderRoomChatUnreadBadges()
       }
 
       function bumpRoomChatUnread() {
         roomChatUnreadCount = Math.min(roomChatUnreadCount + 1, 99)
         roomChatUnread.textContent = String(roomChatUnreadCount)
         roomChatUnread.hidden = false
+        renderRoomChatUnreadBadges()
+      }
+
+      // The dock counter only exists inside the room; mirror it onto the room
+      // rail icon and the meeting PiP so unread room chat is visible from any
+      // tool.
+      function renderRoomChatUnreadBadges() {
+        const show = roomChatUnreadCount > 0
+        const label = String(roomChatUnreadCount)
+        for (const badge of [roomRailUnread, pipUnread]) {
+          if (!badge) {
+            continue
+          }
+          badge.textContent = label
+          badge.hidden = !show
+        }
       }
 
       function updateRoomChatAvailability() {
@@ -24126,7 +24419,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const time = document.createElement('span')
 	        time.className = 'chat-thread-item__time'
 	        time.textContent = scoutChatTimeLabel(thread.updatedAt || thread.createdAt)
-	        row.append(titleEl, time)
+	        if (!active && chatThreadHasUnread(thread)) {
+	          const unreadDot = document.createElement('span')
+	          unreadDot.className = 'chat-thread-item__unread-dot'
+	          unreadDot.setAttribute('aria-label', 'unread activity')
+	          row.append(titleEl, unreadDot, time)
+	        } else {
+	          row.append(titleEl, time)
+	        }
 	        const previewEl = document.createElement('span')
 	        previewEl.className = 'chat-thread-item__preview'
 	        previewEl.textContent = preview
@@ -24186,6 +24486,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function selectScoutChatThread(id) {
 	        activeScoutThreadId = String(id || '')
+	        markChatThreadSeen(selectedScoutChatThread())
 	        hideScoutChatThinking()
 	        renderChatAgentThreads()
 	        renderActiveScoutThread()
@@ -24231,6 +24532,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function renderActiveScoutThread() {
 	        clearScoutChatThreadNodes()
 	        const thread = selectedScoutChatThread()
+	        if (thread && (appShell.dataset.tool || '') === 'chat') {
+	          // The open conversation stays read while its updates stream in.
+	          markChatThreadSeen(thread)
+	        }
 	        const isChannel = chatThreadIsChannel(thread)
 	        const caption = document.querySelector('.scout-private-caption')
 	        if (caption) {
@@ -24262,13 +24567,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        let kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
 	        // Channel messages carry server-stamped author identity; someone
 	        // else's message renders as a named peer bubble instead of "you".
+	        // Own-message detection keys on the session email, never the display
+	        // name — a changed display name must not relabel authorship.
 	        let authorLabel = ''
 	        const authorEmail = String(message?.authorEmail || '').toLowerCase()
 	        const authorName = String(message?.authorName || '').trim()
 	        const selfEmail = String(authedUser?.email || '').toLowerCase()
-	        if (kind === 'user' && authorName && authorEmail && authorEmail !== selfEmail) {
+	        if (kind === 'user' && authorEmail && authorEmail !== selfEmail) {
 	          kind = 'peer'
-	          authorLabel = authorName.toLowerCase()
+	          authorLabel = (authorName || authorEmail.split('@')[0]).toLowerCase()
 	        }
 	        const text = kind === 'scout' ? scoutVoice(message?.text || '') : String(message?.text || '')
 	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel)
@@ -24793,6 +25100,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           node = node.previousElementSibling
         }
         return node
+      }
+
+      function appendScoutChatHintChip(text) {
+        const chip = document.createElement('p')
+        chip.className = 'scout-chat-system scout-chat-hint'
+        chip.textContent = text
+        appendScoutChatNode(chip)
       }
 
       function appendScoutChatNode(node) {
@@ -26724,6 +27038,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             intelData = payload.mission
             intelLoadedAt = Date.now()
             renderMissionIntelligence()
+            syncMeetingIdentityLabel()
           }
         } catch {
           // Intelligence is additive; keep the prior canvas on a missed fetch.
@@ -26911,8 +27226,39 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : [intelEmptyNode('no consensus signals yet')]))
       }
 
+      // 429 cooldown: disable the button with an honest countdown instead of
+      // letting it look dead for the rest of the server-side window.
+      let intelRefreshCooldownTimer = 0
+
+      function beginIntelRefreshCooldown(seconds) {
+        if (!intelRefreshButton) {
+          return
+        }
+        window.clearInterval(intelRefreshCooldownTimer)
+        let remaining = Math.max(1, Math.round(Number(seconds) || 0))
+        const tick = () => {
+          if (remaining <= 0) {
+            window.clearInterval(intelRefreshCooldownTimer)
+            intelRefreshCooldownTimer = 0
+            intelRefreshButton.disabled = false
+            intelRefreshButton.textContent = 'Refresh themes'
+            intelRefreshButton.title = ''
+            return
+          }
+          intelRefreshButton.disabled = true
+          const minutes = Math.floor(remaining / 60)
+          intelRefreshButton.textContent = minutes > 0
+            ? `refresh in ${minutes}m ${String(remaining % 60).padStart(2, '0')}s`
+            : `refresh in ${remaining}s`
+          intelRefreshButton.title = 'themes were refreshed recently'
+          remaining -= 1
+        }
+        tick()
+        intelRefreshCooldownTimer = window.setInterval(tick, 1000)
+      }
+
       async function refreshMissionIntelligence() {
-        if (!intelRefreshButton || intelRefreshing) {
+        if (!intelRefreshButton || intelRefreshing || intelRefreshCooldownTimer) {
           return
         }
         intelRefreshing = true
@@ -26921,7 +27267,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           const response = await fetch('/assistant/mission/refresh', { method: 'POST' })
           if (response.status === 429) {
-            showToast({ text: 'themes are already fresh', kind: 'note' })
+            const retryAfter = Number(response.headers.get('Retry-After')) || 90
+            const payload = await response.json().catch(() => null)
+            showToast({ text: payload?.error || 'themes are already fresh', kind: 'note' })
+            beginIntelRefreshCooldown(retryAfter)
             return
           }
           if (!response.ok) {
@@ -26938,8 +27287,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           showToast({ text: 'theme refresh failed', kind: 'error' })
         } finally {
           intelRefreshing = false
-          intelRefreshButton.disabled = false
-          intelRefreshButton.textContent = 'Refresh themes'
+          if (!intelRefreshCooldownTimer) {
+            intelRefreshButton.disabled = false
+            intelRefreshButton.textContent = 'Refresh themes'
+          }
         }
       }
 
@@ -26997,6 +27348,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (/(research|investigate|source|market|competitive|brief|dig into)/.test(value)) {
           return 'research'
+        }
+        return ''
+      }
+
+      // Channel agent launches require an explicit "mode:" prefix (standalone
+      // or right after the @scout mention) — mirrors the server rule so the
+      // composer never fakes a launch that will not happen.
+      function scoutChannelModePrefixForText(text) {
+        const value = String(text || '').toLowerCase()
+        for (const segment of value.split('@scout')) {
+          const trimmed = segment.trim()
+          for (const mode of ['grill', 'research', 'design', 'workflow']) {
+            if (trimmed.startsWith(`${mode}:`)) {
+              return mode
+            }
+          }
         }
         return ''
       }
@@ -29237,12 +29604,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      // Meeting identity: the label speaks the company's language — the
+      // brain's dominant synthesized theme when one exists, else a dated
+      // meeting name. (Per-participant timers stay join-relative for now; a
+      // shared meeting clock needs a server-side start stamp.)
+      let latestMissionInsight = null
+
+      function meetingDisplayName() {
+        const themes = intelData?.themes?.insight?.themes || latestMissionInsight?.insight?.themes
+        const dominant = Array.isArray(themes) && themes.length
+          ? String(themes.reduce((best, theme) =>
+              (Number(theme?.mentions) || 0) > (Number(best?.mentions) || 0) ? theme : best, themes[0])?.label || '').trim()
+          : ''
+        if (dominant) {
+          return dominant.toLowerCase()
+        }
+        return `meeting · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+      }
+
+      function syncMeetingIdentityLabel() {
+        if (topbarProjectEl) {
+          topbarProjectEl.textContent = meetingDisplayName()
+        }
+        renderRoomLandingState()
+        renderPipMeeting()
+      }
+
       function renderRoomLandingState() {
         const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
         const names = inRoom ? participantsInRoom : participantPreview
         // mirror the canon in-stage empty state from the same honest signals
         if (roomEmptyName) {
-          roomEmptyName.textContent = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
+          roomEmptyName.textContent = (topbarProjectEl?.textContent || '').trim() || meetingDisplayName()
         }
         if (roomEmptyMeta) {
           const seatCount = Math.max(occupiedSeats, (inRoom ? participantsInRoom : participantPreview).length)
@@ -29257,7 +29650,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // there is no calendar source — derive a minimal, honest "today" list
         // from real signals: the standup room plus the most recent published work.
         const rows = []
-        const roomName = (topbarProjectEl?.textContent || 'platform standup').trim() || 'platform standup'
+        const roomName = (topbarProjectEl?.textContent || '').trim() || meetingDisplayName()
         const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
         const names = inRoom ? participantsInRoom : participantPreview
         rows.push({

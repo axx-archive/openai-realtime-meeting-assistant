@@ -219,6 +219,39 @@ func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
 	session.sendEvent("answer", result.answer)
 }
 
+// scoutChatChannelModePrefixes maps the explicit launch prefixes users type in
+// channels onto agent-thread modes. Channels never launch on bare keywords:
+// in a venture studio, "pitch", "brief", and "research" are everyday words, so
+// keyword matching (scoutChatThreadModeForText) is reserved for private
+// threads where every message is already addressed to Scout.
+var scoutChatChannelModePrefixes = []struct {
+	prefix string
+	mode   string
+}{
+	{prefix: "grill:", mode: "grill"},
+	{prefix: "research:", mode: "research"},
+	{prefix: "design:", mode: "design"},
+	{prefix: "workflow:", mode: "workflow"},
+}
+
+// scoutChatThreadModeForChannelText launches a channel agent run only on an
+// explicit "mode:" prefix — either standalone at the start of the message or
+// immediately after an @scout mention. Every other message (including
+// conversational @scout questions that merely contain mode keywords) returns
+// "" and stays a chat answer.
+func scoutChatThreadModeForChannelText(text string) string {
+	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	for _, segment := range strings.Split(lower, "@scout") {
+		segment = strings.TrimSpace(segment)
+		for _, candidate := range scoutChatChannelModePrefixes {
+			if strings.HasPrefix(segment, candidate.prefix) {
+				return candidate.mode
+			}
+		}
+	}
+	return ""
+}
+
 func scoutChatThreadModeForText(text string) string {
 	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
 	if hasAssistantPhrase(lower, "multi-agent", "codex", "goal loop", "goal workflow", "workflow", "shipping gate", "gate before shipping") {

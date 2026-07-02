@@ -481,6 +481,19 @@ func (app *kanbanBoardApp) beginMissionIntelRefresh(now time.Time) (time.Time, b
 	return previous, true
 }
 
+// missionIntelRefreshRetryAfterSeconds reports how long until the on-demand
+// refresh slot frees up, for the 429 Retry-After header.
+func (app *kanbanBoardApp) missionIntelRefreshRetryAfterSeconds(now time.Time) int {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	remaining := missionIntelRefreshCooldown - now.Sub(app.missionIntelRefreshAt)
+	if remaining < time.Second {
+		return 1
+	}
+	return int(remaining.Round(time.Second) / time.Second)
+}
+
 // releaseMissionIntelRefresh rolls a reserved refresh slot back after a run
 // that produced nothing, so a transient model error (or a canceled request)
 // does not lock every user out of refresh for the full cooldown. Only the
@@ -571,6 +584,9 @@ func assistantMissionRefreshHandler(w http.ResponseWriter, r *http.Request) {
 	reservedAt := time.Now()
 	previousRefreshAt, ok := kanbanApp.beginMissionIntelRefresh(reservedAt)
 	if !ok {
+		// Retry-After lets the client disable the refresh button with an
+		// honest countdown instead of appearing dead for the cooldown.
+		w.Header().Set("Retry-After", strconv.Itoa(kanbanApp.missionIntelRefreshRetryAfterSeconds(reservedAt)))
 		writeAuthError(w, http.StatusTooManyRequests, "mission intelligence was refreshed recently")
 		return
 	}

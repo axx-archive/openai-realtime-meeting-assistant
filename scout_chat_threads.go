@@ -262,7 +262,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 		Role:        "user",
 		Text:        text,
 		CreatedAt:   now.Format(time.RFC3339Nano),
-		AuthorName:  canonicalRoomActorName(user.Name),
+		AuthorName:  scoutChatAuthorName(user),
 		AuthorEmail: normalizeAccountEmail(user.Email),
 		Files:       files,
 	}
@@ -287,7 +287,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 	}
 
 	modelQuery := scoutChatMessageModelText(userMessage)
+	// Channels launch agent runs only on an explicit "mode:" prefix; private
+	// threads keep the conversational keyword detection.
 	mode := scoutChatThreadModeForText(text)
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		mode = scoutChatThreadModeForChannelText(text)
+	}
 	if mode != "" {
 		agentThread, err := app.launchAgentThread(mode, text, user.Name)
 		if err != nil {
@@ -351,6 +356,97 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 	response["answer"] = assistantMessage
 	response["thread"] = saved
 	return response, nil
+}
+
+// scoutChatAuthorName resolves the display name stamped on channel messages.
+// canonicalRoomActorName returns "" for any display name outside the seeded
+// roster (e.g. "AJ (Founder)"), which used to persist blank authors that every
+// reader's client rendered as their own message. Fall back to the raw display
+// name, then the roster name for the account email.
+func scoutChatAuthorName(user *userAccount) string {
+	if user == nil {
+		return ""
+	}
+	if name := canonicalRoomActorName(user.Name); name != "" {
+		return name
+	}
+	return firstNonEmptyString(strings.TrimSpace(user.Name), participantNameForEmail(user.Email))
+}
+
+// updateScoutChatThreadRefs rewrites the thread refs embedded in persisted
+// chat messages when an agent thread changes status. Office/chat sessions do
+// not consume room websocket events, so without this rewrite the requester's
+// card would stay at the last streamed progress forever; the 12s chat poll
+// (and the public-channel broadcast) picks up the new status instead.
+func (app *kanbanBoardApp) updateScoutChatThreadRefs(agentThreadID string, status string, artifactID string) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	agentThreadID = strings.TrimSpace(agentThreadID)
+	status = strings.TrimSpace(status)
+	if agentThreadID == "" || status == "" {
+		return
+	}
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || !scoutChatThreadHasAgentRef(thread, agentThreadID) {
+			continue
+		}
+		if err := app.commitScoutChatThreadRefStatus(thread.ID, thread.OwnerEmail, agentThreadID, status, artifactID); err != nil {
+			log.Errorf("Failed to update chat thread %s ref for agent thread %s: %v", thread.ID, agentThreadID, err)
+		}
+	}
+}
+
+func scoutChatThreadHasAgentRef(thread scoutChatThreadRecord, agentThreadID string) bool {
+	for _, message := range thread.Messages {
+		if message.Thread != nil && message.Thread.ID == agentThreadID {
+			return true
+		}
+	}
+	return false
+}
+
+// commitScoutChatThreadRefStatus applies one agent-thread status onto every
+// matching message ref in one chat thread through the same lock + re-read +
+// save path as commitScoutChatThreadMessages.
+func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, ownerEmail string, agentThreadID string, status string, artifactID string) error {
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+	if err != nil {
+		return err
+	}
+	changed := make([]scoutChatMessageRecord, 0, 1)
+	for index := range thread.Messages {
+		ref := thread.Messages[index].Thread
+		if ref == nil || ref.ID != agentThreadID {
+			continue
+		}
+		if ref.Status == status && (artifactID == "" || ref.ArtifactID == artifactID) {
+			continue
+		}
+		ref.Status = status
+		if artifactID != "" {
+			ref.ArtifactID = artifactID
+		}
+		changed = append(changed, thread.Messages[index])
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return err
+	}
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		for _, message := range changed {
+			broadcastScoutChatThreadUpdate(thread, message)
+		}
+	}
+	return nil
 }
 
 // commitScoutChatThreadMessages is the single write path for chat messages.

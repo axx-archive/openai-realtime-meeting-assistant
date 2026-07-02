@@ -489,6 +489,8 @@ func main() {
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
+	http.HandleFunc("/assistant/board", assistantBoardHandler)
+	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
@@ -504,8 +506,14 @@ func main() {
 	http.HandleFunc("/ice-test", iceTestHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
 
-	// index.html handler
+	// index.html handler. The SPA is served for "/" and browser navigations
+	// only: unknown API-ish paths (e.g. /assistant/*, /brain/state) must 404
+	// instead of answering 200 with HTML, which buries client errors.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !shouldServeIndexHTML(r) {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if _, writeErr := w.Write(indexHTML); writeErr != nil {
@@ -910,6 +918,82 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		"thread":   viewerThread,
 		"artifact": viewerThread.Artifact,
 		"actions":  viewerThread.Actions,
+	})
+}
+
+// shouldServeIndexHTML gates the "/" catch-all: the root path and text/html
+// navigations get the SPA; everything else (unknown /assistant/* endpoints,
+// fetch() calls to API-ish paths) gets a real 404.
+func shouldServeIndexHTML(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	path := r.URL.Path
+	if path == "/" || path == "/index.html" {
+		return true
+	}
+	for _, apiPrefix := range []string{"/assistant/", "/auth/", "/api/", "/internal/", "/artifacts/", "/brain/"} {
+		if strings.HasPrefix(path, apiPrefix) {
+			return false
+		}
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}
+
+// assistantBoardHandler serves the kanban board snapshot to any authenticated
+// session. Reads must not require joining the video call: the board state is
+// server-side, and office/chat sessions have no room websocket. Writes and
+// board editing keep their existing room-scoped gates.
+func assistantBoardHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "board is unavailable")
+		return
+	}
+
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"board": kanbanApp.snapshotState(),
+	})
+}
+
+// assistantMemoryHandler serves the memory timeline (same projection the room
+// websocket pushes) to any authenticated session, so the memory tool works
+// without joining a call.
+func assistantMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "memory is unavailable")
+		return
+	}
+
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"memory": kanbanApp.memorySnapshotForClients(20),
 	})
 }
 
