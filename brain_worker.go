@@ -81,6 +81,10 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	}
 
 	broadcastKanbanEvent("memory_brain", entry)
+	// Office memory rails stay live via the snapshot path: the entry-shaped
+	// memory_brain event stays room-only because the client's addMemoryEntry
+	// does not dedupe by id.
+	broadcastOfficeKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", "Scout updated the room brain.", map[string]any{"kind": meetingMemoryKindBrain})
 
 	return entry, nil

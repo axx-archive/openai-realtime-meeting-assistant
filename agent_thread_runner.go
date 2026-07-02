@@ -4,11 +4,25 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const defaultAgentThreadRequestTimeout = 60 * time.Second
+
+// Agent-thread origin kinds, stamped at launch so completion can deliver the
+// finished artifact card back to the surface that requested the work.
+const (
+	agentThreadOriginRoom          = "room"
+	agentThreadOriginChannel       = "channel"
+	agentThreadOriginPrivateThread = "private_thread"
+	agentThreadOriginTool          = "tool"
+)
+
+// agentThreadOriginMetadataKeys are the only origin keys a launch call site
+// may stamp; everything else in the origin map is dropped.
+var agentThreadOriginMetadataKeys = []string{"originKind", "originId", "originMeetingId"}
 
 type scoutAgentThread struct {
 	ID       string              `json:"id"`
@@ -19,11 +33,25 @@ type scoutAgentThread struct {
 	Actions  []osAssistantAction `json:"actions,omitempty"`
 }
 
-var startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
-	go app.runAgentThread(thread)
+// startAgentThreadAsync is assigned in init (not at declaration) to break the
+// package-initialization cycle runAgentThread → syncLinkedCardForArtifact →
+// applyToolCallArgs → launchAgentThreadWithOrigin → startAgentThreadAsync.
+var startAgentThreadAsync func(app *kanbanBoardApp, thread scoutAgentThread)
+
+func init() {
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		go app.runAgentThread(thread)
+	}
 }
 
 func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdBy string) (scoutAgentThread, error) {
+	return app.launchAgentThreadWithOrigin(mode, query, createdBy, nil)
+}
+
+// launchAgentThreadWithOrigin launches an agent thread with origin metadata
+// (originKind/originId/originMeetingId) stamped on the artifact so
+// deliverArtifactToOrigin can close the loop when the worker completes.
+func (app *kanbanBoardApp) launchAgentThreadWithOrigin(mode string, query string, createdBy string, origin map[string]string) (scoutAgentThread, error) {
 	mode = normalizeAgentThreadMode(mode)
 	if mode == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread mode is required")
@@ -59,6 +87,11 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 	for key, value := range agentThreadModeMetadata(mode) {
 		metadata[key] = value
 	}
+	for _, key := range agentThreadOriginMetadataKeys {
+		if value := strings.TrimSpace(origin[key]); value != "" {
+			metadata[key] = value
+		}
+	}
 	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
 	if err != nil {
 		return scoutAgentThread{}, err
@@ -77,7 +110,7 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 		Actions:  actions,
 	}
 
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" thread launched", map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     thread,
@@ -127,6 +160,10 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 			metadata[key] = value
 		}
 	}
+	// "" keeps the stored title (safe under concurrent edits); only a real
+	// derivation from the finished body replaces it.
+	title := ""
+	scaffoldTitle := thread.Artifact.Metadata["title"]
 	if err != nil {
 		status = "error"
 		message = assistantToolLabel(thread.Mode) + " thread needs attention"
@@ -138,9 +175,25 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		metadata["progressPercent"] = "72"
 		metadata["reviewGate"] = "blocked"
 		metadata["error"] = err.Error()
+	} else if derived := artifactTitleFromBody(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
+		// Completed work gets a real display title from the body's first
+		// heading; the launch prompt survives in metadata["threadQuery"].
+		title = derived
+		metadata["titleSource"] = "derived"
+	}
+	if err == nil {
+		// Terminal seam contract: grill runs get their READINESS score parsed
+		// and stamped, and every completed run lands in the threadRuns log the
+		// package binder charts (agent_thread_followup.go).
+		stampReadinessMetadata(thread.Artifact, thread.Mode, output, metadata)
+		version := 1
+		if parsed, versionErr := strconv.Atoi(strings.TrimSpace(thread.Artifact.Metadata["threadVersion"])); versionErr == nil && parsed > 0 {
+			version = parsed
+		}
+		appendThreadRunLog(thread.Artifact, metadata, thread.ID, version, thread.Artifact.Metadata["createdBy"])
 	}
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, thread.Artifact.Metadata["title"], output, scoutParticipantName, metadata)
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, scoutParticipantName, metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update Scout thread artifact %s: %v", thread.ID, updateErr)
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", map[string]any{
@@ -152,7 +205,7 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 	}
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
@@ -160,12 +213,128 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		"actions":    actions,
 		"voiceState": "listening",
 	})
-	// Terminal status must reach requesters who launched from chat: the
-	// persisted message's thread ref is what the 12s chat poll re-renders.
+	// Terminal status must reach requesters who launched from chat: the ref
+	// commit pushes a chat_thread event over the office socket (channel
+	// broadcast or owner-targeted for private threads); the 12s chat poll
+	// re-renders the persisted ref when the socket is down.
 	app.updateScoutChatThreadRefs(thread.ID, status, artifact.ID)
+	// Board auto-advance: a finished deliverable moves its linked card
+	// (complete → Done, error → Blocked) so the board stops lying about
+	// launched work.
+	app.syncLinkedCardForArtifact(artifact, status)
+	// Close the loop: a successful completion posts the compact artifact card
+	// back to the surface that requested the work (room chat or channel).
+	if status == "complete" {
+		app.deliverArtifactToOrigin(artifact, thread.ID)
+	}
 	// Durable milestone: the creator learns the thread finished (or failed)
 	// even if they are outside the room when the worker lands.
 	app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+}
+
+// deliverArtifactToOrigin posts a compact completion card back to the surface
+// that requested the work. Complete-only: errors keep the existing creator
+// notification. Idempotence: metadata["deliveredAt"] is stamped before the
+// post, so a retried codex callback (or a rerun of the same artifact id)
+// never delivers twice.
+func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, agentThreadID string) {
+	if app == nil || app.memory == nil || strings.TrimSpace(artifact.ID) == "" {
+		return
+	}
+	originKind := strings.TrimSpace(artifact.Metadata["originKind"])
+	if originKind != agentThreadOriginRoom && originKind != agentThreadOriginChannel {
+		// private_thread delivery IS the persisted ref rewrite
+		// (updateScoutChatThreadRefs); tool/absent keep the existing
+		// notification-only behavior.
+		return
+	}
+	if strings.TrimSpace(artifact.Metadata["deliveredAt"]) != "" {
+		return
+	}
+
+	mode := firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind)
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), assistantToolLabel(mode)+" artifact")
+	text := fmt.Sprintf("finished %s — %s", assistantToolLabel(mode), title)
+	stampDelivered := func() bool {
+		if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, "", map[string]string{
+			"deliveredAt": time.Now().UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			log.Errorf("Failed to stamp deliveredAt on artifact %s: %v", artifact.ID, err)
+			return false
+		}
+		return true
+	}
+
+	switch originKind {
+	case agentThreadOriginRoom:
+		// Guard: appendEntry lazily mints a NEW meeting id, so posting after
+		// the origin meeting archived/rotated would fabricate a phantom
+		// meeting. The creator notification already covers that case. The
+		// check here is only a cheap early-out — the append itself re-checks
+		// the id under the store lock (appendEntryForMeeting), so a rotation
+		// racing the stampDelivered write below can never slip a card into a
+		// phantom or successor meeting.
+		originMeetingID := strings.TrimSpace(artifact.Metadata["originMeetingId"])
+		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID() {
+			return
+		}
+		if !stampDelivered() {
+			return
+		}
+		payload, ok := app.recordRoomChatMessageWithArtifact(scoutParticipantName, text, artifact.ID, originMeetingID)
+		if !ok {
+			return
+		}
+		broadcastSignedInKanbanEvent("room_chat", payload)
+	case agentThreadOriginChannel:
+		channelID := strings.TrimSpace(artifact.Metadata["originId"])
+		if channelID == "" {
+			return
+		}
+		entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, channelID)
+		if !ok {
+			return
+		}
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok {
+			return
+		}
+		if thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+			// An archived channel (creator-only action) or a non-public thread
+			// never accepts delivery writes — commitScoutChatThreadMessages runs
+			// as the owner and would bypass the archived-thread guard every
+			// user-facing writer enforces. Fall back to the creator
+			// notification, which the terminal seam always sends.
+			return
+		}
+		if agentThreadID != "" && scoutChatThreadHasAgentRef(thread, agentThreadID) {
+			// The in-channel launch card already exists and
+			// updateScoutChatThreadRefs flips it to complete — no duplicate.
+			return
+		}
+		if !stampDelivered() {
+			return
+		}
+		message := scoutChatMessageRecord{
+			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:      "thread",
+			Role:      "scout",
+			Text:      text,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Thread: &scoutChatThreadRef{
+				ID:         firstNonEmptyString(agentThreadID, artifact.Metadata["threadId"]),
+				Mode:       mode,
+				Query:      firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["query"]),
+				Status:     "complete",
+				ArtifactID: artifact.ID,
+			},
+		}
+		// The public-visibility branch inside commit broadcasts chat_thread
+		// over the office channel to every signed-in client.
+		if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
+			log.Errorf("Failed to deliver artifact %s to channel %s: %v", artifact.ID, thread.ID, err)
+		}
+	}
 }
 
 func agentThreadNotificationText(message string, artifact meetingMemoryEntry) string {
@@ -199,7 +368,20 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 		}
 	}
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, thread.Artifact.Metadata["title"], output, scoutParticipantName, metadata)
+	// Only terminal results with real text earn a derived title; queued /
+	// running / approval status updates pass "" so updateOSArtifactWithMetadata
+	// keeps whatever title the artifact carries — never the stale scaffold
+	// prompt from this thread's launch snapshot.
+	title := ""
+	if status == codexJobStatusComplete && strings.TrimSpace(workerResult.Text) != "" {
+		scaffoldTitle := thread.Artifact.Metadata["title"]
+		if derived := artifactTitleFromBody(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
+			title = derived
+			metadata["titleSource"] = "derived"
+		}
+	}
+
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, scoutParticipantName, metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update queued Scout thread artifact %s: %v", thread.ID, updateErr)
 		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", map[string]any{
@@ -211,7 +393,7 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	}
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
@@ -388,7 +570,7 @@ func agentThreadDeliverable(mode string) string {
 	case "design":
 		return "design brief with intent, context links, screens, interaction states, responsive plan, handoff notes, and build risks"
 	case "grill":
-		return "pressure-test scorecard with objections, hard questions, and improved ask"
+		return "pressure-test scorecard opening with a machine-parseable READINESS: X/10 line, then objections, hard questions, and improved ask"
 	case "workflow":
 		return "goal-tracked multi-agent workflow artifact with review and shipping gates"
 	default:
@@ -403,7 +585,7 @@ func agentThreadModeContract(mode string) string {
 	case "design":
 		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
 	case "grill":
-		return "For grill mode, include Score, Strongest objections, Tough questions, Revised ask, and Confidence gate."
+		return "For grill mode, the first line after the Vision must be exactly 'READINESS: <score>/10' with one decimal (example: 'READINESS: 6.5/10') — this line is machine-parsed, never omit or reformat it. Then include Strongest objections, Tough questions, Revised ask, and Confidence gate."
 	case "workflow":
 		return "For workflow mode, keep the ten-step goal loop explicit and make the gate status unambiguous."
 	default:
@@ -418,6 +600,11 @@ func agentThreadModeMetadata(mode string) map[string]string {
 			"artifactContract": "research_brief_v2",
 			"artifactHeadings": "executive summary thesis evidence sources counterarguments recommendation open questions next checks worker evidence",
 			"searchTags":       "required",
+		}
+	case "grill":
+		return map[string]string{
+			"artifactContract": "grill_scorecard_v2",
+			"readinessLine":    "required",
 		}
 	default:
 		return nil

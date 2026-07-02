@@ -32,18 +32,34 @@ const (
 	notificationAudienceMe       = "me"
 )
 
+const (
+	// send_notification deliver argument values.
+	notificationDeliverNow          = "now"
+	notificationDeliverAfterMeeting = "after_meeting"
+	// notificationDeliverAfterMeetingMarker is the stored DeliverAfter value
+	// while an after_meeting record waits for the meeting to end.
+	notificationDeliverAfterMeetingMarker = "meeting"
+)
+
 // notificationRecord is one durable notification. UserEmail == "" means the
 // notification is addressed to everyone; ReadBy tracks which accounts have
 // acknowledged it.
 type notificationRecord struct {
-	ID         string   `json:"id"`
-	UserEmail  string   `json:"userEmail,omitempty"`
-	Kind       string   `json:"kind"`
-	Text       string   `json:"text"`
-	Tool       string   `json:"tool,omitempty"`
-	ArtifactID string   `json:"artifactId,omitempty"`
-	CreatedAt  string   `json:"createdAt"`
-	ReadBy     []string `json:"readBy,omitempty"`
+	ID         string `json:"id"`
+	UserEmail  string `json:"userEmail,omitempty"`
+	Kind       string `json:"kind"`
+	Text       string `json:"text"`
+	Tool       string `json:"tool,omitempty"`
+	ArtifactID string `json:"artifactId,omitempty"`
+	// ThreadID deep-links the bell entry to a chat thread/channel.
+	ThreadID string `json:"threadId,omitempty"`
+	// DeliverAfter marks a queued deferred notification ("meeting" while
+	// waiting for the meeting to end); flushDeferredNotifications clears it,
+	// restamps CreatedAt, and pushes the record. Queued records are hidden
+	// from every viewer list until then.
+	DeliverAfter string   `json:"deliverAfter,omitempty"`
+	CreatedAt    string   `json:"createdAt"`
+	ReadBy       []string `json:"readBy,omitempty"`
 }
 
 type notificationStoreState struct {
@@ -109,8 +125,11 @@ func normalizeNotificationKind(kind string) string {
 // (UserEmail == "") fan out to everyone; targeted records go only to sockets
 // whose server-side authenticated session email matches the recipient — a
 // non-recipient never receives the payload, so client-side filtering is
-// defense-in-depth only.
-func (app *kanbanBoardApp) createNotification(userEmail string, kind string, text string, tool string, artifactID string) (notificationRecord, error) {
+// defense-in-depth only. threadID deep-links the bell entry to a chat
+// thread/channel. deferred queues the record with DeliverAfter="meeting" and
+// skips the push entirely — flushDeferredNotifications delivers it when the
+// meeting ends.
+func (app *kanbanBoardApp) createNotification(userEmail string, kind string, text string, tool string, artifactID string, threadID string, deferred bool) (notificationRecord, error) {
 	if app == nil {
 		return notificationRecord{}, fmt.Errorf("notifications are unavailable")
 	}
@@ -125,7 +144,11 @@ func (app *kanbanBoardApp) createNotification(userEmail string, kind string, tex
 		Text:       text,
 		Tool:       strings.TrimSpace(tool),
 		ArtifactID: strings.TrimSpace(artifactID),
+		ThreadID:   strings.TrimSpace(threadID),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if deferred {
+		record.DeliverAfter = notificationDeliverAfterMeetingMarker
 	}
 
 	app.mu.Lock()
@@ -140,12 +163,62 @@ func (app *kanbanBoardApp) createNotification(userEmail string, kind string, tex
 		log.Errorf("Failed to persist notifications: %v", persistErr)
 	}
 
+	if deferred {
+		// Queued: no broadcast, no targeted send — the flush pushes it.
+		return record, nil
+	}
+	pushNotificationRecord(record)
+	return record, nil
+}
+
+// pushNotificationRecord fans one persisted record out over the websocket:
+// broadcast to everyone, or targeted to the recipient's own sockets only.
+func pushNotificationRecord(record notificationRecord) {
 	if record.UserEmail == "" {
-		broadcastKanbanEvent("notification", notificationForViewer(record, ""))
+		broadcastSignedInKanbanEvent("notification", notificationForViewer(record, ""))
 	} else {
 		sendKanbanEventToUser(record.UserEmail, "notification", notificationForViewer(record, record.UserEmail))
 	}
-	return record, nil
+}
+
+// flushDeferredNotifications delivers every notification queued with
+// deliver "after_meeting": clears the queue marker, restamps CreatedAt to the
+// delivery moment (the bell orders by it), persists once, then pushes each
+// record. Idempotent — a second call finds nothing queued, so the meeting-end
+// seam and archiveMeeting may both invoke it safely.
+func (app *kanbanBoardApp) flushDeferredNotifications(trigger string) int {
+	if app == nil {
+		return 0
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	app.mu.Lock()
+	flushed := make([]notificationRecord, 0, 2)
+	for index := range app.notifications {
+		if app.notifications[index].DeliverAfter != notificationDeliverAfterMeetingMarker {
+			continue
+		}
+		app.notifications[index].DeliverAfter = ""
+		app.notifications[index].CreatedAt = now
+		flushed = append(flushed, app.notifications[index])
+	}
+	var persistErr error
+	if len(flushed) > 0 {
+		persistErr = app.persistNotificationsLocked()
+	}
+	app.mu.Unlock()
+	if persistErr != nil {
+		log.Errorf("Failed to persist flushed deferred notifications: %v", persistErr)
+	}
+	if len(flushed) == 0 {
+		return 0
+	}
+
+	log.Infof("Delivering %d deferred notification(s) on %s", len(flushed), trigger)
+	for _, record := range flushed {
+		pushNotificationRecord(record)
+	}
+	return len(flushed)
 }
 
 func (app *kanbanBoardApp) nextNotificationIDLocked() string {
@@ -207,6 +280,9 @@ func notificationForViewer(record notificationRecord, viewerEmail string) map[st
 	if record.ArtifactID != "" {
 		payload["artifactId"] = record.ArtifactID
 	}
+	if record.ThreadID != "" {
+		payload["threadId"] = record.ThreadID
+	}
 	return payload
 }
 
@@ -238,6 +314,10 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 	visible := make([]map[string]any, 0, len(records))
 	for index := len(records) - 1; index >= 0; index-- {
 		record := records[index]
+		// Queued deferred records stay invisible until the flush delivers them.
+		if record.DeliverAfter != "" {
+			continue
+		}
 		if !notificationVisibleTo(record, viewerEmail) {
 			continue
 		}
@@ -303,7 +383,7 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 // broadcast to everyone so the milestone is never lost.
 func (app *kanbanBoardApp) notifyAgentThreadCreator(artifact meetingMemoryEntry, kind string, text string) {
 	creatorEmail := participantEmail(artifact.Metadata["createdBy"])
-	if _, err := app.createNotification(creatorEmail, kind, text, "", artifact.ID); err != nil {
+	if _, err := app.createNotification(creatorEmail, kind, text, "", artifact.ID, "", false); err != nil {
 		log.Errorf("Failed to create agent thread notification: %v", err)
 	}
 }
@@ -343,9 +423,29 @@ func (app *kanbanBoardApp) sendRealtimeNotification(args map[string]any, request
 		}
 	}
 
-	record, err := app.createNotification(userEmail, asString(args["kind"]), text, tool, "")
+	deliver := strings.ToLower(strings.TrimSpace(asString(args["deliver"])))
+	switch deliver {
+	case "", notificationDeliverNow:
+		deliver = notificationDeliverNow
+	case notificationDeliverAfterMeeting:
+	default:
+		return nil, false, fmt.Errorf("deliver must be %q or %q", notificationDeliverNow, notificationDeliverAfterMeeting)
+	}
+	deferred := deliver == notificationDeliverAfterMeeting
+
+	record, err := app.createNotification(userEmail, asString(args["kind"]), text, tool, "", "", deferred)
 	if err != nil {
 		return nil, false, err
+	}
+
+	if deferred {
+		// Queued until the meeting ends: no toast now, so no actions.
+		return map[string]any{
+			"ok":           true,
+			"audience":     audience,
+			"deliver":      notificationDeliverAfterMeeting,
+			"notification": notificationForViewer(record, userEmail),
+		}, false, nil
 	}
 
 	// The invoking private-voice client applies these actions directly; the

@@ -113,7 +113,16 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 		builder.WriteString(previous[0].Text)
 	}
 
-	if decisions := extractDecisionItems(app.memory.snapshot(0), 10); len(decisions) > 0 {
+	// The decision ledger is the source of truth once it has entries; the
+	// keyword scan survives only as the cold-start fallback.
+	decisions := make([]string, 0, 10)
+	for _, entry := range app.activeDecisionEntries(10) {
+		decisions = append(decisions, entry.Text)
+	}
+	if len(decisions) == 0 {
+		decisions = extractDecisionItems(app.memory.snapshot(0), 10)
+	}
+	if len(decisions) > 0 {
 		builder.WriteString("\n\n# Recent decision signals\n")
 		for _, decision := range decisions {
 			builder.WriteString("- ")
@@ -190,9 +199,38 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 		return entry, err
 	}
 
-	broadcastKanbanEvent("mission_insight", missionInsightEventPayload(entry, insight))
+	broadcastOfficeKanbanEvent("mission_insight", missionInsightEventPayload(entry, insight))
+
+	// server-side auto-title: the dominant synthesized theme names the active
+	// meeting record. setAutoTitle no-ops when the current id has no record
+	// (insight generated between meetings), so a title never lands on the
+	// wrong meeting.
+	if label := dominantMissionTheme(insight); label != "" {
+		if record, changed := app.meetings.setAutoTitle(app.memory.currentMeetingID(), label); changed {
+			app.broadcastMeetingRecord(record)
+		}
+	}
 
 	return entry, nil
+}
+
+// dominantMissionTheme picks the theme with the most mentions; first wins
+// ties (themes arrive most-recurrent-first per missionIntelInstructions) —
+// the same reduce the client's meetingDisplayName runs.
+func dominantMissionTheme(insight missionInsightPayload) string {
+	label := ""
+	best := 0
+	for _, theme := range insight.Themes {
+		trimmed := strings.TrimSpace(theme.Label)
+		if trimmed == "" {
+			continue
+		}
+		if label == "" || theme.Mentions > best {
+			label = trimmed
+			best = theme.Mentions
+		}
+	}
+	return label
 }
 
 func missionInsightEventPayload(entry meetingMemoryEntry, insight missionInsightPayload) map[string]any {
@@ -403,6 +441,7 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 			"contributions":   map[string]any{"people": []missionContributionRow{}, "unattributed": 0, "fuelMax": 0},
 			"themes":          nil,
 			"themesAvailable": false,
+			"decisions":       []map[string]any{},
 			"degraded":        degraded,
 		}
 	}
@@ -451,6 +490,7 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		"contributions":   contributions,
 		"themes":          themes,
 		"themesAvailable": themes != nil,
+		"decisions":       app.decisionLedgerSnapshot(decisionSnapshotLimit),
 		"degraded":        degraded,
 	}
 }

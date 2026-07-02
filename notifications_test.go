@@ -17,7 +17,7 @@ func TestNotificationStorePersistsAndCapsNewest(t *testing.T) {
 
 	total := notificationStoreCap + 5
 	for index := 0; index < total; index++ {
-		if _, err := app.createNotification("", "info", fmt.Sprintf("notification %d", index), "", ""); err != nil {
+		if _, err := app.createNotification("", "info", fmt.Sprintf("notification %d", index), "", "", "", false); err != nil {
 			t.Fatalf("createNotification %d: %v", index, err)
 		}
 	}
@@ -82,11 +82,11 @@ func TestNotificationEndpointsRequireAuthAndScopeToViewer(t *testing.T) {
 		t.Fatalf("unauth read status=%d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 
-	broadcast, err := kanbanApp.createNotification("", "alert", "all hands update", "board", "")
+	broadcast, err := kanbanApp.createNotification("", "alert", "all hands update", "board", "", "", false)
 	if err != nil {
 		t.Fatalf("create broadcast notification: %v", err)
 	}
-	targeted, err := kanbanApp.createNotification("tom@shareability.com", "task", "just for Tom", "", "")
+	targeted, err := kanbanApp.createNotification("tom@shareability.com", "task", "just for Tom", "", "", "", false)
 	if err != nil {
 		t.Fatalf("create targeted notification: %v", err)
 	}
@@ -292,15 +292,15 @@ func TestRealtimeSendNotificationToolContract(t *testing.T) {
 func TestWebsocketNotificationBacklogReplayOnAdmission(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 
-	broadcast, err := kanbanApp.createNotification("", "info", "team broadcast", "", "")
+	broadcast, err := kanbanApp.createNotification("", "info", "team broadcast", "", "", "", false)
 	if err != nil {
 		t.Fatalf("create broadcast: %v", err)
 	}
-	targeted, err := kanbanApp.createNotification("tom@shareability.com", "agent", "your thread finished", "", "os-artifact-research-1")
+	targeted, err := kanbanApp.createNotification("tom@shareability.com", "agent", "your thread finished", "", "os-artifact-research-1", "", false)
 	if err != nil {
 		t.Fatalf("create targeted: %v", err)
 	}
-	if _, err := kanbanApp.createNotification("tyler@shareability.com", "task", "tyler only", "", ""); err != nil {
+	if _, err := kanbanApp.createNotification("tyler@shareability.com", "task", "tyler only", "", "", "", false); err != nil {
 		t.Fatalf("create other-user notification: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestWebsocketTargetedNotificationScopedToRecipientSession(t *testing.T) {
 	waitForKanbanEvent(t, tylerConn, "access_granted", 5*time.Second)
 	writeNativeWebsocketEvent(t, tylerConn, "media_ready", map[string]any{})
 
-	targeted, err := kanbanApp.createNotification("tom@shareability.com", "task", "just for Tom", "", "")
+	targeted, err := kanbanApp.createNotification("tom@shareability.com", "task", "just for Tom", "", "", "", false)
 	if err != nil {
 		t.Fatalf("create targeted notification: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestWebsocketTargetedNotificationScopedToRecipientSession(t *testing.T) {
 	// Sentinel: the next notification event on Tyler's ordered socket must be
 	// this broadcast. If the targeted record had leaked to him, it would be
 	// read first and fail the assertion below.
-	broadcast, err := kanbanApp.createNotification("", "info", "for everyone", "", "")
+	broadcast, err := kanbanApp.createNotification("", "info", "for everyone", "", "", "", false)
 	if err != nil {
 		t.Fatalf("create broadcast notification: %v", err)
 	}
@@ -516,5 +516,185 @@ func TestIndexNotificationCenterWiring(t *testing.T) {
 	reduced := html[strings.LastIndex(html, "@media (prefers-reduced-motion: reduce)"):]
 	if !strings.Contains(reduced, ".notification-panel") {
 		t.Fatal("notification panel animation must be covered by the reduced-motion block")
+	}
+}
+
+// Deferred notifications (deliver "after_meeting") queue invisibly and flush
+// exactly once when the meeting ends: hidden from every list while queued,
+// restamped to the delivery moment on flush, and idempotent across the
+// meeting-end seam + archiveMeeting double invocation.
+func TestDeferredNotificationsQueueAndFlushIdempotently(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	queuedBroadcast, err := app.createNotification("", "info", "post-meeting broadcast reminder", "", "", "", true)
+	if err != nil {
+		t.Fatalf("create deferred broadcast: %v", err)
+	}
+	queuedTargeted, err := app.createNotification("aj@shareability.com", "task", "post-meeting reminder for aj", "", "", "", true)
+	if err != nil {
+		t.Fatalf("create deferred targeted: %v", err)
+	}
+	if queuedBroadcast.DeliverAfter != notificationDeliverAfterMeetingMarker || queuedTargeted.DeliverAfter != notificationDeliverAfterMeetingMarker {
+		t.Fatalf("deferred records missing queue marker: %q/%q", queuedBroadcast.DeliverAfter, queuedTargeted.DeliverAfter)
+	}
+
+	// Queued records are invisible everywhere until the flush.
+	if list := app.notificationsForUser("aj@shareability.com", notificationListLimit); len(list) != 0 {
+		t.Fatalf("queued deferred notifications leaked into the list: %#v", list)
+	}
+	if unread := app.unreadNotificationsFor("aj@shareability.com", notificationListLimit); len(unread) != 0 {
+		t.Fatalf("queued deferred notifications leaked into the unread backlog: %#v", unread)
+	}
+
+	queuedAt := queuedBroadcast.CreatedAt
+	time.Sleep(5 * time.Millisecond)
+	if flushed := app.flushDeferredNotifications("meeting_end"); flushed != 2 {
+		t.Fatalf("flushed=%d, want 2", flushed)
+	}
+
+	unread := app.unreadNotificationsFor("aj@shareability.com", notificationListLimit)
+	if len(unread) != 2 {
+		t.Fatalf("unread after flush=%#v, want both records delivered", unread)
+	}
+	for _, item := range unread {
+		createdAt := asString(item["createdAt"])
+		if createdAt <= queuedAt {
+			t.Fatalf("createdAt=%q not restamped past queue time %q (bell orders by delivery moment)", createdAt, queuedAt)
+		}
+	}
+	app.mu.Lock()
+	for _, record := range app.notifications {
+		if record.DeliverAfter != "" {
+			t.Fatalf("record %s still queued after flush: %q", record.ID, record.DeliverAfter)
+		}
+	}
+	app.mu.Unlock()
+
+	// Idempotent: the second seam invocation finds nothing.
+	if flushed := app.flushDeferredNotifications("archive"); flushed != 0 {
+		t.Fatalf("second flush=%d, want 0", flushed)
+	}
+}
+
+// The send_notification tool contract for deliver "after_meeting": the result
+// carries no actions (no toast now), the record queues, and bad deliver
+// values error through the normal path.
+func TestSendNotificationDeliverAfterMeeting(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.applyToolCallArgs("send_notification", map[string]any{
+		"text":     "after the call, remind everyone about the deck",
+		"kind":     "task",
+		"audience": "everyone",
+		"deliver":  "after_meeting",
+	})
+	if err != nil {
+		t.Fatalf("send_notification after_meeting: %v", err)
+	}
+	if changed {
+		t.Fatal("send_notification must not report a board change")
+	}
+	if result["deliver"] != notificationDeliverAfterMeeting {
+		t.Fatalf("result deliver=%v, want after_meeting", result["deliver"])
+	}
+	if _, hasActions := result["actions"]; hasActions {
+		t.Fatalf("deferred send_notification must not return actions (no toast now): %#v", result)
+	}
+
+	app.mu.Lock()
+	queued := 0
+	for _, record := range app.notifications {
+		if record.DeliverAfter == notificationDeliverAfterMeetingMarker {
+			queued++
+		}
+	}
+	app.mu.Unlock()
+	if queued != 1 {
+		t.Fatalf("queued=%d, want 1 deferred record", queued)
+	}
+
+	if _, _, err := app.applyToolCallArgs("send_notification", map[string]any{
+		"text":     "hi",
+		"kind":     "info",
+		"audience": "everyone",
+		"deliver":  "later",
+	}); err == nil {
+		t.Fatal("invalid deliver value must error")
+	}
+
+	// Contract: schema + both instruction builders teach the deferral.
+	rawTools, err := json.Marshal(app.kanbanTools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	if !strings.Contains(string(rawTools), `"after_meeting"`) {
+		t.Fatal("send_notification schema missing the deliver after_meeting enum")
+	}
+	if !strings.Contains(app.sessionInstructions(), "after_meeting") {
+		t.Fatal("room session instructions must teach deliver after_meeting")
+	}
+	if !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "after_meeting") {
+		t.Fatal("private voice instructions must teach deliver after_meeting")
+	}
+}
+
+// archiveMeeting is the second flush seam: queued records deliver before the
+// meeting id rotates, so an archive with no idle-end still empties the queue.
+func TestArchiveMeetingFlushesDeferredNotifications(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	if _, err := app.createNotification("tom@shareability.com", "task", "after-meeting reminder for tom", "", "", "", true); err != nil {
+		t.Fatalf("create deferred notification: %v", err)
+	}
+	if unread := app.unreadNotificationsFor("tom@shareability.com", notificationListLimit); len(unread) != 0 {
+		t.Fatalf("deferred record visible before archive: %#v", unread)
+	}
+
+	if _, err := app.archiveMeeting("AJ"); err != nil {
+		t.Fatalf("archiveMeeting: %v", err)
+	}
+
+	unread := app.unreadNotificationsFor("tom@shareability.com", notificationListLimit)
+	if len(unread) != 1 || !strings.Contains(asString(unread[0]["text"]), "after-meeting reminder") {
+		t.Fatalf("unread after archive=%#v, want the flushed deferred record", unread)
+	}
+}
+
+// The idle meeting-end seam (endMeetingForIdle) flushes the same queue before
+// rotating the memory meeting id.
+func TestIdleMeetingEndFlushesDeferredNotifications(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.noteMeetingAdmission("AJ")
+	if _, err := app.createNotification("", "info", "reminder queued during the meeting", "", "", "", true); err != nil {
+		t.Fatalf("create deferred notification: %v", err)
+	}
+
+	fireIdleEndNow(app)
+
+	unread := app.unreadNotificationsFor("aj@shareability.com", notificationListLimit)
+	if len(unread) != 1 || !strings.Contains(asString(unread[0]["text"]), "reminder queued") {
+		t.Fatalf("unread after idle end=%#v, want the flushed deferred record", unread)
+	}
+	if flushed := app.flushDeferredNotifications("archive"); flushed != 0 {
+		t.Fatalf("second flush=%d, want 0 (idempotent across both seams)", flushed)
+	}
+}
+
+// Channel notifications deep-link: threadId survives the viewer projection so
+// the client bell can route straight to the channel.
+func TestNotificationForViewerCarriesThreadID(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	record, err := app.createNotification("", notificationKindChat, "AJ posted in #warroom: ship it", "chat", "", "scout-chat-123", false)
+	if err != nil {
+		t.Fatalf("create channel notification: %v", err)
+	}
+	payload := notificationForViewer(record, "")
+	if payload["threadId"] != "scout-chat-123" {
+		t.Fatalf("viewer payload threadId=%v, want scout-chat-123", payload["threadId"])
 	}
 }

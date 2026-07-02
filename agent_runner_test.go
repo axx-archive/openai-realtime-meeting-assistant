@@ -129,6 +129,14 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 			calls = append(calls, "board")
 			return `{"summary":"No actionable board changes.","operations":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "decision ledger") {
+			calls = append(calls, "ledger")
+			return `{"decisions":[]}`, nil
+		}
+		if strings.Contains(request.Instructions, "mission intelligence") {
+			calls = append(calls, "mission")
+			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -139,8 +147,8 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
-	if len(calls) != 2 || calls[0] != "brain" || calls[1] != "board" {
-		t.Fatalf("calls=%v, want one brain pass then one board pass", calls)
+	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
+		t.Fatalf("calls=%v, want one brain pass, one decision-ledger pass, one board pass, then one mission pass", calls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
 		t.Fatalf("downloadUrl=%q, want embedded room key", result.DownloadURL)
@@ -279,6 +287,14 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 			calls = append(calls, "board")
 			return `{"summary":"No actionable board changes.","operations":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "decision ledger") {
+			calls = append(calls, "ledger")
+			return `{"decisions":[]}`, nil
+		}
+		if strings.Contains(request.Instructions, "mission intelligence") {
+			calls = append(calls, "mission")
+			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -292,8 +308,8 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	// fresh in-meeting transcript: the flush picks up from the boot baseline.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if len(calls) != 2 || calls[0] != "brain" || calls[1] != "board" {
-		t.Fatalf("calls=%v, want one brain pass then one board pass for post-boot input", calls)
+	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, board, then mission for post-boot input", calls)
 	}
 }
 

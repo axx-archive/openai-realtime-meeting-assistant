@@ -242,7 +242,8 @@
         }
       }
 
-      #appShell:has(.topbar__mark.is-listening) {
+      #appShell:has(.topbar__mark.is-listening),
+      #appShell:has(.topbar__mark.is-wake) {
         --breathe: var(--breathe-live);
       }
 
@@ -639,6 +640,18 @@
       }
       .topbar__mark.is-listening {
         color: var(--live);
+      }
+      /* wake-word presence cue — Scout heard its name; one breathe cycle,
+         a separate class so it never fights setConnectionState's
+         is-listening ownership */
+      .topbar__mark.is-wake {
+        color: var(--live);
+      }
+      .topbar__mark.is-wake svg {
+        animation: bf-breathe var(--dur-breathe) var(--ease) 1;
+      }
+      .voice-island.is-wake .bf-wave-bar {
+        animation: bf-breathe var(--dur-breathe) var(--ease) 1;
       }
       /* hot-ember handshake — recognition flares the mark for 1.6s */
       .topbar__mark.is-hot-ember {
@@ -6340,6 +6353,65 @@
 	        transform: scale(var(--press-scale));
 	      }
 
+	      /* follow-up composer target chip — reuses the pending-file chip
+	         grammar; no new hues (glass & ink: hue = state only) */
+	      .scout-followup-target {
+	        flex: none;
+	        display: flex;
+	        flex-wrap: wrap;
+	        gap: 8px;
+	        margin: 0 28px 8px;
+	      }
+
+	      .scout-followup-target[hidden] {
+	        display: none;
+	      }
+
+	      .scout-followup-chip {
+	        min-width: 0;
+	        max-width: 100%;
+	        display: inline-flex;
+	        align-items: center;
+	        gap: 8px;
+	        min-height: 32px;
+	        padding: 2px 4px 2px 10px;
+	        border: 1px solid var(--line-1);
+	        border-radius: var(--r-full);
+	        background: var(--surface-2);
+	        color: var(--text-1);
+	      }
+
+	      .scout-followup-chip__label {
+	        min-width: 0;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	      }
+
+	      .scout-followup-chip__clear {
+	        width: 24px;
+	        height: 24px;
+	        display: inline-flex;
+	        align-items: center;
+	        justify-content: center;
+	        padding: 0;
+	        border: 0;
+	        border-radius: var(--r-full);
+	        background: transparent;
+	        color: var(--text-3);
+	        cursor: pointer;
+	        transition:
+	          background var(--dur-fast) var(--ease),
+	          color var(--dur-fast) var(--ease);
+	      }
+
+	      .scout-followup-chip__clear:hover {
+	        background: var(--surface-3);
+	        color: var(--text-1);
+	      }
+
       /* kit: research / tool-progress card — a left-aligned run report */
       .scout-chat-research {
         align-self: flex-start;
@@ -6392,6 +6464,62 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
+      }
+
+      /* in-place version chip + grill readiness dial in the card head */
+      .scout-chat-research__version {
+        flex: none;
+        padding: 1px 7px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-research__version[hidden] {
+        display: none;
+      }
+
+      .scout-chat-research__readiness {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+      }
+
+      .scout-chat-research__readiness[hidden] {
+        display: none;
+      }
+
+      .scout-chat-research__delta {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* state hue only — the same tokens pill--listening / pill--offline use */
+      .scout-chat-research__delta.is-up {
+        color: var(--live);
+      }
+
+      .scout-chat-research__delta.is-down {
+        color: var(--danger);
+      }
+
+      .scout-chat-research__delta.is-flat {
+        color: var(--text-3);
+      }
+
+      /* version boundary rule inside rich chat/report bodies */
+      .chat-rich__rule {
+        width: 100%;
+        margin: 10px 0;
+        border: 0;
+        border-top: 1px solid var(--line-1);
       }
 
       .scout-chat-research__body {
@@ -6853,6 +6981,42 @@
       .room-chat__form {
         flex: none;
         margin: 0 0 var(--sp-2);
+      }
+
+      /* close-the-loop delivery: a finished-artifact message carries a glass
+         chip that opens the report in the intel library */
+      .room-chat-artifact-chip {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 32px;
+        max-width: 100%;
+        margin-top: 6px;
+        padding: 0 11px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .room-chat-artifact-chip__title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .room-chat-artifact-chip:hover {
+        background: var(--surface-2);
+        color: var(--text-1);
+      }
+
+      .room-chat-artifact-chip:active {
+        transform: scale(var(--press-scale));
       }
 
       /* peer bubble — another participant: surface fill, left-aligned */
@@ -7549,6 +7713,224 @@
       .intel-item__text {
         color: var(--text-1);
         font: var(--type-body);
+      }
+
+      /* decision ledger rows: statement + a muted who/when meta line.
+         Glyph stays ink — a recorded decision is content, not a state. */
+      .intel-item__body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .intel-item__meta {
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
+      .intel-col--ledger {
+        max-height: 320px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      /* segmented control — glass pill pair in the intel head; the pressed
+         segment gets the rail-tool treatment (surface + line), hue stays
+         state-only per canon */
+      .intel-seg {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 3px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+      }
+
+      .intel-seg__btn {
+        appearance: none;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        padding: 6px 14px;
+        border-radius: var(--r-full);
+        cursor: pointer;
+      }
+
+      .intel-seg__btn:hover {
+        color: var(--text-1);
+      }
+
+      .intel-seg__btn[aria-pressed="true"] {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-1);
+      }
+
+      /* brain/packages panes keep the canvas rhythm; [hidden] must beat the
+         explicit display */
+      .intel-pane {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-8);
+        min-width: 0;
+      }
+
+      .intel-pane[hidden] {
+        display: none;
+      }
+
+      /* package binder — quiet rows; the stage pill is a neutral chip
+         (pipeline position is content, not tone) */
+      .package-create {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+      }
+
+      .package-create[hidden] {
+        display: none;
+      }
+
+      .package-create__input {
+        flex: 1 1 220px;
+        min-width: 0;
+        padding: 10px 12px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        color: var(--text-1);
+        font: var(--type-body);
+      }
+
+      .package-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .package-row {
+        padding: 16px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        min-width: 0;
+      }
+
+      .package-row__head {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        flex-wrap: wrap;
+        width: 100%;
+        padding: 0;
+        background: none;
+        border: 0;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .package-stage {
+        flex: none;
+        padding: 2px 8px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .package-row__name {
+        margin: 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        min-width: 0;
+      }
+
+      .package-row__meta,
+      .package-row__gaps {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .package-row__gaps {
+        margin-left: auto;
+      }
+
+      .package-row__details {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line-1);
+      }
+
+      .package-row__thesis {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-body);
+      }
+
+      /* stage rail reuses the contribution track/fill pattern for the
+         progress line, with the six stage labels beneath */
+      .package-rail {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .package-rail__labels {
+        display: flex;
+        justify-content: space-between;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .package-rail__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .package-rail__label[aria-current="step"] {
+        color: var(--text-1);
+      }
+
+      .package-artifact {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line-1);
+        min-width: 0;
+      }
+
+      .package-artifact:last-child {
+        border-bottom: 0;
+      }
+
+      .package-artifact__title {
+        color: var(--text-1);
+        font: var(--type-body);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .package-artifact__open {
+        margin-left: auto;
+      }
+
+      .package-row__actions {
+        display: flex;
+        justify-content: flex-end;
       }
 
       .intel-empty {
@@ -12371,6 +12753,8 @@
       @media (prefers-reduced-motion: reduce) {
         .mount-stagger { opacity: 1; transform: none; animation: none !important; }
         .topbar__mark.is-listening,
+        .topbar__mark.is-wake svg,
+        .voice-island.is-wake .bf-wave-bar,
         .pill--listening,
         .login-rise,
         .login-rise--card,
@@ -12910,6 +13294,7 @@
               <button type="button" data-scout-starter="grill">grill</button>
               <button type="button" data-scout-starter="workflow">plan</button>
             </div>
+            <div id="scoutFollowUpTarget" class="scout-followup-target" hidden></div>
             <div id="scoutChatPendingFiles" class="scout-chat-pending-files" hidden></div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
@@ -12939,8 +13324,14 @@
                 <h2 class="intel-title">Mission Intelligence</h2>
                 <p class="intel-meta" id="intelMetaLine">the company brain, visible</p>
               </div>
+              <div class="intel-seg" role="tablist" aria-label="Intelligence canvas view">
+                <button id="intelSegBrain" class="intel-seg__btn" type="button" aria-pressed="true">intelligence</button>
+                <button id="intelSegPackages" class="intel-seg__btn" type="button" aria-pressed="false">packages</button>
+              </div>
               <button id="intelRefreshButton" class="btn btn--ghost" type="button">Refresh themes</button>
             </header>
+
+            <div id="intelBrainPane" class="intel-pane">
 
             <section class="intel-section" aria-label="Ingestion pulse">
               <div class="intel-section__head">
@@ -12969,6 +13360,34 @@
                 <div class="intel-col"><h3 class="intel-col__title">in lockstep</h3><div id="intelAlignments" class="intel-col__body"></div></div>
               </div>
             </section>
+
+            <section class="intel-section" aria-label="Decision ledger">
+              <div class="intel-section__head">
+                <span class="intel-section__label">decision ledger</span>
+                <span id="intelDecisionsStamp" class="intel-section__hint"></span>
+              </div>
+              <div id="intelDecisions" class="intel-col intel-col--ledger"></div>
+            </section>
+
+            </div>
+
+            <!-- the package binder segment; the artifact library section below
+                 stays OUTSIDE both panes so "open" on an attached artifact
+                 reads in place from either segment -->
+            <div id="intelPackagesPane" class="intel-pane" hidden>
+              <section class="intel-section" aria-label="Venture packages">
+                <div class="intel-section__head">
+                  <span class="intel-section__label">venture packages</span>
+                  <button id="packageNewToggle" class="btn btn--ghost" type="button" aria-expanded="false">New package</button>
+                </div>
+                <form id="packageCreateForm" class="package-create" hidden>
+                  <input id="packageNameInput" class="package-create__input" type="text" placeholder="package name" aria-label="Package name" autocomplete="off">
+                  <input id="packageThesisInput" class="package-create__input" type="text" placeholder="one-line thesis (optional)" aria-label="Package thesis" autocomplete="off">
+                  <button class="btn" type="submit">Create package</button>
+                </form>
+                <div id="packageList" class="package-list"></div>
+              </section>
+            </div>
 
             <section class="intel-section" data-admin-artifacts hidden aria-label="Artifact library">
               <div class="intel-section__head">
@@ -13657,6 +14076,16 @@
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
       let resetToken = ''
+      /* office event socket — a second websocket on the same endpoint with an
+         `office` hello. It follows auth (not room membership) and carries the
+         signed-in-safe broadcast set; the room socket (ws) keeps its single
+         job of room membership + media signaling. */
+      let officeWs = null
+      let officeWsReconnectTimer = 0
+      let officeWsAttempts = 0
+      /* meeting_archived rides the union fan-out (room + office sockets), so
+         a tab holding both dedupes by the archive download URL */
+      let lastMeetingArchivedUrl = ''
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
       /* renderTheme paints; applyTheme = renderTheme + persist. The pre-paint
@@ -13838,8 +14267,19 @@
       const intelThemesEl = document.getElementById('intelThemes')
       const intelQuestionsEl = document.getElementById('intelQuestions')
       const intelAlignmentsEl = document.getElementById('intelAlignments')
+      const intelDecisionsStamp = document.getElementById('intelDecisionsStamp')
+      const intelDecisionsEl = document.getElementById('intelDecisions')
       const intelLibraryToggle = document.getElementById('intelLibraryToggle')
       const intelLibrary = document.getElementById('intelLibrary')
+      const intelSegBrain = document.getElementById('intelSegBrain')
+      const intelSegPackages = document.getElementById('intelSegPackages')
+      const intelBrainPane = document.getElementById('intelBrainPane')
+      const intelPackagesPane = document.getElementById('intelPackagesPane')
+      const packageNewToggle = document.getElementById('packageNewToggle')
+      const packageCreateForm = document.getElementById('packageCreateForm')
+      const packageNameInput = document.getElementById('packageNameInput')
+      const packageThesisInput = document.getElementById('packageThesisInput')
+      const packageListEl = document.getElementById('packageList')
       const memoryList = document.getElementById('memoryList')
       const memoryCount = document.getElementById('memoryCount')
       const memorySearch = document.getElementById('memorySearch')
@@ -13859,6 +14299,7 @@
 	      const scoutChatFileInput = document.getElementById('scoutChatFileInput')
 	      const scoutChatAttach = document.getElementById('scoutChatAttach')
 	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
+	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
@@ -14008,6 +14449,9 @@
 	      let scoutChatThreads = []
 	      let activeScoutThreadId = ''
 	      let pendingScoutFiles = []
+	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
+	      // next send re-runs that artifact in place via followUpArtifactId
+	      let scoutFollowUpTarget = null
 	      let newChatThreadVisibility = 'private'
 	      let chatThreadPollTimer = 0
 	      let chatThreadsFingerprint = ''
@@ -14035,12 +14479,19 @@
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
 
       function canUseArtifactLibrary() {
+        /* trust boundary = the signed-in team: every account reads, lists,
+           edits, and publishes artifacts. Only external-write approval keeps
+           the admin gate (canApproveExternalWrites). */
+        return Boolean(authedUser)
+      }
+
+      function canApproveExternalWrites() {
         return Boolean(authedUser) && String(authedUser?.email || '').trim().toLowerCase() === artifactAdminEmail
       }
 
       function syncArtifactLibraryAccess() {
-        /* the intel canvas is for everyone; only the artifact-library
-           section (data-admin-artifacts) stays admin-gated */
+        /* the intel canvas and the artifact library are for everyone
+           signed in; data-admin-artifacts survives as the sign-in gate */
         const allowed = canUseArtifactLibrary()
         adminArtifactNodes.forEach(node => {
           node.hidden = !allowed
@@ -14096,6 +14547,9 @@
       let commentPreviewTimer
       let roomStartedAt = 0
       let roomClockTimer = 0
+      // server-anchored shared meeting start (ms since epoch, skew-corrected);
+      // 0 until a `meeting` event delivers the record
+      let sharedMeetingStartMs = 0
       let connectionRecoveryTimer = 0
       let signalingReconnectTimer = 0
       let signalingReconnectAttempts = 0
@@ -15343,14 +15797,31 @@
           : mode === 'authed' ? `Open office as ${authedUser.name}` : 'Sign in'
         validateAccess()
         syncAuthenticatedShell()
+        // the office event socket follows auth, not room membership: every
+        // path that flips authedUser funnels through renderLoginMode
+        if (authedUser) {
+          ensureOfficeSocket()
+        } else {
+          closeOfficeSocket()
+        }
       }
 
       async function refreshAuthState() {
         try {
           const response = await fetch('/auth/me', { cache: 'no-store' })
-          authedUser = response.ok ? await response.json() : null
+          if (response.ok) {
+            authedUser = await response.json()
+          } else if (response.status === 401 || response.status === 403) {
+            // only a real auth rejection signs the tab out
+            authedUser = null
+          }
+          // any other status is infrastructure noise (proxy 502 while the
+          // server rebuilds) — keep the current signed-in state
         } catch {
-          authedUser = null
+          // a network-failed /auth/me (server restarting, wifi blip) must
+          // NOT clear authedUser: the session cookie is still valid, and
+          // the office socket backoff keeps retrying until the server is
+          // back
         }
         syncAudioSettingsForAccount()
         renderLoginMode()
@@ -15375,6 +15846,102 @@
 	        }
 	        loadNotifications()
 	      }
+
+      /* ---------- office event socket ----------
+         Opens on auth, never takes a room seat: the server's `office` hello
+         registers this socket for the signed-in-safe event set (notification,
+         chat_thread, codex_proposal, mission_insight, board/memory/meeting
+         snapshots, room_chat). Kanban envelopes are handled directly — no
+         signaling ever rides this socket, so the room's signalChain ordering
+         does not apply. */
+      function officeSocketLive() {
+        return officeWs?.readyState === WebSocket.OPEN
+      }
+
+      function ensureOfficeSocket() {
+        if (!authedUser) {
+          return
+        }
+        if (officeWs && (officeWs.readyState === WebSocket.OPEN || officeWs.readyState === WebSocket.CONNECTING)) {
+          return
+        }
+        if (officeWsReconnectTimer) {
+          window.clearTimeout(officeWsReconnectTimer)
+          officeWsReconnectTimer = 0
+        }
+        const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket`)
+        officeWs = socket
+        socket.onopen = () => {
+          if (officeWs !== socket) {
+            return
+          }
+          officeWsAttempts = 0
+          socket.send(JSON.stringify({ event: 'office', data: '{}' }))
+        }
+        socket.onmessage = event => {
+          if (officeWs !== socket) {
+            return
+          }
+          let message
+          try {
+            message = JSON.parse(event.data)
+          } catch (error) {
+            console.warn('Office event parse failed', error)
+            return
+          }
+          // Only kanban envelopes are meaningful here; ignore any stray
+          // signaling frames (offer/candidate) — this socket has no media.
+          if (message?.event !== 'kanban') {
+            return
+          }
+          try {
+            handleKanbanMessage(JSON.parse(message.data))
+          } catch (error) {
+            console.warn('Office event handling failed', error)
+          }
+        }
+        socket.onclose = () => {
+          if (officeWs !== socket) {
+            return
+          }
+          officeWs = null
+          scheduleOfficeSocketReconnect()
+        }
+        socket.onerror = () => {
+          // an expired session cookie rejects the upgrade with 401 — resync
+          // the login card (same pattern as the room socket). A refused
+          // upgrade while the server restarts is safe here: refreshAuthState
+          // keeps authedUser on network failure, so the onclose backoff
+          // keeps reconnecting instead of stranding the tab signed out
+          refreshAuthState()
+        }
+      }
+
+      function scheduleOfficeSocketReconnect() {
+        if (!authedUser || officeWsReconnectTimer) {
+          return
+        }
+        const delay = Math.min(1000 * 2 ** officeWsAttempts, 30000)
+        officeWsAttempts += 1
+        officeWsReconnectTimer = window.setTimeout(() => {
+          officeWsReconnectTimer = 0
+          ensureOfficeSocket()
+        }, delay)
+      }
+
+      function closeOfficeSocket() {
+        if (officeWsReconnectTimer) {
+          window.clearTimeout(officeWsReconnectTimer)
+          officeWsReconnectTimer = 0
+        }
+        officeWsAttempts = 0
+        const socket = officeWs
+        officeWs = null
+        if (socket) {
+          try { socket.close() } catch { /* already closed */ }
+        }
+      }
 
       /* identity cache — prefill only. Nothing secret lives in storage: the
          session is an HttpOnly cookie, passkeys live in the platform
@@ -16227,6 +16794,7 @@
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
           if (tool === 'artifacts') {
             loadMissionIntelligence()
+            loadPackages()
           }
           if (canUseArtifactLibrary()) {
             loadArtifacts()
@@ -16377,8 +16945,8 @@
 
       function openAgentArtifact(entry) {
         if (!canUseArtifactLibrary()) {
-          // non-admins still land on the shared intel canvas — only the
-          // library selection below is admin-gated
+          // signed-out viewers still land on the shared intel canvas — the
+          // library selection below needs the signed-in artifact list
           setActiveTool('artifacts')
           return
         }
@@ -16928,6 +17496,15 @@
             container.appendChild(artifactTableNode(tableLines))
             continue
           }
+          // lone --- lines (agent-thread version boundaries) render as rules
+          if (/^\s*-{3,}\s*$/.test(line)) {
+            flushParagraph()
+            const rule = document.createElement('hr')
+            rule.className = 'chat-rich__rule'
+            container.appendChild(rule)
+            index += 1
+            continue
+          }
           const listMatch = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(line)
           if (listMatch) {
             flushParagraph()
@@ -17061,7 +17638,7 @@
         if (!entry) {
           return ''
         }
-        const title = entry.metadata?.title || 'research-brief'
+        const title = artifactDisplayTitle(entry)
         const text = String(entry.text || '')
         return (title ? `# ${title}\n\n` : '') + text
       }
@@ -17083,7 +17660,7 @@
         if (!entry) {
           return
         }
-        const title = entry.metadata?.title || 'research-brief'
+        const title = artifactDisplayTitle(entry)
         const md = artifactMarkdown(entry)
         try {
           const blob = new Blob([md], { type: 'text/markdown' })
@@ -17170,7 +17747,7 @@
 
         const title = document.createElement('h4')
         title.className = 'research-job__title'
-        title.textContent = entry.metadata?.title || 'research brief'
+        title.textContent = artifactDisplayTitle(entry)
 
         const body = document.createElement('p')
         body.className = 'research-job__body'
@@ -17180,7 +17757,12 @@
         meta.className = 'research-job__meta'
         const sources = artifactSources(entry).length
         const worker = artifactWorkerLabel(entry)
-        meta.textContent = `${worker} · ${sources} source${sources === 1 ? '' : 's'}`
+        const version = Number(entry?.metadata?.threadVersion || 0)
+        meta.textContent = `${version >= 2 ? `v${version} · ` : ''}${worker} · ${sources} source${sources === 1 ? '' : 's'}`
+        const readiness = readinessChipNode(entry?.metadata, entry?.metadata?.mode)
+        if (readiness) {
+          meta.append(' · ', readiness)
+        }
 
         item.append(top, title, body, meta)
         return item
@@ -17326,7 +17908,7 @@
 
       function researchCompleteStage(entry, options = {}) {
         const error = Boolean(options.error)
-        const title = entry?.metadata?.title || 'Research brief'
+        const title = artifactDisplayTitle(entry)
         const { objective, sections } = researchArtifactSections(entry)
         const sources = researchArtifactSources(entry)
 
@@ -17483,7 +18065,7 @@
           item.addEventListener('click', () => openAgentArtifact(entry))
           const title = document.createElement('span')
           title.className = 'agent-context__title'
-          title.textContent = entry.metadata?.title || 'research brief'
+          title.textContent = artifactDisplayTitle(entry)
           const meta = document.createElement('span')
           meta.className = 'agent-context__meta'
           meta.textContent = `${artifactStatusLabel(entry)} · ${artifactTimeLabel(entry)}`
@@ -18068,7 +18650,7 @@
 
         const title = document.createElement('span')
         title.className = 'agent-artifact-link__title'
-        title.textContent = entry.metadata?.title || artifactModeLabel(entry)
+        title.textContent = artifactDisplayTitle(entry)
         const meta = document.createElement('span')
         meta.className = 'agent-artifact-link__meta'
         meta.textContent = artifactTimeLabel(entry)
@@ -21072,7 +21654,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function startRoomClock() {
         if (!roomStartedAt) {
-          roomStartedAt = Date.now()
+          // every participant counts from the SERVER meeting start when the
+          // record has arrived; the local stamp is only a pre-record fallback
+          roomStartedAt = sharedMeetingStartMs || Date.now()
         }
         if (!roomClockTimer) {
           roomClockTimer = window.setInterval(updateRoomClock, 1000)
@@ -21661,11 +22245,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderMemory()
       }
 
-      // Board and memory state normally ride the room websocket; office/chat
-      // sessions read the same snapshots over authed HTTP so the tools work
-      // without joining a call. Reads only — edits keep their room gates.
+      // Board and memory state normally ride the room or office websocket;
+      // these authed HTTP reads are the fallback for tabs whose sockets are
+      // down so the tools still work. Reads only — edits keep their room
+      // gates.
       async function loadBoardSnapshot() {
-        if (!authedUser || ws?.readyState === WebSocket.OPEN) {
+        if (!authedUser || ws?.readyState === WebSocket.OPEN || officeSocketLive()) {
           return
         }
         try {
@@ -21674,7 +22259,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return
           }
           const payload = await response.json()
-          if (payload?.board && ws?.readyState !== WebSocket.OPEN) {
+          if (payload?.board && ws?.readyState !== WebSocket.OPEN && !officeSocketLive()) {
             applyBoardSnapshot(payload.board)
           }
         } catch {
@@ -21683,7 +22268,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function loadMemorySnapshot() {
-        if (!authedUser || ws?.readyState === WebSocket.OPEN) {
+        if (!authedUser || ws?.readyState === WebSocket.OPEN || officeSocketLive()) {
           return
         }
         try {
@@ -21692,7 +22277,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return
           }
           const payload = await response.json()
-          if (Array.isArray(payload?.memory) && ws?.readyState !== WebSocket.OPEN) {
+          if (Array.isArray(payload?.memory) && ws?.readyState !== WebSocket.OPEN && !officeSocketLive()) {
             applyMemorySnapshot(payload.memory)
           }
         } catch {
@@ -21702,6 +22287,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function handleKanbanMessage(message) {
         switch (message.event) {
+          case 'office_granted':
+            // the payload snapshots (board/memory/meeting/backlogs) arrive as
+            // their own events right after; chat threads have no replay event,
+            // so a (re)connect catches up on anything missed while offline
+            console.debug('office socket granted', message.data)
+            if (authedUser) {
+              loadScoutChatThreads({ onlyIfChanged: true })
+            }
+            break
           case 'board':
             applyBoardSnapshot(message.data)
             break
@@ -21788,6 +22382,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               }
             }
             break
+          case 'decision':
+            // office-channel fan-out from the decision-ledger agent: upsert
+            // into the cached mission payload (newest first, same 30-cap as
+            // the server snapshot) instead of re-fetching the whole mission
+            if (message.data) {
+              if (intelData) {
+                const decisions = Array.isArray(intelData.decisions) ? intelData.decisions : []
+                intelData.decisions = [message.data, ...decisions.filter(decision => decision?.id !== message.data.id)].slice(0, 30)
+                if ((appShell.dataset.tool || '') === 'artifacts') {
+                  renderIntelDecisions()
+                }
+              } else if ((appShell.dataset.tool || '') === 'artifacts') {
+                loadMissionIntelligence(true)
+              }
+            }
+            break
+          case 'package':
+            // office-channel fan-out from package mutations: upsert the wire
+            // payload into the binder cache (newest-updated first)
+            if (message.data) {
+              upsertPackage(message.data)
+            }
+            break
+          case 'meeting':
+            handleMeetingRecord(message.data)
+            break
           case 'codex_proposal':
             upsertCodexProposal(message.data)
             break
@@ -21864,6 +22484,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const retryAfterMs = Math.max(0, Number(payload?.retryAfterMs || 3000))
         const message = String(payload?.message || 'Server restarting')
         setLog(message)
+        if (!ws && !appShell.classList.contains('is-in-room')) {
+          // an office-socket tab outside the room just notes the restart —
+          // its own socket close schedules the office reconnect backoff, and
+          // there is no room state to tear down
+          return
+        }
+        if (isSignalReconnecting) {
+          // the union fan-out delivers the same restart notice on both the
+          // room and office sockets of an in-room tab; the first delivery
+          // already tore the room down and armed the retry timer — a second
+          // pass would burn another reconnect attempt and re-arm the timer
+          return
+        }
         if (!roomCanReconnectSignal()) {
           leaveRoom()
           return
@@ -21902,6 +22535,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleAssistantEvent(event) {
+        if (event?.kind === 'wake') {
+          // Wake-word presence cue: visual pulse only, never in the feed.
+          pulseScoutWake()
+          return
+        }
         const text = String(event?.text || event?.message || '').trim()
         if (event?.artifact) {
           addArtifactEntry(event.artifact)
@@ -21918,14 +22556,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!thread.artifact) {
             thread.artifact = eventArtifact
           }
-          upsertScoutChatResearchNode(thread, { updatePreview: true })
+          // ownership check: flip a card already rendered in the pane, or
+          // inject only when the active chat thread references this run —
+          // events for runs launched elsewhere (voice, board worker) stay
+          // out of unrelated panes (their artifacts still reach the library
+          // via addArtifactEntry above)
+          const cardArtifactId = String(eventArtifact?.id || thread?.artifactId || '').trim()
+          const existingRunCard = cardArtifactId && scoutChatThread
+            ? scoutChatThread.querySelector(`.scout-chat-research[data-thread-artifact-id="${selectorEscape(cardArtifactId)}"]`)
+            : null
+          if (existingRunCard || activeScoutThreadReferencesRun(cardArtifactId, thread?.id)) {
+            upsertScoutChatResearchNode(thread, { updatePreview: true })
+          }
         }
         if (Array.isArray(event?.actions)) {
           handleOSAssistantActions(event.actions)
         }
         const voiceState = String(event?.voiceState || '').trim()
         if (voiceState && roomRealtimeVoiceActive()) {
-          setVoiceIslandState(voiceState, voiceIslandDetailForEvent(voiceState, text))
+          // An active grill relabels the island; grill:false restores the
+          // normal state through the regular detail path.
+          const grillDetail = event?.grill === true
+            ? `grilling — ${String(event?.topic || '').trim() || 'the room'}`
+            : ''
+          setVoiceIslandState(voiceState, grillDetail || voiceIslandDetailForEvent(voiceState, text))
         }
         if (!text) {
           return
@@ -23091,6 +23745,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
           roomEntryInProgress = false
+          if (!reconnectingSignal) {
+            // room-chat unread accumulated outside the room (via the office
+            // socket) clears on a fresh join; a signaling reconnect keeps the
+            // in-room count.
+            clearRoomChatUnread()
+          }
           if (reconnectingSignal) {
             resetSignalingReconnectState()
             requestParticipantTrackRefresh('signal reconnected')
@@ -23129,6 +23789,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!result?.downloadUrl) {
           return
         }
+        // Union fan-out can land this on both the room and office sockets of
+        // one tab — dedupe by the archive's download URL so the card and
+        // toast render once.
+        if (String(result.downloadUrl) === lastMeetingArchivedUrl) {
+          return
+        }
+        lastMeetingArchivedUrl = String(result.downloadUrl)
 
         addAssistantMessage({
           kind: 'archive',
@@ -23337,8 +24004,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (options.select !== false && !thread.archivedAt) {
 	          activeScoutThreadId = id
+	          syncChatScopeToSelectedThread()
 	        } else if (thread.archivedAt && activeScoutThreadId === id) {
-	          activeScoutThreadId = scoutChatThreads[0]?.id || ''
+	          activeScoutThreadId = fallbackScoutThreadIdForScope()
 	        }
 	        renderChatAgentThreads()
 	        renderOfficeRecentThreads()
@@ -23417,7 +24085,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatThreadsFingerprint = fingerprint
 	          scoutChatThreads = threads
 	          if (!activeScoutThreadId || !scoutChatThreads.some(thread => thread.id === activeScoutThreadId)) {
-	            activeScoutThreadId = scoutChatThreads[0]?.id || ''
+	            // auto-select only a thread matching the current scope pill —
+	            // landing a public channel under the 'private' filter would
+	            // mislabel an all-team surface as private
+	            activeScoutThreadId = fallbackScoutThreadIdForScope()
 	          }
 	          renderChatAgentThreads()
 	          renderActiveScoutThread()
@@ -23427,12 +24098,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      // Channel activity while the chat tool is open: websocket pushes cover
-	      // media-joined tabs; the 12s poll covers chat-tab users with no socket.
+	      // Channel activity while the chat tool is open: chat_thread events on
+	      // the office socket are the live path; the 12s poll is fallback-only,
+	      // skipping its fetch whenever that socket is up.
 	      function syncChatThreadPolling() {
 	        const shouldPoll = Boolean(authedUser) && appShell.dataset.tool === 'chat'
 	        if (shouldPoll && !chatThreadPollTimer) {
-	          chatThreadPollTimer = window.setInterval(() => loadScoutChatThreads({ onlyIfChanged: true }), 12000)
+	          chatThreadPollTimer = window.setInterval(() => {
+	            if (officeSocketLive()) {
+	              return
+	            }
+	            loadScoutChatThreads({ onlyIfChanged: true })
+	          }, 12000)
 	        } else if (!shouldPoll && chatThreadPollTimer) {
 	          window.clearInterval(chatThreadPollTimer)
 	          chatThreadPollTimer = 0
@@ -23508,26 +24185,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      async function sendScoutChatViaOffice(text, files = []) {
+	        // capture-and-clear the armed follow-up target at entry so an error
+	        // can never leave a stale armed chip; a target armed on another
+	        // thread's card is dropped instead of mis-firing here
+	        const followUp = scoutFollowUpTarget && (!scoutFollowUpTarget.threadId || scoutFollowUpTarget.threadId === activeScoutThreadId)
+	          ? scoutFollowUpTarget
+	          : null
+	        scoutFollowUpTarget = null
+	        renderScoutFollowUpTarget()
 	        const ts = new Date().toISOString()
 	        appendScoutChatNode(scoutChatMessageNode('user', text, ts, files))
 	        updateChatThreadItem(text || attachedFilesPreview(files), ts)
 	        // Channels only summon Scout on an @scout mention (server-enforced);
 	        // skip the thinking indicator for plain human-to-human messages.
 	        // Channel agent launches additionally require an explicit "mode:"
-	        // prefix — conversational keywords must not read as a launch.
+	        // prefix — conversational keywords must not read as a launch. A
+	        // follow-up target counts as explicit engagement (no @scout needed).
 	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
-	        const scoutEngaged = !isChannel || /@scout/i.test(text)
+	        const scoutEngaged = Boolean(followUp) || !isChannel || /@scout/i.test(text)
 	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
-	        const threadMode = !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
+	        const threadMode = followUp || !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
 	        if (scoutEngaged) {
-	          showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
+	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}…` : threadMode ? 'launching thread...' : 'thinking...')
 	        }
 	        try {
 	          const thread = await ensurePersistedScoutThread()
 	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
 	            method: 'POST',
 	            headers: { 'Content-Type': 'application/json' },
-	            body: JSON.stringify({ text, files })
+	            body: JSON.stringify(followUp ? { text, files, followUpArtifactId: followUp.artifactId } : { text, files })
 	          })
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok) {
@@ -23653,6 +24339,49 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }))
 	      }
 
+	      function scoutChatDefaultPlaceholder() {
+	        return chatThreadIsChannel(selectedScoutChatThread())
+	          ? 'message the channel — @scout to ask Scout…'
+	          : 'ask Scout, or start with research/design/grill/plan…'
+	      }
+
+	      // composer target chip: while armed, the next send routes through
+	      // followUpArtifactId and re-runs the target artifact in place
+	      function renderScoutFollowUpTarget() {
+	        if (!scoutFollowUpTargetEl) {
+	          return
+	        }
+	        scoutFollowUpTargetEl.replaceChildren()
+	        scoutFollowUpTargetEl.hidden = !scoutFollowUpTarget
+	        if (!scoutFollowUpTarget) {
+	          if (scoutChatInput) {
+	            scoutChatInput.placeholder = scoutChatDefaultPlaceholder()
+	          }
+	          return
+	        }
+	        const chip = document.createElement('span')
+	        chip.className = 'scout-followup-chip'
+	        const label = document.createElement('span')
+	        label.className = 'scout-followup-chip__label'
+	        const query = String(scoutFollowUpTarget.query || '').trim()
+	        label.textContent = `follow-up → ${assistantToolLabelText(scoutFollowUpTarget.mode)} v${scoutFollowUpTarget.version}${query ? ` · ${query.slice(0, 48)}` : ''}`
+	        const clear = document.createElement('button')
+	        clear.type = 'button'
+	        clear.className = 'scout-followup-chip__clear'
+	        clear.setAttribute('aria-label', 'Clear follow-up target')
+	        clear.title = 'clear'
+	        clear.textContent = '×'
+	        clear.addEventListener('click', () => {
+	          scoutFollowUpTarget = null
+	          renderScoutFollowUpTarget()
+	        })
+	        chip.append(label, clear)
+	        scoutFollowUpTargetEl.appendChild(chip)
+	        if (scoutChatInput) {
+	          scoutChatInput.placeholder = 'add answers, corrections, or new info for the next run…'
+	        }
+	      }
+
 	      function attachedFilesPreview(files) {
 	        if (!Array.isArray(files) || !files.length) {
 	          return ''
@@ -23761,6 +24490,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           text: String(payload.text || ''),
           tool: String(payload.tool || ''),
           artifactId: String(payload.artifactId || ''),
+          threadId: String(payload.threadId || ''),
           createdAt: String(payload.createdAt || new Date().toISOString()),
           read: Boolean(payload.read)
         }
@@ -23908,6 +24638,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function openNotificationEntry(entry) {
         markNotificationsRead([entry.id])
         setNotificationPanelOpen(false)
+        if (entry.threadId) {
+          // Channel notifications (post_to_channel / create_channel) deep-link
+          // straight to the thread, same selection path as the chat rail.
+          selectScoutChatThread(entry.threadId)
+          setActiveTool('chat')
+          return
+        }
         if (entry.artifactId) {
           // Completion notifications land on the originating thread card —
           // the top of the intel canvas is a dead end for the requester.
@@ -24203,6 +24940,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         body.className = 'scout-chat-text'
         body.textContent = String(message?.text || '')
         item.append(meta, body)
+        // Close-the-loop delivery: a completed Scout thread posts its card
+        // back to the room; artifactId turns the bubble into a doorway to the
+        // full report in the intel library.
+        const artifactId = String(message?.artifactId || '').trim()
+        if (artifactId) {
+          const entry = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId)
+          const chip = document.createElement('button')
+          chip.type = 'button'
+          chip.className = 'room-chat-artifact-chip'
+          const label = document.createElement('span')
+          label.textContent = entry ? artifactModeLabel(entry) : 'artifact'
+          const chipTitle = document.createElement('span')
+          chipTitle.className = 'room-chat-artifact-chip__title'
+          chipTitle.textContent = entry ? artifactDisplayTitle(entry) : 'view report'
+          chip.append(label, chipTitle)
+          chip.addEventListener('click', () => handleOSAssistantActions([
+            { type: 'open_tool', tool: 'artifacts', artifactId },
+            { type: 'select_artifact', artifactId }
+          ]))
+          item.appendChild(chip)
+        }
         return item
       }
 
@@ -24382,6 +25140,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(thread?.visibility || '').toLowerCase() === 'public'
 	      }
 
+	      // Fallback selection respects the scope pill: never auto-land a
+	      // channel while the rail is filtered to 'private' (the pane would
+	      // present an all-team surface under private labeling) — no match
+	      // leaves the default private Scout state, whose row stays clickable.
+	      function fallbackScoutThreadIdForScope() {
+	        const wantChannel = newChatThreadVisibility === 'public'
+	        return scoutChatThreads.find(thread => chatThreadIsChannel(thread) === wantChannel)?.id || ''
+	      }
+
+	      // Keep the scope pill truthful: explicitly opening a thread flips the
+	      // rail filter to the side that thread lives on, so the open
+	      // conversation is always visible (and correctly labeled) in the rail.
+	      function syncChatScopeToSelectedThread() {
+	        const selected = selectedScoutChatThread()
+	        if (!selected) {
+	          return
+	        }
+	        const wanted = chatThreadIsChannel(selected) ? 'public' : 'private'
+	        if (newChatThreadVisibility !== wanted) {
+	          setNewChatThreadVisibility(wanted)
+	        }
+	      }
+
 	      function chatThreadRowNode(thread, q) {
 	        const isChannel = chatThreadIsChannel(thread)
 	        const title = thread.title || (isChannel ? 'team channel' : 'Scout')
@@ -24486,6 +25267,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function selectScoutChatThread(id) {
 	        activeScoutThreadId = String(id || '')
+	        syncChatScopeToSelectedThread()
 	        markChatThreadSeen(selectedScoutChatThread())
 	        hideScoutChatThinking()
 	        renderChatAgentThreads()
@@ -24548,6 +25330,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? 'message the channel — @scout to ask Scout…'
 	            : 'ask Scout, or start with research/design/grill/plan…'
 	        }
+	        // a follow-up armed on another thread's card must not fire here
+	        if (scoutFollowUpTarget && scoutFollowUpTarget.threadId && scoutFollowUpTarget.threadId !== activeScoutThreadId) {
+	          scoutFollowUpTarget = null
+	        }
+	        renderScoutFollowUpTarget()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 	        if (!messages.length) {
 	          ensureScoutChatEmptyState()
@@ -24605,6 +25392,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+	      // Ownership check for run cards: a broadcast assistant event belongs to
+	      // the OPEN chat pane only when the active thread actually references
+	      // the run (a persisted thread-kind message carries its artifact or
+	      // agent-thread id). Voice- and board-launched runs reference no chat
+	      // thread, so their events must not inject cards into whatever pane
+	      // happens to be open — the server rejects follow-ups on artifacts the
+	      // thread never referenced.
+	      function activeScoutThreadReferencesRun(artifactId, runId) {
+	        const wantArtifact = String(artifactId || '').trim()
+	        const wantRun = String(runId || '').trim()
+	        if (!wantArtifact && !wantRun) {
+	          return false
+	        }
+	        const active = selectedScoutChatThread()
+	        const messages = Array.isArray(active?.messages) ? active.messages : []
+	        return messages.some(message => {
+	          const ref = message?.thread
+	          if (!ref) {
+	            return false
+	          }
+	          return (Boolean(wantArtifact) && String(ref.artifactId || '') === wantArtifact)
+	            || (Boolean(wantRun) && String(ref.id || '') === wantRun)
+	        })
+	      }
+
       function openAgentThreadInChat(entry) {
         if (!entry) {
           setActiveTool('chat')
@@ -24653,6 +25465,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             h.className = 'chat-rich__heading'
             appendChatInlineNodes(h, heading[1].replace(/:\s*$/, ''))
             container.appendChild(h)
+            index += 1
+            continue
+          }
+
+          // a lone --- reads as a rule (version boundaries in agent artifacts)
+          if (/^\s*-{3,}\s*$/.test(line)) {
+            flushParagraph()
+            const rule = document.createElement('hr')
+            rule.className = 'chat-rich__rule'
+            container.appendChild(rule)
             index += 1
             continue
           }
@@ -24858,6 +25680,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (thread?.mode) {
             existing.dataset.threadMode = String(thread.mode)
           }
+          if (thread?.id) {
+            existing.dataset.threadRunId = String(thread.id)
+          }
           updateScoutChatResearchNode(existing, String(thread?.status || artifactStatusValue(artifact) || 'running'), artifact)
           return existing
         }
@@ -24880,6 +25705,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (artifactId) {
           card.dataset.threadArtifactId = artifactId
         }
+        if (thread?.id) {
+          card.dataset.threadRunId = String(thread.id)
+        }
         const mode = String(thread?.mode || 'research')
         card.dataset.threadMode = mode
         const title = `${assistantModeTitle(mode)} · ${String(thread?.query || '').trim() || 'Scout work thread'}`
@@ -24893,6 +25721,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               <span class="scout-chat-research__title"></span>
               <span class="scout-chat-research__tool">tool · ${escapeHtml(assistantToolLabelText(mode))}</span>
             </span>
+            <span class="scout-chat-research__version" data-research-version hidden></span>
+            <span class="scout-chat-research__readiness" data-research-readiness hidden></span>
             <span class="pill" data-research-pill><span class="pill__dot" aria-hidden="true"></span><span data-research-status></span></span>
           </div>
           <div class="scout-chat-research__body">
@@ -24907,6 +25737,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               <button class="scout-chat-research__action" type="button" data-research-download hidden>download .md</button>
               <button class="scout-chat-research__action" type="button" data-research-copy hidden>copy md</button>
               <button class="scout-chat-research__action" type="button" data-research-library hidden>open in library</button>
+              <button class="scout-chat-research__action" type="button" data-research-followup hidden>follow up</button>
             </div>
           </div>
           <div class="scout-chat-research__report artifact-read" data-research-report hidden></div>`
@@ -24935,6 +25766,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (card.__scoutArtifact) {
             openAgentArtifact(card.__scoutArtifact)
           }
+        })
+        card.querySelector('[data-research-followup]')?.addEventListener('click', () => {
+          // arm the composer: the next send re-runs this artifact in place
+          const entry = card.__scoutArtifact
+          const meta = entry?.metadata || {}
+          scoutFollowUpTarget = {
+            artifactId: card.dataset.threadArtifactId || String(entry?.id || ''),
+            mode: card.dataset.threadMode || 'research',
+            query: String(meta.threadQuery || meta.title || thread?.query || '').trim(),
+            version: Number(meta.threadVersion || 1) || 1,
+            threadId: activeScoutThreadId || ''
+          }
+          renderScoutFollowUpTarget()
+          scoutChatInput?.focus()
         })
         updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
         return card
@@ -25034,6 +25879,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (libraryButton) {
           libraryButton.hidden = !hasMarkdown || !canUseArtifactLibrary()
         }
+        const followupButton = card.querySelector('[data-research-followup]')
+        if (followupButton) {
+          // visible to EVERY signed-in user on a terminal run (the follow-up
+          // executes server-side) — never gated by the artifact library. It
+          // must act on the thread the card belongs to, though: the server
+          // rejects artifacts the active thread never referenced, so hide
+          // the action instead of arming a guaranteed 400
+          const inActiveThread = activeScoutThreadReferencesRun(card.dataset.threadArtifactId, card.dataset.threadRunId)
+          followupButton.hidden = !(done || error || rejected) || !inActiveThread
+          followupButton.disabled = active
+        }
+        const chipMeta = entry?.metadata || artifact?.metadata || {}
+        const versionEl = card.querySelector('[data-research-version]')
+        if (versionEl) {
+          const version = Number(chipMeta.threadVersion || 0)
+          versionEl.hidden = !(version >= 2)
+          versionEl.textContent = version >= 2 ? `v${version}` : ''
+        }
+        const readinessEl = card.querySelector('[data-research-readiness]')
+        if (readinessEl) {
+          const chip = readinessChipNode(chipMeta, card.dataset.threadMode)
+          readinessEl.hidden = !chip
+          readinessEl.replaceChildren(...(chip ? Array.from(chip.childNodes) : []))
+        }
         if (report && !report.hidden && entry) {
           renderArtifactRead(report, entry)
         }
@@ -25067,6 +25936,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           default:
             return 'research'
         }
+      }
+
+      // shared grill readiness dial (score + re-grill delta) for the chat
+      // card head and the library rows. Metadata is model-derived — content
+      // lands via textContent only, and hue carries state only (live=up,
+      // danger=down, muted=flat — the pill--listening/pill--offline tokens).
+      function readinessChipNode(metadata, mode) {
+        const meta = metadata || {}
+        const score = String(meta.readinessScore || '').trim()
+        if (String(mode || '').toLowerCase() !== 'grill' || !score) {
+          return null
+        }
+        const chip = document.createElement('span')
+        chip.className = 'scout-chat-research__readiness'
+        chip.textContent = `readiness ${score}/10`
+        const deltaRaw = String(meta.readinessDelta || '').trim()
+        const delta = Number(deltaRaw)
+        if (deltaRaw && Number.isFinite(delta)) {
+          const trend = document.createElement('span')
+          trend.className = `scout-chat-research__delta ${delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : 'is-flat'}`
+          trend.textContent = `${delta > 0 ? '▲' : delta < 0 ? '▼' : '→'} ${String(meta.readinessPrevScore || '').trim()} → ${score}`
+          chip.append(' ', trend)
+        }
+        return chip
       }
 
       function escapeHtml(value) {
@@ -27089,6 +27982,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         renderIntelContributions()
         renderIntelThemes()
+        renderIntelDecisions()
         if (intelMetaLine) {
           intelMetaLine.textContent = `${intelPulseTotal()} ingested this week · the company brain, visible`
         }
@@ -27226,6 +28120,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : [intelEmptyNode('no consensus signals yet')]))
       }
 
+      /* Decision ledger — kind "decision" entries are Scout-grounding
+         knowledge but never memory-timeline noise; this section is the one
+         place they render. Rows reuse .intel-item; glyph stays ink (hue =
+         state only). */
+      function renderIntelDecisions() {
+        if (!intelDecisionsEl) {
+          return
+        }
+        const decisions = Array.isArray(intelData?.decisions) ? intelData.decisions : []
+        if (intelDecisionsStamp) {
+          intelDecisionsStamp.textContent = decisions.length
+            ? `${decisions.length} on record`
+            : ''
+        }
+        if (!decisions.length) {
+          intelDecisionsEl.replaceChildren(intelEmptyNode('no decisions on record yet — scout logs them as meetings settle things'))
+          return
+        }
+        intelDecisionsEl.replaceChildren(...decisions.map(decision => {
+          const item = document.createElement('div')
+          item.className = 'intel-item intel-item--decision'
+          const mark = document.createElement('span')
+          mark.className = 'intel-item__glyph'
+          mark.setAttribute('aria-hidden', 'true')
+          mark.textContent = '✓'
+          const body = document.createElement('span')
+          body.className = 'intel-item__body'
+          const text = document.createElement('span')
+          text.className = 'intel-item__text'
+          text.textContent = String(decision?.statement || '')
+          const meta = document.createElement('span')
+          meta.className = 'intel-item__meta'
+          const madeBy = String(decision?.madeBy || '').trim()
+          const context = String(decision?.context || '').trim()
+          const parts = []
+          if (madeBy) parts.push(madeBy)
+          parts.push(intelRelativeTime(decision?.createdAt))
+          if (context) parts.push(context)
+          meta.textContent = parts.join(' · ')
+          body.append(text, meta)
+          item.append(mark, body)
+          return item
+        }))
+      }
+
       // 429 cooldown: disable the button with an honest countdown instead of
       // letting it look dead for the rest of the server-side window.
       let intelRefreshCooldownTimer = 0
@@ -27307,6 +28246,314 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
       intelRefreshButton?.addEventListener('click', refreshMissionIntelligence)
       intelLibraryToggle?.addEventListener('click', () => setIntelLibraryOpen(Boolean(intelLibrary?.hidden)))
+
+      /* ---------- Package binder (the packages segment) ---------- */
+      let packagesData = []
+      let packagesLoadedAt = 0
+      let expandedPackageId = ''
+
+      function setIntelSegment(segment) {
+        const packages = segment === 'packages'
+        if (intelBrainPane) {
+          intelBrainPane.hidden = packages
+        }
+        if (intelPackagesPane) {
+          intelPackagesPane.hidden = !packages
+        }
+        intelSegBrain?.setAttribute('aria-pressed', packages ? 'false' : 'true')
+        intelSegPackages?.setAttribute('aria-pressed', packages ? 'true' : 'false')
+        if (packages) {
+          loadPackages()
+        }
+      }
+      intelSegBrain?.addEventListener('click', () => setIntelSegment('brain'))
+      intelSegPackages?.addEventListener('click', () => setIntelSegment('packages'))
+
+      async function loadPackages(force = false) {
+        if (!authedUser || !packageListEl) {
+          return
+        }
+        if (!force && packagesLoadedAt && Date.now() - packagesLoadedAt < 15000) {
+          return
+        }
+        try {
+          const response = await fetch('/assistant/packages', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          if (Array.isArray(payload?.packages)) {
+            packagesData = payload.packages
+            packagesLoadedAt = Date.now()
+            renderPackages()
+          }
+        } catch {
+          // the binder is additive; keep the prior list on a missed fetch
+        }
+      }
+
+      function upsertPackage(payload) {
+        if (!payload || typeof payload !== 'object' || !payload.id) {
+          return
+        }
+        packagesData = [payload, ...packagesData.filter(record => record?.id !== payload.id)]
+        renderPackages()
+      }
+
+      function packageStagePercent(record) {
+        const stages = Array.isArray(record?.stages) ? record.stages : []
+        if (stages.length < 2) {
+          return 0
+        }
+        const index = Math.max(0, Number(record?.stageIndex) || 0)
+        return Math.min(100, Math.round((index / (stages.length - 1)) * 100))
+      }
+
+      function openPackageArtifact(artifactId) {
+        /* open-in-place: the all-user artifact reader (the library section
+           outside the panes) shows the body without leaving the intel canvas */
+        if (!canUseArtifactLibrary() || !artifactId) {
+          return
+        }
+        setIntelLibraryOpen(true)
+        selectArtifact(artifactId)
+        intelLibrary?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+
+      function renderPackageDetails(record) {
+        const details = document.createElement('div')
+        details.className = 'package-row__details'
+        const thesisText = String(record?.thesis || '').trim()
+        if (thesisText) {
+          const thesis = document.createElement('p')
+          thesis.className = 'package-row__thesis'
+          thesis.textContent = thesisText
+          details.append(thesis)
+        }
+
+        const stages = Array.isArray(record?.stages) ? record.stages : []
+        if (stages.length) {
+          const rail = document.createElement('div')
+          rail.className = 'package-rail'
+          const track = document.createElement('span')
+          track.className = 'intel-contrib__track'
+          const fill = document.createElement('span')
+          fill.className = 'intel-contrib__fill'
+          fill.style.width = `${packageStagePercent(record)}%`
+          track.append(fill)
+          const labels = document.createElement('div')
+          labels.className = 'package-rail__labels'
+          labels.append(...stages.map((stageName, index) => {
+            const label = document.createElement('span')
+            label.className = 'package-rail__label'
+            label.textContent = String(stageName)
+            if (index === (Number(record?.stageIndex) || 0)) {
+              label.setAttribute('aria-current', 'step')
+            }
+            return label
+          }))
+          rail.append(track, labels)
+          details.append(rail)
+        }
+
+        const artifacts = Array.isArray(record?.artifacts) ? record.artifacts : []
+        if (artifacts.length) {
+          const list = document.createElement('div')
+          list.className = 'package-artifacts'
+          artifacts.forEach(artifact => {
+            const rowEl = document.createElement('div')
+            rowEl.className = 'package-artifact'
+            const mode = document.createElement('span')
+            mode.className = 'artifact-item__mode'
+            /* grill readiness metadata rides along only when a re-grill pass
+               stored it on the artifact; omitted otherwise */
+            const readiness = String(artifact?.readiness || '').trim()
+            const readinessDelta = String(artifact?.readinessDelta || '').trim()
+            const modeParts = [String(artifact?.mode || 'artifact')]
+            if (readiness) {
+              modeParts.push(readinessDelta ? `${readiness} (${readinessDelta})` : readiness)
+            }
+            mode.textContent = modeParts.join(' · ')
+            const title = document.createElement('span')
+            title.className = 'package-artifact__title'
+            title.textContent = String(artifact?.title || 'untitled artifact')
+            const open = document.createElement('button')
+            open.type = 'button'
+            open.className = 'btn btn--ghost package-artifact__open'
+            open.textContent = 'open'
+            open.addEventListener('click', () => openPackageArtifact(String(artifact?.id || '')))
+            rowEl.append(mode, title, open)
+            list.append(rowEl)
+          })
+          details.append(list)
+        }
+
+        const decisions = Array.isArray(record?.decisions) ? record.decisions : []
+        if (decisions.length) {
+          const ledger = document.createElement('div')
+          ledger.className = 'intel-col intel-col--ledger'
+          decisions.forEach(decision => {
+            const item = document.createElement('div')
+            item.className = 'intel-item intel-item--decision'
+            const mark = document.createElement('span')
+            mark.className = 'intel-item__glyph'
+            mark.setAttribute('aria-hidden', 'true')
+            mark.textContent = '✓'
+            const body = document.createElement('span')
+            body.className = 'intel-item__body'
+            const text = document.createElement('span')
+            text.className = 'intel-item__text'
+            text.textContent = String(decision?.statement || '')
+            body.append(text)
+            const madeBy = String(decision?.madeBy || '').trim()
+            if (madeBy) {
+              const meta = document.createElement('span')
+              meta.className = 'intel-item__meta'
+              meta.textContent = madeBy
+              body.append(meta)
+            }
+            item.append(mark, body)
+            ledger.append(item)
+          })
+          details.append(ledger)
+        }
+
+        const actions = document.createElement('div')
+        actions.className = 'package-row__actions'
+        const advance = document.createElement('button')
+        advance.type = 'button'
+        advance.className = 'btn btn--ghost'
+        const terminal = stages.length > 0 && (Number(record?.stageIndex) || 0) >= stages.length - 1
+        advance.textContent = terminal ? 'assembled' : 'Advance stage'
+        advance.disabled = terminal
+        advance.addEventListener('click', () => advanceVenturePackage(String(record?.id || '')))
+        actions.append(advance)
+        details.append(actions)
+        return details
+      }
+
+      function renderPackages() {
+        if (!packageListEl) {
+          return
+        }
+        if (!packagesData.length) {
+          packageListEl.replaceChildren(intelEmptyNode('no venture packages yet — create one here, or ask scout to create a package'))
+          return
+        }
+        packageListEl.replaceChildren(...packagesData.map(record => {
+          const row = document.createElement('article')
+          row.className = 'package-row'
+          const expanded = expandedPackageId === record?.id
+          const head = document.createElement('button')
+          head.type = 'button'
+          head.className = 'package-row__head'
+          head.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+          const stage = document.createElement('span')
+          stage.className = 'package-stage'
+          stage.textContent = String(record?.stage || 'thesis')
+          const name = document.createElement('h3')
+          name.className = 'package-row__name'
+          name.textContent = String(record?.name || 'untitled package')
+          const meta = document.createElement('span')
+          meta.className = 'package-row__meta'
+          const stats = record?.stats || {}
+          const metaParts = [
+            `${Number(stats.artifactCount) || 0} artifacts`,
+            `${Number(stats.decisionCount) || 0} decisions`
+          ]
+          if (stats.grillScore) {
+            metaParts.push(`grill ${stats.grillScore}/10`)
+          }
+          meta.textContent = metaParts.join(' · ')
+          head.append(stage, name, meta)
+          const gaps = Array.isArray(stats.gaps) ? stats.gaps.filter(Boolean) : []
+          if (gaps.length) {
+            const gapsEl = document.createElement('span')
+            gapsEl.className = 'package-row__gaps'
+            gapsEl.textContent = `gaps: ${gaps.join(', ')}`
+            head.append(gapsEl)
+          }
+          head.addEventListener('click', () => {
+            expandedPackageId = expanded ? '' : String(record?.id || '')
+            renderPackages()
+          })
+          row.append(head)
+          if (expanded) {
+            row.append(renderPackageDetails(record))
+          }
+          return row
+        }))
+      }
+
+      async function advanceVenturePackage(id) {
+        if (!id) {
+          return
+        }
+        try {
+          const response = await fetch(`/assistant/packages/${encodeURIComponent(id)}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'advance_stage' })
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not advance the package', kind: 'error' })
+            return
+          }
+          if (payload?.package) {
+            upsertPackage(payload.package)
+          }
+        } catch {
+          showToast({ text: 'could not advance the package', kind: 'error' })
+        }
+      }
+
+      packageNewToggle?.addEventListener('click', () => {
+        if (!packageCreateForm) {
+          return
+        }
+        const open = Boolean(packageCreateForm.hidden)
+        packageCreateForm.hidden = !open
+        packageNewToggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+        if (open) {
+          packageNameInput?.focus()
+        }
+      })
+
+      packageCreateForm?.addEventListener('submit', async event => {
+        event.preventDefault()
+        const name = String(packageNameInput?.value || '').trim()
+        if (!name) {
+          packageNameInput?.focus()
+          return
+        }
+        try {
+          const response = await fetch('/assistant/packages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, thesis: String(packageThesisInput?.value || '').trim() })
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not create the package', kind: 'error' })
+            return
+          }
+          if (payload?.package) {
+            expandedPackageId = String(payload.package.id || '')
+            upsertPackage(payload.package)
+          }
+          if (packageNameInput) {
+            packageNameInput.value = ''
+          }
+          if (packageThesisInput) {
+            packageThesisInput.value = ''
+          }
+          packageCreateForm.hidden = true
+          packageNewToggle?.setAttribute('aria-expanded', 'false')
+        } catch {
+          showToast({ text: 'could not create the package', kind: 'error' })
+        }
+      })
 
       async function loadArtifacts() {
         if (!canUseArtifactLibrary()) {
@@ -27568,6 +28815,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         status.textContent = artifactStatusLabel(entry)
         lead.appendChild(status)
 
+        const entryVersion = Number(entry?.metadata?.threadVersion || 0)
+        if (entryVersion >= 2) {
+          const versionChip = document.createElement('span')
+          versionChip.className = 'scout-chat-research__version'
+          versionChip.textContent = `v${entryVersion}`
+          lead.appendChild(versionChip)
+        }
+        const readinessChip = readinessChipNode(entry?.metadata, entry?.metadata?.mode)
+        if (readinessChip) {
+          lead.appendChild(readinessChip)
+        }
+
         if (artifactPublished(entry)) {
           const live = document.createElement('span')
           live.className = 'artifact-item__live'
@@ -27582,7 +28841,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const title = document.createElement('h3')
         title.className = 'artifact-item__title'
-        title.textContent = entry.metadata?.title || artifactModeLabel(entry)
+        title.textContent = artifactDisplayTitle(entry)
 
         const body = document.createElement('p')
         body.className = 'artifact-item__body'
@@ -27611,13 +28870,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           artifactEditButton.disabled = disabled
           artifactEditButton.textContent = artifactEditMode ? 'Preview' : 'Edit'
         }
+        /* external-write approval is the one artifact capability that stays
+           admin-only — everyone else sees the status, not the lever */
+        const canApprove = approvalRequired && canApproveExternalWrites()
         if (artifactApproveButton) {
-          artifactApproveButton.hidden = !approvalRequired
-          artifactApproveButton.disabled = !approvalRequired
+          artifactApproveButton.hidden = !canApprove
+          artifactApproveButton.disabled = !canApprove
         }
         if (artifactRejectButton) {
-          artifactRejectButton.hidden = !approvalRequired
-          artifactRejectButton.disabled = !approvalRequired
+          artifactRejectButton.hidden = !canApprove
+          artifactRejectButton.disabled = !canApprove
         }
         if (artifactRerunButton) {
           artifactRerunButton.hidden = !runnerArtifact
@@ -27785,6 +29047,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return 'goal workflow'
         }
         return mode ? `${mode} artifact` : 'artifact'
+      }
+
+      /* Display-title fallback for the existing library of prompt-titled
+         artifacts (no store migration): when the stored title is still the
+         launch prompt, derive a real title from the body's first markdown
+         heading. The artifact editor keeps reading raw metadata.title. */
+      function artifactDisplayTitle(entry) {
+        const meta = entry?.metadata || {}
+        const title = String(meta.title || '').trim()
+        const query = String(meta.threadQuery || meta.query || '').trim()
+        if (!title || (query && title === query.slice(0, title.length) && title.length > 60)) {
+          const m = String(entry?.text || '').match(/^#{1,3}\s+(.{3,90})$/m)
+          if (m) return m[1].trim()
+        }
+        return title || artifactModeLabel(entry)
       }
 
       function artifactPublished(entry) {
@@ -29604,13 +30881,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      // Meeting identity: the label speaks the company's language — the
-      // brain's dominant synthesized theme when one exists, else a dated
-      // meeting name. (Per-participant timers stay join-relative for now; a
-      // shared meeting clock needs a server-side start stamp.)
+      // Meeting identity: the server's first-class meeting record when one is
+      // live (auto-titled from mission themes), else the brain's dominant
+      // synthesized theme, else a dated meeting name. The record also carries
+      // the shared server clock (startedAt + serverNow skew anchor), so every
+      // participant's elapsed timer counts from the same meeting start.
       let latestMissionInsight = null
+      let meetingRecord = null
+      let meetingClockOffsetMs = 0
+
+      function handleMeetingRecord(payload) {
+        meetingRecord = payload && payload.id ? payload : null
+        if (payload?.serverNow) {
+          const serverNowMs = Date.parse(payload.serverNow)
+          if (Number.isFinite(serverNowMs)) {
+            meetingClockOffsetMs = Date.now() - serverNowMs
+          }
+        }
+        if (meetingRecord?.active && meetingRecord.startedAt) {
+          const shared = Date.parse(meetingRecord.startedAt) + meetingClockOffsetMs
+          if (Number.isFinite(shared)) {
+            sharedMeetingStartMs = shared
+            if (roomStartedAt) {
+              // live re-anchor: an already-running clock jumps to shared time
+              roomStartedAt = shared
+              updateRoomClock()
+            }
+          }
+        } else {
+          sharedMeetingStartMs = 0
+        }
+        syncMeetingIdentityLabel()
+      }
 
       function meetingDisplayName() {
+        if (meetingRecord?.title) {
+          return String(meetingRecord.title).toLowerCase()
+        }
         const themes = intelData?.themes?.insight?.themes || latestMissionInsight?.insight?.themes
         const dominant = Array.isArray(themes) && themes.length
           ? String(themes.reduce((best, theme) =>
@@ -29663,7 +30970,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         for (const entry of latestPublishedArtifacts(2)) {
           rows.push({
             time: artifactTimeLabel(entry),
-            title: entry.metadata?.title || artifactModeLabel(entry),
+            title: artifactDisplayTitle(entry),
             who: `published${entry.metadata?.author ? ` by ${entry.metadata.author}` : ''}`,
             state: 'review',
             tone: 'neutral'
@@ -29702,16 +31009,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!officePublishedArtifacts) {
           return
         }
-        if (!canUseArtifactLibrary()) {
-          if (officePublishedSection) {
-            officePublishedSection.style.display = 'none'
-          }
-          if (officePublishedCount) {
-            officePublishedCount.textContent = 'admin only'
-          }
-          officePublishedArtifacts.replaceChildren()
-          return
-        }
         const published = latestPublishedArtifacts(3)
         // section is only shown when there is published work
         if (officePublishedSection) {
@@ -29748,7 +31045,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
           const title = document.createElement('span')
           title.style.cssText = 'font:var(--type-body-medium); color:var(--text-1); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;'
-          title.textContent = entry.metadata?.title || artifactModeLabel(entry)
+          title.textContent = artifactDisplayTitle(entry)
 
           const author = String(entry.metadata?.author || authedUser?.name || 'the team').trim()
           const byline = document.createElement('span')
@@ -29852,7 +31149,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (officeAgentSummary) {
           officeAgentSummary.textContent = activeCount
             ? `${activeCount} working · ${artifactEntries.length} artifacts`
-            : canUseArtifactLibrary() ? `ready · ${artifactEntries.length} artifacts` : 'ready · Scout has the company brain'
+            : `ready · ${artifactEntries.length} artifacts`
         }
 
         officeAgentWorkforce.replaceChildren(...laneEntries.map(({ lane, latest }) => {
@@ -29997,6 +31294,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         hotEmberTimer = window.setTimeout(() => {
           brandMarkEl.classList.remove('is-hot-ember')
         }, HOT_EMBER_DURATION)
+      }
+
+      // Wake-word presence cue: when a transcript names Scout, the brand mark
+      // (and the voice island while it merely idles/listens) breathe for one
+      // --dur-breathe cycle. Visual only — nothing arms, nothing speaks.
+      let wakePulseTimer = null
+      let lastWakePulseAt = 0
+      const WAKE_PULSE_DURATION = 2400
+      const WAKE_PULSE_DEBOUNCE = 3000
+      function pulseScoutWake() {
+        const now = performance.now()
+        if (now - lastWakePulseAt < WAKE_PULSE_DEBOUNCE) {
+          return
+        }
+        lastWakePulseAt = now
+        brandMarkEl.classList.add('is-wake')
+        const islandState = voiceIsland?.dataset.state || 'idle'
+        if (voiceIsland && (islandState === 'idle' || islandState === 'listening')) {
+          voiceIsland.classList.add('is-wake')
+        }
+        window.clearTimeout(wakePulseTimer)
+        wakePulseTimer = window.setTimeout(() => {
+          brandMarkEl.classList.remove('is-wake')
+          voiceIsland?.classList.remove('is-wake')
+        }, WAKE_PULSE_DURATION)
       }
 
       // Categorize tags so the chip color encodes meaning, not hash.

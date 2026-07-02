@@ -31,7 +31,24 @@ const (
 	// knowledge prose: excluded from Scout search context and from the
 	// generic client memory timeline.
 	meetingMemoryKindMissionInsight = "mission_insight"
-	defaultMeetingMemoryPath        = "data/meeting-memory.jsonl"
+	// meetingMemoryKindDecision is one explicit team decision per entry.
+	// entry.Text = the decision statement, so store.search matches decisions
+	// for free — deliberately NOT a UI-state kind: decisions ground Scout's
+	// answers. They are still excluded from the client memory timeline via
+	// visibleMeetingMemoryEntries (the ledger renders in the intel canvas).
+	meetingMemoryKindDecision = "decision"
+	// meetingMemoryKindDecisionPass is the decision-ledger agent's per-pass
+	// cursor artifact (mirrors board_update's role for the board worker). Pure
+	// bookkeeping: UI state, never knowledge.
+	meetingMemoryKindDecisionPass = "decision_pass"
+	// meetingMemoryKindPackage is a venture package — the per-IP mission
+	// binder. entry.Text = the full venturePackageRecord JSON (the
+	// scout_chat_thread precedent), so it is UI state: raw record JSON must
+	// never pollute Scout search; packages reach Scout through a structured
+	// "# Venture packages" context section instead. Excluded from the client
+	// memory timeline too (the binder renders in the intel canvas).
+	meetingMemoryKindPackage = "package"
+	defaultMeetingMemoryPath = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -179,6 +196,38 @@ func (store *meetingMemoryStore) rotateMeetingID() {
 	store.meetingID = ""
 }
 
+// rotateMeetingIDIfCurrent rotates only while id is still the active meeting
+// id; reports whether the rotation landed. The closing seams (idle end,
+// archive) use it so a concurrent admission's freshly minted successor id is
+// never clobbered by a stale close.
+func (store *meetingMemoryStore) rotateMeetingIDIfCurrent(id string) bool {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return false
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.meetingID != id {
+		return false
+	}
+	store.meetingID = ""
+	return true
+}
+
+// ensureMeetingID mints (or returns) the active meeting id eagerly, so a
+// meeting record can be opened at room admission before any entry appends.
+func (store *meetingMemoryStore) ensureMeetingID() string {
+	if store == nil {
+		return ""
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return store.currentMeetingIDLocked()
+}
+
 func (store *meetingMemoryStore) currentMeetingIDLocked() string {
 	if store.meetingID == "" {
 		now := time.Now().UTC()
@@ -206,17 +255,45 @@ func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, item
 }
 
 func (store *meetingMemoryStore) appendAttributedTranscriptWithMetadata(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.appendAttributedTranscriptEntry(eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, false)
+	return store.appendAttributedTranscriptEntry(eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, false, "")
 }
 
 // appendRoomChatTranscript injects a typed room-chat message into the
 // transcript stream. Typed text is deliberate, so it bypasses the
 // transcriptLooksUseful filler filter that guards spoken transcripts.
 func (store *meetingMemoryStore) appendRoomChatTranscript(eventID string, speaker string, text string) (meetingMemoryEntry, bool, error) {
-	return store.appendAttributedTranscriptEntry(eventID, "", speaker, "", text, map[string]string{"source": transcriptSourceRoomChat}, true)
+	return store.appendRoomChatTranscriptWithMetadata(eventID, speaker, text, nil)
 }
 
-func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool) (meetingMemoryEntry, bool, error) {
+// appendRoomChatTranscriptWithMetadata is appendRoomChatTranscript with extra
+// metadata (e.g. artifactId on close-the-loop delivery messages); the
+// room_chat source marker always wins.
+func (store *meetingMemoryStore) appendRoomChatTranscriptWithMetadata(eventID string, speaker string, text string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendRoomChatTranscriptForMeeting(eventID, speaker, text, extraMetadata, "")
+}
+
+// appendRoomChatTranscriptForMeeting is appendRoomChatTranscriptWithMetadata
+// gated on the meeting id: a non-empty expectedMeetingID must still be the
+// active meeting id — validated under the store lock, atomically with the
+// meetingId stamp — or the append is skipped (appended=false). This is the
+// close-the-loop delivery guard: an archive/idle rotation racing the delivery
+// can never lazily mint a phantom meeting or leak the card into the successor
+// meeting's transcript stream.
+func (store *meetingMemoryStore) appendRoomChatTranscriptForMeeting(eventID string, speaker string, text string, extraMetadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+	metadata := make(map[string]string, len(extraMetadata)+1)
+	for key, value := range extraMetadata {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		metadata[key] = value
+	}
+	metadata["source"] = transcriptSourceRoomChat
+	return store.appendAttributedTranscriptEntry(eventID, "", speaker, "", text, metadata, true, expectedMeetingID)
+}
+
+func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" {
 		return meetingMemoryEntry{}, false, nil
@@ -252,7 +329,7 @@ func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string,
 		}
 	}
 
-	return store.appendEntry(meetingMemoryKindTranscript, id, transcript, metadata)
+	return store.appendEntryForMeeting(meetingMemoryKindTranscript, id, transcript, metadata, expectedMeetingID)
 }
 
 func (store *meetingMemoryStore) appendBrainWriteUp(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -281,6 +358,18 @@ func (store *meetingMemoryStore) appendCodexProposal(id string, text string, met
 
 func (store *meetingMemoryStore) appendMissionInsight(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindMissionInsight, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendDecision(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindDecision, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendDecisionPass(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindDecisionPass, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendVenturePackage(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindPackage, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
@@ -423,6 +512,15 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 }
 
 func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntryForMeeting(kind, id, text, metadata, "")
+}
+
+// appendEntryForMeeting is appendEntry with an optional meeting-id gate: a
+// non-empty expectedMeetingID that no longer matches the active meeting id
+// (checked under the lock, atomically with the meetingId stamp) skips the
+// append with appended=false and no error — the caller's origin meeting is
+// simply over.
+func (store *meetingMemoryStore) appendEntryForMeeting(kind string, id string, text string, metadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	if strings.TrimSpace(kind) == "" {
 		kind = meetingMemoryKindTranscript
 	}
@@ -448,6 +546,9 @@ func (store *meetingMemoryStore) appendEntry(kind string, id string, text string
 
 	if _, ok := store.seen[entry.ID]; ok {
 		return entry, false, nil
+	}
+	if expectedMeetingID = strings.TrimSpace(expectedMeetingID); expectedMeetingID != "" && store.meetingID != expectedMeetingID {
+		return meetingMemoryEntry{}, false, nil
 	}
 
 	// stamp every entry with the current meeting id (created lazily at the
@@ -600,10 +701,12 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 }
 
 // isUIStateMemoryKind reports the entry kinds that are workspace/UI state
-// rather than meeting knowledge — chat threads, codex proposals, and mission
-// insights never enter Scout's search results or model context.
+// rather than meeting knowledge — chat threads, codex proposals, mission
+// insights, decision-pass cursors, and venture-package records never enter
+// Scout's search results or model context. Kind "decision" is deliberately
+// absent: decision statements ARE knowledge and must ground Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -739,7 +842,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage {
 		return normalizeMemoryText(value)
 	}
 

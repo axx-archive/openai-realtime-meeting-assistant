@@ -93,6 +93,61 @@ func TestProduceMissionInsightAppendsParsedInsightWithCursor(t *testing.T) {
 	}
 }
 
+// The archive flush includes the mission worker: the archived meeting's
+// dominant theme titles the ARCHIVED record before the id rotates, and the
+// mid-occupancy successor never inherits the old meeting's theme.
+func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"themes":[{"label":"intel canvas","summary":"The team keeps circling the intelligence surface.","mentions":3,"people":["AJ"]}],"openQuestions":[],"alignments":[]}`, nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	meetingID := app.memory.currentMeetingID()
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-flush-1", "## Overview\nThe intel canvas came up repeatedly.", nil); err != nil || !appended {
+		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
+	}
+
+	if _, err := app.archiveMeeting("AJ"); err != nil {
+		t.Fatalf("archiveMeeting: %v", err)
+	}
+
+	if insights := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 10); len(insights) == 0 {
+		t.Fatal("archive flush did not run the mission-intel pass")
+	}
+	var closed meetingRecord
+	for _, record := range app.meetings.recent(0) {
+		if record.ID == meetingID {
+			closed = record
+		}
+	}
+	if closed.ID == "" {
+		t.Fatal("archived meeting record not found")
+	}
+	if closed.Title != "intel canvas" || closed.TitleSource != meetingTitleSourceAuto {
+		t.Fatalf("archived record=%#v, want the flushed dominant theme as its auto title", closed)
+	}
+
+	// AJ never left, so a successor record opened — it must NOT be titled
+	// after the archived meeting's content.
+	successor, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("mid-occupancy archive left no successor record")
+	}
+	if successor.Title != "" {
+		t.Fatalf("successor title=%q, want untitled (the old theme belongs to the archived meeting)", successor.Title)
+	}
+}
+
 func TestProduceMissionInsightSkipsUnparseableOutput(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -358,15 +413,16 @@ func TestAssistantMissionHandlerAuth(t *testing.T) {
 		t.Fatalf("degraded=%v, want honest keyless flag", payload.Mission.Degraded)
 	}
 
-	// admin boundary regression: /artifacts stays 403 for the same non-admin
+	// trust boundary = the signed-in team: /artifacts serves the same
+	// non-admin account too (only external-write approval stays admin-only)
 	artifactsReq := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
 	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
 		artifactsReq.AddCookie(cookie)
 	}
 	recorder = httptest.NewRecorder()
 	artifactsHandler(recorder, artifactsReq)
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("/artifacts non-admin status=%d, want 403", recorder.Code)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("/artifacts non-admin status=%d, want 200", recorder.Code)
 	}
 }
 

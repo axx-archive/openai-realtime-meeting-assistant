@@ -94,7 +94,14 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"launch_agent_thread":    true,
 		"answer_memory_question": true,
 		"propose_codex_task":     true,
+		"create_package":         true,
+		"attach_to_package":      true,
+		"advance_package_stage":  true,
 		"send_notification":      true,
+		"post_to_channel":        true,
+		"create_channel":         true,
+		"meeting_recap":          true,
+		"catch_me_up":            true,
 		"do_nothing":             true,
 	}
 	for _, tool := range tools {
@@ -106,6 +113,13 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	}
 	for missing := range allowed {
 		t.Fatalf("private dashboard Realtime voice missing OS tool %q", missing)
+	}
+	// Grill sessions take over the SHARED room realtime session; the private
+	// dashboard voice must never see either tool.
+	for _, roomOnly := range []string{"start_grill_session", "end_grill_session"} {
+		if privateRealtimeVoiceToolAllowed(roomOnly) {
+			t.Fatalf("private realtime voice must not allow room-only tool %q", roomOnly)
+		}
 	}
 	if toolChoice := session["tool_choice"]; toolChoice != "auto" {
 		t.Fatalf("tool_choice=%v, want auto for private dashboard voice", toolChoice)

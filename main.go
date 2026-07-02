@@ -45,8 +45,13 @@ var (
 	indexHTML                []byte
 
 	// lock for peerConnections and trackLocals
-	listLock                     sync.RWMutex
-	peerConnections              []peerConnectionState
+	listLock        sync.RWMutex
+	peerConnections []peerConnectionState
+	// officeConnections tracks authenticated sockets that opted into office
+	// event delivery (the `office` hello) without room admission. Keyed by
+	// participantSessionID and guarded by listLock; they receive the
+	// signed-in-safe broadcast set, never room media or signaling.
+	officeConnections            = map[string]officeConnectionState{}
 	activeParticipantConnections map[string]peerConnectionState
 	trackLocals                  map[string]*webrtc.TrackLocalStaticRTP
 	trackParticipants            map[string]string
@@ -151,9 +156,9 @@ type peerConnectionState struct {
 	// websocketHandler at admission. Targeted fan-out (sendKanbanEventToUser)
 	// filters on it; it is never taken from a client payload.
 	sessionEmail string
-	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
-	shouldSignal    func(desiredTrackCount int) bool
-	signal          func(gatherComplete <-chan struct{}) error
+	acceptTrack  func(*webrtc.TrackLocalStaticRTP) bool
+	shouldSignal func(desiredTrackCount int) bool
+	signal       func(gatherComplete <-chan struct{}) error
 
 	// Negotiation watchdog bookkeeping, mutated only under listLock by
 	// signalPeerConnectionsWithRestart.
@@ -165,6 +170,15 @@ type peerConnectionState struct {
 	signalingRevision    uint64
 	pendingOfferID       string
 	pendingOfferRevision uint64
+}
+
+// officeConnectionState is the registry entry for an authenticated websocket
+// that sent the `office` hello instead of taking a room seat. It carries no
+// media state — just the writer for signed-in-safe fan-out and the
+// server-resolved account email for targeted sends (never client-supplied).
+type officeConnectionState struct {
+	websocket    *threadSafeWriter
+	sessionEmail string
 }
 
 type participantTrackSnapshot struct {
@@ -487,13 +501,17 @@ func main() {
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
+	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
+	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
+	http.HandleFunc("/assistant/packages", assistantPackagesHandler)
+	http.HandleFunc("/assistant/packages/", assistantPackageActionHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
@@ -562,7 +580,7 @@ func broadcastServerShutdown(retryAfterMs int) {
 		kanbanApp.mu.Unlock()
 	}
 	log.Infof("room_server_shutdown retry_after_ms=%d", retryAfterMs)
-	broadcastKanbanEvent("server_shutdown", map[string]any{
+	broadcastSignedInKanbanEvent("server_shutdown", map[string]any{
 		"message":      "Server restarting",
 		"retryAfterMs": retryAfterMs,
 	})
@@ -906,18 +924,66 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thread, err := kanbanApp.launchAgentThread(payload.Mode, payload.Query, user.Name)
+	thread, err := kanbanApp.launchAgentThreadWithOrigin(payload.Mode, payload.Query, user.Name, map[string]string{
+		"originKind": agentThreadOriginTool,
+	})
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	viewerThread := agentThreadForViewer(thread, canAccessArtifactLibrary(user))
 
 	writeAuthJSON(w, http.StatusAccepted, map[string]any{
 		"ok":       true,
-		"thread":   viewerThread,
-		"artifact": viewerThread.Artifact,
-		"actions":  viewerThread.Actions,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
+	})
+}
+
+// assistantThreadFollowUpHandler is the headless follow-up trigger (package
+// binder / artifact library): POST {artifactId, text} re-runs an existing
+// agent-thread artifact in place. Same origin+session gates as
+// assistantThreadsHandler; any signed-in user.
+func assistantThreadFollowUpHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		ArtifactID string `json:"artifactId"`
+		Text       string `json:"text"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read follow-up request")
+		return
+	}
+
+	thread, err := kanbanApp.launchAgentThreadFollowUp(payload.ArtifactID, payload.Text, user.Name, nil)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeAuthJSON(w, http.StatusAccepted, map[string]any{
+		"ok":       true,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
 	})
 }
 
@@ -1103,31 +1169,13 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 
 const artifactLibraryAdminEmail = "aj@shareability.com"
 
-func canAccessArtifactLibrary(user *userAccount) bool {
+// isArtifactApprovalAdmin gates ONLY the external-write approval actions on
+// Codex artifacts (approve/reject). Artifact bodies, listing, editing, and
+// publishing are readable/writable by every signed-in user — the trust
+// boundary is the seeded team, and publish/update stamping keeps the audit
+// trail.
+func isArtifactApprovalAdmin(user *userAccount) bool {
 	return user != nil && normalizeAccountEmail(user.Email) == artifactLibraryAdminEmail
-}
-
-func artifactForViewer(entry meetingMemoryEntry, canViewArtifact bool) meetingMemoryEntry {
-	if canViewArtifact {
-		return entry
-	}
-	if entry.Metadata != nil {
-		metadata := make(map[string]string, len(entry.Metadata)+1)
-		for key, value := range entry.Metadata {
-			metadata[key] = value
-		}
-		metadata["restricted"] = "true"
-		entry.Metadata = metadata
-	} else {
-		entry.Metadata = map[string]string{"restricted": "true"}
-	}
-	entry.Text = ""
-	return entry
-}
-
-func agentThreadForViewer(thread scoutAgentThread, canViewArtifact bool) scoutAgentThread {
-	thread.Artifact = artifactForViewer(thread.Artifact, canViewArtifact)
-	return thread
 }
 
 func artifactsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1143,10 +1191,6 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromRequest(r)
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
-		return
-	}
-	if !canAccessArtifactLibrary(user) {
-		writeAuthError(w, http.StatusForbidden, "artifacts are admin-only")
 		return
 	}
 	if kanbanApp == nil {
@@ -2397,13 +2441,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
 
 	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
-	scoutChat := newScoutChatSession(c, canAccessArtifactLibrary(sessionUser))
+	scoutChat := newScoutChatSession(c)
 	// Stop the chat worker and cancel any queued/in-flight model calls as
 	// soon as this connection ends.
 	defer func() { scoutChat.close() }()
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	participantAccepted := false
+	officeAccepted := false
 	mediaJoined := false
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
@@ -2430,6 +2475,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						"name": name,
 					})
 					broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+					// arm the idle-end grace timer when the last participant
+					// leaves; a rejoin inside the window cancels it.
+					kanbanApp.noteMeetingOccupancy()
 				}
 			}
 			if closeSocket {
@@ -2446,6 +2494,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	stopHeartbeat := startRoomWebsocketHeartbeat(c, currentParticipantName, participantSessionID)
 	defer stopHeartbeat()
 	defer cleanupParticipantSession("", false)
+	// Office sockets registered via the `office` hello are reaped
+	// unconditionally when the read loop exits; participantSessionID is
+	// unique per socket, so this never touches another connection's entry.
+	defer func() {
+		listLock.Lock()
+		delete(officeConnections, participantSessionID)
+		listLock.Unlock()
+	}()
 
 	// Create new PeerConnection
 	peerConnection, err := newPeerConnection()
@@ -2706,6 +2762,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			participantAccepted = true
 			participantAcceptedState.Store(true)
 			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c, sessionUser.Email)
+			// admission opens (or extends) the first-class meeting record and
+			// cancels any pending idle-end from a briefly empty room.
+			kanbanApp.noteMeetingAdmission(admittedName)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name": admittedName,
 			}); err != nil {
@@ -2727,6 +2786,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// media_ready, so broadcasts cannot reach it yet.
 			if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistory(roomChatHistoryLimit)); err != nil {
 				log.Errorf("Failed to send room chat history: %v", err)
+			}
+			// Meeting record snapshot (null clears client state): the shared
+			// clock anchor must land before media join.
+			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot()); err != nil {
+				log.Errorf("Failed to send meeting record: %v", err)
 			}
 			// Unread notification backlog is per-account, so it replays as a
 			// direct send scoped to this socket's session user.
@@ -2755,6 +2819,57 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"name": admittedName,
 			})
 			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+		case "office":
+			// Office hello: an authenticated tab claims signed-in event
+			// delivery without taking a room seat. Identity comes from the
+			// session cookie, never the payload; repeat hellos are
+			// idempotent. Room-gated cases below still require admission, so
+			// an office socket that tries to edit the board or speak gets
+			// access_denied like any other unadmitted socket.
+			if officeAccepted {
+				continue
+			}
+			officeAccepted = true
+			listLock.Lock()
+			officeConnections[participantSessionID] = officeConnectionState{
+				websocket:    c,
+				sessionEmail: normalizeAccountEmail(sessionUser.Email),
+			}
+			listLock.Unlock()
+			if err := sendKanbanEvent(c, "office_granted", map[string]any{
+				"email": sessionUser.Email,
+				"name":  participantNameForAccount(sessionUser),
+			}); err != nil {
+				log.Errorf("Failed to send office grant: %v", err)
+			}
+			// Direct replay of the signed-in-safe state: this socket is not
+			// in peerConnections, so broadcasts alone cannot seed it.
+			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
+				log.Errorf("Failed to send Kanban board state: %v", err)
+			}
+			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
+				log.Errorf("Failed to send undo state: %v", err)
+			}
+			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForClients(20)); err != nil {
+				log.Errorf("Failed to send meeting memory: %v", err)
+			}
+			// Meeting record snapshot (null clears client state) keeps the
+			// office shell's shared clock anchored while out of the room.
+			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot()); err != nil {
+				log.Errorf("Failed to send meeting record: %v", err)
+			}
+			// Room-chat history seeds the out-of-room unread pip.
+			if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistory(roomChatHistoryLimit)); err != nil {
+				log.Errorf("Failed to send room chat history: %v", err)
+			}
+			// Unread notification backlog is per-account, so it replays as a
+			// direct send scoped to this socket's session user.
+			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionUser.Email, notificationListLimit)); err != nil {
+				log.Errorf("Failed to send notification backlog: %v", err)
+			}
+			if err := sendKanbanEvent(c, "codex_proposals", kanbanApp.codexProposalsSnapshot(codexProposalHistoryLimit)); err != nil {
+				log.Errorf("Failed to send codex proposals: %v", err)
+			}
 		case "media_ready":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before joining media.")
@@ -2905,7 +3020,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			scoutChat.close()
-			scoutChat = newScoutChatSession(c, canAccessArtifactLibrary(sessionUser))
+			scoutChat = newScoutChatSession(c)
 			_ = sendKanbanEvent(c, "scout_chat", map[string]any{
 				"kind": "reset",
 				"text": "new Scout thread started",
@@ -2951,7 +3066,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !ok {
 				continue
 			}
-			broadcastKanbanEvent("room_chat", payload)
+			broadcastSignedInKanbanEvent("room_chat", payload)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
@@ -3014,8 +3129,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				})
 				continue
 			}
-			broadcastKanbanEvent("meeting_archived", result)
-			broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+			broadcastSignedInKanbanEvent("meeting_archived", result)
+			broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
 		case "set_recording":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before changing recording.")
@@ -3155,8 +3270,8 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 		return
 	}
 
-	broadcastKanbanEvent("board", kanbanApp.snapshotState())
-	broadcastKanbanEvent("undo_available", kanbanApp.canUndoDelete())
+	broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
+	broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
 	broadcastAssistantEvent("action", fmt.Sprintf("%s %s", actor, action), nil)
 	kanbanApp.refreshRealtimeBoardContext(action)
 }

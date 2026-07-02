@@ -59,15 +59,18 @@ type scoutChatThreadRef struct {
 }
 
 type scoutChatMessageRecord struct {
-	ID          string                    `json:"id"`
-	Kind        string                    `json:"kind"`
-	Role        string                    `json:"role"`
-	Text        string                    `json:"text,omitempty"`
-	CreatedAt   string                    `json:"createdAt"`
-	AuthorName  string                    `json:"authorName,omitempty"`
-	AuthorEmail string                    `json:"authorEmail,omitempty"`
-	Files       []scoutChatFileAttachment `json:"files,omitempty"`
-	Thread      *scoutChatThreadRef       `json:"thread,omitempty"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Role        string `json:"role"`
+	Text        string `json:"text,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	AuthorName  string `json:"authorName,omitempty"`
+	AuthorEmail string `json:"authorEmail,omitempty"`
+	// Via marks messages relayed by a tool (e.g. "scout_voice" for
+	// post_to_channel from the private dashboard voice).
+	Via    string                    `json:"via,omitempty"`
+	Files  []scoutChatFileAttachment `json:"files,omitempty"`
+	Thread *scoutChatThreadRef       `json:"thread,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -172,14 +175,15 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 2 && parts[1] == "messages" && r.Method == http.MethodPost {
 		payload := struct {
-			Text  string                    `json:"text"`
-			Files []scoutChatFileAttachment `json:"files"`
+			Text               string                    `json:"text"`
+			Files              []scoutChatFileAttachment `json:"files"`
+			FollowUpArtifactId string                    `json:"followUpArtifactId"`
 		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		response, err := kanbanApp.appendScoutChatThreadMessage(r.Context(), user, threadID, payload.Text, payload.Files)
+		response, err := kanbanApp.appendScoutChatThreadMessage(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -240,7 +244,7 @@ func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy st
 	return thread, nil
 }
 
-func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment) (map[string]any, error) {
+func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string) (map[string]any, error) {
 	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
 	if err != nil {
 		return nil, err
@@ -273,6 +277,56 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 		"message": userMessage,
 	}
 
+	// A follow-up reply re-runs an existing agent-thread artifact in place
+	// (agent_thread_followup.go). Explicit engagement: the armed target chip
+	// counts as summoning Scout, so this branch runs regardless of channel
+	// visibility and never needs @scout.
+	if followUpArtifactID = strings.TrimSpace(followUpArtifactID); followUpArtifactID != "" {
+		if !scoutChatThreadHasArtifactRef(thread, followUpArtifactID) {
+			return nil, fmt.Errorf("that report is not in this thread")
+		}
+		completedAt := ""
+		if artifact, ok := app.osArtifactByID(followUpArtifactID); ok {
+			completedAt = firstNonEmptyString(artifact.Metadata["completedAt"], artifact.Metadata["updatedAt"])
+		}
+		// Unattached channel messages posted after the last run become worker
+		// context alongside the explicit reply.
+		teamReplies := scoutChatRepliesSince(thread, completedAt)
+		agentThread, err := app.launchAgentThreadFollowUp(followUpArtifactID, text, user.Name, teamReplies)
+		if err != nil {
+			// The reply is a real team answer even when the run cannot launch
+			// (e.g. a second teammate answering while a follow-up is already in
+			// flight): commit it as a plain message so it survives in the
+			// channel history and feeds the NEXT run's team-reply context, then
+			// surface the launch error.
+			if _, commitErr := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage); commitErr != nil {
+				log.Errorf("Failed to commit follow-up reply after launch rejection: %v", commitErr)
+			}
+			return nil, err
+		}
+		// A plain status message, NOT a new Kind "thread" card: the existing
+		// card flips via updateScoutChatThreadRefs; a second card would
+		// duplicate the artifact key in renderActiveScoutThread.
+		version := firstNonEmptyString(strings.TrimSpace(agentThread.Artifact.Metadata["threadVersion"]), "2")
+		statusMessage := scoutChatMessageRecord{
+			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:      "message",
+			Role:      "scout",
+			Text:      assistantToolLabel(agentThread.Mode) + " follow-up v" + version + " running — the card above will update",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, statusMessage)
+		if err != nil {
+			return nil, err
+		}
+		response["answer"] = statusMessage
+		response["thread"] = saved
+		response["agentThread"] = agentThread
+		response["artifact"] = agentThread.Artifact
+		response["actions"] = agentThread.Actions
+		return response, nil
+	}
+
 	// Public channels are human-to-human by default: Scout (answers and
 	// agent-mode keyword launches alike) only engages on an explicit @scout
 	// mention. Private threads keep the always-answer behavior.
@@ -294,11 +348,17 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 		mode = scoutChatThreadModeForChannelText(text)
 	}
 	if mode != "" {
-		agentThread, err := app.launchAgentThread(mode, text, user.Name)
+		originKind := agentThreadOriginPrivateThread
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+			originKind = agentThreadOriginChannel
+		}
+		agentThread, err := app.launchAgentThreadWithOrigin(mode, text, user.Name, map[string]string{
+			"originKind": originKind,
+			"originId":   threadID,
+		})
 		if err != nil {
 			return nil, err
 		}
-		viewerThread := agentThreadForViewer(agentThread, canAccessArtifactLibrary(user))
 		replyText := assistantToolLabel(mode) + " thread launched"
 		assistantMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -320,9 +380,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 		}
 		response["answer"] = assistantMessage
 		response["thread"] = saved
-		response["agentThread"] = viewerThread
-		response["artifact"] = viewerThread.Artifact
-		response["actions"] = viewerThread.Actions
+		response["agentThread"] = agentThread
+		response["artifact"] = agentThread.Artifact
+		response["actions"] = agentThread.Actions
 		return response, nil
 	}
 
@@ -376,8 +436,10 @@ func scoutChatAuthorName(user *userAccount) string {
 // updateScoutChatThreadRefs rewrites the thread refs embedded in persisted
 // chat messages when an agent thread changes status. Office/chat sessions do
 // not consume room websocket events, so without this rewrite the requester's
-// card would stay at the last streamed progress forever; the 12s chat poll
-// (and the public-channel broadcast) picks up the new status instead.
+// card would stay at the last streamed progress forever; the commit delivers
+// the flip live over the office socket (public broadcast for channels,
+// owner-targeted send for private threads), with the 12s chat poll as the
+// socket-down fallback.
 func (app *kanbanBoardApp) updateScoutChatThreadRefs(agentThreadID string, status string, artifactID string) {
 	if app == nil || app.memory == nil {
 		return
@@ -405,6 +467,46 @@ func scoutChatThreadHasAgentRef(thread scoutChatThreadRecord, agentThreadID stri
 		}
 	}
 	return false
+}
+
+// scoutChatThreadHasArtifactRef mirrors scoutChatThreadHasAgentRef keyed on
+// the artifact id: a follow-up may only target a report whose card lives in
+// this chat thread.
+func scoutChatThreadHasArtifactRef(thread scoutChatThreadRecord, artifactID string) bool {
+	for _, message := range thread.Messages {
+		if message.Thread != nil && message.Thread.ArtifactID == artifactID {
+			return true
+		}
+	}
+	return false
+}
+
+// scoutChatRepliesSince collects the human messages posted after the given
+// RFC3339 timestamp (the artifact's last completedAt) — these become worker
+// context so answers that landed as unattached channel messages count. Last
+// agentThreadFollowUpMaxReplies entries only.
+func scoutChatRepliesSince(thread scoutChatThreadRecord, since string) []scoutChatMessageRecord {
+	cutoff, hasCutoff := time.Time{}, false
+	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(since)); err == nil {
+		cutoff, hasCutoff = parsed, true
+	}
+	replies := make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	for _, message := range thread.Messages {
+		if message.Kind != "message" || message.Role != "user" {
+			continue
+		}
+		if hasCutoff {
+			created, err := time.Parse(time.RFC3339Nano, message.CreatedAt)
+			if err != nil || !created.After(cutoff) {
+				continue
+			}
+		}
+		replies = append(replies, message)
+	}
+	if len(replies) > agentThreadFollowUpMaxReplies {
+		replies = replies[len(replies)-agentThreadFollowUpMaxReplies:]
+	}
+	return replies
 }
 
 // commitScoutChatThreadRefStatus applies one agent-thread status onto every
@@ -441,10 +543,8 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return err
 	}
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		for _, message := range changed {
-			broadcastScoutChatThreadUpdate(thread, message)
-		}
+	for _, message := range changed {
+		deliverScoutChatThreadUpdate(thread, message)
 	}
 	return nil
 }
@@ -482,26 +582,185 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, thr
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		for _, message := range messages {
-			broadcastScoutChatThreadUpdate(thread, message)
-		}
+	for _, message := range messages {
+		deliverScoutChatThreadUpdate(thread, message)
 	}
 	return thread, nil
 }
 
-// broadcastScoutChatThreadUpdate fans a public-channel append out to every
-// connected client (all room websockets are signed-in accounts) so open chat
-// tabs upsert live; users without a socket catch up via the 12s poll.
-func broadcastScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
-	broadcastKanbanEvent("chat_thread", map[string]any{
+// normalizeChannelName strips a leading '#' and surrounding whitespace from a
+// spoken/typed channel reference.
+func normalizeChannelName(name string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "#"))
+}
+
+// publicChannelByName resolves an open public channel by title
+// (case-insensitive, leading '#' tolerated). A miss returns an error listing
+// the available channel names so the voice model can self-correct aloud.
+func (app *kanbanBoardApp) publicChannelByName(name string) (scoutChatThreadRecord, error) {
+	wanted := normalizeChannelName(name)
+	if wanted == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("channel name is required")
+	}
+	if app == nil || app.memory == nil {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat thread memory is unavailable")
+	}
+
+	titles := make([]string, 0, 4)
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" {
+			continue
+		}
+		if strings.EqualFold(wanted, strings.TrimSpace(thread.Title)) {
+			return thread, nil
+		}
+		titles = append(titles, thread.Title)
+	}
+	joined := "none exist yet — use create_channel"
+	if len(titles) > 0 {
+		joined = strings.Join(titles, ", ")
+	}
+	return scoutChatThreadRecord{}, fmt.Errorf("no channel named %q; channels: %s", wanted, joined)
+}
+
+// postToChannel executes the post_to_channel voice tool: relay the user's
+// words into a public team channel through the normal per-thread commit path.
+// requesterEmail identifies the private dashboard voice user; the shared room
+// voice has no single requester, so the post attributes to Scout there.
+// Deliberate: this path never triggers Scout's answer loop, even when the
+// text contains "@scout" — the mention gate lives in
+// appendScoutChatThreadMessage, which this bypasses.
+func (app *kanbanBoardApp) postToChannel(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	text := strings.TrimSpace(asString(args["text"]))
+	if text == "" {
+		return nil, false, fmt.Errorf("text is required")
+	}
+	thread, err := app.publicChannelByName(asString(args["channel"]))
+	if err != nil {
+		return nil, false, err
+	}
+
+	now := time.Now().UTC()
+	message := scoutChatMessageRecord{
+		ID:        fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
+		Kind:      "message",
+		CreatedAt: now.Format(time.RFC3339Nano),
+		Text:      text,
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail != "" {
+		message.Role = "user"
+		message.AuthorName = participantNameForEmail(requesterEmail)
+		message.AuthorEmail = requesterEmail
+		message.Via = "scout_voice"
+	} else {
+		message.Role = "scout"
+		message.AuthorName = scoutParticipantName
+	}
+	author := firstNonEmptyString(message.AuthorName, scoutParticipantName)
+
+	if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
+		return nil, false, err
+	}
+
+	// Bell nudge for everyone, deep-linked to the channel.
+	if _, err := app.createNotification("", notificationKindChat, author+" posted in #"+thread.Title+": "+trimForStorage(text, 140), "chat", "", thread.ID, false); err != nil {
+		log.Errorf("Failed to create channel post notification: %v", err)
+	}
+	// Optional single-person flag.
+	if mention := strings.TrimSpace(asString(args["mention"])); mention != "" {
+		if mentionEmail := participantEmail(canonicalParticipantName(mention)); mentionEmail != "" {
+			if _, err := app.createNotification(mentionEmail, notificationKindChat, author+" flagged you in #"+thread.Title+": "+trimForStorage(text, 140), "chat", "", thread.ID, false); err != nil {
+				log.Errorf("Failed to create channel mention notification: %v", err)
+			}
+		}
+	}
+
+	// No open_tool actions: auto-navigating everyone mid-meeting is hostile.
+	return map[string]any{
+		"ok":        true,
+		"channel":   thread.Title,
+		"threadId":  thread.ID,
+		"messageId": message.ID,
+	}, false, nil
+}
+
+// createChannelByVoice executes the create_channel voice tool. Channels are
+// public scout-chat threads and need an owner identity, so only the private
+// dashboard voice (a single signed-in user) may create one — the shared room
+// peer has no owner and is rejected.
+func (app *kanbanBoardApp) createChannelByVoice(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	name := normalizeChannelName(asString(args["name"]))
+	if name == "" {
+		return nil, false, fmt.Errorf("channel name is required")
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail == "" {
+		return nil, false, fmt.Errorf("create channels from your private Scout or the chat surface")
+	}
+
+	thread, err := app.createScoutChatThread(requesterEmail, participantNameForEmail(requesterEmail), name, scoutChatVisibilityPublic)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Office fan-out so open chat rails learn the new channel; the payload
+	// carries no message (handleChatThreadEvent tolerates that and refreshes
+	// the list for unknown thread ids).
+	broadcastOfficeKanbanEvent("chat_thread", map[string]any{
+		"id":         thread.ID,
+		"title":      thread.Title,
+		"preview":    thread.Preview,
+		"visibility": scoutChatThreadVisibility(thread),
+		"updatedAt":  thread.UpdatedAt,
+	})
+	creator := firstNonEmptyString(participantNameForEmail(requesterEmail), "Scout")
+	if _, err := app.createNotification("", notificationKindChat, creator+" created channel #"+thread.Title, "chat", "", thread.ID, false); err != nil {
+		log.Errorf("Failed to create channel-created notification: %v", err)
+	}
+
+	return map[string]any{
+		"ok":       true,
+		"channel":  thread.Title,
+		"threadId": thread.ID,
+	}, false, nil
+}
+
+// scoutChatThreadUpdatePayload is the chat_thread event body shared by the
+// public broadcast and the private owner-targeted delivery.
+func scoutChatThreadUpdatePayload(thread scoutChatThreadRecord, message scoutChatMessageRecord) map[string]any {
+	return map[string]any{
 		"id":         thread.ID,
 		"title":      thread.Title,
 		"preview":    thread.Preview,
 		"visibility": scoutChatThreadVisibility(thread),
 		"updatedAt":  thread.UpdatedAt,
 		"message":    message,
-	})
+	}
+}
+
+// broadcastScoutChatThreadUpdate fans a public-channel append out over the
+// office channel (every signed-in tab holds an office socket, in-room or
+// not) so open chat tabs upsert live; tabs whose office socket is down catch
+// up via the 12s fallback poll.
+func broadcastScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+	broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadUpdatePayload(thread, message))
+}
+
+// deliverScoutChatThreadUpdate routes one committed chat message (or thread
+// ref status flip) to the tabs allowed to see it live: public channels fan
+// out to every signed-in office socket, private threads go only to the
+// owner's authenticated connections via the targeted send. Without the
+// targeted path a private thread's agent-run status flip has no live route
+// at all — chat_thread broadcasts are public-only and the 12s chat poll
+// skips its fetch while the office socket is up.
+func deliverScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		broadcastScoutChatThreadUpdate(thread, message)
+		return
+	}
+	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadUpdatePayload(thread, message))
 }
 
 // scoutChatThreadLock returns the per-thread mutex serializing chat thread

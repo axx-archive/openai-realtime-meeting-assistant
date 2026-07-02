@@ -471,3 +471,41 @@ func TestIndexCodexProposalWiring(t *testing.T) {
 		t.Fatal("handleKanbanMessage must route the codex_proposals admission replay")
 	}
 }
+
+// Room-confirmed proposals are the room's work: the launched artifact carries
+// the proposal id and the live meeting id so completion can deliver the
+// finished card back into the origin meeting's chat.
+func TestCodexProposalConfirmStampsRoomOrigin(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	var launched scoutAgentThread
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched = thread }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	meetingID := app.memory.ensureMeetingID()
+	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title": "Coyote pricing",
+		"mode":  "research",
+		"query": "Research coyote pricing and draft a brief.",
+	})
+	if err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+	proposalID := asString(result["proposal"].(map[string]any)["id"])
+
+	if _, _, err := app.resolveCodexProposal(proposalID, "confirm", "Tom", "tom@shareability.com"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	metadata := launched.Artifact.Metadata
+	if metadata["originKind"] != agentThreadOriginRoom {
+		t.Fatalf("originKind=%q, want %q", metadata["originKind"], agentThreadOriginRoom)
+	}
+	if metadata["originId"] != proposalID {
+		t.Fatalf("originId=%q, want the proposal id %q", metadata["originId"], proposalID)
+	}
+	if metadata["originMeetingId"] != meetingID {
+		t.Fatalf("originMeetingId=%q, want the live meeting %q", metadata["originMeetingId"], meetingID)
+	}
+}

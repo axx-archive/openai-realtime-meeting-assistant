@@ -177,3 +177,134 @@ func memoryEntriesContain(entries []meetingMemoryEntry, id string) bool {
 
 	return false
 }
+
+// Completed artifacts earn a real display title from the body: first markdown
+// heading wins, then a "Title:" line, then a short first line — mode scaffold
+// openers never become titles, and an unusable body keeps the fallback.
+func TestArtifactTitleFromBody(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		body     string
+		fallback string
+		want     string
+	}{
+		{
+			name:     "first heading wins and sheds punctuation",
+			body:     "## Coyote pricing teardown.\n\nEvidence follows.",
+			fallback: "dig into coyote pricing",
+			want:     "Coyote pricing teardown",
+		},
+		{
+			name:     "scaffold opener heading is skipped for the real one",
+			body:     "# Scout work thread\n\n## Realtime margin audit\n\nbody",
+			fallback: "prompt",
+			want:     "Realtime margin audit",
+		},
+		{
+			name:     "title line beats the first plain line",
+			body:     "Research brief\n\nTitle: Q3 pipeline reconciliation\n\nDetails.",
+			fallback: "prompt",
+			want:     "Q3 pipeline reconciliation",
+		},
+		{
+			name:     "short first line is a title",
+			body:     "Margin plan for Q3\n\nLong details follow here.",
+			fallback: "prompt",
+			want:     "Margin plan for Q3",
+		},
+		{
+			name:     "overlong first line keeps the fallback",
+			body:     strings.Repeat("margin ", 20) + "\n\nbody",
+			fallback: "the original prompt",
+			want:     "the original prompt",
+		},
+		{
+			name:     "scaffold-only body keeps the fallback",
+			body:     "Scout work thread\n\nStatus: running",
+			fallback: "the original prompt",
+			want:     "the original prompt",
+		},
+		{
+			name:     "empty body keeps the fallback",
+			body:     "",
+			fallback: "the original prompt",
+			want:     "the original prompt",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := artifactTitleFromBody(tt.body, tt.fallback); got != tt.want {
+				t.Fatalf("artifactTitleFromBody=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Scout retrieval: a completed artifact whose title matches the query enters
+// query context truncated to budget (with the full-artifact marker), while a
+// running scaffold with the same subject stays out.
+func TestContextEntriesForQueryBudgetsCompletedArtifactBodies(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	longBody := "# Coyote pricing teardown\n\n" + strings.Repeat("Carrier margin evidence with routing detail. ", 80)
+	completed, _, err := app.createOSArtifactWithMetadata("research", "coyote pricing", longBody, "AJ", map[string]string{
+		"title":        "Coyote pricing teardown",
+		"threadStatus": "complete",
+		"status":       "complete",
+	})
+	if err != nil {
+		t.Fatalf("create completed artifact: %v", err)
+	}
+	running, _, err := app.createOSArtifactWithMetadata("research", "coyote pricing second pass", "Scout work thread\n\nVision: coyote pricing second pass", "AJ", map[string]string{
+		"title":        "Coyote pricing second pass",
+		"threadStatus": "running",
+		"status":       "running",
+	})
+	if err != nil {
+		t.Fatalf("create running scaffold: %v", err)
+	}
+
+	entries := app.memory.contextEntriesForQuery("what did the coyote pricing teardown conclude", 12, time.Now())
+	var artifactEntry *meetingMemoryEntry
+	for index := range entries {
+		if entries[index].ID == completed.ID {
+			artifactEntry = &entries[index]
+		}
+		if entries[index].ID == running.ID {
+			t.Fatal("running scaffold must not enter query context")
+		}
+	}
+	if artifactEntry == nil {
+		t.Fatalf("completed artifact %s missing from context entries", completed.ID)
+	}
+	if len([]rune(artifactEntry.Text)) >= len([]rune(longBody)) {
+		t.Fatalf("artifact context len=%d, want truncated below the raw body (%d)", len(artifactEntry.Text), len(longBody))
+	}
+	if !strings.Contains(artifactEntry.Text, "[truncated — full artifact id="+completed.ID) {
+		t.Fatalf("artifact context missing the truncation marker: %q", artifactEntry.Text[len(artifactEntry.Text)-160:])
+	}
+}
+
+// Recall/report-flavored questions that name a completed artifact at title
+// strength skip the board short-circuit so the model answers from the
+// artifact body; plain board questions keep the fast path.
+func TestQueryPrefersArtifactContext(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, _, err := app.createOSArtifactWithMetadata("research", "reconcile coyote pricing against the q3 board", "# Coyote pricing teardown\n\nEvidence.", "AJ", map[string]string{
+		"title":        "Coyote pricing teardown",
+		"threadStatus": "complete",
+		"status":       "complete",
+	}); err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+
+	if !app.queryPrefersArtifactContext("compare the coyote pricing teardown with the q3 board figures") {
+		t.Fatal("artifact-naming comparison question must prefer artifact context")
+	}
+	if app.queryPrefersArtifactContext("what is on the board right now") {
+		t.Fatal("plain board question must keep the board short-circuit")
+	}
+	if app.queryPrefersArtifactContext("compare the roadmap cards") {
+		t.Fatal("flavored question naming no artifact must keep the board short-circuit")
+	}
+}

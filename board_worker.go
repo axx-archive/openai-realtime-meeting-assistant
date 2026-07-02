@@ -125,9 +125,13 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	}
 
 	broadcastKanbanEvent("memory_board_update", entry)
+	// Office memory rails stay live via the snapshot path: the entry-shaped
+	// memory_board_update event stays room-only because the client's
+	// addMemoryEntry does not dedupe by id.
+	broadcastOfficeKanbanEvent("memory", app.memorySnapshotForClients(20))
 	if runResult.ChangedCount > 0 {
-		broadcastKanbanEvent("board", app.snapshotState())
-		broadcastKanbanEvent("undo_available", app.canUndoDelete())
+		broadcastSignedInKanbanEvent("board", app.snapshotState())
+		broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
 		broadcastAssistantEvent("action", "Scout updated the board from meeting summaries.", map[string]any{"kind": meetingMemoryKindBoardUpdate, "changes": runResult.ChangedCount})
 		app.refreshRealtimeBoardContext("meeting board worker")
 	} else {
@@ -237,6 +241,7 @@ func meetingBoardInstructions() string {
 		"Return strict JSON only, with shape: {\"summary\":\"short audit summary\",\"operations\":[{\"tool\":\"update_ticket\",\"reason\":\"why this is grounded\",\"arguments\":{...}}]}.",
 		"Allowed tools are create_ticket, update_ticket, move_ticket, add_tags, add_key_date, propose_codex_task, and do_nothing. Tool arguments must match the existing board tool schemas.",
 		"When an action item clearly maps to an agent deliverable — a research brief, a design brief, a pressure-test, a workflow plan, or a written artifact — also emit propose_codex_task with arguments {\"title\":\"short human title\",\"mode\":\"research|design|grill|workflow|artifacts\",\"query\":\"what the agent should produce\"}.",
+		"When the deliverable matches a board card — including one you create earlier in this same pass — pass its card_id if known, otherwise reuse the card's exact title so the proposal binds to it.",
 		"Proposals are never auto-run: a human reviews and confirms each one, so propose at most two per pass and only when the deliverable is unmistakable.",
 		"Phrase every proposal query as a read-only deliverable to research, draft, or analyze. Never ask the agent to commit, deploy, push, ssh, run migrations, or modify external systems.",
 		"When no board change is warranted, return {\"summary\":\"No actionable board changes.\",\"operations\":[]}.",

@@ -53,13 +53,27 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 
 	id := durableTimestampID("codex-proposal", time.Now())
 	text := fmt.Sprintf("Scout proposes %s task: %s — %s", assistantToolLabel(mode), title, query)
-	entry, appended, err := app.memory.appendCodexProposal(id, text, map[string]string{
+	metadata := map[string]string{
 		"title":      title,
 		"mode":       mode,
 		"query":      query,
 		"status":     codexProposalStatusProposed,
 		"proposedBy": proposedBy,
-	})
+	}
+	// Board linkage captured at propose time: an explicit card_id wins,
+	// otherwise the title fuzzy-matches an existing card. No match just means
+	// no auto-advance later — never an error.
+	if card, ok := app.matchBoardCard(title, asString(args["card_id"])); ok {
+		metadata["cardId"] = card.ID
+	}
+	// Package linkage captured at propose time: package_id resolves by id or
+	// name; an unknown package just means no binder auto-attach later.
+	if packageRef := strings.TrimSpace(asString(args["package_id"])); packageRef != "" {
+		if record, ok := app.findPackageByNameOrID(packageRef); ok {
+			metadata["packageId"] = record.ID
+		}
+	}
+	entry, appended, err := app.memory.appendCodexProposal(id, text, metadata)
 	if err != nil {
 		return nil, false, err
 	}
@@ -68,11 +82,11 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 	}
 
 	payload := codexProposalPayload(entry)
-	broadcastKanbanEvent("codex_proposal", payload)
+	broadcastOfficeKanbanEvent("codex_proposal", payload)
 	// Everyone-notification: any signed-in user may confirm, so the durable
 	// nudge is a broadcast; tool "room" routes the click to the room where
 	// the proposal cards live.
-	if _, err := app.createNotification("", notificationKindTask, "Scout proposes: "+title+" — confirm to launch", "room", ""); err != nil {
+	if _, err := app.createNotification("", notificationKindTask, "Scout proposes: "+title+" — confirm to launch", "room", "", "", false); err != nil {
 		log.Errorf("Failed to create codex proposal notification for %s: %v", entry.ID, err)
 	}
 
@@ -96,7 +110,7 @@ func codexProposalPayload(entry meetingMemoryEntry) map[string]any {
 		"proposedBy": entry.Metadata["proposedBy"],
 		"createdAt":  entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt"} {
+	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId"} {
 		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
 			payload[key] = value
 		}
@@ -163,7 +177,13 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 			return nil, false, err
 		}
 
-		thread, err := app.launchAgentThread(entry.Metadata["mode"], entry.Metadata["query"], userName)
+		// Room-confirmed proposals are the room's work: completion posts the
+		// artifact card back into the origin meeting's chat.
+		thread, err := app.launchAgentThreadWithOrigin(entry.Metadata["mode"], entry.Metadata["query"], userName, map[string]string{
+			"originKind":      agentThreadOriginRoom,
+			"originId":        id,
+			"originMeetingId": app.memory.currentMeetingID(),
+		})
 		if err != nil {
 			if _, _, revertErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
 				"status":           codexProposalStatusProposed,
@@ -179,18 +199,51 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 		// Stamp the thread linkage in a follow-up update. The proposal is
 		// already confirmed, so a failure here only loses the linkage — it can
 		// never re-open the proposal for a second launch.
-		stamped, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
+		threadStamp := map[string]string{
 			"threadId":         thread.ID,
 			"threadArtifactId": thread.Artifact.ID,
-		})
+		}
+		// Board linkage: the propose-time cardId wins; when it is absent, retry
+		// the fuzzy match at confirm time (the board worker may have created
+		// the card in a later pass than the proposal).
+		cardID := strings.TrimSpace(entry.Metadata["cardId"])
+		if cardID == "" {
+			if card, ok := app.matchBoardCard(entry.Metadata["title"], ""); ok {
+				cardID = card.ID
+				threadStamp["cardId"] = cardID
+			}
+		}
+		stamped, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, threadStamp)
 		if stampErr != nil {
 			log.Errorf("Failed to stamp thread linkage on codex proposal %s: %v", id, stampErr)
 		} else {
 			updated = stamped
 		}
+		// Bidirectional stamps + auto-advance. Mirrors the linkage-stamp-
+		// after-commit pattern above: a failure only loses the link, it
+		// never re-opens the settled proposal. The propose-time packageId
+		// rides onto the artifact so the terminal hook can auto-attach the
+		// finished deliverable to its venture package.
+		artifactStamp := map[string]string{}
+		if cardID != "" {
+			artifactStamp["boardCardId"] = cardID
+			artifactStamp["proposalId"] = id
+		}
+		if packageID := strings.TrimSpace(entry.Metadata["packageId"]); packageID != "" {
+			artifactStamp["packageId"] = packageID
+			artifactStamp["proposalId"] = id
+		}
+		if len(artifactStamp) > 0 {
+			if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "", artifactStamp); err != nil {
+				log.Errorf("Failed to stamp board linkage on artifact %s: %v", thread.Artifact.ID, err)
+			}
+		}
+		if cardID != "" {
+			app.advanceLinkedCard(cardID, kanbanStatusInProgress, "confirmed: "+entry.Metadata["title"])
+		}
 
 		payload := codexProposalPayload(updated)
-		broadcastKanbanEvent("codex_proposal", payload)
+		broadcastOfficeKanbanEvent("codex_proposal", payload)
 		return payload, true, nil
 	}
 
@@ -205,7 +258,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 	}
 
 	payload := codexProposalPayload(updated)
-	broadcastKanbanEvent("codex_proposal", payload)
+	broadcastOfficeKanbanEvent("codex_proposal", payload)
 	return payload, false, nil
 }
 

@@ -106,13 +106,18 @@ func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, que
 		}, nil
 	}
 
-	if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
-		return assistantQueryResult{
-			query:        query,
-			answer:       answer,
-			source:       "board",
-			matchedCards: matchedCards,
-		}, nil
+	// Questions that name a completed artifact (recall/report flavored) rank
+	// the artifact body over board-card metadata: skip the board
+	// short-circuit and let the model answer from memory context.
+	if !app.queryPrefersArtifactContext(query) {
+		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
+			return assistantQueryResult{
+				query:        query,
+				answer:       answer,
+				source:       "board",
+				matchedCards: matchedCards,
+			}, nil
+		}
 	}
 
 	matches, contextEntries := app.memoryMatchesAndContext(query)
@@ -199,7 +204,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    assistantQueryInstructions(),
-		Input:           buildAssistantQueryInput(query, cards, entries, history, time.Now(), includeBoard),
+		Input:           buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), history, time.Now(), includeBoard),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 500,
@@ -563,6 +568,73 @@ func osAssistantModeUsesGoalWorkflow(mode string) bool {
 	}
 }
 
+// artifactScaffoldOpeners are the mode contract headers a scaffold or worker
+// output starts with — they name the artifact TYPE, never its subject, so
+// title derivation skips them.
+var artifactScaffoldOpeners = map[string]struct{}{
+	"scout work thread":    {},
+	"research brief":       {},
+	"artifact draft":       {},
+	"design kickoff":       {},
+	"grill mode scorecard": {},
+	"codex goal workflow":  {},
+}
+
+func isArtifactScaffoldOpener(value string) bool {
+	_, ok := artifactScaffoldOpeners[strings.ToLower(strings.TrimSpace(value))]
+	return ok
+}
+
+// artifactTitleFromBody derives a display title from a completed artifact
+// body: first markdown heading (# / ## / ###), else a "Title:" line, else
+// the first non-empty line if it is short (<= 90 runes) and not a scaffold
+// opener ("Scout work thread"), else fallback.
+func artifactTitleFromBody(body string, fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	clean := func(value string) string {
+		value = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(value), "#"))
+		value = strings.TrimRight(value, " \t.,:;!—-")
+		return trimForStorage(compactAssistantLine(value), 90)
+	}
+
+	firstLine := ""
+	titleLine := ""
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			level := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+			rest := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+			if level <= 3 && rest != "" && !isArtifactScaffoldOpener(rest) {
+				if title := clean(rest); title != "" {
+					return title
+				}
+			}
+		}
+		if titleLine == "" {
+			if rest, ok := strings.CutPrefix(trimmed, "Title:"); ok {
+				titleLine = strings.TrimSpace(rest)
+			}
+		}
+		if firstLine == "" {
+			firstLine = trimmed
+		}
+	}
+	if titleLine != "" && !isArtifactScaffoldOpener(titleLine) {
+		if title := clean(titleLine); title != "" {
+			return title
+		}
+	}
+	if firstLine != "" && !isArtifactScaffoldOpener(firstLine) && len([]rune(firstLine)) <= 90 {
+		if title := clean(firstLine); title != "" {
+			return title
+		}
+	}
+	return fallback
+}
+
 func osArtifactTitle(mode string, query string, answer string) string {
 	query = compactAssistantLine(query)
 	if query != "" && query != "no direct context yet" {
@@ -848,7 +920,7 @@ func assistantQueryInstructions() string {
 	}, " ")
 }
 
-func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool) string {
+func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool) string {
 	location := meetingTimeLocation()
 	boardJSON, err := json.MarshalIndent(cards, "", "  ")
 	if err != nil {
@@ -875,6 +947,20 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 	} else {
 		builder.WriteString("\n\n# Current Kanban board\n")
 		builder.WriteString("Omitted because the user did not ask about board, card, task, status, owner, or due-date information.\n")
+	}
+	// Decisions ride along unconditionally: token search can miss a decision
+	// statement, but "what did we decide?" must still ground on the ledger.
+	if len(decisions) > 0 {
+		builder.WriteString("\n\n# Decisions on record\n")
+		for _, decision := range decisions {
+			builder.WriteString("- ")
+			builder.WriteString(decision.Text)
+			builder.WriteString(" (madeBy ")
+			builder.WriteString(firstNonEmptyString(strings.TrimSpace(decision.Metadata["madeBy"]), "unknown"))
+			builder.WriteString(", ")
+			builder.WriteString(decision.CreatedAt.In(location).Format("2006-01-02"))
+			builder.WriteString(")\n")
+		}
 	}
 	builder.WriteString("\n\n# Memory context\n")
 	if len(entries) == 0 {
@@ -1216,6 +1302,113 @@ func buildMemoryQuestionInput(query string, entries []meetingMemoryEntry, now ti
 	return builder.String()
 }
 
+const (
+	// artifactContextBudgetChars caps how much of one artifact body rides
+	// into Scout's model context; the truncation marker names the artifact
+	// id so the model can point users at the full report.
+	artifactContextBudgetChars = 1600
+	// artifactContextMaxEntries bounds the dedicated artifact lane.
+	artifactContextMaxEntries = 3
+	// artifactContextScanLimit is how many recent artifacts the lane scores.
+	artifactContextScanLimit = 40
+)
+
+// artifactReadyForContext reports os_artifact entries whose bodies are real
+// knowledge: completed worker threads plus hand-saved/published artifacts
+// (no thread lifecycle at all). Running/queued/error scaffolds are noise.
+func artifactReadyForContext(entry meetingMemoryEntry) bool {
+	if entry.Kind != meetingMemoryKindOSArtifact {
+		return false
+	}
+	threadStatus := strings.TrimSpace(entry.Metadata["threadStatus"])
+	if threadStatus == "" {
+		return true
+	}
+	return threadStatus == "complete" || strings.TrimSpace(entry.Metadata["status"]) == "complete"
+}
+
+// truncateArtifactForContext returns a copy whose Text is capped at
+// artifactContextBudgetChars (rune-safe), suffixed with a marker naming the
+// full artifact, so no multi-KB body ever enters model context whole.
+func truncateArtifactForContext(entry meetingMemoryEntry) meetingMemoryEntry {
+	runes := []rune(entry.Text)
+	if len(runes) <= artifactContextBudgetChars {
+		return entry
+	}
+	entry.Text = strings.TrimSpace(string(runes[:artifactContextBudgetChars])) +
+		fmt.Sprintf("\n[truncated — full artifact id=%s title=%s]", entry.ID, strings.TrimSpace(entry.Metadata["title"]))
+	return entry
+}
+
+// scoreArtifactForQuery scores title + threadQuery/query metadata at
+// transcript-like weight (substring +10, token +3 as search() does) PLUS
+// text token hits at +1, so a title match beats a body-noise match.
+func scoreArtifactForQuery(queryTokens []string, lowerQuery string, entry meetingMemoryEntry) int {
+	if lowerQuery == "" || len(queryTokens) == 0 {
+		return 0
+	}
+	score := 0
+	titleText := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		entry.Metadata["title"],
+		firstNonEmptyString(entry.Metadata["threadQuery"], entry.Metadata["query"]),
+	}, " ")))
+	if titleText != "" {
+		if strings.Contains(titleText, lowerQuery) {
+			score += 10
+		}
+		for _, token := range queryTokens {
+			if strings.Contains(titleText, token) {
+				score += 3
+			}
+		}
+	}
+	lowerText := strings.ToLower(entry.Text)
+	for _, token := range queryTokens {
+		if strings.Contains(lowerText, token) {
+			score++
+		}
+	}
+	return score
+}
+
+// queryPrefersArtifactContext reports recall/report-flavored questions that
+// name a completed artifact at title strength. Those skip the board-card
+// short-circuit so the model path answers from the artifact body (the board
+// JSON still rides along via shouldIncludeBoardContextForAssistant).
+func (app *kanbanBoardApp) queryPrefersArtifactContext(query string) bool {
+	if app == nil || app.memory == nil {
+		return false
+	}
+	lower := strings.ToLower(query)
+	flavored := isMemoryRecallQuery(query)
+	if !flavored {
+		for _, marker := range []string{"artifact", "brief", "report", "reconcile", "compare"} {
+			if strings.Contains(lower, marker) {
+				flavored = true
+				break
+			}
+		}
+	}
+	if !flavored {
+		return false
+	}
+	normalized := normalizeMemoryText(canonicalizeDomainTerms(query))
+	if normalized == "" {
+		return false
+	}
+	queryTokens := uniqueMemoryTokens(normalized)
+	lowerQuery := strings.ToLower(normalized)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, artifactContextScanLimit) {
+		if !artifactReadyForContext(entry) {
+			continue
+		}
+		if scoreArtifactForQuery(queryTokens, lowerQuery, entry) >= 10 {
+			return true
+		}
+	}
+	return false
+}
+
 func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int, now time.Time) []meetingMemoryEntry {
 	if store == nil || limit <= 0 {
 		return nil
@@ -1231,6 +1424,15 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		// UI-state entries never reach Scout's model context
 		if strings.TrimSpace(entry.ID) == "" || isUIStateMemoryKind(entry.Kind) {
 			return
+		}
+		// artifacts are budgeted no matter which lane found them: whole
+		// multi-KB bodies never enter model context, and running/queued/
+		// error scaffolds are boilerplate noise in every lane
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			if !artifactReadyForContext(entry) {
+				return
+			}
+			entry = truncateArtifactForContext(entry)
 		}
 		selected[entry.ID] = entry
 	}
@@ -1263,6 +1465,34 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 			if entryAllowedByTime(entry) && memoryEntryMentionsParticipant(entry, participant) {
 				add(entry)
 			}
+		}
+	}
+
+	// Dedicated artifact lane: completed artifact bodies score weakly in the
+	// generic token search (long bodies dilute), so titles and launch queries
+	// get transcript-weight scoring here and the winners enter context
+	// truncated to budget.
+	if normalizedQuery := normalizeMemoryText(canonicalizeDomainTerms(query)); normalizedQuery != "" {
+		queryTokens := uniqueMemoryTokens(normalizedQuery)
+		lowerQuery := strings.ToLower(normalizedQuery)
+		type scoredArtifact struct {
+			entry meetingMemoryEntry
+			score int
+		}
+		scored := make([]scoredArtifact, 0, artifactContextMaxEntries)
+		for _, entry := range store.entriesOfKind(meetingMemoryKindOSArtifact, artifactContextScanLimit) {
+			if !artifactReadyForContext(entry) || !entryAllowedByTime(entry) {
+				continue
+			}
+			if score := scoreArtifactForQuery(queryTokens, lowerQuery, entry); score > 0 {
+				scored = append(scored, scoredArtifact{entry: entry, score: score})
+			}
+		}
+		sort.SliceStable(scored, func(i, j int) bool {
+			return scored[i].score > scored[j].score
+		})
+		for index := 0; index < len(scored) && index < artifactContextMaxEntries; index++ {
+			add(scored[index].entry)
 		}
 	}
 

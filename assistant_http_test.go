@@ -539,59 +539,87 @@ func TestArtifactsHandlerListsSavedArtifactsForSignedInUser(t *testing.T) {
 	}
 }
 
-func TestArtifactsHandlerRejectsNonAdminUser(t *testing.T) {
+// The trust boundary is the signed-in team: every account lists, reads, and
+// edits artifacts. ONLY the external-write approval actions stay admin-only.
+func TestArtifactsOpenToAllSignedInUsersExceptExternalWriteApproval(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	artifact, _, err := kanbanApp.createOSArtifact("research", "restricted brief", "Research brief\n\n1. Interview operators.", "AJ")
+	artifact, _, err := kanbanApp.createOSArtifact("research", "team brief", "Research brief\n\n1. Interview operators.", "AJ")
 	if err != nil {
 		t.Fatalf("createOSArtifact: %v", err)
 	}
 
-	for _, tc := range []struct {
-		name    string
-		method  string
-		path    string
-		body    string
-		handler http.HandlerFunc
-	}{
-		{
-			name:    "list",
-			method:  http.MethodGet,
-			path:    "/artifacts",
-			handler: artifactsHandler,
-		},
-		{
-			name:    "update",
-			method:  http.MethodPatch,
-			path:    "/artifacts",
-			body:    fmt.Sprintf(`{"id":%q,"title":"Nope","text":"Nope"}`, artifact.ID),
-			handler: artifactsHandler,
-		},
-		{
-			name:    "action",
-			method:  http.MethodPost,
-			path:    "/artifacts/action",
-			body:    fmt.Sprintf(`{"id":%q,"action":"approve"}`, artifact.ID),
-			handler: artifactRunnerActionHandler,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-			req.Header.Set("Content-Type", "application/json")
-			for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
-				req.AddCookie(cookie)
-			}
-			recorder := httptest.NewRecorder()
+	timCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
 
-			tc.handler(recorder, req)
+	// Non-admin list: 200 with full bodies.
+	req := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
+	for _, cookie := range timCookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	artifactsHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("non-admin list status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	var listPayload struct {
+		Artifacts []meetingMemoryEntry `json:"artifacts"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listPayload.Artifacts) != 1 || !strings.Contains(listPayload.Artifacts[0].Text, "Interview operators") {
+		t.Fatalf("artifacts=%#v, want the full body for a non-admin reader", listPayload.Artifacts)
+	}
 
-			if recorder.Code != http.StatusForbidden {
-				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusForbidden)
-			}
-		})
+	// Non-admin edit: 200, with updatedBy audit stamping.
+	req = httptest.NewRequest(http.MethodPatch, "/artifacts", strings.NewReader(fmt.Sprintf(`{"id":%q,"title":"Operator interviews","text":"Research brief\n\n1. Interview operators.\n2. Validate pricing."}`, artifact.ID)))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range timCookies {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	artifactsHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("non-admin update status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	updated, found := kanbanApp.osArtifactByID(artifact.ID)
+	if !found || updated.Metadata["title"] != "Operator interviews" {
+		t.Fatalf("artifact after non-admin edit=%#v, want the edit applied", updated.Metadata)
+	}
+	if updated.Metadata["updatedBy"] == "" {
+		t.Fatal("non-admin edit must stamp updatedBy for the audit trail")
+	}
+
+	// External-write approval stays admin-only: approve and reject 403.
+	for _, action := range []string{"approve", "reject"} {
+		req = httptest.NewRequest(http.MethodPost, "/artifacts/action", strings.NewReader(fmt.Sprintf(`{"id":%q,"action":%q}`, artifact.ID, action)))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range timCookies {
+			req.AddCookie(cookie)
+		}
+		recorder = httptest.NewRecorder()
+		artifactRunnerActionHandler(recorder, req)
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("non-admin %s status=%d body=%s, want 403", action, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	// Rerun is the POST /assistant/threads capability — open to any account.
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	req = httptest.NewRequest(http.MethodPost, "/artifacts/action", strings.NewReader(fmt.Sprintf(`{"id":%q,"action":"rerun"}`, artifact.ID)))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range timCookies {
+		req.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	artifactRunnerActionHandler(recorder, req)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("non-admin rerun status=%d body=%s, want 202", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -609,6 +637,7 @@ func TestAssistantBoardAndMemoryReadableWithoutRoomJoin(t *testing.T) {
 	}{
 		{name: "board", path: "/assistant/board", handler: assistantBoardHandler, key: "board"},
 		{name: "memory", path: "/assistant/memory", handler: assistantMemoryHandler, key: "memory"},
+		{name: "meetings", path: "/assistant/meetings", handler: assistantMeetingsHandler, key: "meetings"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Signed-out reads stay rejected.
@@ -718,7 +747,10 @@ func TestAssistantThreadsHandlerLaunchesRunningArtifact(t *testing.T) {
 	}
 }
 
-func TestAssistantThreadsHandlerHidesArtifactBodyForNonAdminUser(t *testing.T) {
+// Artifact bodies belong to the whole signed-in team: a non-admin launcher
+// gets the full scaffold back, plus the tool origin stamp used by
+// close-the-loop delivery.
+func TestAssistantThreadsHandlerServesFullArtifactToNonAdminUser(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
@@ -752,11 +784,14 @@ func TestAssistantThreadsHandlerHidesArtifactBodyForNonAdminUser(t *testing.T) {
 	if payload.Artifact.ID == "" || payload.Thread.Artifact.ID == "" {
 		t.Fatalf("artifact ids missing: %#v", payload)
 	}
-	if payload.Artifact.Text != "" || payload.Thread.Artifact.Text != "" {
-		t.Fatalf("non-admin artifact text=%q thread text=%q, want hidden bodies", payload.Artifact.Text, payload.Thread.Artifact.Text)
+	if !strings.Contains(payload.Artifact.Text, "Scout work thread") || !strings.Contains(payload.Thread.Artifact.Text, "Scout work thread") {
+		t.Fatalf("non-admin artifact text=%q thread text=%q, want full bodies", payload.Artifact.Text, payload.Thread.Artifact.Text)
 	}
-	if payload.Artifact.Metadata["restricted"] != "true" || payload.Thread.Artifact.Metadata["restricted"] != "true" {
-		t.Fatalf("metadata=%v/%v, want restricted marker", payload.Artifact.Metadata, payload.Thread.Artifact.Metadata)
+	if payload.Artifact.Metadata["restricted"] != "" {
+		t.Fatalf("metadata=%v, want no restricted marker anywhere", payload.Artifact.Metadata)
+	}
+	if payload.Artifact.Metadata["originKind"] != agentThreadOriginTool {
+		t.Fatalf("originKind=%q, want %q stamped at launch", payload.Artifact.Metadata["originKind"], agentThreadOriginTool)
 	}
 }
 

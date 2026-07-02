@@ -388,6 +388,7 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	snapshotPeerState(t)
 	listLock.Lock()
 	peerConnections = nil
+	officeConnections = map[string]officeConnectionState{}
 	activeParticipantConnections = map[string]peerConnectionState{}
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -114,6 +115,10 @@ type meetingArchive struct {
 	Participants []string             `json:"participants,omitempty"`
 	Notes        meetingNotes         `json:"notes"`
 	Email        meetingEmailStatus   `json:"email"`
+	// Meeting embeds the closed first-class meeting record (title, real
+	// startedAt, participants union) so an archive references its meeting
+	// self-containedly.
+	Meeting *meetingRecord `json:"meeting,omitempty"`
 }
 
 type meetingArchiveResult struct {
@@ -212,14 +217,31 @@ type kanbanBoardApp struct {
 	agentBaselineIDs         map[string]string
 	agentRunLocks            map[string]*sync.Mutex
 	chatThreadLocks          map[string]*sync.Mutex
-	notifications            []notificationRecord
+	// agentThreadRunLocks serializes follow-up validate+mark-running per
+	// artifact (agent_thread_followup.go); model calls stay outside.
+	agentThreadRunLocks map[string]*sync.Mutex
+	notifications       []notificationRecord
+	meetings            *meetingStore
+	// Grill session state ("Scout, grill us") — all under mu. While
+	// grillActive, sessionInstructions() swaps to the persona instruction set
+	// and realtimeToolChoice() returns "auto" so the persona can speak.
+	grillActive               bool
+	grillTopic                string
+	grillPersona              string
+	grillStartedBy            string
+	grillStartedAt            time.Time
+	grillBaselineTranscriptID string
+	grillTimer                *time.Timer
 	// missionIntelRefreshAt is the last accepted on-demand mission refresh;
 	// the refresh endpoint allows one attempt per cooldown window.
 	missionIntelRefreshAt time.Time
 	// proposalMu serializes codex-proposal confirm/dismiss transitions so a
 	// double confirm can never launch two agent threads.
 	proposalMu sync.Mutex
-	closeOnce  sync.Once
+	// packageMu serializes ALL venture-package mutations (the proposal-lock
+	// precedent): whole-record last-write-wins inside the lock.
+	packageMu sync.Mutex
+	closeOnce sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -304,6 +326,15 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	} else {
 		app.notifications = notifications
 	}
+	if meetings, err := loadMeetingStore(meetingsPath()); err != nil {
+		log.Errorf("Meeting record persistence disabled: %v", err)
+	} else {
+		app.meetings = meetings
+	}
+	// boot reconciliation: close a stale open record (its meeting id no longer
+	// matches the memory store's resumed id), or re-arm the idle timer when
+	// the same in-flight meeting survived the restart.
+	app.reconcileMeetingRecordsAtBoot()
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
 			log.Errorf("Could not persist initial Kanban board: %v", err)
@@ -456,6 +487,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startMeetingBrainWorker(apiKey)
 	app.startMeetingBoardWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
+	app.startDecisionLedgerWorker(apiKey)
 
 	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
 		return err
@@ -988,7 +1020,9 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
 		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not treat the user as a meeting participant, and do not mutate the shared Kanban board or room recording from this private surface. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# Channels\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
+		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
 		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Ask one concise clarifying question when the request is ambiguous; do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
@@ -1002,7 +1036,14 @@ func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
 		"launch_agent_thread":    {},
 		"answer_memory_question": {},
 		"propose_codex_task":     {},
+		"create_package":         {},
+		"attach_to_package":      {},
+		"advance_package_stage":  {},
 		"send_notification":      {},
+		"post_to_channel":        {},
+		"create_channel":         {},
+		"meeting_recap":          {},
+		"catch_me_up":            {},
 		"do_nothing":             {},
 	}
 	tools := []map[string]any{}
@@ -1132,6 +1173,10 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 }
 
 func (app *kanbanBoardApp) realtimeToolChoice() string {
+	// The grill persona must speak freely without voice-control being on.
+	if app.grillSessionActive() {
+		return "auto"
+	}
 	if app.voiceControlEnabled() {
 		return "auto"
 	}
@@ -1573,6 +1618,12 @@ func scoutSpokenResponseInstructions() string {
 }
 
 func (app *kanbanBoardApp) sessionInstructions() string {
+	// An active grill replaces the whole operator instruction set: the
+	// session.update issued by refreshRealtimeBoardContext("grill start")
+	// swaps Scout into the persona, and "grill end" swaps it back.
+	if app.grillSessionActive() {
+		return app.grillSessionInstructions()
+	}
 	voiceControlState := "inactive: only clear utterances that start with Hey Scout are addressed to you."
 	if app.voiceControlEnabled() {
 		voiceControlState = "active: every clear room request is addressed to you until the user turns the shared room voice island off."
@@ -1594,8 +1645,11 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
 		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening in the room, turn off shared room voice, end the vocal room conversation, close the room voice island, or stop room Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording; this switch is room-wide for every participant, and after it changes you should make one short group announcement that recording is on or off. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
-		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. Do not use send_notification for routine acknowledgements or board updates.",
-		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. Prefer launch_agent_thread when the user wants the work started right now in their own chat.",
+		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. When the user says \"after this meeting/call, remind…\" or asks for the reminder once the meeting is over, pass deliver \"after_meeting\" so it queues until the meeting is archived. Do not use send_notification for routine acknowledgements or board updates.",
+		"# Channels\nUse post_to_channel when a user says put/post/share that in #channel or tell the team in a channel; quote their content faithfully, never embellish. Use mention to flag one person by name. create_channel makes a new public team channel, but only from a user's private Scout — tell room requesters to create channels from their private Scout or the chat surface.",
+		"# Meeting recap\nUse meeting_recap when someone asks where are we, recap this meeting, or what did I miss; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell.",
+		"# Grill sessions\nUse start_grill_session when a user says grill us, pressure-test us, or play investor on a topic; you will switch into the named persona and question the room. Use end_grill_session when anyone asks to stop grilling or stand down — a graded report thread is filed automatically.",
+		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -1916,11 +1970,57 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title": map[string]any{"type": "string", "description": "Short human title for the proposed task."},
-					"mode":  artifactModeProperty,
-					"query": map[string]any{"type": "string", "description": "What the agent should produce once a human confirms the proposal."},
+					"title":      map[string]any{"type": "string", "description": "Short human title for the proposed task."},
+					"mode":       artifactModeProperty,
+					"query":      map[string]any{"type": "string", "description": "What the agent should produce once a human confirms the proposal."},
+					"card_id":    map[string]any{"type": "string", "description": "id of the existing board card this task delivers; omit if none."},
+					"package_id": map[string]any{"type": "string", "description": "id or exact name of the venture package this task belongs to; omit if none."},
 				},
 				"required":             []string{"title", "mode", "query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "create_package",
+			"description": "Create a venture package — a first-class IP mission binder that collects the artifacts, board cards, decisions, and channel moving one piece of IP through the pipeline.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":   map[string]any{"type": "string", "description": "Unique package name, usually the IP or venture name."},
+					"thesis": map[string]any{"type": "string", "description": "One-line thesis for why this IP wins."},
+				},
+				"required":             []string{"name"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "attach_to_package",
+			"description": "Attach an existing artifact, board card, channel, or decision to a venture package so the binder stays the one place holding the IP's moving parts.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"package":   map[string]any{"type": "string", "description": "Package name or id."},
+					"ref_type":  map[string]any{"type": "string", "description": "What kind of object is being attached.", "enum": []string{"artifact", "card", "channel", "decision"}},
+					"ref_id":    map[string]any{"type": "string", "description": "Exact id of the object to attach; preferred when known."},
+					"ref_title": map[string]any{"type": "string", "description": "Title to fuzzy-resolve within ref_type when the exact id is unknown."},
+				},
+				"required":             []string{"package", "ref_type"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "advance_package_stage",
+			"description": "Advance a venture package to its next pipeline stage, or set an explicit stage (forward or back).",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"package": map[string]any{"type": "string", "description": "Package name or id."},
+					"stage":   map[string]any{"type": "string", "description": "Explicit stage to set; omit to step to the next stage.", "enum": packageStages},
+				},
+				"required":             []string{"package"},
 				"additionalProperties": false,
 			},
 		},
@@ -1947,8 +2047,100 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 						"description": "Optional Bonfire OS surface to open when the notification is clicked.",
 						"enum":        []string{"office", "room", "chat", "artifacts", "research", "design", "grill", "board", "memory"},
 					},
+					"deliver": map[string]any{
+						"type":        "string",
+						"description": "after_meeting queues the notification until the meeting is archived; now (the default) delivers immediately.",
+						"enum":        []string{"now", "after_meeting"},
+					},
 				},
 				"required":             []string{"text", "kind", "audience"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "post_to_channel",
+			"description": "Post a message into an existing public team channel on behalf of the user. Quote the user's content faithfully; never embellish. This posts only — it never summons Scout to answer in the channel.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"channel": map[string]any{"type": "string", "description": "Channel name; a leading '#' is tolerated."},
+					"text":    map[string]any{"type": "string", "description": "The message to post, quoting the user's words faithfully."},
+					"mention": map[string]any{
+						"type":        "string",
+						"description": "Optional participant name to flag with a targeted notification.",
+						"enum":        append([]string{""}, meetingParticipantNames...),
+					},
+				},
+				"required":             []string{"channel", "text"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "create_channel",
+			"description": "Create a new public team channel (a shared chat thread every signed-in user can read). Only available from a user's private Scout — the shared room voice cannot create channels.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Channel name; a leading '#' is tolerated."},
+				},
+				"required":             []string{"name"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "meeting_recap",
+			"description": "Build a fresh recap of the live meeting: forces a meeting-brain pass over the newest transcripts, posts the full recap to room chat (audience room, the default), or lands it in the requesting user's notification bell (audience me for catch-me-up requests). Speak the headline after the result arrives.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"audience": map[string]any{
+						"type":        "string",
+						"description": "room posts the recap to room chat for everyone; me delivers it privately to the requesting user's bell.",
+						"enum":        []string{"room", "me"},
+					},
+					"focus": map[string]any{"type": "string", "description": "Optional topic to emphasize when speaking the recap."},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "catch_me_up",
+			"description": "Catch one person up on the live meeting: same as meeting_recap with audience me — a fresh recap lands in the requesting user's notification bell and you read the headline aloud.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"focus": map[string]any{"type": "string", "description": "Optional topic to emphasize when speaking the recap."},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "start_grill_session",
+			"description": "Start a grill session: Scout switches into a pressure-test persona and questions the room on the topic until end_grill_session. Use when a user says grill us, pressure-test us, or play investor.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"topic":   map[string]any{"type": "string", "description": "What the room is being grilled on."},
+					"persona": map[string]any{"type": "string", "description": "Optional persona to adopt; defaults to a skeptical seed-stage investor."},
+				},
+				"required":             []string{"topic"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "end_grill_session",
+			"description": "End the active grill session, restore normal Scout behavior, and file the graded grill report as an agent thread. Use immediately when anyone says end the grill, stop grilling, or Scout, stand down.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"reason": map[string]any{"type": "string", "description": "Optional reason the grill ended."},
+				},
 				"additionalProperties": false,
 			},
 		},
@@ -2191,7 +2383,10 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting":
+	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "end_grill_session":
+		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s)
+		// and end_grill_session files a report thread; run them off the
+		// datachannel event loop like the other slow tools.
 		return true
 	default:
 		return false
@@ -2239,8 +2434,8 @@ func (app *kanbanBoardApp) finishToolCall(outputItem kanbanRealtimeOutputItem, a
 		return
 	}
 
-	broadcastKanbanEvent("board", app.snapshotState())
-	broadcastKanbanEvent("undo_available", app.canUndoDelete())
+	broadcastSignedInKanbanEvent("board", app.snapshotState())
+	broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
 	broadcastAssistantEvent("action", humanizeToolName(outputItem.Name)+" complete", map[string]any{"tool": outputItem.Name})
 	if err := app.SendEvent(app.sessionUpdateEvent()); err != nil {
 		log.Errorf("Failed to refresh Kanban Realtime session: %v", err)
@@ -2365,7 +2560,14 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	case "create_artifact":
 		return app.createRealtimeArtifact(args)
 	case "launch_agent_thread":
-		return app.launchRealtimeAgentThread(args)
+		// The shared dispatch serves the room voice loop and the board
+		// worker: both act on the live meeting, so completion delivers back
+		// to the room. The private dashboard voice path intercepts this tool
+		// in applyPrivateRealtimeVoiceTool and passes no origin.
+		return app.launchRealtimeAgentThread(args, map[string]string{
+			"originKind":      agentThreadOriginRoom,
+			"originMeetingId": app.memory.currentMeetingID(),
+		})
 	case "update_artifact":
 		return app.updateRealtimeArtifact(args)
 	case "publish_artifact":
@@ -2377,10 +2579,33 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// directly. The shared dispatch (board worker + room voice) has no
 		// single requester, so provenance falls back to board_worker.
 		return app.proposeCodexTask(args, "")
+	case "create_package":
+		// Shared dispatch (room voice + workers) has no single requester, so
+		// package mutations attribute to Scout inside the tool helpers.
+		return app.createPackageTool(args, "")
+	case "attach_to_package":
+		return app.attachToPackageTool(args, "")
+	case "advance_package_stage":
+		return app.advancePackageStageTool(args, "")
 	case "send_notification":
 		// The shared room path has no single requester; audience "me" falls
 		// back to everyone there (see sendRealtimeNotification).
 		return app.sendRealtimeNotification(args, "")
+	case "post_to_channel":
+		// Room voice has no single requester: the post attributes to Scout.
+		return app.postToChannel(args, "")
+	case "create_channel":
+		// Rejected without a requester — channels need an owner identity.
+		return app.createChannelByVoice(args, "")
+	case "meeting_recap":
+		// Room voice: audience "me" falls back to a room post (no requester).
+		return app.meetingRecap(args, "")
+	case "catch_me_up":
+		return app.catchMeUp(args, "")
+	case "start_grill_session":
+		return app.startGrillSession(args)
+	case "end_grill_session":
+		return app.endGrillSession(args)
 	case "do_nothing":
 		reason := asString(args["reason"])
 		if reason == "" {
@@ -2396,8 +2621,10 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 }
 
 func privateRealtimeVoiceToolAllowed(toolName string) bool {
+	// start_grill_session / end_grill_session stay room-only: the grill
+	// persona takes over the shared room session, never the private voice.
 	switch strings.TrimSpace(toolName) {
-	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "propose_codex_task", "send_notification", "do_nothing":
+	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "propose_codex_task", "create_package", "attach_to_package", "advance_package_stage", "send_notification", "post_to_channel", "create_channel", "meeting_recap", "catch_me_up", "do_nothing":
 		return true
 	default:
 		return false
@@ -2420,6 +2647,36 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	}
 	if toolName == "propose_codex_task" {
 		return app.proposeCodexTask(args, normalizeAccountEmail(requesterEmail))
+	}
+	// Channel and recap tools carry the signed-in requester so posts attribute
+	// to the real author and catch-me-up recaps land in the right bell.
+	if toolName == "post_to_channel" {
+		return app.postToChannel(args, requesterEmail)
+	}
+	if toolName == "create_channel" {
+		return app.createChannelByVoice(args, requesterEmail)
+	}
+	if toolName == "meeting_recap" {
+		return app.meetingRecap(args, requesterEmail)
+	}
+	if toolName == "catch_me_up" {
+		return app.catchMeUp(args, requesterEmail)
+	}
+	// Package mutations carry the signed-in requester's identity from the
+	// private dashboard voice; the shared dispatch falls back to Scout.
+	if toolName == "create_package" {
+		return app.createPackageTool(args, packageToolActor(requesterEmail))
+	}
+	if toolName == "attach_to_package" {
+		return app.attachToPackageTool(args, packageToolActor(requesterEmail))
+	}
+	if toolName == "advance_package_stage" {
+		return app.advancePackageStageTool(args, packageToolActor(requesterEmail))
+	}
+	// The private dashboard voice is not the room's work: launches carry no
+	// room origin, so completion stays with the creator notification.
+	if toolName == "launch_agent_thread" {
+		return app.launchRealtimeAgentThread(args, nil)
 	}
 	return app.applyToolCallArgs(toolName, args)
 }
@@ -2518,8 +2775,8 @@ func (app *kanbanBoardApp) archiveRealtimeMeeting(_ map[string]any) (map[string]
 		return nil, false, err
 	}
 
-	broadcastKanbanEvent("meeting_archived", result)
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("meeting_archived", result)
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	var actions []osAssistantAction
 	if result.Artifact != nil {
 		actions = app.osAssistantActions(result.Summary, "artifacts", *result.Artifact)
@@ -2562,7 +2819,7 @@ func (app *kanbanBoardApp) updateRealtimeArtifact(args map[string]any) (map[stri
 	if err != nil {
 		return nil, false, err
 	}
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	actions := app.osAssistantActions(title, "artifacts", artifact)
 	broadcastAssistantEvent("action", "Artifact updated", map[string]any{
 		"tool":       "update_artifact",
@@ -2598,7 +2855,7 @@ func (app *kanbanBoardApp) publishRealtimeArtifact(args map[string]any) (map[str
 	if err != nil {
 		return nil, false, err
 	}
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	actions := app.osAssistantActions(artifact.Metadata["title"], "artifacts", artifact)
 	message := "Artifact unpublished"
 	if publishedValue {
@@ -2706,7 +2963,7 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 		return nil, false, fmt.Errorf("artifact was not saved")
 	}
 
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	actions := app.osAssistantActions(query, mode, artifact)
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" artifact saved", map[string]any{
 		"tool":       "create_artifact",
@@ -2726,7 +2983,7 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 	}, false, nil
 }
 
-func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any) (map[string]any, bool, error) {
+func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin map[string]string) (map[string]any, bool, error) {
 	mode := normalizeAgentThreadMode(asString(args["mode"]))
 	if mode == "" {
 		return nil, false, fmt.Errorf("mode is required")
@@ -2736,7 +2993,7 @@ func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any) (map[s
 		return nil, false, fmt.Errorf("query is required")
 	}
 
-	thread, err := app.launchAgentThread(mode, query, scoutParticipantName)
+	thread, err := app.launchAgentThreadWithOrigin(mode, query, scoutParticipantName, origin)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2787,7 +3044,18 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 
 	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
 	broadcastKanbanEvent("memory_transcript", entry)
+	// Wake-word presence cue (VISUAL only — no auto-arming): a transcript
+	// naming Scout pulses the brand mark / voice island on room clients.
+	// Detection lives only here, so typed room chat never pulses, and the
+	// recording toggle gates it (no transcripts = no presence).
+	if scoutWakePattern.MatchString(entry.Text) {
+		broadcastAssistantEvent("wake", "Scout heard its name", map[string]any{"speaker": speaker})
+	}
 }
+
+// scoutWakePattern spots Scout's name as a whole word inside a transcript —
+// "scouting" and "discount" never match.
+var scoutWakePattern = regexp.MustCompile(`(?i)\bscout\b`)
 
 const (
 	// maxRoomChatMessageRunes caps a single typed room-chat message.
@@ -2815,6 +3083,35 @@ func normalizeRoomChatText(text string) string {
 // payload. Speaker is passed explicitly; never speakerForCompletedTranscript,
 // which would steal attribution state from the audio pipeline.
 func (app *kanbanBoardApp) recordRoomChatMessage(senderName string, text string) (map[string]any, bool) {
+	return app.recordRoomChatMessageWithMetadata(senderName, text, nil)
+}
+
+// recordRoomChatMessageWithArtifact posts a room-chat message that carries a
+// finished artifact reference — the close-the-loop delivery card. It rides
+// the same transcript-entering path as typed chat, so the brain/board
+// workers and meeting archives see the delivery too. expectedMeetingID gates
+// the append atomically on that meeting still being active (empty = ungated):
+// the delivery seam passes the origin meeting id so a rotation racing the
+// delivery can never mint a phantom meeting or leak into the successor.
+func (app *kanbanBoardApp) recordRoomChatMessageWithArtifact(senderName string, text string, artifactID string, expectedMeetingID string) (map[string]any, bool) {
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return app.recordRoomChatMessage(senderName, text)
+	}
+	// Scout is not a canonical meeting participant, so the transcript path's
+	// speaker normalization drops it; the explicit metadata fallback keeps the
+	// card attributed (a canonical sender still wins inside the append).
+	return app.recordRoomChatMessageForMeeting(senderName, text, map[string]string{
+		"artifactId": artifactID,
+		"speaker":    strings.TrimSpace(senderName),
+	}, expectedMeetingID)
+}
+
+func (app *kanbanBoardApp) recordRoomChatMessageWithMetadata(senderName string, text string, extraMetadata map[string]string) (map[string]any, bool) {
+	return app.recordRoomChatMessageForMeeting(senderName, text, extraMetadata, "")
+}
+
+func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(senderName string, text string, extraMetadata map[string]string, expectedMeetingID string) (map[string]any, bool) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; room chat message was not saved")
 		return nil, false
@@ -2825,7 +3122,7 @@ func (app *kanbanBoardApp) recordRoomChatMessage(senderName string, text string)
 	}
 
 	id := durableTimestampID("chat", time.Now())
-	entry, appended, err := app.memory.appendRoomChatTranscript(id, senderName, text)
+	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(id, senderName, text, extraMetadata, expectedMeetingID)
 	if err != nil {
 		log.Errorf("Failed to write room chat to meeting memory: %v", err)
 		return nil, false
@@ -2851,12 +3148,18 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 			text = strings.TrimSpace(text[len(prefix):])
 		}
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"id":        entry.ID,
 		"name":      name,
 		"text":      text,
 		"createdAt": entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
+	// Completion-delivery messages carry the artifact id so the client can
+	// render a "view report" chip on the bubble.
+	if artifactID := strings.TrimSpace(entry.Metadata["artifactId"]); artifactID != "" {
+		payload["artifactId"] = artifactID
+	}
+	return payload
 }
 
 // roomChatHistory returns the newest room-chat messages of the current
@@ -2902,8 +3205,11 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 	for _, entry := range entries {
 		// codex_proposal entries render as dedicated confirm/dismiss cards
 		// (codex_proposal events), never as generic memory-timeline noise;
-		// mission_insight JSON is UI state served via /assistant/mission.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight {
+		// mission_insight JSON is UI state served via /assistant/mission;
+		// decisions render in the intel canvas ledger (and decision_pass is
+		// pure cursor bookkeeping); package records render in the intel
+		// canvas binder — none of them are timeline entries.
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage {
 			continue
 		}
 		visible = append(visible, entry)
@@ -3714,6 +4020,9 @@ func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 }
 
 func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResult, error) {
+	// force-end an active grill FIRST so the grill Q&A lands in the archive,
+	// the report window closes cleanly, and normal instructions are restored.
+	app.endGrillSessionForArchive()
 	// flush ambient agents first so the final minutes of the meeting are
 	// summarized and applied to the board before the snapshot is taken.
 	app.flushAmbientAgentsForArchive()
@@ -3731,6 +4040,25 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if len(participants) == 0 && archivedBy != "" {
 		participants = []string{archivedBy}
 	}
+	// Snapshot the meeting record for the archive embed (title, real
+	// startedAt, participants union) WITHOUT closing it yet: the record only
+	// ends after the archive is durably written, so a failed write never
+	// strands an ended record whose archiveId 404s while the room keeps
+	// talking on an un-rotated memory id. The end stamps below mirror exactly
+	// what endMeeting will persist after the first successful write.
+	var closedMeeting *meetingRecord
+	if record, ok := app.meetings.activeRecord(); ok && record.ID == meetingID {
+		pending := record
+		pending.EndedAt = archivedAt.Format(time.RFC3339Nano)
+		pending.EndedReason = meetingEndedReasonArchive
+		pending.ArchiveID = archiveID
+		closedMeeting = &pending
+	} else if record, _ := app.meetings.endMeeting(meetingID, archivedAt, meetingEndedReasonArchive, archiveID); record.ID != "" {
+		// Defensive: the id matches an ALREADY-ENDED record (endMeeting is
+		// idempotent, changed=false) — embed it as stored.
+		closedRecord := record
+		closedMeeting = &closedRecord
+	}
 	notes := buildMeetingNotes(archiveID, archivedAt, archivedBy, board, memory, participants)
 	email := meetingEmailStatus{
 		Recipients: participantEmails(participants),
@@ -3747,6 +4075,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		Participants: participants,
 		Notes:        notes,
 		Email:        email,
+		Meeting:      closedMeeting,
 	}
 
 	archivePath, err := meetingArchivePath(archiveID)
@@ -3756,6 +4085,16 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 
 	if err := writeMeetingArchive(archivePath, archive); err != nil {
 		return meetingArchiveResult{}, fmt.Errorf("write meeting archive: %w", err)
+	}
+
+	// The archive is durable: NOW close the record (idempotent — a retried
+	// archive of an already-ended id reports changed=false and never
+	// restamps).
+	closedMeetingChanged := false
+	if record, changed := app.meetings.endMeeting(meetingID, archivedAt, meetingEndedReasonArchive, archiveID); record.ID != "" {
+		closedRecord := record
+		closedMeeting = &closedRecord
+		closedMeetingChanged = changed
 	}
 
 	email = sendMeetingNotesEmail(email.Recipients, notes)
@@ -3805,8 +4144,33 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		}
 		clientArtifact := decorateArchiveDownloadURLForClient(artifactEntry)
 		artifact = &clientArtifact
-		// the archive closes the current meeting; the next entry starts a new one.
-		app.memory.rotateMeetingID()
+		// the meeting is over: deliver anything queued with deliver
+		// "after_meeting" before the id rotates (idempotent — the idle-end
+		// seam may already have flushed).
+		app.flushDeferredNotifications("archive")
+		// the archive closes the current meeting; the next entry starts a new
+		// one. Conditional: a racing admission that already rotated and minted
+		// a successor id must not have it cleared by this stale close.
+		if meetingID != "" {
+			app.memory.rotateMeetingIDIfCurrent(meetingID)
+		} else {
+			// nothing was captured before the archive; clear whatever id the
+			// archive entries themselves lazily minted (pre-fix behavior).
+			app.memory.rotateMeetingID()
+		}
+	}
+
+	// push the closed record, then immediately open a successor record when
+	// people are still in the room so a mid-occupancy archive never leaves a
+	// recordless gap.
+	if closedMeetingChanged && closedMeeting != nil {
+		app.broadcastMeetingRecord(*closedMeeting)
+	}
+	if app.meetings != nil && app.memory != nil && app.activeParticipantCount() > 0 {
+		successorID := app.memory.ensureMeetingID()
+		if successor, started := app.meetings.startMeeting(successorID, time.Now().UTC(), app.participantSnapshot()); started {
+			app.broadcastMeetingRecord(successor)
+		}
 	}
 
 	return meetingArchiveResult{
@@ -3823,7 +4187,15 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 }
 
 func meetingArchiveArtifactTitle(archive meetingArchive) string {
-	title := strings.TrimSpace(archive.Notes.Subject)
+	title := ""
+	// the meeting record's server-derived title is the meeting's real name;
+	// the generated notes subject is the fallback.
+	if archive.Meeting != nil {
+		title = strings.TrimSpace(archive.Meeting.Title)
+	}
+	if title == "" {
+		title = strings.TrimSpace(archive.Notes.Subject)
+	}
 	if title == "" {
 		title = "Meeting artifact"
 	}
@@ -4390,11 +4762,36 @@ func sendKanbanEvent(websocket *threadSafeWriter, event string, data any) error 
 	})
 }
 
-func broadcastKanbanEvent(event string, data any) {
+func encodeKanbanEvent(event string, data any) (string, error) {
 	raw, err := json.Marshal(map[string]any{
 		"event": event,
 		"data":  data,
 	})
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func deliverKanbanEvent(websockets []*threadSafeWriter, raw string) {
+	for _, websocket := range websockets {
+		if err := websocket.WriteJSON(&websocketMessage{
+			Event: "kanban",
+			Data:  raw,
+		}); err != nil {
+			if isExpectedKanbanBroadcastClose(err) {
+				continue
+			}
+			log.Errorf("Failed to send Kanban event: %v", err)
+		}
+	}
+}
+
+// broadcastKanbanEvent is the room fan-out: it reaches media-joined room
+// sockets only. Room-scoped events (signaling companions, participants,
+// transcripts, active speaker) must stay on this path.
+func broadcastKanbanEvent(event string, data any) {
+	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode Kanban event: %v", err)
 		return
@@ -4409,24 +4806,71 @@ func broadcastKanbanEvent(event string, data any) {
 	}
 	listLock.RUnlock()
 
-	for _, websocket := range websockets {
-		if err := websocket.WriteJSON(&websocketMessage{
-			Event: "kanban",
-			Data:  string(raw),
-		}); err != nil {
-			if isExpectedKanbanBroadcastClose(err) {
-				continue
-			}
-			log.Errorf("Failed to send Kanban event: %v", err)
+	deliverKanbanEvent(websockets, raw)
+}
+
+// broadcastOfficeKanbanEvent fans an event out to office sockets only —
+// authenticated connections that never took a room seat. Clients keep the
+// office socket open while in the room too, so office-only routing is the
+// exactly-once channel for signed-in-safe events (chat_thread,
+// codex_proposal, mission_insight).
+func broadcastOfficeKanbanEvent(event string, data any) {
+	raw, err := encodeKanbanEvent(event, data)
+	if err != nil {
+		log.Errorf("Failed to encode office Kanban event: %v", err)
+		return
+	}
+
+	listLock.RLock()
+	websockets := make([]*threadSafeWriter, 0, len(officeConnections))
+	for _, state := range officeConnections {
+		if state.websocket != nil {
+			websockets = append(websockets, state.websocket)
 		}
 	}
+	listLock.RUnlock()
+
+	deliverKanbanEvent(websockets, raw)
+}
+
+// broadcastSignedInKanbanEvent reaches the union of office sockets and
+// media-joined room sockets, deduped by writer pointer. Reserved for
+// idempotent, snapshot-shaped payloads (board, undo_available, memory,
+// meeting, meeting_archived, server_shutdown) and id-deduped entries
+// (notification, room_chat) where a double delivery is a harmless re-render.
+func broadcastSignedInKanbanEvent(event string, data any) {
+	raw, err := encodeKanbanEvent(event, data)
+	if err != nil {
+		log.Errorf("Failed to encode signed-in Kanban event: %v", err)
+		return
+	}
+
+	listLock.RLock()
+	seen := make(map[*threadSafeWriter]bool, len(officeConnections)+len(peerConnections))
+	websockets := make([]*threadSafeWriter, 0, len(officeConnections)+len(peerConnections))
+	for _, state := range officeConnections {
+		if state.websocket != nil && !seen[state.websocket] {
+			seen[state.websocket] = true
+			websockets = append(websockets, state.websocket)
+		}
+	}
+	for _, state := range peerConnections {
+		if state.websocket != nil && !seen[state.websocket] {
+			seen[state.websocket] = true
+			websockets = append(websockets, state.websocket)
+		}
+	}
+	listLock.RUnlock()
+
+	deliverKanbanEvent(websockets, raw)
 }
 
 // sendKanbanEventToUser delivers an event only to live connections whose
 // server-side authenticated session email matches. It iterates
-// activeParticipantConnections (populated at admission, unlike the
-// media-gated peerConnections fan-out pool) so admitted-but-not-media-joined
-// sockets are reached too. Targeted payloads must never go through
+// officeConnections plus activeParticipantConnections (populated at
+// admission, unlike the media-gated peerConnections fan-out pool), deduped by
+// writer pointer, so office tabs and admitted-but-not-media-joined sockets
+// are reached too. Targeted payloads must never go through
 // broadcastKanbanEvent and rely on client-side redaction.
 func sendKanbanEventToUser(email string, event string, data any) {
 	email = normalizeAccountEmail(email)
@@ -4434,19 +4878,24 @@ func sendKanbanEventToUser(email string, event string, data any) {
 		return
 	}
 
-	raw, err := json.Marshal(map[string]any{
-		"event": event,
-		"data":  data,
-	})
+	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode targeted Kanban event: %v", err)
 		return
 	}
 
 	listLock.RLock()
-	websockets := make([]*threadSafeWriter, 0, 1)
+	seen := make(map[*threadSafeWriter]bool, 2)
+	websockets := make([]*threadSafeWriter, 0, 2)
+	for _, state := range officeConnections {
+		if state.websocket != nil && state.sessionEmail == email && !seen[state.websocket] {
+			seen[state.websocket] = true
+			websockets = append(websockets, state.websocket)
+		}
+	}
 	for _, state := range activeParticipantConnections {
-		if state.websocket != nil && state.sessionEmail == email {
+		if state.websocket != nil && state.sessionEmail == email && !seen[state.websocket] {
+			seen[state.websocket] = true
 			websockets = append(websockets, state.websocket)
 		}
 	}
@@ -4455,7 +4904,7 @@ func sendKanbanEventToUser(email string, event string, data any) {
 	for _, websocket := range websockets {
 		if err := websocket.WriteJSON(&websocketMessage{
 			Event: "kanban",
-			Data:  string(raw),
+			Data:  raw,
 		}); err != nil {
 			if isExpectedKanbanBroadcastClose(err) {
 				continue

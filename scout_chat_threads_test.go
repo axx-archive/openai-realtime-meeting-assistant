@@ -111,7 +111,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 
 	// A plain human message — even one carrying agent-mode keywords — must not
 	// summon Scout or launch an agent thread.
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "let's research the market together at 3pm", nil)
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "let's research the market together at 3pm", nil, "")
 	if err != nil {
 		t.Fatalf("append channel message: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	}
 
 	// An @scout mention (case-insensitive) gets an answer.
-	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@Scout what did we decide yesterday?", nil)
+	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@Scout what did we decide yesterday?", nil, "")
 	if err != nil {
 		t.Fatalf("append mention message: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 
 	// A conversational @scout message that merely contains mode keywords must
 	// stay a chat answer: channel launches require an explicit "mode:" prefix.
-	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research the rodeo creator market", nil)
+	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research the rodeo creator market", nil, "")
 	if err != nil {
 		t.Fatalf("append mention keyword message: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	}
 
 	// The explicit prefix after the mention launches an agent run.
-	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil)
+	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil, "")
 	if err != nil {
 		t.Fatalf("append mention launch message: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 	modelCalls = 0
-	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "what did we decide yesterday?", nil); err != nil {
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "what did we decide yesterday?", nil, ""); err != nil {
 		t.Fatalf("append private message: %v", err)
 	}
 	if modelCalls != 1 {
@@ -213,7 +213,7 @@ func TestScoutChatConcurrentAppendsBothSurvive(t *testing.T) {
 		wg.Add(1)
 		go func(text string) {
 			defer wg.Done()
-			if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, text, nil); err != nil {
+			if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, text, nil, ""); err != nil {
 				errs <- err
 			}
 		}(text)
@@ -318,7 +318,7 @@ func TestAgentThreadCompletionUpdatesPersistedChatThreadRef(t *testing.T) {
 	if user == nil {
 		t.Fatal("seed user tim@shareability.com missing")
 	}
-	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil); err != nil {
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil, ""); err != nil {
 		t.Fatalf("append launch message: %v", err)
 	}
 	if launched.ID == "" {
@@ -375,7 +375,7 @@ func TestScoutChatChannelAttributionSurvivesDisplayNameChange(t *testing.T) {
 	renamed := *seeded
 	renamed.Name = "AJ (Founder)"
 
-	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), &renamed, channel.ID, "the package lives in 4 tools", nil)
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), &renamed, channel.ID, "the package lives in 4 tools", nil, "")
 	if err != nil {
 		t.Fatalf("append channel message: %v", err)
 	}
@@ -408,4 +408,168 @@ func responseKeys(response map[string]any) []string {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+// post_to_channel relays user words into a public channel through the normal
+// commit path: room voice attributes to Scout, private voice to the real
+// author (Via scout_voice), everyone gets a deep-linked bell entry, and the
+// tool NEVER summons Scout's answer loop even when the text says @scout.
+func TestPostToChannelPersistsAndNotifiesWithoutInvokingScout(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	// A model call anywhere in this path is a bug: the mention gate lives in
+	// appendScoutChatThreadMessage, which post_to_channel bypasses.
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("post_to_channel must never invoke the model")
+		return "", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "warroom", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	// Room voice: no requester, so the relay attributes to Scout. '#' and
+	// case differences are tolerated, @scout stays inert.
+	result, changed, err := app.applyToolCallArgs("post_to_channel", map[string]any{
+		"channel": "#Warroom",
+		"text":    "@scout we agreed to ship the pilot Friday",
+	})
+	if err != nil {
+		t.Fatalf("post_to_channel room voice: %v", err)
+	}
+	if changed {
+		t.Fatal("post_to_channel must not report a board change")
+	}
+	if result["ok"] != true || result["channel"] != "warroom" || result["threadId"] != channel.ID || asString(result["messageId"]) == "" {
+		t.Fatalf("result=%#v, want ok/channel/threadId/messageId", result)
+	}
+	if _, hasActions := result["actions"]; hasActions {
+		t.Fatalf("post_to_channel must not auto-navigate anyone: %#v", result)
+	}
+
+	// Private voice: the post carries the requester's identity + mention flag.
+	if _, _, err := app.applyPrivateRealtimeVoiceTool("aj@shareability.com", "post_to_channel", map[string]any{
+		"channel": "warroom",
+		"text":    "Tim, can you own the vendor call?",
+		"mention": "Tim",
+	}); err != nil {
+		t.Fatalf("post_to_channel private voice: %v", err)
+	}
+
+	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", channel.ID)
+	if err != nil {
+		t.Fatalf("reload channel: %v", err)
+	}
+	if len(saved.Messages) != 2 {
+		t.Fatalf("channel messages=%d, want exactly the two posts (no Scout reply)", len(saved.Messages))
+	}
+	roomPost := saved.Messages[0]
+	if roomPost.Role != "scout" || roomPost.AuthorName != scoutParticipantName || roomPost.Via != "" {
+		t.Fatalf("room post=%#v, want Scout-attributed relay", roomPost)
+	}
+	privatePost := saved.Messages[1]
+	if privatePost.Role != "user" || privatePost.AuthorEmail != "aj@shareability.com" || privatePost.Via != "scout_voice" {
+		t.Fatalf("private post=%#v, want requester-attributed via scout_voice", privatePost)
+	}
+
+	// Bell: two everyone-posts plus one targeted mention, all deep-linked.
+	timUnread := app.unreadNotificationsFor("tim@shareability.com", notificationListLimit)
+	if len(timUnread) != 3 {
+		t.Fatalf("tim unread=%#v, want 2 channel posts + 1 mention flag", timUnread)
+	}
+	mentionFound := false
+	for _, item := range timUnread {
+		if item["threadId"] != channel.ID {
+			t.Fatalf("notification=%#v, want threadId deep link to the channel", item)
+		}
+		if strings.Contains(asString(item["text"]), "flagged you in #warroom") && item["userEmail"] == "tim@shareability.com" {
+			mentionFound = true
+		}
+	}
+	if !mentionFound {
+		t.Fatal("mention must create a targeted notification for Tim")
+	}
+	// The targeted mention never reaches other accounts.
+	for _, item := range app.unreadNotificationsFor("tyler@shareability.com", notificationListLimit) {
+		if strings.Contains(asString(item["text"]), "flagged you") {
+			t.Fatalf("mention notification leaked to tyler: %#v", item)
+		}
+	}
+}
+
+// Unknown channels error with the available names so the voice model can
+// self-correct aloud; private threads are never postable.
+func TestPostToChannelUnknownAndPrivateThreadsRejected(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, err := app.createScoutChatThread("aj@shareability.com", "AJ", "warroom", "public"); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := app.createScoutChatThread("aj@shareability.com", "AJ", "diary", "private"); err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	_, _, err := app.applyToolCallArgs("post_to_channel", map[string]any{
+		"channel": "nonexistent",
+		"text":    "hello",
+	})
+	if err == nil || !strings.Contains(err.Error(), `no channel named "nonexistent"`) || !strings.Contains(err.Error(), "warroom") {
+		t.Fatalf("unknown channel error=%v, want the available channel names listed", err)
+	}
+
+	// The private thread's title must not resolve — private threads are not
+	// channels.
+	if _, _, err := app.applyToolCallArgs("post_to_channel", map[string]any{
+		"channel": "diary",
+		"text":    "hello",
+	}); err == nil {
+		t.Fatal("posting to a private thread by title must be rejected")
+	}
+}
+
+// create_channel needs an owner identity: the shared room voice is rejected,
+// the private dashboard voice creates a public channel and notifies everyone
+// with a deep link.
+func TestCreateChannelByVoiceRequiresPrivateRequester(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, _, err := app.applyToolCallArgs("create_channel", map[string]any{"name": "growth"}); err == nil || !strings.Contains(err.Error(), "private Scout") {
+		t.Fatalf("room-voice create_channel error=%v, want private-Scout redirect", err)
+	}
+
+	result, changed, err := app.applyPrivateRealtimeVoiceTool("tim@shareability.com", "create_channel", map[string]any{"name": "#growth"})
+	if err != nil {
+		t.Fatalf("create_channel private voice: %v", err)
+	}
+	if changed {
+		t.Fatal("create_channel must not report a board change")
+	}
+	threadID := asString(result["threadId"])
+	if result["ok"] != true || result["channel"] != "growth" || threadID == "" {
+		t.Fatalf("result=%#v, want ok/channel/threadId", result)
+	}
+
+	thread, _, err := app.scoutChatThreadByID("aj@shareability.com", threadID)
+	if err != nil {
+		t.Fatalf("channel not readable by other signed-in users: %v", err)
+	}
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || normalizeAccountEmail(thread.OwnerEmail) != "tim@shareability.com" {
+		t.Fatalf("thread=%#v, want a public channel owned by tim", thread)
+	}
+
+	unread := app.unreadNotificationsFor("aj@shareability.com", notificationListLimit)
+	if len(unread) != 1 || unread[0]["threadId"] != threadID || !strings.Contains(asString(unread[0]["text"]), "created channel #growth") {
+		t.Fatalf("unread=%#v, want one deep-linked channel-created notification", unread)
+	}
+
+	// The new channel resolves for posts immediately.
+	if _, _, err := app.applyPrivateRealtimeVoiceTool("tim@shareability.com", "post_to_channel", map[string]any{
+		"channel": "growth",
+		"text":    "kicking this off",
+	}); err != nil {
+		t.Fatalf("post to freshly created channel: %v", err)
+	}
 }

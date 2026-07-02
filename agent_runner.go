@@ -24,7 +24,9 @@ import (
 	"time"
 )
 
-const meetingArchiveFlushTimeout = 2 * time.Minute
+// meetingArchiveFlushTimeout covers three sequential model calls at archive
+// time (brain → decision ledger → board).
+const meetingArchiveFlushTimeout = 3 * time.Minute
 
 type ambientAgentConfig struct {
 	name              string
@@ -212,10 +214,15 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 	app.agentBaselineIDs[name] = baselineID
 }
 
-// flushAmbientAgentsForArchive synchronously runs one brain pass then one
-// board pass with a batch minimum of one, so the last minutes of a meeting
-// are summarized and applied to the board before the archive snapshot is
-// taken. Skips silently when no API key is configured or nothing new exists.
+// flushAmbientAgentsForArchive synchronously runs one brain pass, then one
+// decision-ledger pass, then one board pass, then one mission-intel pass with
+// a batch minimum of one, so the last minutes of a meeting are summarized,
+// their decisions land in the ledger, the board is updated, and the archived
+// meeting's dominant theme titles the RIGHT record before the archive
+// snapshot is taken (and before rotateMeetingID — a later mission tick would
+// otherwise consume the pre-archive brain write-ups and stamp the old
+// meeting's theme onto the successor record). Skips silently when no API key
+// is configured or nothing new exists.
 func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 	if app == nil || app.memory == nil {
 		return
@@ -229,7 +236,7 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), meetingArchiveFlushTimeout)
 	defer cancel()
-	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), meetingBoardAgent()} {
+	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), decisionLedgerAgent(), meetingBoardAgent(), missionIntelligenceAgent()} {
 		// honor both disable forms (interval=0/off/false/disabled and the
 		// _DISABLED env): a turned-off agent must not run at archive time.
 		if boolEnv(agent.disabledEnv) || agent.interval() <= 0 {

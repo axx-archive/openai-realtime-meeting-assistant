@@ -243,6 +243,15 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"data-research-download",
 		"data-research-copy",
 		"data-research-library",
+		"data-research-followup",
+		"data-research-version",
+		"data-research-readiness",
+		`id="scoutFollowUpTarget" class="scout-followup-target"`,
+		"function renderScoutFollowUpTarget()",
+		"function readinessChipNode(metadata, mode)",
+		"followUpArtifactId: followUp.artifactId",
+		"scout-chat-research__delta",
+		"chat-rich__rule",
 		"renderArtifactRead(report, entry)",
 		"data-agent-tool-form=\"research\"",
 		"data-agent-tool-form=\"design\"",
@@ -449,6 +458,12 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="intelThemes" class="intel-col__body"`,
 		`id="intelQuestions" class="intel-col__body"`,
 		`id="intelAlignments" class="intel-col__body"`,
+		`<section class="intel-section" aria-label="Decision ledger">`,
+		`id="intelDecisionsStamp" class="intel-section__hint"`,
+		`id="intelDecisions" class="intel-col intel-col--ledger"`,
+		"function renderIntelDecisions()",
+		"case 'decision':",
+		"no decisions on record yet — scout logs them as meetings settle things",
 		`<section class="intel-section" data-admin-artifacts hidden aria-label="Artifact library">`,
 		".intel-section[hidden]",
 		"intelPulseLive.hidden = !(Number(pulse?.liveParticipants) > 0)",
@@ -472,6 +487,40 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing Mission Intelligence marker %q", want)
 		}
+	}
+	// The package binder segment: an intelligence/packages segmented control,
+	// a packages pane fed by GET /assistant/packages + the "package" office
+	// event, and open-in-place for attached artifacts through the all-user
+	// artifact library (which stays OUTSIDE both panes for that reason).
+	for _, want := range []string{
+		`<button id="intelSegBrain" class="intel-seg__btn" type="button" aria-pressed="true">intelligence</button>`,
+		`<button id="intelSegPackages" class="intel-seg__btn" type="button" aria-pressed="false">packages</button>`,
+		`<div id="intelBrainPane" class="intel-pane">`,
+		`<div id="intelPackagesPane" class="intel-pane" hidden>`,
+		`id="packageCreateForm" class="package-create" hidden`,
+		`id="packageList" class="package-list"`,
+		"async function loadPackages(force = false)",
+		"fetch('/assistant/packages', { cache: 'no-store' })",
+		"function renderPackages()",
+		"function renderPackageDetails(record)",
+		"function openPackageArtifact(artifactId)",
+		"setIntelLibraryOpen(true)",
+		"case 'package':",
+		"no venture packages yet — create one here, or ask scout to create a package",
+		`.intel-seg__btn[aria-pressed="true"]`,
+		".intel-pane[hidden]",
+		".package-row__details",
+		`label.setAttribute('aria-current', 'step')`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing package binder marker %q", want)
+		}
+	}
+	brainPaneIndex := strings.Index(html, `<div id="intelBrainPane"`)
+	packagesPaneIndex := strings.Index(html, `<div id="intelPackagesPane"`)
+	libraryIndex := strings.Index(html, `<section class="intel-section" data-admin-artifacts`)
+	if !(brainPaneIndex != -1 && brainPaneIndex < packagesPaneIndex && packagesPaneIndex < libraryIndex) {
+		t.Fatal("intel canvas order must be brain pane, packages pane, then the shared artifact library outside both panes")
 	}
 	if strings.Contains(html, `body.textContent = 'Use artifact, research, design, or grill mode in the assistant`) {
 		t.Fatal("artifact empty state should not teach separate assistant modes")
@@ -1504,6 +1553,150 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 	}
 }
 
+// Frontend wiring guard for the office event socket: it opens on auth (not
+// room join), sends the `office` hello, feeds kanban events directly (no
+// signaling chain), reconnects with backoff, closes on sign-out, and demotes
+// the HTTP snapshot reads and the 12s chat poll to fallback-only while live.
+func TestIndexOfficeSocketWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// office socket state + lifecycle
+		"let officeWs = null",
+		"function officeSocketLive()",
+		"function ensureOfficeSocket()",
+		"function scheduleOfficeSocketReconnect()",
+		"function closeOfficeSocket()",
+		"JSON.stringify({ event: 'office', data: '{}' })",
+		// reconnect backoff: 1s doubling capped at 30s
+		"Math.min(1000 * 2 ** officeWsAttempts, 30000)",
+		// kanban envelopes bypass the room signal chain on this socket
+		"case 'office_granted':",
+		// the socket follows auth: every authedUser flip funnels through
+		// renderLoginMode
+		"// the office event socket follows auth, not room membership: every",
+		// poll supersession: HTTP snapshots and the 12s chat poll are
+		// fallback-only while the office socket is live
+		"if (!authedUser || ws?.readyState === WebSocket.OPEN || officeSocketLive()) {",
+		// room-chat unread accumulated outside the room clears on a fresh join
+		"clearRoomChatUnread()",
+		// meeting_archived rides the union fan-out — dedupe by download URL
+		"let lastMeetingArchivedUrl = ''",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing office socket marker %q", want)
+		}
+	}
+
+	// The 12s chat poll survives as the fallback, gated on socket absence.
+	pollBody := functionBody(html, "function syncChatThreadPolling()")
+	if !strings.Contains(pollBody, "officeSocketLive()") || !strings.Contains(pollBody, "12000") {
+		t.Fatal("the 12s chat thread poll must stay as the fallback, skipping fetches while the office socket is live")
+	}
+
+	// ensureOfficeSocket never rides the room socket state: it must not
+	// reference `ws` (the room socket) at all.
+	ensureBody := functionBody(html, "function ensureOfficeSocket()")
+	if strings.Contains(ensureBody, " ws ") || strings.Contains(ensureBody, "(ws") {
+		t.Fatal("ensureOfficeSocket must not couple to the room websocket")
+	}
+}
+
+// Frontend wiring guard for first-class meeting records: the `meeting` kanban
+// event feeds a shared server-anchored room clock (join-relative clocks die)
+// and the meeting label prefers the record's server-derived title.
+func TestIndexMeetingRecordWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// the `meeting` event lands in the inner kanban switch
+		"case 'meeting':",
+		"function handleMeetingRecord(payload)",
+		// shared clock state: server startedAt + serverNow skew anchor
+		"let sharedMeetingStartMs = 0",
+		"let meetingRecord = null",
+		"let meetingClockOffsetMs = 0",
+		"meetingClockOffsetMs = Date.now() - serverNowMs",
+		// the room clock counts from the server meeting start when known
+		"roomStartedAt = sharedMeetingStartMs || Date.now()",
+		// the meeting label prefers the record's server-derived title
+		"if (meetingRecord?.title) {",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing meeting record marker %q", want)
+		}
+	}
+
+	if strings.Contains(html, "roomStartedAt = Date.now()") {
+		t.Fatal("join-relative room clocks must not come back: the clock anchors on sharedMeetingStartMs when the meeting record is known")
+	}
+}
+
+// Frontend wiring guard for the artifact model: every signed-in account reads
+// the artifact library (only external-write approval stays admin-gated),
+// display titles derive from the artifact body when the stored title is still
+// the launch prompt, and close-the-loop room-chat deliveries render an
+// artifact chip that opens the report.
+func TestIndexArtifactModelWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// permissions: the library follows sign-in; approval keeps the admin
+		// email check
+		"function canUseArtifactLibrary()",
+		"function canApproveExternalWrites()",
+		"const canApprove = approvalRequired && canApproveExternalWrites()",
+		// display-title fallback for prompt-titled artifacts
+		"function artifactDisplayTitle(entry)",
+		"title.textContent = artifactDisplayTitle(entry)",
+		// the artifact editor keeps editing the raw stored title
+		"artifactTitleInput.value = artifact?.metadata?.title || ''",
+		// close-the-loop delivery chip on room-chat bubbles
+		"room-chat-artifact-chip",
+		"const artifactId = String(message?.artifactId || '').trim()",
+		"{ type: 'open_tool', tool: 'artifacts', artifactId },",
+		"{ type: 'select_artifact', artifactId }",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing artifact model marker %q", want)
+		}
+	}
+
+	// The read gate is sign-in, not the admin email: the email check may only
+	// survive inside canApproveExternalWrites.
+	libraryGateBody := functionBody(html, "function canUseArtifactLibrary()")
+	if !strings.Contains(libraryGateBody, "return Boolean(authedUser)") || strings.Contains(libraryGateBody, "artifactAdminEmail") {
+		t.Fatal("canUseArtifactLibrary must gate on sign-in only; artifactAdminEmail belongs to canApproveExternalWrites")
+	}
+	approveGateBody := functionBody(html, "function canApproveExternalWrites()")
+	if !strings.Contains(approveGateBody, "artifactAdminEmail") {
+		t.Fatal("canApproveExternalWrites must keep the admin email check for the external-write gate")
+	}
+
+	// Admin-only dashboard copy is dead: artifacts belong to the whole team.
+	for _, stale := range []string{
+		"'admin only'",
+		"Scout has the company brain",
+		"title.textContent = entry.metadata?.title || artifactModeLabel(entry)",
+	} {
+		if strings.Contains(html, stale) {
+			t.Fatalf("index.html still contains pre-relaxation artifact marker %q", stale)
+		}
+	}
+}
+
 func functionBody(source string, signature string) string {
 	start := strings.Index(source, signature)
 	if start == -1 {
@@ -1783,9 +1976,10 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	}
 
 	// transcript/brain pulses ride the 15s intel cache — only a fresh
-	// mission_insight event may force the canvas fetch
+	// mission_insight or decision event (each carrying new synthesized
+	// content with no cached payload to patch) may force the canvas fetch
 	kanbanBody := functionBody(html, "function handleKanbanMessage(message)")
-	if strings.Count(kanbanBody, "loadMissionIntelligence(true)") > 1 || !strings.Contains(kanbanBody, "loadMissionIntelligence()") {
+	if strings.Count(kanbanBody, "loadMissionIntelligence(true)") > 2 || !strings.Contains(kanbanBody, "loadMissionIntelligence()") {
 		t.Fatal("memory_transcript/memory_brain events must use the cached loadMissionIntelligence() path")
 	}
 
@@ -1818,5 +2012,129 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	if !strings.Contains(hearthBody, "Boolean(activeSpeakerAudible && stageName && stageName === activeSpeaker)") ||
 		!strings.Contains(hearthBody, "Boolean(activeSpeakerAudible && name && name === activeSpeaker)") {
 		t.Fatal("is-active-speaker toggles must require audible liveness")
+	}
+}
+
+// Frontend wiring guard for the A7 voice-tool surfaces: the wake-word visual
+// pulse (server "wake" assistant event → brand-mark/voice-island breathe),
+// the grill island label, and the channel-notification deep link must stay
+// wired together.
+func TestIndexWakePulseGrillLabelAndChannelDeepLinkWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// wake pulse — CSS: separate is-wake class so setConnectionState's
+		// is-listening ownership is never fought, breathe hook extended
+		".topbar__mark.is-wake {",
+		"#appShell:has(.topbar__mark.is-wake)",
+		".voice-island.is-wake .bf-wave-bar {",
+		// wake pulse — JS: debounced one-cycle pulse, island only while calm
+		"function pulseScoutWake()",
+		"const WAKE_PULSE_DEBOUNCE = 3000",
+		"const WAKE_PULSE_DURATION = 2400",
+		"brandMarkEl.classList.add('is-wake')",
+		// grill status relabels the voice island while active
+		"`grilling — ${String(event?.topic || '').trim() || 'the room'}`",
+		// channel notifications deep-link to the thread
+		"threadId: String(payload.threadId || '')",
+		"selectScoutChatThread(entry.threadId)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing A7 voice-tool wiring %q", want)
+		}
+	}
+
+	assistantBody := functionBody(html, "function handleAssistantEvent(event)")
+	if !strings.Contains(assistantBody, "event?.kind === 'wake'") || !strings.Contains(assistantBody, "pulseScoutWake()") {
+		t.Fatal("handleAssistantEvent must route the wake event to the visual pulse (and never the feed)")
+	}
+
+	openEntryBody := functionBody(html, "function openNotificationEntry(entry)")
+	if !strings.Contains(openEntryBody, "if (entry.threadId) {") || !strings.Contains(openEntryBody, "setActiveTool('chat')") {
+		t.Fatal("openNotificationEntry must deep-link threadId notifications into chat before the artifact route")
+	}
+
+	// nothing may loop under reduced motion: both wake selectors are covered
+	reduced := html[strings.LastIndex(html, "@media (prefers-reduced-motion: reduce)"):]
+	for _, want := range []string{".topbar__mark.is-wake svg", ".voice-island.is-wake .bf-wave-bar"} {
+		if !strings.Contains(reduced, want) {
+			t.Fatalf("reduced-motion block missing wake pulse coverage %q", want)
+		}
+	}
+}
+
+// Frontend wiring guard for the office-shell resilience fixes: a
+// network-failed /auth/me never signs the tab out, the duplicated
+// server_shutdown delivery on dual-socket tabs is suppressed, broadcast run
+// cards only land in chat panes that reference them, and chat-thread
+// auto-select respects the scope pill so labels stay truthful.
+func TestIndexOfficeShellResilienceGuards(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	// refreshAuthState: only a real 401/403 clears authedUser — a thrown
+	// fetch or a proxy 5xx during a deploy keeps the signed-in state so the
+	// office socket backoff can carry the tab across a server restart.
+	authBody := functionBody(html, "async function refreshAuthState()")
+	if !strings.Contains(authBody, "response.status === 401 || response.status === 403") {
+		t.Fatal("refreshAuthState must clear authedUser only on a real 401/403")
+	}
+	if strings.Contains(authBody, "response.ok ? await response.json() : null") {
+		t.Fatal("refreshAuthState must not treat every non-ok /auth/me as signed-out")
+	}
+	if !strings.Contains(authBody, "// a network-failed /auth/me (server restarting, wifi blip) must") {
+		t.Fatal("refreshAuthState catch must keep authedUser on network failure")
+	}
+
+	// server_shutdown rides the union fan-out: an in-room tab receives it on
+	// both sockets, and the second delivery must not burn another reconnect
+	// attempt or re-arm the pending retry timer.
+	shutdownBody := functionBody(html, "function handleServerShutdown(payload)")
+	if !strings.Contains(shutdownBody, "if (isSignalReconnecting) {") {
+		t.Fatal("handleServerShutdown must dedupe the room+office union delivery via isSignalReconnecting")
+	}
+
+	// Broadcast assistant events inject run cards only into panes that own
+	// them: an existing card flips in place, otherwise the active thread
+	// must reference the run (voice/board launches stay out of open panes).
+	for _, want := range []string{
+		"function activeScoutThreadReferencesRun(artifactId, runId)",
+		"if (existingRunCard || activeScoutThreadReferencesRun(cardArtifactId, thread?.id)) {",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing run-card ownership marker %q", want)
+		}
+	}
+	// The follow-up affordance mirrors the server rule (artifact must be
+	// referenced by the target thread) instead of arming a guaranteed 400.
+	if !strings.Contains(html, "activeScoutThreadReferencesRun(card.dataset.threadArtifactId, card.dataset.threadRunId)") {
+		t.Fatal("run-card follow-up must be gated on the active thread referencing the artifact")
+	}
+
+	// Chat-thread auto-select respects the scope pill (never lands a public
+	// channel under the 'private' filter), and explicit selection keeps the
+	// pill in sync with the opened thread's visibility.
+	for _, want := range []string{
+		"function fallbackScoutThreadIdForScope()",
+		"function syncChatScopeToSelectedThread()",
+		"activeScoutThreadId = fallbackScoutThreadIdForScope()",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing scope-aware selection marker %q", want)
+		}
+	}
+	if strings.Contains(html, "activeScoutThreadId = scoutChatThreads[0]?.id || ''") {
+		t.Fatal("thread fallback selection must go through fallbackScoutThreadIdForScope, not scoutChatThreads[0]")
+	}
+	selectBody := functionBody(html, "function selectScoutChatThread(id)")
+	if !strings.Contains(selectBody, "syncChatScopeToSelectedThread()") {
+		t.Fatal("selecting a thread must sync the scope pill to its visibility")
 	}
 }

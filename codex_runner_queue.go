@@ -759,7 +759,26 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		text = existing.Text
 	}
 
-	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, existing.Metadata["title"], text, "Codex runner", metadata)
+	title := existing.Metadata["title"]
+	if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete && strings.TrimSpace(payload.Text) != "" {
+		// An explicit runner-supplied title wins; otherwise derive from the
+		// finished body so the prompt stops masquerading as the title.
+		if runnerTitle := strings.TrimSpace(payload.Metadata["title"]); runnerTitle != "" {
+			title = runnerTitle
+		} else if derived := artifactTitleFromBody(text, title); derived != "" && derived != title {
+			title = derived
+			metadata["titleSource"] = "derived"
+		}
+	}
+	// Grill runs landing through the queued-runner callback get the same
+	// READINESS parse as the synchronous seams (runAgentThread and the
+	// follow-up runner), so the readiness dial never depends on which worker
+	// produced the run.
+	if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete {
+		stampReadinessMetadata(existing, firstNonEmptyString(existing.Metadata["mode"], existing.Kind), text, metadata)
+	}
+
+	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, title, text, "Codex runner", metadata)
 	if err != nil {
 		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -777,11 +796,20 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	case codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired:
 		if changed {
 			kanbanApp.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(statusMessage, artifact))
+			// Close the loop for queued Codex completions too; deliveredAt
+			// makes a retried callback a no-op.
+			if strings.ToLower(strings.TrimSpace(payload.Status)) == codexJobStatusComplete {
+				kanbanApp.deliverArtifactToOrigin(artifact, firstNonEmptyString(artifact.Metadata["latestThreadRun"], artifact.Metadata["threadId"]))
+			}
+			// Board auto-advance for the queued-runner terminal seam too:
+			// complete → Done, failed/approval_required → Blocked. The same
+			// `changed` guard keeps a retried callback from re-syncing.
+			kanbanApp.syncLinkedCardForArtifact(artifact, payload.Status)
 		}
 	}
 
 	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
-	broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", statusMessage, map[string]any{
 		"tool":       "codex_runner",
 		"artifact":   artifact,
@@ -807,10 +835,6 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	user := userFromRequest(r)
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
-		return
-	}
-	if !canAccessArtifactLibrary(user) {
-		writeAuthError(w, http.StatusForbidden, "artifacts are admin-only")
 		return
 	}
 	if kanbanApp == nil {
@@ -840,6 +864,12 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "approve":
+		// External-write approval is the ONE artifact capability that stays
+		// admin-gated: it authorizes the Codex worker to touch the world.
+		if !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
+			return
+		}
 		updated, actions, err := kanbanApp.approveCodexArtifactExternalWrite(artifact, user.Name)
 		if err != nil {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
@@ -851,6 +881,10 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			"actions":  actions,
 		})
 	case "reject":
+		if !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
+			return
+		}
 		updated, actions, err := kanbanApp.rejectCodexArtifactGate(artifact, user.Name)
 		if err != nil {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
@@ -862,12 +896,18 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			"actions":  actions,
 		})
 	case "rerun":
+		// Rerun is the same capability as POST /assistant/threads, which is
+		// open to every signed-in user.
 		mode := normalizeAgentThreadMode(artifact.Kind)
 		if mode == "" {
 			mode = "workflow"
 		}
 		query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"], compactAssistantLine(artifact.Text))
-		thread, err := kanbanApp.launchAgentThread(mode, query, user.Name)
+		// A rerun inherits the prior artifact's origin ONLY when delivery there
+		// is still safe for THIS user (GATE-FINDINGS G2); everything else drops
+		// to originKind tool, which keeps the creator-notification behavior.
+		origin := kanbanApp.rerunOriginForUser(artifact, user.Email)
+		thread, err := kanbanApp.launchAgentThreadWithOrigin(mode, query, user.Name, origin)
 		if err != nil {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
 			return
@@ -881,6 +921,60 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAuthError(w, http.StatusBadRequest, "unknown artifact action")
 	}
+}
+
+// rerunOriginForUser decides which origin metadata a rerun may inherit from
+// the stored artifact (GATE-FINDINGS G2 — conditional origin inheritance):
+//   - channel origins survive only while the origin thread is still a public,
+//     unarchived channel;
+//   - private-thread origins survive only when the rerunning user OWNS the
+//     origin thread (a non-owner rerun must never post into someone else's
+//     private thread);
+//   - room origins survive only while the origin meeting is still the active
+//     meeting;
+//   - everything else (tool, absent, unresolvable) drops to originKind tool,
+//     which keeps the creator-notification-only completion behavior.
+func (app *kanbanBoardApp) rerunOriginForUser(artifact meetingMemoryEntry, userEmail string) map[string]string {
+	origin := map[string]string{"originKind": agentThreadOriginTool}
+	if app == nil || app.memory == nil {
+		return origin
+	}
+	originID := strings.TrimSpace(artifact.Metadata["originId"])
+	switch strings.TrimSpace(artifact.Metadata["originKind"]) {
+	case agentThreadOriginChannel, agentThreadOriginPrivateThread:
+		if originID == "" {
+			return origin
+		}
+		entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, originID)
+		if !ok {
+			return origin
+		}
+		thread, decoded := decodeScoutChatThreadEntry(entry)
+		if !decoded || thread.ArchivedAt != "" {
+			return origin
+		}
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+			origin["originKind"] = agentThreadOriginChannel
+			origin["originId"] = originID
+			return origin
+		}
+		if normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(userEmail) {
+			return origin
+		}
+		origin["originKind"] = agentThreadOriginPrivateThread
+		origin["originId"] = originID
+	case agentThreadOriginRoom:
+		originMeetingID := strings.TrimSpace(artifact.Metadata["originMeetingId"])
+		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID() {
+			return origin
+		}
+		origin["originKind"] = agentThreadOriginRoom
+		origin["originMeetingId"] = originMeetingID
+		if originID != "" {
+			origin["originId"] = originID
+		}
+	}
+	return origin
 }
 
 func (app *kanbanBoardApp) approveCodexArtifactExternalWrite(artifact meetingMemoryEntry, approvedBy string) (meetingMemoryEntry, []osAssistantAction, error) {
@@ -932,7 +1026,7 @@ func (app *kanbanBoardApp) rejectCodexArtifactGate(artifact meetingMemoryEntry, 
 		return meetingMemoryEntry{}, nil, err
 	}
 	actions := app.osAssistantActions(updated.Metadata["title"], updated.Kind, updated)
-	broadcastKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", assistantToolLabel(updated.Kind)+" thread rejected", map[string]any{
 		"tool":       "codex_runner",
 		"artifact":   updated,

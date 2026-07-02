@@ -12,6 +12,7 @@ func snapshotPeerState(t *testing.T) {
 	t.Helper()
 	listLock.Lock()
 	prevPeerConnections := peerConnections
+	prevOfficeConnections := officeConnections
 	prevTrackLocals := trackLocals
 	prevActive := activeParticipantConnections
 	prevTrackParticipants := trackParticipants
@@ -24,6 +25,7 @@ func snapshotPeerState(t *testing.T) {
 	t.Cleanup(func() {
 		listLock.Lock()
 		peerConnections = prevPeerConnections
+		officeConnections = prevOfficeConnections
 		trackLocals = prevTrackLocals
 		activeParticipantConnections = prevActive
 		trackParticipants = prevTrackParticipants
