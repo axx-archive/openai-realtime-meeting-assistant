@@ -783,7 +783,7 @@ func TestAssistantChatThreadsArchiveHidesFromDefaultList(t *testing.T) {
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Archive me")
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Archive me", "")
 	if err != nil {
 		t.Fatalf("createScoutChatThread: %v", err)
 	}

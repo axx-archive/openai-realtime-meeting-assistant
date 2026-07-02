@@ -147,6 +147,10 @@ type peerConnectionState struct {
 	websocket       *threadSafeWriter
 	participantName string
 	sessionID       string
+	// sessionEmail is the server-side authenticated account email resolved by
+	// websocketHandler at admission. Targeted fan-out (sendKanbanEventToUser)
+	// filters on it; it is never taken from a client payload.
+	sessionEmail string
 	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
 	shouldSignal    func(desiredTrackCount int) bool
 	signal          func(gatherComplete <-chan struct{}) error
@@ -483,6 +487,9 @@ func main() {
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
+	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
+	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
+	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
@@ -988,7 +995,7 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceTool(payload.Name, payload.Arguments)
+	result, changed, err := kanbanApp.applyPrivateRealtimeVoiceTool(user.Email, payload.Name, payload.Arguments)
 	ok := err == nil
 	if err != nil {
 		result = map[string]any{
@@ -1809,7 +1816,7 @@ func secondsToMillis(seconds float64) float64 {
 	return seconds * 1000
 }
 
-func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter) {
+func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
 	name = canonicalParticipantName(name)
 	if name == "" {
 		return
@@ -1830,6 +1837,7 @@ func replaceExistingParticipantSession(name string, sessionID string, currentPee
 		websocket:       currentWebsocket,
 		participantName: name,
 		sessionID:       sessionID,
+		sessionEmail:    normalizeAccountEmail(sessionEmail),
 	}
 
 	retainedConnections := peerConnections[:0]
@@ -2605,7 +2613,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			setParticipantName(admittedName)
 			participantAccepted = true
 			participantAcceptedState.Store(true)
-			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c)
+			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c, sessionUser.Email)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name": admittedName,
 			}); err != nil {
@@ -2622,6 +2630,21 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForClients(20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
+			}
+			// Direct send: this socket is not in peerConnections until
+			// media_ready, so broadcasts cannot reach it yet.
+			if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistory(roomChatHistoryLimit)); err != nil {
+				log.Errorf("Failed to send room chat history: %v", err)
+			}
+			// Unread notification backlog is per-account, so it replays as a
+			// direct send scoped to this socket's session user.
+			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionUser.Email, notificationListLimit)); err != nil {
+				log.Errorf("Failed to send notification backlog: %v", err)
+			}
+			// Codex proposals render as confirm/dismiss cards in the room;
+			// replay them directly so a fresh joiner can act on pending ones.
+			if err := sendKanbanEvent(c, "codex_proposals", kanbanApp.codexProposalsSnapshot(codexProposalHistoryLimit)); err != nil {
+				log.Errorf("Failed to send codex proposals: %v", err)
 			}
 			if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
 				log.Errorf("Failed to send Kanban status: %v", err)
@@ -2656,6 +2679,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				websocket:       c,
 				participantName: currentParticipantName(),
 				sessionID:       participantSessionID,
+				sessionEmail:    normalizeAccountEmail(sessionUser.Email),
 			})
 			listLock.Unlock()
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
@@ -2816,6 +2840,26 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// lands in send order), then hand off to the session's FIFO
 			// worker; model calls never block the websocket read path.
 			scoutChat.submit(kanbanApp, chat.Text, currentParticipantName())
+		case "room_chat":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before sending room chat")
+				continue
+			}
+			chat := struct {
+				Text string `json:"text"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &chat); err != nil {
+				log.Errorf("Failed to unmarshal room chat payload: %v", err)
+				continue
+			}
+			// Identity comes from the participant session, never the payload;
+			// persistence happens first so the echo-on-broadcast carries the
+			// durable id and everyone (sender included) renders one ordering.
+			payload, ok := kanbanApp.recordRoomChatMessage(currentParticipantName(), chat.Text)
+			if !ok {
+				continue
+			}
+			broadcastKanbanEvent("room_chat", payload)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")

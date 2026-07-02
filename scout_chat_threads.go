@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -16,6 +17,31 @@ const (
 	scoutChatMaxFilesPerMessage = 6
 	scoutChatMaxFileTextBytes   = 64 << 10
 )
+
+const (
+	scoutChatVisibilityPrivate = "private"
+	scoutChatVisibilityPublic  = "public"
+)
+
+// normalizeScoutChatVisibility maps any stored/submitted value onto the two
+// sanctioned visibilities. Empty (all pre-channel threads on disk) stays
+// private for backward compatibility.
+func normalizeScoutChatVisibility(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), scoutChatVisibilityPublic) {
+		return scoutChatVisibilityPublic
+	}
+	return scoutChatVisibilityPrivate
+}
+
+func scoutChatThreadVisibility(thread scoutChatThreadRecord) string {
+	return normalizeScoutChatVisibility(thread.Visibility)
+}
+
+// scoutChatMentionsScout gates Scout in public channels: humans talk to each
+// other by default and only summon the model with an explicit @scout mention.
+func scoutChatMentionsScout(text string) bool {
+	return strings.Contains(strings.ToLower(text), "@scout")
+}
 
 type scoutChatFileAttachment struct {
 	Name string `json:"name"`
@@ -33,13 +59,15 @@ type scoutChatThreadRef struct {
 }
 
 type scoutChatMessageRecord struct {
-	ID        string                    `json:"id"`
-	Kind      string                    `json:"kind"`
-	Role      string                    `json:"role"`
-	Text      string                    `json:"text,omitempty"`
-	CreatedAt string                    `json:"createdAt"`
-	Files     []scoutChatFileAttachment `json:"files,omitempty"`
-	Thread    *scoutChatThreadRef       `json:"thread,omitempty"`
+	ID          string                    `json:"id"`
+	Kind        string                    `json:"kind"`
+	Role        string                    `json:"role"`
+	Text        string                    `json:"text,omitempty"`
+	CreatedAt   string                    `json:"createdAt"`
+	AuthorName  string                    `json:"authorName,omitempty"`
+	AuthorEmail string                    `json:"authorEmail,omitempty"`
+	Files       []scoutChatFileAttachment `json:"files,omitempty"`
+	Thread      *scoutChatThreadRef       `json:"thread,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -48,6 +76,7 @@ type scoutChatThreadRecord struct {
 	Preview    string                   `json:"preview"`
 	OwnerEmail string                   `json:"ownerEmail"`
 	CreatedBy  string                   `json:"createdBy,omitempty"`
+	Visibility string                   `json:"visibility,omitempty"`
 	CreatedAt  string                   `json:"createdAt"`
 	UpdatedAt  string                   `json:"updatedAt"`
 	ArchivedAt string                   `json:"archivedAt,omitempty"`
@@ -82,12 +111,13 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		payload := struct {
-			Title string `json:"title"`
+			Title      string `json:"title"`
+			Visibility string `json:"visibility"`
 		}{}
 		if r.Body != nil {
 			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload)
 		}
-		thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title)
+		thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title, payload.Visibility)
 		if err != nil {
 			writeAuthError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -172,7 +202,7 @@ func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 	writeAuthError(w, status, err.Error())
 }
 
-func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy string, title string) (scoutChatThreadRecord, error) {
+func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy string, title string, visibility string) (scoutChatThreadRecord, error) {
 	if app == nil || app.memory == nil {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat thread memory is unavailable")
 	}
@@ -182,12 +212,20 @@ func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy st
 		return scoutChatThreadRecord{}, fmt.Errorf("thread owner is required")
 	}
 	createdBy = canonicalRoomActorName(createdBy)
+	visibility = normalizeScoutChatVisibility(visibility)
+	defaultTitle := "Scout"
+	defaultPreview := "new chat thread"
+	if visibility == scoutChatVisibilityPublic {
+		defaultTitle = "team channel"
+		defaultPreview = "new team channel"
+	}
 	thread := scoutChatThreadRecord{
 		ID:         fmt.Sprintf("scout-chat-%d", now.UnixNano()),
-		Title:      firstNonEmptyString(strings.TrimSpace(title), "Scout"),
-		Preview:    "new chat thread",
+		Title:      firstNonEmptyString(strings.TrimSpace(title), defaultTitle),
+		Preview:    defaultPreview,
 		OwnerEmail: ownerEmail,
 		CreatedBy:  createdBy,
+		Visibility: visibility,
 		CreatedAt:  now.Format(time.RFC3339Nano),
 		UpdatedAt:  now.Format(time.RFC3339Nano),
 	}
@@ -219,22 +257,37 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 
 	now := time.Now().UTC()
 	userMessage := scoutChatMessageRecord{
-		ID:        fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
-		Kind:      "message",
-		Role:      "user",
-		Text:      text,
-		CreatedAt: now.Format(time.RFC3339Nano),
-		Files:     files,
+		ID:          fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
+		Kind:        "message",
+		Role:        "user",
+		Text:        text,
+		CreatedAt:   now.Format(time.RFC3339Nano),
+		AuthorName:  canonicalRoomActorName(user.Name),
+		AuthorEmail: normalizeAccountEmail(user.Email),
+		Files:       files,
 	}
 	history := scoutChatHistoryFromThread(thread)
-	thread.Messages = append(thread.Messages, userMessage)
 
-	modelQuery := scoutChatMessageModelText(userMessage)
-	mode := scoutChatThreadModeForText(text)
 	response := map[string]any{
 		"ok":      true,
 		"message": userMessage,
 	}
+
+	// Public channels are human-to-human by default: Scout (answers and
+	// agent-mode keyword launches alike) only engages on an explicit @scout
+	// mention. Private threads keep the always-answer behavior.
+	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMentionsScout(text)
+	if !scoutEngaged {
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage)
+		if err != nil {
+			return nil, err
+		}
+		response["thread"] = saved
+		return response, nil
+	}
+
+	modelQuery := scoutChatMessageModelText(userMessage)
+	mode := scoutChatThreadModeForText(text)
 	if mode != "" {
 		agentThread, err := app.launchAgentThread(mode, text, user.Name)
 		if err != nil {
@@ -256,13 +309,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 				ArtifactID: agentThread.Artifact.ID,
 			},
 		}
-		thread.Messages = append(thread.Messages, assistantMessage)
-		updateScoutChatThreadSummary(&thread, userMessage, assistantMessage)
-		if err := app.saveScoutChatThread(thread); err != nil {
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+		if err != nil {
 			return nil, err
 		}
 		response["answer"] = assistantMessage
-		response["thread"] = thread
+		response["thread"] = saved
 		response["agentThread"] = viewerThread
 		response["artifact"] = viewerThread.Artifact
 		response["actions"] = viewerThread.Actions
@@ -278,9 +330,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 			Text:      err.Error(),
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		thread.Messages = append(thread.Messages, errorMessage)
-		updateScoutChatThreadSummary(&thread, userMessage, errorMessage)
-		_ = app.saveScoutChatThread(thread)
+		_, _ = app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, errorMessage)
 		return nil, err
 	}
 	answer := strings.TrimSpace(result.answer)
@@ -294,20 +344,96 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 		Text:      answer,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	thread.Messages = append(thread.Messages, assistantMessage)
-	updateScoutChatThreadSummary(&thread, userMessage, assistantMessage)
-	if err := app.saveScoutChatThread(thread); err != nil {
+	saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+	if err != nil {
 		return nil, err
 	}
 	response["answer"] = assistantMessage
-	response["thread"] = thread
+	response["thread"] = saved
 	return response, nil
+}
+
+// commitScoutChatThreadMessages is the single write path for chat messages.
+// Persistence is whole-thread last-write-wins, so concurrent channel posters
+// must serialize here: take the per-thread lock, re-read the thread from the
+// store (another writer may have appended while this caller's model call ran),
+// append, and save. Model/agent calls stay outside the lock.
+func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, threadID string, messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	if len(messages) == 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat thread commit requires a message")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	thread.Messages = append(thread.Messages, messages...)
+
+	userMessage := scoutChatMessageRecord{}
+	assistantMessage := scoutChatMessageRecord{}
+	for _, message := range messages {
+		if message.Role == "user" && userMessage.ID == "" {
+			userMessage = message
+		}
+		if message.Role != "user" {
+			assistantMessage = message
+		}
+	}
+	updateScoutChatThreadSummary(&thread, userMessage, assistantMessage)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		for _, message := range messages {
+			broadcastScoutChatThreadUpdate(thread, message)
+		}
+	}
+	return thread, nil
+}
+
+// broadcastScoutChatThreadUpdate fans a public-channel append out to every
+// connected client (all room websockets are signed-in accounts) so open chat
+// tabs upsert live; users without a socket catch up via the 12s poll.
+func broadcastScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+	broadcastKanbanEvent("chat_thread", map[string]any{
+		"id":         thread.ID,
+		"title":      thread.Title,
+		"preview":    thread.Preview,
+		"visibility": scoutChatThreadVisibility(thread),
+		"updatedAt":  thread.UpdatedAt,
+		"message":    message,
+	})
+}
+
+// scoutChatThreadLock returns the per-thread mutex serializing chat thread
+// read-modify-write commits (mirrors ambientAgentRunLock).
+func (app *kanbanBoardApp) scoutChatThreadLock(threadID string) *sync.Mutex {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.chatThreadLocks == nil {
+		app.chatThreadLocks = map[string]*sync.Mutex{}
+	}
+	lock, ok := app.chatThreadLocks[threadID]
+	if !ok {
+		lock = &sync.Mutex{}
+		app.chatThreadLocks[threadID] = lock
+	}
+	return lock
 }
 
 func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadID string, archived bool) (scoutChatThreadRecord, error) {
 	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, err
+	}
+	// Any signed-in user can read a public channel, but only its creator may
+	// archive (or restore) it.
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(ownerEmail) {
+		return scoutChatThreadRecord{}, fmt.Errorf("only the channel creator can archive this channel")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if archived {
@@ -349,7 +475,12 @@ func (app *kanbanBoardApp) scoutChatThreadsSnapshot(ownerEmail string, includeAr
 	threads := make([]scoutChatThreadRecord, 0, len(entries))
 	for _, entry := range entries {
 		thread, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || normalizeAccountEmail(thread.OwnerEmail) != ownerEmail {
+		if !ok {
+			continue
+		}
+		// Owner sees their own threads; public channels are readable by every
+		// signed-in user (ownerEmail is already verified non-empty above).
+		if normalizeAccountEmail(thread.OwnerEmail) != ownerEmail && scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 			continue
 		}
 		if !includeArchived && thread.ArchivedAt != "" {
@@ -377,7 +508,10 @@ func (app *kanbanBoardApp) scoutChatThreadByID(ownerEmail string, threadID strin
 			continue
 		}
 		thread, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || normalizeAccountEmail(thread.OwnerEmail) != ownerEmail {
+		if !ok {
+			break
+		}
+		if normalizeAccountEmail(thread.OwnerEmail) != ownerEmail && scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 			break
 		}
 		return thread, entry, nil
@@ -416,6 +550,8 @@ func decodeScoutChatThreadEntry(entry meetingMemoryEntry) (scoutChatThreadRecord
 	if strings.TrimSpace(thread.UpdatedAt) == "" {
 		thread.UpdatedAt = firstNonEmptyString(entry.Metadata["updatedAt"], thread.CreatedAt)
 	}
+	// Pre-channel entries carry no visibility; they stay private.
+	thread.Visibility = normalizeScoutChatVisibility(firstNonEmptyString(thread.Visibility, entry.Metadata["visibility"]))
 	return thread, true
 }
 
@@ -424,6 +560,7 @@ func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 		"ownerEmail": normalizeAccountEmail(thread.OwnerEmail),
 		"title":      strings.TrimSpace(thread.Title),
 		"preview":    strings.TrimSpace(thread.Preview),
+		"visibility": scoutChatThreadVisibility(thread),
 		"createdAt":  strings.TrimSpace(thread.CreatedAt),
 		"updatedAt":  strings.TrimSpace(thread.UpdatedAt),
 		"source":     "scout_chat",

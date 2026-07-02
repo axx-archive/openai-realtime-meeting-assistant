@@ -759,7 +759,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		text = existing.Text
 	}
 
-	artifact, _, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, existing.Metadata["title"], text, "Codex runner", metadata)
+	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, existing.Metadata["title"], text, "Codex runner", metadata)
 	if err != nil {
 		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -768,9 +768,21 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Durable milestone: queued Codex jobs land through this callback instead
+	// of the synchronous runner paths (agent_thread_runner.go), so the creator
+	// notification has to happen here too. Gate on `changed` so a retried
+	// identical callback cannot re-notify.
+	statusMessage := codexRunnerStatusMessage(payload.Status, artifact)
+	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
+	case codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired:
+		if changed {
+			kanbanApp.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(statusMessage, artifact))
+		}
+	}
+
 	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
 	broadcastKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
-	broadcastAssistantEvent("action", codexRunnerStatusMessage(payload.Status, artifact), map[string]any{
+	broadcastAssistantEvent("action", statusMessage, map[string]any{
 		"tool":       "codex_runner",
 		"artifact":   artifact,
 		"actions":    actions,

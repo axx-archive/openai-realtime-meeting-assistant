@@ -93,6 +93,7 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"create_artifact":        true,
 		"launch_agent_thread":    true,
 		"answer_memory_question": true,
+		"send_notification":      true,
 		"do_nothing":             true,
 	}
 	for _, tool := range tools {

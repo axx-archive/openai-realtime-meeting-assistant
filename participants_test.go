@@ -195,7 +195,7 @@ func TestReplaceExistingParticipantSessionRemovesSameParticipantTracks(t *testin
 		listLock.Unlock()
 	}()
 
-	replaceExistingParticipantSession("AJ", "new", nil, nil)
+	replaceExistingParticipantSession("AJ", "new", nil, nil, "aj@shareability.com")
 
 	listLock.RLock()
 	defer listLock.RUnlock()

@@ -1038,7 +1038,7 @@
       .video-tile.is-active-speaker::after {
         box-shadow:
           inset 0 0 0 2px var(--speaker-accent),
-          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
+          inset 0 0 0 3px rgba(0, 0, 0, 0.28);
       }
 
       /* shadow appears on lift only */
@@ -2374,6 +2374,7 @@
       .controls #screenShare,
       .controls #recordMeeting,
       .controls #archiveMeeting,
+      .controls #roomChatToggle,
       .controls #join {
         min-width: 0;
         border-radius: var(--r-full);
@@ -2569,6 +2570,7 @@
       #appShell:not(.is-in-room) #toggleCamera,
       #appShell:not(.is-in-room) #audioSettingsButton,
       #appShell:not(.is-in-room) #screenShare,
+      #appShell:not(.is-in-room) #roomChatToggle,
       #appShell:not(.is-in-room) #recordMeeting,
       #appShell:not(.is-in-room) #archiveMeeting,
       #appShell:not(.is-in-room) #leave,
@@ -4010,7 +4012,8 @@
         }
       }
 
-      /* outranks the responsive dock-clearance padding — no dock on tool pages */
+      /* outranks the responsive dock-clearance padding — no dock or rail
+         gutter on tool pages; the nav island floats above the canvas. */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
@@ -4018,17 +4021,6 @@
       #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
         padding: 0;
-      }
-
-      @media (min-width: 641px) {
-        #appShell.is-authed.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
-        #appShell.is-authed.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
-          padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));
-        }
       }
 
       #appShell.is-authed[data-tool="chat"] #chatTool {
@@ -4809,7 +4801,7 @@
         color: var(--accent);
         border-radius: var(--r-full);
         background:
-          radial-gradient(circle at 50% 38%, rgba(255, 122, 43, 0.22), transparent 58%),
+          radial-gradient(circle at 50% 38%, var(--accent-soft), transparent 58%),
           var(--surface-3);
         border: 1px solid var(--line-1);
         overflow: hidden;
@@ -4892,15 +4884,12 @@
         width: min(430px, calc(100vw - 32px));
         min-height: 54px;
         padding: 8px 8px 8px 16px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--glass-border);
         border-radius: var(--r-full);
-        background: rgba(32, 33, 37, 0.94);
+        background: var(--glass-chrome);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.12),
-          0 18px 44px rgba(15, 16, 18, 0.28),
-          0 2px 8px rgba(15, 16, 18, 0.2);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
         transform: translateX(-50%);
         pointer-events: auto;
         transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -4927,15 +4916,12 @@
 
       .voice-island[data-state="hearing"],
       .voice-island[data-state="talking"] {
-        border-color: rgba(255, 255, 255, 0.18);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.14),
-          0 20px 48px rgba(15, 16, 18, 0.34),
-          0 3px 12px rgba(15, 16, 18, 0.22);
+        border-color: var(--line-2);
+        box-shadow: var(--glass-highlight), var(--glass-shadow), var(--shadow-2);
       }
 
       .voice-island[data-state="error"] {
-        border-color: rgba(255, 69, 58, 0.42);
+        border-color: color-mix(in srgb, var(--danger) 42%, transparent);
       }
 
       .voice-island__main {
@@ -4945,7 +4931,7 @@
         align-items: center;
         gap: 12px;
         flex: 1;
-        color: rgba(255, 255, 255, 0.94);
+        color: var(--text-1);
         text-align: left;
       }
 
@@ -4969,7 +4955,7 @@
         border-radius: 0;
         background: transparent;
         box-shadow: none;
-        color: rgba(255, 255, 255, 0.94);
+        color: var(--text-1);
       }
 
       .voice-island .bf-wave-bar {
@@ -4994,7 +4980,7 @@
 
       .voice-island__meta {
         overflow: hidden;
-        color: rgba(255, 255, 255, 0.9);
+        color: var(--text-1);
         font: 650 13px/1.25 var(--font-sans);
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -5008,14 +4994,13 @@
         align-items: center;
         justify-content: center;
         border-radius: var(--r-full);
-        background: rgba(255, 255, 255, 0.94);
-        color: rgba(28, 29, 33, 0.92);
+        background: var(--accent);
+        color: var(--on-accent);
         transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
       }
 
       .voice-island__close:hover {
-        background: #fff;
-        color: #111;
+        background: var(--accent-hover);
       }
 
       .voice-island__close:active {
@@ -5613,6 +5598,12 @@
         letter-spacing: var(--track-label);
         color: var(--text-3);
         padding: 6px 14px 10px;
+      }
+
+      /* new-thread scope — reuses the sanctioned segmented recipe; picks
+         whether the + button starts a private thread or a team channel */
+      .chat-new-scope {
+        margin: 0 2px 10px;
       }
 
       /* thread rows — kit components/chat/ThreadItem.jsx anatomy. Scout is
@@ -6477,6 +6468,465 @@
 
       .chat-conversation .scout-chat-hint {
         margin-top: -12px;
+      }
+
+      /* ---------- Room chat — the everyone-visible thread ----------
+         Desktop: swaps in over the Scout panel inside the rail (no box, no
+         glass — same dissolved treatment). Mobile: rises as a glass bottom
+         sheet. Bubbles reuse the scout-chat set; peers get a surface fill
+         with the author on the mono meta line. */
+      .room-chat {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        padding: 0 var(--sp-2);
+        /* token-timed swap-in when chat replaces the Scout pane; the mobile
+           sheet overrides this with bf-sheetin below */
+        animation: bf-fadein var(--dur-med) var(--ease);
+      }
+
+      .room-chat[hidden] {
+        display: none;
+      }
+
+      .room-chat__header {
+        flex: none;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        border-bottom: 1px solid var(--line-1);
+        padding-bottom: var(--sp-2);
+      }
+
+      .room-chat__title {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .room-chat__title h2 {
+        margin: 0;
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+      }
+
+      .room-chat__mark {
+        display: inline-grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--text-1);
+        flex: 0 0 auto;
+      }
+
+      .room-chat__close {
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .room-chat__close:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .room-chat__close:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .room-chat__thread {
+        padding: 14px 4px;
+      }
+
+      .room-chat__form {
+        flex: none;
+        margin: 0 0 var(--sp-2);
+      }
+
+      /* peer bubble — another participant: surface fill, left-aligned */
+      .scout-chat-msg--peer {
+        align-self: flex-start;
+        align-items: flex-start;
+      }
+
+      .scout-chat-msg--peer .scout-chat-text {
+        background: var(--surface-2);
+        color: var(--text-1);
+        border: 1px solid var(--line-1);
+        border-radius: 18px 18px 18px 6px;
+      }
+
+      /* the rail shows one pane at a time — chat swaps in over the Scout
+         panel; the rail's mount transform is dropped so the mobile sheet's
+         fixed positioning anchors to the viewport, not the rail */
+      #appShell.is-room-chat-open .scout-rail .scout-panel {
+        display: none;
+      }
+
+      #appShell.is-room-chat-open.is-in-room .scout-rail {
+        animation: none;
+        /* dropping the animation also drops rise-in's fill, so the rail would
+           fall back to mount-stagger's opacity-0 base — pin it visible */
+        opacity: 1;
+        transform: none;
+        /* mount-stagger's will-change would make the rail the containing
+           block for the mobile sheet's fixed positioning */
+        will-change: auto;
+      }
+
+      /* the in-room stage owns the full width and the rail is hidden; opening
+         chat re-shows the rail as the chat host (its Scout panel stays hidden
+         above). Mobile keeps the single column — the panel is a fixed sheet. */
+      #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .scout-rail {
+        display: grid;
+      }
+
+      @media (min-width: 861px) {
+        #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .workspace {
+          grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px);
+        }
+
+        #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .hearth-presentation {
+          grid-column: 1;
+          grid-row: 1;
+        }
+
+        #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .scout-rail {
+          grid-column: 2;
+          grid-row: 1;
+        }
+      }
+
+      /* dock toggle — the unread count rides the button corner as the same
+         ink pill the chat thread rows use */
+      .room-chat-toggle {
+        position: relative;
+      }
+
+      .room-chat-toggle__unread {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        margin-top: 0;
+        letter-spacing: 0;
+      }
+
+      .room-chat-toggle__unread[hidden] {
+        display: none;
+      }
+
+      /* ---------- Notification center (rail bell + chrome-glass window) ---------- */
+
+      .tool-rail__bell {
+        position: relative;
+      }
+
+      .notification-bell__unread {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        margin-top: 0;
+        letter-spacing: 0;
+      }
+
+      .notification-bell__unread[hidden] {
+        display: none;
+      }
+
+      /* chrome glass, applied once on the window; the list items inside stay
+         flat surface-2. Sits beside the rail on desktop. */
+      .notification-panel {
+        position: fixed;
+        left: max(92px, calc(env(safe-area-inset-left) + 92px));
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1150; /* above toasts (1100), below card-detail (1200) */
+        width: min(380px, calc(100vw - 108px));
+        max-height: min(560px, calc(100svh - 48px));
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+        padding: 16px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        animation: bf-islandin var(--dur-med) var(--ease);
+      }
+
+      .notification-panel[hidden] {
+        display: none;
+      }
+
+      .notification-panel__head {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+
+      .notification-panel__title {
+        flex: 1;
+        min-width: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+      }
+
+      .notification-panel__mark {
+        min-height: var(--hit-min);
+      }
+
+      .notification-panel__close {
+        width: var(--hit-min);
+        height: var(--hit-min);
+        padding: 0;
+        flex: none;
+      }
+
+      .notification-panel__list {
+        display: grid;
+        gap: var(--sp-2);
+        overflow-y: auto;
+        min-height: 0;
+        overscroll-behavior: contain;
+      }
+
+      .notification-panel__empty {
+        margin: 0;
+        padding: var(--sp-4) 0;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .notification-panel__empty[hidden] {
+        display: none;
+      }
+
+      /* items follow the .assistant-message flat recipe; unread earns the ink
+         dot + full-ink text, never a hue */
+      .notification-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        width: 100%;
+        min-height: var(--hit-min);
+        padding: var(--sp-2) var(--sp-3);
+        text-align: left;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.5;
+        cursor: pointer;
+        transition:
+          background var(--dur-fast) var(--ease),
+          border-color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .notification-item:hover {
+        background: var(--surface-3);
+        border-color: var(--line-2);
+      }
+
+      .notification-item:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .notification-item__dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        margin-top: 5px;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        opacity: 0;
+        transition: opacity var(--dur-med) var(--ease);
+      }
+
+      .notification-item.is-unread {
+        color: var(--text-1);
+      }
+
+      .notification-item.is-unread .notification-item__dot {
+        opacity: 1;
+      }
+
+      .notification-item__body {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .notification-item__meta {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (max-width: 860px) {
+        /* mobile: the window becomes a bottom sheet clearing the bottom rail */
+        .notification-panel {
+          left: max(12px, env(safe-area-inset-left));
+          right: max(12px, env(safe-area-inset-right));
+          width: auto;
+          top: auto;
+          transform: none;
+          bottom: calc(max(12px, env(safe-area-inset-bottom)) + 72px);
+          max-height: min(60svh, 480px);
+        }
+      }
+
+      /* ---------- Codex task proposals (board worker -> confirm/dismiss cards) ---------- */
+
+      /* fixed stack near the meeting surface, top-right under the topbar;
+         each card is its own floating chrome-glass surface (glass once),
+         everything inside stays flat */
+      .proposal-deck {
+        position: fixed;
+        top: calc(var(--shell-topbar-height, 56px) + var(--sp-3) + env(safe-area-inset-top, 0px));
+        right: calc(var(--sp-4) + env(safe-area-inset-right, 0px));
+        width: min(340px, calc(100vw - 32px));
+        z-index: 1000; /* above meeting bar (900), below comment preview (1050) */
+        display: none;
+        flex-direction: column;
+        gap: var(--sp-2);
+      }
+
+      /* cards surface in the room (joined, or on the room tool page) */
+      #appShell.is-in-room ~ .proposal-deck:not([hidden]),
+      #appShell.is-authed[data-tool="room"] ~ .proposal-deck:not([hidden]) {
+        display: flex;
+      }
+
+      .proposal-deck__list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        min-height: 0;
+      }
+
+      .proposal-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        padding: var(--sp-3);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-xl);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        animation: bf-islandin var(--dur-med) var(--ease);
+      }
+
+      .proposal-card__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-2);
+      }
+
+      .proposal-card__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* mode pill — mono label on a flat surface; ink, never a hue */
+      .proposal-card__mode {
+        flex: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        padding: 3px 10px;
+      }
+
+      .proposal-card__title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.35;
+        color: var(--text-1);
+      }
+
+      .proposal-card__query {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--text-2);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .proposal-card__actions {
+        display: flex;
+        gap: var(--sp-2);
+      }
+
+      .proposal-card__actions .btn {
+        flex: 1;
+        min-height: var(--hit-min);
+      }
+
+      .proposal-card__status {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+      }
+
+      @media (max-width: 860px) {
+        /* mobile: the panel leaves the rail flow and rises as a bottom
+           sheet — the one glass on this surface; items inside stay flat */
+        #appShell.is-in-room .room-chat {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 1000; /* above the meeting dock (900), below comment-preview (1050) */
+          height: min(68dvh, 560px);
+          padding: var(--sp-2) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
+          background: var(--glass-panel);
+          border: 1px solid var(--glass-border);
+          border-bottom: 0;
+          border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+          box-shadow: var(--glass-highlight), var(--glass-shadow);
+          backdrop-filter: var(--glass-blur);
+          -webkit-backdrop-filter: var(--glass-blur);
+          animation: bf-sheetin var(--dur-med) var(--ease) both;
+        }
+
+        #appShell.is-in-room .room-chat[hidden] {
+          display: none;
+        }
       }
 
       /* ---------- Memory tool — quiet log entries ---------- */
@@ -8712,7 +9162,7 @@
         border-radius: inherit;
         box-shadow:
           inset 0 0 0 2px var(--speaker-accent),
-          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
+          inset 0 0 0 3px rgba(0, 0, 0, 0.28);
         pointer-events: none;
       }
 
@@ -8832,7 +9282,7 @@
       .hearth-seat.is-active-speaker::after {
         box-shadow:
           inset 0 0 0 2px var(--speaker-accent),
-          inset 0 0 0 3px rgba(11, 8, 5, 0.28);
+          inset 0 0 0 3px rgba(0, 0, 0, 0.28);
       }
 
       .hearth-seat.is-placeholder {
@@ -9950,7 +10400,7 @@
 
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: auto 44px 44px 44px minmax(104px, 0.9fr) minmax(112px, 1fr) minmax(112px, 1fr) 44px;
+          grid-template-columns: auto 44px 44px 44px 44px minmax(104px, 0.9fr) minmax(112px, 1fr) minmax(112px, 1fr) 44px;
           align-items: center;
           gap: 8px;
           width: 100%;
@@ -9966,6 +10416,7 @@
         #appShell.is-in-room #muteMic,
         #appShell.is-in-room #toggleCamera,
         #appShell.is-in-room #audioSettingsButton,
+        #appShell.is-in-room #roomChatToggle,
         #appShell.is-in-room #leave {
           width: 44px;
           min-width: 0;
@@ -9974,7 +10425,8 @@
         }
 
         #appShell.is-in-room #muteMic .mute-label,
-        #appShell.is-in-room #toggleCamera .camera-label {
+        #appShell.is-in-room #toggleCamera .camera-label,
+        #appShell.is-in-room #roomChatToggle .room-chat-toggle__label {
           display: none;
         }
 
@@ -9988,20 +10440,24 @@
           white-space: nowrap;
         }
 
-        #appShell.is-in-room #screenShare {
+        #appShell.is-in-room #roomChatToggle {
           grid-column: 5;
         }
 
-        #appShell.is-in-room #recordMeeting {
+        #appShell.is-in-room #screenShare {
           grid-column: 6;
         }
 
-        #appShell.is-in-room #archiveMeeting {
+        #appShell.is-in-room #recordMeeting {
           grid-column: 7;
         }
 
-        #appShell.is-in-room #leave {
+        #appShell.is-in-room #archiveMeeting {
           grid-column: 8;
+        }
+
+        #appShell.is-in-room #leave {
+          grid-column: 9;
           grid-row: 1;
           justify-self: end;
         }
@@ -10663,12 +11119,23 @@
           display: none;
         }
 
-        /* elapsed rides as a quiet mono line above the verbs on phones */
+        /* elapsed rides as a quiet mono line above the verbs on phones;
+           the chat toggle takes the top-right corner beside it */
         #appShell.is-in-room .meeting-bar .room-clock {
-          grid-column: 1 / -1;
+          grid-column: 1 / 6;
           grid-row: 1;
           text-align: center;
           padding: 0 0 2px;
+        }
+
+        #appShell.is-in-room #roomChatToggle {
+          grid-column: 6;
+          grid-row: 1;
+          justify-self: end;
+        }
+
+        #appShell.is-in-room #roomChatToggle .room-chat-toggle__label {
+          display: none;
         }
 
         /* the intelligence is glanceable without the long scroll — one mono
@@ -10698,6 +11165,7 @@
         #appShell.is-in-room #muteMic,
         #appShell.is-in-room #toggleCamera,
         #appShell.is-in-room #audioSettingsButton,
+        #appShell.is-in-room #roomChatToggle,
         #appShell.is-in-room #recordMeeting,
         #appShell.is-in-room #leave {
           width: 48px;
@@ -11208,6 +11676,10 @@
         .scout-chat-thinking__dot,
         .pip-meeting__dot { animation: none; }
         .voice-island.is-visible { animation: none; }
+        .bf-wave-bar { animation: none; }
+        .notification-panel { animation: none; }
+        .proposal-card { animation: none; }
+        .room-chat { animation: none; }
       }
     </style>
   </head>
@@ -11270,6 +11742,11 @@
           </button>
         </span>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
+        <button id="notificationBell" class="tool-rail__tool tool-rail__bell" type="button" aria-label="Notifications" title="Notifications" aria-haspopup="dialog" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+          <span class="tool-rail__label">alerts</span>
+          <span id="notificationBadge" class="chat-thread-item__unread notification-bell__unread" hidden>0</span>
+        </button>
         <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
@@ -11531,6 +12008,35 @@
               </form>
             </div>
           </section>
+          <!-- Room chat — everyone in the room; messages persist into meeting
+               memory as typed transcript lines (metadata source=room_chat) -->
+          <section id="roomChatPanel" class="room-chat" hidden aria-label="Room chat">
+            <header class="room-chat__header">
+              <div class="room-chat__title">
+                <span class="room-chat__mark" aria-hidden="true">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </span>
+                <h2>Room chat</h2>
+              </div>
+              <button id="roomChatClose" class="room-chat__close" type="button" aria-label="Close room chat" title="Close room chat">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </button>
+            </header>
+            <div id="roomChatThread" class="scout-chat-thread room-chat__thread" role="log" aria-label="Room chat messages">
+              <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
+            </div>
+            <form id="roomChatForm" class="scout-chat-form room-chat__form">
+              <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room…" aria-label="Message the room" disabled></textarea>
+              <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 19V5"></path>
+                  <path d="m5 12 7-7 7 7"></path>
+                </svg>
+              </button>
+            </form>
+          </section>
         </aside>
 
         <section id="presentationTile" class="presentation-tile hearth-presentation mount-stagger" aria-label="Shared workspace">
@@ -11637,6 +12143,12 @@
                 </svg>
               </button>
             </div>
+            <div class="stage-segmented chat-new-scope" role="group" aria-label="New thread scope">
+              <button id="chatScopePrivate" type="button" aria-pressed="true">private</button>
+              <button id="chatScopeChannel" type="button" aria-pressed="false">channel</button>
+            </div>
+            <span id="chatChannelsLabel" class="chat-threads__label" hidden>channels</span>
+            <div id="chatChannelThreads" class="chat-agent-threads" aria-label="Team channels"></div>
             <span class="chat-threads__label">threads</span>
             <button id="chatDefaultThread" class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
@@ -12049,6 +12561,13 @@
             </svg>
             <span class="audio-settings-label">audio</span>
           </button>
+          <button id="roomChatToggle" class="btn btn--ghost room-chat-toggle" type="button" aria-label="Open room chat" aria-pressed="false" title="Room chat" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="room-chat-toggle__label">Chat</span>
+            <span id="roomChatUnread" class="chat-thread-item__unread room-chat-toggle__unread" hidden>0</span>
+          </button>
           <button id="recordMeeting" class="btn btn--ghost btn--recording is-recording" type="button" aria-label="Pause transcript recording" aria-pressed="true" title="Pause transcript recording" disabled>
             <span class="record-dot" aria-hidden="true"></span>
             <span class="record-label">Recording</span>
@@ -12116,6 +12635,23 @@
       </button>
     </aside>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <!-- codex task proposals — board-worker-proposed agent tasks awaiting a
+         human decision; Confirm launches the thread as the confirming user -->
+    <aside id="proposalDeck" class="proposal-deck" aria-label="Proposed agent tasks" hidden>
+      <div id="proposalDeckList" class="proposal-deck__list"></div>
+    </aside>
+    <!-- notification center — durable tier above toasts; opened from the rail bell -->
+    <section id="notificationPanel" class="notification-panel" role="dialog" aria-label="Notifications" hidden>
+      <header class="notification-panel__head">
+        <span class="notification-panel__title">notifications</span>
+        <button id="notificationMarkAll" class="btn btn--text notification-panel__mark" type="button">mark all read</button>
+        <button id="notificationClose" class="btn btn--ghost notification-panel__close" type="button" aria-label="Close notifications">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+        </button>
+      </header>
+      <div id="notificationList" class="notification-panel__list" role="list"></div>
+      <p id="notificationEmpty" class="notification-panel__empty">nothing yet</p>
+    </section>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
     <!-- PiP meeting — the room follows you into Chat/Memory (kit meeting/PiPMeeting) -->
@@ -12433,6 +12969,27 @@
 	      const chatNewThread = document.getElementById('chatNewThread')
 	      const chatDefaultThread = document.getElementById('chatDefaultThread')
 	      const chatAgentThreads = document.getElementById('chatAgentThreads')
+	      const chatChannelThreads = document.getElementById('chatChannelThreads')
+	      const chatChannelsLabel = document.getElementById('chatChannelsLabel')
+	      const chatScopePrivate = document.getElementById('chatScopePrivate')
+	      const chatScopeChannel = document.getElementById('chatScopeChannel')
+      const roomChatPanel = document.getElementById('roomChatPanel')
+      const roomChatThread = document.getElementById('roomChatThread')
+      const roomChatForm = document.getElementById('roomChatForm')
+      const roomChatInput = document.getElementById('roomChatInput')
+      const roomChatSend = document.getElementById('roomChatSend')
+      const roomChatToggle = document.getElementById('roomChatToggle')
+      const roomChatUnread = document.getElementById('roomChatUnread')
+      const roomChatClose = document.getElementById('roomChatClose')
+      const notificationBell = document.getElementById('notificationBell')
+      const notificationBadge = document.getElementById('notificationBadge')
+      const notificationPanel = document.getElementById('notificationPanel')
+      const notificationList = document.getElementById('notificationList')
+      const notificationEmpty = document.getElementById('notificationEmpty')
+      const notificationMarkAll = document.getElementById('notificationMarkAll')
+      const notificationClose = document.getElementById('notificationClose')
+      const proposalDeck = document.getElementById('proposalDeck')
+      const proposalDeckList = document.getElementById('proposalDeckList')
       const topbarProjectEl = document.getElementById('topbarProject')
       const topbarToolTitle = document.getElementById('topbarToolTitle')
       const topbarToolMeta = document.getElementById('topbarToolMeta')
@@ -12543,6 +13100,9 @@
 	      let scoutChatThreads = []
 	      let activeScoutThreadId = ''
 	      let pendingScoutFiles = []
+	      let newChatThreadVisibility = 'private'
+	      let chatThreadPollTimer = 0
+	      let chatThreadsFingerprint = ''
 	      let osAssistantMode = 'chat'
       let osAssistantVoiceActive = false
       let osAssistantVoiceRecognizer = null
@@ -12594,6 +13154,14 @@
       const pipVideoTilesByParticipant = new Map()
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
+      const roomChatMaxNodes = 200
+      const roomChatSeenIds = new Set()
+      let roomChatUnreadCount = 0
+      const notificationMaxEntries = 100
+      let notificationEntries = []
+      let codexProposals = []
+      const codexProposalPendingActions = new Set()
+      const codexProposalRemovalTimers = new Map()
       let activeScreenShareParticipant = ''
       let activeSpeakerName = ''
       let serverActiveSpeakerName = ''
@@ -12982,6 +13550,8 @@
       })
 	      chatThreadSearch?.addEventListener('input', filterChatThreads)
 	      chatNewThread?.addEventListener('click', startNewScoutThread)
+	      chatScopePrivate?.addEventListener('click', () => setNewChatThreadVisibility('private'))
+	      chatScopeChannel?.addEventListener('click', () => setNewChatThreadVisibility('public'))
 	      chatDefaultThread?.addEventListener('click', () => {
 	        if (authedUser && !selectedScoutChatThread()) {
 	          startNewScoutThread()
@@ -13023,6 +13593,22 @@
           sendScoutChatFromForm(event)
         }
       })
+      roomChatForm.addEventListener('submit', sendRoomChatFromForm)
+      roomChatInput.addEventListener('input', resizeRoomChatInput)
+      roomChatInput.addEventListener('keydown', event => {
+        if (event.isComposing || event.keyCode === 229) {
+          return
+        }
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          sendRoomChatFromForm(event)
+        }
+      })
+      roomChatToggle.addEventListener('click', () => setRoomChatOpen(!isRoomChatOpen()))
+      roomChatClose.addEventListener('click', () => setRoomChatOpen(false))
+      notificationBell.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden))
+      notificationClose.addEventListener('click', () => setNotificationPanelOpen(false))
+      notificationMarkAll.addEventListener('click', markAllNotificationsRead)
       document.querySelectorAll('[data-scout-query]').forEach(button => {
         button.addEventListener('click', () => {
           assistantInput.value = button.dataset.scoutQuery || ''
@@ -13778,7 +14364,9 @@
 	          loadScoutChatThreads()
 	        } else {
 	          resetPersistedScoutChatState()
+	          setNotificationPanelOpen(false)
 	        }
+	        loadNotifications()
 	      }
 
       /* identity cache — prefill only. Nothing secret lives in storage: the
@@ -14566,6 +15154,7 @@
         syncToolTopbar()
         applyStatusPillForTool()
         renderPipMeeting()
+        syncChatThreadPolling()
         if (tool === 'office') {
           updateOfficeHome()
         } else if (tool === 'chat') {
@@ -14775,6 +15364,22 @@
               setVoiceIslandState('listening', 'listening...')
             } else if (!enabled) {
               stopRealtimeVoiceConversation({ notifyServer: false })
+            }
+          } else if (type === 'notify') {
+            // Transient tier now, durable tier in the bell. The websocket
+            // broadcast carries the same id, so the store append dedupes.
+            const text = String(action.label || '').trim()
+            if (text) {
+              showToast({ text, kind: 'note' })
+              appendNotificationEntry({
+                id: String(action.id || '') || `notify-${Date.now()}`,
+                kind: String(action.kind || 'info'),
+                text,
+                tool: TOOL_IDS.includes(tool) ? tool : '',
+                artifactId,
+                createdAt: new Date().toISOString(),
+                read: false
+              }, { toast: false })
             }
           }
         }
@@ -19986,8 +20591,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'memory_transcript':
             addMemoryEntry(message.data)
-            setActiveSpeakerFromText(message.data?.text || message.data?.transcript || '')
-            triggerHotEmber()
+            // Typed room-chat lines land in the transcript timeline too, but a
+            // silent typer must not be promoted to active speaker or pulse the
+            // ember — those cues are reserved for spoken audio.
+            if (message.data?.metadata?.source !== 'room_chat') {
+              setActiveSpeakerFromText(message.data?.text || message.data?.transcript || '')
+              triggerHotEmber()
+            }
             break
           case 'memory_brain':
             addMemoryEntry(message.data)
@@ -20017,6 +20627,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'scout_chat':
             handleScoutChatEvent(message.data)
+            break
+          case 'chat_thread':
+            handleChatThreadEvent(message.data)
+            break
+          case 'room_chat':
+            handleRoomChatEvent(message.data)
+            break
+          case 'room_chat_history':
+            handleRoomChatHistory(message.data)
+            break
+          case 'notification':
+            handleNotificationEvent(message.data)
+            break
+          case 'notification_backlog':
+            handleNotificationBacklog(message.data)
+            break
+          case 'codex_proposal':
+            upsertCodexProposal(message.data)
+            break
+          case 'codex_proposals':
+            handleCodexProposalsSnapshot(message.data)
             break
           case 'participants':
             handleParticipants(message.data)
@@ -21527,6 +22158,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          scoutChatHint.hidden = false
 	          scoutChatHint.textContent = 'sign in to keep chat threads and attachments'
 	        }
+	        updateRoomChatAvailability()
 	      }
 
 	      function syncScoutChatToRoomView(inRoom) {
@@ -21572,12 +22204,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatThreads = []
 	        activeScoutThreadId = ''
 	        pendingScoutFiles = []
+	        chatThreadsFingerprint = ''
 	        renderPendingScoutFiles()
 	        renderChatAgentThreads()
 	        renderActiveScoutThread()
+	        syncChatThreadPolling()
 	      }
 
-	      async function loadScoutChatThreads() {
+	      function chatThreadsListFingerprint(threads) {
+	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}:${(thread?.messages || []).length}`).join('|')
+	      }
+
+	      async function loadScoutChatThreads(options = {}) {
 	        if (!authedUser) {
 	          resetPersistedScoutChatState()
 	          return
@@ -21588,7 +22226,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            return
 	          }
 	          const payload = await response.json()
-	          scoutChatThreads = Array.isArray(payload?.threads) ? payload.threads : []
+	          const threads = Array.isArray(payload?.threads) ? payload.threads : []
+	          const fingerprint = chatThreadsListFingerprint(threads)
+	          if (options.onlyIfChanged && fingerprint === chatThreadsFingerprint) {
+	            return
+	          }
+	          chatThreadsFingerprint = fingerprint
+	          scoutChatThreads = threads
 	          if (!activeScoutThreadId || !scoutChatThreads.some(thread => thread.id === activeScoutThreadId)) {
 	            activeScoutThreadId = scoutChatThreads[0]?.id || ''
 	          }
@@ -21597,6 +22241,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          renderOfficeRecentThreads()
 	        } catch {
 	          // Persistent chat can refresh again; keep the current in-memory view.
+	        }
+	      }
+
+	      // Channel activity while the chat tool is open: websocket pushes cover
+	      // media-joined tabs; the 12s poll covers chat-tab users with no socket.
+	      function syncChatThreadPolling() {
+	        const shouldPoll = Boolean(authedUser) && appShell.dataset.tool === 'chat'
+	        if (shouldPoll && !chatThreadPollTimer) {
+	          chatThreadPollTimer = window.setInterval(() => loadScoutChatThreads({ onlyIfChanged: true }), 12000)
+	        } else if (!shouldPoll && chatThreadPollTimer) {
+	          window.clearInterval(chatThreadPollTimer)
+	          chatThreadPollTimer = 0
+	        }
+	      }
+
+	      function handleChatThreadEvent(payload) {
+	        if (!authedUser || !payload?.id) {
+	          return
+	        }
+	        const id = String(payload.id)
+	        const existing = scoutChatThreads.find(thread => String(thread?.id || '') === id)
+	        if (!existing) {
+	          // A channel this client has never loaded — refresh the list.
+	          loadScoutChatThreads({ onlyIfChanged: true })
+	          return
+	        }
+	        existing.title = payload.title || existing.title
+	        existing.preview = payload.preview || existing.preview
+	        existing.updatedAt = payload.updatedAt || existing.updatedAt
+	        existing.visibility = payload.visibility || existing.visibility
+	        const message = payload.message
+	        if (message?.id) {
+	          const messages = Array.isArray(existing.messages) ? existing.messages : []
+	          if (!messages.some(candidate => String(candidate?.id || '') === String(message.id))) {
+	            messages.push(message)
+	          }
+	          existing.messages = messages
+	        }
+	        upsertScoutChatThread(existing, { select: false })
+	        if (activeScoutThreadId === id) {
+	          renderActiveScoutThread()
 	        }
 	      }
 
@@ -21638,8 +22323,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const ts = new Date().toISOString()
 	        appendScoutChatNode(scoutChatMessageNode('user', text, ts, files))
 	        updateChatThreadItem(text || attachedFilesPreview(files), ts)
-	        const threadMode = scoutThreadModeForText(text)
-	        showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
+	        // Channels only summon Scout on an @scout mention (server-enforced);
+	        // skip the thinking indicator for plain human-to-human messages.
+	        const scoutEngaged = !chatThreadIsChannel(selectedScoutChatThread()) || /@scout/i.test(text)
+	        const threadMode = scoutEngaged ? scoutThreadModeForText(text) : ''
+	        if (scoutEngaged) {
+	          showScoutChatThinking(threadMode ? 'launching thread...' : 'thinking...')
+	        }
 	        try {
 	          const thread = await ensurePersistedScoutThread()
 	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
@@ -21856,9 +22546,471 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      // ---------- Notification center ----------
+      // Durable tier: the server persists data/notifications.json and pushes
+      // 'notification' events (broadcasts fan out to everyone; targeted
+      // records are delivered server-side only to the recipient's own
+      // authenticated sockets — notificationAddressedToMe is defense-in-depth,
+      // not the access control) plus an unread 'notification_backlog' replay
+      // on room admission. Toasts stay the transient tier.
+
+      function normalizeNotificationEntry(payload) {
+        if (!payload || typeof payload !== 'object' || !payload.id) {
+          return null
+        }
+        return {
+          id: String(payload.id),
+          kind: String(payload.kind || 'info'),
+          text: String(payload.text || ''),
+          tool: String(payload.tool || ''),
+          artifactId: String(payload.artifactId || ''),
+          createdAt: String(payload.createdAt || new Date().toISOString()),
+          read: Boolean(payload.read)
+        }
+      }
+
+      function notificationAddressedToMe(payload) {
+        const target = String(payload?.userEmail || '').trim().toLowerCase()
+        if (!target) {
+          return true
+        }
+        return target === String(authedUser?.email || '').trim().toLowerCase()
+      }
+
+      function unreadNotificationCount() {
+        return notificationEntries.filter(entry => !entry.read).length
+      }
+
+      function renderNotificationBadge() {
+        const unread = unreadNotificationCount()
+        notificationBadge.textContent = unread > 99 ? '99+' : String(unread)
+        notificationBadge.hidden = unread === 0
+      }
+
+      function notificationItemNode(entry) {
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = `notification-item${entry.read ? '' : ' is-unread'}`
+        item.setAttribute('role', 'listitem')
+
+        const dot = document.createElement('span')
+        dot.className = 'notification-item__dot'
+        dot.setAttribute('aria-hidden', 'true')
+
+        const body = document.createElement('span')
+        body.className = 'notification-item__body'
+        const text = document.createElement('span')
+        text.className = 'notification-item__text'
+        text.textContent = entry.text
+        const meta = document.createElement('span')
+        meta.className = 'notification-item__meta'
+        meta.textContent = `${entry.kind} · ${scoutChatTimeLabel(entry.createdAt)}`
+        body.append(text, meta)
+
+        item.append(dot, body)
+        item.addEventListener('click', () => openNotificationEntry(entry))
+        return item
+      }
+
+      function renderNotifications() {
+        notificationList.replaceChildren(...notificationEntries.map(notificationItemNode))
+        notificationEmpty.hidden = notificationEntries.length > 0
+        renderNotificationBadge()
+      }
+
+      function appendNotificationEntry(payload, options = {}) {
+        const entry = normalizeNotificationEntry(payload)
+        if (!entry || notificationEntries.some(existing => existing.id === entry.id)) {
+          return
+        }
+        notificationEntries.unshift(entry)
+        if (notificationEntries.length > notificationMaxEntries) {
+          notificationEntries.length = notificationMaxEntries
+        }
+        renderNotifications()
+        if (options.toast && entry.text) {
+          showToast({ text: entry.text, kind: 'note' })
+        }
+      }
+
+      function handleNotificationEvent(payload) {
+        if (!notificationAddressedToMe(payload)) {
+          return
+        }
+        appendNotificationEntry(payload, { toast: true })
+      }
+
+      function handleNotificationBacklog(payload) {
+        if (!Array.isArray(payload)) {
+          return
+        }
+        // Backlog replays oldest-last is newest-first from the server; append
+        // without toasting so a rejoin does not replay a toast storm.
+        for (let index = payload.length - 1; index >= 0; index--) {
+          appendNotificationEntry(payload[index], { toast: false })
+        }
+      }
+
+      async function loadNotifications() {
+        if (!authedUser) {
+          notificationEntries = []
+          renderNotifications()
+          return
+        }
+        try {
+          const response = await fetch('/assistant/notifications', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          const entries = Array.isArray(payload?.notifications) ? payload.notifications : []
+          notificationEntries = entries.map(normalizeNotificationEntry).filter(Boolean)
+          renderNotifications()
+        } catch {
+          // The bell can refresh again; keep the current in-memory view.
+        }
+      }
+
+      function markNotificationsRead(ids) {
+        const wanted = ids.filter(Boolean)
+        if (!wanted.length) {
+          return
+        }
+        let changed = false
+        for (const entry of notificationEntries) {
+          if (!entry.read && wanted.includes(entry.id)) {
+            entry.read = true
+            changed = true
+          }
+        }
+        if (changed) {
+          renderNotifications()
+        }
+        fetch('/assistant/notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: wanted })
+        }).catch(() => {
+          // Read receipts re-sync on the next load.
+        })
+      }
+
+      function markAllNotificationsRead() {
+        markNotificationsRead(notificationEntries.filter(entry => !entry.read).map(entry => entry.id))
+      }
+
+      function openNotificationEntry(entry) {
+        markNotificationsRead([entry.id])
+        setNotificationPanelOpen(false)
+        if (entry.artifactId) {
+          openAgentArtifact({ id: entry.artifactId })
+        } else if (entry.tool && TOOL_IDS.includes(entry.tool)) {
+          setActiveTool(entry.tool)
+        }
+      }
+
+      function setNotificationPanelOpen(open) {
+        notificationPanel.hidden = !open
+        notificationBell.setAttribute('aria-expanded', String(Boolean(open)))
+        if (open) {
+          loadNotifications()
+        }
+      }
+
+      // ---------- Codex task proposals ----------
+      // The board worker proposes agent tasks from meeting action items
+      // (server tool propose_codex_task). Cards render in the room; Confirm
+      // launches the agent thread as the confirming user, Dismiss settles.
+      // Status updates arrive live on the codex_proposal broadcast and the
+      // codex_proposals admission replay.
+
+      function codexProposalNode(proposal) {
+        const card = document.createElement('article')
+        card.className = 'proposal-card'
+        card.dataset.proposalId = proposal.id
+
+        const head = document.createElement('div')
+        head.className = 'proposal-card__head'
+        const kicker = document.createElement('span')
+        kicker.className = 'proposal-card__kicker'
+        kicker.textContent = 'scout proposes'
+        const mode = document.createElement('span')
+        mode.className = 'proposal-card__mode'
+        mode.textContent = String(proposal.mode || 'artifacts').toLowerCase()
+        head.append(kicker, mode)
+
+        const title = document.createElement('h3')
+        title.className = 'proposal-card__title'
+        title.textContent = String(proposal.title || 'agent task')
+
+        const query = document.createElement('p')
+        query.className = 'proposal-card__query'
+        query.textContent = String(proposal.query || '')
+
+        card.append(head, title, query)
+
+        if (String(proposal.status || '') === 'proposed') {
+          const actions = document.createElement('div')
+          actions.className = 'proposal-card__actions'
+          const pending = codexProposalPendingActions.has(proposal.id)
+          const confirm = document.createElement('button')
+          confirm.type = 'button'
+          confirm.className = 'btn btn--primary proposal-card__confirm'
+          confirm.textContent = pending ? 'Working…' : 'Confirm'
+          confirm.disabled = pending
+          confirm.addEventListener('click', () => submitCodexProposalAction(proposal.id, 'confirm'))
+          const dismiss = document.createElement('button')
+          dismiss.type = 'button'
+          dismiss.className = 'btn btn--ghost proposal-card__dismiss'
+          dismiss.textContent = 'Dismiss'
+          dismiss.disabled = pending
+          dismiss.addEventListener('click', () => submitCodexProposalAction(proposal.id, 'dismiss'))
+          actions.append(confirm, dismiss)
+          card.append(actions)
+        } else {
+          const status = document.createElement('span')
+          status.className = 'proposal-card__status'
+          const by = String(proposal.confirmedBy || proposal.dismissedBy || '').toLowerCase()
+          status.textContent = String(proposal.status || '') === 'confirmed'
+            ? `confirmed${by ? ' by ' + by : ''} · thread launched`
+            : `dismissed${by ? ' by ' + by : ''}`
+          card.append(status)
+        }
+        return card
+      }
+
+      function renderCodexProposals() {
+        const visible = codexProposals.filter(proposal => proposal && proposal.id)
+        proposalDeckList.replaceChildren(...visible.map(codexProposalNode))
+        proposalDeck.hidden = visible.length === 0
+      }
+
+      function upsertCodexProposal(payload) {
+        const id = String(payload?.id || '')
+        if (!id) {
+          return
+        }
+        const next = { ...payload, id }
+        const index = codexProposals.findIndex(proposal => proposal.id === id)
+        if (index >= 0) {
+          codexProposals[index] = next
+        } else {
+          codexProposals.push(next)
+        }
+        if (String(next.status || '') !== 'proposed') {
+          // Settled cards linger briefly so the room sees the outcome.
+          scheduleCodexProposalRemoval(id)
+        }
+        renderCodexProposals()
+      }
+
+      function scheduleCodexProposalRemoval(id) {
+        if (codexProposalRemovalTimers.has(id)) {
+          return
+        }
+        codexProposalRemovalTimers.set(id, window.setTimeout(() => {
+          codexProposalRemovalTimers.delete(id)
+          codexProposals = codexProposals.filter(proposal => proposal.id !== id)
+          renderCodexProposals()
+        }, 6000))
+      }
+
+      function handleCodexProposalsSnapshot(payload) {
+        // Authoritative replay on (re)admission — only pending proposals are
+        // actionable; settled history stays in notifications.
+        const list = Array.isArray(payload) ? payload : []
+        codexProposals = list.filter(proposal => proposal && proposal.id && String(proposal.status || '') === 'proposed')
+        renderCodexProposals()
+      }
+
+      async function submitCodexProposalAction(id, action) {
+        if (codexProposalPendingActions.has(id)) {
+          return
+        }
+        codexProposalPendingActions.add(id)
+        renderCodexProposals()
+        try {
+          const result = await postAuthJSON(`/assistant/proposals/${encodeURIComponent(id)}/action`, { action })
+          if (!result.ok) {
+            throw new Error(result.data?.error || `could not ${action} the proposal`)
+          }
+          codexProposalPendingActions.delete(id)
+          upsertCodexProposal(result.data?.proposal)
+          if (result.data?.launched) {
+            showToast({ text: 'agent thread launched', kind: 'done' })
+          } else if (action === 'dismiss') {
+            showToast({ text: 'proposal dismissed', kind: 'note' })
+          }
+        } catch (error) {
+          codexProposalPendingActions.delete(id)
+          renderCodexProposals()
+          showToast({ text: error.message || `could not ${action} the proposal`, kind: 'error' })
+        }
+      }
+
+      // ---------- Room chat ----------
+      // Everyone in the room; the server persists each message into meeting
+      // memory (transcript injection) and echoes it back on broadcast, so the
+      // sender renders from the same ordering as everyone else.
+
+      function isRoomChatOpen() {
+        return appShell.classList.contains('is-room-chat-open')
+      }
+
+      function setRoomChatOpen(open) {
+        appShell.classList.toggle('is-room-chat-open', open)
+        roomChatPanel.hidden = !open
+        roomChatToggle.setAttribute('aria-pressed', String(open))
+        roomChatToggle.setAttribute('aria-label', open ? 'Close room chat' : 'Open room chat')
+        if (open) {
+          clearRoomChatUnread()
+          roomChatThread.scrollTop = roomChatThread.scrollHeight
+          if (!roomChatInput.disabled) {
+            roomChatInput.focus()
+          }
+        }
+      }
+
+      function clearRoomChatUnread() {
+        roomChatUnreadCount = 0
+        roomChatUnread.hidden = true
+        roomChatUnread.textContent = '0'
+      }
+
+      function bumpRoomChatUnread() {
+        roomChatUnreadCount = Math.min(roomChatUnreadCount + 1, 99)
+        roomChatUnread.textContent = String(roomChatUnreadCount)
+        roomChatUnread.hidden = false
+      }
+
+      function updateRoomChatAvailability() {
+        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
+        roomChatInput.disabled = !joined
+        roomChatSend.disabled = !joined
+        roomChatToggle.disabled = !joined
+        if (!joined && isRoomChatOpen()) {
+          setRoomChatOpen(false)
+        }
+      }
+
+      function roomChatMessageIsOwn(message) {
+        const name = String(message?.name || '')
+        return Boolean(currentParticipantName) && name.toLowerCase() === currentParticipantName.toLowerCase()
+      }
+
+      function roomChatIsNearBottom() {
+        return roomChatThread.scrollHeight - roomChatThread.scrollTop - roomChatThread.clientHeight < 48
+      }
+
+      function roomChatMessageNode(message) {
+        const own = roomChatMessageIsOwn(message)
+        const item = document.createElement('article')
+        item.className = `scout-chat-msg ${own ? 'scout-chat-msg--user' : 'scout-chat-msg--peer'}`
+        const meta = document.createElement('span')
+        meta.className = 'scout-chat-meta'
+        const author = own ? 'you' : String(message?.name || 'guest').toLowerCase()
+        meta.textContent = `${author} · ${scoutChatTimeLabel(message?.createdAt)}`
+        const body = document.createElement('div')
+        body.className = 'scout-chat-text'
+        body.textContent = String(message?.text || '')
+        item.append(meta, body)
+        return item
+      }
+
+      function ensureRoomChatEmptyState() {
+        if (roomChatThread.querySelector('.scout-chat-msg') || roomChatThread.querySelector('.scout-chat-empty')) {
+          return
+        }
+        const empty = document.createElement('p')
+        empty.className = 'scout-chat-empty'
+        empty.textContent = 'messages here reach everyone in the room and land in meeting memory'
+        roomChatThread.appendChild(empty)
+      }
+
+      function appendRoomChatMessage(message) {
+        const id = String(message?.id || '')
+        const text = String(message?.text || '')
+        if (!text || (id && roomChatSeenIds.has(id))) {
+          return false
+        }
+        if (id) {
+          roomChatSeenIds.add(id)
+        }
+        const stick = roomChatIsNearBottom()
+        roomChatThread.querySelector('.scout-chat-empty')?.remove()
+        roomChatThread.appendChild(roomChatMessageNode(message))
+        // Cap the rendered thread; the server replays history on rejoin.
+        while (roomChatThread.children.length > roomChatMaxNodes) {
+          roomChatThread.firstElementChild?.remove()
+        }
+        if (stick) {
+          roomChatThread.scrollTop = roomChatThread.scrollHeight
+        }
+        return true
+      }
+
+      function handleRoomChatEvent(message) {
+        if (!appendRoomChatMessage(message)) {
+          return
+        }
+        if (!roomChatMessageIsOwn(message) && !isRoomChatOpen()) {
+          bumpRoomChatUnread()
+        }
+      }
+
+      function handleRoomChatHistory(messages) {
+        // Authoritative replay on (re)admission — rebuild the thread.
+        roomChatSeenIds.clear()
+        roomChatThread.querySelectorAll('.scout-chat-msg').forEach(node => node.remove())
+        const list = Array.isArray(messages) ? messages : []
+        list.forEach(message => appendRoomChatMessage(message))
+        ensureRoomChatEmptyState()
+        roomChatThread.scrollTop = roomChatThread.scrollHeight
+      }
+
+      function sendRoomChat(text) {
+        const trimmed = String(text || '').trim().slice(0, 4000)
+        if (!trimmed) {
+          return false
+        }
+        if (!ws || ws.readyState !== WebSocket.OPEN || !appShell.classList.contains('is-in-room')) {
+          setLog('join the room to use room chat')
+          return false
+        }
+        // No optimistic render — the message lands via the server broadcast.
+        ws.send(JSON.stringify({
+          event: 'room_chat',
+          data: JSON.stringify({ text: trimmed })
+        }))
+        return true
+      }
+
+      function sendRoomChatFromForm(event) {
+        event.preventDefault()
+        if (sendRoomChat(roomChatInput.value)) {
+          roomChatInput.value = ''
+          resizeRoomChatInput()
+        }
+      }
+
+      function resizeRoomChatInput() {
+        if (!roomChatInput.value) {
+          roomChatInput.style.height = ''
+          return
+        }
+        roomChatInput.style.height = 'auto'
+        roomChatInput.style.height = `${Math.min(roomChatInput.scrollHeight + 2, 108)}px`
+      }
+
 	      // kit: live, case-insensitive filter over durable chat thread rows.
 	      function filterChatThreads() {
 	        renderChatAgentThreads()
+	      }
+
+	      function setNewChatThreadVisibility(visibility) {
+	        newChatThreadVisibility = visibility === 'public' ? 'public' : 'private'
+	        chatScopePrivate?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'private'))
+	        chatScopeChannel?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'public'))
 	      }
 
 	      async function startNewScoutThread() {
@@ -21869,8 +23021,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatThreadSearch.value = ''
 	        }
 	        if (authedUser) {
+	          const isChannel = newChatThreadVisibility === 'public'
+	          let title = 'Scout'
+	          if (isChannel) {
+	            const name = window.prompt('channel name', 'team channel')
+	            if (name === null) {
+	              return
+	            }
+	            title = String(name).trim() || 'team channel'
+	          }
 	          try {
-	            const result = await postAuthJSON('/assistant/chat-threads', { title: 'Scout' })
+	            const result = await postAuthJSON('/assistant/chat-threads', { title, visibility: isChannel ? 'public' : 'private' })
 	            if (!result.ok) {
 	              throw new Error(result.data?.error || 'could not create chat thread')
 	            }
@@ -21906,56 +23067,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      function renderChatAgentThreads() {
-	        if (!chatAgentThreads) {
-	          return
-	        }
-	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
-	        const threads = scoutChatThreads.slice()
-	        if (chatDefaultThread) {
-	          chatDefaultThread.hidden = threads.length > 0
-	          chatDefaultThread.setAttribute('aria-pressed', threads.length ? 'false' : 'true')
-	        }
-	        chatAgentThreads.replaceChildren(...threads.map(thread => {
-	          const title = thread.title || 'Scout'
-	          const preview = thread.preview || 'new chat thread'
-	          const haystack = `${title} ${preview}`.toLowerCase()
-	          const active = String(thread.id || '') === activeScoutThreadId
-	          const item = document.createElement('div')
-	          item.className = 'chat-thread-item chat-thread-item--with-action'
-	          item.setAttribute('role', 'button')
-	          item.tabIndex = 0
-	          item.setAttribute('aria-pressed', active ? 'true' : 'false')
-	          item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
-	          item.addEventListener('click', () => selectScoutChatThread(thread.id))
-	          item.addEventListener('keydown', event => {
-	            if (event.key === 'Enter' || event.key === ' ') {
-	              event.preventDefault()
-	              selectScoutChatThread(thread.id)
-	            }
-	          })
+	      function chatThreadIsChannel(thread) {
+	        return String(thread?.visibility || '').toLowerCase() === 'public'
+	      }
 
-	          const icon = document.createElement('span')
-	          icon.className = 'chat-thread-item__icon'
-	          icon.setAttribute('aria-hidden', 'true')
-	          icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
+	      function chatThreadRowNode(thread, q) {
+	        const isChannel = chatThreadIsChannel(thread)
+	        const title = thread.title || (isChannel ? 'team channel' : 'Scout')
+	        const preview = thread.preview || (isChannel ? 'new team channel' : 'new chat thread')
+	        const haystack = `${title} ${preview}`.toLowerCase()
+	        const active = String(thread.id || '') === activeScoutThreadId
+	        const item = document.createElement('div')
+	        item.className = 'chat-thread-item chat-thread-item--with-action'
+	        item.setAttribute('role', 'button')
+	        item.tabIndex = 0
+	        item.setAttribute('aria-pressed', active ? 'true' : 'false')
+	        item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
+	        item.addEventListener('click', () => selectScoutChatThread(thread.id))
+	        item.addEventListener('keydown', event => {
+	          if (event.key === 'Enter' || event.key === ' ') {
+	            event.preventDefault()
+	            selectScoutChatThread(thread.id)
+	          }
+	        })
 
-	          const body = document.createElement('span')
-	          body.className = 'chat-thread-item__body'
-          const row = document.createElement('span')
-          row.className = 'chat-thread-item__row'
-          const titleEl = document.createElement('span')
-	          titleEl.className = 'chat-thread-item__title'
-	          titleEl.textContent = title
-	          const time = document.createElement('span')
-	          time.className = 'chat-thread-item__time'
-	          time.textContent = scoutChatTimeLabel(thread.updatedAt || thread.createdAt)
-	          row.append(titleEl, time)
-	          const previewEl = document.createElement('span')
-	          previewEl.className = 'chat-thread-item__preview'
-	          previewEl.textContent = preview
-	          body.append(row, previewEl)
+	        const icon = document.createElement('span')
+	        icon.className = 'chat-thread-item__icon'
+	        icon.setAttribute('aria-hidden', 'true')
+	        icon.innerHTML = isChannel
+	          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"></path><path d="M4 15h16"></path><path d="M10 3 8 21"></path><path d="M16 3l-2 18"></path></svg>'
+	          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
 
+	        const body = document.createElement('span')
+	        body.className = 'chat-thread-item__body'
+	        const row = document.createElement('span')
+	        row.className = 'chat-thread-item__row'
+	        const titleEl = document.createElement('span')
+	        titleEl.className = 'chat-thread-item__title'
+	        titleEl.textContent = title
+	        const time = document.createElement('span')
+	        time.className = 'chat-thread-item__time'
+	        time.textContent = scoutChatTimeLabel(thread.updatedAt || thread.createdAt)
+	        row.append(titleEl, time)
+	        const previewEl = document.createElement('span')
+	        previewEl.className = 'chat-thread-item__preview'
+	        previewEl.textContent = preview
+	        body.append(row, previewEl)
+
+	        item.append(icon, body)
+
+	        // Channels archive server-side as creator-only; hide the affordance
+	        // from everyone else.
+	        const ownEmail = String(authedUser?.email || '').toLowerCase()
+	        const ownerEmail = String(thread.ownerEmail || '').toLowerCase()
+	        if (!isChannel || (ownEmail && ownerEmail === ownEmail)) {
 	          const archive = document.createElement('button')
 	          archive.type = 'button'
 	          archive.className = 'chat-thread-item__archive'
@@ -21966,10 +23131,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            event.stopPropagation()
 	            archiveScoutChatThread(thread.id)
 	          })
+	          item.appendChild(archive)
+	        }
+	        return item
+	      }
 
-	          item.append(icon, body, archive)
-	          return item
-	        }))
+	      function renderChatAgentThreads() {
+	        if (!chatAgentThreads) {
+	          return
+	        }
+	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
+	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
+	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
+	        if (chatDefaultThread) {
+	          chatDefaultThread.hidden = privates.length > 0
+	          chatDefaultThread.setAttribute('aria-pressed', privates.length ? 'false' : 'true')
+	        }
+	        if (chatChannelsLabel) {
+	          chatChannelsLabel.hidden = channels.length === 0
+	        }
+	        chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))
+	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
 	      }
 
 	      function selectScoutChatThread(id) {
@@ -22019,6 +23201,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function renderActiveScoutThread() {
 	        clearScoutChatThreadNodes()
 	        const thread = selectedScoutChatThread()
+	        const isChannel = chatThreadIsChannel(thread)
+	        const caption = document.querySelector('.scout-private-caption')
+	        if (caption) {
+	          caption.textContent = isChannel
+	            ? 'channel · everyone signed in can read — mention @scout to bring Scout in'
+	            : 'private · voice and chat route Scout work here'
+	        }
+	        if (scoutChatInput) {
+	          scoutChatInput.placeholder = isChannel
+	            ? 'message the channel — @scout to ask Scout…'
+	            : 'ask Scout, or start with research/design/grill/plan…'
+	        }
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 	        if (!messages.length) {
 	          ensureScoutChatEmptyState()
@@ -22035,9 +23229,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return scoutChatResearchNode(scoutThreadFromChatMessage(message))
 	        }
 	        const role = String(message?.role || '').toLowerCase()
-	        const kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
+	        let kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
+	        // Channel messages carry server-stamped author identity; someone
+	        // else's message renders as a named peer bubble instead of "you".
+	        let authorLabel = ''
+	        const authorEmail = String(message?.authorEmail || '').toLowerCase()
+	        const authorName = String(message?.authorName || '').trim()
+	        const selfEmail = String(authedUser?.email || '').toLowerCase()
+	        if (kind === 'user' && authorName && authorEmail && authorEmail !== selfEmail) {
+	          kind = 'peer'
+	          authorLabel = authorName.toLowerCase()
+	        }
 	        const text = kind === 'scout' ? scoutVoice(message?.text || '') : String(message?.text || '')
-	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [])
+	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel)
 	      }
 
 	      function scoutThreadFromChatMessage(message) {
@@ -22203,19 +23407,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function scoutChatMessageNode(kind, text, ts, files) {
+      function scoutChatMessageNode(kind, text, ts, files, authorLabel) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
 
         const meta = document.createElement('span')
         meta.className = 'scout-chat-meta'
-        if (kind !== 'user') {
+        if (kind === 'scout' || kind === 'error') {
           const dot = document.createElement('span')
           dot.className = 'scout-chat-meta__dot'
           dot.setAttribute('aria-hidden', 'true')
           meta.appendChild(dot)
         }
-        const label = kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : 'error'
+        const label = authorLabel || (kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : kind === 'peer' ? 'peer' : 'error')
         meta.appendChild(document.createTextNode(`${label} · ${scoutChatTimeLabel(ts)}`))
 
         item.append(meta)

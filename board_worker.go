@@ -211,7 +211,7 @@ func normalizeMeetingBoardToolName(operation meetingBoardOperation) string {
 
 func meetingBoardToolAllowed(toolName string) bool {
 	switch toolName {
-	case "create_ticket", "update_ticket", "move_ticket", "add_tags", "add_key_date", "do_nothing":
+	case "create_ticket", "update_ticket", "move_ticket", "add_tags", "add_key_date", "propose_codex_task", "do_nothing":
 		return true
 	default:
 		return false
@@ -235,7 +235,10 @@ func meetingBoardInstructions() string {
 		"Never delete cards from asynchronous summaries. Ignore broad discussion, uncertain audio, greetings, filler, and facts that do not affect the board.",
 		"Preserve exact proper nouns, participant names, project titles, and dates. Use owner Unassigned unless a responsible participant is clear.",
 		"Return strict JSON only, with shape: {\"summary\":\"short audit summary\",\"operations\":[{\"tool\":\"update_ticket\",\"reason\":\"why this is grounded\",\"arguments\":{...}}]}.",
-		"Allowed tools are create_ticket, update_ticket, move_ticket, add_tags, add_key_date, and do_nothing. Tool arguments must match the existing board tool schemas.",
+		"Allowed tools are create_ticket, update_ticket, move_ticket, add_tags, add_key_date, propose_codex_task, and do_nothing. Tool arguments must match the existing board tool schemas.",
+		"When an action item clearly maps to an agent deliverable — a research brief, a design brief, a pressure-test, a workflow plan, or a written artifact — also emit propose_codex_task with arguments {\"title\":\"short human title\",\"mode\":\"research|design|grill|workflow|artifacts\",\"query\":\"what the agent should produce\"}.",
+		"Proposals are never auto-run: a human reviews and confirms each one, so propose at most two per pass and only when the deliverable is unmistakable.",
+		"Phrase every proposal query as a read-only deliverable to research, draft, or analyze. Never ask the agent to commit, deploy, push, ssh, run migrations, or modify external systems.",
 		"When no board change is warranted, return {\"summary\":\"No actionable board changes.\",\"operations\":[]}.",
 	}, " ")
 }

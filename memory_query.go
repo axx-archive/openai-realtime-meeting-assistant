@@ -38,6 +38,8 @@ type assistantQueryResult struct {
 
 type osAssistantAction struct {
 	Type       string `json:"type"`
+	ID         string `json:"id,omitempty"`
+	Kind       string `json:"kind,omitempty"`
 	Tool       string `json:"tool,omitempty"`
 	Mode       string `json:"mode,omitempty"`
 	ArtifactID string `json:"artifactId,omitempty"`

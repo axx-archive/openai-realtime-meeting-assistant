@@ -20,7 +20,15 @@ const (
 	meetingMemoryKindArchive     = "archive"
 	meetingMemoryKindOSArtifact  = "os_artifact"
 	meetingMemoryKindScoutChat   = "scout_chat_thread"
-	defaultMeetingMemoryPath     = "data/meeting-memory.jsonl"
+	// meetingMemoryKindCodexProposal is a board-worker-proposed agent task
+	// awaiting a human confirm/dismiss. Proposals are UI state, not knowledge:
+	// like scout_chat_thread they are excluded from Scout search context and
+	// from the generic client memory timeline.
+	meetingMemoryKindCodexProposal = "codex_proposal"
+	defaultMeetingMemoryPath       = "data/meeting-memory.jsonl"
+	// transcriptSourceRoomChat marks transcript entries injected from the
+	// in-meeting text chat rather than the audio transcription lanes.
+	transcriptSourceRoomChat = "room_chat"
 )
 
 var memoryTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
@@ -192,8 +200,22 @@ func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, item
 }
 
 func (store *meetingMemoryStore) appendAttributedTranscriptWithMetadata(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendAttributedTranscriptEntry(eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, false)
+}
+
+// appendRoomChatTranscript injects a typed room-chat message into the
+// transcript stream. Typed text is deliberate, so it bypasses the
+// transcriptLooksUseful filler filter that guards spoken transcripts.
+func (store *meetingMemoryStore) appendRoomChatTranscript(eventID string, speaker string, text string) (meetingMemoryEntry, bool, error) {
+	return store.appendAttributedTranscriptEntry(eventID, "", speaker, "", text, map[string]string{"source": transcriptSourceRoomChat}, true)
+}
+
+func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
-	if store == nil || transcript == "" || !transcriptLooksUseful(transcript) {
+	if store == nil || transcript == "" {
+		return meetingMemoryEntry{}, false, nil
+	}
+	if !bypassUsefulnessFilter && !transcriptLooksUseful(transcript) {
 		return meetingMemoryEntry{}, false, nil
 	}
 
@@ -245,6 +267,10 @@ func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metada
 
 func (store *meetingMemoryStore) appendScoutChatThread(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindScoutChat, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendCodexProposal(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindCodexProposal, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
@@ -519,6 +545,50 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 	return cloneMemoryEntries(tailMemoryEntries(entries, limit))
 }
 
+// entriesOfKind returns the newest entries of one kind, oldest first.
+func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	matched := make([]meetingMemoryEntry, 0)
+	for _, entry := range store.entries {
+		if entry.Kind == kind {
+			matched = append(matched, entry)
+		}
+	}
+
+	return cloneMemoryEntries(tailMemoryEntries(matched, limit))
+}
+
+// entryByKindAndID looks up a single entry; newest wins if ids ever collide
+// across rewrites.
+func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meetingMemoryEntry, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, false
+	}
+	kind = strings.TrimSpace(kind)
+	id = strings.TrimSpace(id)
+	if kind == "" || id == "" {
+		return meetingMemoryEntry{}, false
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		entry := store.entries[index]
+		if entry.ID == id && entry.Kind == kind {
+			return cloneMemoryEntry(entry), true
+		}
+	}
+
+	return meetingMemoryEntry{}, false
+}
+
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
 	if store == nil || limit <= 0 {
 		return nil
@@ -541,7 +611,7 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	matches := make([]meetingMemoryMatch, 0, len(entries))
 	lowerQuery := strings.ToLower(query)
 	for _, entry := range entries {
-		if entry.Kind == meetingMemoryKindScoutChat {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal {
 			continue
 		}
 		lowerText := strings.ToLower(entry.Text)

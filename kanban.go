@@ -211,7 +211,12 @@ type kanbanBoardApp struct {
 	agentDones               map[string]chan struct{}
 	agentBaselineIDs         map[string]string
 	agentRunLocks            map[string]*sync.Mutex
-	closeOnce                sync.Once
+	chatThreadLocks          map[string]*sync.Mutex
+	notifications            []notificationRecord
+	// proposalMu serializes codex-proposal confirm/dismiss transitions so a
+	// double confirm can never launch two agent threads.
+	proposalMu sync.Mutex
+	closeOnce  sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -290,6 +295,11 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		participantMedia:             map[string]participantMediaState{},
 		transcriptRecordingEnabled:   true,
 		transcriptRecordingUpdatedAt: updatedAt,
+	}
+	if notifications, err := loadNotificationStoreState(notificationsPath()); err != nil {
+		log.Errorf("Notification persistence disabled: %v", err)
+	} else {
+		app.notifications = notifications
 	}
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
@@ -974,7 +984,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
 		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not treat the user as a meeting participant, and do not mutate the shared Kanban board or room recording from this private surface. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
 		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Ask one concise clarifying question when the request is ambiguous; do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
@@ -987,6 +997,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
 		"create_artifact":        {},
 		"launch_agent_thread":    {},
 		"answer_memory_question": {},
+		"send_notification":      {},
 		"do_nothing":             {},
 	}
 	tools := []map[string]any{}
@@ -1578,6 +1589,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# App control\nUse control_app when the user asks you to open or show a Bonfire OS surface. Available surfaces are office, room, chat, artifacts, research, design, grill, board, and memory. If the user asks to open the chat app, start a chat, begin a conversational thread, start a discussion thread, or talk to Scout privately, call control_app with tool chat. Opening Chat focuses the user's current private Scout thread; a new chat thread should reset that private conversation unless the user explicitly asks to resume existing context. Do not say you cannot start a thread unless the user specifically asks to create multiple named/persistent chat threads beyond the current Scout thread. If the user asks for a saved artifact, select it by artifact_id when you know the id; otherwise open artifacts.",
 		"# Room controls\nUse set_voice_control with enabled=false when the user asks you to stop listening in the room, turn off shared room voice, end the vocal room conversation, close the room voice island, or stop room Realtime. Use set_recording when the user asks to pause, resume, turn on, turn off, start, or stop transcript recording, meeting notes capture, or shared room recording; this switch is room-wide for every participant, and after it changes you should make one short group announcement that recording is on or off. Use archive_meeting when the user asks to send notes, generate meeting notes, archive the meeting, or save the meeting artifact. Browser-local controls such as muting or unmuting the user's microphone, turning their camera on/off, sharing their screen, switching stage layout, pinning a speaker, copying a link, signing in/out, changing passwords, or adding passkeys require that user's browser and device permissions; open the relevant surface with control_app and explain the local action instead of claiming direct control.",
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
+		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. Do not use send_notification for routine acknowledgements or board updates.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -1888,6 +1900,34 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"query": map[string]any{"type": "string", "description": "The user's recall question or memory search query."},
 				},
 				"required":             []string{"query"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "send_notification",
+			"description": "Post a persistent Bonfire OS notification to the notification bell. Use this for deliberate notify, alert, or remind requests such as notify the team, alert everyone, or remind me; do not use it for routine acknowledgements.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{"type": "string", "description": "Short notification text to deliver."},
+					"kind": map[string]any{
+						"type":        "string",
+						"description": "Notification tone.",
+						"enum":        []string{"info", "task", "agent", "chat", "alert"},
+					},
+					"audience": map[string]any{
+						"type":        "string",
+						"description": "everyone posts to all signed-in users; me notifies only the requesting user.",
+						"enum":        []string{"everyone", "me"},
+					},
+					"tool": map[string]any{
+						"type":        "string",
+						"description": "Optional Bonfire OS surface to open when the notification is clicked.",
+						"enum":        []string{"office", "room", "chat", "artifacts", "research", "design", "grill", "board", "memory"},
+					},
+				},
+				"required":             []string{"text", "kind", "audience"},
 				"additionalProperties": false,
 			},
 		},
@@ -2311,6 +2351,14 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
+	case "propose_codex_task":
+		// Board-worker tool: creates a confirmable proposal, never launches
+		// an agent thread directly.
+		return app.proposeCodexTask(args)
+	case "send_notification":
+		// The shared room path has no single requester; audience "me" falls
+		// back to everyone there (see sendRealtimeNotification).
+		return app.sendRealtimeNotification(args, "")
 	case "do_nothing":
 		reason := asString(args["reason"])
 		if reason == "" {
@@ -2327,20 +2375,26 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 
 func privateRealtimeVoiceToolAllowed(toolName string) bool {
 	switch strings.TrimSpace(toolName) {
-	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "do_nothing":
+	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "send_notification", "do_nothing":
 		return true
 	default:
 		return false
 	}
 }
 
-func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(toolName string, args map[string]any) (map[string]any, bool, error) {
+func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, toolName string, args map[string]any) (map[string]any, bool, error) {
 	toolName = strings.TrimSpace(toolName)
 	if !privateRealtimeVoiceToolAllowed(toolName) {
 		return nil, false, fmt.Errorf("private Realtime voice cannot use %q", toolName)
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+	// send_notification is the one tool whose behavior depends on who is
+	// asking: the private dashboard voice belongs to a single signed-in user,
+	// so audience "me" can target that account.
+	if toolName == "send_notification" {
+		return app.sendRealtimeNotification(args, requesterEmail)
 	}
 	return app.applyToolCallArgs(toolName, args)
 }
@@ -2710,6 +2764,98 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 	broadcastKanbanEvent("memory_transcript", entry)
 }
 
+const (
+	// maxRoomChatMessageRunes caps a single typed room-chat message.
+	maxRoomChatMessageRunes = 4000
+	// roomChatHistoryLimit is how many chat messages replay to a newly
+	// admitted participant.
+	roomChatHistoryLimit = 50
+)
+
+// normalizeRoomChatText trims a typed chat message and enforces the server
+// size cap (rune-safe so multi-byte text never splits mid-character).
+func normalizeRoomChatText(text string) string {
+	text = strings.TrimSpace(text)
+	if runes := []rune(text); len(runes) > maxRoomChatMessageRunes {
+		text = strings.TrimSpace(string(runes[:maxRoomChatMessageRunes]))
+	}
+	return text
+}
+
+// recordRoomChatMessage persists a typed room-chat message into the
+// transcript stream so it flows into brain/board analysis and meeting
+// archives. Unlike spoken transcripts it ignores the recording toggle —
+// typing is an explicit act — and bypasses the filler filter. It mirrors
+// rememberTranscript's broadcast pattern and returns the room_chat broadcast
+// payload. Speaker is passed explicitly; never speakerForCompletedTranscript,
+// which would steal attribution state from the audio pipeline.
+func (app *kanbanBoardApp) recordRoomChatMessage(senderName string, text string) (map[string]any, bool) {
+	if app == nil || app.memory == nil {
+		log.Errorf("Meeting memory unavailable; room chat message was not saved")
+		return nil, false
+	}
+	text = normalizeRoomChatText(text)
+	if text == "" {
+		return nil, false
+	}
+
+	id := durableTimestampID("chat", time.Now())
+	entry, appended, err := app.memory.appendRoomChatTranscript(id, senderName, text)
+	if err != nil {
+		log.Errorf("Failed to write room chat to meeting memory: %v", err)
+		return nil, false
+	}
+	if !appended {
+		return nil, false
+	}
+
+	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
+	broadcastKanbanEvent("memory_transcript", entry)
+	return roomChatEventPayload(entry), true
+}
+
+// roomChatEventPayload shapes a persisted chat entry into the room_chat wire
+// payload; the stored text carries the "Speaker: " transcript prefix, which
+// the payload strips because the author rides in the name field.
+func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
+	name := strings.TrimSpace(entry.Metadata["speaker"])
+	text := entry.Text
+	if name != "" {
+		prefix := name + ":"
+		if len(text) > len(prefix) && strings.EqualFold(text[:len(prefix)], prefix) {
+			text = strings.TrimSpace(text[len(prefix):])
+		}
+	}
+	return map[string]any{
+		"id":        entry.ID,
+		"name":      name,
+		"text":      text,
+		"createdAt": entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+// roomChatHistory returns the newest room-chat messages of the current
+// meeting, oldest first, shaped like room_chat broadcast payloads.
+func (app *kanbanBoardApp) roomChatHistory(limit int) []map[string]any {
+	history := []map[string]any{}
+	if app == nil || app.memory == nil {
+		return history
+	}
+
+	entries := app.memory.snapshotForMeeting(app.memory.currentMeetingID(), 0)
+	chats := make([]meetingMemoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != meetingMemoryKindTranscript || entry.Metadata["source"] != transcriptSourceRoomChat {
+			continue
+		}
+		chats = append(chats, entry)
+	}
+	for _, entry := range tailMemoryEntries(chats, limit) {
+		history = append(history, roomChatEventPayload(entry))
+	}
+	return history
+}
+
 func (app *kanbanBoardApp) memorySnapshot(limit int) []meetingMemoryEntry {
 	if app == nil || app.memory == nil {
 		return nil
@@ -2729,7 +2875,9 @@ func (app *kanbanBoardApp) memorySnapshotForMeeting(meetingID string, limit int)
 func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meetingMemoryEntry {
 	visible := make([]meetingMemoryEntry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Kind == meetingMemoryKindScoutChat {
+		// codex_proposal entries render as dedicated confirm/dismiss cards
+		// (codex_proposal events), never as generic memory-timeline noise.
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal {
 			continue
 		}
 		visible = append(visible, entry)
@@ -4244,6 +4392,49 @@ func broadcastKanbanEvent(event string, data any) {
 				continue
 			}
 			log.Errorf("Failed to send Kanban event: %v", err)
+		}
+	}
+}
+
+// sendKanbanEventToUser delivers an event only to live connections whose
+// server-side authenticated session email matches. It iterates
+// activeParticipantConnections (populated at admission, unlike the
+// media-gated peerConnections fan-out pool) so admitted-but-not-media-joined
+// sockets are reached too. Targeted payloads must never go through
+// broadcastKanbanEvent and rely on client-side redaction.
+func sendKanbanEventToUser(email string, event string, data any) {
+	email = normalizeAccountEmail(email)
+	if email == "" {
+		return
+	}
+
+	raw, err := json.Marshal(map[string]any{
+		"event": event,
+		"data":  data,
+	})
+	if err != nil {
+		log.Errorf("Failed to encode targeted Kanban event: %v", err)
+		return
+	}
+
+	listLock.RLock()
+	websockets := make([]*threadSafeWriter, 0, 1)
+	for _, state := range activeParticipantConnections {
+		if state.websocket != nil && state.sessionEmail == email {
+			websockets = append(websockets, state.websocket)
+		}
+	}
+	listLock.RUnlock()
+
+	for _, websocket := range websockets {
+		if err := websocket.WriteJSON(&websocketMessage{
+			Event: "kanban",
+			Data:  string(raw),
+		}); err != nil {
+			if isExpectedKanbanBroadcastClose(err) {
+				continue
+			}
+			log.Errorf("Failed to send targeted Kanban event: %v", err)
 		}
 	}
 }

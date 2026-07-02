@@ -160,6 +160,16 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		"actions":    actions,
 		"voiceState": "listening",
 	})
+	// Durable milestone: the creator learns the thread finished (or failed)
+	// even if they are outside the room when the worker lands.
+	app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+}
+
+func agentThreadNotificationText(message string, artifact meetingMemoryEntry) string {
+	if title := strings.TrimSpace(artifact.Metadata["title"]); title != "" {
+		return message + ": " + title
+	}
+	return message
 }
 
 func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, workerResult agentThreadWorkerResult) {
@@ -206,6 +216,11 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 		"actions":    actions,
 		"voiceState": "listening",
 	})
+	// Approval gates stall silently otherwise: the creator gets a durable
+	// nudge that the worker is waiting on them.
+	if status == codexJobStatusApprovalRequired {
+		app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+	}
 }
 
 func agentThreadRequestTimeout() time.Duration {

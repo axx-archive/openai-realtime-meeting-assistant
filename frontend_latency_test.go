@@ -264,9 +264,15 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"syncScoutChatResearchCards()",
 		"['queued', 'running'].includes(artifactStatusValue(entry))",
 		"fetch('/assistant/chat-threads'",
-		"function loadScoutChatThreads()",
+		"function loadScoutChatThreads(options = {})",
 		"function archiveScoutChatThread(id)",
-		"chatAgentThreads.replaceChildren(...threads.map(thread => {",
+		"chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))",
+		"chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))",
+		"case 'chat_thread':",
+		"function handleChatThreadEvent(payload)",
+		"function syncChatThreadPolling()",
+		`id="chatChannelThreads"`,
+		`id="chatScopeChannel"`,
 		"addArtifactEntry(result.artifact, { select: false })",
 		"meeting artifact saved",
 		"method: 'PATCH'",
@@ -615,6 +621,16 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	if strings.Contains(html, `id="toolRail" class="tool-rail mount-stagger"`) {
 		t.Fatal("tool rail must not use mount-stagger; mount transforms can override its centering anchors")
 	}
+	if !strings.Contains(html, "gutter on tool pages; the nav island floats above the canvas.") {
+		t.Fatal("in-room tool pages must document that the floating rail does not reserve a layout gutter")
+	}
+	inRoomToolWorkspaceBlock := functionBody(html, "#appShell.is-in-room[data-tool=\"chat\"]:not(.is-board-expanded) .workspace")
+	if !strings.Contains(inRoomToolWorkspaceBlock, "padding: 0;") {
+		t.Fatal("in-room chat/memory/artifact tool pages must keep workspace padding at zero so the rail overlays instead of reserving space")
+	}
+	if strings.Contains(html, "#appShell.is-authed.is-in-room[data-tool=\"chat\"]:not(.is-board-expanded) .workspace") {
+		t.Fatal("in-room tool pages must not reintroduce desktop rail clearance; the rail is fixed overlay chrome")
+	}
 
 	const phoneViewport = 390.0
 	const railMaxWidth = phoneViewport - 24.0
@@ -650,7 +666,7 @@ func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
 		}
 	}
 
-	scoutBody := functionBody(html, "function scoutChatMessageNode(kind, text, ts, files)")
+	scoutBody := functionBody(html, "function scoutChatMessageNode(kind, text, ts, files, authorLabel)")
 	if scoutBody == "" {
 		t.Fatal("index.html missing scoutChatMessageNode")
 	}
@@ -1497,7 +1513,7 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"function closePrivateRealtimeVoiceSession()",
 		"setVoiceIslandState('connecting', 'connecting...')",
 		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",
-		"background: rgba(32, 33, 37, 0.94);",
+		"background: var(--glass-chrome);",
 		"border-radius: var(--r-full);",
 		"voiceIslandDetailForEvent('hearing', text)",
 		"Start Realtime 2 voice",

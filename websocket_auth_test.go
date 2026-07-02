@@ -368,6 +368,13 @@ func TestWebsocketNativeAnswerCandidateRestartAndLayerSelection(t *testing.T) {
 func newIsolatedNativeWebsocket(t *testing.T, email string) *websocket.Conn {
 	t.Helper()
 
+	server := newIsolatedWebsocketServer(t)
+	return dialIsolatedWebsocket(t, server, email)
+}
+
+func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
 	dir := t.TempDir()
 	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
 	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
@@ -406,13 +413,18 @@ func newIsolatedNativeWebsocket(t *testing.T, email string) *websocket.Conn {
 		signalRequestLock.Unlock()
 	})
 
+	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func dialIsolatedWebsocket(t *testing.T, server *httptest.Server, email string) *websocket.Conn {
+	t.Helper()
+
 	token, err := userSessionStore().create(email)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-
-	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
-	t.Cleanup(server.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/websocket"
 	header := http.Header{}
