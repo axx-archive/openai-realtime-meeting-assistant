@@ -179,10 +179,10 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	html := string(rawHTML)
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office">`,
-		`data-tool="office" aria-label="Home" title="Home"`,
-		`data-tool="room" aria-label="The room" title="The room"`,
-		`data-tool="chat" aria-label="Chat" title="Chat"`,
-		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings" title="User settings"`,
+		`data-tool="office" aria-label="Home" aria-pressed="true"`,
+		`data-tool="room" aria-label="The room" aria-pressed="false"`,
+		`data-tool="chat" aria-label="Chat" aria-pressed="false"`,
+		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		"let railHidden = false",
 		"function loadRailHiddenPreference()",
 		"window.localStorage?.removeItem('bonfire.rail.hidden.v1')",
@@ -216,8 +216,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="researchArtifactList" class="research-library__list"`,
 		`id="designTool" class="agent-tool" data-agent-tool="design"`,
 		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
-		`<span class="tool-rail__slot" data-admin-artifacts hidden>
-          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">`,
+		`<span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Intelligence" aria-pressed="false">`,
+		`<span class="tool-rail__label">intel</span>`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
 		`<div class="scout-work-starters" aria-label="Start Scout work">`,
 		`data-scout-starter="research"`,
@@ -306,7 +307,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		".tool-rail:hover,",
 		".tool-rail__label",
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button"`,
-		`id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`,
+		`id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`,
 		`id="profileDisplayName" type="text" autocomplete="name"`,
 		`id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden`,
 		"async function saveAccountProfile(event)",
@@ -325,9 +326,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"const agentToolIds = ['research', 'design', 'grill']",
 		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
 		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">`,
+          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">`,
 		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">`,
+          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" aria-pressed="false">`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false" hidden>research</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false" hidden>design</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false" hidden>grill</button>`,
@@ -418,10 +419,59 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		t.Fatal("assistant mode opens should resolve to the Chat entry surface")
 	}
 	if !strings.Contains(openOSAssistantBody, "requested === 'artifacts'") || !strings.Contains(openOSAssistantBody, "setActiveTool('artifacts')") {
-		t.Fatal("assistant artifact opens should resolve through the admin-gated Artifacts route")
+		t.Fatal("assistant artifact opens should resolve through the Intelligence (artifacts) route")
 	}
-	if !strings.Contains(setActiveToolBody, "next === 'artifacts' && !canUseArtifactLibrary()") || !strings.Contains(setActiveToolBody, "applyToolState(authedUser ? 'chat' : 'office')") {
-		t.Fatal("non-admin artifact navigation should fall back to Chat/Office")
+	// Mission Intelligence: the artifacts tool id now routes every signed-in
+	// user to the intel canvas — only the library SECTION stays admin-gated.
+	if strings.Contains(setActiveToolBody, "canUseArtifactLibrary()") {
+		t.Fatal("setActiveTool must not bounce non-admins off the intel tool")
+	}
+	applyToolStateBody := functionBody(html, "function applyToolState(tool)")
+	if applyToolStateBody == "" {
+		t.Fatal("index.html missing applyToolState")
+	}
+	if strings.Contains(applyToolStateBody, "tool = authedUser ? 'chat' : 'office'") {
+		t.Fatal("applyToolState must not reroute non-admins away from the intel canvas")
+	}
+	if !strings.Contains(applyToolStateBody, "loadMissionIntelligence()") {
+		t.Fatal("opening the intel tool must load the mission intelligence canvas")
+	}
+	syncLibraryBody := functionBody(html, "function syncArtifactLibraryAccess()")
+	if strings.Contains(syncLibraryBody, "applyToolState(authedUser ? 'chat' : 'office')") {
+		t.Fatal("syncArtifactLibraryAccess must gate only the library nodes, never kick users off the intel tool")
+	}
+	for _, want := range []string{
+		`<section id="artifactsTool" class="artifacts-tool" aria-label="Mission Intelligence">`,
+		`<div class="intel-canvas mount-stagger">`,
+		`id="intelRefreshButton" class="btn btn--ghost"`,
+		`id="intelPulseGrid" class="intel-tiles"`,
+		`id="intelContribList" class="intel-contrib"`,
+		`id="intelThemes" class="intel-col__body"`,
+		`id="intelQuestions" class="intel-col__body"`,
+		`id="intelAlignments" class="intel-col__body"`,
+		`<section class="intel-section" data-admin-artifacts hidden aria-label="Artifact library">`,
+		".intel-section[hidden]",
+		"intelPulseLive.hidden = !(Number(pulse?.liveParticipants) > 0)",
+		`id="intelLibraryToggle" class="btn btn--ghost" type="button" aria-expanded="false"`,
+		`id="intelLibrary" class="artifacts-workspace" hidden`,
+		"fuel for the brain — every word makes the company smarter",
+		"scout needs an api key to synthesize themes",
+		"async function loadMissionIntelligence(force = false)",
+		"fetch('/assistant/mission', { cache: 'no-store' })",
+		"fetch('/assistant/mission/refresh', { method: 'POST' })",
+		"function renderMissionIntelligence()",
+		"case 'mission_insight':",
+		"themes are already fresh",
+		"unattributed · ${unattributed} spoken",
+		".intel-contrib__fill",
+		"background: var(--accent);",
+		".intel-live__dot { animation: none; }",
+		`artifacts: 'Intelligence',`,
+		"`${intelPulseTotal()} ingested · ${intelThemeCount()} themes`",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing Mission Intelligence marker %q", want)
+		}
 	}
 	if strings.Contains(html, `body.textContent = 'Use artifact, research, design, or grill mode in the assistant`) {
 		t.Fatal("artifact empty state should not teach separate assistant modes")
@@ -429,16 +479,24 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if strings.Contains(html, "openOfficeTool(mode === 'research' || mode === 'design' ? mode : 'artifacts')") {
 		t.Fatal("agent thread cards should open Artifacts, not legacy Research/Design pages")
 	}
-	if !strings.Contains(html, `id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled`) {
-		t.Fatal("board tool should remain addressable but disabled until the room is ready")
+	if !strings.Contains(html, `<span class="tool-rail__slot">
+          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" aria-pressed="false">`) {
+		t.Fatal("board rail slot should be visible and enabled; the expanded board gates editing, not entry")
 	}
-	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false"`) {
+	if !strings.Contains(html, `<span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" aria-pressed="false">`) {
+		t.Fatal("memory rail slot should be visible so the memory browser is reachable")
+	}
+	if strings.Contains(html, "toolBoardButton.disabled") {
+		t.Fatal("board rail entry must not be re-disabled by board readiness; the expanded surface owns its locked state")
+	}
+	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`) {
 		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
 	}
-	if strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false" hidden`) {
+	if strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false" hidden`) {
 		t.Fatal("left rail theme toggle should not be hidden")
 	}
-	if !strings.Contains(html, `id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings" title="User settings"`) {
+	if !strings.Contains(html, `id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`) {
 		t.Fatal("prototype rail should expose account settings at the bottom")
 	}
 	if strings.Contains(html, `class="tool-rail__flame"`) {
@@ -473,9 +531,17 @@ func TestIndexAccountMenuPreservesDraftNameDuringAvatarPreview(t *testing.T) {
 		t.Fatal("syncAccountChrome must not overwrite an unsaved typed display name during avatar preview/clear")
 	}
 
-	openBody := functionBody(html, "function setAccountMenuOpen(open)")
-	if !strings.Contains(openBody, "profileDisplayName.value = authedUser.name || authedUser.email || ''") {
-		t.Fatal("account menu open should initialize the display-name form once")
+	openMenuBody := functionBody(html, "function setAccountMenuOpen(open)")
+	if strings.Contains(openMenuBody, "profileDisplayName.value") {
+		t.Fatal("the popover no longer hosts the profile form; prefill belongs to prepareProfileForm for the settings window")
+	}
+	prepareBody := functionBody(html, "function prepareProfileForm()")
+	if !strings.Contains(prepareBody, "profileDisplayName.value = authedUser ? authedUser.name || authedUser.email || '' : ''") {
+		t.Fatal("settings window open should initialize the display-name form once via prepareProfileForm")
+	}
+	// functionBody would stop at the `{}` default parameter, so pin the exact open sequence instead
+	if !strings.Contains(html, "settingsRestoreFocusEl = options.restoreFocusTo || audioSettingsButton\n        prepareProfileForm()") {
+		t.Fatal("openSettings must prefill the profile form or the modal shows a stale display name")
 	}
 	saveBody := functionBody(html, "async function saveAccountProfile(event)")
 	if !strings.Contains(saveBody, "profileDisplayName.value = authedUser.name || ''") {
@@ -542,25 +608,41 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		".tool-rail:hover,",
 		".tool-rail:focus-within",
 		"width: 64px;",
-		"max-width: 0;",
-		".tool-rail:hover .tool-rail__theme,",
-		".tool-rail:focus-within .tool-rail__theme",
+		"overflow: visible;",
+		"left: calc(100% + 14px);",
+		"max-width: none;",
+		"pointer-events: none;",
+		".tool-rail__tool:hover .tool-rail__label,",
+		".tool-rail__tool:focus-visible .tool-rail__label",
+		"transition-delay: 300ms;",
 		"#appShell.is-authed .workspace",
 		"padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));",
 		`<span class="tool-rail__label">office</span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
-		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings" title="User settings"`,
+		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		`class="tool-rail__account-icon"`,
 		`aria-haspopup="dialog"`,
 		`role="dialog" aria-label="Account menu"`,
 		"accountMenuButton.addEventListener('click'",
 		"setAccountMenuOpen(accountMenu.hidden)",
-		"if (!accountMenu.hidden && !topbarAccount.contains(event.target))",
+		"if (!accountMenu.hidden && !topbarAccount.contains(event.target) && !accountMenu.contains(event.target))",
 		"if (!accountMenu.hidden) {\n            setAccountMenuOpen(false)",
-		"openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })",
+		"openSettings({ section: 'profile', allowLocked: true, restoreFocusTo: accountMenuButton })",
 		"accountMenuSignOut.addEventListener('click', signOutOfAccount)",
+		`id="settingsRegion" class="settings-region" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"`,
+		`<nav class="settings-nav" aria-label="Settings sections">`,
+		`data-settings-section="profile"`,
+		`data-settings-section="account"`,
+		`data-settings-section="devices"`,
+		`data-settings-section="appearance"`,
+		"audioSettingsButton.addEventListener('click', () => openSettings({ section: 'devices' }))",
+		"settingsRegion.addEventListener('keydown', trapSettingsFocus)",
+		"width: min(720px, calc(100vw - 48px));",
 		"#appShell:has(#accountMenuButton[aria-expanded=\"true\"]) .tool-rail",
+		"if (next && window.matchMedia('(max-width: 640px)').matches) {",
+		"document.body.appendChild(accountMenu)",
+		"topbarAccount.appendChild(accountMenu)",
 		"width: min(340px, calc(100vw - 28px));",
 		"position: fixed;",
 		"inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;",
@@ -574,7 +656,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"transform: translate(-50%, -50%) scale(0.25);",
 		"filter: blur(4px);",
 		"bottom: calc(76px + env(safe-area-inset-bottom));",
-		"#appShell.is-in-room:not(.is-board-expanded) .account-menu",
+		"#appShell.is-in-room:not(.is-board-expanded) ~ .account-menu",
 		"bottom: calc(186px + env(safe-area-inset-bottom));",
 	} {
 		if !strings.Contains(html, want) {
@@ -621,15 +703,32 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	if strings.Contains(html, `id="toolRail" class="tool-rail mount-stagger"`) {
 		t.Fatal("tool rail must not use mount-stagger; mount transforms can override its centering anchors")
 	}
-	if !strings.Contains(html, "gutter on tool pages; the nav island floats above the canvas.") {
-		t.Fatal("in-room tool pages must document that the floating rail does not reserve a layout gutter")
+	if !strings.Contains(html, "gutter (padding-left above) survives in-room.") {
+		t.Fatal("in-room tool pages must document that the dock clearance folds away while the desktop rail gutter survives")
 	}
 	inRoomToolWorkspaceBlock := functionBody(html, "#appShell.is-in-room[data-tool=\"chat\"]:not(.is-board-expanded) .workspace")
-	if !strings.Contains(inRoomToolWorkspaceBlock, "padding: 0;") {
-		t.Fatal("in-room chat/memory/artifact tool pages must keep workspace padding at zero so the rail overlays instead of reserving space")
+	if !strings.Contains(inRoomToolWorkspaceBlock, "padding-bottom: 0;") {
+		t.Fatal("in-room chat/memory/artifact tool pages must zero the dock clearance (the dock is hidden there)")
 	}
-	if strings.Contains(html, "#appShell.is-authed.is-in-room[data-tool=\"chat\"]:not(.is-board-expanded) .workspace") {
-		t.Fatal("in-room tool pages must not reintroduce desktop rail clearance; the rail is fixed overlay chrome")
+	if strings.Contains(inRoomToolWorkspaceBlock, "padding: 0;") {
+		t.Fatal("in-room tool pages must not reset the whole padding box; the desktop rail gutter (padding-left) must survive in-room")
+	}
+	desktopGutterBlock := functionBody(html, "@media (min-width: 641px) {")
+	for _, want := range []string{
+		"#appShell.is-authed[data-tool=\"chat\"] .workspace,",
+		"#appShell.is-authed[data-tool=\"memory\"] .workspace,",
+		"#appShell.is-authed[data-tool=\"artifacts\"] .workspace,",
+		"#appShell.is-authed[data-tool=\"research\"] .workspace,",
+		"#appShell.is-authed[data-tool=\"design\"] .workspace,",
+		"#appShell.is-authed[data-tool=\"grill\"] .workspace {",
+		"padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));",
+	} {
+		if !strings.Contains(desktopGutterBlock, want) {
+			t.Fatalf("desktop panel tool pages must restore the rail gutter; missing %q in the min-width 641px block", want)
+		}
+	}
+	if strings.Contains(desktopGutterBlock, "#appShell.is-authed[data-tool=\"room\"] .workspace") || strings.Contains(desktopGutterBlock, "[data-tool=\"board\"] .workspace") {
+		t.Fatal("the room and the expanded board stay full-bleed; the tool-page gutter override must not include them")
 	}
 
 	const phoneViewport = 390.0
@@ -1538,5 +1637,126 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 	}
 	if strings.Contains(html[privateStart:privateEnd], "sendVoiceControlState(true)") {
 		t.Fatal("private Realtime voice must not send room voice_control messages")
+	}
+}
+
+// Frontend wiring guard for the wave-4 audit fixes: mobile composer
+// clearance, channel scope filtering without preview bleed, inline channel
+// creation, notification dismissal, mobile meeting bar, room chat sheet
+// treatment, the speaking-only signal ring, and the quiet login gate.
+func TestIndexAuditFixWiring(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		// chat/tool pages clear the fixed bottom rail on phones
+		"padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);",
+		// inline glass channel creation replaces window.prompt
+		`id="chatChannelCreate"`,
+		`id="chatChannelName"`,
+		`id="chatChannelsEmpty"`,
+		`id="chatPrivateLabel"`,
+		"function setChannelCreateOpen(open)",
+		"async function createScoutChatThreadOnServer(title, visibility)",
+		// notifications: header action group + nav/Escape dismissal
+		`class="notification-panel__actions"`,
+		// mobile meeting bar: derived dock clearance + icon-only Send notes
+		"--dock-h: 152px;",
+		"@media (max-width: 400px) {",
+		`class="archive-label"`,
+		`class="archive-icon"`,
+		"function setArchiveMeetingLabel(text)",
+		// room chat: carded desktop panel, opaque sheet + stage scrim
+		"box-shadow: 0 0 0 100vmax var(--scrim), var(--shadow-3);",
+		// the ring means speaking NOW, not merely present
+		"function participantIsAudiblyLive(name)",
+		"function scheduleActiveSpeakerRingDecay(speaking)",
+		// login: status pill earns its slot; disabled stays a faded primary
+		`id="loginStatusPill"`,
+		"function setLoginStatusPill(state, text)",
+		"color-mix(in srgb, var(--accent) 45%, var(--bg-app))",
+		// hidden must survive the .chat-thread-item display:flex rule so the
+		// default Scout row really disappears under the channel scope
+		".chat-thread-item[hidden]",
+		// the board surface mirrors the stage: occupancy excludes the local
+		// identity outside the room, the ring requires genuine audio, and the
+		// exit chrome only says 'back to room' when there is a room to go to
+		"function boardOccupantNames()",
+		"const speakerAudible = participantIsAudiblyLive(speaker)",
+		"name === speaker && speakerAudible",
+		"function updateBoardExitChrome()",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing audit-fix anchor %q", want)
+		}
+	}
+
+	for _, unwanted := range []string{
+		// channel names come from the inline glass row now
+		"window.prompt(",
+		// the static always-on pill is gone from the login card
+		`<span class="pill">not connected</span>`,
+		// button label writes go through the span-aware helper
+		"archiveMeetingButton.textContent = '",
+	} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("index.html still contains retired audit-fix marker %q", unwanted)
+		}
+	}
+
+	// the segmented scope filters the list: channel view never shows the
+	// private Scout thread, private view never shows channels
+	renderBody := functionBody(html, "function renderChatAgentThreads()")
+	if !strings.Contains(renderBody, "const channelScope = newChatThreadVisibility === 'public'") {
+		t.Fatal("renderChatAgentThreads must treat the scope control as a list filter")
+	}
+	if !strings.Contains(renderBody, "chatDefaultThread.hidden = channelScope || privates.length > 0") {
+		t.Fatal("the default private Scout row must hide in the channel scope")
+	}
+	// the row's pressed highlight tracks the actually-open thread, not the
+	// emptiness of the current scope
+	if !strings.Contains(renderBody, "chatDefaultThread.setAttribute('aria-pressed', selectedScoutChatThread() ? 'false' : 'true')") {
+		t.Fatal("the default Scout row's aria-pressed must follow the open thread")
+	}
+
+	// transcript/brain pulses ride the 15s intel cache — only a fresh
+	// mission_insight event may force the canvas fetch
+	kanbanBody := functionBody(html, "function handleKanbanMessage(message)")
+	if strings.Count(kanbanBody, "loadMissionIntelligence(true)") > 1 || !strings.Contains(kanbanBody, "loadMissionIntelligence()") {
+		t.Fatal("memory_transcript/memory_brain events must use the cached loadMissionIntelligence() path")
+	}
+
+	// a channel post must never bleed into the private Scout row's preview
+	updateBody := functionBody(html, "function updateChatThreadItem(text, ts)")
+	if !strings.Contains(updateBody, "chatThreadIsChannel(selectedScoutChatThread())") {
+		t.Fatal("updateChatThreadItem must refuse to mirror channel posts onto the private row")
+	}
+
+	// switching tools dismisses the notifications window
+	toolBody := functionBody(html, "function setActiveTool(tool)")
+	if !strings.Contains(toolBody, "setNotificationPanelOpen(false)") {
+		t.Fatal("setActiveTool must close the notifications panel")
+	}
+
+	// Escape closes the notifications panel and the room chat sheet
+	if !strings.Contains(html, "if (!notificationPanel.hidden) {\n            setNotificationPanelOpen(false)") {
+		t.Fatal("the Escape handler must close the notifications panel")
+	}
+	if !strings.Contains(html, "if (isRoomChatOpen()) {\n            setRoomChatOpen(false)") {
+		t.Fatal("the Escape handler must close the room chat sheet")
+	}
+
+	// the signal ring is gated on genuine audio, both on the stage tile and
+	// the grid tiles
+	hearthBody := functionBody(html, "function updateHearthParticipants()")
+	if !strings.Contains(hearthBody, "const activeSpeakerAudible = participantIsAudiblyLive(activeSpeaker)") {
+		t.Fatal("updateHearthParticipants must derive ring state from audible liveness")
+	}
+	if !strings.Contains(hearthBody, "Boolean(activeSpeakerAudible && stageName && stageName === activeSpeaker)") ||
+		!strings.Contains(hearthBody, "Boolean(activeSpeakerAudible && name && name === activeSpeaker)") {
+		t.Fatal("is-active-speaker toggles must require audible liveness")
 	}
 }

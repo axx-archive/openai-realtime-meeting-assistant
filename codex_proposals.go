@@ -22,15 +22,21 @@ const (
 	codexProposalActionDismiss = "dismiss"
 )
 
-// proposeCodexTask executes the board-worker propose_codex_task tool: it
-// records a kind codex_proposal memory entry (UI state — excluded from Scout
-// search context and from the client memory timeline), broadcasts a
-// codex_proposal card to the room, and posts an everyone-notification. It
-// NEVER launches the agent thread itself; a human confirms via
-// POST /assistant/proposals/{id}/action.
-func (app *kanbanBoardApp) proposeCodexTask(args map[string]any) (map[string]any, bool, error) {
+// proposeCodexTask executes the propose_codex_task tool: it records a kind
+// codex_proposal memory entry (UI state — excluded from Scout search context
+// and from the client memory timeline), broadcasts a codex_proposal card to
+// the room, and posts an everyone-notification. It NEVER launches the agent
+// thread itself; a human confirms via POST /assistant/proposals/{id}/action.
+// proposedBy stamps the requesting identity (the private voice path passes
+// the signed-in user's email); empty falls back to the shared "board_worker"
+// provenance used by the board worker and the shared room voice.
+func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy string) (map[string]any, bool, error) {
 	if app == nil || app.memory == nil {
 		return nil, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	proposedBy = strings.TrimSpace(proposedBy)
+	if proposedBy == "" {
+		proposedBy = "board_worker"
 	}
 	title := canonicalizeBoardText(asString(args["title"]))
 	if title == "" {
@@ -52,7 +58,7 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any) (map[string]any
 		"mode":       mode,
 		"query":      query,
 		"status":     codexProposalStatusProposed,
-		"proposedBy": "board_worker",
+		"proposedBy": proposedBy,
 	})
 	if err != nil {
 		return nil, false, err

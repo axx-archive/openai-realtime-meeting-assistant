@@ -4,8 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#F5F5F7">
+    <meta name="application-name" content="Bonfire">
+    <meta name="apple-mobile-web-app-title" content="Bonfire">
     <title>Bonfire</title>
     <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/public/manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
@@ -330,7 +333,7 @@
         align-self: start;
         flex: none;
         padding: 9px;
-        overflow: hidden;
+        overflow: visible;
         background: color-mix(in srgb, var(--glass-chrome) 88%, transparent);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
@@ -342,7 +345,6 @@
           inset 0 1px 0 rgb(255 255 255 / 0.16);
         transform: translateY(-50%);
         transition:
-          width var(--dur-med) var(--ease),
           background var(--dur-med) var(--ease),
           border-color var(--dur-med) var(--ease),
           box-shadow var(--dur-med) var(--ease),
@@ -351,7 +353,6 @@
 
       .tool-rail:hover,
       .tool-rail:focus-within {
-        width: 64px;
         background: color-mix(in srgb, var(--glass-chrome) 94%, transparent);
         box-shadow:
           var(--glass-highlight),
@@ -372,6 +373,7 @@
       }
 
       .tool-rail__tool {
+        position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: flex-start;
@@ -383,40 +385,49 @@
         border-radius: var(--r-md);
         background: transparent;
         color: var(--text-3);
-        overflow: hidden;
         white-space: nowrap;
         transition:
-          width var(--dur-med) var(--ease),
           background var(--dur-fast) var(--ease),
           color var(--dur-fast) var(--ease),
           border-color var(--dur-fast) var(--ease),
           transform var(--dur-fast) var(--ease);
       }
-      .tool-rail:hover .tool-rail__tool,
-      .tool-rail:focus-within .tool-rail__tool {
-        width: 44px;
-      }
       .tool-rail__tool svg {
         flex: 0 0 auto;
       }
+      /* label chips — per-button glass flyouts beside the rail; no rail
+         width change, no layout shift. Hover/focus reveals after a beat. */
       .tool-rail__label {
-        min-width: 0;
-        max-width: 0;
-        opacity: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: inherit;
+        position: absolute;
+        left: calc(100% + 14px);
+        top: 50%;
+        translate: -4px -50%;
+        white-space: nowrap;
+        max-width: none;
+        padding: 6px 10px;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--glass-chrome) 94%, transparent);
+        border: 1px solid color-mix(in srgb, var(--glass-border) 86%, transparent);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow:
+          var(--glass-highlight),
+          0 8px 20px rgb(0 0 0 / 0.18);
+        color: var(--text-1);
         font: var(--type-caption-medium);
         letter-spacing: var(--track-text);
         text-transform: lowercase;
-        transition:
-          max-width var(--dur-med) var(--ease),
-          opacity var(--dur-med) var(--ease);
-      }
-      .tool-rail:hover .tool-rail__label,
-      .tool-rail:focus-within .tool-rail__label {
-        max-width: 0;
         opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity var(--dur-fast) var(--ease),
+          translate var(--dur-fast) var(--ease);
+      }
+      .tool-rail__tool:hover .tool-rail__label,
+      .tool-rail__tool:focus-visible .tool-rail__label {
+        opacity: 1;
+        translate: 0 -50%;
+        transition-delay: 300ms;
       }
       .tool-rail__tool:hover {
         background: var(--accent-soft);
@@ -469,15 +480,18 @@
         height: 40px;
         padding: 0;
         align-self: flex-start;
-        overflow: hidden;
         border: 1px solid var(--line-1);
         background: var(--surface-3);
         color: var(--text-2);
         border-radius: var(--r-full);
       }
-      .tool-rail:hover .tool-rail__theme,
-      .tool-rail:focus-within .tool-rail__theme {
-        width: 40px;
+      /* the circle keeps its 40px visual weight; the transparent overlay
+         raises the hit target to the rail's 44px minimum */
+      .tool-rail__theme::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: inherit;
       }
       .tool-rail__theme svg {
         position: absolute;
@@ -881,7 +895,7 @@
 
       .account-menu__actions {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
         gap: var(--sp-2);
       }
 
@@ -1357,6 +1371,10 @@
         color: var(--text-2);
       }
 
+      .login-wordmark__os {
+        color: var(--text-3);
+      }
+
       .login-welcome {
         margin: 0 0 6px;
         font: var(--type-title-1);
@@ -1529,8 +1547,23 @@
         transform: scale(var(--press-scale));
       }
       .login-signin[disabled] {
-        opacity: 0.4;
+        /* reduced-strength PRIMARY, not a gray slab — the accent surface
+           fades while the label keeps its on-accent ink */
+        background: color-mix(in srgb, var(--accent) 45%, var(--bg-app));
+        color: var(--on-accent);
         cursor: not-allowed;
+      }
+
+      /* connection status stays out of sight until it means something —
+         it appears only while signing in or after a failed attempt */
+      .login-status {
+        margin-top: 26px;
+        display: flex;
+        justify-content: center;
+      }
+
+      .login-status[hidden] {
+        display: none;
       }
 
       .login-divider {
@@ -2381,6 +2414,11 @@
         white-space: nowrap;
       }
 
+      /* Send notes keeps its word on wide docks; the glyph is phone-only */
+      #archiveMeeting .archive-icon {
+        display: none;
+      }
+
       /* kit ControlDock — share flips to primary while sharing */
       .controls #screenShare.is-sharing {
         background: var(--accent);
@@ -2888,7 +2926,7 @@
       }
 
       /* kit Dialog — scrim, opaque surface-1 box, radius 28, shadow-3 */
-      .audio-settings-region {
+      .settings-region {
         position: fixed;
         inset: 0;
         z-index: 1260;
@@ -2898,7 +2936,7 @@
         background: var(--scrim);
       }
 
-      .audio-settings-region.visible {
+      .settings-region.visible {
         display: grid;
         animation: bf-fade var(--dur-med) var(--ease);
       }
@@ -2923,10 +2961,12 @@
       .bf-chip:hover { filter: brightness(1.06); }
       .bf-card-hover:hover { background: var(--surface-3) !important; box-shadow: var(--shadow-2) !important; }
 
-      .audio-settings-panel {
-        width: min(480px, calc(100vw - 48px));
+      .settings-panel {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        width: min(720px, calc(100vw - 48px));
         max-height: calc(100svh - 48px);
-        overflow: auto;
+        overflow: hidden;
         border: 1px solid var(--line-2);
         border-radius: var(--r-2xl);
         background: var(--surface-1);
@@ -2934,11 +2974,11 @@
         color: var(--text-1);
       }
 
-      .audio-settings-panel:focus {
+      .settings-panel:focus {
         outline: none;
       }
 
-      .audio-settings-header {
+      .settings-header {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: start;
@@ -2946,13 +2986,13 @@
         padding: var(--sp-6) var(--sp-6) var(--sp-3);
       }
 
-      .audio-settings-header h2 {
+      .settings-header h2 {
         font: var(--type-title-2);
         letter-spacing: var(--track-title-2);
         color: var(--text-1);
       }
 
-      .audio-settings-header p,
+      .settings-header p,
       .voice-profile p {
         color: var(--text-2);
         font: var(--type-caption);
@@ -2960,11 +3000,11 @@
         text-wrap: pretty;
       }
 
-      .audio-settings-header p {
+      .settings-header p {
         margin-top: 4px;
       }
 
-      .btn.audio-settings-close {
+      .btn.settings-close {
         width: 30px;
         height: 30px;
         min-width: 0;
@@ -2976,10 +3016,73 @@
         color: var(--text-2);
       }
 
-      .audio-settings-body {
+      /* section-navigated window: nav rail left, scrolling body right */
+      .settings-layout {
+        display: grid;
+        grid-template-columns: 168px minmax(0, 1fr);
+        gap: var(--sp-5);
+        min-height: 0;
+        padding: 0 var(--sp-6) var(--sp-5);
+      }
+
+      .settings-nav {
+        display: grid;
+        gap: var(--sp-1);
+        align-content: start;
+      }
+
+      /* same anatomy as .account-menu__link — system voice, lowercase */
+      .settings-nav__item {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: var(--sp-2);
+        min-height: 44px;
+        padding: 0 10px;
+        border-radius: var(--r-md);
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-align: left;
+        text-transform: lowercase;
+        transition:
+          background var(--dur-fast) var(--ease),
+          color var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
+      }
+
+      .settings-nav__item:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .settings-nav__item:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .settings-nav__item[aria-current="true"] {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .settings-body {
         display: grid;
         gap: var(--sp-5);
-        padding: 0 var(--sp-6) var(--sp-5);
+        align-content: start;
+        overflow: auto;
+        min-height: 0;
+        padding-right: 2px;
+      }
+
+      .settings-body > section {
+        display: grid;
+        gap: var(--sp-5);
+        align-content: start;
+        min-width: 0;
+      }
+
+      .settings-body > section[data-settings-section][hidden] {
+        display: none;
       }
 
       .noise-mode-group {
@@ -3114,7 +3217,7 @@
       }
 
       .voice-profile__actions,
-      .audio-settings-actions {
+      .settings-actions {
         display: flex;
         align-items: center;
         justify-content: flex-end;
@@ -3122,8 +3225,9 @@
         flex-wrap: wrap;
       }
 
-      /* account section — same card recipe as the voice profile */
-      .account-settings {
+      /* account + profile sections — same card recipe as the voice profile */
+      .account-settings,
+      .profile-settings {
         display: grid;
         gap: var(--sp-3);
         min-width: 0;
@@ -3171,23 +3275,52 @@
         flex: none;
       }
 
-      .audio-settings-actions {
+      .settings-actions {
         padding: 0 var(--sp-6) var(--sp-6);
       }
 
       @media (max-width: 640px) {
-        .audio-settings-region {
+        /* bottom sheet: full width, chip-row section nav */
+        .settings-region {
           padding: var(--sp-3);
+          align-items: end;
         }
 
-        .audio-settings-panel {
-          width: calc(100vw - 24px);
+        .settings-panel {
+          width: 100%;
           max-height: calc(100svh - 24px);
+          border-radius: var(--r-2xl) var(--r-2xl) 0 0;
         }
 
-        .audio-settings-header,
-        .audio-settings-body,
-        .audio-settings-actions {
+        .settings-layout {
+          grid-template-columns: 1fr;
+          gap: var(--sp-3);
+        }
+
+        .settings-nav {
+          display: flex;
+          overflow-x: auto;
+          gap: var(--sp-2);
+          padding-bottom: 2px;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .settings-nav__item {
+          flex: none;
+          border: 1px solid var(--line-1);
+          border-radius: var(--r-full);
+          background: var(--surface-2);
+          padding: 0 var(--sp-4);
+        }
+
+        .settings-nav__item[aria-current="true"] {
+          background: var(--surface-3);
+          border-color: var(--line-2);
+        }
+
+        .settings-header,
+        .settings-layout,
+        .settings-actions {
           padding-right: var(--sp-4);
           padding-left: var(--sp-4);
         }
@@ -3804,7 +3937,7 @@
 
       /* Modals arrive on the kit spring — a short rise, nothing showy. */
       .card-detail-region.visible .card-detail,
-      .audio-settings-region.visible .audio-settings-panel {
+      .settings-region.visible .settings-panel {
         animation: modal-rise var(--dur-slow) var(--ease-spring);
       }
 
@@ -3940,6 +4073,18 @@
         height: auto;
       }
 
+      /* the room's stage is dark in both themes — give the floating rail a
+         more opaque chrome backing and raise the idle icon ink so inactive
+         tools stay legible (≥3:1) over the black canvas, pre-join and live */
+      #appShell.is-authed[data-tool="room"] .tool-rail {
+        background: color-mix(in srgb, var(--glass-chrome) 97%, transparent);
+        border-color: color-mix(in srgb, var(--glass-border) 94%, transparent);
+      }
+
+      #appShell.is-authed[data-tool="room"] .tool-rail__tool:not([aria-pressed="true"]):not(:hover) {
+        color: var(--text-2);
+      }
+
       #appShell.is-authed[data-tool="office"] .workspace {
         grid-template-columns: minmax(0, 1fr);
         gap: 0;
@@ -4010,17 +4155,30 @@
         #appShell.is-authed .workspace {
           padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));
         }
+
+        /* panel tool pages (chat · memory · artifacts · agents) sit in the
+           rail's gutter — outranks the padding: 0 reset above by source
+           order. Only the room and the expanded board stay full-bleed. */
+        #appShell.is-authed[data-tool="chat"] .workspace,
+        #appShell.is-authed[data-tool="memory"] .workspace,
+        #appShell.is-authed[data-tool="artifacts"] .workspace,
+        #appShell.is-authed[data-tool="research"] .workspace,
+        #appShell.is-authed[data-tool="design"] .workspace,
+        #appShell.is-authed[data-tool="grill"] .workspace {
+          padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));
+        }
       }
 
-      /* outranks the responsive dock-clearance padding — no dock or rail
-         gutter on tool pages; the nav island floats above the canvas. */
+      /* outranks the responsive dock-clearance padding — the dock is hidden
+         on tool pages, so its bottom clearance folds away; the desktop rail
+         gutter (padding-left above) survives in-room. */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
-        padding: 0;
+        padding-bottom: 0;
       }
 
       #appShell.is-authed[data-tool="chat"] #chatTool {
@@ -5600,10 +5758,85 @@
         padding: 6px 14px 10px;
       }
 
-      /* new-thread scope — reuses the sanctioned segmented recipe; picks
-         whether the + button starts a private thread or a team channel */
+      /* new-thread scope — reuses the sanctioned segmented recipe; filters
+         the list below AND picks what the + button starts */
       .chat-new-scope {
         margin: 0 2px 10px;
+      }
+
+      /* inline channel naming — replaces window.prompt. Enter creates,
+         Escape cancels; a flat field inside the sidebar's panel glass. */
+      .chat-channel-create {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 2px 10px;
+      }
+
+      .chat-channel-create[hidden] {
+        display: none;
+      }
+
+      .chat-channel-create__input {
+        flex: 1;
+        min-width: 0;
+        height: 44px;
+        padding: 0 12px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        font-family: var(--font-sans);
+        outline: 0;
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .chat-channel-create__input:focus {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .chat-channel-create__input::placeholder {
+        color: var(--text-3);
+      }
+
+      .chat-channel-create__go {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: none;
+        border-radius: var(--r-md);
+        background: var(--accent);
+        color: var(--on-accent);
+        cursor: pointer;
+        transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .chat-channel-create__go:hover {
+        filter: brightness(1.06);
+      }
+
+      .chat-channel-create__go:active {
+        transform: scale(var(--press-scale));
+      }
+
+      /* quiet empty state for the channel scope */
+      .chat-channels-empty {
+        margin: 0;
+        padding: 6px 14px 10px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .chat-channels-empty[hidden] {
+        display: none;
       }
 
       /* thread rows — kit components/chat/ThreadItem.jsx anatomy. Scout is
@@ -5620,6 +5853,12 @@
         border-radius: var(--r-md);
         cursor: pointer;
 	        transition: background var(--dur-fast) var(--ease);
+	      }
+
+	      /* [hidden] must beat the display: flex above — the default Scout row
+	         hides under the channel scope and behind real private threads */
+	      .chat-thread-item[hidden] {
+	        display: none;
 	      }
 
 	      .chat-thread-item--with-action {
@@ -5791,7 +6030,8 @@
 
       .scout-chat-empty {
         margin: auto;
-        max-width: 360px;
+        max-width: 52ch;
+        padding: 0 24px;
         text-align: center;
         text-wrap: balance;
         font: var(--type-label-lg);
@@ -6441,8 +6681,15 @@
         transform: scale(var(--press-scale));
       }
 
-      /* quiet until there's something typed to send */
-	      .scout-chat-form:has(.scout-chat-input:placeholder-shown):not(.scout-chat-form--has-files) .scout-chat-send,
+      /* quiet until there's something typed to send — but the arrow stays
+         legible while the composer is enabled (text-2, not disabled ink) */
+	      .scout-chat-form:has(.scout-chat-input:placeholder-shown):not(.scout-chat-form--has-files) .scout-chat-send:not([disabled]) {
+	        background: var(--surface-2);
+	        color: var(--text-2);
+        cursor: default;
+        transform: none;
+      }
+
 	      .scout-chat-send[disabled] {
 	        background: var(--surface-2);
 	        color: var(--text-disabled);
@@ -6471,17 +6718,24 @@
       }
 
       /* ---------- Room chat — the everyone-visible thread ----------
-         Desktop: swaps in over the Scout panel inside the rail (no box, no
-         glass — same dissolved treatment). Mobile: rises as a glass bottom
-         sheet. Bubbles reuse the scout-chat set; peers get a surface fill
-         with the author on the mono meta line. */
+         Desktop: swaps in over the Scout panel inside the rail as a carded
+         panel-glass surface (the chat tool sidebar's treatment — one glass on
+         this surface, everything inside stays flat). Mobile: rises as an
+         opaque bottom sheet over a stage scrim. Bubbles reuse the scout-chat
+         set; peers get a surface fill with the author on the mono meta line. */
       .room-chat {
         min-width: 0;
         min-height: 0;
         display: flex;
         flex-direction: column;
         gap: var(--sp-2);
-        padding: 0 var(--sp-2);
+        padding: var(--sp-3);
+        background: var(--glass-panel);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
         /* token-timed swap-in when chat replaces the Scout pane; the mobile
            sheet overrides this with bf-sheetin below */
         animation: bf-fadein var(--dur-med) var(--ease);
@@ -6676,9 +6930,12 @@
         display: none;
       }
 
+      /* header rhythm: title anchors left; 'mark all read' + close ride as a
+         tight right-aligned group */
       .notification-panel__head {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: var(--sp-2);
       }
 
@@ -6688,6 +6945,13 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-2);
+      }
+
+      .notification-panel__actions {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
       }
 
       .notification-panel__mark {
@@ -6904,8 +7168,11 @@
       }
 
       @media (max-width: 860px) {
-        /* mobile: the panel leaves the rail flow and rises as a bottom
-           sheet — the one glass on this surface; items inside stay flat */
+        /* mobile: the panel leaves the rail flow and rises as an OPAQUE
+           bottom sheet — glass here let the leave button and dock smear
+           through the composer. The flanking 100vmax shadow is the scrim
+           that dims the stage behind it (the sheet already sits above the
+           dock's z-index, so one paint covers both). */
         #appShell.is-in-room .room-chat {
           position: fixed;
           left: 0;
@@ -6914,13 +7181,13 @@
           z-index: 1000; /* above the meeting dock (900), below comment-preview (1050) */
           height: min(68dvh, 560px);
           padding: var(--sp-2) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
-          background: var(--glass-panel);
-          border: 1px solid var(--glass-border);
+          background: var(--surface-1);
+          border: 1px solid var(--line-1);
           border-bottom: 0;
           border-radius: var(--r-2xl) var(--r-2xl) 0 0;
-          box-shadow: var(--glass-highlight), var(--glass-shadow);
-          backdrop-filter: var(--glass-blur);
-          -webkit-backdrop-filter: var(--glass-blur);
+          box-shadow: 0 0 0 100vmax var(--scrim), var(--shadow-3);
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
           animation: bf-sheetin var(--dur-med) var(--ease) both;
         }
 
@@ -6937,11 +7204,351 @@
         padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
       }
 
-      /* canon Artifacts — 320px list sidebar + detail editor, full height */
+      /* canon Mission Intelligence — a flat content canvas (like Memory) for
+         every signed-in user: pulse tiles, contribution lens, themes cards.
+         The admin artifact library keeps its 320px sidebar + detail editor,
+         boxed inside #intelLibrary. Hue = state only: the live dot and the
+         alignment check earn --live; bars are ink. */
       #artifactsTool {
         grid-template-rows: minmax(0, 1fr);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 28px clamp(16px, 4vw, 48px) 64px;
+      }
+
+      .intel-canvas {
+        width: 100%;
+        max-width: 1080px;
+        margin-inline: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-8);
+        min-width: 0;
+      }
+
+      .intel-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--sp-3);
+      }
+
+      .intel-title {
+        margin: 0 0 4px;
+        color: var(--text-1);
+        font: var(--type-display);
+        letter-spacing: var(--track-display);
+      }
+
+      .intel-meta,
+      .intel-section__label,
+      .intel-section__hint {
+        margin: 0;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .intel-col__title {
+        margin: 0;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .intel-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+        min-width: 0;
+      }
+
+      .intel-section__head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        flex-wrap: wrap;
+      }
+
+      .intel-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px;
+      }
+
+      .intel-tile {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 16px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        min-width: 0;
+      }
+
+      .intel-tile__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* display value: proportional figures, not tabular */
+      .intel-tile__value {
+        color: var(--text-1);
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+      }
+
+      .intel-tile__delta {
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
+      /* live = the one state hue the pulse section earns */
+      .intel-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--live);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* explicit display beats the UA [hidden] rule — restate it */
+      .intel-live[hidden] {
+        display: none;
+      }
+
+      .intel-live__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+
+      .intel-contrib {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .intel-contrib__row {
+        display: grid;
+        grid-template-columns: 28px minmax(96px, 170px) minmax(0, 1fr) 64px;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .intel-contrib__row:last-child {
+        border-bottom: 0;
+      }
+
+      .intel-contrib__row--unattributed {
+        grid-template-columns: minmax(0, 1fr);
+        color: var(--text-3);
+      }
+
+      .intel-contrib__avatar {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-2);
+        font: 600 10px/1 var(--font-sans);
+      }
+
+      .intel-contrib__meta {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .intel-contrib__name {
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .intel-contrib__breakdown {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         overflow: hidden;
-        padding: 0;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* single-series nominal bars: one ink hue, no legend — fuel for the
+         brain, counts framed as contribution, never a ranking color code */
+      .intel-contrib__track {
+        height: 10px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        overflow: hidden;
+      }
+
+      .intel-contrib__fill {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--accent);
+        transition: width var(--dur-slow) var(--ease);
+      }
+
+      .intel-contrib__fuel {
+        color: var(--text-1);
+        font: var(--type-numeric);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .intel-consensus {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .intel-col {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+        padding: 16px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        min-width: 0;
+      }
+
+      .intel-col__body {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .intel-theme {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .intel-theme:last-child {
+        border-bottom: 0;
+      }
+
+      .intel-theme__body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .intel-theme__label {
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .intel-theme__summary {
+        color: var(--text-2);
+        font: var(--type-caption);
+      }
+
+      .intel-theme__mentions {
+        flex: none;
+        align-self: flex-start;
+        padding: 2px 8px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .intel-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .intel-item:last-child {
+        border-bottom: 0;
+      }
+
+      .intel-item__glyph {
+        flex: none;
+        color: var(--text-3);
+        font: var(--type-body-medium);
+      }
+
+      /* alignment reached = the one state hue this section earns */
+      .intel-item--alignment .intel-item__glyph {
+        color: var(--live);
+      }
+
+      .intel-item__text {
+        color: var(--text-1);
+        font: var(--type-body);
+      }
+
+      .intel-empty {
+        margin: 0;
+        padding: 24px;
+        text-align: center;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* the admin library keeps the existing sidebar/detail flex layout,
+         boxed to a fixed height inside the scrolling canvas */
+      #intelLibrary {
+        height: min(680px, 70vh);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+      }
+
+      #intelLibrary[hidden] {
+        display: none;
+      }
+
+      /* [hidden] must beat the .intel-section display: flex above — the
+         artifact-library section stays unreachable for non-admins */
+      .intel-section[hidden] {
+        display: none;
+      }
+
+      @media (max-width: 900px) {
+        .intel-consensus {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .intel-contrib__row {
+          grid-template-columns: minmax(96px, 1fr) minmax(0, 1.2fr) 48px;
+        }
+
+        .intel-contrib__avatar {
+          display: none;
+        }
+
+        .intel-contrib__row--unattributed {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       .artifacts-workspace {
@@ -10351,7 +10958,7 @@
         }
 
         #artifactsTool {
-          padding: 0;
+          padding: 20px 12px 36px;
         }
 
         .pip-meeting {
@@ -10544,6 +11151,32 @@
           padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));
         }
 
+        /* tool pages zero the workspace padding at (1-3-1) specificity, which
+           silently beat the clearance above and slid the chat composer under
+           the fixed bottom rail (56px pill + 16px inset). Restore a safe-area
+           aware bottom inset here so the composer and its chips stay tappable. */
+        #appShell.is-authed[data-tool="chat"] .workspace,
+        #appShell.is-authed[data-tool="memory"] .workspace,
+        #appShell.is-authed[data-tool="artifacts"] .workspace,
+        #appShell.is-authed[data-tool="research"] .workspace,
+        #appShell.is-authed[data-tool="design"] .workspace,
+        #appShell.is-authed[data-tool="grill"] .workspace {
+          padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);
+        }
+
+        /* the in-room override (padding-bottom: 0, 1-4-0) outranks the
+           clearance above, but the dock it folds away for is hidden on tool
+           pages — keep the same rail + safe-area clearance in-room so the
+           composer never slides under the home indicator */
+        #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .workspace {
+          padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);
+        }
+
         .mobile-tool-launcher {
           display: none;
         }
@@ -10592,13 +11225,21 @@
           display: none;
         }
 
+        /* the rail rides fully above the dock — a 126px lift left its top edge
+           (and the live dot) peeking out behind the bar as a stray card */
         #appShell.is-in-room:not(.is-board-expanded) .tool-rail {
-          bottom: max(126px, calc(env(safe-area-inset-bottom) + 126px));
+          bottom: calc(max(var(--sp-2), env(safe-area-inset-bottom)) + var(--dock-h, 152px) + 12px);
         }
 
-        .tool-rail:hover,
-        .tool-rail:focus-within {
-          width: max-content;
+        /* tool pages hide the meeting dock, so the dock lift above would
+           strand the rail mid-screen — drop it back to the plain inset */
+        #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .tool-rail,
+        #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .tool-rail,
+        #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .tool-rail,
+        #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .tool-rail,
+        #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .tool-rail,
+        #appShell.is-in-room[data-tool="grill"]:not(.is-board-expanded) .tool-rail {
+          bottom: max(16px, env(safe-area-inset-bottom));
         }
 
         .tool-rail__slot {
@@ -10612,11 +11253,6 @@
           height: 42px;
           padding: 0;
           border-radius: var(--r-full);
-        }
-
-        .tool-rail:hover .tool-rail__tool,
-        .tool-rail:focus-within .tool-rail__tool {
-          width: 42px;
         }
 
         .tool-rail__label,
@@ -10713,15 +11349,19 @@
           display: none;
         }
 
+        /* the sheet lives on <body> while open (portaled out of the dock's
+           transform/backdrop-filter containing block), so it anchors to the
+           viewport and needs to clear the dock's z-index on its own */
         .account-menu {
           position: fixed;
           right: max(12px, env(safe-area-inset-right));
           bottom: calc(76px + env(safe-area-inset-bottom));
           left: max(12px, env(safe-area-inset-left));
           width: auto;
+          z-index: 1000;
         }
 
-        #appShell.is-in-room:not(.is-board-expanded) .account-menu {
+        #appShell.is-in-room:not(.is-board-expanded) ~ .account-menu {
           bottom: calc(186px + env(safe-area-inset-bottom));
         }
 
@@ -10778,7 +11418,10 @@
         }
 
         .hearth-stage {
-          min-height: clamp(280px, 38svh, 420px);
+          /* the stage owns most of the phone viewport — 38svh left a dead
+             gray band between the tile and the dock (no aspect pin here;
+             sticky + orientation behaviors are untouched) */
+          min-height: clamp(300px, 52svh, 560px);
           padding: var(--sp-2);
         }
 
@@ -11085,14 +11728,15 @@
           display: none;
         }
 
-        /* one source of truth: the last board card always clears the dock
-           (two rows on mobile: scout strip + verbs) */
+        /* one source of truth: the phone dock stacks three rows (scout strip ·
+           clock · verbs) ≈ 152px tall — content and the tool rail both clear
+           it from this variable */
         #appShell.is-in-room:not(.is-board-expanded) {
-          --dock-h: 104px;
+          --dock-h: 152px;
         }
 
         #appShell.is-in-room:not(.is-board-expanded) .workspace {
-          padding-bottom: calc(96px + env(safe-area-inset-bottom) + var(--sp-3));
+          padding-bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--sp-3));
         }
 
         /* the dock: ONE row of ≥48px glass verbs — mic · cam · mixer ·
@@ -11486,7 +12130,7 @@
 
       @media (max-width: 420px) {
         .hearth-stage {
-          min-height: clamp(300px, 44svh, 380px);
+          min-height: clamp(300px, 50svh, 520px);
         }
 
         /* Two 220px columns cannot fit a 360px phone — stack the board. */
@@ -11500,13 +12144,31 @@
         }
       }
 
+      @media (max-width: 400px) {
+        /* the squeezed "Send notes" label collided with the leave button —
+           the verb goes icon-only and keeps a full 48px landing */
+        #appShell.is-in-room #archiveMeeting .archive-label {
+          display: none;
+        }
+
+        #appShell.is-in-room #archiveMeeting .archive-icon {
+          display: block;
+        }
+
+        #appShell.is-in-room #archiveMeeting {
+          width: 48px;
+          padding: 0;
+          justify-self: center;
+        }
+      }
+
       @media (max-width: 360px) {
         .btn {
           font-size: 13px;
         }
 
-        /* nothing shrinks below --touch-min; "Send notes" simply gets the
-           narrower middle column */
+        /* nothing shrinks below --touch-min; Send notes is already icon-only
+           at ≤400px so the middle column just breathes */
         #appShell.is-in-room .meeting-bar .controls {
           grid-template-columns: 48px 48px 48px 48px minmax(0, 1fr) 48px;
           gap: 6px;
@@ -11657,7 +12319,7 @@
         .comment-preview { animation: none; }
         .assistant-message--entering { animation: none; }
         .card-detail-region.visible .card-detail,
-        .audio-settings-region.visible .audio-settings-panel { animation: none; }
+        .settings-region.visible .settings-panel { animation: none; }
         .board-video-tile:hover,
         .board-video-tile:focus-visible { transform: none; }
         .board-preview__card:hover { transform: none; }
@@ -11680,6 +12342,7 @@
         .notification-panel { animation: none; }
         .proposal-card { animation: none; }
         .room-chat { animation: none; }
+        .intel-live__dot { animation: none; }
       }
     </style>
   </head>
@@ -11687,72 +12350,72 @@
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" title="Home" aria-pressed="true">
+          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
             <span class="tool-rail__label">office</span>
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="The room" title="The room" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="room" aria-label="The room" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.5-2.5A1 1 0 0 1 21 8.4v7.2a1 1 0 0 1-1.5.9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
             <span class="tool-rail__label">the room</span>
           </button>
           <span class="tool-rail__live" aria-hidden="true"></span>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" title="Chat" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="chat" aria-label="Chat" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path></svg>
             <span class="tool-rail__label">chat</span>
           </button>
         </span>
-        <span class="tool-rail__slot" data-admin-artifacts hidden>
-          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Artifacts" title="Artifacts" aria-pressed="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
-            <span class="tool-rail__label">artifacts</span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Intelligence" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            <span class="tool-rail__label">intel</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" title="Research" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
             <span class="tool-rail__label">research</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" title="Design" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="design" aria-label="Design" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             <span class="tool-rail__label">design</span>
           </button>
         </span>
         <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" title="Grill mode" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="grill" aria-label="Grill mode" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"></path><path d="M5 8h14"></path><path d="M6 16h12"></path><path d="M8 3l-2 5"></path><path d="M16 3l2 5"></path></svg>
             <span class="tool-rail__label">grill mode</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
-          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" title="Board" aria-pressed="false" disabled>
+        <span class="tool-rail__slot">
+          <button id="toolBoard" class="tool-rail__tool" type="button" data-tool="board" aria-label="Board" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
             <span class="tool-rail__label">board</span>
           </button>
         </span>
-        <span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" title="Memory" aria-pressed="false">
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
             <span class="tool-rail__label">memory</span>
           </button>
         </span>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
-        <button id="notificationBell" class="tool-rail__tool tool-rail__bell" type="button" aria-label="Notifications" title="Notifications" aria-haspopup="dialog" aria-expanded="false">
+        <button id="notificationBell" class="tool-rail__tool tool-rail__bell" type="button" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
           <span class="tool-rail__label">alerts</span>
           <span id="notificationBadge" class="chat-thread-item__unread notification-bell__unread" hidden>0</span>
         </button>
-        <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
+        <button id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false">
           <svg class="tool-rail__icon--moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
           <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
         <span id="topbarAccount" class="tool-rail__slot tool-rail__account" hidden>
-          <button id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings" title="User settings">
+          <button id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings">
             <svg class="tool-rail__account-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 19.79 6.2l-.06.06A1.65 1.65 0 0 0 19.4 9c.27.6.85 1 1.6 1H21a2 2 0 0 1 0 4h-.09c-.75 0-1.33.4-1.51 1Z"></path></svg>
             <span class="topbar__avatar" aria-hidden="true">
               <img id="topbarAvatarImage" alt="" hidden>
@@ -11771,19 +12434,6 @@
                 <span id="accountMenuEmail" class="account-menu__email">signed in</span>
               </span>
             </div>
-            <form id="profileForm" class="account-menu__form" novalidate>
-              <label class="field">
-                <span>display name</span>
-                <input id="profileDisplayName" type="text" autocomplete="name" maxlength="80">
-              </label>
-              <div class="account-menu__upload">
-                <input id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-                <button id="profileAvatarButton" class="btn btn--ghost" type="button">Upload avatar</button>
-                <button id="profileAvatarClear" class="btn btn--text" type="button">clear</button>
-              </div>
-              <button id="profileSaveButton" class="btn btn--primary" type="submit">Save profile</button>
-              <p id="profileStatus" class="account-menu__status" aria-live="polite"></p>
-            </form>
             <span class="account-menu__divider" aria-hidden="true"></span>
             <div class="account-menu__actions">
               <button id="accountMenuSettings" class="account-menu__link" type="button">
@@ -11882,11 +12532,11 @@
             <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
           </button>
           <header class="login-head login-rise">
-            <svg class="login-flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire">
+            <svg class="login-flame" width="26" height="26" viewBox="0 0 64 64" role="img" aria-label="Bonfire OS">
               <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
             </svg>
             <div class="login-head__text">
-              <h2 class="login-wordmark">bonfire</h2>
+              <h2 class="login-wordmark">bonfire <span class="login-wordmark__os">os</span></h2>
               <h1 class="login-welcome">welcome back</h1>
               <p class="login-subline">sign in to your office.</p>
             </div>
@@ -11948,7 +12598,7 @@
               Use Face ID
             </button>
             <p id="accessHint" class="access-hint" aria-live="polite"></p>
-            <div style="margin-top:26px; display:flex; justify-content:center;"><span class="pill">not connected</span></div>
+            <div id="loginStatusRow" class="login-status" hidden><span id="loginStatusPill" class="pill pill--connecting"><span class="pill__dot" aria-hidden="true"></span><span id="loginStatusText">signing in</span></span></div>
           </form>
           <p class="login-foot login-rise login-rise--foot">a voice-first operating system</p>
           <div class="inside-row" hidden>
@@ -12143,13 +12793,23 @@
                 </svg>
               </button>
             </div>
-            <div class="stage-segmented chat-new-scope" role="group" aria-label="New thread scope">
+            <div class="stage-segmented chat-new-scope" role="group" aria-label="Thread scope">
               <button id="chatScopePrivate" type="button" aria-pressed="true">private</button>
               <button id="chatScopeChannel" type="button" aria-pressed="false">channel</button>
             </div>
+            <form id="chatChannelCreate" class="chat-channel-create" hidden>
+              <input id="chatChannelName" class="chat-channel-create__input" type="text" maxlength="80" autocomplete="off" placeholder="channel name…" aria-label="New channel name">
+              <button class="chat-channel-create__go" type="submit" aria-label="Create channel" title="create channel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12h14"></path>
+                  <path d="m12 5 7 7-7 7"></path>
+                </svg>
+              </button>
+            </form>
             <span id="chatChannelsLabel" class="chat-threads__label" hidden>channels</span>
             <div id="chatChannelThreads" class="chat-agent-threads" aria-label="Team channels"></div>
-            <span class="chat-threads__label">threads</span>
+            <p id="chatChannelsEmpty" class="chat-channels-empty" hidden>no channels yet — press + to start one</p>
+            <span id="chatPrivateLabel" class="chat-threads__label">threads</span>
             <button id="chatDefaultThread" class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -12202,9 +12862,52 @@
           </div>
         </section>
 
-        <!-- Artifacts tool — durable outputs from Scout work -->
-        <section id="artifactsTool" class="artifacts-tool" aria-label="Artifacts">
-          <div class="artifacts-workspace">
+        <!-- Mission Intelligence — the company brain, visible to every user;
+             the admin artifact library survives as a gated section inside -->
+        <section id="artifactsTool" class="artifacts-tool" aria-label="Mission Intelligence">
+          <div class="intel-canvas mount-stagger">
+            <header class="intel-head">
+              <div>
+                <h2 class="intel-title">Mission Intelligence</h2>
+                <p class="intel-meta" id="intelMetaLine">the company brain, visible</p>
+              </div>
+              <button id="intelRefreshButton" class="btn btn--ghost" type="button">Refresh themes</button>
+            </header>
+
+            <section class="intel-section" aria-label="Ingestion pulse">
+              <div class="intel-section__head">
+                <span class="intel-section__label">ingestion pulse</span>
+                <span id="intelPulseLive" class="intel-live" hidden><span class="intel-live__dot" aria-hidden="true"></span>meeting live</span>
+              </div>
+              <div id="intelPulseGrid" class="intel-tiles"></div>
+            </section>
+
+            <section class="intel-section" aria-label="Contribution lens">
+              <div class="intel-section__head">
+                <span class="intel-section__label">contribution lens</span>
+                <span class="intel-section__hint">fuel for the brain — every word makes the company smarter</span>
+              </div>
+              <div id="intelContribList" class="intel-contrib"></div>
+            </section>
+
+            <section class="intel-section" aria-label="Themes and consensus">
+              <div class="intel-section__head">
+                <span class="intel-section__label">themes &amp; consensus</span>
+                <span id="intelThemesStamp" class="intel-section__hint"></span>
+              </div>
+              <div class="intel-consensus">
+                <div class="intel-col"><h3 class="intel-col__title">recurring themes</h3><div id="intelThemes" class="intel-col__body"></div></div>
+                <div class="intel-col"><h3 class="intel-col__title">open questions</h3><div id="intelQuestions" class="intel-col__body"></div></div>
+                <div class="intel-col"><h3 class="intel-col__title">in lockstep</h3><div id="intelAlignments" class="intel-col__body"></div></div>
+              </div>
+            </section>
+
+            <section class="intel-section" data-admin-artifacts hidden aria-label="Artifact library">
+              <div class="intel-section__head">
+                <span class="intel-section__label">artifact library</span>
+                <button id="intelLibraryToggle" class="btn btn--ghost" type="button" aria-expanded="false">Open library</button>
+              </div>
+              <div id="intelLibrary" class="artifacts-workspace" hidden>
             <aside class="artifacts-sidebar" aria-label="Saved artifacts">
               <header class="artifacts-sidebar__head">
                 <div>
@@ -12253,6 +12956,8 @@
                 <button id="artifactPublishButton" class="btn btn--primary" type="button" disabled>Publish to team</button>
               </div>
             </form>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -12572,7 +13277,13 @@
             <span class="record-dot" aria-hidden="true"></span>
             <span class="record-label">Recording</span>
           </button>
-          <button id="archiveMeeting" class="btn btn--primary" type="button" disabled>Send notes</button>
+          <button id="archiveMeeting" class="btn btn--primary" type="button" aria-label="Send notes" title="Send notes" disabled>
+            <svg class="archive-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+              <path d="M22 2 11 13"></path>
+            </svg>
+            <span class="archive-label">Send notes</span>
+          </button>
           <span class="controls__divider" aria-hidden="true"></span>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" title="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -12583,13 +13294,13 @@
         </div>
       </footer>
     </main>
-    <aside id="osAssistant" class="os-assistant" hidden aria-label="Bonfire assistant">
+    <aside id="osAssistant" class="os-assistant" hidden aria-label="Scout">
       <section class="os-assistant__panel" aria-label="Assistant conversation">
         <header class="os-assistant__head">
           <div class="os-assistant__title">
             <span class="os-wave bf-fab" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
             <div>
-              <span>Bonfire assistant</span>
+              <span>scout</span>
               <p id="osAssistantModeLabel" class="os-assistant__mode-label">chat mode</p>
             </div>
           </div>
@@ -12609,7 +13320,7 @@
           <p class="os-assistant__msg"><b>ready</b><span>ask about the board, prior meetings, artifacts, goal workflows, research, design work, or pitch feedback.</span></p>
         </div>
         <form id="osAssistantForm" class="os-assistant__form">
-          <textarea id="osAssistantInput" class="os-assistant__input" rows="1" autocomplete="off" placeholder="ask the office..." aria-label="Ask Bonfire assistant"></textarea>
+          <textarea id="osAssistantInput" class="os-assistant__input" rows="1" autocomplete="off" placeholder="ask the office..." aria-label="Ask Scout"></textarea>
           <button id="osAssistantVoice" class="os-assistant__voice" type="button" aria-label="Start voice assistant" aria-pressed="false" title="Start voice assistant">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg>
           </button>
@@ -12644,10 +13355,12 @@
     <section id="notificationPanel" class="notification-panel" role="dialog" aria-label="Notifications" hidden>
       <header class="notification-panel__head">
         <span class="notification-panel__title">notifications</span>
-        <button id="notificationMarkAll" class="btn btn--text notification-panel__mark" type="button">mark all read</button>
-        <button id="notificationClose" class="btn btn--ghost notification-panel__close" type="button" aria-label="Close notifications">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
-        </button>
+        <span class="notification-panel__actions">
+          <button id="notificationMarkAll" class="btn btn--text notification-panel__mark" type="button">mark all read</button>
+          <button id="notificationClose" class="btn btn--ghost notification-panel__close" type="button" aria-label="Close notifications">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </span>
       </header>
       <div id="notificationList" class="notification-panel__list" role="list"></div>
       <p id="notificationEmpty" class="notification-panel__empty">nothing yet</p>
@@ -12698,96 +13411,166 @@
         </button>
       </div>
     </aside>
-    <div id="audioSettingsRegion" class="audio-settings-region" role="dialog" aria-modal="true" aria-labelledby="audioSettingsTitle">
-      <section class="audio-settings-panel" tabindex="-1">
-        <header class="audio-settings-header">
+    <div id="settingsRegion" class="settings-region" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <section class="settings-panel" tabindex="-1">
+        <header class="settings-header">
           <div>
-            <h2 id="audioSettingsTitle">settings.</h2>
-            <p>audio focus and your account. the room cleans your microphone before it reaches people or Scout.</p>
+            <h2 id="settingsTitle">settings.</h2>
+            <p>your profile, security, devices, and appearance.</p>
           </div>
-          <button id="audioSettingsClose" class="btn btn--ghost audio-settings-close" type="button" aria-label="Close audio settings" title="close">
+          <button id="settingsClose" class="btn btn--ghost settings-close" type="button" aria-label="Close settings" title="close">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 6 6 18"></path>
               <path d="m6 6 12 12"></path>
             </svg>
           </button>
         </header>
-        <div class="audio-settings-body">
-          <label class="device-control device-control--settings">
-            <span>microphone</span>
-            <select id="micSelect" class="device-select" disabled>
-              <option value="">microphone</option>
-            </select>
-          </label>
-          <fieldset class="noise-mode-group">
-            <legend>noise reduction</legend>
-            <label class="noise-mode-option">
-              <input type="radio" name="audioNoiseMode" value="voice-focus">
-              <span class="noise-mode-control" aria-hidden="true"></span>
-              <span class="noise-mode-text">
-                <strong>voice focus</strong>
-                <span>stronger local RNNoise cleanup for noisy rooms.</span>
-              </span>
-            </label>
-            <label class="noise-mode-option">
-              <input type="radio" name="audioNoiseMode" value="standard">
-              <span class="noise-mode-control" aria-hidden="true"></span>
-              <span class="noise-mode-text">
-                <strong>standard cleanup</strong>
-                <span>browser echo cancellation and noise suppression only.</span>
-              </span>
-            </label>
-            <label class="noise-mode-option">
-              <input type="radio" name="audioNoiseMode" value="off">
-              <span class="noise-mode-control" aria-hidden="true"></span>
-              <span class="noise-mode-text">
-                <strong>raw mic</strong>
-                <span>no added cleanup beyond the microphone hardware.</span>
-              </span>
-            </label>
-          </fieldset>
-          <section class="voice-profile" aria-label="Voice focus profile">
-            <div>
-              <div class="voice-profile__label">voice profile</div>
-              <p>speak normally for a few seconds. you are muted to the room while this runs, and the profile stays in this browser.</p>
-            </div>
-            <div class="voice-profile__meta">
-              <span id="voiceProfileState">adaptive profile</span>
-              <span id="voiceTrainingCountdown"></span>
-            </div>
-            <div class="voice-meter" aria-hidden="true">
-              <span id="voiceTrainingMeter" class="voice-meter__bar"></span>
-            </div>
-            <div class="voice-profile__actions">
-              <button id="trainVoiceFocus" class="btn btn--ghost" type="button">Train voice focus</button>
-              <button id="resetVoiceFocus" class="btn btn--text" type="button">reset</button>
-            </div>
-          </section>
-          <section class="account-settings" aria-label="Account">
-            <div class="voice-profile__label">account</div>
-            <p id="accountIdentity" class="account-settings__identity">not signed in</p>
-            <form id="changePasswordForm" class="account-settings__form" novalidate>
-              <label class="field">
-                <span>current password</span>
-                <input id="currentPasswordInput" type="password" autocomplete="current-password">
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="Settings sections">
+            <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true">profile</button>
+            <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false">account</button>
+            <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false">audio &amp; video</button>
+            <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false">appearance</button>
+          </nav>
+          <div class="settings-body">
+            <section data-settings-section="profile" aria-label="Profile">
+              <div class="profile-settings">
+                <div class="voice-profile__label">profile</div>
+                <div class="account-menu__identity">
+                  <span class="account-menu__avatar" aria-hidden="true">
+                    <img id="settingsAvatarImage" alt="" hidden>
+                    <span id="settingsAvatarInitials">TC</span>
+                  </span>
+                  <span class="account-menu__details">
+                    <span id="settingsProfileName" class="account-menu__name">team captain</span>
+                    <span id="settingsProfileEmail" class="account-menu__email">signed in</span>
+                  </span>
+                </div>
+                <form id="profileForm" class="account-menu__form" novalidate>
+                  <label class="field">
+                    <span>display name</span>
+                    <input id="profileDisplayName" type="text" autocomplete="name" maxlength="80">
+                  </label>
+                  <div class="account-menu__upload">
+                    <input id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                    <button id="profileAvatarButton" class="btn btn--ghost" type="button">Upload avatar</button>
+                    <button id="profileAvatarClear" class="btn btn--text" type="button">clear</button>
+                  </div>
+                  <button id="profileSaveButton" class="btn btn--primary" type="submit">Save profile</button>
+                  <p id="profileStatus" class="account-menu__status" aria-live="polite"></p>
+                </form>
+              </div>
+            </section>
+            <section data-settings-section="account" hidden aria-label="Account">
+              <section class="account-settings" aria-label="Account &amp; security">
+                <div class="voice-profile__label">account &amp; security</div>
+                <p id="accountIdentity" class="account-settings__identity">not signed in</p>
+                <form id="changePasswordForm" class="account-settings__form" novalidate>
+                  <label class="field">
+                    <span>current password</span>
+                    <input id="currentPasswordInput" type="password" autocomplete="current-password">
+                  </label>
+                  <label class="field">
+                    <span>new password</span>
+                    <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="at least 8 characters">
+                  </label>
+                  <button class="btn btn--ghost" type="submit">Change password</button>
+                </form>
+                <div class="voice-profile__label">passkeys</div>
+                <ul id="passkeyList" class="account-settings__passkeys"></ul>
+                <div class="voice-profile__actions">
+                  <button id="addPasskeyButton" class="btn btn--ghost" type="button">Add a passkey on this device</button>
+                  <button id="accountSignOut" class="btn btn--text" type="button">sign out</button>
+                </div>
+                <p id="accountStatus" class="access-hint" aria-live="polite"></p>
+              </section>
+            </section>
+            <section data-settings-section="devices" hidden aria-label="Audio &amp; video">
+              <div class="voice-profile__label">audio &amp; video</div>
+              <label class="device-control device-control--settings">
+                <span>microphone</span>
+                <select id="micSelect" class="device-select" disabled>
+                  <option value="">microphone</option>
+                </select>
               </label>
-              <label class="field">
-                <span>new password</span>
-                <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="at least 8 characters">
-              </label>
-              <button class="btn btn--ghost" type="submit">Change password</button>
-            </form>
-            <div class="voice-profile__label">passkeys</div>
-            <ul id="passkeyList" class="account-settings__passkeys"></ul>
-            <div class="voice-profile__actions">
-              <button id="addPasskeyButton" class="btn btn--ghost" type="button">Add a passkey on this device</button>
-              <button id="accountSignOut" class="btn btn--text" type="button">sign out</button>
-            </div>
-            <p id="accountStatus" class="access-hint" aria-live="polite"></p>
-          </section>
+              <fieldset class="noise-mode-group">
+                <legend>noise reduction</legend>
+                <label class="noise-mode-option">
+                  <input type="radio" name="audioNoiseMode" value="voice-focus">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>voice focus</strong>
+                    <span>stronger local RNNoise cleanup for noisy rooms.</span>
+                  </span>
+                </label>
+                <label class="noise-mode-option">
+                  <input type="radio" name="audioNoiseMode" value="standard">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>standard cleanup</strong>
+                    <span>browser echo cancellation and noise suppression only.</span>
+                  </span>
+                </label>
+                <label class="noise-mode-option">
+                  <input type="radio" name="audioNoiseMode" value="off">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>raw mic</strong>
+                    <span>no added cleanup beyond the microphone hardware.</span>
+                  </span>
+                </label>
+              </fieldset>
+              <section class="voice-profile" aria-label="Voice focus profile">
+                <div>
+                  <div class="voice-profile__label">voice profile</div>
+                  <p>speak normally for a few seconds. you are muted to the room while this runs, and the profile stays in this browser.</p>
+                </div>
+                <div class="voice-profile__meta">
+                  <span id="voiceProfileState">adaptive profile</span>
+                  <span id="voiceTrainingCountdown"></span>
+                </div>
+                <div class="voice-meter" aria-hidden="true">
+                  <span id="voiceTrainingMeter" class="voice-meter__bar"></span>
+                </div>
+                <div class="voice-profile__actions">
+                  <button id="trainVoiceFocus" class="btn btn--ghost" type="button">Train voice focus</button>
+                  <button id="resetVoiceFocus" class="btn btn--text" type="button">reset</button>
+                </div>
+              </section>
+            </section>
+            <section data-settings-section="appearance" hidden aria-label="Appearance">
+              <fieldset class="noise-mode-group">
+                <legend>appearance</legend>
+                <label class="noise-mode-option">
+                  <input type="radio" name="themeMode" value="system">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>system</strong>
+                    <span>follow this device.</span>
+                  </span>
+                </label>
+                <label class="noise-mode-option">
+                  <input type="radio" name="themeMode" value="light">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>light</strong>
+                    <span>paper and ink.</span>
+                  </span>
+                </label>
+                <label class="noise-mode-option">
+                  <input type="radio" name="themeMode" value="dark">
+                  <span class="noise-mode-control" aria-hidden="true"></span>
+                  <span class="noise-mode-text">
+                    <strong>dark</strong>
+                    <span>true black, glass chrome.</span>
+                  </span>
+                </label>
+              </fieldset>
+            </section>
+          </div>
         </div>
-        <footer class="audio-settings-actions">
-          <button id="audioSettingsDone" class="btn btn--primary" type="button">Done</button>
+        <footer class="settings-actions">
+          <button id="settingsDone" class="btn btn--primary" type="button">Done</button>
         </footer>
       </section>
     </div>
@@ -12806,7 +13589,11 @@
       let authedUser = null
       let resetToken = ''
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
-      function applyTheme(theme) {
+      const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
+      /* renderTheme paints; applyTheme = renderTheme + persist. The pre-paint
+         script treats an absent key as "follow system", so the 'system'
+         preference simply removes the key and paints without persisting. */
+      function renderTheme(theme) {
         const next = theme === 'dark' ? 'dark' : 'light'
         if (next === 'dark') {
           document.documentElement.dataset.theme = 'dark'
@@ -12814,12 +13601,38 @@
           delete document.documentElement.dataset.theme
         }
         if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#F5F5F7')
+        return next
+      }
+      function applyTheme(theme) {
+        const next = renderTheme(theme)
         try { window.localStorage?.setItem(themeStorageKey, next) } catch (err) { /* private mode */ }
         return next
       }
       function toggleTheme() {
         return applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')
       }
+      function storedThemePreference() {
+        let stored = null
+        try { stored = window.localStorage?.getItem(themeStorageKey) } catch (err) { stored = null }
+        return stored === 'light' || stored === 'dark' ? stored : 'system'
+      }
+      function systemTheme() {
+        return systemThemeQuery?.matches ? 'dark' : 'light'
+      }
+      function setThemePreference(mode) {
+        if (mode === 'light' || mode === 'dark') {
+          syncThemeToggles(applyTheme(mode))
+          return
+        }
+        try { window.localStorage?.removeItem(themeStorageKey) } catch (err) { /* private mode */ }
+        syncThemeToggles(renderTheme(systemTheme()))
+      }
+      /* live OS theme flips repaint only while no explicit choice is stored */
+      systemThemeQuery?.addEventListener?.('change', () => {
+        if (storedThemePreference() === 'system') {
+          syncThemeToggles(renderTheme(systemTheme()))
+        }
+      })
       window.applyTheme = applyTheme
       window.toggleTheme = toggleTheme
 
@@ -12828,7 +13641,6 @@
       const toolRail = document.getElementById('toolRail')
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
       const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))
-      const toolBoardButton = document.getElementById('toolBoard')
       const themeToggleButton = document.getElementById('themeToggle')
       const boardEl = document.getElementById('board')
       const boardSurface = document.getElementById('boardSurface')
@@ -12862,11 +13674,14 @@
       const muteMicButton = document.getElementById('muteMic')
       const toggleCameraButton = document.getElementById('toggleCamera')
       const audioSettingsButton = document.getElementById('audioSettingsButton')
-      const audioSettingsRegion = document.getElementById('audioSettingsRegion')
-      const audioSettingsPanel = audioSettingsRegion.querySelector('.audio-settings-panel')
-      const audioSettingsClose = document.getElementById('audioSettingsClose')
-      const audioSettingsDone = document.getElementById('audioSettingsDone')
+      const settingsRegion = document.getElementById('settingsRegion')
+      const settingsPanel = settingsRegion.querySelector('.settings-panel')
+      const settingsClose = document.getElementById('settingsClose')
+      const settingsDone = document.getElementById('settingsDone')
+      const settingsNavButtons = Array.from(settingsRegion.querySelectorAll('.settings-nav__item'))
+      const settingsSections = Array.from(settingsRegion.querySelectorAll('.settings-body > section[data-settings-section]'))
       const audioNoiseModeInputs = Array.from(document.querySelectorAll('input[name="audioNoiseMode"]'))
+      const themeModeInputs = Array.from(document.querySelectorAll('input[name="themeMode"]'))
       const trainVoiceFocusButton = document.getElementById('trainVoiceFocus')
       const resetVoiceFocusButton = document.getElementById('resetVoiceFocus')
       const voiceProfileState = document.getElementById('voiceProfileState')
@@ -12881,6 +13696,9 @@
       const accessPanel = document.getElementById('accessPanel')
       const accessState = document.getElementById('accessState')
       const accessHint = document.getElementById('accessHint')
+      const loginStatusRow = document.getElementById('loginStatusRow')
+      const loginStatusPill = document.getElementById('loginStatusPill')
+      const loginStatusText = document.getElementById('loginStatusText')
       const accessReadyTag = document.getElementById('accessReadyTag')
       const participantNameInput = document.getElementById('participantName')
       const roomPasswordInput = document.getElementById('roomPassword')
@@ -12942,6 +13760,17 @@
       const artifactCopyButton = document.getElementById('artifactCopyButton')
       const artifactPublishButton = document.getElementById('artifactPublishButton')
       const artifactSaveButton = document.getElementById('artifactSaveButton')
+      const intelMetaLine = document.getElementById('intelMetaLine')
+      const intelRefreshButton = document.getElementById('intelRefreshButton')
+      const intelPulseLive = document.getElementById('intelPulseLive')
+      const intelPulseGrid = document.getElementById('intelPulseGrid')
+      const intelContribList = document.getElementById('intelContribList')
+      const intelThemesStamp = document.getElementById('intelThemesStamp')
+      const intelThemesEl = document.getElementById('intelThemes')
+      const intelQuestionsEl = document.getElementById('intelQuestions')
+      const intelAlignmentsEl = document.getElementById('intelAlignments')
+      const intelLibraryToggle = document.getElementById('intelLibraryToggle')
+      const intelLibrary = document.getElementById('intelLibrary')
       const memoryList = document.getElementById('memoryList')
       const memoryCount = document.getElementById('memoryCount')
       const memorySearch = document.getElementById('memorySearch')
@@ -12971,6 +13800,10 @@
 	      const chatAgentThreads = document.getElementById('chatAgentThreads')
 	      const chatChannelThreads = document.getElementById('chatChannelThreads')
 	      const chatChannelsLabel = document.getElementById('chatChannelsLabel')
+	      const chatChannelsEmpty = document.getElementById('chatChannelsEmpty')
+	      const chatPrivateLabel = document.getElementById('chatPrivateLabel')
+	      const chatChannelCreate = document.getElementById('chatChannelCreate')
+	      const chatChannelName = document.getElementById('chatChannelName')
 	      const chatScopePrivate = document.getElementById('chatScopePrivate')
 	      const chatScopeChannel = document.getElementById('chatScopeChannel')
       const roomChatPanel = document.getElementById('roomChatPanel')
@@ -13014,6 +13847,10 @@
       const profileStatus = document.getElementById('profileStatus')
       const accountMenuSettings = document.getElementById('accountMenuSettings')
       const accountMenuSignOut = document.getElementById('accountMenuSignOut')
+      const settingsAvatarImage = document.getElementById('settingsAvatarImage')
+      const settingsAvatarInitials = document.getElementById('settingsAvatarInitials')
+      const settingsProfileName = document.getElementById('settingsProfileName')
+      const settingsProfileEmail = document.getElementById('settingsProfileEmail')
       const pipMeeting = document.getElementById('pipMeeting')
       const pipTiles = document.getElementById('pipTiles')
       const pipTitle = document.getElementById('pipTitle')
@@ -13131,13 +13968,12 @@
       }
 
       function syncArtifactLibraryAccess() {
+        /* the intel canvas is for everyone; only the artifact-library
+           section (data-admin-artifacts) stays admin-gated */
         const allowed = canUseArtifactLibrary()
         adminArtifactNodes.forEach(node => {
           node.hidden = !allowed
         })
-        if (!allowed && (appShell.dataset.tool || 'office') === 'artifacts') {
-          applyToolState(authedUser ? 'chat' : 'office')
-        }
         if (!allowed) {
           artifactQuery = ''
           selectedArtifactId = ''
@@ -13166,6 +14002,7 @@
       let activeSpeakerName = ''
       let serverActiveSpeakerName = ''
       let serverActiveSpeakerSeenAt = 0
+      let activeSpeakerRingTimer = 0
       let pinnedSpeakerName = ''
       let stageMode = 'gallery'
       let pendingActiveSpeakerName = ''
@@ -13176,7 +14013,8 @@
       let occupiedSeats = 0
       let roomRecordingEnabled = true
       let profileAvatarDraft = null
-      let audioSettingsRestoreFocusEl = audioSettingsButton
+      let settingsRestoreFocusEl = audioSettingsButton
+      let settingsActiveSection = 'profile'
       let roomRecordingUpdatedAt = ''
       let roomRecordingUpdatedBy = ''
       let hasBoardSnapshot = false
@@ -13388,17 +14226,21 @@
       micSelect.addEventListener('change', switchMicrophone)
       muteMicButton.addEventListener('click', toggleLocalMute)
       toggleCameraButton.addEventListener('click', toggleLocalCamera)
-      audioSettingsButton.addEventListener('click', openAudioSettings)
+      audioSettingsButton.addEventListener('click', () => openSettings({ section: 'devices' }))
       document.getElementById('dockScoutState')?.addEventListener('click', () => {
         // Scout now lives in the chat tool under the Bonfire OS design; jump there.
         setActiveTool('chat')
       })
-      audioSettingsClose.addEventListener('click', closeAudioSettings)
-      audioSettingsDone.addEventListener('click', closeAudioSettings)
-      audioSettingsRegion.addEventListener('click', event => {
-        if (event.target === audioSettingsRegion) {
-          closeAudioSettings()
+      settingsClose.addEventListener('click', closeSettings)
+      settingsDone.addEventListener('click', closeSettings)
+      settingsRegion.addEventListener('click', event => {
+        if (event.target === settingsRegion) {
+          closeSettings()
         }
+      })
+      settingsRegion.addEventListener('keydown', trapSettingsFocus)
+      settingsNavButtons.forEach(button => {
+        button.addEventListener('click', () => setSettingsSection(button.dataset.settingsSection))
       })
       audioNoiseModeInputs.forEach(input => {
         input.addEventListener('change', () => {
@@ -13406,6 +14248,14 @@
             return
           }
           setAudioNoiseMode(input.value)
+        })
+      })
+      themeModeInputs.forEach(input => {
+        input.addEventListener('change', () => {
+          if (!input.checked) {
+            return
+          }
+          setThemePreference(input.value)
         })
       })
       trainVoiceFocusButton.addEventListener('click', trainVoiceFocus)
@@ -13476,6 +14326,13 @@
         const pressed = theme === 'dark' ? 'true' : 'false'
         themeToggleButton.setAttribute('aria-pressed', pressed)
         loginThemeToggleButton.setAttribute('aria-pressed', pressed)
+        renderThemePreference()
+      }
+      function renderThemePreference() {
+        const preference = storedThemePreference()
+        themeModeInputs.forEach(input => {
+          input.checked = input.value === preference
+        })
       }
       themeToggleButton.addEventListener('click', () => {
         syncThemeToggles(toggleTheme())
@@ -13537,7 +14394,7 @@
       profileAvatarInput.addEventListener('change', readProfileAvatar)
       accountMenuSettings.addEventListener('click', () => {
         setAccountMenuOpen(false)
-        openAudioSettings({ allowLocked: true, restoreFocusTo: accountMenuButton })
+        openSettings({ section: 'profile', allowLocked: true, restoreFocusTo: accountMenuButton })
       })
       accountMenuSignOut.addEventListener('click', signOutOfAccount)
       assistantForm.addEventListener('submit', sendAssistantQuery)
@@ -13552,6 +14409,22 @@
 	      chatNewThread?.addEventListener('click', startNewScoutThread)
 	      chatScopePrivate?.addEventListener('click', () => setNewChatThreadVisibility('private'))
 	      chatScopeChannel?.addEventListener('click', () => setNewChatThreadVisibility('public'))
+	      chatChannelCreate?.addEventListener('submit', async event => {
+	        event.preventDefault()
+	        const title = String(chatChannelName?.value || '').trim() || 'team channel'
+	        setChannelCreateOpen(false)
+	        try {
+	          await createScoutChatThreadOnServer(title, 'public')
+	        } catch (error) {
+	          showToast({ text: error.message || 'could not create channel', kind: 'error' })
+	        }
+	      })
+	      chatChannelName?.addEventListener('keydown', event => {
+	        if (event.key === 'Escape') {
+	          event.stopPropagation()
+	          setChannelCreateOpen(false)
+	        }
+	      })
 	      chatDefaultThread?.addEventListener('click', () => {
 	        if (authedUser && !selectedScoutChatThread()) {
 	          startNewScoutThread()
@@ -13629,7 +14502,7 @@
         if (!boardDockMenu.hidden && !boardDockMenu.contains(event.target) && event.target !== boardDockMenuButton) {
           closeBoardDockMenu()
         }
-        if (!accountMenu.hidden && !topbarAccount.contains(event.target)) {
+        if (!accountMenu.hidden && !topbarAccount.contains(event.target) && !accountMenu.contains(event.target)) {
           setAccountMenuOpen(false)
         }
       })
@@ -13645,13 +14518,23 @@
             accountMenuButton.focus()
             return
           }
-          if (audioSettingsRegion.classList.contains('visible')) {
-            closeAudioSettings()
+          if (settingsRegion.classList.contains('visible')) {
+            closeSettings()
             return
           }
           // an open card dialog closes first — same path as its × button
           if (cardDetailRegion.classList.contains('visible')) {
             closeCardDetail()
+            return
+          }
+          if (!notificationPanel.hidden) {
+            setNotificationPanelOpen(false)
+            notificationBell.focus()
+            return
+          }
+          if (isRoomChatOpen()) {
+            setRoomChatOpen(false)
+            roomChatToggle.focus()
             return
           }
           if (appShell.classList.contains('is-board-expanded')) {
@@ -13953,25 +14836,68 @@
         }).format(date).toLowerCase()
       }
 
-      function openAudioSettings(options = {}) {
+      function openSettings(options = {}) {
         if (audioSettingsButton.disabled && !options.allowLocked) {
           return
         }
-        audioSettingsRestoreFocusEl = options.restoreFocusTo || audioSettingsButton
+        settingsRestoreFocusEl = options.restoreFocusTo || audioSettingsButton
+        prepareProfileForm()
         renderAudioSettings()
         renderAccountSettings()
-        audioSettingsRegion.classList.add('visible')
-        audioSettingsPanel.focus()
+        renderThemePreference()
+        setSettingsSection(options.section || settingsActiveSection)
+        settingsRegion.classList.add('visible')
+        settingsPanel.focus()
       }
 
-      function closeAudioSettings(options = {}) {
-        const wasOpen = audioSettingsRegion.classList.contains('visible')
-        audioSettingsRegion.classList.remove('visible')
+      function setSettingsSection(name) {
+        if (settingsActiveSection === 'devices' && name !== 'devices') {
+          // training privacy-mutes you to the room; never leave it running off-screen
+          cancelVoiceFocusTraining()
+        }
+        settingsActiveSection = name
+        settingsSections.forEach(section => {
+          section.hidden = section.dataset.settingsSection !== name
+        })
+        settingsNavButtons.forEach(button => {
+          button.setAttribute('aria-current', String(button.dataset.settingsSection === name))
+        })
+      }
+
+      function closeSettings(options = {}) {
+        const wasOpen = settingsRegion.classList.contains('visible')
+        settingsRegion.classList.remove('visible')
         cancelVoiceFocusTraining()
         if (wasOpen && options.restoreFocus !== false) {
-          ;(audioSettingsRestoreFocusEl || audioSettingsButton).focus()
+          ;(settingsRestoreFocusEl || audioSettingsButton).focus()
         }
-        audioSettingsRestoreFocusEl = audioSettingsButton
+        settingsRestoreFocusEl = audioSettingsButton
+      }
+
+      /* the dialog claims aria-modal, so Tab must actually stay inside it */
+      function trapSettingsFocus(event) {
+        if (event.key !== 'Tab') {
+          return
+        }
+        const focusable = Array.from(settingsPanel.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        )).filter(el => el.getClientRects().length > 0)
+        if (!focusable.length) {
+          event.preventDefault()
+          return
+        }
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        const active = document.activeElement
+        if (event.shiftKey) {
+          if (active === first || active === settingsPanel || !settingsPanel.contains(active)) {
+            event.preventDefault()
+            last.focus()
+          }
+        } else if (active === last || !settingsPanel.contains(active)) {
+          event.preventDefault()
+          first.focus()
+        }
       }
 
       function setAudioNoiseMode(mode) {
@@ -14314,6 +15240,8 @@
          when a session cookie is already live, and the emailed reset flow. */
       function renderLoginMode() {
         const mode = resetToken ? 'reset' : authedUser ? 'authed' : 'login'
+        // a fresh gate starts quiet — stale connection status never greets you
+        setLoginStatusPill('')
         loginAccountFieldEl.hidden = mode === 'reset'
         if (mode !== 'reset') {
           syncLoginAccountSelection({ preserveTypedEmail: Boolean(loginEmailInput.value.trim()) })
@@ -14480,21 +15408,40 @@
         topbarAccountName.textContent = name
         accountMenuName.textContent = name
         accountMenuEmail.textContent = email
+        settingsProfileName.textContent = name
+        settingsProfileEmail.textContent = email
         renderAvatarImage(topbarAvatarImage, topbarAvatarInitials)
         renderAvatarImage(accountMenuAvatarImage, accountMenuAvatarInitials)
+        renderAvatarImage(settingsAvatarImage, settingsAvatarInitials)
       }
 
       function setAccountMenuOpen(open) {
         const next = Boolean(open && authedUser)
         accountMenu.hidden = !next
         accountMenuButton.setAttribute('aria-expanded', next ? 'true' : 'false')
-        if (next) {
-          profileAvatarDraft = null
-          profileDisplayName.value = authedUser.name || authedUser.email || ''
-          setProfileStatus('')
-          syncAccountChrome()
-          window.setTimeout(() => profileDisplayName.select(), 0)
+        /* phones: the dock's translate + backdrop-filter make the rail the
+           containing block for position: fixed, so the sheet portals to
+           <body> while open to anchor against the real viewport. */
+        if (next && window.matchMedia('(max-width: 640px)').matches) {
+          if (accountMenu.parentElement !== document.body) {
+            document.body.appendChild(accountMenu)
+          }
+        } else if (accountMenu.parentElement !== topbarAccount) {
+          topbarAccount.appendChild(accountMenu)
         }
+        if (next) {
+          syncAccountChrome()
+          window.setTimeout(() => accountMenuSettings.focus(), 0)
+        }
+      }
+
+      /* profile form prefill — runs when the settings window opens, so the
+         modal never shows a stale display name (was inline in setAccountMenuOpen
+         while the form lived in the popover). */
+      function prepareProfileForm() {
+        profileAvatarDraft = null
+        profileDisplayName.value = authedUser ? authedUser.name || authedUser.email || '' : ''
+        setProfileStatus('')
       }
 
       function setProfileStatus(message, isError = false) {
@@ -14596,6 +15543,21 @@
         return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase()
       }
 
+      // the gate stays quiet until status means something: the pill shows
+      // only while a sign-in runs or after one fails
+      function setLoginStatusPill(state, text) {
+        if (!loginStatusRow || !loginStatusPill || !loginStatusText) {
+          return
+        }
+        if (!state) {
+          loginStatusRow.hidden = true
+          return
+        }
+        loginStatusRow.hidden = false
+        loginStatusPill.className = `pill pill--${state}`
+        loginStatusText.textContent = text
+      }
+
       async function signInToOffice() {
         if (!validateAccess()) {
           setLog('choose your name and enter your password')
@@ -14610,6 +15572,7 @@
         passkeySignInButton.disabled = true
         accessState.textContent = 'checking'
         accessHint.textContent = 'signing in.'
+        setLoginStatusPill('connecting', 'signing in')
         setLog('signing in')
         try {
           const result = await postAuthJSON('/auth/login', {
@@ -14630,11 +15593,13 @@
 	            loadArtifacts()
 	          }
           setConnectionState('idle', 'office ready')
+          setLoginStatusPill('')
           setLog('office ready')
           return true
         } catch (error) {
           accessState.textContent = 'locked'
           accessHint.textContent = error.message || 'sign-in failed.'
+          setLoginStatusPill('offline', 'sign-in failed')
           setLog(error.message || 'sign-in failed')
           return false
         } finally {
@@ -14649,6 +15614,7 @@
         }
         passkeySignInButton.disabled = true
         accessHint.textContent = 'waiting for your passkey.'
+        setLoginStatusPill('connecting', 'waiting for passkey')
         try {
           const begin = await postAuthJSON('/auth/passkey/login/begin')
           if (!begin.ok) {
@@ -14689,12 +15655,17 @@
 	            loadArtifacts()
 	          }
           setConnectionState('idle', 'office ready')
+          setLoginStatusPill('')
           setLog('office ready')
         } catch (error) {
           /* NotAllowedError is the user dismissing the prompt — not an error */
-          accessHint.textContent = error?.name === 'NotAllowedError'
-            ? ''
-            : (error.message || 'passkey sign-in failed.')
+          if (error?.name === 'NotAllowedError') {
+            accessHint.textContent = ''
+            setLoginStatusPill('')
+          } else {
+            accessHint.textContent = error.message || 'passkey sign-in failed.'
+            setLoginStatusPill('offline', 'sign-in failed')
+          }
         } finally {
           updatePasskeyButton()
         }
@@ -15141,9 +16112,6 @@
          the Board tool delegates to setBoardExpanded, and every existing
          expand/collapse path syncs the rail through applyToolState. */
       function applyToolState(tool) {
-        if (tool === 'artifacts' && !canUseArtifactLibrary()) {
-          tool = authedUser ? 'chat' : 'office'
-        }
         appShell.dataset.tool = tool
         if (tool !== 'board') {
           lastNonBoardTool = tool
@@ -15159,8 +16127,13 @@
           updateOfficeHome()
         } else if (tool === 'chat') {
           scoutChatThread.scrollTop = scoutChatThread.scrollHeight
-        } else if ((tool === 'artifacts' && canUseArtifactLibrary()) || agentToolIds.includes(tool)) {
-          loadArtifacts()
+        } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
+          if (tool === 'artifacts') {
+            loadMissionIntelligence()
+          }
+          if (canUseArtifactLibrary()) {
+            loadArtifacts()
+          }
           if (agentToolIds.includes(tool)) {
             renderAgentWorkspaces()
           }
@@ -15182,7 +16155,7 @@
         const toolTitles = {
           office: 'Office',
           chat: 'Chat',
-          artifacts: 'Artifacts',
+          artifacts: 'Intelligence',
           research: 'Research',
           design: 'Design',
           grill: 'Grill mode',
@@ -15199,7 +16172,7 @@
           : tool === 'chat'
               ? `scout · room memory · ${memoryTotal} saved`
               : tool === 'artifacts'
-                ? `${artifactTotal} saved · Scout outputs`
+                ? `${intelPulseTotal()} ingested · ${intelThemeCount()} themes`
                 : tool === 'research'
                   ? `${agentArtifacts('research').length} briefs · saved artifacts`
                   : tool === 'design'
@@ -15243,11 +16216,12 @@
       }
 
       function setActiveTool(tool) {
-        const next = TOOL_IDS.includes(tool) ? tool : 'office'
-        if (next === 'artifacts' && !canUseArtifactLibrary()) {
-          applyToolState(authedUser ? 'chat' : 'office')
-          return
+        // navigating tools dismisses the floating notifications window so it
+        // never lingers over the next surface
+        if (!notificationPanel.hidden) {
+          setNotificationPanelOpen(false)
         }
+        const next = TOOL_IDS.includes(tool) ? tool : 'office'
         if (next === 'board') {
           // opens the board surface; editing controls stay gated by board readiness
           setBoardExpanded(true)
@@ -15306,7 +16280,9 @@
 
       function openAgentArtifact(entry) {
         if (!canUseArtifactLibrary()) {
-          setActiveTool('chat')
+          // non-admins still land on the shared intel canvas — only the
+          // library selection below is admin-gated
+          setActiveTool('artifacts')
           return
         }
         if (entry?.id) {
@@ -20598,9 +21574,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               setActiveSpeakerFromText(message.data?.text || message.data?.transcript || '')
               triggerHotEmber()
             }
+            // cheap pulse liveness while the intel canvas is open — the
+            // non-forced path leans on the 15s cache so a burst of
+            // transcript lines never stampedes GET /assistant/mission
+            if ((appShell.dataset.tool || '') === 'artifacts') {
+              loadMissionIntelligence()
+            }
             break
           case 'memory_brain':
             addMemoryEntry(message.data)
+            if ((appShell.dataset.tool || '') === 'artifacts') {
+              loadMissionIntelligence()
+            }
             break
           case 'memory_board_update':
             addMemoryEntry(message.data)
@@ -20642,6 +21627,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'notification_backlog':
             handleNotificationBacklog(message.data)
+            break
+          case 'mission_insight':
+            if (message.data) {
+              if (intelData) {
+                intelData.themes = message.data
+                intelData.themesAvailable = true
+              }
+              if ((appShell.dataset.tool || '') === 'artifacts') {
+                intelData ? renderMissionIntelligence() : loadMissionIntelligence(true)
+              }
+            }
             break
           case 'codex_proposal':
             upsertCodexProposal(message.data)
@@ -23011,6 +24007,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        newChatThreadVisibility = visibility === 'public' ? 'public' : 'private'
 	        chatScopePrivate?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'private'))
 	        chatScopeChannel?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'public'))
+	        if (newChatThreadVisibility === 'private') {
+	          setChannelCreateOpen(false)
+	        }
+	        // the segmented control is a list filter too — re-render the rows
+	        renderChatAgentThreads()
+	      }
+
+	      function setChannelCreateOpen(open) {
+	        if (!chatChannelCreate) {
+	          return
+	        }
+	        chatChannelCreate.hidden = !open
+	        if (open) {
+	          chatChannelName.value = ''
+	          chatChannelName.focus()
+	        }
+	      }
+
+	      async function createScoutChatThreadOnServer(title, visibility) {
+	        const result = await postAuthJSON('/assistant/chat-threads', { title, visibility })
+	        if (!result.ok) {
+	          throw new Error(result.data?.error || 'could not create chat thread')
+	        }
+	        upsertScoutChatThread(result.data.thread)
+	        renderActiveScoutThread()
 	      }
 
 	      async function startNewScoutThread() {
@@ -23021,22 +24042,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatThreadSearch.value = ''
 	        }
 	        if (authedUser) {
-	          const isChannel = newChatThreadVisibility === 'public'
-	          let title = 'Scout'
-	          if (isChannel) {
-	            const name = window.prompt('channel name', 'team channel')
-	            if (name === null) {
-	              return
-	            }
-	            title = String(name).trim() || 'team channel'
+	          if (newChatThreadVisibility === 'public') {
+	            // inline glass input instead of window.prompt — Enter creates,
+	            // Escape cancels; creation continues in the submit handler
+	            setChannelCreateOpen(true)
+	            return
 	          }
 	          try {
-	            const result = await postAuthJSON('/assistant/chat-threads', { title, visibility: isChannel ? 'public' : 'private' })
-	            if (!result.ok) {
-	              throw new Error(result.data?.error || 'could not create chat thread')
-	            }
-	            upsertScoutChatThread(result.data.thread)
-	            renderActiveScoutThread()
+	            await createScoutChatThreadOnServer('Scout', 'private')
 	          } catch (error) {
 	            appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not create chat thread', new Date().toISOString()))
 	          }
@@ -23056,6 +24069,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // kit ThreadItem: the row mirrors the last message — preview text plus
       // a right-aligned HH:MM timestamp on the title row
 	      function updateChatThreadItem(text, ts) {
+	        // this default row mirrors the PRIVATE Scout thread only — a channel
+	        // post must never bleed into its preview/timestamp
+	        if (chatThreadIsChannel(selectedScoutChatThread())) {
+	          return
+	        }
 	        const time = document.getElementById('chatThreadTime')
 	        const preview = document.getElementById('chatThreadPreview')
         if (preview) {
@@ -23141,14 +24159,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
-	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
-	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
+	        // the segmented scope is a list filter: the private view shows only
+	        // private threads, the channel view shows only channels — the private
+	        // Scout thread never appears under channels
+	        const channelScope = newChatThreadVisibility === 'public'
+	        const channels = channelScope ? scoutChatThreads.filter(thread => chatThreadIsChannel(thread)) : []
+	        const privates = channelScope ? [] : scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
 	        if (chatDefaultThread) {
-	          chatDefaultThread.hidden = privates.length > 0
-	          chatDefaultThread.setAttribute('aria-pressed', privates.length ? 'false' : 'true')
+	          chatDefaultThread.hidden = channelScope || privates.length > 0
+	          // pressed tracks the actually-open thread: the default row is
+	          // selected only while no persisted thread is active
+	          chatDefaultThread.setAttribute('aria-pressed', selectedScoutChatThread() ? 'false' : 'true')
+	        }
+	        if (chatPrivateLabel) {
+	          chatPrivateLabel.hidden = channelScope
 	        }
 	        if (chatChannelsLabel) {
-	          chatChannelsLabel.hidden = channels.length === 0
+	          chatChannelsLabel.hidden = !channelScope
+	        }
+	        if (chatChannelsEmpty) {
+	          chatChannelsEmpty.hidden = !channelScope || channels.length > 0
 	        }
 	        chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))
 	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
@@ -23881,6 +24911,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
       }
 
+      // the label lives in a span beside the phone-only icon — writing
+      // textContent on the button would blow the icon away
+      function setArchiveMeetingLabel(text) {
+        const label = archiveMeetingButton.querySelector('.archive-label')
+        if (label) {
+          label.textContent = text
+        } else {
+          archiveMeetingButton.textContent = text
+        }
+        archiveMeetingButton.setAttribute('aria-label', text)
+        archiveMeetingButton.title = text
+      }
+
       function archiveMeeting() {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           const message = 'join the room before archiving the meeting.'
@@ -23890,12 +24933,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         archiveMeetingButton.disabled = true
-        archiveMeetingButton.textContent = 'Generating notes'
+        setArchiveMeetingLabel('Generating notes')
         ws.send(JSON.stringify({ event: 'archive_meeting', data: '{}' }))
         window.setTimeout(() => {
           if (ws?.readyState === WebSocket.OPEN) {
             archiveMeetingButton.disabled = false
-            archiveMeetingButton.textContent = 'Send notes'
+            setArchiveMeetingLabel('Send notes')
           }
         }, 1400)
       }
@@ -24110,6 +25153,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return ['the room']
       }
 
+      // The board surface reports ROOM occupancy: outside the room only the
+      // server roster counts (the local identity/selection must not inflate
+      // it), and the 'the room' placeholder never renders as a person.
+      function boardOccupantNames() {
+        const names = visibleParticipantNames().filter(name => name && name !== 'the room')
+        if (appShell.classList.contains('is-in-room')) {
+          return names
+        }
+        const roster = new Set([...participantsInRoom, ...participantPreview].map(name => String(name).toLowerCase()))
+        return names.filter(name => roster.has(String(name).toLowerCase()))
+      }
+
       function participantDisplayNameInRoom(name) {
         const participantName = String(name || '').trim()
         if (!participantName || participantName === 'participant') {
@@ -24129,6 +25184,45 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           pendingActiveSpeakerSince = 0
         }
         updateHearthParticipants()
+      }
+
+      // The signal ring means "speaking NOW". activeSpeakerDisplayName falls
+      // back to any visible participant so the stage always has a name, but
+      // that fallback must not light the ring — a silent solo user is not an
+      // active speaker.
+      function participantIsAudiblyLive(name) {
+        if (!name || name === 'the room') {
+          return false
+        }
+        if (authoritativeActiveSpeakerName() === name) {
+          return true
+        }
+        const now = performance.now()
+        const target = String(name).trim().toLowerCase()
+        for (const monitor of audioMonitors.values()) {
+          if (!monitor.lastAudibleAt || now - monitor.lastAudibleAt > 2500) {
+            continue
+          }
+          if (String(monitor.name || '').trim().toLowerCase() === target) {
+            return true
+          }
+        }
+        return false
+      }
+
+      // the ring has no event for "stopped talking" — re-render once the
+      // server speaker signal goes stale so it fades instead of lingering
+      function scheduleActiveSpeakerRingDecay(speaking) {
+        if (!speaking) {
+          return
+        }
+        if (activeSpeakerRingTimer) {
+          window.clearTimeout(activeSpeakerRingTimer)
+        }
+        activeSpeakerRingTimer = window.setTimeout(() => {
+          activeSpeakerRingTimer = 0
+          updateHearthParticipants()
+        }, serverActiveSpeakerStaleMs + 250)
       }
 
       function activeSpeakerDisplayName(options = {}) {
@@ -24521,7 +25615,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ? 'the room · waiting'
           : `${stageName}${stageParticipantIsLocal ? ' · you' : ''} · ${stageStateLabel}`
         activeSpeakerTile.classList.toggle('has-video', false)
-        activeSpeakerTile.classList.toggle('is-active-speaker', Boolean(stageName && stageName === activeSpeaker))
+        const activeSpeakerAudible = participantIsAudiblyLive(activeSpeaker)
+        activeSpeakerTile.classList.toggle('is-active-speaker', Boolean(activeSpeakerAudible && stageName && stageName === activeSpeaker))
         syncLocalMirrorPreview()
 
         const localTile = localVideo.closest('.video-tile')
@@ -24534,12 +25629,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateRoomGridMetrics()
         for (const tile of videoStack.querySelectorAll('.video-tile:not(.video-drag-slot)')) {
           const name = tile.dataset.participant || ''
-          tile.classList.toggle('is-active-speaker', Boolean(name && name === activeSpeaker))
+          tile.classList.toggle('is-active-speaker', Boolean(activeSpeakerAudible && name && name === activeSpeaker))
           tile.classList.toggle('is-on-stage', Boolean(name && name === stageParticipant && stageParticipantVisible))
           ensureVideoTileReorderControl(tile, name)
           ensurePinButton(tile, name)
           applyParticipantMediaStateToTile(tile, name)
         }
+        scheduleActiveSpeakerRingDecay(activeSpeakerAudible)
 
         updateSpeakerPictureInPicture()
         renderBoardHuddle()
@@ -24714,7 +25810,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!boardHuddle) {
           return
         }
-        const names = visibleParticipantNames()
+        const names = boardOccupantNames()
         const stack = document.createElement('div')
         stack.className = 'stack-avatars'
         renderAvatarStack(stack, names, { max: 4, markCurrent: true })
@@ -24734,7 +25830,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!boardVideoStrip) {
           return
         }
-        const names = visibleParticipantNames().filter(name => name && name !== 'the room').slice(0, 6)
+        const names = boardOccupantNames().slice(0, 6)
         const activeNames = new Set(names)
         for (const [name, tile] of Array.from(boardVideoTilesByParticipant.entries())) {
           if (!activeNames.has(name)) {
@@ -24742,9 +25838,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             boardVideoTilesByParticipant.delete(name)
           }
         }
+        // the display-name fallback keeps the dock labelled, but the green
+        // ring and the 'speaking' state require genuine audio — a silent
+        // solo user is not an active speaker (mirrors updateHearthParticipants)
         const speaker = activeSpeakerDisplayName({ ignorePinned: true })
+        const speakerAudible = participantIsAudiblyLive(speaker)
         const stageParticipant = stageParticipantDisplayName()
-        const tiles = names.map(name => renderBoardVideoTile(name, name === speaker, name === stageParticipant))
+        const tiles = names.map(name => renderBoardVideoTile(name, name === speaker && speakerAudible, name === stageParticipant))
         if (tiles.length === 0) {
           const empty = document.createElement('span')
           empty.className = 'board-dock-now'
@@ -24757,11 +25857,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (boardDockNow) {
           boardDockNow.textContent = stageParticipant
             ? `${stageParticipant.toLowerCase()} pinned`
-            : speaker === 'the room'
-            ? 'room visible'
-            : `${speaker.toLowerCase()} speaking`
+            : speakerAudible && speaker !== 'the room'
+            ? `${speaker.toLowerCase()} speaking`
+            : 'room visible'
         }
+        updateBoardExitChrome()
         updateBoardDockControls()
+      }
+
+      // Outside the room the expanded board is not "over" a meeting — the
+      // exit affordances read 'close board' instead of 'back to room'.
+      function updateBoardExitChrome() {
+        const label = appShell.classList.contains('is-in-room') ? 'back to room' : 'close board'
+        if (collapseBoardButton && collapseBoardButton.lastChild?.nodeType === Node.TEXT_NODE) {
+          collapseBoardButton.lastChild.textContent = label
+        }
+        const backAction = boardDockMenu?.querySelector('[data-board-menu-action="back"]')
+        if (backAction) {
+          backAction.textContent = label
+        }
       }
 
       function renderBoardVideoTile(name, isSpeaker, isOnStage = false) {
@@ -25554,6 +26668,294 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const remoteNames = participantNamesForRoom().filter(name => name && name !== currentParticipantName)
         return remoteNames.length === 1 ? remoteNames[0] : ''
       }
+
+      /* ---------- Mission Intelligence — the company brain, visible ----------
+         GET /assistant/mission serves every signed-in user counts + generated
+         themes only; artifact text stays behind the admin library gate. */
+      let intelData = null
+      let intelLoadedAt = 0
+      let intelRefreshing = false
+
+      function intelPulseTotal() {
+        const week = intelData?.pulse?.last7d
+        if (!week) {
+          return 0
+        }
+        return Object.values(week).reduce((total, value) => total + (Number(value) || 0), 0)
+      }
+
+      function intelThemeCount() {
+        return Array.isArray(intelData?.themes?.insight?.themes) ? intelData.themes.insight.themes.length : 0
+      }
+
+      function intelRelativeTime(raw) {
+        const date = raw ? new Date(raw) : null
+        if (!date || Number.isNaN(date.valueOf())) {
+          return 'just now'
+        }
+        const minutes = Math.max(0, Math.round((Date.now() - date.valueOf()) / 60000))
+        if (minutes < 1) {
+          return 'just now'
+        }
+        if (minutes < 60) {
+          return `${minutes}m ago`
+        }
+        const hours = Math.round(minutes / 60)
+        if (hours < 24) {
+          return `${hours}h ago`
+        }
+        return `${Math.round(hours / 24)}d ago`
+      }
+
+      async function loadMissionIntelligence(force = false) {
+        if (!authedUser || !intelPulseGrid) {
+          return
+        }
+        if (!force && intelData && Date.now() - intelLoadedAt < 15000) {
+          return
+        }
+        try {
+          const response = await fetch('/assistant/mission', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          if (payload?.mission) {
+            intelData = payload.mission
+            intelLoadedAt = Date.now()
+            renderMissionIntelligence()
+          }
+        } catch {
+          // Intelligence is additive; keep the prior canvas on a missed fetch.
+        }
+      }
+
+      function intelEmptyNode(text) {
+        const node = document.createElement('p')
+        node.className = 'intel-empty'
+        node.textContent = text
+        return node
+      }
+
+      function renderMissionIntelligence() {
+        if (!intelPulseGrid) {
+          return
+        }
+        const pulse = intelData?.pulse || null
+        const day = pulse?.last24h || {}
+        const week = pulse?.last7d || {}
+        const tiles = [
+          { key: 'spokenTranscripts', label: 'spoken transcripts' },
+          { key: 'roomChatMessages', label: 'chat messages' },
+          { key: 'threadsActive', label: 'threads active' },
+          { key: 'artifactsCreated', label: 'artifacts' },
+          { key: 'brainWriteUps', label: 'brain write-ups' },
+          { key: 'boardUpdates', label: 'board updates' }
+        ]
+        intelPulseGrid.replaceChildren(...tiles.map(tile => {
+          const card = document.createElement('article')
+          card.className = 'intel-tile'
+          const label = document.createElement('span')
+          label.className = 'intel-tile__label'
+          label.textContent = tile.label
+          const value = document.createElement('span')
+          value.className = 'intel-tile__value'
+          value.textContent = String(Number(week[tile.key]) || 0)
+          const delta = document.createElement('span')
+          delta.className = 'intel-tile__delta'
+          delta.textContent = `+${Number(day[tile.key]) || 0} · last 24h`
+          card.append(label, value, delta)
+          return card
+        }))
+        if (intelPulseLive) {
+          // real room occupancy drives the dot — currentMeetingId is the
+          // ingest-session id and stays non-empty between archives
+          intelPulseLive.hidden = !(Number(pulse?.liveParticipants) > 0)
+        }
+        renderIntelContributions()
+        renderIntelThemes()
+        if (intelMetaLine) {
+          intelMetaLine.textContent = `${intelPulseTotal()} ingested this week · the company brain, visible`
+        }
+        syncToolTopbar()
+      }
+
+      function intelBreakdownText(person) {
+        const plural = (count, unit) => `${count} ${unit}${count === 1 ? '' : 's'}`
+        const parts = []
+        if (person.spoken) parts.push(`${person.spoken} spoken`)
+        if (person.chat) parts.push(`${person.chat} chat`)
+        if (person.channelMessages) parts.push(`${person.channelMessages} channel`)
+        if (person.threadsStarted) parts.push(plural(person.threadsStarted, 'thread'))
+        if (person.proposalsConfirmed) parts.push(`${person.proposalsConfirmed} confirmed`)
+        if (person.artifactsCreated) parts.push(plural(person.artifactsCreated, 'artifact'))
+        if (person.boardCardsOwned) parts.push(plural(person.boardCardsOwned, 'card'))
+        return parts.length ? parts.join(' · ') : 'no fuel yet'
+      }
+
+      function renderIntelContributions() {
+        if (!intelContribList) {
+          return
+        }
+        const contributions = intelData?.contributions || null
+        const people = Array.isArray(contributions?.people) ? contributions.people : []
+        if (!people.length) {
+          intelContribList.replaceChildren(intelEmptyNode('the brain hasn’t seen enough yet — hold a meeting or drop notes in chat'))
+          return
+        }
+        const fuelMax = Math.max(1, Number(contributions?.fuelMax) || 0)
+        const rows = people.map(person => {
+          const row = document.createElement('div')
+          row.className = 'intel-contrib__row'
+          const avatar = document.createElement('span')
+          avatar.className = 'intel-contrib__avatar'
+          avatar.setAttribute('aria-hidden', 'true')
+          avatar.textContent = initialsForName(person.name)
+          const meta = document.createElement('span')
+          meta.className = 'intel-contrib__meta'
+          const name = document.createElement('span')
+          name.className = 'intel-contrib__name'
+          name.textContent = person.name
+          const breakdown = document.createElement('span')
+          breakdown.className = 'intel-contrib__breakdown'
+          breakdown.textContent = intelBreakdownText(person)
+          meta.append(name, breakdown)
+          const track = document.createElement('span')
+          track.className = 'intel-contrib__track'
+          const fill = document.createElement('span')
+          fill.className = 'intel-contrib__fill'
+          fill.style.width = `${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100)}%`
+          track.appendChild(fill)
+          const fuel = document.createElement('span')
+          fuel.className = 'intel-contrib__fuel'
+          fuel.textContent = String(Number(person.fuel) || 0)
+          row.append(avatar, meta, track, fuel)
+          return row
+        })
+        // the unattributed row stays visible so the numbers read honest
+        const unattributed = Number(contributions?.unattributed) || 0
+        if (unattributed > 0) {
+          const row = document.createElement('div')
+          row.className = 'intel-contrib__row intel-contrib__row--unattributed'
+          const note = document.createElement('span')
+          note.className = 'intel-contrib__breakdown'
+          note.textContent = `unattributed · ${unattributed} spoken`
+          row.appendChild(note)
+          rows.push(row)
+        }
+        intelContribList.replaceChildren(...rows)
+      }
+
+      function intelListItem(glyph, text, variant) {
+        const item = document.createElement('div')
+        item.className = `intel-item ${variant}`
+        const mark = document.createElement('span')
+        mark.className = 'intel-item__glyph'
+        mark.setAttribute('aria-hidden', 'true')
+        mark.textContent = glyph
+        const body = document.createElement('span')
+        body.className = 'intel-item__text'
+        body.textContent = text
+        item.append(mark, body)
+        return item
+      }
+
+      function renderIntelThemes() {
+        if (!intelThemesEl || !intelQuestionsEl || !intelAlignmentsEl) {
+          return
+        }
+        const keyless = Array.isArray(intelData?.degraded) && intelData.degraded.includes('openai_api_key_missing')
+        const themes = intelData?.themes || null
+        const insight = themes?.insight || null
+        if (intelThemesStamp) {
+          const brainCount = Number(themes?.brainCount) || 0
+          intelThemesStamp.textContent = themes
+            ? `synthesized ${intelRelativeTime(themes.generatedAt)} · ${brainCount} brain write-up${brainCount === 1 ? '' : 's'}`
+            : ''
+        }
+        if (!insight) {
+          intelThemesEl.replaceChildren(intelEmptyNode(keyless
+            ? 'scout needs an api key to synthesize themes'
+            : 'the brain hasn’t seen enough yet — hold a meeting or drop notes in chat'))
+          intelQuestionsEl.replaceChildren(intelEmptyNode('nothing unresolved yet'))
+          intelAlignmentsEl.replaceChildren(intelEmptyNode('no consensus signals yet'))
+          return
+        }
+        const themeItems = Array.isArray(insight.themes) ? insight.themes : []
+        intelThemesEl.replaceChildren(...(themeItems.length ? themeItems.map(theme => {
+          const item = document.createElement('div')
+          item.className = 'intel-theme'
+          const body = document.createElement('span')
+          body.className = 'intel-theme__body'
+          const label = document.createElement('span')
+          label.className = 'intel-theme__label'
+          label.textContent = String(theme?.label || 'theme')
+          const summary = document.createElement('span')
+          summary.className = 'intel-theme__summary'
+          const people = Array.isArray(theme?.people) && theme.people.length ? ` — ${theme.people.join(', ')}` : ''
+          summary.textContent = `${String(theme?.summary || '')}${people}`
+          body.append(label, summary)
+          const mentions = document.createElement('span')
+          mentions.className = 'intel-theme__mentions'
+          mentions.textContent = `${Number(theme?.mentions) || 0}×`
+          item.append(body, mentions)
+          return item
+        }) : [intelEmptyNode('no recurring themes yet')]))
+        const questions = Array.isArray(insight.openQuestions) ? insight.openQuestions : []
+        intelQuestionsEl.replaceChildren(...(questions.length
+          ? questions.map(question => intelListItem('?', String(question), 'intel-item--question'))
+          : [intelEmptyNode('nothing unresolved yet')]))
+        const alignments = Array.isArray(insight.alignments) ? insight.alignments : []
+        intelAlignmentsEl.replaceChildren(...(alignments.length
+          ? alignments.map(alignment => intelListItem('✓', String(alignment), 'intel-item--alignment'))
+          : [intelEmptyNode('no consensus signals yet')]))
+      }
+
+      async function refreshMissionIntelligence() {
+        if (!intelRefreshButton || intelRefreshing) {
+          return
+        }
+        intelRefreshing = true
+        intelRefreshButton.disabled = true
+        intelRefreshButton.textContent = 'synthesizing…'
+        try {
+          const response = await fetch('/assistant/mission/refresh', { method: 'POST' })
+          if (response.status === 429) {
+            showToast({ text: 'themes are already fresh', kind: 'note' })
+            return
+          }
+          if (!response.ok) {
+            showToast({ text: 'theme refresh failed', kind: 'error' })
+            return
+          }
+          const payload = await response.json()
+          if (payload?.mission) {
+            intelData = payload.mission
+            intelLoadedAt = Date.now()
+            renderMissionIntelligence()
+          }
+        } catch {
+          showToast({ text: 'theme refresh failed', kind: 'error' })
+        } finally {
+          intelRefreshing = false
+          intelRefreshButton.disabled = false
+          intelRefreshButton.textContent = 'Refresh themes'
+        }
+      }
+
+      function setIntelLibraryOpen(open) {
+        if (!intelLibrary || !intelLibraryToggle) {
+          return
+        }
+        intelLibrary.hidden = !open
+        intelLibraryToggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+        intelLibraryToggle.textContent = open ? 'Close library' : 'Open library'
+        if (open) {
+          loadArtifacts()
+        }
+      }
+      intelRefreshButton?.addEventListener('click', refreshMissionIntelligence)
+      intelLibraryToggle?.addEventListener('click', () => setIntelLibraryOpen(Boolean(intelLibrary?.hidden)))
 
       async function loadArtifacts() {
         if (!canUseArtifactLibrary()) {
@@ -27683,8 +29085,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         recordMeetingButton.disabled = true
         archiveMeetingButton.disabled = true
         setScreenShareButtonState(false)
-        archiveMeetingButton.textContent = 'Send notes'
-        closeAudioSettings({ restoreFocus: false })
+        setArchiveMeetingLabel('Send notes')
+        closeSettings({ restoreFocus: false })
         updateRoomRecordingControls()
         updateBoardDockControls()
 
@@ -27803,7 +29205,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         newCardButton.disabled = !canEditBoard
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
-        toolBoardButton.disabled = !isBoardReady
         topbarBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
           ? `${cards.length} card${cards.length === 1 ? '' : 's'}`

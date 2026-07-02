@@ -489,6 +489,8 @@ func main() {
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
+	http.HandleFunc("/assistant/mission", assistantMissionHandler)
+	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
@@ -612,9 +614,10 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"boardFile":   boardCheck,
 			"realtime":    realtime,
 			"agents": map[string]any{
-				"brain":       readinessAgentSnapshot(meetingBrainAgent()),
-				"board":       readinessAgentSnapshot(meetingBoardAgent()),
-				"codexRunner": readinessCodexRunnerSnapshot(),
+				"brain":        readinessAgentSnapshot(meetingBrainAgent()),
+				"board":        readinessAgentSnapshot(meetingBoardAgent()),
+				"missionIntel": readinessAgentSnapshot(missionIntelligenceAgent()),
+				"codexRunner":  readinessCodexRunnerSnapshot(),
 			},
 		},
 	})
@@ -1124,6 +1127,11 @@ func publicAssetHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if strings.HasSuffix(r.URL.Path, ".webmanifest") {
+		// Go's mime table has no .webmanifest entry; with nosniff set the
+		// PWA manifest must declare its type explicitly.
+		w.Header().Set("Content-Type", "application/manifest+json")
+	}
 	http.StripPrefix("/public/", http.FileServer(http.Dir("public"))).ServeHTTP(w, r)
 }
 

@@ -1226,7 +1226,10 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 
 	selected := map[string]meetingMemoryEntry{}
 	add := func(entry meetingMemoryEntry) {
-		if strings.TrimSpace(entry.ID) == "" {
+		// the time-range/participant/fallback branches below read raw
+		// snapshots, so the search() kind exclusion must apply here too —
+		// UI-state entries never reach Scout's model context
+		if strings.TrimSpace(entry.ID) == "" || isUIStateMemoryKind(entry.Kind) {
 			return
 		}
 		selected[entry.ID] = entry

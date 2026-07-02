@@ -25,7 +25,13 @@ const (
 	// like scout_chat_thread they are excluded from Scout search context and
 	// from the generic client memory timeline.
 	meetingMemoryKindCodexProposal = "codex_proposal"
-	defaultMeetingMemoryPath       = "data/meeting-memory.jsonl"
+	// meetingMemoryKindMissionInsight is the mission-intelligence agent's
+	// synthesized themes/consensus JSON. Like scout_chat_thread and
+	// codex_proposal it is UI state (served via /assistant/mission), not
+	// knowledge prose: excluded from Scout search context and from the
+	// generic client memory timeline.
+	meetingMemoryKindMissionInsight = "mission_insight"
+	defaultMeetingMemoryPath        = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -271,6 +277,10 @@ func (store *meetingMemoryStore) appendScoutChatThread(id string, text string, m
 
 func (store *meetingMemoryStore) appendCodexProposal(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindCodexProposal, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendMissionInsight(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindMissionInsight, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
@@ -589,6 +599,13 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 	return meetingMemoryEntry{}, false
 }
 
+// isUIStateMemoryKind reports the entry kinds that are workspace/UI state
+// rather than meeting knowledge — chat threads, codex proposals, and mission
+// insights never enter Scout's search results or model context.
+func isUIStateMemoryKind(kind string) bool {
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight
+}
+
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
 	if store == nil || limit <= 0 {
 		return nil
@@ -611,7 +628,7 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	matches := make([]meetingMemoryMatch, 0, len(entries))
 	lowerQuery := strings.ToLower(query)
 	for _, entry := range entries {
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal {
+		if isUIStateMemoryKind(entry.Kind) {
 			continue
 		}
 		lowerText := strings.ToLower(entry.Text)
@@ -722,7 +739,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight {
 		return normalizeMemoryText(value)
 	}
 

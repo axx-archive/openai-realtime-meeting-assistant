@@ -103,6 +103,77 @@ func TestProposeCodexTaskToolCreatesProposalAndNotifiesEveryone(t *testing.T) {
 	}
 }
 
+// Contract test alongside TestRealtimeSendNotificationToolContract: the
+// schema, both private allowlists, and both instruction strings must expose
+// propose_codex_task to Scout's voice, and the private voice path must stamp
+// the requesting user as the proposal's provenance.
+func TestRealtimeProposeCodexTaskToolContract(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	rawTools, err := json.Marshal(app.kanbanTools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	toolsJSON := string(rawTools)
+	for _, want := range []string{`"name":"propose_codex_task"`, `"title"`, `"query"`, "human must confirm"} {
+		if !strings.Contains(toolsJSON, want) {
+			t.Fatalf("tools JSON missing %s", want)
+		}
+	}
+
+	if !privateRealtimeVoiceToolAllowed("propose_codex_task") {
+		t.Fatal("private realtime voice must allow propose_codex_task")
+	}
+	foundPrivate := false
+	for _, tool := range app.privateRealtimeVoiceTools() {
+		if asString(tool["name"]) == "propose_codex_task" {
+			foundPrivate = true
+		}
+	}
+	if !foundPrivate {
+		t.Fatal("privateRealtimeVoiceTools must expose the propose_codex_task schema")
+	}
+
+	if !strings.Contains(app.sessionInstructions(), "propose_codex_task") {
+		t.Fatal("room session instructions must mention propose_codex_task")
+	}
+	if !strings.Contains(app.privateRealtimeVoiceSessionInstructions(), "propose_codex_task") {
+		t.Fatal("private voice instructions must mention propose_codex_task")
+	}
+
+	// Private path: the proposal records the requesting account, never
+	// board_worker, and still only proposes — no launch.
+	launches := 0
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	result, changed, err := app.applyPrivateRealtimeVoiceTool("AJ@Shareability.com", "propose_codex_task", map[string]any{
+		"title": "Comparable exits brief",
+		"mode":  "research",
+		"query": "Research comparable exits for creator-led IP and draft a brief.",
+	})
+	if err != nil {
+		t.Fatalf("private propose_codex_task: %v", err)
+	}
+	if changed {
+		t.Fatal("proposing must not report a board change")
+	}
+	proposal, ok := result["proposal"].(map[string]any)
+	if !ok {
+		t.Fatalf("result proposal=%#v, want payload map", result["proposal"])
+	}
+	if proposal["proposedBy"] != "aj@shareability.com" {
+		t.Fatalf("proposedBy=%v, want the normalized requesting account", proposal["proposedBy"])
+	}
+	if proposal["status"] != codexProposalStatusProposed {
+		t.Fatalf("status=%v, want proposed", proposal["status"])
+	}
+	if launches != 0 {
+		t.Fatalf("launches=%d, voice proposals must never start an agent thread", launches)
+	}
+}
+
 // Proposals are UI state, not knowledge: excluded from Scout search context
 // (like scout_chat_thread) and from the generic client memory timeline.
 func TestCodexProposalExcludedFromSearchAndClientMemory(t *testing.T) {
