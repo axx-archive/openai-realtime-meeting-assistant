@@ -48,10 +48,51 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 	return app.launchAgentThreadWithOrigin(mode, query, createdBy, nil)
 }
 
+// agentThreadGoalSpec carries the additive goal-spec fields a caller may stamp
+// on a launch. Every field is optional: an empty spec stamps nothing and
+// reproduces today's behavior exactly. Present fields become additive artifact
+// metadata the AgentRunner layer (and Wave 2's /goal engine) can read back.
+type agentThreadGoalSpec struct {
+	Objective     string
+	ToolTemplate  string
+	ContextRefs   string
+	OriginSurface string
+	RequestedBy   string
+	Authority     string
+	Visibility    string
+	PackageID     string
+}
+
+func (spec agentThreadGoalSpec) metadata() map[string]string {
+	metadata := map[string]string{}
+	for key, value := range map[string]string{
+		"objective":     spec.Objective,
+		"toolTemplate":  spec.ToolTemplate,
+		"contextRefs":   spec.ContextRefs,
+		"originSurface": spec.OriginSurface,
+		"requestedBy":   spec.RequestedBy,
+		"authority":     spec.Authority,
+		"visibility":    spec.Visibility,
+		"packageId":     spec.PackageID,
+	} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			metadata[key] = trimmed
+		}
+	}
+	return metadata
+}
+
 // launchAgentThreadWithOrigin launches an agent thread with origin metadata
 // (originKind/originId/originMeetingId) stamped on the artifact so
 // deliverArtifactToOrigin can close the loop when the worker completes.
 func (app *kanbanBoardApp) launchAgentThreadWithOrigin(mode string, query string, createdBy string, origin map[string]string) (scoutAgentThread, error) {
+	return app.launchAgentThreadWithSpec(mode, query, createdBy, origin, agentThreadGoalSpec{})
+}
+
+// launchAgentThreadWithSpec is launchAgentThreadWithOrigin plus additive
+// goal-spec metadata. Existing callers route through the thin wrapper above with
+// an empty spec, so their behavior is unchanged.
+func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, createdBy string, origin map[string]string, spec agentThreadGoalSpec) (scoutAgentThread, error) {
 	mode = normalizeAgentThreadMode(mode)
 	if mode == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread mode is required")
@@ -91,6 +132,11 @@ func (app *kanbanBoardApp) launchAgentThreadWithOrigin(mode string, query string
 		if value := strings.TrimSpace(origin[key]); value != "" {
 			metadata[key] = value
 		}
+	}
+	// Additive goal-spec metadata: absent fields stamp nothing, so callers that
+	// pass an empty spec keep today's behavior.
+	for key, value := range spec.metadata() {
+		metadata[key] = value
 	}
 	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
 	if err != nil {
@@ -411,11 +457,17 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 }
 
 func agentThreadRequestTimeout() time.Duration {
-	if configuredAgentThreadWorkerMode() == agentThreadWorkerCodexExec {
+	switch selectedAgentRunnerName() {
+	case agentRunnerCodexSidecar, agentRunnerCodexLocal:
 		return codexExecConfigFromEnv().Timeout
+	case agentRunnerAnthropicFable:
+		// The in-process tool loop runs many turns; give it room beyond the
+		// single-completion default. Only applies when the orchestrator is
+		// selected, so the codex/openai timeouts are unchanged.
+		return orchestratorTimeout()
+	default:
+		return defaultAgentThreadRequestTimeout
 	}
-
-	return defaultAgentThreadRequestTimeout
 }
 
 type agentThreadWorkerResult struct {
@@ -424,24 +476,21 @@ type agentThreadWorkerResult struct {
 	Terminal bool
 }
 
+// produceAgentThreadArtifactWithWorker is the single seam the AgentRunner
+// interface replaces. It selects a runner (anthropic_fable when
+// ANTHROPIC_API_KEY is set, else today's codex/openai worker per env), runs the
+// job, and drains the async progress channel into the synchronous
+// agentThreadWorkerResult the terminal seam in runAgentThread expects. The
+// wrapper providers emit their underlying result verbatim, so codex/openai
+// paths are byte-for-byte unchanged; only the anthropic path is new.
 func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (agentThreadWorkerResult, error) {
-	switch configuredAgentThreadWorkerMode() {
-	case agentThreadWorkerCodexExec:
-		if configuredCodexRunnerMode() == codexRunnerModeLocalExec {
-			return app.produceCodexAgentThreadArtifact(ctx, thread)
-		}
-		return app.enqueueCodexAgentThreadArtifact(ctx, thread)
-	default:
-		output, err := app.produceAgentThreadArtifact(ctx, thread, responder)
-		return agentThreadWorkerResult{
-			Text: output,
-			Metadata: map[string]string{
-				"worker":         "openai_text_response",
-				"workerBoundary": "responses_artifact_writer",
-			},
-			Terminal: true,
-		}, err
+	job := app.newAgentJob(thread)
+	runner := app.selectAgentRunner(job, responder)
+	progress, err := runner.RunJob(ctx, job)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
 	}
+	return drainAgentProgress(progress, nil)
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {
