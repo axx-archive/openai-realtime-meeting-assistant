@@ -319,7 +319,13 @@ func (app *kanbanBoardApp) createOSArtifactWithMetadata(mode string, query strin
 		metadata[key] = strings.TrimSpace(value)
 	}
 
-	return app.memory.appendOSArtifact(artifactID, answer, metadata)
+	entry, appended, err := app.memory.appendOSArtifact(artifactID, answer, metadata)
+	if appended && err == nil {
+		// Unified push channel: a new artifact (worker scaffold or a directly
+		// saved piece) fans out title-only to every signed-in session.
+		emitOSArtifactEvent(entry)
+	}
+	return entry, appended, err
 }
 
 func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
@@ -343,7 +349,15 @@ func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string,
 		updatedBy = rawUpdatedBy
 	}
 
-	return app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, metadataUpdates)
+	entry, changed, err := app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, metadataUpdates)
+	if changed && err == nil {
+		// Unified push channel: a status transition (progress → complete, a
+		// publish) fans out title-only. Bookkeeping re-writes that leave the
+		// user-visible state unchanged are deduped inside emitOSArtifactEvent,
+		// so deliverArtifactToOrigin's deliveredAt stamp stays silent.
+		emitOSArtifactEvent(entry)
+	}
+	return entry, changed, err
 }
 
 func (app *kanbanBoardApp) publishOSArtifact(id string, published bool, updatedBy string) (meetingMemoryEntry, bool, error) {

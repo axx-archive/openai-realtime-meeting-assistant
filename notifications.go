@@ -179,6 +179,22 @@ func pushNotificationRecord(record notificationRecord) {
 	} else {
 		sendKanbanEventToUser(record.UserEmail, "notification", notificationForViewer(record, record.UserEmail))
 	}
+	// Unified push channel: the same record on the typed stream so brief
+	// counters and other light consumers can react by kind. The bell itself
+	// stays driven by the full 'notification' event above; this carries a
+	// body-free, kind-derived label only — record.Text can embed message body
+	// (chat notifications) which must never cross the "titles only" boundary.
+	osEvt := osEvent{
+		Kind:          osEventNotification,
+		Ref:           record.ID,
+		Title:         osNotificationEventTitle(record),
+		OriginSurface: firstNonEmptyString(record.Tool, "room"),
+	}
+	if record.UserEmail == "" {
+		broadcastOSEvent(osEvt)
+	} else {
+		sendOSEventToUser(record.UserEmail, osEvt)
+	}
 }
 
 // flushDeferredNotifications delivers every notification queued with

@@ -384,6 +384,16 @@ func (app *kanbanBoardApp) advancePackageStage(id string, stage string, updatedB
 	}
 	if persisted {
 		app.broadcastVenturePackage(record)
+		// Unified push channel: the stage advance as a title-only signal. The
+		// package rail is a rich consumer — it re-reads packagePayload by ref
+		// on receipt (the full 'package' event above self-heals it too).
+		broadcastOSEvent(osEvent{
+			Kind:          osEventPackageAdvanced,
+			Ref:           record.ID,
+			Title:         strings.TrimSpace(record.Name) + " → " + record.Stage,
+			OriginSurface: "packages",
+			Actor:         firstNonEmptyString(strings.TrimSpace(updatedBy), scoutParticipantName),
+		})
 	}
 	return record, nil
 }

@@ -25028,6 +25028,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'codex_proposal':
             upsertCodexProposal(message.data)
             break
+          case 'os_event':
+            // Unified push channel (Wave 3): one typed stream every producer
+            // fans finished work onto. The per-surface events above stay as
+            // the polling/self-heal fallback; this router adds the unified
+            // cross-surface semantics on top.
+            osEventsRoute(message.data)
+            break
           case 'codex_proposals':
             handleCodexProposalsSnapshot(message.data)
             break
@@ -25072,6 +25079,135 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             handleScreenShareStopped(message.data)
             break
         }
+      }
+
+      // ---------- Unified push channel consumer (Wave 3) ----------
+      // One router by kind over the office socket's os_event stream. Two
+      // consumer classes:
+      //   - light consumers render straight from the payload (brief counters,
+      //     the "work finished" arrival hook). Titles only ever arrive here.
+      //   - rich consumers treat the event as an invalidation signal and
+      //     fetch-by-ref on receipt (board re-read, package rail re-read).
+      // Idempotent by (kind, ref, at): a replayed event is a no-op re-fetch.
+      // The per-surface events (notification, package, chat_thread, board,
+      // codex_proposal) stay as the self-healing fallback — this layer is
+      // purely additive.
+      const osEventsSeen = new Map()
+      const osEventsSeenCap = 512
+      // Brief counters for Wave 8's Morning Brief; incremented by kind so a
+      // surface can show "3 new" without knowing each producer's event shape.
+      const osEventsBriefCounts = {
+        artifact_completed: 0,
+        artifact_progress: 0,
+        proposal: 0,
+        notification: 0,
+        channel_post: 0,
+        package_advanced: 0,
+        quarantine_change: 0
+      }
+      // Documented extension point. Wave 11's return-to-origin card and Wave
+      // 8's approval round-trip register handlers here; each receives every
+      // routed OS event. Kept deliberately minimal in this wave.
+      const osEventHandlers = []
+
+      function osEventsKey(event) {
+        return `${event?.kind || ''}|${event?.ref || ''}|${event?.at || ''}`
+      }
+
+      // Rich-consumer fetches coalesce: a burst of completions/advances off-room
+      // (several subtasks finishing close together) collapses to one fetch each
+      // instead of one uncoalesced /assistant/board or /assistant/packages call
+      // per event. force:true bypasses the officeSocketLive() short-circuit, so
+      // without this a burst would stampede the endpoint.
+      const osEventsRefetchDebounceMs = 500
+      let osEventsPackagesTimer = null
+      let osEventsBoardTimer = null
+
+      function osEventsRefetchPackages() {
+        // rich consumer: the package rail re-reads packagePayload by ref. The
+        // title-only event is an invalidation signal, never the state itself.
+        if (osEventsPackagesTimer) {
+          clearTimeout(osEventsPackagesTimer)
+        }
+        osEventsPackagesTimer = setTimeout(() => {
+          osEventsPackagesTimer = null
+          loadPackages(true)
+        }, osEventsRefetchDebounceMs)
+      }
+
+      function osEventsRefetchBoard() {
+        // rich consumer: a completed artifact may have advanced a linked card.
+        // loadBoardSnapshot self-guards (no-op while a room ws is OPEN, where
+        // the 'board' event already covers it) so this is cheap off-room.
+        if (osEventsBoardTimer) {
+          clearTimeout(osEventsBoardTimer)
+        }
+        osEventsBoardTimer = setTimeout(() => {
+          osEventsBoardTimer = null
+          loadBoardSnapshot({ force: true })
+        }, osEventsRefetchDebounceMs)
+      }
+
+      function osEventsDispatchHandlers(event) {
+        for (const handler of osEventHandlers) {
+          try {
+            handler(event)
+          } catch (err) {
+            console.debug('osEvent handler failed', err)
+          }
+        }
+      }
+
+      function osEventsRoute(event) {
+        if (!event || !event.kind || !event.ref) {
+          return
+        }
+        const key = osEventsKey(event)
+        if (osEventsSeen.has(key)) {
+          return
+        }
+        osEventsSeen.set(key, true)
+        if (osEventsSeen.size > osEventsSeenCap) {
+          // drop the oldest inserted key — Map preserves insertion order
+          osEventsSeen.delete(osEventsSeen.keys().next().value)
+        }
+        if (Object.prototype.hasOwnProperty.call(osEventsBriefCounts, event.kind)) {
+          osEventsBriefCounts[event.kind] += 1
+        }
+
+        switch (event.kind) {
+          case 'artifact_completed':
+            // light: the "work finished" arrival hook. Full return-card UI is
+            // Wave 11; here we just surface it to the extension point and let
+            // the board re-read pick up any linked-card advance.
+            osEventsRefetchBoard()
+            break
+          case 'artifact_progress':
+            // light: progress is a documented signal only in this wave.
+            break
+          case 'package_advanced':
+            // rich: re-read the package rail by ref.
+            osEventsRefetchPackages()
+            break
+          case 'proposal':
+            // the codex_proposal event already carries the card; Wave 8's
+            // approval round-trip consumes the unified signal via handlers.
+            break
+          case 'notification':
+            // the bell is driven by the full 'notification' event (Wave-5
+            // pulse fires there on a genuine unread increase); the OS event
+            // only feeds the brief counter — never a second bell entry.
+            break
+          case 'channel_post':
+            // light: brief counter only; the chat_thread event self-heals the
+            // rail for open chat tabs.
+            break
+          case 'quarantine_change':
+            // Wave 7 stub — no producer yet; routed for the extension point.
+            break
+        }
+
+        osEventsDispatchHandlers(event)
       }
 
       function handleAuthoritativeActiveSpeaker(payload) {

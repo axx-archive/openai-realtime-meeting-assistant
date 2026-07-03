@@ -83,6 +83,16 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 
 	payload := codexProposalPayload(entry)
 	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	// Unified push channel: the same proposal on the typed stream (title only)
+	// so surfaces beyond the room cards learn of it. Wave 8's approval
+	// round-trip subscribes to these proposal events.
+	broadcastOSEvent(osEvent{
+		Kind:          osEventProposal,
+		Ref:           entry.ID,
+		Title:         title,
+		OriginSurface: "room",
+		Actor:         proposedBy,
+	})
 	// Everyone-notification: any signed-in user may confirm, so the durable
 	// nudge is a broadcast; tool "room" routes the click to the room where
 	// the proposal cards live.

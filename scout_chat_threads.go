@@ -723,6 +723,17 @@ func (app *kanbanBoardApp) postToChannel(args map[string]any, requesterEmail str
 		}
 	}
 
+	// Unified push channel: a title-only signal that #channel got a post — the
+	// message body never crosses this boundary; a consumer that wants it reads
+	// the thread by ref under the normal auth guard.
+	broadcastOSEvent(osEvent{
+		Kind:          osEventChannelPost,
+		Ref:           thread.ID,
+		Title:         "#" + thread.Title,
+		OriginSurface: "chat",
+		Actor:         author,
+	})
+
 	// No open_tool actions: auto-navigating everyone mid-meeting is hostile.
 	return map[string]any{
 		"ok":        true,
