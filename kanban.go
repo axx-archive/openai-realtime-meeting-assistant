@@ -497,6 +497,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startMeetingBoardWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
 	app.startDecisionLedgerWorker(apiKey)
+	app.reconcileGoalThreadsAtBoot()
 
 	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
 		return err

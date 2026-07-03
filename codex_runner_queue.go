@@ -805,6 +805,19 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 			// complete → Done, failed/approval_required → Blocked. The same
 			// `changed` guard keeps a retried callback from re-syncing.
 			kanbanApp.syncLinkedCardForArtifact(artifact, payload.Status)
+			// Goal-engine linkage: a codex-executed subtask child (or the single
+			// commit_push child) folds its terminal result back into the parent
+			// plan. This is the codex-callback twin of the runAgentThread fold
+			// hook — without it, execution-tagged subtasks strand the plan since
+			// their completion never passes through the synchronous runner seam.
+			// Fold on its own goroutine so a re-drive (which may make model calls)
+			// never blocks this HTTP callback; no-op for non-goal artifacts.
+			if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" {
+				switch strings.ToLower(strings.TrimSpace(payload.Status)) {
+				case codexJobStatusComplete, codexJobStatusFailed:
+					go kanbanApp.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+				}
+			}
 		}
 	}
 
@@ -868,6 +881,23 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// admin-gated: it authorizes the Codex worker to touch the world.
 		if !isArtifactApprovalAdmin(user) {
 			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
+			return
+		}
+		// A /goal artifact parked at its ship gate resumes through the goal
+		// engine (commit_push), which ships exactly the command the gate
+		// recorded — not a fresh codex job re-derived from the objective text.
+		if artifact.Metadata["mode"] == "goal" {
+			if err := kanbanApp.resumeApprovedGoal(artifactID, user.Name); err != nil {
+				writeAuthError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			updated, _ := kanbanApp.osArtifactByID(artifactID)
+			actions := kanbanApp.osAssistantActions(updated.Metadata["threadQuery"], updated.Metadata["mode"], updated)
+			writeAuthJSON(w, http.StatusAccepted, map[string]any{
+				"ok":       true,
+				"artifact": updated,
+				"actions":  actions,
+			})
 			return
 		}
 		updated, actions, err := kanbanApp.approveCodexArtifactExternalWrite(artifact, user.Name)

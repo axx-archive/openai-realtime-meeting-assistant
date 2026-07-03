@@ -61,19 +61,29 @@ type agentThreadGoalSpec struct {
 	Authority     string
 	Visibility    string
 	PackageID     string
+	// Goal-engine linkage (Wave 2): a subtask launched by the /goal engine
+	// stamps its parent goal + subtask id so the child's terminal seam folds
+	// the result back into the parent plan, and the assigned runner so
+	// selectAgentRunner can honor the per-subtask capability match.
+	ParentGoalID   string
+	SubtaskID      string
+	AssignedRunner string
 }
 
 func (spec agentThreadGoalSpec) metadata() map[string]string {
 	metadata := map[string]string{}
 	for key, value := range map[string]string{
-		"objective":     spec.Objective,
-		"toolTemplate":  spec.ToolTemplate,
-		"contextRefs":   spec.ContextRefs,
-		"originSurface": spec.OriginSurface,
-		"requestedBy":   spec.RequestedBy,
-		"authority":     spec.Authority,
-		"visibility":    spec.Visibility,
-		"packageId":     spec.PackageID,
+		"objective":      spec.Objective,
+		"toolTemplate":   spec.ToolTemplate,
+		"contextRefs":    spec.ContextRefs,
+		"originSurface":  spec.OriginSurface,
+		"requestedBy":    spec.RequestedBy,
+		"authority":      spec.Authority,
+		"visibility":     spec.Visibility,
+		"packageId":      spec.PackageID,
+		"goalParentId":   spec.ParentGoalID,
+		"goalSubtaskId":  spec.SubtaskID,
+		"assignedRunner": spec.AssignedRunner,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
@@ -276,6 +286,12 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 	// Durable milestone: the creator learns the thread finished (or failed)
 	// even if they are outside the room when the worker lands.
 	app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+	// Goal-engine linkage: a subtask child folds its terminal result back into
+	// the parent plan, which re-drives the state machine (goal_engine.go). No-op
+	// for non-goal threads (goalParentId absent).
+	if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" {
+		app.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, status)
+	}
 }
 
 // deliverArtifactToOrigin posts a compact completion card back to the surface
@@ -490,7 +506,29 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Cont
 	if err != nil {
 		return agentThreadWorkerResult{}, err
 	}
-	return drainAgentProgress(progress, nil)
+	// onProgress persists each non-terminal turn onto the running artifact so the
+	// progress card advances mid-run; the terminal update is left to the seam in
+	// runAgentThread (folding that write here would race it). The office-socket
+	// broadcast of these updates is Wave 3's job.
+	return drainAgentProgress(progress, func(update AgentProgress) {
+		app.persistAgentThreadProgress(thread, update)
+	})
+}
+
+// persistAgentThreadProgress stamps a runner's per-turn progress (currentStage,
+// goalStatus, progressPercent, reviewGate) onto the running thread's artifact.
+// Non-terminal only and additive metadata; the current body is preserved.
+func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, update AgentProgress) {
+	if app == nil || update.Terminal || strings.TrimSpace(thread.Artifact.ID) == "" {
+		return
+	}
+	metadata := agentProgressMetadata(update)
+	if len(metadata) == 0 {
+		return
+	}
+	if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata); err != nil {
+		log.Errorf("Failed to persist thread %s progress: %v", thread.ID, err)
+	}
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {

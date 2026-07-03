@@ -14,8 +14,8 @@ import (
 // provider contract; the unexported `thread` carries the full launch record so
 // the wrapper providers (codex/openai) can call today's functions unchanged.
 type AgentJob struct {
-	JobID       string            // == artifact/thread run id
-	ArtifactID  string            // durable os_artifact this job writes back to
+	JobID       string // == artifact/thread run id
+	ArtifactID  string // durable os_artifact this job writes back to
 	ThreadID    string
 	Mode        string            // research|design|grill|workflow|artifacts|goal
 	Objective   string            // the user's goal text (thread.Query)
@@ -190,7 +190,15 @@ func selectedExecutionRunnerName() string {
 // responder is threaded through so the openai_text provider stays test-injectable
 // exactly as produceAgentThreadArtifact did.
 func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextResponder) AgentRunner {
-	switch selectedAgentRunnerName() {
+	name := selectedAgentRunnerName()
+	// A /goal subtask carries the concrete runner its capability match assigned
+	// (assignGoalRunners). Honoring it routes shell/repo subtasks to the
+	// execution runner while everything else stays on the orchestrator. Only
+	// goal children set this key, so non-goal threads are unchanged.
+	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" {
+		name = override
+	}
+	switch name {
 	case agentRunnerAnthropicFable:
 		return newAnthropicFableRunner(app)
 	case agentRunnerCodexSidecar:
@@ -201,6 +209,30 @@ func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextR
 		return &stubAgentRunner{}
 	default:
 		return &openAITextAgentRunner{app: app, responder: responder}
+	}
+}
+
+// resolveAssignedRunnerName validates a per-subtask runner override against the
+// known runner names; an unknown/empty value returns "" so the env-selected
+// default stands. The anthropic path still degrades keyless (an anthropic
+// override with no key would 503) by falling back to the legacy worker.
+func resolveAssignedRunnerName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case agentRunnerAnthropicFable:
+		if hasAnthropicAPIKey() {
+			return agentRunnerAnthropicFable
+		}
+		return legacyWorkerRunnerName()
+	case agentRunnerCodexSidecar:
+		return agentRunnerCodexSidecar
+	case agentRunnerCodexLocal:
+		return agentRunnerCodexLocal
+	case agentRunnerOpenAIText:
+		return agentRunnerOpenAIText
+	case agentRunnerStub:
+		return agentRunnerStub
+	default:
+		return ""
 	}
 }
 

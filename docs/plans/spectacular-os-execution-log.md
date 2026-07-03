@@ -89,6 +89,13 @@ No SQL migrations in this project — ops = `.env` additions, docker compose reb
 
 ## Wave 1
 
+Status: `completed` (commit 5782f17, reviewed PASS)
+Files: agent_runner_iface.go (267), agent_runner_anthropic.go (607), agent_runner_providers.go (120), agent_thread_runner.go (+68/-19), 2 test files (11 tests). Review fixes: orchestrator create_ticket forced draft=true (D4 gate); non-end_turn stop_reasons → needs_attention with orchestratorStop stamp.
+Risks carried forward: live per-turn progress streaming deferred to Wave 3 seam (onProgress hook exists, passed nil); refusal `fallbacks` beta deferred (env-gate later); orchestrator timeout 5m may need raising for long goals; CanBrowse=false until a web tool is wired.
+Deviations (accepted): keyless default = openai_text (today's exact behavior); stub via BONFIRE_AGENT_RUNNER=stub.
+
+<details><summary>original scope</summary>
+
 Status: `pending`
 
 ### Scope Checklist
@@ -147,6 +154,8 @@ Requirements: keep branch main; go test ./... green; compact nothing yet (first 
 
 ---
 
+(end of original Wave-1 scope)</details>
+
 ## Wave 2
 
 Status: `pending`
@@ -163,15 +172,11 @@ Status: `pending`
 
 ## Wave 3
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] broadcastOSEvent seam wired into all five producers
-- [ ] Office ws carries events for every authed session
-- [ ] Client consumer (light render / rich fetch-by-ref, idempotent)
-- [ ] Polling fallback retained
-- [ ] Two-session acceptance test + RSS measurement
-- [ ] Fan-out + auth-guard + frontend-marker tests
+Status: `completed` (commit 4b5b153, reviewed PASS after 3 fixes)
+Files: office_events.go (198+), office_events_test.go (289+), memory_query.go +18, codex_proposals.go +10, notifications.go +15, scout_chat_threads.go +11, packages.go +10, index.html +115.
+Review fixes: (1) notification os_event leaked message-body excerpts → fixed to kind-derived labels + widened no-leak test; (2) artifact_progress dedup swallowed execute-phase ticks → signature now includes progressPercent/currentStage; (3) board/package refetch now 500ms debounced.
+RSS baseline (darwin, keyless): 17,344 KB idle → 23,296 KB after ~1,200 requests — in envelope. Two-session acceptance: PASS (≤2s, no room join).
+Risks carried forward: Wave 8 must add an os_event at resolveCodexProposal (approve/reject transition has no event yet); Wave 11 must use osEventHandlers, not a second board refetch; if Wave 7 adds private artifacts, switch emitOSArtifactEvent to owner-scoped sends.
 
 ---
 
@@ -191,14 +196,10 @@ Status: `pending`
 
 ## Wave 5
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Rename all 8 label locations (labels only; `office` key untouched)
-- [ ] --agent token family (both themes) + ember active-tool hairline
-- [ ] Remove 9× transition:all; .pressable; flyout delay; focus-on-glass; bell warmth
-- [ ] Reduced-motion entries + monolith checklist banner
-- [ ] Frontend-marker test pins rename + token
+Status: `completed` (commit 8d3e4a7, reviewed PASS)
+Files: index.html (+~220), frontend_latency_test.go (pins + TestIndexBonfireOSRenameAndAgentToken). Review fix: bell pulse primed baseline (no on-load fire).
+Notes: rail label needed a scoped text-transform:none exception (house lowercase style); ember hairline scoped to [data-tool][aria-pressed] to exclude theme toggle; "office as a place" metaphor copy (login CTA, memory placeholder, "ask the office…") deliberately kept — AJ can overrule.
+Risks carried forward: live browser verification deferred to Wave 14 acceptance.
 
 ---
 
