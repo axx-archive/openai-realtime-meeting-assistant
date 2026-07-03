@@ -63,6 +63,12 @@ var (
 	signalRequestLock            sync.Mutex
 	signalRequestTimer           *time.Timer
 	participantSessionSeq        atomic.Uint64
+	// activeWebsocketHandlers counts in-flight websocketHandler goroutines. A
+	// hijacked websocket outlives httptest.Server.Close, so tests that swap
+	// package globals the handler reads (e.g. kanbanApp) must wait for handlers
+	// to drain first to stay race-clean. Production never waits on this — it is
+	// a plain atomic counter with negligible overhead.
+	activeWebsocketHandlers atomic.Int64
 
 	log = logging.NewDefaultLoggerFactory().NewLogger("openai-realtime-meeting-assistant")
 
@@ -152,6 +158,11 @@ type peerConnectionState struct {
 	websocket       *threadSafeWriter
 	participantName string
 	sessionID       string
+	// endpointID identifies the device this session belongs to. Two endpoints
+	// of one account coexist; a stale session is only replaced when a newer
+	// session arrives on the SAME endpoint. Empty for legacy/native clients,
+	// which keeps the original single-slot-per-name behaviour.
+	endpointID string
 	// sessionEmail is the server-side authenticated account email resolved by
 	// websocketHandler at admission. Targeted fan-out (sendKanbanEventToUser)
 	// filters on it; it is never taken from a client payload.
@@ -1962,12 +1973,52 @@ func secondsToMillis(seconds float64) float64 {
 	return seconds * 1000
 }
 
+// participantConnectionKey indexes activeParticipantConnections by device so
+// two endpoints of one account can hold separate entries. Legacy clients (empty
+// endpoint id) key on the bare name, preserving the original single-slot map
+// key exactly — this is what keeps the existing participant tests green.
+func participantConnectionKey(name string, endpointID string) string {
+	name = canonicalParticipantName(name)
+	if endpointID == "" {
+		return name
+	}
+	return name + "\x00" + endpointID
+}
+
+// sanitizeEndpointID bounds and cleans a client-supplied device id. Anything
+// unexpected degrades to "" (legacy single-slot behaviour) rather than being
+// trusted verbatim, since the id participates in a connection map key.
+func sanitizeEndpointID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if len(raw) > 64 {
+		raw = raw[:64]
+	}
+	for _, r := range raw {
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
+			return ""
+		}
+	}
+	return raw
+}
+
 func replaceExistingParticipantSession(name string, sessionID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
+	replaceExistingParticipantSessionEndpoint(name, sessionID, "", currentPeerConnection, currentWebsocket, sessionEmail)
+}
+
+// replaceExistingParticipantSessionEndpoint installs the current session for one
+// endpoint and evicts only a stale session on that SAME endpoint (a refreshed
+// tab). Other endpoints of the same account — the mandated laptop+phone case —
+// are left fully intact: their connections and forwarded tracks are untouched.
+func replaceExistingParticipantSessionEndpoint(name string, sessionID string, endpointID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
 	name = canonicalParticipantName(name)
 	if name == "" {
 		return
 	}
 
+	key := participantConnectionKey(name, endpointID)
 	var staleConnections []peerConnectionState
 	removedTracks := false
 
@@ -1975,21 +2026,23 @@ func replaceExistingParticipantSession(name string, sessionID string, currentPee
 	if activeParticipantConnections == nil {
 		activeParticipantConnections = map[string]peerConnectionState{}
 	}
-	if existing, ok := activeParticipantConnections[name]; ok && existing.sessionID != sessionID {
+	if existing, ok := activeParticipantConnections[key]; ok && existing.sessionID != sessionID {
 		staleConnections = append(staleConnections, existing)
 	}
-	activeParticipantConnections[name] = peerConnectionState{
+	activeParticipantConnections[key] = peerConnectionState{
 		peerConnection:  currentPeerConnection,
 		websocket:       currentWebsocket,
 		participantName: name,
 		sessionID:       sessionID,
+		endpointID:      endpointID,
 		sessionEmail:    normalizeAccountEmail(sessionEmail),
 	}
 
 	retainedConnections := peerConnections[:0]
 	for _, state := range peerConnections {
 		isCurrentConnection := currentPeerConnection != nil && state.peerConnection == currentPeerConnection
-		if isCurrentConnection || !sameParticipantName(state.participantName, name) || state.sessionID == sessionID {
+		sameEndpoint := sameParticipantName(state.participantName, name) && state.endpointID == endpointID
+		if isCurrentConnection || !sameEndpoint || state.sessionID == sessionID {
 			retainedConnections = append(retainedConnections, state)
 			continue
 		}
@@ -1997,7 +2050,14 @@ func replaceExistingParticipantSession(name string, sessionID string, currentPee
 	}
 	peerConnections = retainedConnections
 
-	removedTracks = removeParticipantTracksLocked(name, "")
+	// Remove only the evicted sessions' forwarded tracks, never the account's
+	// other live endpoint. A brand-new session has no tracks yet at admission,
+	// so this only prunes the replaced tab's leftovers.
+	for _, stale := range staleConnections {
+		if removeParticipantTracksLocked(name, stale.sessionID) {
+			removedTracks = true
+		}
+	}
 	listLock.Unlock()
 
 	closeParticipantConnections(staleConnections)
@@ -2007,6 +2067,9 @@ func replaceExistingParticipantSession(name string, sessionID string, currentPee
 	}
 }
 
+// unregisterParticipantSession tears down exactly one session when its socket
+// closes, scoped by sessionID so a person's other device (a different endpoint,
+// a different session) keeps its connection, tracks, and layer tier.
 func unregisterParticipantSession(name string, sessionID string) {
 	name = canonicalParticipantName(name)
 	if name == "" {
@@ -2017,9 +2080,9 @@ func unregisterParticipantSession(name string, sessionID string) {
 	removedTracks := false
 
 	listLock.Lock()
-	if activeParticipantConnections != nil {
-		if current, ok := activeParticipantConnections[name]; ok && current.sessionID == sessionID {
-			delete(activeParticipantConnections, name)
+	for key, state := range activeParticipantConnections {
+		if sameParticipantName(state.participantName, name) && state.sessionID == sessionID {
+			delete(activeParticipantConnections, key)
 			removedConnection = true
 		}
 	}
@@ -2445,6 +2508,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		return
 	}
 
+	// A hijacked websocket outlives httptest.Server.Close; count this goroutine
+	// so tests can wait for it to fully drain (all deferred cleanup that touches
+	// package globals has run) before mutating those globals. Decremented last,
+	// after every other defer below.
+	activeWebsocketHandlers.Add(1)
+	defer activeWebsocketHandlers.Add(-1)
+
 	// Bound per-message memory: signaling frames (SDP/ICE/board events) are small;
 	// reject oversized frames so an unauthenticated client cannot stream an
 	// arbitrarily large frame and force the server to buffer it before parsing.
@@ -2457,6 +2527,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	defer func() { scoutChat.close() }()
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
+	// endpointID is the stable per-device id from the participant hello. It is
+	// set once at admission and only ever read afterwards on this same read-loop
+	// goroutine, so it needs no lock. Empty for legacy/native clients.
+	endpointID := ""
 	participantAccepted := false
 	officeAccepted := false
 	mediaJoined := false
@@ -2480,14 +2554,23 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if participantAcceptedState.Load() {
 				name := currentParticipantName()
 				unregisterParticipantSession(name, participantSessionID)
-				if kanbanApp.forgetParticipantSession(name, participantSessionID) {
-					broadcastKanbanEvent("participant_left", map[string]any{
-						"name": name,
-					})
+				if removed, stillPresent := kanbanApp.forgetParticipantSessionResult(name, participantSessionID); removed {
+					// participant_left means a PERSON left. When one of an
+					// account's two devices drops but another stays connected,
+					// the person is still here: suppress the "left" (peers would
+					// otherwise tear down that account's live tile) but still
+					// refresh the roster so the "· 2 devices" affordance drops
+					// back to one. Only arm the idle-end timer once the last
+					// device is gone.
+					if !stillPresent {
+						broadcastKanbanEvent("participant_left", map[string]any{
+							"name": name,
+						})
+					}
 					broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
-					// arm the idle-end grace timer when the last participant
-					// leaves; a rejoin inside the window cancels it.
-					kanbanApp.noteMeetingOccupancy()
+					if !stillPresent {
+						kanbanApp.noteMeetingOccupancy()
+					}
 				}
 			}
 			if closeSocket {
@@ -2763,7 +2846,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if participantAccepted {
 				continue
 			}
-			admittedName, err := kanbanApp.admitParticipantSession(name, participantSessionID)
+			// The endpoint id is an additive, optional hint carried in the
+			// hello payload (never identity — that still comes from the
+			// session). Absent/invalid ids fall back to the legacy single-slot
+			// behaviour.
+			if trimmed := strings.TrimSpace(message.Data); trimmed != "" {
+				var hello struct {
+					EndpointID string `json:"endpointId"`
+				}
+				if err := json.Unmarshal([]byte(trimmed), &hello); err == nil {
+					endpointID = sanitizeEndpointID(hello.EndpointID)
+				}
+			}
+			admittedName, firstEndpoint, err := kanbanApp.admitParticipantSessionEndpoint(name, participantSessionID, endpointID)
 			if err != nil {
 				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 				continue
@@ -2771,7 +2866,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			setParticipantName(admittedName)
 			participantAccepted = true
 			participantAcceptedState.Store(true)
-			replaceExistingParticipantSession(admittedName, participantSessionID, peerConnection, c, sessionUser.Email)
+			replaceExistingParticipantSessionEndpoint(admittedName, participantSessionID, endpointID, peerConnection, c, sessionUser.Email)
 			// admission opens (or extends) the first-class meeting record and
 			// cancels any pending idle-end from a briefly empty room.
 			kanbanApp.noteMeetingAdmission(admittedName)
@@ -2825,9 +2920,18 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					log.Errorf("Failed to send active speaker snapshot: %v", err)
 				}
 			}
-			broadcastKanbanEvent("participant_joined", map[string]any{
-				"name": admittedName,
-			})
+			// participant_joined announces a PERSON arriving (status line +
+			// roster media reset on peers). Fire it only when this admission
+			// brought the account from absent to present; a second device of an
+			// already-present account is not a new arrival and must not make
+			// peers nuke that account's existing tile or log a false "joined".
+			// The roster snapshot below still refreshes unconditionally so the
+			// "· 2 devices" affordance updates.
+			if firstEndpoint {
+				broadcastKanbanEvent("participant_joined", map[string]any{
+					"name": admittedName,
+				})
+			}
 			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
 		case "office":
 			// Office hello: an authenticated tab claims signed-in event
@@ -2896,6 +3000,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				websocket:       c,
 				participantName: currentParticipantName(),
 				sessionID:       participantSessionID,
+				endpointID:      endpointID,
 				sessionEmail:    normalizeAccountEmail(sessionUser.Email),
 			})
 			listLock.Unlock()

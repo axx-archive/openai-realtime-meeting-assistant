@@ -3454,6 +3454,65 @@
       .toast--note .toast__bar { color: var(--info); }
       .toast--error .toast__bar { color: var(--danger); }
 
+      /* Calm multi-device handoff chip (rtc §5.4): both devices stay in the
+         room, so this is informational — never the alarming eviction banner. */
+      .multi-device-chip {
+        position: fixed;
+        top: calc(16px + env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1200;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        max-width: min(520px, calc(100vw - 32px));
+        padding: 8px 10px 8px 18px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+      }
+      .multi-device-chip[hidden] { display: none; }
+      .multi-device-chip__label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .multi-device-chip__action {
+        flex: none;
+        min-height: 32px;
+        padding: 0 14px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-raise, transparent);
+        color: var(--text-1);
+        font: inherit;
+        cursor: pointer;
+      }
+      .multi-device-chip__action:hover { color: var(--text-1); border-color: var(--text-3, var(--glass-border)); }
+      .multi-device-chip__dismiss {
+        flex: none;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .multi-device-chip__dismiss:hover { color: var(--text-1); }
+
       .toast__link {
         color: var(--text-1);
         font-weight: 500;
@@ -16840,6 +16899,10 @@
       let participantPreview = []
       let roomCapacity = 10
       let occupiedSeats = 0
+      // How many devices each in-room account currently holds, keyed by
+      // lowercased name. Drives the subtle "· 2 devices" roster affordance and
+      // the calm "you joined from another device" chip.
+      let participantEndpointCounts = {}
       let roomRecordingEnabled = true
       let profileAvatarDraft = null
       let settingsRestoreFocusEl = audioSettingsButton
@@ -16942,6 +17005,43 @@
       let localMirrorFrame = 0
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
+      // Stable per-device id so one account can be in the room on a laptop and a
+      // phone at once. It persists across reloads: a refreshed tab reuses the id
+      // and correctly REPLACES its own prior session, while a different device
+      // mints a different id and coexists. Sent as an additive, optional field
+      // in the participant hello — the server treats a missing id as legacy
+      // single-slot behaviour.
+      const endpointIdStorageKey = 'bonfire.endpoint.id.v1'
+      let cachedEndpointId = ''
+      function ensureEndpointId() {
+        if (cachedEndpointId) {
+          return cachedEndpointId
+        }
+        const mint = () => {
+          try {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+              return window.crypto.randomUUID()
+            }
+          } catch (_) {}
+          return `ep-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+        }
+        const valid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value)
+        try {
+          const stored = localStorage.getItem(endpointIdStorageKey)
+          if (valid(stored)) {
+            cachedEndpointId = stored
+            return cachedEndpointId
+          }
+          const minted = mint()
+          localStorage.setItem(endpointIdStorageKey, minted)
+          cachedEndpointId = minted
+        } catch (_) {
+          // Storage blocked (private mode / iframe): fall back to an in-memory
+          // id that is at least stable for the life of this tab.
+          cachedEndpointId = mint()
+        }
+        return cachedEndpointId
+      }
       const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`
       const audioSettingsSchemaVersion = 7
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
@@ -19005,6 +19105,7 @@
           roomCapacity = Number.isFinite(Number(payload?.capacity)) ? Number(payload.capacity) : roomCapacity
           occupiedSeats = Number.isFinite(Number(payload?.occupiedSeats)) ? Number(payload.occupiedSeats) : names.length
           applyParticipantMediaStates(payload?.mediaStates)
+          applyParticipantEndpointCounts(payload?.endpointCounts)
           applyRoomRecordingState(payload?.recording)
         } else {
           occupiedSeats = names.length
@@ -19024,6 +19125,100 @@
         roomRecordingUpdatedBy = recording.updatedBy || ''
         updateRoomRecordingControls()
         applyRoomListeningStatus()
+      }
+
+      function applyParticipantEndpointCounts(endpointCounts) {
+        const next = {}
+        if (endpointCounts && typeof endpointCounts === 'object') {
+          for (const [name, count] of Object.entries(endpointCounts)) {
+            const key = String(name || '').trim().toLowerCase()
+            const value = Number(count)
+            if (key && Number.isFinite(value) && value > 0) {
+              next[key] = value
+            }
+          }
+        }
+        participantEndpointCounts = next
+      }
+
+      // How many devices a given account is currently in the room on. Defaults
+      // to 1 for any present participant we have no explicit count for (older
+      // servers, or a name from a plain list snapshot).
+      function participantDeviceCount(name) {
+        const key = String(name || '').trim().toLowerCase()
+        if (!key) {
+          return 0
+        }
+        return participantEndpointCounts[key] || 1
+      }
+
+      // Subtle roster suffix: a person on two devices reads as one identity with
+      // a "· 2 devices" affordance, never as a duplicate seat.
+      function participantDeviceSuffix(name) {
+        const count = participantDeviceCount(name)
+        return count > 1 ? ` · ${count} devices` : ''
+      }
+
+      // Multi-device handoff chip (rtc §5.4). When the local account is present
+      // on more than one device, both stay in the room — there is no alarming
+      // session_replaced eviction. This calm, dismissible chip simply names the
+      // situation and offers "leave here" for a deliberate hand-off.
+      let multiDeviceHandoffChip = null
+      let multiDeviceHandoffDismissed = false
+      function ensureMultiDeviceHandoffChip() {
+        if (multiDeviceHandoffChip) {
+          return multiDeviceHandoffChip
+        }
+        const chip = document.createElement('div')
+        chip.className = 'multi-device-chip'
+        chip.setAttribute('role', 'status')
+        chip.hidden = true
+        const label = document.createElement('span')
+        label.className = 'multi-device-chip__label'
+        label.textContent = 'You joined from another device'
+        const leave = document.createElement('button')
+        leave.type = 'button'
+        leave.className = 'multi-device-chip__action'
+        leave.textContent = 'leave here'
+        leave.addEventListener('click', () => {
+          hideMultiDeviceHandoffChip()
+          leaveRoom()
+        })
+        const dismiss = document.createElement('button')
+        dismiss.type = 'button'
+        dismiss.className = 'multi-device-chip__dismiss'
+        dismiss.setAttribute('aria-label', 'dismiss')
+        dismiss.textContent = '×'
+        dismiss.addEventListener('click', () => {
+          multiDeviceHandoffDismissed = true
+          hideMultiDeviceHandoffChip()
+        })
+        chip.append(label, leave, dismiss)
+        document.body.appendChild(chip)
+        multiDeviceHandoffChip = chip
+        return chip
+      }
+      function hideMultiDeviceHandoffChip() {
+        if (multiDeviceHandoffChip) {
+          multiDeviceHandoffChip.hidden = true
+        }
+      }
+      function updateMultiDeviceHandoffChip() {
+        const inRoom = appShell.classList.contains('is-in-room')
+        const count = inRoom && currentParticipantName ? participantDeviceCount(currentParticipantName) : 0
+        if (count > 1 && !multiDeviceHandoffDismissed) {
+          const chip = ensureMultiDeviceHandoffChip()
+          chip.querySelector('.multi-device-chip__label').textContent =
+            count > 2 ? `You're in this room on ${count} devices` : 'You joined from another device'
+          chip.hidden = false
+        } else {
+          hideMultiDeviceHandoffChip()
+          if (count <= 1) {
+            // once you're back to a single device, a future second join should
+            // surface the chip again.
+            multiDeviceHandoffDismissed = false
+          }
+        }
       }
 
       function normalizeParticipantList(names) {
@@ -19159,7 +19354,11 @@
         const liveSpeaker = speaker && speaker !== 'the room' && names.includes(speaker)
           ? `${speaker} ${speakerState.micMuted ? 'is muted' : speakerState.cameraOff ? 'camera off' : 'is speaking'}`
           : names.slice(0, 2).join(', ')
-        waitingParticipants.textContent = `${seatCount} inside · ${liveSpeaker}`
+        // Subtle multi-device affordance: a person on more than one device reads
+        // as one identity carrying a "· N devices" note, never a duplicate seat.
+        const multiDevice = names.find(name => participantDeviceCount(name) > 1)
+        const multiDeviceNote = multiDevice ? ` · ${multiDevice}${participantDeviceSuffix(multiDevice)}` : ''
+        waitingParticipants.textContent = `${seatCount} inside · ${liveSpeaker}${multiDeviceNote}`
       }
 
       function setRoomView(inRoom) {
@@ -22316,7 +22515,8 @@
           socket.send(JSON.stringify({
             event: 'participant',
             data: JSON.stringify({
-              name: currentParticipantName
+              name: currentParticipantName,
+              endpointId: ensureEndpointId()
             })
           }))
         }
@@ -25430,6 +25630,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         updateParticipantPreviewText()
         updateHearthParticipants()
+        updateMultiDeviceHandoffChip()
       }
 
       function handleParticipantJoined(participant) {
@@ -34524,6 +34725,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         cancelVideoTilePointerDrag()
         isLeavingRoom = true
+        participantEndpointCounts = {}
+        hideMultiDeviceHandoffChip()
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
         clearIceRestartRetryTimer()

@@ -158,15 +158,10 @@ Requirements: keep branch main; go test ./... green; compact nothing yet (first 
 
 ## Wave 2
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Goal state enum + goalPlan JSON schema persisted on artifact metadata
-- [ ] Transition engine (decompose/assign/coordinate/execute, cap 2, children via launchAgentThreadWithOrigin)
-- [ ] Review/gate/verify model calls + bounded retries + external-write → approval_required stop
-- [ ] save_what_worked + four-line report + gate-outcome/ASSUMED-count fields
-- [ ] Boot reconciler (resume all non-terminal mode=goal artifacts)
-- [ ] Tests: state table, plan validation, resumability, external-write safety regression
+Status: `completed` (commit 7779513, reviewed PASS after 3 critical fixes)
+Files: goal_engine.go (~1,500), goal_engine_test.go (~600), agent_thread_runner.go, agent_runner_iface.go, codex_runner_queue.go, kanban.go:500 (reconciler wire).
+Review fixes: sidecar subtasks now fold via internalCodexRunnerResultHandler (goals no longer hang; fold paths mutually exclusive); artifactRunnerActionHandler approve branch routes mode=goal → resumeApprovedGoal (vetted command, not raw-text job); commit_push idempotent via mode=goal_commit child + CommitChildID; child authority clamped ≤ parent.
+Risks carried forward: Wave 6 — voice initiate_goal calls launchGoalThread and needs a graceful keyless fallback; sidecar re-derives authority from text (deferred, comment in code) — Wave 6 should honor the engine's clamp. Wave 8 — add requester-notification round-trip on approve/reject (resume path already wired). Wave 10 — tool prompts inject at (e *goalEngine).decompose system prompt. Nice-to-have: HTTP-level test for the approve-routing branch. Narrow known window: crash between commit-child create and CommitChildID persist could duplicate one job (consistent with existing dispatch pattern).
 
 ---
 
@@ -182,15 +177,12 @@ Risks carried forward: Wave 8 must add an os_event at resolveCodexProposal (appr
 
 ## Wave 4
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Client endpointId (localStorage, additive hello field)
-- [ ] Server endpoint-keyed sessions + capacity by name + cap 2/account
-- [ ] Roster identity + other-device chip + muted-playback self-echo guard + handoff chip
-- [ ] endpoint_session_test.go + renegotiation case + existing participants tests green
-- [ ] scripts/multi-endpoint-smoke.mjs
-- [ ] OPS-1 (ops-agent: commit, .env additions, rsync, rebuild, verify + RSS)
+Status: `completed` (reviewed PASS; commit follows as OPS-1)
+Files: kanban.go (~110 net — endpoint-keyed sessions, presence-transition gating), main.go (+105 — connection index, hello parse, activeWebsocketHandlers race fix), index.html (+207 — endpoint mint, roster affordance, handoff chip), websocket_auth_test.go (+54), endpoint_session_test.go (309, 9 tests), scripts/multi-endpoint-smoke.mjs (189).
+Review fixes: per-device join/left broadcasts caused third-party tile teardown → presence now gates on true person-level transitions (firstEndpoint/stillPresent); bonus: idle-meeting timer no longer arms on partial departure. Pre-existing ws data race fixed (handler drain counter; production never blocks).
+**Decisions (deliberate deviations from rtc §1.3.4-5, reviewer-accepted):** (1) self-echo guard = structural same-name track exclusion (acceptsTrack), NOT muted-playback + chip — simpler and echo-proof by construction; (2) one-visible-tile-per-account; true dual-tile per endpoint deferred to follow-up task #24 (~15 call-site re-key, UI risk). "· N devices" affordance reflects presence count honestly.
+Smoke: 12/12 keyless two-context same-account (docstring corrected to claim only what it tests). Full-package -race green (340s).
+Risks carried forward: dual-tile follow-up (#24); smoke script requires ms-playwright cache (self-SKIPs otherwise).
 
 ---
 

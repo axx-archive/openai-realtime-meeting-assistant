@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -172,15 +173,22 @@ type kanbanRealtimeOutputItem struct {
 }
 
 type kanbanBoardApp struct {
-	mu                           sync.Mutex
-	cards                        []kanbanCard
-	nextCreatedIndex             int
-	updatedAt                    time.Time
-	handledCalls                 map[string]struct{}
-	memory                       *meetingMemoryStore
-	participants                 map[string]time.Time
-	participantCounts            map[string]int
-	participantSessions          map[string]string
+	mu                sync.Mutex
+	cards             []kanbanCard
+	nextCreatedIndex  int
+	updatedAt         time.Time
+	handledCalls      map[string]struct{}
+	memory            *meetingMemoryStore
+	participants      map[string]time.Time
+	participantCounts map[string]int
+	// participantEndpoints keys live sessions by (participant name -> endpoint
+	// id -> session id). One account can hold several concurrent endpoints (a
+	// laptop and a phone) at once; each device has a stable endpoint id and its
+	// own session slot, so a refresh on one device replaces only that device's
+	// prior session while the other device stays admitted. Legacy/native
+	// clients that send no endpoint id share the empty-string slot, which
+	// collapses to the original one-name-one-session behaviour.
+	participantEndpoints         map[string]map[string]string
 	participantMedia             map[string]participantMediaState
 	transcriptRecordingEnabled   bool
 	transcriptRecordingUpdatedAt time.Time
@@ -321,7 +329,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		memory:                       memory,
 		participants:                 map[string]time.Time{},
 		participantCounts:            map[string]int{},
-		participantSessions:          map[string]string{},
+		participantEndpoints:         map[string]map[string]string{},
 		participantMedia:             map[string]participantMediaState{},
 		transcriptRecordingEnabled:   true,
 		transcriptRecordingUpdatedAt: updatedAt,
@@ -3865,63 +3873,149 @@ func (app *kanbanBoardApp) snapshotState() kanbanBoardState {
 	return state
 }
 
+// defaultMaxEndpointsPerUser bounds how many concurrent devices one account may
+// hold in the room at once. Two lets the mandated laptop+phone case work while
+// keeping fan-out on the small VPS predictable.
+const defaultMaxEndpointsPerUser = 2
+
+// maxEndpointsPerUser reads BONFIRE_MAX_ENDPOINTS_PER_USER, defaulting to and
+// flooring at defaultMaxEndpointsPerUser so a misconfigured value never drops
+// below the single-device guarantee.
+func maxEndpointsPerUser() int {
+	raw := strings.TrimSpace(os.Getenv("BONFIRE_MAX_ENDPOINTS_PER_USER"))
+	if raw == "" {
+		return defaultMaxEndpointsPerUser
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return defaultMaxEndpointsPerUser
+	}
+	return value
+}
+
 func (app *kanbanBoardApp) admitParticipant(name string) (string, error) {
 	return app.admitParticipantSession(name, "")
 }
 
+// admitParticipantSession preserves the original one-session-per-name contract
+// for callers (and tests) that do not carry a device endpoint id: the empty
+// endpoint id collapses to a single shared slot.
 func (app *kanbanBoardApp) admitParticipantSession(name string, sessionID string) (string, error) {
+	admitted, _, err := app.admitParticipantSessionEndpoint(name, sessionID, "")
+	return admitted, err
+}
+
+// admitParticipantSessionEndpoint admits (or refreshes) one endpoint of an
+// account. Capacity is counted per distinct name, so a person on two devices
+// still consumes a single seat; the number of concurrent endpoints one account
+// may hold is bounded by maxEndpointsPerUser so fan-out stays affordable. The
+// returned firstEndpoint is true only when this admission brought the account
+// from absent to present, so callers can announce a genuine "joined" to the
+// room without firing a spurious join every time a second device connects.
+func (app *kanbanBoardApp) admitParticipantSessionEndpoint(name string, sessionID string, endpointID string) (admitted string, firstEndpoint bool, err error) {
 	name = canonicalParticipantName(name)
 	if name == "" {
-		return "", fmt.Errorf("choose a listed participant and enter the room password")
+		return "", false, fmt.Errorf("choose a listed participant and enter the room password")
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
 	capacity := configuredMeetingRoomCapacity()
-	if active := app.activeParticipantCountLocked(); app.participantCounts[name] <= 0 && active >= capacity {
-		return "", fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
+	alreadyPresent := app.participantCounts[name] > 0
+	if !alreadyPresent && app.activeParticipantCountLocked() >= capacity {
+		return "", false, fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
 	}
+
+	endpoints := app.participantEndpoints[name]
+	if endpoints == nil {
+		endpoints = map[string]string{}
+		app.participantEndpoints[name] = endpoints
+	}
+	_, endpointExisted := endpoints[endpointID]
+	if !endpointExisted && len(endpoints) >= maxEndpointsPerUser() {
+		return "", false, fmt.Errorf("you're already connected from %d devices. leave one to join here", maxEndpointsPerUser())
+	}
+	endpoints[endpointID] = sessionID
 
 	now := time.Now().UTC()
 	app.participants[name] = now
-	app.participantCounts[name] = 1
-	app.participantSessions[name] = sessionID
-	app.participantMedia[name] = participantMediaState{
-		UpdatedAt: now.Format(time.RFC3339Nano),
+	app.participantCounts[name] = len(endpoints)
+	// Reset the shared media state on a fresh account or when an endpoint's own
+	// session reconnects (a refreshed tab), but NOT when an additional device
+	// joins an already-present account — otherwise the first device's mute/
+	// camera state would be clobbered by the second device's arrival.
+	if !alreadyPresent || endpointExisted {
+		app.participantMedia[name] = participantMediaState{
+			UpdatedAt: now.Format(time.RFC3339Nano),
+		}
 	}
 
-	return name, nil
+	return name, !alreadyPresent, nil
 }
 
 func (app *kanbanBoardApp) forgetParticipant(name string) {
 	app.forgetParticipantSession(name, "")
 }
 
+// forgetParticipantSession drops one session. With an empty sessionID it clears
+// the whole account (the forgetParticipant path). With a real sessionID it only
+// removes the endpoint that currently holds that session; a stale session that
+// has already been replaced is a no-op (returns false), and other endpoints of
+// the same account are left untouched.
 func (app *kanbanBoardApp) forgetParticipantSession(name string, sessionID string) bool {
+	removed, _ := app.forgetParticipantSessionResult(name, sessionID)
+	return removed
+}
+
+// forgetParticipantSessionResult is forgetParticipantSession with presence
+// bookkeeping: stillPresent reports whether the account still holds another live
+// endpoint after this removal, so callers announce "left" only when the last
+// device is gone — not when one of a person's two devices disconnects.
+func (app *kanbanBoardApp) forgetParticipantSessionResult(name string, sessionID string) (removed bool, stillPresent bool) {
 	name = canonicalParticipantName(name)
 	if name == "" {
-		return false
+		return false, false
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
+	endpoints := app.participantEndpoints[name]
+
 	if sessionID != "" {
-		currentSessionID, ok := app.participantSessions[name]
-		if !ok || currentSessionID != sessionID {
-			return false
+		matchedEndpoint := ""
+		matched := false
+		for endpointID, storedSessionID := range endpoints {
+			if storedSessionID == sessionID {
+				matchedEndpoint = endpointID
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false, app.participantCounts[name] > 0
+		}
+		delete(endpoints, matchedEndpoint)
+		if len(endpoints) > 0 {
+			app.participantCounts[name] = len(endpoints)
+			app.participants[name] = time.Now().UTC()
+			return true, true
 		}
 	}
 
 	delete(app.participantCounts, name)
 	delete(app.participants, name)
-	delete(app.participantSessions, name)
+	delete(app.participantEndpoints, name)
 	delete(app.participantMedia, name)
 
-	return true
+	return true, false
 }
 
+// participantSessionCurrent reports whether the given session is still the live
+// session for its endpoint. A session stays current until a newer session
+// replaces it on the SAME endpoint (a refreshed tab); a second device with its
+// own endpoint id never invalidates the first device's session.
 func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID string) bool {
 	name = canonicalParticipantName(name)
 	if name == "" {
@@ -3938,7 +4032,13 @@ func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID stri
 		return true
 	}
 
-	return app.participantSessions[name] == sessionID
+	for _, storedSessionID := range app.participantEndpoints[name] {
+		if storedSessionID == sessionID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (app *kanbanBoardApp) activeParticipantCount() int {
@@ -3957,6 +4057,20 @@ func (app *kanbanBoardApp) activeParticipantCountLocked() int {
 	}
 
 	return active
+}
+
+// participantEndpointCountsLocked reports how many concurrent devices each
+// in-room account currently holds, so the roster can render a subtle
+// "· 2 devices" affordance for a person on more than one endpoint. Callers must
+// hold app.mu.
+func (app *kanbanBoardApp) participantEndpointCountsLocked() map[string]int {
+	counts := make(map[string]int, len(app.participantEndpoints))
+	for name, endpoints := range app.participantEndpoints {
+		if count := len(endpoints); count > 0 {
+			counts[name] = count
+		}
+	}
+	return counts
 }
 
 func (app *kanbanBoardApp) participantSnapshot() []string {
@@ -4104,6 +4218,7 @@ func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 		"occupiedSeats":  occupiedSeats,
 		"availableSeats": availableSeats,
 		"mediaStates":    mediaStates,
+		"endpointCounts": app.participantEndpointCountsLocked(),
 		"recording":      app.roomRecordingStateLocked(),
 	}
 }

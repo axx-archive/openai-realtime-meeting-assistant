@@ -40,10 +40,13 @@ func TestWebsocketAdmitsSessionIdentity(t *testing.T) {
 
 	// The handler outlives httptest.Server.Close (the websocket is hijacked),
 	// so the global app is left in place rather than restored to nil — a nil
-	// kanbanApp would panic the handler's deferred cleanup.
+	// kanbanApp would panic the handler's deferred cleanup. Drain the leaked
+	// handler before the test returns so a later test's kanbanApp swap can't
+	// race this connection's reads (runs after the conn/server close defers).
 	if kanbanApp == nil {
 		kanbanApp = newKanbanBoardApp()
 	}
+	t.Cleanup(func() { waitForWebsocketHandlersToDrain(t, 5*time.Second) })
 
 	token, err := userSessionStore().create("aj@shareability.com")
 	if err != nil {
@@ -115,11 +118,16 @@ func TestWebsocketAdmitsAccountEmailWhenDisplayNameChanges(t *testing.T) {
 
 	previousApp := kanbanApp
 	kanbanApp = newKanbanBoardApp()
-	if previousApp != nil {
-		t.Cleanup(func() {
+	// Drain the hijacked handler before restoring the global, otherwise the
+	// leaked goroutine's kanbanApp reads race this write (and the swap above
+	// races any prior leaked handler — every websocket test drains, so none
+	// leak past its own return).
+	t.Cleanup(func() {
+		waitForWebsocketHandlersToDrain(t, 5*time.Second)
+		if previousApp != nil {
 			kanbanApp = previousApp
-		})
-	}
+		}
+	})
 
 	if _, err := accountStore().updateProfile("aj@shareability.com", "// aj", ""); err != nil {
 		t.Fatalf("update profile: %v", err)
@@ -191,11 +199,14 @@ func TestWebsocketNativeMediaReadyReceivesServerOffer(t *testing.T) {
 
 	previousApp := kanbanApp
 	kanbanApp = newKanbanBoardApp()
-	if previousApp != nil {
-		t.Cleanup(func() {
+	// Drain the hijacked handler before restoring the global (see the twin note
+	// in TestWebsocketAdmitsAccountEmailWhenDisplayNameChanges).
+	t.Cleanup(func() {
+		waitForWebsocketHandlersToDrain(t, 5*time.Second)
+		if previousApp != nil {
 			kanbanApp = previousApp
-		})
-	}
+		}
+	})
 
 	listLock.Lock()
 	previousPeerConnections := peerConnections
@@ -375,6 +386,12 @@ func newIsolatedNativeWebsocket(t *testing.T, email string) *websocket.Conn {
 func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
+	// Registered first so it runs LAST — after the conn.Close and server.Close
+	// cleanups — guaranteeing the hijacked handler goroutine has fully returned
+	// before this test's isolated globals go out of scope and the next test
+	// (which may swap kanbanApp) begins.
+	t.Cleanup(func() { waitForWebsocketHandlersToDrain(t, 5*time.Second) })
+
 	dir := t.TempDir()
 	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
 	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
@@ -542,4 +559,23 @@ func waitForNativeLayerTier(t *testing.T, participant string, tier layerTier, ti
 	listLock.RLock()
 	defer listLock.RUnlock()
 	t.Fatalf("subscriber layer for %s did not become %s; active=%v tiers=%v", participant, tier, activeParticipantConnections, subscriberLayerTiers)
+}
+
+// waitForWebsocketHandlersToDrain blocks until every in-flight websocketHandler
+// goroutine has returned — including its deferred cleanup that reads package
+// globals such as kanbanApp. A hijacked websocket outlives
+// httptest.Server.Close, so a test must drain here before it (or the next test)
+// swaps one of those globals, otherwise the leaked handler and the swap race.
+func waitForWebsocketHandlersToDrain(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if activeWebsocketHandlers.Load() == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if remaining := activeWebsocketHandlers.Load(); remaining != 0 {
+		t.Logf("warning: %d websocket handler(s) still active after %s drain wait", remaining, timeout)
+	}
 }
