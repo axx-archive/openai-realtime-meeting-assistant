@@ -179,7 +179,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	html := string(rawHTML)
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office">`,
-		`data-tool="office" aria-label="Home" aria-pressed="true"`,
+		`data-tool="office" aria-label="BonfireOS home" aria-pressed="true"`,
 		`data-tool="room" aria-label="The room" aria-pressed="false"`,
 		`data-tool="chat" aria-label="Chat" aria-pressed="false"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -190,7 +190,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"setRailHidden(railHidden, { persist: false })",
 		"setRailHidden(false, { persist: false })",
 		`id="officeTool" class="office-tool"`,
-		`class="office-launch__wave"`,
+		`class="office-launch__wave pressable"`,
 		`data-assistant-mode="workflow"`,
 		`id="osAssistant" class="os-assistant"`,
 		`.os-assistant__toggle[hidden]`,
@@ -661,12 +661,12 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"left: calc(100% + 14px);",
 		"max-width: none;",
 		"pointer-events: none;",
-		".tool-rail__tool:hover .tool-rail__label,",
-		".tool-rail__tool:focus-visible .tool-rail__label",
-		"transition-delay: 300ms;",
+		".tool-rail__tool:hover .tool-rail__label {",
+		".tool-rail__tool:focus-visible .tool-rail__label {",
+		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
 		"padding-left: 60px;",
-		`<span class="tool-rail__label">office</span>`,
+		`<span class="tool-rail__label">BonfireOS</span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -2134,5 +2134,58 @@ func TestIndexOfficeShellResilienceGuards(t *testing.T) {
 	selectBody := functionBody(html, "function selectScoutChatThread(id)")
 	if !strings.Contains(selectBody, "syncChatScopeToSelectedThread()") {
 		t.Fatal("selecting a thread must sync the scope pill to its visibility")
+	}
+}
+
+// TestIndexBonfireOSRenameAndAgentToken pins the Spectacular OS Wave 5
+// design-system foundation: the "Office" tab renamed to BonfireOS everywhere it
+// surfaces, and the single agent-working ember accent token. A future refactor
+// that drops the rename or the token fails CI here. The load-bearing `office`
+// data-tool KEY must survive the rename — it is asserted to stay.
+func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	// The rename surfaces (labels only).
+	for _, want := range []string{
+		`<span class="tool-rail__label">BonfireOS</span>`,
+		`data-tool="office" aria-label="BonfireOS home" aria-pressed="true"`,
+		`aria-label="Back to BonfireOS"`,
+		`id="officeTool" class="office-tool" aria-label="BonfireOS"`,
+		"office: 'BonfireOS',",
+		"? 'BonfireOS'",
+		"|| 'BonfireOS'",
+		"'BonfireOS ready'",
+		// the one warm accent, defined once per theme block and its glow
+		"--agent: #FF7A2B;",
+		"--agent-soft:",
+		"--glow-agent:",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing BonfireOS rename / agent-token marker %q", want)
+		}
+	}
+
+	// The `office` data-tool KEY is load-bearing and must never be renamed.
+	for _, key := range []string{
+		`<main id="appShell" data-tool="office">`,
+		`data-tool="office"`,
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
+	} {
+		if !strings.Contains(html, key) {
+			t.Fatalf("index.html dropped the load-bearing office data-tool key %q", key)
+		}
+	}
+
+	// The rename must not leave the tab labelled "Office" in the title map.
+	if strings.Contains(html, "office: 'Office',") {
+		t.Fatal("toolTitles still maps office -> 'Office'; expected 'BonfireOS'")
+	}
+	// The ember accent is defined in BOTH theme blocks (light :root + dark).
+	if got := strings.Count(html, "--agent: #FF7A2B;"); got < 2 {
+		t.Fatalf("--agent must be defined in both theme blocks, found %d", got)
 	}
 }
