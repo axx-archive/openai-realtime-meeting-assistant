@@ -815,7 +815,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 			if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" {
 				switch strings.ToLower(strings.TrimSpace(payload.Status)) {
 				case codexJobStatusComplete, codexJobStatusFailed:
-					go kanbanApp.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+					foldGoalChildAsync(kanbanApp, parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
 				}
 			}
 		}

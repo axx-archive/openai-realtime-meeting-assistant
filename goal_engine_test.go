@@ -110,6 +110,14 @@ func installFakeResponder(t *testing.T, routes goalResponderRoutes) {
 	originalStart := startGoalThreadAsync
 	t.Cleanup(func() { startGoalThreadAsync = originalStart })
 	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	// The codex callback folds on its own goroutine in production; run it inline
+	// under test so a fold (and its broadcasts) fully completes before the
+	// callback returns — no goroutine leaks across test boundaries.
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
 }
 
 func waitForGoalStage(t *testing.T, app *kanbanBoardApp, parentID string, want string) goalPlan {
