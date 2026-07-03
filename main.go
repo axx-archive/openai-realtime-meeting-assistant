@@ -519,6 +519,7 @@ func main() {
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)
+	http.HandleFunc("/assistant/tools", assistantToolsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
@@ -1000,6 +1001,7 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		Objective     string `json:"objective"`
 		Package       string `json:"package"`
+		ToolTemplate  string `json:"toolTemplate"`
 		AuthorityHint string `json:"authorityHint"`
 		OriginSurface string `json:"originSurface"`
 	}{}
@@ -1024,11 +1026,12 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
-		Objective: payload.Objective,
-		CreatedBy: user.Email,
-		Authority: authority,
-		PackageID: strings.TrimSpace(payload.Package),
-		Origin:    origin,
+		Objective:    payload.Objective,
+		CreatedBy:    user.Email,
+		Authority:    authority,
+		PackageID:    strings.TrimSpace(payload.Package),
+		ToolTemplate: strings.TrimSpace(payload.ToolTemplate),
+		Origin:       origin,
 	})
 	if err != nil {
 		if errors.Is(err, errAgentWorkerNotConfigured) {

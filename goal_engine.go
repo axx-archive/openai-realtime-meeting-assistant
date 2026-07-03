@@ -83,6 +83,7 @@ type goalPlan struct {
 	CreatedBy         string           `json:"createdBy"`
 	Authority         string           `json:"authority"`
 	PackageID         string           `json:"packageId,omitempty"`
+	ToolTemplate      string           `json:"toolTemplate,omitempty"`
 	State             string           `json:"state"`
 	Subtasks          []goalSubtask    `json:"subtasks"`
 	Gate              goalGate         `json:"gate"`
@@ -301,16 +302,84 @@ func goalEngineLock(parentID string) *sync.Mutex {
 	return lock.(*sync.Mutex)
 }
 
+// --- Tool-template grounding (Wave 10) ---------------------------------------
+
+// resolvedTool returns the goal's tool template entry, if it carries one.
+func (e *goalEngine) resolvedTool(plan *goalPlan) (packagingTool, bool) {
+	return toolByID(plan.ToolTemplate)
+}
+
+// toolPromptContextForPlan fills the master wrapper's grounding slots from the
+// studio's own record so a tool-templated goal cannot write from priors alone
+// (the wrapper's quality lever). Missing slots fall back to the wrapper's own
+// "(none…)" defaults via assembleToolPrompt.
+func (e *goalEngine) toolPromptContextForPlan(plan *goalPlan, tool packagingTool) toolPromptContext {
+	ctx := toolPromptContext{
+		GoalStatement:   plan.Objective,
+		Actor:           firstNonEmptyString(plan.CreatedBy, "the studio"),
+		SuccessCriteria: "the output satisfies the " + tool.Name + " contract and passes " + firstNonEmptyString(tool.Rubric.Ref, tool.ID+"_gate"),
+	}
+	artifacts, decisions, recent, memory := e.app.goalGroundingSlots(plan.PackageID)
+	ctx.PackageArtifacts = artifacts
+	ctx.RelevantDecisions = decisions
+	ctx.RelevantArtifacts = recent
+	ctx.RelevantMemory = memory
+	if pkg, ok := e.app.venturePackageByID(plan.PackageID); ok {
+		ctx.PackageName = pkg.Name
+	}
+	return ctx
+}
+
+// goalGroundingSlots returns the four wrapper grounding strings: package-attached
+// artifact titles+bodies, package decisions, recent artifacts, and recent
+// durable memory. Each is bounded and compacted; an empty slot returns "" so the
+// wrapper falls back to its own default.
+func (app *kanbanBoardApp) goalGroundingSlots(packageID string) (artifacts string, decisions string, recent string, memory string) {
+	if app == nil || app.memory == nil {
+		return "", "", "", ""
+	}
+	packageID = strings.TrimSpace(packageID)
+	const maxLines = 6
+
+	var attached, recentLines, decisionLines []string
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 40) {
+		title := firstNonEmptyString(entry.Metadata["title"], compactAssistantLine(entry.Text))
+		line := "- " + title + ": " + compactAssistantLine(entry.Text)
+		if packageID != "" && strings.TrimSpace(entry.Metadata["packageId"]) == packageID {
+			if len(attached) < maxLines {
+				attached = append(attached, line)
+			}
+		} else if len(recentLines) < maxLines {
+			recentLines = append(recentLines, "- "+title)
+		}
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 40) {
+		if packageID != "" && strings.TrimSpace(entry.Metadata["packageId"]) != packageID {
+			continue
+		}
+		decisionLines = append(decisionLines, "- "+compactAssistantLine(entry.Text))
+		if len(decisionLines) >= maxLines {
+			break
+		}
+	}
+	var memoryLines []string
+	for _, entry := range app.memorySnapshotForClients(12) {
+		memoryLines = append(memoryLines, "- "+entry.Kind+": "+compactAssistantLine(entry.Text))
+	}
+	return strings.Join(attached, "\n"), strings.Join(decisionLines, "\n"), strings.Join(recentLines, "\n"), strings.Join(memoryLines, "\n")
+}
+
 // --- Launch path -------------------------------------------------------------
 
 // goalLaunchSpec is the additive input to launchGoalThread. Only Objective is
 // required; the rest is derived when absent.
 type goalLaunchSpec struct {
-	Objective string
-	CreatedBy string
-	Authority string
-	PackageID string
-	Origin    map[string]string
+	Objective    string
+	CreatedBy    string
+	Authority    string
+	PackageID    string
+	ToolTemplate string
+	Origin       map[string]string
 }
 
 // launchGoalThread creates the mode=goal thread/artifact with an initial plan
@@ -336,6 +405,10 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 	authority = normalizeCodexJobAuthority(authority)
 
+	// Resolve the tool template (if any). An unknown id degrades to a plain
+	// goal — a stray toolTemplate is never an error, per the registry contract.
+	toolTemplate := normalizeToolTemplate(spec.ToolTemplate)
+
 	goalID := fmt.Sprintf("agent-thread-goal-%d", app.nowUnixNano())
 	plan := goalPlan{
 		PlanVersion:  goalPlanVersion,
@@ -344,6 +417,7 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 		CreatedBy:    createdBy,
 		Authority:    authority,
 		PackageID:    strings.TrimSpace(spec.PackageID),
+		ToolTemplate: toolTemplate,
 		State:        goalStateIdentify,
 		Gate:         goalGate{Status: "pending"},
 		Verification: goalVerification{Verdict: "pending"},
@@ -377,6 +451,17 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 	if plan.PackageID != "" {
 		metadata["packageId"] = plan.PackageID
+	}
+	// A tool-templated goal stamps the tool + its output contract so the running
+	// card, recall indexing, and the contract parsers see the same shape a
+	// single-shot tool thread would (flywheel write #3: the artifact is indexed
+	// under its contract for the next tool's grounding).
+	if tool, ok := toolByID(toolTemplate); ok {
+		metadata["toolTemplate"] = tool.ID
+		metadata["toolGroup"] = tool.Group
+		if tool.Contract != "" {
+			metadata["artifactContract"] = tool.Contract
+		}
 	}
 	for _, key := range agentThreadOriginMetadataKeys {
 		if value := strings.TrimSpace(spec.Origin[key]); value != "" {
@@ -585,6 +670,14 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 		"Do not include any external_write (commit, push, deploy, email, production) work as a subtask; that is gated separately at ship time.",
 	}, "\n")
 	user := "Goal: " + plan.Objective + "\nRequested by: " + firstNonEmptyString(plan.CreatedBy, "the room") + "\nAuthority: " + plan.Authority
+	// A tool-templated goal hands the decomposer the tool's full A++ prompt: the
+	// master wrapper (grounded in Bonfire's own record) with the tool body and
+	// exact output contract, so the plan's terminal subtask produces that
+	// contract. The last subtask must emit the tool's exact output headings.
+	if tool, ok := e.resolvedTool(plan); ok {
+		prompt := assembleToolPrompt(tool, e.toolPromptContextForPlan(plan, tool))
+		user += "\n\nThis goal runs the \"" + tool.Name + "\" tool. Decompose so the FINAL subtask produces its output contract exactly. The tool's full instructions and output contract:\n" + prompt
+	}
 	if plan.DecomposeAttempts > 0 {
 		user += "\n\nYour previous plan was rejected as invalid JSON or schema. Return only the JSON object described."
 	}
@@ -710,6 +803,15 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 		SubtaskID:      st.ID,
 		AssignedRunner: st.Runner,
 	}
+	// The deliverable-producing subtask carries the tool template so the model
+	// that actually WRITES the artifact receives the tool's full A++ prompt
+	// (role, evidence discipline, exact output contract, gate rubric) — the
+	// wrapper is the quality lever only if it reaches generation, not just the
+	// decomposer. Upstream subtasks (research feeding a one-pager) keep the
+	// generic per-mode contract so they don't each try to emit the deliverable.
+	if st.ID == goalDeliverableSubtaskID(plan) {
+		spec.ToolTemplate = plan.ToolTemplate
+	}
 	// Children deliver back through the fold + creator notification, not a room
 	// origin, so no origin metadata is stamped on the subtask thread.
 	thread, err := e.app.launchAgentThreadWithSpec(st.Mode, query, plan.CreatedBy, nil, spec)
@@ -719,6 +821,45 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	st.ThreadID = thread.ID
 	st.ArtifactID = thread.Artifact.ID
 	return nil
+}
+
+// goalDeliverableSubtaskID picks the subtask that produces the goal's final
+// deliverable — the one whose generation should receive the tool template.
+// Rule: among sinks (subtasks nothing else depends on), prefer one whose mode
+// matches the tool's base mode; otherwise the last sink in plan order. Returns
+// "" when the plan carries no resolvable tool (nothing is stamped). Deterministic
+// so a boot-time re-dispatch stamps the same subtask.
+func goalDeliverableSubtaskID(plan *goalPlan) string {
+	tool, ok := toolByID(plan.ToolTemplate)
+	if !ok || len(plan.Subtasks) == 0 {
+		return ""
+	}
+	hasDependent := map[string]bool{}
+	for index := range plan.Subtasks {
+		for _, dep := range plan.Subtasks[index].DependsOn {
+			hasDependent[strings.TrimSpace(dep)] = true
+		}
+	}
+	lastSink := ""
+	modeSink := ""
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if hasDependent[st.ID] {
+			continue
+		}
+		lastSink = st.ID // plan order; the later sink wins ties
+		if normalizeAgentThreadMode(st.Mode) == normalizeAgentThreadMode(tool.Mode) {
+			modeSink = st.ID
+		}
+	}
+	if modeSink != "" {
+		return modeSink
+	}
+	if lastSink != "" {
+		return lastSink
+	}
+	// No sink (shouldn't happen for an acyclic plan): fall back to the last subtask.
+	return plan.Subtasks[len(plan.Subtasks)-1].ID
 }
 
 // goalChildAuthority clamps a child subtask's authority to the LESSER of its own
@@ -906,6 +1047,12 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 		produced = compactAssistantLine(artifact.Text)
 	}
 	system := "You are Scout's reviewer for Bonfire OS. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\"}."
+	// For a tool-templated goal, the review scores against the tool's gate rubric
+	// (dimensions + bars + kill condition) rather than a generic "does it match"
+	// pass — the studio-grade quality bar for this contract.
+	if tool, ok := e.resolvedTool(plan); ok {
+		system += "\n\n" + toolReviewInstruction(tool)
+	}
 	user := "Overall goal: " + plan.Objective + "\nSubtask: " + st.Title
 	if strings.TrimSpace(st.Detail) != "" {
 		user += " — " + st.Detail
@@ -942,6 +1089,12 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 // self-approve an external write.
 func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	system := "You are Scout's ship gate for Bonfire OS. Answer one question: is the work safe and complete to publish/deliver? Return STRICT JSON only: {\"safe\":true|false,\"external_write_required\":true|false,\"command\":\"\",\"reason\":\"one line\"}. Set external_write_required true only if shipping needs a commit, push, deploy, email, or other production side effect."
+	tool, hasTool := e.resolvedTool(plan)
+	if hasTool {
+		// The ship gate also runs the tool's kill condition: a triggered kill
+		// condition is not safe to ship regardless of completeness.
+		system += "\n\n" + toolReviewInstruction(tool) + "\nIf the kill condition is triggered, set safe=false."
+	}
 	user := "Goal: " + plan.Objective + "\nAuthority: " + plan.Authority + "\nSubtasks:\n" + goalSubtaskSummary(plan)
 	text, err := e.callModel(ctx, system, user)
 
@@ -965,10 +1118,16 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	plan.Gate.Reason = strings.TrimSpace(decoded.Reason)
 	plan.Gate.Command = strings.TrimSpace(decoded.Command)
 
-	// Authority OR the gate's own read: either forces the human approval gate.
-	if plan.Authority == codexJobAuthorityExternalWrite || decoded.ExternalWriteRequired {
+	// Authority, an external-write-gated tool (the memo/deal-room class whose
+	// output crosses the building boundary), OR the gate's own read: any of the
+	// three forces the human approval gate. external_write is earned here, never
+	// self-granted.
+	if plan.Authority == codexJobAuthorityExternalWrite || (hasTool && tool.ExternalWriteGated) || decoded.ExternalWriteRequired {
 		plan.Gate.ApprovalRequired = true
 		plan.Gate.Status = goalStateApproval
+		if hasTool && tool.ExternalWriteGated && strings.TrimSpace(plan.Gate.Reason) == "" {
+			plan.Gate.Reason = tool.Name + " leaves the building; it needs human approval before it can be sent."
+		}
 		return
 	}
 	if !decoded.Safe {
@@ -998,7 +1157,7 @@ func (e *goalEngine) saveWhatWorked(plan *goalPlan, parentID string) {
 // card plus the assumed-claim count the future return card will surface. Only
 // the headline is meant to be spoken/notified; the detail lives in the artifact.
 func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
-	system := "You are Scout reporting a finished goal for Bonfire OS. Report only what matters. Return STRICT JSON only: {\"changed\":\"one line\",\"headline\":\"one line\",\"gap\":\"one line or empty\",\"next\":\"one line or empty\",\"assumed_claim_count\":0}. assumed_claim_count is how many claims in the work are assumptions not backed by a produced artifact."
+	system := "You are Scout reporting a finished goal for Bonfire OS. Report only what matters. Return STRICT JSON only: {\"changed\":\"one line\",\"headline\":\"one line\",\"gap\":\"one line or empty\",\"next\":\"one line or empty\",\"assumed_claim_count\":0,\"decision\":\"\"}. assumed_claim_count is how many claims in the work are assumptions not backed by a produced artifact. decision is the ONE concrete decision this goal explicitly established (a price, an attach/no-attach, a go/no-go) that the team should be held to later — leave it empty unless the work clearly settled one; never invent a decision."
 	user := "Goal: " + plan.Objective + "\nSubtasks:\n" + goalSubtaskSummary(plan) + "\nGate: " + plan.Gate.Status
 	text, err := e.callModel(ctx, system, user)
 
@@ -1014,6 +1173,7 @@ func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
 		Gap               string `json:"gap"`
 		Next              string `json:"next"`
 		AssumedClaimCount int    `json:"assumed_claim_count"`
+		Decision          string `json:"decision"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
 		plan.Report.Headline = compactAssistantLine(text)
@@ -1024,6 +1184,35 @@ func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
 	plan.Report.Gap = strings.TrimSpace(decoded.Gap)
 	plan.Report.Next = strings.TrimSpace(decoded.Next)
 	plan.Report.AssumedClaimCount = decoded.AssumedClaimCount
+	// Flywheel write #2 (design §4): a decision the goal explicitly established is
+	// logged to the ledger, linked to the package, so the next tool's wrapper
+	// pulls it as relevant_decisions and cannot contradict it.
+	e.recordGoalDecision(plan, decoded.Decision)
+}
+
+// recordGoalDecision fires the decision-ledger flywheel write for a goal that
+// settled one. It rides the existing appendDecision + attachToPackage seams the
+// decision-ledger worker already uses, so the entry lands in decisionLedger
+// snapshots and grounds the next tool. No package = nothing to link to = skip
+// (the design's linkage requirement); an empty decision line is a no-op.
+func (e *goalEngine) recordGoalDecision(plan *goalPlan, decision string) {
+	decision = strings.TrimSpace(decision)
+	if decision == "" || strings.TrimSpace(plan.PackageID) == "" || e.app == nil || e.app.memory == nil {
+		return
+	}
+	id := fmt.Sprintf("goal-decision-%d", e.app.nowUnixNano())
+	entry, ok, err := e.app.memory.appendDecision(id, decision, map[string]string{
+		"packageId": plan.PackageID,
+		"source":    "goal_completion",
+		"goalId":    plan.GoalID,
+	})
+	if err != nil || !ok {
+		log.Errorf("goal %s decision-ledger write failed: ok=%v err=%v", plan.GoalID, ok, err)
+		return
+	}
+	if _, err := e.app.attachToPackage(plan.PackageID, packageRefTypeDecision, entry.ID, scoutParticipantName); err != nil {
+		log.Errorf("goal %s decision attach failed: %v", plan.GoalID, err)
+	}
 }
 
 // --- Stage: verify_goal_completed -------------------------------------------

@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	anthropicMessagesURL      = "https://api.anthropic.com/v1/messages"
-	anthropicAPIVersion       = "2023-06-01"
-	defaultOrchestratorModel  = "claude-fable-5"
+	anthropicMessagesURL       = "https://api.anthropic.com/v1/messages"
+	anthropicAPIVersion        = "2023-06-01"
+	defaultOrchestratorModel   = "claude-fable-5"
 	controlToolReportGoalState = "report_goal_state"
 )
 
@@ -318,14 +318,24 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 
 func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 	authority := normalizeCodexJobAuthority(job.Authority)
+	// Wave-10 generation hop: for a tool-templated deliverable job, the tool's
+	// full A++ prompt (its exact output contract + gate rubric) replaces the
+	// generic per-mode contract, and the final-artifact instruction defers to the
+	// tool's headings instead of the generic workflow ones.
+	modeContract := agentThreadModeContract(job.Mode)
+	finalLine := "When the goal is met, write the finished artifact as your final message using stable Markdown headings (Vision, Goal, Context used, Work decomposition, Execution log, Review, Gate, What worked, Report, Next moves, Verification). Write in a practical operator voice."
+	if toolPrompt, ok := r.app.toolPromptForThread(job.thread); ok {
+		modeContract = toolPrompt
+		finalLine = "When the goal is met, write the finished artifact as your final message using the tool's OUTPUT CONTRACT above — its exact headings, nothing generic. Write in a practical operator voice."
+	}
 	return strings.Join([]string{
 		"You are Scout, the in-process orchestrator for Bonfire OS.",
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",
 		"Authority: this job is " + authority + ". read_only may inspect and report; workspace_write may change the board, memory, packages, and notifications; external_write (commit, push, deploy, SSH, email, external APIs, production mutations) is never granted in this loop — if the goal needs it, stop and report that an approval gate is required. Never claim you performed shell, browser, SSH, repository, or external work; that is a handoff to the execution runner.",
-		agentThreadModeContract(job.Mode),
-		"When the goal is met, write the finished artifact as your final message using stable Markdown headings (Vision, Goal, Context used, Work decomposition, Execution log, Review, Gate, What worked, Report, Next moves, Verification). Write in a practical operator voice.",
+		modeContract,
+		finalLine,
 	}, "\n")
 }
 

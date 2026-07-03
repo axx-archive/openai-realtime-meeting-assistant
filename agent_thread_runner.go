@@ -545,7 +545,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 
 	output, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
-		Instructions:    agentThreadInstructions(thread.Mode),
+		Instructions:    app.agentThreadInstructionsForThread(thread),
 		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.memorySnapshotForClients(20), time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "medium",
@@ -608,6 +608,25 @@ func buildAgentThreadError(thread scoutAgentThread, err error) string {
 		"Next action: reconnect the worker or run the Codex/MCP handoff from this artifact.",
 	}
 	return strings.Join(appendGoalWorkflow(lines, thread.Mode, thread.Query, err.Error(), agentThreadDeliverable(thread.Mode), "worker error recorded on artifact"), "\n")
+}
+
+// agentThreadInstructionsForThread is agentThreadInstructions plus the Wave-10
+// generation hop: when the thread carries a resolvable tool template (the
+// deliverable subtask of a tool-templated goal), the model that writes the
+// artifact receives the tool's full A++ prompt with its exact output contract
+// taking primacy over the generic workflow headings. Every other thread keeps
+// today's per-mode contract unchanged.
+func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThread) string {
+	if toolPrompt, ok := app.toolPromptForThread(thread); ok {
+		return strings.Join([]string{
+			toolPrompt,
+			"",
+			"Emit ONLY the tool's OUTPUT CONTRACT above, using its exact headings — do not add the generic workflow headings.",
+			"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
+			"Write in a practical operator voice. Keep it useful as a saved artifact, not a chat reply.",
+		}, "\n")
+	}
+	return agentThreadInstructions(thread.Mode)
 }
 
 func agentThreadInstructions(mode string) string {
