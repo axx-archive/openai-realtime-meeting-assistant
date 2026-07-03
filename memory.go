@@ -48,11 +48,52 @@ const (
 	// "# Venture packages" context section instead. Excluded from the client
 	// memory timeline too (the binder renders in the intel canvas).
 	meetingMemoryKindPackage = "package"
-	defaultMeetingMemoryPath = "data/meeting-memory.jsonl"
+	// meetingMemoryKindSlopPass is the slop-classifier's per-pass cursor +
+	// audit-stub artifact (mirrors decision_pass for the ledger). Pure
+	// bookkeeping: UI state, never knowledge — carries the consumed-through
+	// transcript cursor and, for an expiry deletion, the deleted id + reason so
+	// the FACT of a hard delete survives even though the content does not.
+	meetingMemoryKindSlopPass = "slop_pass"
+	defaultMeetingMemoryPath  = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
 )
+
+// relevance lifecycle (Wave 7). Stored on meetingMemoryEntry.Metadata under
+// key "relevance"; absent == active. active/archived stay searchable (archived
+// is down-ranked in store.search); quarantined/expired are excluded from recall,
+// model context, and the client timeline. quarantined hard-deletes 30 visible
+// days after quarantinedAt, leaving a slop_pass audit stub.
+const (
+	relevanceMetadataKey = "relevance"
+	relevanceActive      = "active"
+	relevanceArchived    = "archived"
+	relevanceQuarantined = "quarantined"
+	relevanceExpired     = "expired"
+	// archivedSearchPenalty subtracts from an archived entry's match score so it
+	// ranks below active material yet stays findable (design §6).
+	archivedSearchPenalty = 6
+)
+
+// memoryEntryRelevance returns the lifecycle state of an entry; absent == active.
+func memoryEntryRelevance(entry meetingMemoryEntry) string {
+	relevance := strings.TrimSpace(strings.ToLower(entry.Metadata[relevanceMetadataKey]))
+	if relevance == "" {
+		return relevanceActive
+	}
+	return relevance
+}
+
+// memoryEntryHiddenFromRecall reports entries excluded from search, model
+// context, and the client timeline: quarantined or expired.
+func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
+	switch memoryEntryRelevance(entry) {
+	case relevanceQuarantined, relevanceExpired:
+		return true
+	}
+	return false
+}
 
 var memoryTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
 
@@ -372,6 +413,10 @@ func (store *meetingMemoryStore) appendVenturePackage(id string, text string, me
 	return store.appendEntry(meetingMemoryKindPackage, id, text, metadata)
 }
 
+func (store *meetingMemoryStore) appendSlopPass(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindSlopPass, id, text, metadata)
+}
+
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.updateEntryWithMetadata(meetingMemoryKindScoutChat, id, text, metadataUpdates)
 }
@@ -630,7 +675,25 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	return cloneMemoryEntries(tailMemoryEntries(store.entries, limit))
+	return cloneMemoryEntries(tailMemoryEntries(store.visibleEntriesLocked(), limit))
+}
+
+// visibleEntriesLocked returns store.entries minus the entries that must never
+// reach the client memory timeline or the snapshot-fed model-context lanes:
+// quarantined/expired material (forgotten) and slop_pass cursor/audit stubs
+// (pure bookkeeping — visibleMeetingMemoryEntries filters the other UI-state
+// kinds by name but predates slop_pass, so it is dropped here). Callers that
+// must SEE quarantined entries (the quarantine tray, the classifier, expiry)
+// read store.entries via entriesByRelevance/entriesOfKind, not snapshot.
+func (store *meetingMemoryStore) visibleEntriesLocked() []meetingMemoryEntry {
+	visible := make([]meetingMemoryEntry, 0, len(store.entries))
+	for _, entry := range store.entries {
+		if entry.Kind == meetingMemoryKindSlopPass || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	return visible
 }
 
 func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int) []meetingMemoryEntry {
@@ -646,7 +709,7 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 	defer store.mu.Unlock()
 
 	entries := make([]meetingMemoryEntry, 0, len(store.entries))
-	for _, entry := range store.entries {
+	for _, entry := range store.visibleEntriesLocked() {
 		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
 			continue
 		}
@@ -700,13 +763,101 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 	return meetingMemoryEntry{}, false
 }
 
+// entryByID looks up a single entry by id across all kinds (newest wins on an
+// id collision). Used by the quarantine restore/delete paths, which key on the
+// entry id alone and infer the kind from the found entry.
+func (store *meetingMemoryStore) entryByID(id string) (meetingMemoryEntry, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, false
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, false
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		if store.entries[index].ID == id {
+			return cloneMemoryEntry(store.entries[index]), true
+		}
+	}
+
+	return meetingMemoryEntry{}, false
+}
+
+// entriesByRelevance returns every entry in the given lifecycle state, newest
+// first. The classifier and the quarantine tray read the store directly this
+// way (never through snapshot, which HIDES quarantined/expired material).
+func (store *meetingMemoryStore) entriesByRelevance(relevance string) []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+	relevance = strings.TrimSpace(strings.ToLower(relevance))
+	if relevance == "" {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	matched := make([]meetingMemoryEntry, 0)
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		if memoryEntryRelevance(store.entries[index]) == relevance {
+			matched = append(matched, cloneMemoryEntry(store.entries[index]))
+		}
+	}
+
+	return matched
+}
+
+// deleteEntryByID hard-deletes one entry (any kind) and rewrites the log. This
+// is the ONLY hard delete in the system — the expiry job's terminal step, always
+// paired with a slop_pass audit stub so the fact of deletion survives. Reports
+// whether an entry was removed.
+func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("entry id is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	index := -1
+	for candidate := len(store.entries) - 1; candidate >= 0; candidate-- {
+		if store.entries[candidate].ID == id {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return meetingMemoryEntry{}, false, nil
+	}
+
+	removed := cloneMemoryEntry(store.entries[index])
+	store.entries = append(store.entries[:index], store.entries[index+1:]...)
+	if err := store.rewriteLocked(); err != nil {
+		// restore the in-memory slice so a failed rewrite is not silently lossy.
+		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+		return meetingMemoryEntry{}, false, err
+	}
+	delete(store.seen, id)
+
+	return removed, true, nil
+}
+
 // isUIStateMemoryKind reports the entry kinds that are workspace/UI state
 // rather than meeting knowledge — chat threads, codex proposals, mission
 // insights, decision-pass cursors, and venture-package records never enter
 // Scout's search results or model context. Kind "decision" is deliberately
 // absent: decision statements ARE knowledge and must ground Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindSlopPass
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -723,6 +874,11 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	if len(queryTokens) == 0 {
 		return nil
 	}
+	// Query expansion (Wave 7): OR a curated set of synonyms into token
+	// matching, at a slightly lower weight than the raw tokens, so a
+	// vocabulary mismatch ("runway" vs "cash-out") still surfaces the entry.
+	// Pure static map (domain_terms.go) — no model call in the search path.
+	synonymTokens := expandRecallSynonyms(queryTokens)
 
 	store.mu.Lock()
 	entries := cloneMemoryEntries(store.entries)
@@ -732,6 +888,10 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	lowerQuery := strings.ToLower(query)
 	for _, entry := range entries {
 		if isUIStateMemoryKind(entry.Kind) {
+			continue
+		}
+		// quarantined/expired material is forgotten: never a recall candidate.
+		if memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
 		lowerText := strings.ToLower(entry.Text)
@@ -744,8 +904,19 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 				score += 3
 			}
 		}
+		for _, token := range synonymTokens {
+			if strings.Contains(lowerText, token) {
+				score += 2
+			}
+		}
 		if score == 0 {
 			continue
+		}
+		// archived material stays searchable but ranks below active (design §6).
+		if memoryEntryRelevance(entry) == relevanceArchived {
+			if score -= archivedSearchPenalty; score < 1 {
+				score = 1
+			}
 		}
 		matches = append(matches, meetingMemoryMatch{Entry: entry, Score: score})
 	}

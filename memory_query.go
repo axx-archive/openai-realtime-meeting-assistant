@@ -650,19 +650,16 @@ func artifactTitleFromBody(body string, fallback string) string {
 }
 
 func osArtifactTitle(mode string, query string, answer string) string {
-	query = compactAssistantLine(query)
-	if query != "" && query != "no direct context yet" {
-		return query
+	compactQuery := compactAssistantLine(query)
+	if compactQuery != "" && compactQuery != "no direct context yet" && !isArtifactScaffoldOpener(compactQuery) {
+		return trimForStorage(compactQuery, 90)
 	}
 
-	for _, line := range strings.Split(answer, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return compactAssistantLine(line)
-		}
-	}
-
-	return strings.Title(normalizeOSAssistantMode(mode)) + " artifact"
+	// No usable objective/query: derive a real title from the body — the first
+	// markdown heading or "Title:" line, skipping scaffold openers ("Research
+	// brief") that name the artifact TYPE, not its subject.
+	fallback := strings.Title(normalizeOSAssistantMode(mode)) + " artifact"
+	return artifactTitleFromBody(answer, fallback)
 }
 
 func buildArtifactModeAnswer(query string, contextAnswer string, board kanbanBoardState, memory []meetingMemoryEntry) string {
@@ -1437,6 +1434,11 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		// snapshots, so the search() kind exclusion must apply here too —
 		// UI-state entries never reach Scout's model context
 		if strings.TrimSpace(entry.ID) == "" || isUIStateMemoryKind(entry.Kind) {
+			return
+		}
+		// quarantined/expired material is forgotten — the artifact lane reads
+		// entriesOfKind (unfiltered by snapshot), so re-apply the recall guard.
+		if memoryEntryHiddenFromRecall(entry) {
 			return
 		}
 		// artifacts are budgeted no matter which lane found them: whole

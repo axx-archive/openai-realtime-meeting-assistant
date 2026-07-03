@@ -59,6 +59,78 @@ var meetingDomainVocabulary = []string{
 	"Kanban",
 }
 
+// recallSynonymGroups is the curated synonym table that powers query
+// expansion (Wave 7). Every token in a group is treated as interchangeable at
+// recall time, so a question asked in one vocabulary still surfaces an entry
+// written in another ("runway" ⇆ "cash-out"). Seeded from the studio's
+// packaging-company vocabulary plus the domain acronyms; kept deliberately
+// small and lowercase (matched against uniqueMemoryTokens, ≥3 chars). Extend
+// here — there is no model call in the search path.
+var recallSynonymGroups = [][]string{
+	{"runway", "cash", "cashout", "burn"},
+	{"comp", "comparable", "comparables", "compset", "benchmark"},
+	{"revenue", "sales", "topline"},
+	{"acquisition", "cac"},
+	{"churn", "attrition"},
+	{"objective", "goal", "mission", "aim"},
+	{"deck", "pitch", "presentation"},
+	{"hire", "hiring", "headcount", "recruit"},
+	{"launch", "ship", "release", "shipping"},
+	{"pricing", "price"},
+	{"customer", "client", "buyer"},
+	{"competitor", "competition", "rival"},
+	{"decision", "decided", "call"},
+	{"timeline", "schedule", "roadmap"},
+	{"budget", "spend", "cost"},
+}
+
+// recallSynonymMap indexes recallSynonymGroups token → the other tokens in its
+// group, built once at init.
+var recallSynonymMap = buildRecallSynonymMap()
+
+func buildRecallSynonymMap() map[string][]string {
+	index := map[string][]string{}
+	for _, group := range recallSynonymGroups {
+		for _, token := range group {
+			for _, other := range group {
+				if other == token {
+					continue
+				}
+				index[token] = append(index[token], other)
+			}
+		}
+	}
+	return index
+}
+
+// expandRecallSynonyms returns the synonyms of the supplied query tokens that
+// are NOT already query tokens themselves, deduplicated. The caller ORs them
+// into token matching at a lower weight than the raw tokens.
+func expandRecallSynonyms(queryTokens []string) []string {
+	if len(queryTokens) == 0 {
+		return nil
+	}
+	present := make(map[string]struct{}, len(queryTokens))
+	for _, token := range queryTokens {
+		present[token] = struct{}{}
+	}
+	expanded := make([]string, 0, len(queryTokens))
+	seen := map[string]struct{}{}
+	for _, token := range queryTokens {
+		for _, synonym := range recallSynonymMap[token] {
+			if _, isQueryToken := present[synonym]; isQueryToken {
+				continue
+			}
+			if _, already := seen[synonym]; already {
+				continue
+			}
+			seen[synonym] = struct{}{}
+			expanded = append(expanded, synonym)
+		}
+	}
+	return expanded
+}
+
 func realtimeTranscriptionModel() string {
 	if model := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL")); model != "" {
 		return model

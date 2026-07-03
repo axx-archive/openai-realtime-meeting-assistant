@@ -134,6 +134,11 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 	if artifacts := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 15); len(artifacts) > 0 {
 		builder.WriteString("\n\n# Recent artifact titles (titles only)\n")
 		for _, artifact := range artifacts {
+			// entriesOfKind is unfiltered by relevance: re-apply the recall guard
+			// so a quarantined/expired draft's title never enters model context.
+			if memoryEntryHiddenFromRecall(artifact) {
+				continue
+			}
 			builder.WriteString("- ")
 			builder.WriteString(firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), "untitled"))
 			if mode := strings.TrimSpace(artifact.Metadata["mode"]); mode != "" {
