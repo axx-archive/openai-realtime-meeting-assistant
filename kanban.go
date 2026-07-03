@@ -1041,6 +1041,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
 		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud.",
+		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
 		"# Behavior\nAnswer directly and briefly. Prefer the available OS tools when the user asks to navigate, save an artifact, start research/design/grill/workflow, or recall memory. Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information. Ask one concise clarifying question when the request is ambiguous; do not volunteer board status for unclear follow-ups like \"what?\" just because board context is present.",
@@ -2162,6 +2163,49 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "start_private_grill",
+			"description": "Start a private, one-on-one grill: YOU (Scout) pressure-test the single dashboard user by voice. Use when the user says grill me, pressure-test me, or play investor with me. Returns the persona instructions the browser applies to this private session — this does NOT grill the shared room. Optionally name a package to ground the question bank in its artifacts and decisions.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"package": map[string]any{"type": "string", "description": "Optional package name or id to ground the grill in (its artifacts, rights/economics assumptions, and decisions become the question bank)."},
+					"persona": map[string]any{"type": "string", "description": "Optional persona to adopt; defaults to a prepared, skeptical investor who has read the whole package."},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "end_private_grill",
+			"description": "End the private grill, restore normal private-voice behavior, and file the graded scorecard as a grill agent thread. Call this after you deliver the spoken readiness report, when the user says end the grill, stop, that's enough, or stand down. Pass the package (if one was named) and a short Q&A transcript so the scorecard carries a valid READINESS line.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"package":    map[string]any{"type": "string", "description": "The package the grill was grounded in, if any — the scorecard attaches to it and updates the readiness dial."},
+					"persona":    map[string]any{"type": "string", "description": "The persona you grilled as; recorded on the report."},
+					"transcript": map[string]any{"type": "string", "description": "A short Q&A transcript of the grill (questions asked and answers given) so the filed scorecard can grade each answer."},
+					"reason":     map[string]any{"type": "string", "description": "Optional reason the grill ended."},
+					"readiness":  map[string]any{"type": "number", "description": "The overall readiness score you assigned this pitch out of 10 (one decimal). Powers the live scorecard reveal."},
+					"verdict":    map[string]any{"type": "string", "description": "One sharp closing line for the scorecard (e.g. 'Strong on story. Thin on the moat.')."},
+					"scores": map[string]any{
+						"type":        "array",
+						"description": "Per-dimension scores you graded live, in the order you want them shown.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"label": map[string]any{"type": "string", "description": "Dimension name, e.g. Evidence, Clarity, Confidence."},
+								"score": map[string]any{"type": "number", "description": "Score for this dimension out of 10."},
+							},
+							"required":             []string{"label", "score"},
+							"additionalProperties": false,
+						},
+					},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "read_thread_aloud",
 			"description": "Fetch the recent text of a channel, a private thread, a saved artifact, or the user's notifications so you can read it aloud in your spoken turn. Use for requests like read me the latest in #dealflow, what did the fintech thread say, or read my notifications. This returns text only; you speak it.",
 			"parameters": map[string]any{
@@ -2211,6 +2255,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"objective": map[string]any{"type": "string", "description": "The end-to-end goal, in the user's words."},
 					"package":   map[string]any{"type": "string", "description": "Optional package name or id to file the result under."},
+					"tool":      map[string]any{"type": "string", "description": "Optional packaging-tool preset id to run the goal against (e.g. deep_research, one_pager, grill_pressure_test, package_assembly, investor_update_memo); shapes the output contract and the ship gate. Omit for a free-form goal."},
 					"authority_hint": map[string]any{
 						"type":        "string",
 						"description": "read_only for research/analysis goals; workspace_write when the goal produces or edits work. external_write is never available here — it is earned only at the ship gate with human approval.",
@@ -2724,6 +2769,11 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"meeting_recap", "catch_me_up",
 		// New Realtime-2 parity tools (Wave 6).
 		"read_thread_aloud", "start_chat_as_user", "initiate_goal",
+		// Private grill (Wave 12) — client-driven session.update swap, private
+		// only. The room grill (start_grill_session/end_grill_session) swaps the
+		// SHARED room persona server-side and stays room-only above; this variant
+		// grills the single dashboard user and never mutates a server session.
+		"start_private_grill", "end_private_grill",
 		"do_nothing":
 		return true
 	default:
@@ -2793,6 +2843,16 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	if toolName == "initiate_goal" {
 		return app.initiateGoalTool(args, requesterEmail)
 	}
+	// start_private_grill / end_private_grill return the instruction block the
+	// BROWSER applies over its own data channel (the server does not own the
+	// private peer, so it cannot push session.update). Neither mutates any
+	// server session state; end also files the graded scorecard as the requester.
+	if toolName == "start_private_grill" {
+		return app.startPrivateGrill(args, requesterEmail)
+	}
+	if toolName == "end_private_grill" {
+		return app.endPrivateGrill(args, requesterEmail)
+	}
 	// Board mutations and artifact edits fall through to the shared dispatch;
 	// they broadcast to every client exactly as the room path does.
 	return app.applyToolCallArgs(toolName, args)
@@ -2816,10 +2876,11 @@ func (app *kanbanBoardApp) initiateGoalTool(args map[string]any, requesterEmail 
 	}
 
 	spec := goalLaunchSpec{
-		Objective: objective,
-		CreatedBy: normalizeAccountEmail(requesterEmail),
-		Authority: authority,
-		PackageID: strings.TrimSpace(asString(args["package"])),
+		Objective:    objective,
+		CreatedBy:    normalizeAccountEmail(requesterEmail),
+		Authority:    authority,
+		PackageID:    strings.TrimSpace(asString(args["package"])),
+		ToolTemplate: strings.TrimSpace(asString(args["tool"])),
 	}
 	thread, err := app.launchGoalThread(spec)
 	if err != nil {

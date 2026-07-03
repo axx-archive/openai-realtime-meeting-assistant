@@ -6112,6 +6112,331 @@
         transform: scale(var(--press-scale));
       }
 
+      /* --- Private grill stage (Wave 12) -----------------------------------
+         The three-act ritual. z-slot 1370 sits above the voice island (1350)
+         and the voice ledger (1360) with its own scrim. Namespaced
+         .grillstage__*, token-only, ember (--agent) is the only accent, --warn
+         amber flags a weak score. */
+      .grillstage {
+        position: fixed;
+        inset: 0;
+        z-index: 1370;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--scrim);
+        -webkit-backdrop-filter: blur(2px);
+        backdrop-filter: blur(2px);
+        pointer-events: auto;
+      }
+
+      .grillstage[hidden] {
+        display: none;
+      }
+
+      .grillstage__panel {
+        position: relative;
+        width: min(460px, calc(100vw - 32px));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        padding: 28px 24px 24px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-lg);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-2);
+        /* Act II cools the stage one step; the accent sharpens to full ember. */
+        transition: background var(--dur-slow) var(--ease), box-shadow var(--dur-slow) var(--ease);
+      }
+
+      .grillstage[data-act="grill"] .grillstage__panel {
+        background: var(--surface-2);
+        box-shadow: var(--shadow-2), 0 0 0 1px color-mix(in srgb, var(--agent) 26%, transparent);
+      }
+
+      .grillstage__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+      }
+
+      .grillstage__badge {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        color: var(--agent);
+      }
+
+      .grillstage__close {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-full);
+        color: var(--text-3);
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+      }
+
+      .grillstage__close:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      /* Only the active act is shown; data-act on the root selects it. */
+      .grillstage__act {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        width: 100%;
+      }
+
+      .grillstage[data-act="pitch"] .grillstage__act[data-act="pitch"],
+      .grillstage[data-act="grill"] .grillstage__act[data-act="grill"],
+      .grillstage[data-act="scorecard"] .grillstage__act[data-act="scorecard"] {
+        display: flex;
+      }
+
+      /* Act I — calm timer ring, tabular countdown. */
+      .grillstage__ring {
+        width: 108px;
+        height: 108px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-full);
+        border: 2px solid var(--line-2);
+        box-shadow: inset 0 0 0 6px color-mix(in srgb, var(--agent) 8%, transparent);
+      }
+
+      .grillstage__timer {
+        font: var(--type-numeric);
+        font-size: 26px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-1);
+      }
+
+      .grillstage__ring.is-low {
+        border-color: var(--warn);
+      }
+
+      .grillstage__wave {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 22px;
+      }
+
+      .grillstage__copy {
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
+        text-align: center;
+        text-wrap: balance;
+      }
+
+      .grillstage__done {
+        min-height: 44px;
+        padding: 0 22px;
+        border-radius: var(--r-full);
+        background: var(--agent);
+        color: var(--on-accent);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+      }
+
+      .grillstage__done:hover { filter: brightness(1.05); }
+
+      /* Act II — a warm-to-hot pressure edge (NOT a health bar) + struck lines. */
+      .grillstage__pressure {
+        width: 100%;
+        height: 3px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        overflow: hidden;
+      }
+
+      .grillstage__pressure-fill {
+        display: block;
+        height: 100%;
+        width: 0%;
+        border-radius: var(--r-full);
+        background: linear-gradient(90deg, color-mix(in srgb, var(--agent) 55%, transparent), var(--agent));
+        transition: width var(--dur-slow) var(--ease);
+      }
+
+      .grillstage__questions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        min-height: 96px;
+      }
+
+      .grillstage__q {
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
+        text-wrap: pretty;
+        animation: grillstage-strike var(--dur-med) var(--ease) both;
+      }
+
+      .grillstage__q.is-past {
+        font: var(--type-body);
+        color: var(--text-3);
+        animation: none;
+      }
+
+      @keyframes grillstage-strike {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .grillstage__hint {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        color: var(--text-3);
+      }
+
+      /* Act III — scorecard reveal: rows stagger, scores count up, verdict lands. */
+      .grillstage__scoretitle {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        color: var(--text-3);
+      }
+
+      .grillstage__provisional {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        color: var(--text-3);
+        text-align: center;
+        text-wrap: balance;
+      }
+
+      .grillstage__rows {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .grillstage__row {
+        display: grid;
+        grid-template-columns: 88px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        animation: grillstage-row var(--dur-med) var(--ease) both;
+      }
+
+      @keyframes grillstage-row {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .grillstage__row-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        color: var(--text-2);
+      }
+
+      .grillstage__meter {
+        height: 8px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        overflow: hidden;
+      }
+
+      .grillstage__meter-fill {
+        display: block;
+        height: 100%;
+        width: 0%;
+        border-radius: var(--r-full);
+        background: var(--agent);
+        transition: width var(--dur-slow) var(--ease);
+      }
+
+      .grillstage__row.is-weak .grillstage__meter-fill { background: var(--warn); }
+
+      .grillstage__count {
+        font: var(--type-numeric);
+        font-size: 16px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-1);
+        min-width: 26px;
+        text-align: right;
+      }
+
+      .grillstage__row.is-weak .grillstage__count { color: var(--warn); }
+
+      .grillstage__verdict {
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        font-style: italic;
+        color: var(--text-1);
+        text-align: center;
+        text-wrap: balance;
+        opacity: 0;
+        animation: grillstage-verdict var(--dur-slow) var(--ease) forwards;
+      }
+
+      @keyframes grillstage-verdict {
+        from { opacity: 0; filter: blur(4px); transform: translateY(4px); }
+        to { opacity: 1; filter: blur(0); transform: translateY(0); }
+      }
+
+      .grillstage__cta {
+        display: flex;
+        gap: 10px;
+      }
+
+      .grillstage__btn {
+        min-height: 44px;
+        padding: 0 20px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-2);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .grillstage__btn:hover { background: var(--surface-3); }
+
+      .grillstage__btn--primary {
+        border-color: transparent;
+        background: var(--agent);
+        color: var(--on-accent);
+      }
+
+      .grillstage__btn--primary:hover { background: var(--agent); filter: brightness(1.05); }
+
+      @media (max-width: 640px) {
+        .grillstage {
+          align-items: flex-end;
+          padding: 0;
+        }
+        .grillstage__panel {
+          width: 100%;
+          min-height: 74vh;
+          border-radius: var(--r-lg) var(--r-lg) 0 0;
+          padding-bottom: max(24px, env(safe-area-inset-bottom));
+          justify-content: center;
+          animation: bf-sheetin var(--dur-slow) var(--ease) both;
+        }
+      }
+
       .os-assistant__close {
         width: 34px;
         height: 34px;
@@ -15434,6 +15759,15 @@
         .bf-island.is-speaking .bf-wave-bar,
         .bf-fab.is-speaking .bf-wave-bar { animation: none; }
         .voice-ledger { animation: none; }
+        /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
+           drop the MOTION — the scorecard appears assembled with final values,
+           the count-up short-circuits in JS, and the panel does not slide. */
+        .grillstage__panel { animation: none; }
+        .grillstage__q { animation: none; }
+        .grillstage__row { animation: none; }
+        .grillstage__verdict { animation: none; opacity: 1; filter: none; }
+        .grillstage__pressure-fill,
+        .grillstage__meter-fill { transition: none; }
         /* tab-pane enters (hardcoded .4s) snap under reduced motion */
         #appShell.is-authed[data-tool="office"] #officeTool,
         #appShell.is-authed[data-tool="chat"] #chatTool,
@@ -16654,6 +16988,46 @@
       <div class="voice-ledger__title">what scout did</div>
       <div id="voiceLedgerList"></div>
     </aside>
+    <!-- Private grill stage (Wave 12) — the three-act ritual. Browser-owned:
+         start_private_grill returns the persona instructions this page applies
+         with session.update over its own data channel; end reverts. data-act on
+         the root drives which act is visible. Full-height sheet on phones. -->
+    <aside id="grillStage" class="grillstage" data-act="pitch" hidden aria-label="Private grill" aria-live="polite">
+      <div class="grillstage__panel bf-islandin">
+        <header class="grillstage__head">
+          <span class="grillstage__badge" aria-hidden="true">◆ grill</span>
+          <button id="grillStageClose" class="grillstage__close pressable" type="button" aria-label="End the grill">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </header>
+        <!-- Act I — pitch capture: calm, timer ring, bars react to your voice -->
+        <div class="grillstage__act" data-act="pitch">
+          <div class="grillstage__ring" role="timer" aria-label="Pitch time remaining">
+            <span id="grillStageTimer" class="grillstage__timer">2:00</span>
+          </div>
+          <span class="os-wave grillstage__wave" aria-hidden="true"><span class="bf-wave-bar" style="animation-delay:0ms;"></span><span class="bf-wave-bar" style="animation-delay:120ms;"></span><span class="bf-wave-bar" style="animation-delay:240ms;"></span><span class="bf-wave-bar" style="animation-delay:80ms;"></span><span class="bf-wave-bar" style="animation-delay:300ms;"></span><span class="bf-wave-bar" style="animation-delay:160ms;"></span><span class="bf-wave-bar" style="animation-delay:60ms;"></span><span class="bf-wave-bar" style="animation-delay:220ms;"></span></span>
+          <p class="grillstage__copy">pitch me — what are we building?</p>
+          <button id="grillStageDone" class="grillstage__done pressable" type="button">done &#9656;</button>
+        </div>
+        <!-- Act II — grilling: cooler, ember sharpens, one question at a time -->
+        <div class="grillstage__act" data-act="grill">
+          <div class="grillstage__pressure" aria-hidden="true"><span class="grillstage__pressure-fill"></span></div>
+          <div id="grillStageQuestions" class="grillstage__questions" aria-live="polite"></div>
+          <p class="grillstage__hint">answer out loud — she's listening</p>
+        </div>
+        <!-- Act III — scorecard reveal: staggered rows, count-up, serif verdict -->
+        <div class="grillstage__act" data-act="scorecard">
+          <div class="grillstage__scoretitle">grill &middot; scorecard</div>
+          <p class="grillstage__provisional">instant read — the filed scorecard on the package is the final grade</p>
+          <div id="grillStageRows" class="grillstage__rows"></div>
+          <p id="grillStageVerdict" class="grillstage__verdict"></p>
+          <div class="grillstage__cta">
+            <button id="grillStageSave" class="grillstage__btn grillstage__btn--primary pressable" type="button">save</button>
+            <button id="grillStageAgain" class="grillstage__btn pressable" type="button">again</button>
+          </div>
+        </div>
+      </div>
+    </aside>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <!-- codex task proposals — board-worker-proposed agent tasks awaiting a
          human decision; Confirm launches the thread as the confirming user -->
@@ -17331,6 +17705,11 @@
       const voiceIslandLedgerBtn = document.getElementById('voiceIslandLedgerBtn')
       const voiceLedger = document.getElementById('voiceLedger')
       const voiceLedgerList = document.getElementById('voiceLedgerList')
+      const grillStage = document.getElementById('grillStage')
+      const grillStageTimer = document.getElementById('grillStageTimer')
+      const grillStageQuestions = document.getElementById('grillStageQuestions')
+      const grillStageRows = document.getElementById('grillStageRows')
+      const grillStageVerdict = document.getElementById('grillStageVerdict')
       const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       const agentToolIds = ['research', 'design', 'grill']
       const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
@@ -17403,6 +17782,17 @@
       let privateRealtimeVoiceSessionToken = 0
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
+      // Private grill (Wave 12) — a browser-driven ritual. The private Realtime
+      // peer and its oai-events data channel are OWNED BY THIS PAGE (the server
+      // only proxies SDP), so the grill persona swap is applied here with
+      // session.update over that channel and reverted on end. RESTART RULE: an
+      // in-flight private grill SURVIVES a server restart because the session and
+      // the swap are browser-owned; only the report-filing HTTP call (end_private
+      // _grill) would retry. These vars track the client-owned ritual + timer.
+      let privateGrillActive = false
+      let privateGrillSafetyTimer = 0
+      let privateGrillRingTimer = 0
+      let privateGrillPackage = ''
       // "what Scout did" — a reverse-chron record of this voice session's
       // actions, reachable from the island's ⋯ menu. Reset when a session ends.
       let scoutSessionLedger = []
@@ -17810,6 +18200,22 @@
         if (voiceLedger && !voiceLedger.hidden && !voiceLedger.contains(event.target) && event.target !== voiceIslandLedgerBtn && !voiceIslandLedgerBtn?.contains(event.target)) {
           setScoutLedgerOpen(false)
         }
+      })
+      // Private grill affordances. [done] nudges Scout out of Act I; [close] and
+      // [again] hand the model a spoken cue so the voice loop stays authoritative
+      // (the acts follow the model, not the other way around). [save] just closes
+      // — the scorecard was already filed when end_private_grill ran server-side.
+      document.getElementById('grillStageDone')?.addEventListener('click', () => {
+        setPrivateGrillAct('grill')
+        nudgePrivateGrill("That's my pitch — go ahead and grill me.")
+      })
+      document.getElementById('grillStageClose')?.addEventListener('click', () => {
+        nudgePrivateGrill('End the grill now and give me my readiness report.')
+      })
+      document.getElementById('grillStageSave')?.addEventListener('click', () => hidePrivateGrillStage())
+      document.getElementById('grillStageAgain')?.addEventListener('click', () => {
+        hidePrivateGrillStage()
+        nudgePrivateGrill('Grill me again on the same pitch — I want to move the dial.')
       })
       osAssistantModeButtons.forEach(button => {
         button.addEventListener('click', () => setOSAssistantMode(button.dataset.assistantMode || 'chat'))
@@ -21765,6 +22171,17 @@
         if (!type) {
           return
         }
+        // During Act II only, feed Scout's own spoken lines into the struck-
+        // question ritual (Act I is pitch capture — her "pitch me" prompt is not
+        // a question). The private channel emits the assistant's output
+        // transcript on an *_audio_transcript.done event (GA
+        // "output_audio_transcript.done", legacy "audio_transcript.done").
+        if (privateGrillActive && grillStage?.dataset.act === 'grill' && type.includes('audio_transcript.done')) {
+          const spoken = String(event.transcript || event.text || '').trim()
+          if (spoken) {
+            appendPrivateGrillQuestion(spoken)
+          }
+        }
         if (type === 'response.output_item.done' && event.item?.type === 'function_call') {
           handlePrivateRealtimeToolCall(event.item)
         } else if (type === 'response.function_call_arguments.done') {
@@ -21808,6 +22225,274 @@
         }
         privateRealtimeVoiceDataChannel.send(JSON.stringify(event))
         return true
+      }
+
+      // --- Private grill ritual (Wave 12) -----------------------------------
+      // The server can't push session.update into the private session (the
+      // browser owns the peer + data channel), so start_private_grill RETURNS
+      // the persona instruction block and we apply it HERE with session.update,
+      // reverting on end. The 15-minute safety timer is client-owned too. An
+      // in-flight grill survives a server restart because none of this state
+      // lives on the server — only end_private_grill's report-filing HTTP call
+      // would need a retry.
+
+      function applyPrivateGrillSessionUpdate(instructions) {
+        const text = String(instructions || '').trim()
+        if (!text) {
+          return false
+        }
+        return sendPrivateRealtimeEvent({
+          type: 'session.update',
+          session: { type: 'realtime', instructions: text }
+        })
+      }
+
+      function beginPrivateGrillRitual(output) {
+        const instructions = String(output?.instructions || '').trim()
+        if (!instructions) {
+          return
+        }
+        // Swap the private session into the grill persona over our own channel.
+        applyPrivateGrillSessionUpdate(instructions)
+        privateGrillActive = true
+        privateGrillPackage = String(output?.package || '').trim()
+        showPrivateGrillStage()
+        setPrivateGrillAct('pitch')
+        if (grillStageQuestions) grillStageQuestions.innerHTML = ''
+        // Client-owned safety timer: an unattended grill auto-ends and reverts
+        // so the persona can't hold the session forever (mirrors the server
+        // grill's defaultGrillMaxDuration; the browser owns this one).
+        const maxDurationMs = Number(output?.maxDurationMs) > 0 ? Number(output.maxDurationMs) : 15 * 60 * 1000
+        startPrivateGrillTimers(maxDurationMs)
+      }
+
+      function endPrivateGrillRitual(output) {
+        // Revert first (over the same channel) so Scout is herself again even if
+        // the scorecard reveal below is empty.
+        applyPrivateGrillSessionUpdate(output?.instructions)
+        stopPrivateGrillTimers()
+        privateGrillActive = false
+        // The model graded the pitch live and passes the scores/verdict in the
+        // tool args (the async worker re-grades authoritatively for the filed
+        // artifact, but can't feed this instant reveal). If it graded, reveal
+        // Act III; otherwise just close the stage.
+        const scores = Array.isArray(output?.__scores) ? output.__scores : []
+        const verdict = String(output?.__verdict || '').trim()
+        const readiness = output?.__readiness
+        if (scores.length || verdict || (readiness !== undefined && readiness !== null && readiness !== '')) {
+          revealPrivateGrillScorecard(scores, verdict, readiness, output?.priorReadiness)
+        } else {
+          hidePrivateGrillStage()
+        }
+      }
+
+      function showPrivateGrillStage() {
+        if (!grillStage) {
+          return
+        }
+        grillStage.hidden = false
+      }
+
+      function hidePrivateGrillStage() {
+        stopPrivateGrillTimers()
+        if (grillStage) {
+          grillStage.hidden = true
+          grillStage.dataset.act = 'pitch'
+        }
+        if (grillStageQuestions) grillStageQuestions.innerHTML = ''
+        if (grillStageRows) grillStageRows.innerHTML = ''
+        if (grillStageVerdict) grillStageVerdict.textContent = ''
+      }
+
+      function setPrivateGrillAct(act) {
+        if (!grillStage) {
+          return
+        }
+        const next = ['pitch', 'grill', 'scorecard'].includes(act) ? act : 'pitch'
+        grillStage.dataset.act = next
+      }
+
+      // Append one struck question line in Act II (called when Scout speaks a
+      // new grill question); the previous line dims so it reads one-at-a-time.
+      function appendPrivateGrillQuestion(text) {
+        const line = String(text || '').trim()
+        if (!grillStageQuestions || !line) {
+          return
+        }
+        setPrivateGrillAct('grill')
+        grillStageQuestions.querySelectorAll('.grillstage__q').forEach(node => {
+          node.classList.remove('grillstage__q')
+          node.classList.add('grillstage__q', 'is-past')
+        })
+        const node = document.createElement('p')
+        node.className = 'grillstage__q'
+        node.textContent = line
+        grillStageQuestions.appendChild(node)
+      }
+
+      function startPrivateGrillTimers(maxDurationMs) {
+        stopPrivateGrillTimers()
+        const endAt = Date.now() + maxDurationMs
+        const paint = () => {
+          const remaining = Math.max(0, endAt - Date.now())
+          if (grillStageTimer) {
+            const totalSeconds = Math.ceil(remaining / 1000)
+            const mm = Math.floor(totalSeconds / 60)
+            const ss = String(totalSeconds % 60).padStart(2, '0')
+            grillStageTimer.textContent = `${mm}:${ss}`
+            grillStageTimer.parentElement?.classList.toggle('is-low', remaining <= 30 * 1000)
+          }
+        }
+        paint()
+        privateGrillRingTimer = window.setInterval(paint, 1000)
+        // Hard safety cap: force-end WITHOUT depending on the model. We call the
+        // server end_private_grill directly, get the real revert instructions,
+        // and apply them over our own channel — so the live session leaves the
+        // grill persona even if the model never calls the tool itself.
+        privateGrillSafetyTimer = window.setTimeout(() => {
+          if (!privateGrillActive) {
+            return
+          }
+          forcePrivateGrillEnd('time limit reached')
+        }, maxDurationMs)
+      }
+
+      // Model-independent end: hit the server end_private_grill route ourselves,
+      // apply the returned revert instructions to the live session, and close the
+      // stage. Used by the safety timeout and the [close] affordance so a
+      // stuck-persona can never outlive the ritual UI.
+      async function forcePrivateGrillEnd(reason) {
+        stopPrivateGrillTimers()
+        privateGrillActive = false
+        try {
+          const response = await postAuthJSON('/assistant/realtime-tool', {
+            name: 'end_private_grill',
+            arguments: { package: privateGrillPackage, reason }
+          })
+          const output = response.data?.result
+          if (output?.instructions) {
+            applyPrivateGrillSessionUpdate(output.instructions)
+          }
+        } catch (error) {
+          console.warn('Private grill force-end failed', error)
+        }
+        hidePrivateGrillStage()
+        nudgePrivateGrill('The grill timed out — give me my readiness report.')
+      }
+
+      function stopPrivateGrillTimers() {
+        if (privateGrillSafetyTimer) {
+          window.clearTimeout(privateGrillSafetyTimer)
+          privateGrillSafetyTimer = 0
+        }
+        if (privateGrillRingTimer) {
+          window.clearInterval(privateGrillRingTimer)
+          privateGrillRingTimer = 0
+        }
+      }
+
+      // Send Scout a spoken cue over the data channel and ask for an audio turn.
+      // Used by the [done]/[again]/timeout affordances so the voice loop stays
+      // the source of truth for act transitions.
+      function nudgePrivateGrill(text) {
+        const cue = String(text || '').trim()
+        if (!cue) {
+          return
+        }
+        sendPrivateRealtimeEvent({
+          type: 'conversation.item.create',
+          item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: cue }] }
+        })
+        sendPrivateRealtimeEvent({ type: 'response.create', response: { output_modalities: ['audio'] } })
+      }
+
+      // Act III — staggered rows, count-up scores, serif verdict lands last.
+      // Reduced-motion callers still get the assembled scorecard with final
+      // values (the CSS drops the motion; the count-up short-circuits below).
+      function revealPrivateGrillScorecard(scores, verdict, readiness, priorReadiness) {
+        setPrivateGrillAct('scorecard')
+        if (grillStageRows) {
+          grillStageRows.innerHTML = ''
+          const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+          scores.slice(0, 6).forEach((entry, index) => {
+            const label = String(entry?.label || '').trim() || 'score'
+            const value = Math.max(0, Math.min(10, Number(entry?.score) || 0))
+            const weak = value <= 4
+            const row = document.createElement('div')
+            row.className = weak ? 'grillstage__row is-weak' : 'grillstage__row'
+            row.style.animationDelay = reduceMotion ? '0ms' : `${index * 100}ms`
+            const labelEl = document.createElement('span')
+            labelEl.className = 'grillstage__row-label'
+            labelEl.textContent = label.toLowerCase()
+            const meter = document.createElement('span')
+            meter.className = 'grillstage__meter'
+            const fill = document.createElement('span')
+            fill.className = 'grillstage__meter-fill'
+            meter.appendChild(fill)
+            const count = document.createElement('span')
+            count.className = 'grillstage__count'
+            count.textContent = reduceMotion ? formatGrillScore(value) : '0'
+            row.append(labelEl, meter, count)
+            grillStageRows.appendChild(row)
+            if (reduceMotion) {
+              fill.style.width = `${value * 10}%`
+            } else {
+              window.setTimeout(() => {
+                fill.style.width = `${value * 10}%`
+                countUpGrillScore(count, value)
+              }, index * 100 + 120)
+            }
+          })
+        }
+        if (grillStageVerdict) {
+          let line = verdict
+          const scoreText = readiness === undefined || readiness === null || readiness === '' ? '' : formatGrillScore(Number(readiness))
+          if (scoreText) {
+            const deltaText = formatGrillDelta(readiness, priorReadiness)
+            line = `${scoreText}/10${deltaText} — ${verdict || 'that is your read.'}`
+          }
+          grillStageVerdict.textContent = line || ''
+        }
+      }
+
+      function formatGrillScore(value) {
+        const num = Number(value)
+        if (!Number.isFinite(num)) {
+          return '0'
+        }
+        return (Math.round(num * 10) / 10).toFixed(1).replace(/\.0$/, '')
+      }
+
+      function formatGrillDelta(readiness, priorReadiness) {
+        const now = Number(readiness)
+        const prev = Number(priorReadiness)
+        if (!Number.isFinite(now) || !Number.isFinite(prev) || prev === 0) {
+          return ''
+        }
+        const delta = Math.round((now - prev) * 10) / 10
+        if (delta === 0) {
+          return ' (flat)'
+        }
+        return delta > 0 ? ` (up ${delta.toFixed(1)})` : ` (down ${Math.abs(delta).toFixed(1)})`
+      }
+
+      function countUpGrillScore(node, target) {
+        if (!node) {
+          return
+        }
+        const start = performance.now()
+        const duration = 600
+        const step = now => {
+          const t = Math.min(1, (now - start) / duration)
+          const eased = 1 - Math.pow(1 - t, 3)
+          node.textContent = formatGrillScore(target * eased)
+          if (t < 1) {
+            window.requestAnimationFrame(step)
+          } else {
+            node.textContent = formatGrillScore(target)
+          }
+        }
+        window.requestAnimationFrame(step)
       }
 
       async function handlePrivateRealtimeToolCall(item) {
@@ -21859,11 +22544,25 @@
           if (Array.isArray(response.data?.actions)) {
             handleOSAssistantActions(response.data.actions)
           }
+          // Private grill swap: the browser owns the data channel, so we apply
+          // the returned instruction block (start) or revert (end) here. On end,
+          // carry the model's live-graded args (scores/verdict/readiness) onto
+          // the output so the scorecard reveal can render instantly — the filed
+          // artifact is re-graded authoritatively server-side.
+          if (name === 'start_private_grill' && output?.ok !== false) {
+            beginPrivateGrillRitual(output)
+          } else if (name === 'end_private_grill' && output?.ok !== false) {
+            output.__scores = Array.isArray(args?.scores) ? args.scores : []
+            output.__verdict = args?.verdict
+            output.__readiness = args?.readiness
+            endPrivateGrillRitual(output)
+          }
           // confirm beat: on a successful mutating action, record the ledger
           // line, drop a durable toast receipt, and show the confirm verb. Pure
-          // reads (read_thread_aloud, answer_memory_question, do_nothing) and
-          // failures don't earn a receipt.
+          // reads (read_thread_aloud, answer_memory_question, do_nothing) and the
+          // grill ritual (its own stage IS the feedback) don't earn a receipt.
           const mutating = name !== 'do_nothing' && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
+            && name !== 'start_private_grill' && name !== 'end_private_grill'
           if (output?.ok !== false && mutating) {
             recordScoutAction(name, output)
             showToast({ text: scoutActionVerb(name, 'confirm'), kind: name === 'delete_ticket' ? 'note' : 'done' })
@@ -21910,6 +22609,9 @@
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
+        // A closing session ends any in-flight grill ritual (the browser owns it).
+        privateGrillActive = false
+        hidePrivateGrillStage()
         resetScoutSessionLedger()
 
         if (privateRealtimeVoicePeer) {

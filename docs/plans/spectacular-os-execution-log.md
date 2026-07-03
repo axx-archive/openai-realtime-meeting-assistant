@@ -216,29 +216,20 @@ Risks carried forward: goal_engine boot reconciler reads raw entriesOfKind (a qu
 
 ## Wave 8
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Morning Brief (incl. quarantine tray, 10-second kit, permissions)
-- [ ] Portfolio Health + "how's the portfolio" tool
-- [ ] Approval round-trip loop (requester subscription → admin one-tap → origin-surface return)
-- [ ] Mobile specs for all three
-- [ ] Tests incl. approval round-trip
-- [ ] OPS-2 (ops-agent deploy + SLOP_CLASSIFIER_INTERVAL)
+Status: `completed` (commit 101209e + UI in dfbcddf, reviewed PASS after 3 fixes)
+Files: office_brief.go (470+), office_brief_test.go (330+), codex_proposals.go, codex_runner_queue.go, kanban.go (portfolio_health tool), main.go (2 routes), office_events.go (gate-entry seam), index.html office-home region.
+Review fixes: reject double-fire (transition guard mirroring approve paths + idempotency test); two hardcoded colors → tokens. Dev-added beyond spec: admin gate-entry bell notification (once per gate entry, admin-only) + one-tap bell approve/reject with inline reason.
+Risks carried forward: Wave 11 return card should share renderApprovalRow's waiting-card vocabulary + register alongside the existing osEventHandlers consumer; board deltas only as granular as board-worker summaries; OPS-2 code push done (dfbcddf) — VPS deploy batched to OPS-3.
 
 ---
 
 ## Wave 9
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Per-browser suppression strategy (no stacking)
-- [ ] Worklet gate demotion + noiseBias removal + soft ducker
-- [ ] Default-on desktop + relabeled modes
-- [ ] Honest status chip + suppression meter + v8 settings (tolerant migration) + saved-for-this-device
-- [ ] Benchmark extension (suppression-dB + onset preservation)
-- [ ] Frontend-marker tests
+Status: `completed` (commit dfbcddf, reviewed PASS after 3 fixes)
+Files: index.html audio/settings regions, public/voice-focus/rnnoise-processor.js (+62), scripts/voice-focus-benchmark.mjs (+147), frontend_latency_test.go, frontend_noise_suppression_test.go (6 tests + in-body wiring test).
+Review fixes: silent-worklet-crash chip lie (onprocessorerror handler + 4s staleness guard); mislabeled fallback text unified; marker tests hardened to functionBody() scoping (the Wave-6 lesson applied).
+Benchmark evidence: onset retention 0.28→0.49 (1.75×), suppression 11.3dB speech-over-fan / 9.2dB fan-only. Dev also fixed initial-capture double-processing (raw mediaConstraints on first getUserMedia).
+Risks carried forward: Wave 13 rides the v8 video sub-record ({look, lookIntensity, preferredCamera}, look enum validated in normalizeVideoSettings — extend it); privacy-mute machinery dormant by design.
 
 ---
 

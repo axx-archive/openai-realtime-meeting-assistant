@@ -117,9 +117,14 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"start_chat_as_user":     true,
 		"read_thread_aloud":      true,
 		"initiate_goal":          true,
-		"meeting_recap":          true,
-		"catch_me_up":            true,
-		"do_nothing":             true,
+		// Wave 12: private grill is a client-driven session.update swap, private
+		// only. The room grill (start_grill_session/end_grill_session) stays
+		// room-only below.
+		"start_private_grill": true,
+		"end_private_grill":   true,
+		"meeting_recap":       true,
+		"catch_me_up":         true,
+		"do_nothing":          true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
