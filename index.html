@@ -5766,6 +5766,132 @@
         border-color: color-mix(in srgb, var(--danger) 42%, transparent);
       }
 
+      /* acting (§0 color law): ember = a machine is working. The island takes an
+         ember hairline while Scout runs a tool on the user's behalf. */
+      .voice-island[data-state="acting"] {
+        border-color: color-mix(in srgb, var(--agent) 52%, transparent);
+        box-shadow: var(--glass-highlight), var(--glass-shadow), var(--glow-agent);
+      }
+      .voice-island[data-state="acting"] .os-wave {
+        color: var(--agent);
+      }
+      .voice-island[data-state="acting"] .bf-wave-bar {
+        animation: bf-wave 520ms var(--ease) infinite;
+        opacity: 1;
+      }
+
+      /* hand-raised: Scout paused for consent (post-as-user, external write).
+         Bars go still; a single amber pulse rides the edge — not green (no human
+         is speaking), not full ember (she is waiting, not working). */
+      .voice-island[data-state="hand-raised"] {
+        border-color: color-mix(in srgb, var(--warn) 60%, transparent);
+        animation: voice-island-consent 1.8s var(--ease) infinite;
+      }
+      .voice-island[data-state="hand-raised"] .os-wave {
+        color: var(--warn);
+      }
+      .voice-island[data-state="hand-raised"] .bf-wave-bar {
+        animation: none;
+        opacity: 0.55;
+      }
+
+      @keyframes voice-island-consent {
+        0%, 100% { box-shadow: var(--glass-highlight), var(--glass-shadow); }
+        50% { box-shadow: var(--glass-highlight), var(--glass-shadow), 0 0 0 1.5px color-mix(in srgb, var(--warn) 70%, transparent); }
+      }
+
+      /* the ⋯ ledger trigger + the "what Scout did" panel */
+      .voice-island__ledger-btn {
+        width: 30px;
+        height: 30px;
+        flex: none;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-full);
+        color: var(--text-3);
+        transition: transform var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .voice-island__ledger-btn:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+      .voice-island__ledger-btn:active {
+        transform: scale(var(--press-scale));
+      }
+      .voice-island.has-ledger .voice-island__ledger-btn {
+        display: inline-flex;
+      }
+
+      .voice-ledger {
+        position: fixed;
+        left: 50%;
+        top: max(146px, calc(env(safe-area-inset-top) + 136px));
+        z-index: 1360;
+        width: min(360px, calc(100vw - 32px));
+        max-height: min(60vh, 420px);
+        overflow-y: auto;
+        transform: translateX(-50%);
+        padding: 12px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-lg);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow), var(--shadow-2);
+        pointer-events: auto;
+        animation: voice-ledger-enter var(--dur-fast) var(--ease) both;
+      }
+      .voice-ledger[hidden] { display: none; }
+      @keyframes voice-ledger-enter {
+        from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+      }
+      .voice-ledger__title {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        padding: 2px 6px 8px;
+      }
+      .voice-ledger__empty {
+        color: var(--text-3);
+        font: 400 12.5px/1.5 var(--font-sans);
+        padding: 6px 6px 8px;
+      }
+      .voice-ledger__item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 6px;
+        border-top: 1px solid var(--line-1);
+      }
+      .voice-ledger__item:first-of-type { border-top: 0; }
+      .voice-ledger__verb {
+        min-width: 0;
+        flex: 1;
+        color: var(--text-1);
+        font: 400 13px/1.35 var(--font-sans);
+        overflow-wrap: anywhere;
+      }
+      .voice-ledger__time {
+        flex: none;
+        color: var(--text-3);
+        font: var(--type-numeric, 400 11px/1 var(--font-mono, monospace));
+        font-variant-numeric: tabular-nums;
+      }
+      .voice-ledger__undo {
+        flex: none;
+        min-height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        color: var(--agent);
+        font: 600 12px/1 var(--font-sans);
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .voice-ledger__undo:hover { border-color: var(--agent); }
+      .voice-ledger__undo:active { transform: scale(var(--press-scale)); }
+
       .voice-island__main {
         min-width: 0;
         display: grid;
@@ -6956,6 +7082,25 @@
         letter-spacing: var(--track-label);
         color: var(--text-3);
         padding-left: 4px;
+      }
+
+      /* disclosure chip: a message Scout posted on the user's behalf. ember
+         (a machine acted), always visible, never hidden. */
+      .scout-chat-msg__via {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 1px 6px;
+        border-radius: var(--r-full);
+        background: var(--agent-soft);
+        color: var(--agent);
+        font: 600 10px/1.4 var(--font-sans);
+        letter-spacing: 0.02em;
+        text-transform: none;
+        vertical-align: middle;
+      }
+      #chatTool .scout-chat-msg--user .scout-chat-msg__stack .scout-chat-msg__via {
+        margin-left: auto;
       }
 
       .scout-chat-text {
@@ -14938,9 +15083,12 @@
         .voice-island[data-state="hearing"] .bf-wave-bar,
         .voice-island[data-state="thinking"] .bf-wave-bar,
         .voice-island[data-state="talking"] .bf-wave-bar,
+        .voice-island[data-state="acting"] .bf-wave-bar,
+        .voice-island[data-state="hand-raised"] { animation: none; }
         .office-launch.is-listening .bf-wave-bar,
         .bf-island.is-speaking .bf-wave-bar,
         .bf-fab.is-speaking .bf-wave-bar { animation: none; }
+        .voice-ledger { animation: none; }
         /* tab-pane enters (hardcoded .4s) snap under reduced motion */
         #appShell.is-authed[data-tool="office"] #officeTool,
         #appShell.is-authed[data-tool="chat"] #chatTool,
@@ -16100,9 +16248,16 @@
           <span id="voiceIslandMeta" class="voice-island__meta">listening…</span>
         </span>
       </button>
+      <button id="voiceIslandLedgerBtn" class="voice-island__ledger-btn" type="button" aria-label="What Scout did this session" title="What Scout did" aria-haspopup="true" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>
+      </button>
       <button id="voiceIslandClose" class="voice-island__close" type="button" aria-label="Turn off Realtime voice" title="Turn off Realtime voice">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
       </button>
+    </aside>
+    <aside id="voiceLedger" class="voice-ledger" hidden aria-label="What Scout did this session">
+      <div class="voice-ledger__title">what scout did</div>
+      <div id="voiceLedgerList"></div>
     </aside>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <!-- codex task proposals — board-worker-proposed agent tasks awaiting a
@@ -16769,6 +16924,9 @@
       const voiceIslandClose = document.getElementById('voiceIslandClose')
       const voiceIslandLabel = document.getElementById('voiceIslandLabel')
       const voiceIslandMeta = document.getElementById('voiceIslandMeta')
+      const voiceIslandLedgerBtn = document.getElementById('voiceIslandLedgerBtn')
+      const voiceLedger = document.getElementById('voiceLedger')
+      const voiceLedgerList = document.getElementById('voiceLedgerList')
       const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       const agentToolIds = ['research', 'design', 'grill']
       const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
@@ -16841,6 +16999,9 @@
       let privateRealtimeVoiceSessionToken = 0
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
+      // "what Scout did" — a reverse-chron record of this voice session's
+      // actions, reachable from the island's ⋯ menu. Reset when a session ends.
+      let scoutSessionLedger = []
       const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
 
       function canUseArtifactLibrary() {
@@ -17218,6 +17379,15 @@
       })
       voiceIslandMain.addEventListener('click', () => openOfficeTool('chat'))
       voiceIslandClose.addEventListener('click', stopRealtimeVoiceConversation)
+      voiceIslandLedgerBtn?.addEventListener('click', event => {
+        event.stopPropagation()
+        toggleScoutLedger()
+      })
+      document.addEventListener('click', event => {
+        if (voiceLedger && !voiceLedger.hidden && !voiceLedger.contains(event.target) && event.target !== voiceIslandLedgerBtn && !voiceIslandLedgerBtn?.contains(event.target)) {
+          setScoutLedgerOpen(false)
+        }
+      })
       osAssistantModeButtons.forEach(button => {
         button.addEventListener('click', () => setOSAssistantMode(button.dataset.assistantMode || 'chat'))
       })
@@ -21157,7 +21327,16 @@
           return
         }
         privateRealtimeVoiceHandledCalls.add(callId)
-        setVoiceIslandState('thinking', 'working…')
+        // announce beat: posting-as-user pauses on a consent-signalling
+        // hand-raised state; every other action shows the ember "acting" state
+        // with the live verb. do_nothing stays quiet.
+        if (name === 'do_nothing') {
+          setVoiceIslandState('thinking', 'thinking…')
+        } else if (name === 'start_chat_as_user') {
+          setVoiceIslandState('hand-raised', scoutActionVerb(name, 'announce'))
+        } else {
+          setVoiceIslandState('acting', scoutActionVerb(name, 'announce'))
+        }
 
         let args = {}
         try {
@@ -21177,7 +21356,7 @@
           }
           const threadOutput = output?.thread || response.data?.result?.thread
           if (response.data?.artifact) {
-            addArtifactEntry(response.data.artifact, { select: !(name === 'launch_agent_thread' || threadOutput) })
+            addArtifactEntry(response.data.artifact, { select: !(name === 'launch_agent_thread' || name === 'initiate_goal' || threadOutput) })
           }
           if (threadOutput) {
             const thread = { ...threadOutput }
@@ -21190,10 +21369,23 @@
           if (Array.isArray(response.data?.actions)) {
             handleOSAssistantActions(response.data.actions)
           }
-          const label = output.tool ? `opened ${String(output.tool).replaceAll('_', ' ')}` : name.replaceAll('_', ' ')
-          setVoiceIslandState('thinking', label)
+          // confirm beat: on a successful mutating action, record the ledger
+          // line, drop a durable toast receipt, and show the confirm verb. Pure
+          // reads (read_thread_aloud, answer_memory_question, do_nothing) and
+          // failures don't earn a receipt.
+          const mutating = name !== 'do_nothing' && name !== 'read_thread_aloud' && name !== 'answer_memory_question'
+          if (output?.ok !== false && mutating) {
+            recordScoutAction(name, output)
+            showToast({ text: scoutActionVerb(name, 'confirm'), kind: name === 'delete_ticket' ? 'note' : 'done' })
+            setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
+          } else if (output?.ok === false && output?.error) {
+            setVoiceIslandState('error', String(output.error))
+          } else {
+            setVoiceIslandState('acting', scoutActionVerb(name, 'confirm'))
+          }
         } catch (error) {
           output = { ok: false, error: error.message || 'tool request failed' }
+          setVoiceIslandState('error', output.error)
         }
         sendPrivateRealtimeToolOutput(callId, output)
       }
@@ -21228,6 +21420,7 @@
         }
         privateRealtimeVoiceDataChannel = undefined
         privateRealtimeVoiceHandledCalls = new Set()
+        resetScoutSessionLedger()
 
         if (privateRealtimeVoicePeer) {
           privateRealtimeVoicePeer.ontrack = null
@@ -21331,14 +21524,14 @@
         }
         window.clearTimeout(voiceIslandClearTimer)
         voiceIslandClearTimer = 0
-        const next = ['connecting', 'listening', 'hearing', 'thinking', 'talking', 'error'].includes(state) ? state : 'idle'
+        const next = ['connecting', 'listening', 'hearing', 'thinking', 'talking', 'acting', 'hand-raised', 'error'].includes(state) ? state : 'idle'
         voiceIslandState = next
         voiceIsland.dataset.state = next
         // breathe canon (D10): the office waveform swells only while the
-        // realtime voice pipeline is genuinely listening/answering
+        // realtime voice pipeline is genuinely listening/answering/acting
         officeLaunchHome?.classList.toggle(
           'is-listening',
-          ['listening', 'hearing', 'thinking', 'talking'].includes(next)
+          ['listening', 'hearing', 'thinking', 'talking', 'acting', 'hand-raised'].includes(next)
         )
         syncOfficeLaunchVoiceCopy()
         const labels = {
@@ -21347,6 +21540,8 @@
           hearing: 'Realtime 2',
           thinking: 'Realtime 2',
           talking: 'Realtime 2',
+          acting: 'Scout',
+          'hand-raised': 'Scout · needs you',
           error: 'Realtime 2'
         }
         const details = {
@@ -21355,6 +21550,8 @@
           hearing: 'listening…',
           thinking: 'thinking…',
           talking: 'answering…',
+          acting: 'working…',
+          'hand-raised': 'waiting for your ok…',
           error: 'voice needs attention'
         }
         voiceIslandLabel.textContent = labels[next] || labels.listening
@@ -21392,6 +21589,151 @@
         const visible = shouldShowVoiceIsland()
         voiceIsland.hidden = !visible
         voiceIsland.classList.toggle('is-visible', visible)
+        if (!visible) {
+          setScoutLedgerOpen(false)
+        }
+      }
+
+      // announce→act→confirm: each Scout tool call narrates the same three
+      // beats so a multi-step task reads as small certainties. The verb maps
+      // stay lowercase mono-voice; unknown tools fall back to the humanized name.
+      const scoutActionNarration = {
+        control_app: { announce: 'opening…', confirm: 'opened.' },
+        create_ticket: { announce: 'adding a card…', confirm: 'card added.' },
+        move_ticket: { announce: 'moving the card…', confirm: 'card moved.' },
+        update_ticket: { announce: 'updating the card…', confirm: 'card updated.' },
+        add_tags: { announce: 'tagging…', confirm: 'tagged.' },
+        add_key_date: { announce: 'setting a date…', confirm: 'date set.' },
+        remove_key_dates: { announce: 'clearing dates…', confirm: 'dates cleared.' },
+        delete_ticket: { announce: 'deleting the card…', confirm: 'card deleted.' },
+        undo_delete_ticket: { announce: 'restoring the card…', confirm: 'card restored.' },
+        create_artifact: { announce: 'saving an artifact…', confirm: 'artifact saved.' },
+        update_artifact: { announce: 'updating the artifact…', confirm: 'artifact updated.' },
+        publish_artifact: { announce: 'publishing…', confirm: 'published.' },
+        launch_agent_thread: { announce: 'starting a workstream…', confirm: 'workstream running.' },
+        initiate_goal: { announce: 'kicking off the goal…', confirm: 'goal running.' },
+        answer_memory_question: { announce: 'searching memory…', confirm: 'found it.' },
+        read_thread_aloud: { announce: 'pulling it up…', confirm: 'here it is.' },
+        send_notification: { announce: 'notifying the team…', confirm: 'notified.' },
+        post_to_channel: { announce: 'posting…', confirm: 'posted.' },
+        start_chat_as_user: { announce: 'posting as you…', confirm: 'posted as you.' },
+        create_channel: { announce: 'making the channel…', confirm: 'channel made.' },
+        create_package: { announce: 'creating the package…', confirm: 'package created.' },
+        attach_to_package: { announce: 'filing it…', confirm: 'filed.' },
+        advance_package_stage: { announce: 'advancing the stage…', confirm: 'stage advanced.' },
+        meeting_recap: { announce: 'building a recap…', confirm: 'recap ready.' },
+        catch_me_up: { announce: 'catching you up…', confirm: 'caught up.' }
+      }
+
+      function scoutActionVerb(tool, phase) {
+        const entry = scoutActionNarration[tool]
+        if (entry && entry[phase]) {
+          return entry[phase]
+        }
+        const humanized = String(tool || 'that').replaceAll('_', ' ')
+        return phase === 'announce' ? `${humanized}…` : `${humanized} done.`
+      }
+
+      // Actions that carry a real inverse get an undo affordance in the ledger;
+      // everything else is recorded as an honest audit line with no fake undo.
+      function scoutActionUndo(tool, output) {
+        if (tool === 'delete_ticket') {
+          return { label: 'undo', run: () => postAuthJSON('/assistant/realtime-tool', { name: 'undo_delete_ticket', arguments: {} }) }
+        }
+        if (tool === 'send_notification') {
+          const id = String(output?.notificationId || output?.id || '').trim()
+          if (id) {
+            return { label: 'dismiss', run: () => markNotificationsRead([id]) }
+          }
+        }
+        return null
+      }
+
+      function recordScoutAction(tool, output) {
+        const verb = scoutActionVerb(tool, 'confirm')
+        scoutSessionLedger.unshift({
+          tool,
+          verb,
+          at: Date.now(),
+          undo: scoutActionUndo(tool, output)
+        })
+        if (scoutSessionLedger.length > 40) {
+          scoutSessionLedger.length = 40
+        }
+        if (voiceIsland) {
+          voiceIsland.classList.add('has-ledger')
+        }
+        if (voiceLedger && !voiceLedger.hidden) {
+          renderScoutLedger()
+        }
+      }
+
+      function resetScoutSessionLedger() {
+        scoutSessionLedger = []
+        setScoutLedgerOpen(false)
+        voiceIsland?.classList.remove('has-ledger')
+      }
+
+      function renderScoutLedger() {
+        if (!voiceLedgerList) {
+          return
+        }
+        voiceLedgerList.textContent = ''
+        if (!scoutSessionLedger.length) {
+          const empty = document.createElement('p')
+          empty.className = 'voice-ledger__empty'
+          empty.textContent = 'nothing yet this session.'
+          voiceLedgerList.appendChild(empty)
+          return
+        }
+        scoutSessionLedger.forEach((entry, index) => {
+          const row = document.createElement('div')
+          row.className = 'voice-ledger__item'
+          const verb = document.createElement('span')
+          verb.className = 'voice-ledger__verb'
+          verb.textContent = entry.verb
+          const time = document.createElement('span')
+          time.className = 'voice-ledger__time'
+          time.textContent = scoutChatTimeLabel(new Date(entry.at).toISOString())
+          row.append(verb, time)
+          if (entry.undo) {
+            const undo = document.createElement('button')
+            undo.type = 'button'
+            undo.className = 'voice-ledger__undo'
+            undo.textContent = entry.undo.label || 'undo'
+            undo.addEventListener('click', async () => {
+              undo.disabled = true
+              try {
+                await entry.undo.run()
+                scoutSessionLedger[index] = { ...entry, undo: null, verb: `${entry.verb} (undone)` }
+                showToast({ text: 'undone', kind: 'note' })
+              } catch {
+                undo.disabled = false
+                showToast({ text: 'could not undo that', kind: 'error' })
+                return
+              }
+              renderScoutLedger()
+            })
+            row.appendChild(undo)
+          }
+          voiceLedgerList.appendChild(row)
+        })
+      }
+
+      function setScoutLedgerOpen(open) {
+        if (!voiceLedger) {
+          return
+        }
+        const show = Boolean(open) && scoutSessionLedger.length >= 0
+        voiceLedger.hidden = !show
+        voiceIslandLedgerBtn?.setAttribute('aria-expanded', show ? 'true' : 'false')
+        if (show) {
+          renderScoutLedger()
+        }
+      }
+
+      function toggleScoutLedger() {
+        setScoutLedgerOpen(voiceLedger?.hidden !== false ? true : false)
       }
 
       function renderAgentArtifactLink(entry) {
@@ -27395,9 +27737,81 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!scoutChatInput.value.trim() && !pendingScoutFiles.length) {
 	          return
 	        }
+	        // /goal text door: a message whose FIRST token is exactly "/goal"
+	        // launches the same goal spec the voice initiate_goal tool emits,
+	        // scoped to this thread as its origin surface.
+	        const goalObjective = parseGoalCommand(scoutChatInput.value)
+	        if (goalObjective !== null) {
+	          if (goalObjective) {
+	            launchGoalFromComposer(goalObjective)
+	          } else {
+	            appendScoutChatNode(scoutChatMessageNode('error', 'usage: /goal <objective>', new Date().toISOString()))
+	          }
+	          scoutChatInput.value = ''
+	          resizeScoutChatInput()
+	          return
+	        }
 	        if (sendScoutChat(scoutChatInput.value)) {
 	          scoutChatInput.value = ''
           resizeScoutChatInput()
+        }
+      }
+
+      // parseGoalCommand returns the objective when the message's first token
+      // is exactly "/goal" (the door marker), an empty string when "/goal" is
+      // typed with no objective, or null when it is a normal message. Keying on
+      // the first token means "the /goal syntax" in prose is never mistaken for it.
+      function parseGoalCommand(raw) {
+        const value = String(raw || '')
+        const match = value.match(/^\s*\/goal(?:\s+([\s\S]*))?$/i)
+        if (!match) {
+          return null
+        }
+        return String(match[1] || '').trim()
+      }
+
+      async function launchGoalFromComposer(objective) {
+        if (!authedUser) {
+          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to launch a goal', new Date().toISOString()))
+          return
+        }
+        const ts = new Date().toISOString()
+        appendScoutChatNode(scoutChatMessageNode('user', `/goal ${objective}`, ts))
+        updateChatThreadItem(`/goal ${objective}`, ts)
+        showScoutChatThinking('kicking off the goal')
+        try {
+          const thread = await ensurePersistedScoutThread()
+          const response = await fetch('/assistant/goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ objective, originSurface: `chat:${thread?.id || ''}` })
+          })
+          const payload = await response.json().catch(() => ({}))
+          withScoutChatThinkingHold(() => {
+            hideScoutChatThinking()
+            if (!response.ok) {
+              const message = payload.error || (response.status === 503 ? 'the goal engine is not configured here' : 'could not launch that goal')
+              appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
+              return
+            }
+            if (payload.artifact) {
+              addArtifactEntry(payload.artifact, { select: false })
+              scheduleArtifactRefresh()
+            }
+            // Render the running goal in-thread like other launched work: the
+            // thread shows the artifact reference and jumps into the work view.
+            if (payload.thread) {
+              const runningThread = { ...payload.thread }
+              if (!runningThread.artifact && payload.artifact) {
+                runningThread.artifact = payload.artifact
+              }
+              upsertScoutChatResearchNode(runningThread)
+            }
+            showToast({ text: 'goal running', kind: 'done' })
+          })
+        } catch (error) {
+          hideScoutChatThinking()
+          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not launch that goal', new Date().toISOString()))
         }
       }
 
@@ -28576,7 +28990,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          authorLabel = authorName || authorEmail.split('@')[0].toLowerCase()
 	        }
 	        const text = kind === 'scout' ? scoutVoice(message?.text || '') : String(message?.text || '')
-	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel)
+	        // Disclosure: a message Scout posted on someone's behalf carries a
+	        // server-stamped postedOnBehalfOf — render a visible "via Scout" chip
+	        // next to the author so authorship is never hidden.
+	        const viaScout = Boolean(String(message?.postedOnBehalfOf || '').trim())
+	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	      }
 
 	      function scoutThreadFromChatMessage(message) {
@@ -28777,13 +29195,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function scoutChatMessageNode(kind, text, ts, files, authorLabel) {
+      function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
         const label = authorLabel || (kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : kind === 'peer' ? 'peer' : 'error')
         // authorship + timestamp survive as a hover tooltip — the design
         // bubbles carry no meta line
-        item.title = `${label} · ${scoutChatTimeLabel(ts)}`
+        item.title = `${label} · ${scoutChatTimeLabel(ts)}${viaScout ? ' · via Scout' : ''}`
 
         // design §7.2 — scout wears the bare flame, peers a 22px initials
         // disc; your own messages carry no avatar
@@ -28802,10 +29220,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stack = document.createElement('div')
         stack.className = 'scout-chat-msg__stack'
 
-        if (kind === 'peer' && authorLabel) {
+        if ((kind === 'peer' && authorLabel) || viaScout) {
           const author = document.createElement('span')
           author.className = 'scout-chat-msg__author'
-          author.textContent = authorLabel
+          author.textContent = kind === 'peer' && authorLabel ? authorLabel : label
+          if (viaScout) {
+            const chip = document.createElement('span')
+            chip.className = 'scout-chat-msg__via'
+            chip.textContent = 'via Scout'
+            author.append(' ', chip)
+          }
           stack.appendChild(author)
         }
 

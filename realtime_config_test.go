@@ -88,18 +88,34 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	if !ok || len(tools) == 0 {
 		t.Fatalf("private dashboard Realtime voice tools=%T, want constrained OS tool list", session["tools"])
 	}
+	// Wave 6 ("she can do it all"): private Scout drives the board and edits
+	// artifacts on the user's behalf, plus the new parity tools. The room-only
+	// set below stays excluded because it mutates the shared room.
 	allowed := map[string]bool{
 		"control_app":            true,
 		"create_artifact":        true,
+		"update_artifact":        true,
+		"publish_artifact":       true,
 		"launch_agent_thread":    true,
 		"answer_memory_question": true,
 		"propose_codex_task":     true,
+		"create_ticket":          true,
+		"move_ticket":            true,
+		"update_ticket":          true,
+		"add_tags":               true,
+		"add_key_date":           true,
+		"remove_key_dates":       true,
+		"delete_ticket":          true,
+		"undo_delete_ticket":     true,
 		"create_package":         true,
 		"attach_to_package":      true,
 		"advance_package_stage":  true,
 		"send_notification":      true,
 		"post_to_channel":        true,
 		"create_channel":         true,
+		"start_chat_as_user":     true,
+		"read_thread_aloud":      true,
+		"initiate_goal":          true,
 		"meeting_recap":          true,
 		"catch_me_up":            true,
 		"do_nothing":             true,
@@ -114,9 +130,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	for missing := range allowed {
 		t.Fatalf("private dashboard Realtime voice missing OS tool %q", missing)
 	}
-	// Grill sessions take over the SHARED room realtime session; the private
-	// dashboard voice must never see either tool.
-	for _, roomOnly := range []string{"start_grill_session", "end_grill_session"} {
+	// Room controls take over the SHARED room realtime session/recording; the
+	// private dashboard voice must never see them.
+	for _, roomOnly := range []string{"start_grill_session", "end_grill_session", "set_voice_control", "set_recording", "archive_meeting"} {
 		if privateRealtimeVoiceToolAllowed(roomOnly) {
 			t.Fatalf("private realtime voice must not allow room-only tool %q", roomOnly)
 		}
@@ -129,7 +145,14 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"private Bonfire OS voice assistant",
 		"outside the video room",
 		"Do not describe yourself as the shared room Scout",
-		"do not mutate the shared Kanban board",
+		// Wave 6: the boundary is now "on the user's behalf; not the room's
+		// shared voice", board mutation is allowed, external writes stay gated,
+		// and disclosure is mandatory when posting as the user.
+		"You MAY update the shared Kanban board on the user's behalf",
+		"you are NOT the room's shared voice",
+		"External writes",
+		"stay gated",
+		"disclosure is mandatory",
 		"Use launch_agent_thread",
 		"Use board context only when the user explicitly asks about board, card, task, status, owner, or due-date information",
 		"do not volunteer board status for unclear follow-ups like \"what?\"",

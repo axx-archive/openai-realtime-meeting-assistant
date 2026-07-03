@@ -238,6 +238,17 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifact(_ context.Context, th
 	}
 
 	authority := codexJobAuthorityForThread(thread)
+	// Wave-6 handoff: a /goal subtask child (goalParentId present) already had
+	// its authority clamped by goalChildAuthority — never above workspace_write,
+	// never out-privileging its parent. Re-deriving from the title text here
+	// would ignore that clamp and, worse, could spuriously trip the approval
+	// gate on a child whose title merely mentions "deploy". Honor the stamped,
+	// already-clamped authority so the sidecar respects the engine's decision.
+	if strings.TrimSpace(thread.Artifact.Metadata["goalParentId"]) != "" {
+		if stamped := normalizeCodexJobAuthority(thread.Artifact.Metadata["authority"]); stamped == codexJobAuthorityReadOnly || stamped == codexJobAuthorityWorkspaceWrite {
+			authority = stamped
+		}
+	}
 	if authority == codexJobAuthorityExternalWrite {
 		return codexApprovalRequiredResult(thread, authority), nil
 	}

@@ -1036,10 +1036,10 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
-		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room.",
-		"# Boundary\nDo not describe yourself as the shared room Scout. Do not say the room can hear you, do not treat the user as a meeting participant, and do not mutate the shared Kanban board or room recording from this private surface. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory. Use launch_agent_thread for any request to research, investigate, source, design, grill, pressure-test, plan, or run a goal/workflow so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
-		"# Channels\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
+		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
+		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, or memory; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
 		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
@@ -1048,26 +1048,9 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 }
 
 func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
-	allowed := map[string]struct{}{
-		"control_app":            {},
-		"create_artifact":        {},
-		"launch_agent_thread":    {},
-		"answer_memory_question": {},
-		"propose_codex_task":     {},
-		"create_package":         {},
-		"attach_to_package":      {},
-		"advance_package_stage":  {},
-		"send_notification":      {},
-		"post_to_channel":        {},
-		"create_channel":         {},
-		"meeting_recap":          {},
-		"catch_me_up":            {},
-		"do_nothing":             {},
-	}
 	tools := []map[string]any{}
 	for _, tool := range app.kanbanTools() {
-		name := asString(tool["name"])
-		if _, ok := allowed[name]; ok {
+		if privateRealtimeVoiceToolAllowed(asString(tool["name"])) {
 			tools = append(tools, tool)
 		}
 	}
@@ -1869,6 +1852,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"tool":        appToolProperty,
 					"artifact_id": map[string]any{"type": "string", "description": "Optional saved artifact id to select after opening artifacts."},
+					"also_open": map[string]any{
+						"type":        "array",
+						"description": "Optional extra surfaces to open alongside tool, in order — use when the user asks to open several things at once (e.g. the market map artifact AND the deck).",
+						"items":       map[string]any{"type": "string", "enum": []string{"office", "room", "chat", "artifacts", "research", "design", "grill", "board", "memory"}},
+					},
 				},
 				"required":             []string{"tool"},
 				"additionalProperties": false,
@@ -2159,6 +2147,67 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"reason": map[string]any{"type": "string", "description": "Optional reason the grill ended."},
 				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "read_thread_aloud",
+			"description": "Fetch the recent text of a channel, a private thread, a saved artifact, or the user's notifications so you can read it aloud in your spoken turn. Use for requests like read me the latest in #dealflow, what did the fintech thread say, or read my notifications. This returns text only; you speak it.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target": map[string]any{
+						"type":        "string",
+						"description": "What to read: channel (a public #channel), private_thread (one of the user's Scout threads), artifact (a saved artifact id), or notifications (the user's bell).",
+						"enum":        []string{"channel", "private_thread", "artifact", "notifications"},
+					},
+					"ref":   map[string]any{"type": "string", "description": "Channel name, private thread id, or artifact id. Ignored for notifications."},
+					"limit": map[string]any{"type": "integer", "description": "How many recent messages to read. Default 3."},
+				},
+				"required":             []string{"target", "ref"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "start_chat_as_user",
+			"description": "Start (or address) a channel or a private thread and post a message into it on the user's behalf, quoting them faithfully. The post is always disclosed as via Scout — read the draft back and confirm before posting. Use for requests like start a thread with the team about X and say Y, or post to #dealflow as me.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"audience": map[string]any{
+						"type":        "string",
+						"description": "channel starts/addresses a public team #channel; thread starts/addresses one of the user's private Scout threads.",
+						"enum":        []string{"channel", "thread"},
+					},
+					"name": map[string]any{"type": "string", "description": "Channel or thread name to create or address; a leading '#' is tolerated."},
+					"text": map[string]any{"type": "string", "description": "The message to post, quoting the user's words faithfully."},
+					"disclose": map[string]any{
+						"type":        "boolean",
+						"description": "Always true. Disclosure is stamped server-side regardless of this value; the message is always shown as posted via Scout.",
+					},
+				},
+				"required":             []string{"audience", "name", "text"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "initiate_goal",
+			"description": "Launch the multi-step /goal pipeline: Scout decomposes the objective, runs the subtasks, reviews against the goal, gates before shipping, and reports. Use for a real end-to-end objective (\"package the Aurora IP into an investor one-pager and deck\"), not a single research or design ask (use launch_agent_thread for those).",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"objective": map[string]any{"type": "string", "description": "The end-to-end goal, in the user's words."},
+					"package":   map[string]any{"type": "string", "description": "Optional package name or id to file the result under."},
+					"authority_hint": map[string]any{
+						"type":        "string",
+						"description": "read_only for research/analysis goals; workspace_write when the goal produces or edits work. external_write is never available here — it is earned only at the ship gate with human approval.",
+						"enum":        []string{"read_only", "workspace_write"},
+					},
+				},
+				"required":             []string{"objective"},
 				"additionalProperties": false,
 			},
 		},
@@ -2638,11 +2687,30 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	}
 }
 
+// privateRealtimeVoiceToolAllowed is the single source of truth for what
+// private Scout ("she can do it all") may call. Room-only tools are excluded by
+// construction: set_voice_control / set_recording / archive_meeting mutate the
+// shared room session or recording for every participant, and
+// start_grill_session / end_grill_session swap the shared room persona — the
+// private surface has no room. Everything else the private user owns for
+// themselves, including board mutation on their behalf and artifact edits.
 func privateRealtimeVoiceToolAllowed(toolName string) bool {
-	// start_grill_session / end_grill_session stay room-only: the grill
-	// persona takes over the shared room session, never the private voice.
 	switch strings.TrimSpace(toolName) {
-	case "control_app", "create_artifact", "launch_agent_thread", "answer_memory_question", "propose_codex_task", "create_package", "attach_to_package", "advance_package_stage", "send_notification", "post_to_channel", "create_channel", "meeting_recap", "catch_me_up", "do_nothing":
+	case
+		// Navigation, recall, artifacts (the private user owns editing).
+		"control_app", "create_artifact", "update_artifact", "publish_artifact",
+		"launch_agent_thread", "answer_memory_question", "propose_codex_task",
+		// Board mutation on the user's behalf — private Scout drives the board
+		// for you; the mutation path is the same shared applyToolCallArgs.
+		"create_ticket", "move_ticket", "update_ticket", "add_tags",
+		"add_key_date", "remove_key_dates", "delete_ticket", "undo_delete_ticket",
+		// Packages, notifications, channels, recap.
+		"create_package", "attach_to_package", "advance_package_stage",
+		"send_notification", "post_to_channel", "create_channel",
+		"meeting_recap", "catch_me_up",
+		// New Realtime-2 parity tools (Wave 6).
+		"read_thread_aloud", "start_chat_as_user", "initiate_goal",
+		"do_nothing":
 		return true
 	default:
 		return false
@@ -2696,7 +2764,72 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	if toolName == "launch_agent_thread" {
 		return app.launchRealtimeAgentThread(args, nil)
 	}
+	// read_thread_aloud resolves recent text scoped to the signed-in requester
+	// (private threads and notifications are theirs); the session speaks it.
+	if toolName == "read_thread_aloud" {
+		return app.readThreadAloud(args, requesterEmail)
+	}
+	// start_chat_as_user posts on the user's behalf with a mandatory,
+	// server-stamped disclosure — the requester identity, never a model arg.
+	if toolName == "start_chat_as_user" {
+		return app.startChatAsUser(args, requesterEmail)
+	}
+	// initiate_goal launches the /goal engine as the signed-in requester and can
+	// never request external_write (the dispatch clamps it below).
+	if toolName == "initiate_goal" {
+		return app.initiateGoalTool(args, requesterEmail)
+	}
+	// Board mutations and artifact edits fall through to the shared dispatch;
+	// they broadcast to every client exactly as the room path does.
 	return app.applyToolCallArgs(toolName, args)
+}
+
+// initiateGoalTool launches the /goal pipeline by voice as the signed-in
+// requester. It is a thin adapter over launchGoalThread: it can NEVER request
+// external_write (the schema enum excludes it AND this dispatch clamps any
+// smuggled value down to workspace_write), and it degrades gracefully when the
+// orchestrator key is absent so keyless deploys keep working.
+func (app *kanbanBoardApp) initiateGoalTool(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	objective := strings.TrimSpace(asString(args["objective"]))
+	if objective == "" {
+		return nil, false, fmt.Errorf("objective is required")
+	}
+	// Clamp authority: external_write is earned at the gate, never set here.
+	// Anything that is not an explicit read_only hint becomes workspace_write.
+	authority := codexJobAuthorityWorkspaceWrite
+	if strings.EqualFold(strings.TrimSpace(asString(args["authority_hint"])), "read_only") {
+		authority = codexJobAuthorityReadOnly
+	}
+
+	spec := goalLaunchSpec{
+		Objective: objective,
+		CreatedBy: normalizeAccountEmail(requesterEmail),
+		Authority: authority,
+		PackageID: strings.TrimSpace(asString(args["package"])),
+	}
+	thread, err := app.launchGoalThread(spec)
+	if err != nil {
+		if errors.Is(err, errAgentWorkerNotConfigured) {
+			// Keyless / no orchestrator: speak an honest fallback instead of a
+			// hard error, and do not pretend a goal is running.
+			return map[string]any{
+				"ok":       false,
+				"launched": false,
+				"reason":   "the goal engine needs the orchestrator key, which is not configured here — I can research or draft pieces of it instead.",
+			}, false, nil
+		}
+		return nil, false, err
+	}
+
+	return map[string]any{
+		"ok":        true,
+		"launched":  true,
+		"objective": objective,
+		"threadId":  thread.ID,
+		"thread":    thread,
+		"artifact":  thread.Artifact,
+		"authority": authority,
+	}, false, nil
 }
 
 func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool, error) {
@@ -2706,6 +2839,17 @@ func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool
 	}
 	artifactID := firstNonEmptyString(asString(args["artifact_id"]), asString(args["artifactId"]))
 	actions := osAssistantActionsForTool(tool, artifactID)
+	opened := []string{tool}
+	// also_open loops extra surfaces into the same action batch so "open the
+	// market map AND the deck" is one tool call, not several.
+	for _, extra := range asStringSlice(args["also_open"]) {
+		normalized := normalizeOSControlTool(extra)
+		if normalized == "" || normalized == tool {
+			continue
+		}
+		actions = append(actions, osAssistantActionsForTool(normalized, "")...)
+		opened = append(opened, normalized)
+	}
 	broadcastAssistantEvent("action", "Opened "+assistantToolLabel(tool), map[string]any{
 		"tool":       "control_app",
 		"actions":    actions,
@@ -2717,6 +2861,7 @@ func (app *kanbanBoardApp) controlApp(args map[string]any) (map[string]any, bool
 		"tool":       tool,
 		"artifactId": artifactID,
 		"actions":    actions,
+		"opened":     opened,
 	}, false, nil
 }
 
@@ -4603,6 +4748,22 @@ func asString(value any) string {
 func asBool(value any) bool {
 	candidate, ok := value.(bool)
 	return ok && candidate
+}
+
+// asInt reads an integer tool argument. JSON numbers decode to float64, but
+// tolerate a numeric string too so a model that quotes the value still works.
+func asInt(value any) int {
+	switch candidate := value.(type) {
+	case float64:
+		return int(candidate)
+	case int:
+		return candidate
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(candidate)); err == nil {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func firstNonEmptyString(values ...string) string {

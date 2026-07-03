@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -495,6 +496,10 @@ func main() {
 		log.Errorf("Kanban Realtime peer disabled: %v", err)
 		broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
 	}
+	// The slop classifier + expiry sweep is a slow background worker (default
+	// 6h) that runs independent of any meeting, so it starts at boot rather than
+	// at room join. No-ops without OPENAI_API_KEY, like every ambient worker.
+	kanbanApp.startSlopClassifierWorker(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")))
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
 	var err error
@@ -513,6 +518,7 @@ func main() {
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
+	http.HandleFunc("/assistant/goal", assistantGoalHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
@@ -522,6 +528,8 @@ func main() {
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
+	http.HandleFunc("/assistant/quarantine", assistantQuarantineHandler)
+	http.HandleFunc("/assistant/quarantine/", assistantQuarantineActionHandler)
 	http.HandleFunc("/assistant/packages", assistantPackagesHandler)
 	http.HandleFunc("/assistant/packages/", assistantPackageActionHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
@@ -949,6 +957,82 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		"originKind": agentThreadOriginTool,
 	})
 	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeAuthJSON(w, http.StatusAccepted, map[string]any{
+		"ok":       true,
+		"thread":   thread,
+		"artifact": thread.Artifact,
+		"actions":  thread.Actions,
+	})
+}
+
+// assistantGoalHandler is the /goal text door: the composer's "/goal
+// <objective>" parser and (later) the quick-select palette POST here to emit the
+// SAME goal spec the voice initiate_goal tool does. The goal always launches as
+// the signed-in requester, and it can NEVER set external_write — that authority
+// is earned only at the ship gate with admin approval. Same origin+session
+// gates as assistantThreadsHandler.
+func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		Objective     string `json:"objective"`
+		Package       string `json:"package"`
+		AuthorityHint string `json:"authorityHint"`
+		OriginSurface string `json:"originSurface"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read goal request")
+		return
+	}
+	if strings.TrimSpace(payload.Objective) == "" {
+		writeAuthError(w, http.StatusBadRequest, "objective is required")
+		return
+	}
+
+	// Clamp authority exactly like the voice tool: never external_write.
+	authority := codexJobAuthorityWorkspaceWrite
+	if strings.EqualFold(strings.TrimSpace(payload.AuthorityHint), "read_only") {
+		authority = codexJobAuthorityReadOnly
+	}
+
+	origin := map[string]string{}
+	if surface := strings.TrimSpace(payload.OriginSurface); surface != "" {
+		origin["originSurface"] = surface
+	}
+
+	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+		Objective: payload.Objective,
+		CreatedBy: user.Email,
+		Authority: authority,
+		PackageID: strings.TrimSpace(payload.Package),
+		Origin:    origin,
+	})
+	if err != nil {
+		if errors.Is(err, errAgentWorkerNotConfigured) {
+			writeAuthError(w, http.StatusServiceUnavailable, "the goal engine is not configured here")
+			return
+		}
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}

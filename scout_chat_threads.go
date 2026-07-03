@@ -68,9 +68,15 @@ type scoutChatMessageRecord struct {
 	AuthorEmail string `json:"authorEmail,omitempty"`
 	// Via marks messages relayed by a tool (e.g. "scout_voice" for
 	// post_to_channel from the private dashboard voice).
-	Via    string                    `json:"via,omitempty"`
-	Files  []scoutChatFileAttachment `json:"files,omitempty"`
-	Thread *scoutChatThreadRef       `json:"thread,omitempty"`
+	Via string `json:"via,omitempty"`
+	// PostedOnBehalfOf is the disclosure stamp: when Scout posts a message as a
+	// user (start_chat_as_user), this carries that user's email UNCONDITIONALLY
+	// — it is set server-side, never from a model argument, so Scout can never
+	// silently impersonate. The client renders a visible "via Scout" chip
+	// whenever this is present.
+	PostedOnBehalfOf string                    `json:"postedOnBehalfOf,omitempty"`
+	Files            []scoutChatFileAttachment `json:"files,omitempty"`
+	Thread           *scoutChatThreadRef       `json:"thread,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -782,6 +788,215 @@ func (app *kanbanBoardApp) createChannelByVoice(args map[string]any, requesterEm
 		"channel":  thread.Title,
 		"threadId": thread.ID,
 	}, false, nil
+}
+
+// startChatAsUser backs the start_chat_as_user private-voice tool: Scout starts
+// (or addresses) a channel or private thread and posts a message AS the
+// signed-in user, with a mandatory disclosure stamp. The disclosure
+// (postedOnBehalfOf) is written server-side UNCONDITIONALLY from the
+// authenticated requester — never from a model argument — so Scout can never
+// silently impersonate. A missing requester is rejected: there is no "as user"
+// without a real user.
+func (app *kanbanBoardApp) startChatAsUser(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	text := strings.TrimSpace(asString(args["text"]))
+	if text == "" {
+		return nil, false, fmt.Errorf("text is required")
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail == "" {
+		return nil, false, fmt.Errorf("start chats from your private Scout — an owner identity is required")
+	}
+	authorName := participantNameForEmail(requesterEmail)
+
+	audience := strings.ToLower(strings.TrimSpace(asString(args["audience"])))
+	if audience == "" {
+		audience = "channel"
+	}
+
+	var thread scoutChatThreadRecord
+	var err error
+	switch audience {
+	case "thread", "private_thread", "dm":
+		thread, err = app.resolveOrCreatePrivateThread(requesterEmail, authorName, asString(args["name"]))
+	default:
+		audience = "channel"
+		thread, err = app.resolveOrCreatePublicChannel(requesterEmail, authorName, asString(args["name"]))
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	now := time.Now().UTC()
+	message := scoutChatMessageRecord{
+		ID:          fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
+		Kind:        "message",
+		Role:        "user",
+		CreatedAt:   now.Format(time.RFC3339Nano),
+		Text:        text,
+		AuthorName:  authorName,
+		AuthorEmail: requesterEmail,
+		Via:         "scout_voice",
+		// Disclosure is stamped from the authenticated requester, never args —
+		// this is the one place a model action speaks as a human, so the audit
+		// stamp is the safety control (risk-10).
+		PostedOnBehalfOf: requesterEmail,
+	}
+
+	// commitScoutChatThreadMessages fans the message out to the visibility-scoped
+	// tabs itself, so no extra deliver call here.
+	if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
+		return nil, false, err
+	}
+
+	author := firstNonEmptyString(authorName, scoutParticipantName)
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		if _, err := app.createNotification("", notificationKindChat, author+" posted in #"+thread.Title+": "+trimForStorage(text, 140), "chat", "", thread.ID, false); err != nil {
+			log.Errorf("Failed to create start-chat notification: %v", err)
+		}
+		broadcastOSEvent(osEvent{
+			Kind:          osEventChannelPost,
+			Ref:           thread.ID,
+			Title:         "#" + thread.Title,
+			OriginSurface: "chat",
+			Actor:         author,
+		})
+	}
+
+	return map[string]any{
+		"ok":               true,
+		"audience":         audience,
+		"channel":          thread.Title,
+		"threadId":         thread.ID,
+		"messageId":        message.ID,
+		"postedOnBehalfOf": requesterEmail,
+	}, false, nil
+}
+
+// resolveOrCreatePublicChannel addresses an existing public channel by name or
+// creates it, so start_chat_as_user can "start a chat" idempotently.
+func (app *kanbanBoardApp) resolveOrCreatePublicChannel(requesterEmail string, authorName string, name string) (scoutChatThreadRecord, error) {
+	if existing, err := app.publicChannelByName(name); err == nil {
+		return existing, nil
+	}
+	channelName := normalizeChannelName(name)
+	if channelName == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("channel name is required")
+	}
+	thread, err := app.createScoutChatThread(requesterEmail, authorName, channelName, scoutChatVisibilityPublic)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+	return thread, nil
+}
+
+// resolveOrCreatePrivateThread addresses the requester's existing private thread
+// by title (case-insensitive, non-archived) or creates a new one.
+func (app *kanbanBoardApp) resolveOrCreatePrivateThread(requesterEmail string, authorName string, name string) (scoutChatThreadRecord, error) {
+	title := trimForStorage(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "#")), 72)
+	if title != "" {
+		for _, existing := range app.scoutChatThreadsSnapshot(requesterEmail, false, 100) {
+			if scoutChatThreadVisibility(existing) == scoutChatVisibilityPublic {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(existing.Title), title) {
+				return existing, nil
+			}
+		}
+	}
+	thread, err := app.createScoutChatThread(requesterEmail, authorName, title, scoutChatVisibilityPrivate)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
+	return thread, nil
+}
+
+// readThreadAloud backs the read_thread_aloud private-voice tool. The Realtime
+// session already outputs audio, so "read aloud" is recall-shaped: resolve the
+// target's recent text and return it in the tool result for the model to speak
+// in its next turn. No new audio plumbing.
+func (app *kanbanBoardApp) readThreadAloud(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	target := strings.ToLower(strings.TrimSpace(asString(args["target"])))
+	ref := strings.TrimSpace(asString(args["ref"]))
+	limit := asInt(args["limit"])
+	if limit <= 0 || limit > 12 {
+		limit = 3
+	}
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+
+	switch target {
+	case "channel":
+		thread, err := app.publicChannelByName(ref)
+		if err != nil {
+			return nil, false, err
+		}
+		return readThreadAloudResult("#"+thread.Title, scoutChatRecentMessageLines(thread, limit)), false, nil
+	case "private_thread", "thread":
+		if requesterEmail == "" {
+			return nil, false, fmt.Errorf("sign in to read a private thread")
+		}
+		thread, _, err := app.scoutChatThreadByID(requesterEmail, ref)
+		if err != nil {
+			return nil, false, err
+		}
+		title := firstNonEmptyString(thread.Title, "thread")
+		return readThreadAloudResult(title, scoutChatRecentMessageLines(thread, limit)), false, nil
+	case "artifact":
+		entry, ok := app.osArtifactByID(ref)
+		if !ok {
+			return nil, false, fmt.Errorf("no artifact %q to read", ref)
+		}
+		artifactTitle := firstNonEmptyString(entry.Metadata["title"], entry.Metadata["threadQuery"], "artifact")
+		return readThreadAloudResult(artifactTitle, []string{trimForStorage(entry.Text, 1600)}), false, nil
+	case "notifications":
+		if requesterEmail == "" {
+			return nil, false, fmt.Errorf("sign in to read notifications")
+		}
+		lines := []string{}
+		for _, record := range app.notificationsForUser(requesterEmail, limit) {
+			if text := strings.TrimSpace(asString(record["text"])); text != "" {
+				lines = append(lines, text)
+			}
+		}
+		return readThreadAloudResult("notifications", lines), false, nil
+	default:
+		return nil, false, fmt.Errorf("target must be channel, private_thread, artifact, or notifications")
+	}
+}
+
+func readThreadAloudResult(title string, lines []string) map[string]any {
+	clean := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			clean = append(clean, trimmed)
+		}
+	}
+	return map[string]any{
+		"ok":    true,
+		"title": title,
+		"text":  strings.Join(clean, "\n"),
+		"count": len(clean),
+	}
+}
+
+// scoutChatRecentMessageLines returns up to limit most-recent message lines
+// (newest last) as "author: text" for the model to read aloud.
+func scoutChatRecentMessageLines(thread scoutChatThreadRecord, limit int) []string {
+	messages := thread.Messages
+	if len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+	lines := make([]string, 0, len(messages))
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		author := firstNonEmptyString(message.AuthorName, map[string]string{"scout": scoutParticipantName}[message.Role], "someone")
+		lines = append(lines, author+": "+text)
+	}
+	return lines
 }
 
 // scoutChatThreadEventPayload is the message-less chat_thread event body used

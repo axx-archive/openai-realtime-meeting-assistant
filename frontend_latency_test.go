@@ -809,7 +809,7 @@ func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
 		}
 	}
 
-	scoutBody := functionBody(html, "function scoutChatMessageNode(kind, text, ts, files, authorLabel)")
+	scoutBody := functionBody(html, "function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false)")
 	if scoutBody == "" {
 		t.Fatal("index.html missing scoutChatMessageNode")
 	}
