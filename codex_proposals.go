@@ -254,6 +254,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 		payload := codexProposalPayload(updated)
 		broadcastOfficeKanbanEvent("codex_proposal", payload)
+		app.notifyProposalResolution(updated, codexProposalActionConfirm, userName)
 		return payload, true, nil
 	}
 
@@ -269,7 +270,46 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 	payload := codexProposalPayload(updated)
 	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	app.notifyProposalResolution(updated, codexProposalActionDismiss, userName)
 	return payload, false, nil
+}
+
+// notifyProposalResolution closes the proposal round-trip: it fans the
+// resolution onto the push channel (title only) so every surface learns of it,
+// and — when the proposer is a resolvable account other than the resolver —
+// notifies that proposer directly with the outcome. The room/board worker
+// paths stamp a non-account proposedBy ("board_worker"), which resolves to no
+// email, so only a real human proposer (the private voice path) is notified.
+func (app *kanbanBoardApp) notifyProposalResolution(entry meetingMemoryEntry, action string, resolvedByName string) {
+	if app == nil {
+		return
+	}
+	title := strings.TrimSpace(entry.Metadata["title"])
+	broadcastOSEvent(osEvent{
+		Kind:          osEventProposal,
+		Ref:           entry.ID,
+		Title:         title,
+		OriginSurface: "room",
+		Actor:         canonicalRoomActorName(resolvedByName),
+	})
+
+	proposedBy := strings.TrimSpace(entry.Metadata["proposedBy"])
+	proposerEmail := ""
+	if strings.Contains(proposedBy, "@") {
+		proposerEmail = normalizeAccountEmail(proposedBy)
+	} else {
+		proposerEmail = participantEmail(proposedBy)
+	}
+	if proposerEmail == "" || proposerEmail == normalizeAccountEmail(participantEmail(resolvedByName)) {
+		return
+	}
+	text := "Confirmed · launched: " + title
+	if action == codexProposalActionDismiss {
+		text = "Dismissed: " + title
+	}
+	if _, err := app.createNotification(proposerEmail, notificationKindAgent, text, "room", "", "", false); err != nil {
+		log.Errorf("Failed to notify proposer %s of proposal resolution for %s: %v", proposerEmail, entry.ID, err)
+	}
 }
 
 // assistantProposalActionHandler serves POST /assistant/proposals/{id}/action

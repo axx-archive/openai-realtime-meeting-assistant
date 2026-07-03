@@ -532,6 +532,8 @@ func main() {
 	http.HandleFunc("/assistant/quarantine/", assistantQuarantineActionHandler)
 	http.HandleFunc("/assistant/packages", assistantPackagesHandler)
 	http.HandleFunc("/assistant/packages/", assistantPackageActionHandler)
+	http.HandleFunc("/assistant/brief", assistantBriefHandler)
+	http.HandleFunc("/assistant/portfolio", assistantPortfolioHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)

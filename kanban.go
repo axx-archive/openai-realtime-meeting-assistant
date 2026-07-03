@@ -1971,6 +1971,16 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "portfolio_health",
+			"description": "Summarize the state of the venture portfolio for the user — every package's stage, readiness, freshness, and open gaps, leading with anything stale. Use when the user asks how the portfolio, the book, or the packages are doing (\"how's the portfolio?\"). Read-only.",
+			"parameters": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "propose_codex_task",
 			"description": "Propose a Codex agent task as a confirmable proposal card. Use when the user asks to have someone or an agent research, design, grill, plan, or write something later; this never launches work itself — a human must confirm the proposal card before the agent thread starts.",
 			"parameters": map[string]any{
@@ -2641,6 +2651,10 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
+	case "portfolio_health":
+		// Read-only aggregation over the venture packages; no requester needed,
+		// so the shared dispatch serves both the room and private voice paths.
+		return app.portfolioHealthTool()
 	case "propose_codex_task":
 		// Creates a confirmable proposal, never launches an agent thread
 		// directly. The shared dispatch (board worker + room voice) has no
@@ -2705,7 +2719,7 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"create_ticket", "move_ticket", "update_ticket", "add_tags",
 		"add_key_date", "remove_key_dates", "delete_ticket", "undo_delete_ticket",
 		// Packages, notifications, channels, recap.
-		"create_package", "attach_to_package", "advance_package_stage",
+		"create_package", "attach_to_package", "advance_package_stage", "portfolio_health",
 		"send_notification", "post_to_channel", "create_channel",
 		"meeting_recap", "catch_me_up",
 		// New Realtime-2 parity tools (Wave 6).

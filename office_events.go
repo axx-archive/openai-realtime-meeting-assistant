@@ -223,4 +223,10 @@ func emitOSArtifactEvent(entry meetingMemoryEntry) {
 		OriginSurface: firstNonEmptyString(strings.TrimSpace(entry.Metadata["originKind"]), "artifacts"),
 		Actor:         firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"], scoutParticipantName),
 	})
+
+	// Wave 8: the same transition seam is where the admin learns an artifact has
+	// parked at the external-write gate (fires once per gate entry, admin-only).
+	if kanbanApp != nil {
+		kanbanApp.maybeNotifyApprovalGate(entry)
+	}
 }

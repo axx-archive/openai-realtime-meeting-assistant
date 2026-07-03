@@ -869,6 +869,7 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		ID     string `json:"id"`
 		Action string `json:"action"`
+		Reason string `json:"reason"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -903,6 +904,9 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			updated, _ := kanbanApp.osArtifactByID(artifactID)
+			// Round-trip loop: fan the approval to the push channel + the
+			// requester so their origin surface flips to "approved · sent".
+			kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
 			actions := kanbanApp.osAssistantActions(updated.Metadata["threadQuery"], updated.Metadata["mode"], updated)
 			writeAuthJSON(w, http.StatusAccepted, map[string]any{
 				"ok":       true,
@@ -916,6 +920,7 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
 		writeAuthJSON(w, http.StatusAccepted, map[string]any{
 			"ok":       true,
 			"artifact": updated,
@@ -931,6 +936,8 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Round-trip loop: the requester's card returns with the admin's reason.
+		kanbanApp.recordApprovalOutcome(artifact, "reject", payload.Reason, user.Name)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":       true,
 			"artifact": updated,
@@ -1052,6 +1059,13 @@ func (app *kanbanBoardApp) approveCodexArtifactExternalWrite(artifact meetingMem
 }
 
 func (app *kanbanBoardApp) rejectCodexArtifactGate(artifact meetingMemoryEntry, rejectedBy string) (meetingMemoryEntry, []osAssistantAction, error) {
+	// Idempotency guard, mirroring approveCodexArtifactExternalWrite: a second
+	// reject on an artifact that is no longer at the gate must not rewrite it
+	// again, or the handler would double-fire the requester's "Rejected"
+	// notification + push event. A double-clicked/resubmitted reject is a no-op.
+	if !artifactAwaitingApproval(artifact.Metadata) {
+		return meetingMemoryEntry{}, nil, fmt.Errorf("artifact is not waiting for external-write approval")
+	}
 	metadata := map[string]string{
 		"status":          "rejected",
 		"threadStatus":    "rejected",

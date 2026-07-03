@@ -110,6 +110,7 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"create_package":         true,
 		"attach_to_package":      true,
 		"advance_package_stage":  true,
+		"portfolio_health":       true,
 		"send_notification":      true,
 		"post_to_channel":        true,
 		"create_channel":         true,
