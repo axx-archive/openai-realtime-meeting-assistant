@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -214,10 +215,11 @@ func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
 }
 
 // scoutChatChannelModePrefixes maps the explicit launch prefixes users type in
-// channels onto agent-thread modes. Channels never launch on bare keywords:
-// in a venture studio, "pitch", "brief", and "research" are everyday words, so
-// keyword matching (scoutChatThreadModeForText) is reserved for private
-// threads where every message is already addressed to Scout.
+// channels onto agent-thread modes. In a venture studio, "pitch", "brief", and
+// "research" are everyday words, so unmentioned channel chatter never launches
+// anything; full conversational keyword matching (scoutChatThreadModeForText)
+// is reserved for private threads where every message is already addressed to
+// Scout.
 var scoutChatChannelModePrefixes = []struct {
 	prefix string
 	mode   string
@@ -228,18 +230,39 @@ var scoutChatChannelModePrefixes = []struct {
 	{prefix: "workflow:", mode: "workflow"},
 }
 
-// scoutChatThreadModeForChannelText launches a channel agent run only on an
-// explicit "mode:" prefix — either standalone at the start of the message or
-// immediately after an @scout mention. Every other message (including
-// conversational @scout questions that merely contain mode keywords) returns
-// "" and stays a chat answer.
+// scoutChatWorkstreamKeywords are the design workstreams a bare keyword can
+// summon in a channel — but only alongside an explicit @scout mention (D5):
+// the mention is itself the invocation, so the false-positive guard's purpose
+// is preserved while "@scout research …" routes straight to the workstream.
+var scoutChatWorkstreamKeywords = []string{"research", "design", "grill"}
+
+// scoutChatThreadModeForChannelText launches a channel agent run on either
+// (1) an explicit "mode:" prefix — standalone at the start of the message or
+// immediately after an @scout mention — or (2) an @scout mention combined
+// with a bare workstream keyword (research / design / grill). Bare keywords
+// WITHOUT @scout never trigger anything.
 func scoutChatThreadModeForChannelText(text string) string {
 	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
-	for _, segment := range strings.Split(lower, "@scout") {
+	segments := strings.Split(lower, "@scout")
+	for _, segment := range segments {
 		segment = strings.TrimSpace(segment)
 		for _, candidate := range scoutChatChannelModePrefixes {
 			if strings.HasPrefix(segment, candidate.prefix) {
 				return candidate.mode
+			}
+		}
+	}
+	if len(segments) < 2 {
+		// No @scout mention — a bare keyword stays conversation.
+		return ""
+	}
+	tokens := strings.FieldsFunc(lower, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '-'
+	})
+	for _, keyword := range scoutChatWorkstreamKeywords {
+		for _, token := range tokens {
+			if token == keyword {
+				return keyword
 			}
 		}
 	}

@@ -505,6 +505,7 @@ func main() {
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
+	http.HandleFunc("/assistant/board/drafts/", assistantBoardDraftActionHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
 	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
@@ -760,12 +761,21 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if userFromRequest(r) == nil {
-		writeAuthError(w, http.StatusUnauthorized, "not signed in")
-		return
-	}
 	if kanbanApp == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "room state is unavailable")
+		return
+	}
+	if userFromRequest(r) == nil {
+		// login-gate presence hint (D8): signed-out callers get the seat
+		// count and nothing else — no names, no media state, no capacity.
+		// The occupancy signal itself was accepted by the v1 audit.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"occupiedSeats": kanbanApp.activeParticipantCount(),
+		}); err != nil {
+			log.Errorf("Failed to encode presence summary: %v", err)
+		}
 		return
 	}
 
@@ -3077,6 +3087,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				sendManualBoardError(c, err)
 				continue
 			}
+			// human-created cards are never drafts (D4) — only the board
+			// worker may set the draft flag
+			delete(args, "draft")
 			broadcastManualBoardMutation(c, currentParticipantName(), "created a card", func() (map[string]any, bool, error) {
 				return kanbanApp.createTicket(args)
 			})

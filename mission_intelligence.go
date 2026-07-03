@@ -262,6 +262,48 @@ func missionContributionFuel(row missionContributionRow) int {
 	return row.Spoken + row.Chat + row.ChannelMessages + 3*row.ThreadsStarted + 3*row.ProposalsConfirmed + 5*row.ArtifactsCreated
 }
 
+// missionPulseHistogramBuckets × missionPulseHistogramBucket = the rolling
+// window the ingestion pulse chart draws (36 five-minute bars, last 3h).
+const (
+	missionPulseHistogramBuckets = 36
+	missionPulseHistogramBucket  = 5 * time.Minute
+)
+
+// missionPulseHistogram buckets memory ingestion into the pulse chart's 36
+// five-minute bars ending at now. Scout chat threads are skipped: they
+// rewrite in place, so CreatedAt is the thread's birth, not activity.
+func missionPulseHistogram(entries []meetingMemoryEntry, now time.Time) []int {
+	counts := make([]int, missionPulseHistogramBuckets)
+	start := now.Add(-time.Duration(missionPulseHistogramBuckets) * missionPulseHistogramBucket)
+	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindScoutChat {
+			continue
+		}
+		offset := entry.CreatedAt.Sub(start)
+		if offset < 0 {
+			continue
+		}
+		index := int(offset / missionPulseHistogramBucket)
+		if index >= missionPulseHistogramBuckets {
+			index = missionPulseHistogramBuckets - 1
+		}
+		counts[index]++
+	}
+	return counts
+}
+
+// missionTranscriptLineCount is the all-time transcript-line total the intel
+// stat tiles show — real ingestion, never a synthetic ticker (D2).
+func missionTranscriptLineCount(entries []meetingMemoryEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.Kind == meetingMemoryKindTranscript {
+			count++
+		}
+	}
+	return count
+}
+
 // missionPulseWindow counts pipeline activity newer than since. Thread
 // activity uses the thread's updatedAt (threads rewrite in place), everything
 // else buckets on CreatedAt.
@@ -437,7 +479,7 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 	if app == nil || app.memory == nil {
 		return map[string]any{
 			"generatedAt":     now.UTC().Format(time.RFC3339Nano),
-			"pulse":           map[string]any{"last24h": missionPulseWindow(nil, now), "last7d": missionPulseWindow(nil, now), "totalEntries": 0, "lastIngestAt": "", "currentMeetingId": "", "liveParticipants": 0},
+			"pulse":           map[string]any{"last24h": missionPulseWindow(nil, now), "last7d": missionPulseWindow(nil, now), "totalEntries": 0, "lastIngestAt": "", "currentMeetingId": "", "liveParticipants": 0, "histogram": missionPulseHistogram(nil, now), "transcriptLines": 0, "meetingsToday": 0, "meetingsThisWeek": 0},
 			"contributions":   map[string]any{"people": []missionContributionRow{}, "unattributed": 0, "fuelMax": 0},
 			"themes":          nil,
 			"themesAvailable": false,
@@ -470,7 +512,14 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		// /participants snapshot reports) and is what liveness keys on.
 		"currentMeetingId": app.memory.currentMeetingID(),
 		"liveParticipants": app.activeParticipantCount(),
+		// The pulse chart + stat tiles (design §9.1): a real ingestion
+		// histogram and real counters — never the prototype's fake ticker.
+		"histogram":       missionPulseHistogram(entries, now),
+		"transcriptLines": missionTranscriptLineCount(entries),
 	}
+	meetingsToday, meetingsThisWeek := app.meetings.countStartedSince(now)
+	pulse["meetingsToday"] = meetingsToday
+	pulse["meetingsThisWeek"] = meetingsThisWeek
 
 	people, unattributed, fuelMax := missionContributions(entries, board)
 	contributions := map[string]any{

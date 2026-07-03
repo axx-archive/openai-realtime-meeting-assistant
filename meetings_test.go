@@ -689,3 +689,130 @@ func TestAssistantMeetingsHandlerAuthAndShape(t *testing.T) {
 		t.Fatalf("limited=%#v, want only the newest record", limited)
 	}
 }
+
+// The Memory tool's day-grouped meeting cards (D15) ride the meetings list:
+// each item carries the brain-derived summary, the active-decision checklist,
+// capped log rows, and board-card links resolved against the live board.
+func TestAssistantMeetingsPayloadCarriesMemoryDetail(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	started := time.Now().UTC().Add(-40 * time.Minute)
+	meetingID := "meeting-detail-0000001"
+	kanbanApp.meetings.startMeeting(meetingID, started, []string{"AJ", "Tim"})
+
+	cardResult, _, err := kanbanApp.applyToolCallArgs("create_ticket", map[string]any{"title": "Add bandwidth estimation probe"})
+	if err != nil {
+		t.Fatalf("create card: %v", err)
+	}
+	card, ok := cardResult["card"].(kanbanCard)
+	if !ok {
+		t.Fatalf("create result=%#v, want a card", cardResult)
+	}
+
+	stamp := map[string]string{"meetingId": meetingID}
+	if _, _, err := kanbanApp.memory.appendAttributedTranscriptWithMetadata("event-1", "item-1", "Tim", "", "keep the buffer bounded, two seconds max", stamp); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	brainText := "## Overview\nAligned on bounding the retransmission buffer at two seconds.\n\n## Decisions\n- bound the buffer"
+	if _, _, err := kanbanApp.memory.appendBrainWriteUp("brain-detail-1", brainText, map[string]string{"meetingId": meetingID}); err != nil {
+		t.Fatalf("append brain: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendBoardUpdate("board-detail-1", "## Summary\nDrafted the probe card.", map[string]string{"meetingId": meetingID, "cardIds": card.ID + ",card-gone"}); err != nil {
+		t.Fatalf("append board update: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendDecision("decision-detail-1", "bound the retransmission buffer at two seconds", map[string]string{"meetingId": meetingID, "status": decisionStatusActive}); err != nil {
+		t.Fatalf("append decision: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendDecision("decision-detail-2", "superseded pick", map[string]string{"meetingId": meetingID, "status": "superseded"}); err != nil {
+		t.Fatalf("append superseded decision: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/assistant/meetings", nil)
+	for _, cookie := range loginAs(t, "tim@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantMeetingsHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Meetings []struct {
+			ID         string              `json:"id"`
+			Summary    string              `json:"summary"`
+			Decisions  []string            `json:"decisions"`
+			Log        []map[string]string `json:"log"`
+			Links      []map[string]string `json:"links"`
+			EntryCount int                 `json:"entryCount"`
+		} `json:"meetings"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode meetings: %v", err)
+	}
+	if len(payload.Meetings) != 1 || payload.Meetings[0].ID != meetingID {
+		t.Fatalf("meetings=%#v, want the one detail meeting", payload.Meetings)
+	}
+	item := payload.Meetings[0]
+	if item.Summary != "Aligned on bounding the retransmission buffer at two seconds." {
+		t.Fatalf("summary=%q, want the brain Overview text", item.Summary)
+	}
+	if len(item.Decisions) != 1 || item.Decisions[0] != "bound the retransmission buffer at two seconds" {
+		t.Fatalf("decisions=%#v, want only the active decision", item.Decisions)
+	}
+	if item.EntryCount != 3 {
+		t.Fatalf("entryCount=%d, want 3 visible entries (transcript+brain+board)", item.EntryCount)
+	}
+	if len(item.Log) != 3 || item.Log[0]["kind"] != "transcript" || item.Log[2]["kind"] != "board_update" {
+		t.Fatalf("log=%#v, want 3 chronological rows starting at the transcript", item.Log)
+	}
+	if item.Log[0]["text"] == "" || item.Log[0]["at"] == "" {
+		t.Fatalf("log row=%#v, want text + timestamp", item.Log[0])
+	}
+	if len(item.Links) != 1 || item.Links[0]["cardId"] != card.ID || item.Links[0]["title"] != "Add bandwidth estimation probe" {
+		t.Fatalf("links=%#v, want one link resolved to the live card (dead ids dropped)", item.Links)
+	}
+}
+
+// The intel stat tiles and pulse chart are fed by real ingestion counts.
+func TestMissionPulseCarriesHistogramAndRealCounters(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, _, err := app.memory.appendTranscript("event-hist-1", "item-1", "Tim: two seconds max on the buffer."); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	if _, _, err := app.memory.appendTranscript("event-hist-2", "item-2", "AJ: agreed, keep the retransmission bounded."); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	app.meetings.startMeeting("meeting-hist-1", time.Now().UTC(), []string{"AJ"})
+
+	snapshot := app.missionIntelligenceSnapshot(time.Now().UTC())
+	pulse, ok := snapshot["pulse"].(map[string]any)
+	if !ok {
+		t.Fatalf("pulse type=%T, want map", snapshot["pulse"])
+	}
+	histogram, ok := pulse["histogram"].([]int)
+	if !ok || len(histogram) != missionPulseHistogramBuckets {
+		t.Fatalf("histogram=%#v, want %d buckets", pulse["histogram"], missionPulseHistogramBuckets)
+	}
+	total := 0
+	for _, count := range histogram {
+		total += count
+	}
+	if total != 2 {
+		t.Fatalf("histogram total=%d, want the two fresh transcripts in-window", total)
+	}
+	if histogram[missionPulseHistogramBuckets-1] != 2 {
+		t.Fatalf("histogram=%v, want just-appended entries in the newest bucket", histogram)
+	}
+	if lines, _ := pulse["transcriptLines"].(int); lines != 2 {
+		t.Fatalf("transcriptLines=%v, want 2", pulse["transcriptLines"])
+	}
+	if today, _ := pulse["meetingsToday"].(int); today != 1 {
+		t.Fatalf("meetingsToday=%v, want 1", pulse["meetingsToday"])
+	}
+	if week, _ := pulse["meetingsThisWeek"].(int); week != 1 {
+		t.Fatalf("meetingsThisWeek=%v, want 1", pulse["meetingsThisWeek"])
+	}
+}

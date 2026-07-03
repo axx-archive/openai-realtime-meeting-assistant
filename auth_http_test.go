@@ -168,11 +168,25 @@ func TestParticipantsEndpointRequiresSession(t *testing.T) {
 		kanbanApp = previousApp
 	})
 
+	// Signed-out callers get the D8 presence summary — a seat count and
+	// nothing else. Names, media state, and capacity stay session-gated.
 	req := httptest.NewRequest(http.MethodGet, "/participants", nil)
 	recorder := httptest.NewRecorder()
 	participantsHandler(recorder, req)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected /participants without session to return 401, got %d", recorder.Code)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /participants without session to return the presence summary, got %d", recorder.Code)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("presence summary is not JSON: %v", err)
+	}
+	if _, ok := summary["occupiedSeats"]; !ok {
+		t.Fatalf("presence summary should carry occupiedSeats, got %s", recorder.Body.String())
+	}
+	for _, leaked := range []string{"participants", "mediaStates", "capacity", "availableSeats", "recording"} {
+		if _, ok := summary[leaked]; ok {
+			t.Fatalf("presence summary must not leak %q pre-auth, got %s", leaked, recorder.Body.String())
+		}
 	}
 
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")

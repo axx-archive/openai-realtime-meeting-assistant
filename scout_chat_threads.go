@@ -125,6 +125,15 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Fan the new thread out like the voice create path and renames do —
+		// without this, a channel created from the + button never reaches
+		// peers' sidebars until its first message forces a list refresh.
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+			broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+		} else {
+			// private threads only need the owner's OTHER tabs to learn of it
+			sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
+		}
 		writeAuthJSON(w, http.StatusCreated, map[string]any{"ok": true, "thread": thread})
 	}
 }
@@ -158,13 +167,29 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 1 && r.Method == http.MethodPatch {
 		payload := struct {
-			Archived bool `json:"archived"`
-		}{Archived: true}
+			Archived *bool   `json:"archived"`
+			Title    *string `json:"title"`
+		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read thread update")
 			return
 		}
-		thread, err := kanbanApp.setScoutChatThreadArchived(user.Email, threadID, payload.Archived)
+		// A title payload is a rename (D7); otherwise archived keeps its
+		// legacy default-true semantics so existing callers stay intact.
+		if payload.Title != nil {
+			thread, err := kanbanApp.renameScoutChatThread(user.Email, threadID, *payload.Title)
+			if err != nil {
+				writeScoutChatThreadError(w, err)
+				return
+			}
+			writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+			return
+		}
+		archived := true
+		if payload.Archived != nil {
+			archived = *payload.Archived
+		}
+		thread, err := kanbanApp.setScoutChatThreadArchived(user.Email, threadID, archived)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -360,6 +385,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 			return nil, err
 		}
 		replyText := assistantToolLabel(mode) + " thread launched"
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+			if designReply := scoutWorkstreamReplyText(mode); designReply != "" {
+				replyText = designReply
+			}
+		}
 		assistantMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 			Kind:      "thread",
@@ -416,6 +446,22 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 	response["answer"] = assistantMessage
 	response["thread"] = saved
 	return response, nil
+}
+
+// scoutWorkstreamReplyText is the design-canon channel reply for the three
+// public workstreams. The research line is verbatim; design/grill are adapted
+// to honest launch tense — the prototype's replies claimed completed seed
+// results ("final score 7.4") that a just-launched run cannot promise (D2).
+func scoutWorkstreamReplyText(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "research":
+		return "on it — research workstream kicked off. the brief lands in the library; i'll link it here when it's done."
+	case "design":
+		return "on it — design workstream kicked off. screens, states, and handoff questions land in the library."
+	case "grill":
+		return "on it — grill mode is running on the pitch. the scorecard lands in artifacts."
+	}
+	return ""
 }
 
 // scoutChatAuthorName resolves the display name stamped on channel messages.
@@ -727,17 +773,25 @@ func (app *kanbanBoardApp) createChannelByVoice(args map[string]any, requesterEm
 	}, false, nil
 }
 
-// scoutChatThreadUpdatePayload is the chat_thread event body shared by the
-// public broadcast and the private owner-targeted delivery.
-func scoutChatThreadUpdatePayload(thread scoutChatThreadRecord, message scoutChatMessageRecord) map[string]any {
+// scoutChatThreadEventPayload is the message-less chat_thread event body used
+// for metadata-only changes (rename, channel creation) — handleChatThreadEvent
+// tolerates a missing message and just updates the row.
+func scoutChatThreadEventPayload(thread scoutChatThreadRecord) map[string]any {
 	return map[string]any{
 		"id":         thread.ID,
 		"title":      thread.Title,
 		"preview":    thread.Preview,
 		"visibility": scoutChatThreadVisibility(thread),
 		"updatedAt":  thread.UpdatedAt,
-		"message":    message,
 	}
+}
+
+// scoutChatThreadUpdatePayload is the chat_thread event body shared by the
+// public broadcast and the private owner-targeted delivery.
+func scoutChatThreadUpdatePayload(thread scoutChatThreadRecord, message scoutChatMessageRecord) map[string]any {
+	payload := scoutChatThreadEventPayload(thread)
+	payload["message"] = message
+	return payload
 }
 
 // broadcastScoutChatThreadUpdate fans a public-channel append out over the
@@ -780,7 +834,52 @@ func (app *kanbanBoardApp) scoutChatThreadLock(threadID string) *sync.Mutex {
 	return lock
 }
 
+// renameScoutChatThread applies a user-chosen title through the same
+// per-thread lock + re-read + save discipline as message commits, then fans
+// the change out like a visibility-scoped chat_thread event (broadcast for
+// public channels, owner-targeted for private threads). Public threads are
+// renamable by any signed-in user (D7 — acceptable on the small roster);
+// private threads are only reachable by their owner via scoutChatThreadByID.
+func (app *kanbanBoardApp) renameScoutChatThread(viewerEmail string, threadID string, title string) (scoutChatThreadRecord, error) {
+	title = trimForStorage(title, 72)
+	if title == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("thread title is required")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat thread is archived")
+	}
+	if thread.Title == title {
+		return thread, nil
+	}
+	thread.Title = title
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+	} else {
+		sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
+	}
+	return thread, nil
+}
+
 func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadID string, archived bool) (scoutChatThreadRecord, error) {
+	// Same per-thread mutex as rename and message commits — an unlocked
+	// read-modify-write here could interleave with a concurrent rename and
+	// silently revert whichever change saved first.
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, err

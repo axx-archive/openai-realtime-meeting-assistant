@@ -284,7 +284,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`id="chatChannelThreads"`,
 		`id="chatScopeChannel"`,
 		"addArtifactEntry(result.artifact, { select: false })",
-		"meeting artifact saved",
+		"notes sent · ${meetingName} → memory",
 		"method: 'PATCH'",
 		"voiceIslandMain.addEventListener('click', () => openOfficeTool('chat'))",
 		"function shouldShowVoiceIsland()",
@@ -482,7 +482,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"background: var(--accent);",
 		".intel-live__dot { animation: none; }",
 		`artifacts: 'Intelligence',`,
-		"`${intelPulseTotal()} ingested · ${intelThemeCount()} themes`",
+		"return 'the company brain, visible'",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing Mission Intelligence marker %q", want)
@@ -648,15 +648,15 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
 		"top: 50%;",
-		"left: max(16px, env(safe-area-inset-left));",
-		"max-height: min(640px, calc(100svh - 48px));",
-		"width: 64px;",
-		"border-radius: calc(var(--r-2xl) + 4px);",
+		"inset: 0 auto 0 0;",
+		"border-right: 1px solid var(--line-1);",
+		"width: 60px;",
+		"padding: 16px 0 14px;",
 		"transform: translateY(-50%);",
 		"display: none;",
 		".tool-rail:hover,",
 		".tool-rail:focus-within",
-		"width: 64px;",
+		"box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);",
 		"overflow: visible;",
 		"left: calc(100% + 14px);",
 		"max-width: none;",
@@ -665,7 +665,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		".tool-rail__tool:focus-visible .tool-rail__label",
 		"transition-delay: 300ms;",
 		"#appShell.is-authed .workspace",
-		"padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));",
+		"padding-left: 60px;",
 		`<span class="tool-rail__label">office</span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
@@ -700,7 +700,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"transform: translateX(-50%);",
 		"backdrop-filter: blur(22px) saturate(1.45);",
 		"#appShell.is-authed .workspace",
-		"padding-bottom: max(84px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
+		"padding-bottom: max(96px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
 		".tool-rail__theme svg",
 		"transform: translate(-50%, -50%) scale(0.25);",
 		"filter: blur(4px);",
@@ -736,8 +736,8 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
-		"left: max(16px, env(safe-area-inset-left));",
-		"transform: translateY(-50%);",
+		"inset: 0 auto 0 0;",
+		"width: 60px;",
 		"inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;",
 		"left: 50%;",
 		"width: max-content;",
@@ -762,22 +762,17 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	if strings.Contains(inRoomToolWorkspaceBlock, "padding: 0;") {
 		t.Fatal("in-room tool pages must not reset the whole padding box; the desktop rail gutter (padding-left) must survive in-room")
 	}
-	desktopGutterBlock := functionBody(html, "@media (min-width: 641px) {")
+	desktopShellBlock := functionBody(html, "@media (min-width: 641px) {")
 	for _, want := range []string{
-		"#appShell.is-authed[data-tool=\"chat\"] .workspace,",
-		"#appShell.is-authed[data-tool=\"memory\"] .workspace,",
-		"#appShell.is-authed[data-tool=\"artifacts\"] .workspace,",
-		"#appShell.is-authed[data-tool=\"research\"] .workspace,",
-		"#appShell.is-authed[data-tool=\"design\"] .workspace,",
-		"#appShell.is-authed[data-tool=\"grill\"] .workspace {",
-		"padding-left: max(96px, calc(env(safe-area-inset-left) + 96px));",
+		"#appShell.is-authed {",
+		"--shell-topbar-height: 52px;",
+		"padding-left: 60px;",
+		"#appShell.is-authed .topbar {",
+		"display: flex;",
 	} {
-		if !strings.Contains(desktopGutterBlock, want) {
-			t.Fatalf("desktop panel tool pages must restore the rail gutter; missing %q in the min-width 641px block", want)
+		if !strings.Contains(desktopShellBlock, want) {
+			t.Fatalf("desktop shell must clear the 60px rail and show the 52px header; missing %q in the min-width 641px block", want)
 		}
-	}
-	if strings.Contains(desktopGutterBlock, "#appShell.is-authed[data-tool=\"room\"] .workspace") || strings.Contains(desktopGutterBlock, "[data-tool=\"board\"] .workspace") {
-		t.Fatal("the room and the expanded board stay full-bleed; the tool-page gutter override must not include them")
 	}
 
 	const phoneViewport = 390.0
@@ -1510,7 +1505,10 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 		// completion notifications land on the originating thread card
 		"function chatThreadForArtifactId(artifactId)",
 		// board + memory reads over authed HTTP without joining the call
-		"async function loadBoardSnapshot()",
+		// (options.force re-syncs the board after leaving a room — the live
+		// office socket would otherwise skip the fallback forever)
+		"async function loadBoardSnapshot(options = {})",
+		"loadBoardSnapshot({ force: true })",
 		"async function loadMemorySnapshot()",
 		"fetch('/assistant/board', { cache: 'no-store' })",
 		"fetch('/assistant/memory', { cache: 'no-store' })",
@@ -1863,7 +1861,7 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 		"type: 'function_call_output'",
 		"type: 'response.create'",
 		"function closePrivateRealtimeVoiceSession()",
-		"setVoiceIslandState('connecting', 'connecting...')",
+		"setVoiceIslandState('connecting', 'connecting…')",
 		"top: max(82px, calc(env(safe-area-inset-top) + 72px));",
 		"background: var(--glass-chrome);",
 		"border-radius: var(--r-full);",
@@ -1906,7 +1904,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 
 	for _, want := range []string{
 		// chat/tool pages clear the fixed bottom rail on phones
-		"padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 64px);",
+		"padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 96px);",
 		// inline glass channel creation replaces window.prompt
 		`id="chatChannelCreate"`,
 		`id="chatChannelName"`,

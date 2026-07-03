@@ -145,17 +145,21 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 		t.Fatalf("answer=%#v, want scout reply", response["answer"])
 	}
 
-	// A conversational @scout message that merely contains mode keywords must
-	// stay a chat answer: channel launches require an explicit "mode:" prefix.
+	// D5: an @scout mention plus a bare workstream keyword routes to that
+	// workstream — the mention is itself the explicit invocation.
 	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research the rodeo creator market", nil, "")
 	if err != nil {
 		t.Fatalf("append mention keyword message: %v", err)
 	}
-	if _, ok := response["agentThread"]; ok {
-		t.Fatalf("response keys=%v, want conversational answer instead of a keyword-hijacked agent launch", responseKeys(response))
+	if _, ok := response["agentThread"]; !ok {
+		t.Fatalf("response keys=%v, want @scout + research keyword to launch the workstream (D5)", responseKeys(response))
 	}
-	if modelCalls != 2 {
-		t.Fatalf("modelCalls=%d, want conversational answer for keyword-only @scout message", modelCalls)
+	if modelCalls != 1 {
+		t.Fatalf("modelCalls=%d, want no conversational model call for a workstream launch", modelCalls)
+	}
+	launchReply, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || !strings.Contains(launchReply.Text, "research workstream kicked off") {
+		t.Fatalf("answer=%#v, want the design workstream reply copy", response["answer"])
 	}
 
 	// The explicit prefix after the mention launches an agent run.
@@ -275,12 +279,20 @@ func TestScoutChatChannelModePrefixDetection(t *testing.T) {
 		{text: "@scout research: the rodeo creator market", want: "research"},
 		{text: "@scout Design: onboarding flow for the package", want: "design"},
 		{text: "@scout workflow: ship the EMBERS package", want: "workflow"},
-		// Conversational messages containing mode keywords stay conversational.
-		{text: "@scout the grill run finished but I can't open the scorecard from here", want: ""},
+		// D5: an @scout mention plus a bare workstream keyword launches that
+		// workstream — the mention is the explicit invocation.
+		{text: "@scout can you research the market for us?", want: "research"},
+		{text: "@scout what's in the design doc?", want: "design"},
+		{text: "@scout the grill run finished but I can't open the scorecard from here", want: "grill"},
+		// Non-keyword @scout chatter stays conversational.
 		{text: "@scout from the pressure-test scorecard artifact, list the three hardest questions", want: ""},
-		{text: "@scout can you research the market for us?", want: ""},
 		{text: "let's discuss the pitch brief at 3pm @scout thoughts?", want: ""},
-		{text: "@scout what's in the design doc?", want: ""},
+		{text: "@scout who owns the packetizer card?", want: ""},
+		// Bare keywords WITHOUT @scout never trigger anything (D5 guard),
+		// and workflow stays prefix-only.
+		{text: "let's research the market together at 3pm", want: ""},
+		{text: "the design review moved to friday", want: ""},
+		{text: "@scout how does the goal workflow behave?", want: ""},
 	} {
 		if got := scoutChatThreadModeForChannelText(tt.text); got != tt.want {
 			t.Fatalf("scoutChatThreadModeForChannelText(%q)=%q, want %q", tt.text, got, tt.want)
@@ -571,5 +583,112 @@ func TestCreateChannelByVoiceRequiresPrivateRequester(t *testing.T) {
 		"text":    "kicking this off",
 	}); err != nil {
 		t.Fatalf("post to freshly created channel: %v", err)
+	}
+}
+
+// D7: PATCH accepts a title — owner-renamable private threads, any signed-in
+// user for public channels — while the legacy archived payloads keep working.
+func TestScoutChatThreadRename(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "launch plan", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	renamed, err := kanbanApp.renameScoutChatThread("aj@shareability.com", private.ID, "  simulcast recap  ")
+	if err != nil {
+		t.Fatalf("rename private thread: %v", err)
+	}
+	if renamed.Title != "simulcast recap" {
+		t.Fatalf("title=%q, want trimmed rename", renamed.Title)
+	}
+	if renamed.UpdatedAt == private.UpdatedAt {
+		t.Fatal("rename must stamp UpdatedAt")
+	}
+	saved, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", private.ID)
+	if err != nil || saved.Title != "simulcast recap" {
+		t.Fatalf("saved=%#v err=%v, want persisted rename", saved, err)
+	}
+
+	// A private thread is invisible to anyone but its owner.
+	if _, err := kanbanApp.renameScoutChatThread("tim@shareability.com", private.ID, "hijack"); err == nil {
+		t.Fatal("non-owner rename of a private thread must fail")
+	}
+
+	// Public channels are renamable by any signed-in user (D7).
+	if _, err := kanbanApp.renameScoutChatThread("tim@shareability.com", channel.ID, "launch plan v2"); err != nil {
+		t.Fatalf("channel rename by non-creator: %v", err)
+	}
+
+	// Empty titles are rejected; archived threads refuse renames.
+	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", private.ID, "   "); err == nil {
+		t.Fatal("empty title must be rejected")
+	}
+	if _, err := kanbanApp.setScoutChatThreadArchived("aj@shareability.com", private.ID, true); err != nil {
+		t.Fatalf("archive thread: %v", err)
+	}
+	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", private.ID, "after archive"); err == nil {
+		t.Fatal("archived thread rename must be rejected")
+	}
+}
+
+// The PATCH route dispatches title payloads to rename and keeps the legacy
+// archived semantics (default true on an empty body) intact.
+func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	renameReq := httptest.NewRequest(http.MethodPatch, "/assistant/chat-threads/"+thread.ID, strings.NewReader(`{"title":"simulcast recap"}`))
+	for _, cookie := range cookies {
+		renameReq.AddCookie(cookie)
+	}
+	renameRec := httptest.NewRecorder()
+	assistantChatThreadHandler(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("rename status=%d body=%s", renameRec.Code, renameRec.Body.String())
+	}
+	var renamePayload struct {
+		Thread scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(renameRec.Body.Bytes(), &renamePayload); err != nil {
+		t.Fatalf("decode rename response: %v", err)
+	}
+	if renamePayload.Thread.Title != "simulcast recap" || renamePayload.Thread.ArchivedAt != "" {
+		t.Fatalf("thread=%#v, want renamed and unarchived", renamePayload.Thread)
+	}
+
+	archiveReq := httptest.NewRequest(http.MethodPatch, "/assistant/chat-threads/"+thread.ID, strings.NewReader(`{"archived":true}`))
+	for _, cookie := range cookies {
+		archiveReq.AddCookie(cookie)
+	}
+	archiveRec := httptest.NewRecorder()
+	assistantChatThreadHandler(archiveRec, archiveReq)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive status=%d body=%s", archiveRec.Code, archiveRec.Body.String())
+	}
+	var archivePayload struct {
+		Thread scoutChatThreadRecord `json:"thread"`
+	}
+	if err := json.Unmarshal(archiveRec.Body.Bytes(), &archivePayload); err != nil {
+		t.Fatalf("decode archive response: %v", err)
+	}
+	if archivePayload.Thread.ArchivedAt == "" || archivePayload.Thread.Title != "simulcast recap" {
+		t.Fatalf("thread=%#v, want archived with title intact", archivePayload.Thread)
 	}
 }

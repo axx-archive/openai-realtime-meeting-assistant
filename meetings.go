@@ -371,6 +371,36 @@ func (store *meetingStore) recent(limit int) []meetingRecord {
 	return records
 }
 
+// countStartedSince reports how many records started today and within the
+// last 7 days (meetingTimeLocation wall-clock), for the intel stat tiles.
+func (store *meetingStore) countStartedSince(now time.Time) (int, int) {
+	if store == nil {
+		return 0, 0
+	}
+	location := meetingTimeLocation()
+	local := now.In(location)
+	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+	weekStart := now.Add(-7 * 24 * time.Hour)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	today, week := 0, 0
+	for _, record := range store.records {
+		startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt)
+		if err != nil {
+			continue
+		}
+		if !startedAt.Before(dayStart) {
+			today++
+		}
+		if !startedAt.Before(weekStart) {
+			week++
+		}
+	}
+	return today, week
+}
+
 // armIdleEnd schedules fire after the idle grace; arming replaces any pending
 // timer (which bumps the generation so the replaced fire cannot land). fire
 // receives the generation captured at arm time and must hand it back to
@@ -563,6 +593,196 @@ func (app *kanbanBoardApp) meetingSnapshot() map[string]any {
 	return meetingRecordPayload(record, time.Now().UTC())
 }
 
+/* ---------- memory enrichment (Memory tool, D15) ---------- */
+
+// Per-meeting caps for the enriched GET /assistant/meetings payload.
+const (
+	meetingDetailDecisionLimit = 12
+	meetingDetailLogLimit      = 8
+	meetingDetailLinkLimit     = 6
+	meetingDetailSummaryLimit  = 480
+	meetingDetailLogLineLimit  = 160
+)
+
+// meetingMemoryDetail is what the Memory tool's expanded meeting card shows:
+// a summary, the decided checklist, capped log rows, linked board cards, and
+// the visible entry count. All of it is derived from data the store already
+// holds — nothing here is synthesized for display (D2/D15).
+type meetingMemoryDetail struct {
+	Summary        string
+	archiveSummary string
+	Decisions      []string
+	Log            []map[string]string
+	CardIDs        []string
+	EntryCount     int
+}
+
+// meetingSummaryFromWriteUp lifts the Overview section (or the first prose
+// paragraph) out of a meeting-brain markdown write-up.
+func meetingSummaryFromWriteUp(text string) string {
+	lines := strings.Split(text, "\n")
+	inOverview := false
+	collected := []string{}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			heading := strings.ToLower(strings.Trim(trimmed, "# "))
+			inOverview = strings.Contains(heading, "overview")
+			continue
+		}
+		if inOverview && trimmed != "" {
+			collected = append(collected, trimmed)
+		}
+	}
+	if len(collected) == 0 {
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			collected = append(collected, trimmed)
+			break
+		}
+	}
+	return trimForStorage(strings.Join(collected, " "), meetingDetailSummaryLimit)
+}
+
+// meetingDetailLogLine flattens an entry's text to one bounded log-row line:
+// the first prose line, skipping markdown headings (brain/board write-ups
+// open with "## Summary"-style section markers).
+func meetingDetailLogLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return trimForStorage(line, meetingDetailLogLineLimit)
+	}
+	return ""
+}
+
+// meetingMemoryDetails walks the memory store once and groups the Memory
+// tool's expanded-card data by meeting id (only ids present in wanted).
+func (app *kanbanBoardApp) meetingMemoryDetails(wanted map[string]struct{}) map[string]*meetingMemoryDetail {
+	details := map[string]*meetingMemoryDetail{}
+	if app == nil || app.memory == nil || len(wanted) == 0 {
+		return details
+	}
+	for _, entry := range app.memory.snapshot(0) {
+		meetingID := strings.TrimSpace(entry.Metadata["meetingId"])
+		if meetingID == "" {
+			continue
+		}
+		if _, ok := wanted[meetingID]; !ok {
+			continue
+		}
+		detail := details[meetingID]
+		if detail == nil {
+			detail = &meetingMemoryDetail{}
+			details[meetingID] = detail
+		}
+		switch entry.Kind {
+		case meetingMemoryKindDecision:
+			status := strings.TrimSpace(entry.Metadata["status"])
+			if status == "" || status == decisionStatusActive {
+				if len(detail.Decisions) < meetingDetailDecisionLimit {
+					detail.Decisions = append(detail.Decisions, entry.Text)
+				}
+			}
+			continue
+		case meetingMemoryKindCodexProposal:
+			if strings.TrimSpace(entry.Metadata["confirmedBy"]) != "" {
+				detail.addCardID(entry.Metadata["cardId"])
+			}
+			continue
+		case meetingMemoryKindScoutChat, meetingMemoryKindMissionInsight, meetingMemoryKindDecisionPass, meetingMemoryKindPackage:
+			// UI-state kinds never surface as meeting log rows.
+			continue
+		}
+
+		// The remaining kinds are the visible-timeline family: they count
+		// toward the entry total and feed the log rows.
+		detail.EntryCount++
+		kind := entry.Kind
+		switch entry.Kind {
+		case meetingMemoryKindTranscript:
+			if entry.Metadata["source"] == transcriptSourceRoomChat {
+				kind = "chat"
+			}
+		case meetingMemoryKindBrain:
+			// the freshest brain write-up narrates the meeting
+			detail.Summary = meetingSummaryFromWriteUp(entry.Text)
+		case meetingMemoryKindBoardUpdate:
+			for _, cardID := range strings.Split(entry.Metadata["cardIds"], ",") {
+				detail.addCardID(cardID)
+			}
+		case meetingMemoryKindOSArtifact:
+			detail.addCardID(entry.Metadata["boardCardId"])
+		case meetingMemoryKindArchive:
+			detail.archiveSummary = trimForStorage(strings.TrimSpace(entry.Text), meetingDetailSummaryLimit)
+		}
+		detail.Log = append(detail.Log, map[string]string{
+			"kind": kind,
+			"at":   entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+			"text": meetingDetailLogLine(entry.Text),
+		})
+	}
+	for _, detail := range details {
+		if detail.Summary == "" {
+			detail.Summary = detail.archiveSummary
+		}
+		if overflow := len(detail.Log) - meetingDetailLogLimit; overflow > 0 {
+			detail.Log = detail.Log[overflow:]
+		}
+	}
+	return details
+}
+
+func (detail *meetingMemoryDetail) addCardID(cardID string) {
+	cardID = strings.TrimSpace(cardID)
+	if cardID == "" || len(detail.CardIDs) >= meetingDetailLinkLimit {
+		return
+	}
+	for _, existing := range detail.CardIDs {
+		if existing == cardID {
+			return
+		}
+	}
+	detail.CardIDs = append(detail.CardIDs, cardID)
+}
+
+// meetingDetailFields shapes a detail for the wire; link chips resolve card
+// titles against the CURRENT board, so a deleted card never renders a dead
+// jump target.
+func meetingDetailFields(detail *meetingMemoryDetail, cardTitles map[string]string) map[string]any {
+	if detail == nil {
+		detail = &meetingMemoryDetail{}
+	}
+	decisions := detail.Decisions
+	if decisions == nil {
+		decisions = []string{}
+	}
+	logRows := detail.Log
+	if logRows == nil {
+		logRows = []map[string]string{}
+	}
+	links := make([]map[string]string, 0, len(detail.CardIDs))
+	for _, cardID := range detail.CardIDs {
+		title, ok := cardTitles[cardID]
+		if !ok || strings.TrimSpace(title) == "" {
+			continue
+		}
+		links = append(links, map[string]string{"cardId": cardID, "title": title})
+	}
+	return map[string]any{
+		"summary":    detail.Summary,
+		"decisions":  decisions,
+		"log":        logRows,
+		"links":      links,
+		"entryCount": detail.EntryCount,
+	}
+}
+
 /* ---------- HTTP ---------- */
 
 // assistantMeetingsHandler serves GET /assistant/meetings to any signed-in
@@ -602,11 +822,25 @@ func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	records := kanbanApp.meetings.recent(limit)
+	wanted := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		wanted[record.ID] = struct{}{}
+	}
+	details := kanbanApp.meetingMemoryDetails(wanted)
+	cardTitles := map[string]string{}
+	for _, card := range kanbanApp.snapshotState().Cards {
+		cardTitles[card.ID] = card.Title
+	}
 	meetings := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		item := meetingRecordPayload(record, now)
 		// one top-level anchor instead of a per-item serverNow.
 		delete(item, "serverNow")
+		// Memory-tool enrichment (D15): summary, decided checklist, log
+		// rows, and board-card links per meeting.
+		for key, value := range meetingDetailFields(details[record.ID], cardTitles) {
+			item[key] = value
+		}
 		meetings = append(meetings, item)
 	}
 

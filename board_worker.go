@@ -117,6 +117,12 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	if throughTranscriptID := strings.TrimSpace(lastSummary.Metadata["throughTranscriptId"]); throughTranscriptID != "" {
 		metadata["throughTranscriptId"] = throughTranscriptID
 	}
+	// Board linkage for memory: the ids of every card this pass actually
+	// touched ride the entry, so the meeting → "on the board" chips in the
+	// Memory tool stay grounded in real mutations (D15).
+	if cardIDs := meetingBoardChangedCardIDs(runResult); len(cardIDs) > 0 {
+		metadata["cardIds"] = strings.Join(cardIDs, ",")
+	}
 
 	id := durableTimestampID("board-update", time.Now())
 	entry, appended, err := app.memory.appendBoardUpdate(id, renderMeetingBoardUpdateArtifact(summaries, runResult), metadata)
@@ -177,6 +183,11 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 		}
 		if args == nil {
 			args = map[string]any{}
+		}
+		if toolName == "create_ticket" {
+			// D4: worker-created cards land as pending Scout drafts a human
+			// accepts or dismisses — never as instant board cards.
+			args["draft"] = true
 		}
 
 		toolResult, changed, err := app.applyToolCallArgs(toolName, args)
@@ -443,6 +454,28 @@ func renderMeetingBoardUpdateArtifact(summaries []meetingMemoryEntry, result mee
 	}
 
 	return strings.TrimSpace(builder.String())
+}
+
+// meetingBoardChangedCardIDs collects the unique card ids of the operations
+// that actually changed the board this pass, in application order.
+func meetingBoardChangedCardIDs(result meetingBoardRunResult) []string {
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(result.Applications))
+	for _, application := range result.Applications {
+		if !application.Changed {
+			continue
+		}
+		cardID := strings.TrimSpace(meetingBoardApplicationTarget(application))
+		if cardID == "" {
+			continue
+		}
+		if _, ok := seen[cardID]; ok {
+			continue
+		}
+		seen[cardID] = struct{}{}
+		ids = append(ids, cardID)
+	}
+	return ids
 }
 
 func meetingBoardApplicationTarget(application meetingBoardOperationApplication) string {

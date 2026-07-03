@@ -85,6 +85,11 @@ type kanbanCard struct {
 	Tags     []string        `json:"tags"`
 	DueDate  string          `json:"dueDate,omitempty"`
 	KeyDates []kanbanKeyDate `json:"keyDates,omitempty"`
+	// Draft marks a Scout-proposed card awaiting a human accept/dismiss
+	// (D4). Human-created cards are never drafts. Boards persisted before
+	// the field existed decode as non-drafts (zero value).
+	Draft     bool   `json:"draft,omitempty"`
+	DraftedAt string `json:"draftedAt,omitempty"`
 }
 
 type kanbanBoardState struct {
@@ -434,6 +439,10 @@ func normalizeKanbanCards(cards []kanbanCard) []kanbanCard {
 		card.KeyDates = normalizeKanbanKeyDates(card.KeyDates)
 		if card.DueDate == "" {
 			card.DueDate = dueDateFromKeyDates(card.KeyDates)
+		}
+		card.DraftedAt = strings.TrimSpace(card.DraftedAt)
+		if !card.Draft {
+			card.DraftedAt = ""
 		}
 		normalized = append(normalized, cloneKanbanCard(card))
 	}
@@ -3308,6 +3317,11 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		status = parsedStatus
 	}
 
+	// Scout-drafted cards (board worker, D4) land as pending drafts a human
+	// accepts or dismisses; the manual create path strips this flag so
+	// human-created cards are never drafts.
+	draft := asBool(args["draft"])
+
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -3321,6 +3335,10 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		DueDate:  dueDate,
 		KeyDates: keyDates,
 	}
+	if draft {
+		card.Draft = true
+		card.DraftedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	app.cards = append(app.cards, card)
 	if err := app.touchLocked(); err != nil {
 		return nil, false, err
@@ -3330,6 +3348,76 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 		"ok":      true,
 		"created": true,
 		"card":    cloneKanbanCard(card),
+	}, true, nil
+}
+
+// acceptDraftTicket converts a Scout draft into a normal board card (D4).
+// The card keeps its column and owner (Unassigned until someone claims it).
+func (app *kanbanBoardApp) acceptDraftTicket(args map[string]any) (map[string]any, bool, error) {
+	cardID := asString(args["card_id"])
+	if cardID == "" {
+		return nil, false, fmt.Errorf("card_id is required")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	card, ok := app.findCardLocked(cardID)
+	if !ok {
+		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
+	}
+	if !card.Draft {
+		return nil, false, fmt.Errorf("card %s is not a draft", cardID)
+	}
+	card.Draft = false
+	card.DraftedAt = ""
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
+
+	return map[string]any{
+		"ok":       true,
+		"accepted": true,
+		"card_id":  cardID,
+		"card":     cloneKanbanCard(*card),
+	}, true, nil
+}
+
+// dismissDraftTicket removes a Scout draft from the board (D4). Dismissed
+// drafts never counted as board cards, so they do not enter the undo slot.
+func (app *kanbanBoardApp) dismissDraftTicket(args map[string]any) (map[string]any, bool, error) {
+	cardID := asString(args["card_id"])
+	if cardID == "" {
+		return nil, false, fmt.Errorf("card_id is required")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	index := -1
+	for candidateIndex, card := range app.cards {
+		if card.ID == cardID {
+			index = candidateIndex
+			break
+		}
+	}
+	if index == -1 {
+		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
+	}
+	if !app.cards[index].Draft {
+		return nil, false, fmt.Errorf("card %s is not a draft", cardID)
+	}
+	dismissedCard := cloneKanbanCard(app.cards[index])
+	app.cards = append(app.cards[:index], app.cards[index+1:]...)
+	if err := app.touchLocked(); err != nil {
+		return nil, false, err
+	}
+
+	return map[string]any{
+		"ok":        true,
+		"dismissed": true,
+		"card_id":   cardID,
+		"card":      dismissedCard,
 	}, true, nil
 }
 
@@ -4351,14 +4439,16 @@ func cloneKanbanCards(cards []kanbanCard) []kanbanCard {
 
 func cloneKanbanCard(card kanbanCard) kanbanCard {
 	return kanbanCard{
-		ID:       card.ID,
-		Status:   card.Status,
-		Title:    card.Title,
-		Notes:    card.Notes,
-		Owner:    card.Owner,
-		Tags:     append([]string(nil), card.Tags...),
-		DueDate:  card.DueDate,
-		KeyDates: cloneKanbanKeyDates(card.KeyDates),
+		ID:        card.ID,
+		Status:    card.Status,
+		Title:     card.Title,
+		Notes:     card.Notes,
+		Owner:     card.Owner,
+		Tags:      append([]string(nil), card.Tags...),
+		DueDate:   card.DueDate,
+		KeyDates:  cloneKanbanKeyDates(card.KeyDates),
+		Draft:     card.Draft,
+		DraftedAt: card.DraftedAt,
 	}
 }
 
