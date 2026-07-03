@@ -1038,10 +1038,11 @@ func TestIndexHasLayeredVoiceFocusNoiseReduction(t *testing.T) {
 		"rnnoiseReady: Boolean",
 		"frameSize: Number",
 		"const blend = Math.min(1, Math.max(0, (rms - closeAt)",
-		"voiceIsolation: { ideal: voiceFocusEnabled() }",
-		"suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() }",
-		"googNoiseSuppression2: audioProcessingEnabled()",
-		"function trainVoiceFocus()",
+		// Wave 9: capture constraints are strategy-driven, not per-mode toggled.
+		"function resolveSuppressionStrategy(",
+		"voiceIsolation: { ideal: strategy.voiceIsolation }",
+		"suppressLocalAudioPlayback: { ideal: strategy.echoCancellation }",
+		"googNoiseSuppression2: strategy.browserNoiseSuppression",
 		"localAudioSourceTrack?.getSettings?.().deviceId",
 	} {
 		if !strings.Contains(html, want) {
@@ -1092,7 +1093,7 @@ func TestVoiceFocusBenchmarkPasses(t *testing.T) {
 	}
 }
 
-func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
+func TestIndexKeepsVoiceFocusPersistentAndHonest(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -1107,10 +1108,11 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 		"Media capture recovered with ${attempt.label}",
 		"const audioSettingsStorageKey = 'bonfire.audio.settings.v1'",
 		"const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`",
-		"const audioSettingsSchemaVersion = 7",
+		// Wave 9: schema bumped to the unified v8 AV record, default-on desktop.
+		"const audioSettingsSchemaVersion = 8",
 		"function canonicalAudioMode(mode)",
 		"function audioProfileName()",
-		"mode: 'voice-focus'",
+		"mode: isMobileDevice ? 'standard' : 'voice-focus'",
 		"savedMode === 'voice-focus' || savedMode === 'off' ? savedMode : defaults.mode",
 		"preferredInput: null",
 		"function audioSettingsAccountStorageKey(user = authedUser)",
@@ -1120,25 +1122,25 @@ func TestIndexKeepsVoiceFocusTrainingPrivateAndPersistent(t *testing.T) {
 		"function resolvePreferredAudioInputDeviceId(devices)",
 		"function savePreferredAudioInput(track, fallbackDeviceId = '')",
 		"savePreferredAudioInput(nextTrack, selectedDeviceId)",
+		// Honest, mechanism-aware chip copy replaced the old "trained" strings.
 		"function voiceFocusStatusText()",
-		"rnnoise voice focus active",
-		"native voice isolation active",
+		"voice focus active · ",
+		"this browser's isolation",
+		"function renderAudioSavedHint()",
+		"function renderPreferredMicHonesty()",
+		// Privacy-mute machinery is retained (dormant) for the mute path.
 		"let voiceTrainingPrivacyMute = false",
 		"function effectiveMicMuted()",
 		"return Boolean(isMicMuted || voiceTrainingPrivacyMute)",
 		"function setVoiceTrainingPrivacyMute(muted)",
-		"setVoiceTrainingPrivacyMute(true)",
-		"await applyAudioSettingsToLiveMicrophone({ announce: false })",
-		"cancelVoiceFocusTraining({ keepSamples: true, keepPrivacyMute: true })",
 		"setVoiceTrainingPrivacyMute(false)",
 		"sourceTrack.enabled = voiceTrainingPrivacyMute || !isMicMuted",
 		"outputTrack.enabled = !effectiveMicMuted()",
 		"function createMutedOutboundAudioClone(sourceTrack)",
 		"micMuted: effectiveMicMuted()",
-		"you are muted to the room while this runs",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing private persistent voice focus setup %q", want)
+			t.Fatalf("index.html missing persistent honest voice focus setup %q", want)
 		}
 	}
 }

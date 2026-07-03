@@ -197,28 +197,20 @@ Risks carried forward: live browser verification deferred to Wave 14 acceptance.
 
 ## Wave 6
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Allowlist 13→~24 + instruction rewrite (room-only set unchanged)
-- [ ] read_thread_aloud / start_chat_as_user (server-stamped) / initiate_goal / also_open + dispatch
-- [ ] /goal composer parser → same goal spec
-- [ ] Voice island acting/hand-raised + narration + toasts + "what Scout did" ledger
-- [ ] Tests incl. disclosure-regardless-of-args regression
+Status: `completed` (commit 449606d, reviewed PASS after 1 fix)
+Files: kanban.go +211, scout_chat_threads.go +221, index.html +434, main.go +84 (/assistant/goal), codex_runner_queue.go +11 (stamped-authority handoff), wave6_scout_parity_test.go (290), 2 test-contract updates.
+Allowlist 14 → 27 (single source of truth). Review fix: /goal parser was dead code (insertion aborted mid-write; substring test missed it) — wired into sendScoutChatFromForm, test hardened to in-body assertion, live-verified keyless.
+Risks carried forward: originSurface not yet persisted by goal_engine (stamps originKind/Id/MeetingId only) — Wave 11 follow-up if the return card needs it; private-voice system prompt grew (27 schemas) — measure session payload size at acceptance; Wave 8 hooks = hand-raised state + ledger; Wave 12 rides island states.
 
 ---
 
 ## Wave 7
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Artifact titles + read-only reader for all
-- [ ] Body recall ranking + query expansion
-- [ ] relevance lifecycle + search guard (+ archived down-rank)
-- [ ] Classifier worker (0.85/0.70, deny-list in code, 2 candidate kinds, segment-level transcripts)
-- [ ] Expiry + audit stubs + /assistant/quarantine endpoints (restore all, delete-now admin)
-- [ ] Tests: exclusion/restore, deny-list, expiry, idempotence, expansion, reader access
+Status: `completed` (commit 0cc84f6, reviewed PASS after 1 fix)
+Files: memory.go +150, memory_query.go +15, domain_terms.go +70, slop_classifier.go (808), main.go (boot + 2 routes, committed with Wave 6), mission_intelligence.go +1 (leak guard), 2 test files (527).
+Delete-path audit: deleteEntryByID has exactly 2 callers (expiry sweep, admin endpoint), both gated, both audited. Review fix: Mission Intelligence read raw entriesOfKind → quarantined titles could leak into its prompt — guarded.
+Deviations (accepted): boot registration in main.go; own worker loop so expiry rides every tick; keep verdicts terminal (idempotence/cost over re-eval).
+Risks carried forward: goal_engine boot reconciler reads raw entriesOfKind (a quarantined non-terminal goal could still be re-driven — edge case, next goal_engine owner); queryPrefersArtifactContext unguarded but leaks nothing (routing bool only). Wave 8 tray consumes GET /assistant/quarantine (payload shape in dev report); event is title-only — tray must fetch detail.
 
 ---
 

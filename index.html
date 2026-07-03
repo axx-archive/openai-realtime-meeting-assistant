@@ -3886,6 +3886,143 @@
         letter-spacing: var(--track-text);
       }
 
+      /* ---------- AV honest status (Spectacular OS · Wave 9) ---------- */
+      /* the "intelligent" pill — mechanism is auto-chosen, so we say so plainly */
+      .noise-mode-tag {
+        display: inline-block;
+        margin-left: var(--sp-2);
+        padding: 1px 7px;
+        border-radius: var(--r-full);
+        background: var(--accent-soft);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        vertical-align: middle;
+      }
+
+      /* the live status sits under the label (col 2), so the radio column stays
+         clean and the row still reads as one control on a phone */
+      .noise-mode-option--status .noise-mode-status {
+        grid-column: 2;
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        min-height: 18px;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
+      }
+
+      .noise-mode-status:empty,
+      .noise-mode-status__text:empty {
+        display: none;
+      }
+
+      .noise-mode-status__dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-2);
+        background: transparent;
+      }
+
+      /* active = a real, confirmed graph state → the one green in this dialog */
+      .noise-mode-status__dot[data-state="active"] {
+        border-color: transparent;
+        background: var(--live);
+        box-shadow: 0 0 0 3px var(--live-soft);
+      }
+
+      /* fallback = requested mode failed; a lesser one is actually running */
+      .noise-mode-status__dot[data-state="fallback"] {
+        border-color: transparent;
+        background: var(--warn);
+        box-shadow: 0 0 0 3px var(--warn-soft);
+      }
+
+      .noise-mode-status__dot[data-state="loading"] {
+        border-color: transparent;
+        background: var(--text-3);
+        animation: avStatusPulse var(--dur-breathe) var(--ease) infinite;
+      }
+
+      .noise-mode-status__dot[data-state="unavailable"] {
+        border-style: dashed;
+        border-color: var(--text-3);
+      }
+      /* off / idle keep the hollow ring — no claim of activity */
+
+      @keyframes avStatusPulse {
+        0%, 100% { opacity: 0.35; }
+        50% { opacity: 1; }
+      }
+
+      .av-mic-honesty,
+      .av-status-warn {
+        margin: 0;
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
+      }
+
+      .av-status-warn {
+        color: var(--warn);
+      }
+
+      .av-suppression {
+        display: grid;
+        gap: var(--sp-2);
+        min-width: 0;
+      }
+
+      .av-suppression__head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--sp-3);
+      }
+
+      .av-suppression__label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+      }
+
+      .av-suppression__value {
+        color: var(--text-2);
+        font: var(--type-numeric);
+        letter-spacing: var(--track-numeric);
+        font-variant-numeric: tabular-nums;
+        text-transform: lowercase;
+      }
+
+      .av-suppression__meter {
+        position: relative;
+        overflow: hidden;
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+      }
+
+      .av-suppression__bar {
+        display: block;
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--live);
+        transition: width var(--dur-med) var(--ease);
+      }
+
+      .av-saved {
+        margin: 0;
+        color: var(--text-3);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
+      }
+
       .voice-profile {
         display: grid;
         gap: var(--sp-3);
@@ -8266,6 +8403,21 @@
         color: var(--text-3);
         font-variant-numeric: tabular-nums;
       }
+
+      /* Wave 8: an approval notification lays its body + one-tap actions in a
+         column (the row is a div, not a button, so actions can nest). */
+      .notification-item--approval {
+        flex-wrap: wrap;
+        cursor: default;
+      }
+      .notification-item__actions {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+        margin-top: 8px;
+        padding-left: 18px; /* clear the status dot's column */
+      }
+      .notification-item__actions .approval__btn { flex: 1; min-height: var(--hit-min); }
 
       @media (max-width: 860px) {
         /* mobile: the window becomes a bottom sheet clearing the bottom rail */
@@ -12964,6 +13116,197 @@
         color: var(--text-3);
       }
 
+      /* ===== Wave 8: Morning Brief + Portfolio Health (design §9, ux §5) =====
+         Home-surface launch cards + responsive sheets. Token-only; ember
+         (--agent) marks machine work, amber (--warn) marks a waiting state;
+         the two never co-occur. Motion lives in the reduced-motion block. */
+      .office-home-card {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 11px;
+        padding: 15px 16px;
+        margin-top: 12px;
+        border-radius: 16px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+        color: var(--text-1);
+        text-align: left;
+        transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
+      }
+      .office-home-card:hover { border-color: var(--line-2, var(--line-1)); }
+      .office-home-card:active { transform: scale(0.98); }
+      .office-home-card > svg:first-child { color: var(--agent); flex: none; }
+      .office-home-card__text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+      .office-home-card__title { font: 600 13.5px var(--font-sans); letter-spacing: -0.01em; }
+      .office-home-card__sub { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .office-home-card__badge {
+        flex: none;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: var(--agent);
+        color: #fff;
+        font: 600 11px var(--font-sans);
+        font-variant-numeric: tabular-nums;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .office-home-card__badge[hidden] { display: none; }
+      .office-home-card__chevron { color: var(--text-3); flex: none; }
+
+      /* the sheet: a centered dialog on desktop, a full-height rising sheet on
+         phone (ux §5.4). Scrim dims the shell; the panel scrolls internally. */
+      .bsheet {
+        position: fixed;
+        inset: 0;
+        z-index: 60; /* z-ladder: above shell chrome, below toasts */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+      }
+      .bsheet[hidden] { display: none; }
+      .bsheet__scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
+      .bsheet__panel {
+        position: relative;
+        width: min(640px, 100%);
+        max-height: 100%;
+        display: flex;
+        flex-direction: column;
+        border-radius: 20px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-1, var(--surface-2));
+        box-shadow: var(--shadow-3);
+        overflow: hidden;
+        animation: bf-sheetin 220ms var(--ease);
+      }
+      .bsheet__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 20px 12px;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .bsheet__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .bsheet__eyebrow { font: var(--type-label); letter-spacing: var(--track-label); color: var(--agent); text-transform: uppercase; }
+      .bsheet__title { margin: 0; font: 600 18px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); }
+      .bsheet__close {
+        flex: none;
+        width: var(--hit-min);
+        height: var(--hit-min);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+        color: var(--text-2);
+      }
+      .bsheet__body { padding: 8px 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
+
+      /* brief sections */
+      .brief__section { margin-top: 18px; }
+      .brief__section:first-child { margin-top: 8px; }
+      .brief__section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .brief__section-title { font: 600 12px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+      .brief__section-count { font: 600 12px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text-3); }
+      .brief__empty { font: var(--type-body, 13px var(--font-sans)); color: var(--text-3); padding: 4px 0; }
+      .brief__row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+        margin-bottom: 8px;
+      }
+      .brief__row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .brief__row-title { font: 500 13.5px var(--font-sans); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+      .brief__row-meta { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+
+      /* an approval waiting card — amber while it waits on the admin */
+      .approval { border-left: 3px solid var(--warn); }
+      .approval__state { font: 600 12px var(--font-sans); color: var(--warn); }
+      .approval__actions { display: flex; gap: 8px; flex: none; }
+      .approval__btn {
+        min-height: 36px;
+        padding: 0 12px;
+        border-radius: 10px;
+        font: 600 12.5px var(--font-sans);
+        border: 1px solid var(--line-1);
+        background: var(--surface-1, var(--surface-2));
+        color: var(--text-1);
+      }
+      .approval__btn--approve { border-color: var(--agent); color: var(--agent); }
+      .approval__btn--reject { color: var(--text-2); }
+      .approval__reason {
+        flex: 1;
+        min-width: 0;
+        min-height: 36px;
+        padding: 0 10px;
+        border-radius: 10px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-1, var(--surface-2));
+        color: var(--text-1);
+        font: 12.5px var(--font-sans);
+      }
+
+      /* quarantine tray — the 10-second decision kit */
+      .tray__entry { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid var(--line-1); background: var(--surface-2); margin-bottom: 8px; }
+      .tray__title { font: 500 13.5px var(--font-sans); color: var(--text-1); }
+      .tray__reason { font: 12.5px var(--font-sans); color: var(--text-2); }
+      .tray__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .tray__meta b { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-2); }
+      .tray__actions { display: flex; gap: 8px; margin-top: 2px; }
+      .tray__btn { min-height: 36px; padding: 0 12px; border-radius: 10px; font: 600 12.5px var(--font-sans); border: 1px solid var(--line-1); background: var(--surface-1, var(--surface-2)); color: var(--text-1); }
+      .tray__btn--delete { color: var(--danger, #d9534f); border-color: var(--line-1); }
+      .tray__countdown { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); font-variant-numeric: tabular-nums; align-self: center; }
+      .tray__batch { display: flex; gap: 8px; margin: 4px 0 10px; }
+
+      /* portfolio rows — stage + readiness dial + freshness + gaps */
+      .portfolio__row { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; border: 1px solid var(--line-1); background: var(--surface-2); margin-bottom: 10px; }
+      .portfolio__row.is-stale { border-left: 3px solid var(--warn); }
+      .portfolio__top { display: flex; align-items: center; gap: 12px; }
+      .portfolio__name { font: 600 15px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); flex: 1; min-width: 0; }
+      .portfolio__stage { font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--text-3); }
+      .portfolio__dial { display: flex; align-items: baseline; gap: 4px; flex: none; }
+      .portfolio__score { font: 700 18px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text-1); }
+      .portfolio__score-max { font: 12px var(--font-sans); color: var(--text-3); }
+      .portfolio__delta { font: 600 12px var(--font-sans); font-variant-numeric: tabular-nums; }
+      .portfolio__delta--up { color: var(--signal); }
+      .portfolio__delta--down { color: var(--warn); }
+      .portfolio__metertrack { height: 6px; border-radius: 999px; background: var(--surface-3, rgba(127,127,127,0.16)); overflow: hidden; }
+      .portfolio__meterfill { height: 100%; border-radius: 999px; background: var(--agent); }
+      .portfolio__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .portfolio__meta b { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-2); }
+      .portfolio__nudge { font: 12.5px var(--font-sans); color: var(--warn); }
+      .portfolio__gaps { display: flex; gap: 6px; flex-wrap: wrap; }
+      .portfolio__gap { font: 600 11px var(--font-sans); letter-spacing: 0.02em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-1); color: var(--text-3); }
+
+      /* phone: sheets become full-height, option/action rows go full-width */
+      @media (max-width: 640px) {
+        .bsheet { padding: 0; align-items: flex-end; }
+        .bsheet__panel { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; }
+        .approval__actions { width: 100%; }
+        .approval__btn, .tray__btn { flex: 1; min-height: var(--hit-min); }
+        .brief__row { flex-wrap: wrap; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bsheet__panel { animation: none; }
+        .office-home-card { transition: none; }
+      }
+
       /* chat — the stacked navigator's back chevron (mobile only) */
       .chat-convo-head__back {
         display: none;
@@ -15073,6 +15416,8 @@
         .toast.is-leaving { animation-duration: 1ms; }
         .scout-chat-thinking__dot,
         .pip-meeting__dot { animation: none; }
+        /* the loading status dot keeps its neutral colour (state); the pulse drops */
+        .noise-mode-status__dot[data-state="loading"] { animation: none; }
         .voice-island.is-visible { animation: none; }
         .bf-wave-bar { animation: none; }
         html, body { transition: none; }
@@ -15302,6 +15647,23 @@
                 </button>
               </div>
             </div>
+            <button id="officeBriefCard" class="office-home-card" type="button" aria-haspopup="dialog">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M4 9h16"></path><path d="M8 13h8"></path><path d="M8 16h5"></path></svg>
+              <span class="office-home-card__text">
+                <span class="office-home-card__title">Morning Brief</span>
+                <span class="office-home-card__sub">what moved, what's waiting</span>
+              </span>
+              <span id="officeBriefBadge" class="office-home-card__badge" hidden>0</span>
+              <svg class="office-home-card__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+            </button>
+            <button id="officePortfolioCard" class="office-home-card" type="button" aria-haspopup="dialog">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 5-6"></path></svg>
+              <span class="office-home-card__text">
+                <span class="office-home-card__title">Portfolio Health</span>
+                <span class="office-home-card__sub">the whole book at a glance</span>
+              </span>
+              <svg class="office-home-card__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+            </button>
             <button id="officeIntelCard" class="office-intel-card" type="button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>
               <span class="office-intel-card__text">
@@ -15313,6 +15675,39 @@
             <p class="office-foot-hint">everything the company does lands here.</p>
           </div>
         </section>
+
+        <!-- Wave 8: Morning Brief + Portfolio Health sheets (desktop dialog / phone full-height sheet). -->
+        <div id="briefOverlay" class="bsheet" hidden role="dialog" aria-modal="true" aria-label="Morning Brief">
+          <div class="bsheet__scrim" data-close-brief></div>
+          <div class="bsheet__panel">
+            <header class="bsheet__head">
+              <div class="bsheet__titles">
+                <span class="bsheet__eyebrow">BonfireOS</span>
+                <h2 class="bsheet__title" id="briefGreeting">Morning Brief</h2>
+              </div>
+              <button class="bsheet__close pressable" type="button" data-close-brief aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </button>
+            </header>
+            <div class="bsheet__body" id="briefBody"></div>
+          </div>
+        </div>
+
+        <div id="portfolioOverlay" class="bsheet" hidden role="dialog" aria-modal="true" aria-label="Portfolio Health">
+          <div class="bsheet__scrim" data-close-portfolio></div>
+          <div class="bsheet__panel">
+            <header class="bsheet__head">
+              <div class="bsheet__titles">
+                <span class="bsheet__eyebrow">BonfireOS</span>
+                <h2 class="bsheet__title">Portfolio Health</h2>
+              </div>
+              <button class="bsheet__close pressable" type="button" data-close-portfolio aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </button>
+            </header>
+            <div class="bsheet__body" id="portfolioBody"></div>
+          </div>
+        </div>
 
         <section id="accessPanel" class="access-panel" aria-label="Sign in">
           <button id="loginThemeToggle" class="login-theme" type="button" aria-label="Switch theme" title="Switch theme" aria-pressed="false">
@@ -16433,50 +16828,57 @@
                   <option value="">microphone</option>
                 </select>
               </label>
+              <p class="av-mic-honesty" id="audioMicHonesty" role="status" hidden></p>
               <fieldset class="noise-mode-group">
                 <legend>noise reduction</legend>
-                <label class="noise-mode-option">
+                <label class="noise-mode-option noise-mode-option--status">
                   <input type="radio" name="audioNoiseMode" value="voice-focus">
                   <span class="noise-mode-control" aria-hidden="true"></span>
                   <span class="noise-mode-text">
-                    <strong>voice focus</strong>
-                    <span>stronger local RNNoise cleanup for noisy rooms.</span>
+                    <strong>voice focus <span class="noise-mode-tag">intelligent</span></strong>
+                    <span>picks the strongest cleanup this browser has — no setup, no training.</span>
+                  </span>
+                  <span class="noise-mode-status" data-mode-status="voice-focus" aria-live="polite">
+                    <span class="noise-mode-status__dot" aria-hidden="true"></span>
+                    <span class="noise-mode-status__text"></span>
                   </span>
                 </label>
-                <label class="noise-mode-option">
+                <label class="noise-mode-option noise-mode-option--status">
                   <input type="radio" name="audioNoiseMode" value="standard">
                   <span class="noise-mode-control" aria-hidden="true"></span>
                   <span class="noise-mode-text">
                     <strong>standard cleanup</strong>
-                    <span>browser echo cancellation and noise suppression only.</span>
+                    <span>this browser's own echo cancellation and noise suppression.</span>
+                  </span>
+                  <span class="noise-mode-status" data-mode-status="standard" aria-live="polite">
+                    <span class="noise-mode-status__dot" aria-hidden="true"></span>
+                    <span class="noise-mode-status__text"></span>
                   </span>
                 </label>
-                <label class="noise-mode-option">
+                <label class="noise-mode-option noise-mode-option--status">
                   <input type="radio" name="audioNoiseMode" value="off">
                   <span class="noise-mode-control" aria-hidden="true"></span>
                   <span class="noise-mode-text">
                     <strong>raw mic</strong>
-                    <span>no added cleanup beyond the microphone hardware.</span>
+                    <span>no noise suppression or gain — echo cancellation only.</span>
+                  </span>
+                  <span class="noise-mode-status" data-mode-status="off" aria-live="polite">
+                    <span class="noise-mode-status__dot" aria-hidden="true"></span>
+                    <span class="noise-mode-status__text"></span>
                   </span>
                 </label>
               </fieldset>
-              <section class="voice-profile" aria-label="Voice focus profile">
-                <div>
-                  <div class="voice-profile__label">voice profile</div>
-                  <p>speak normally for a few seconds. you are muted to the room while this runs, and the profile stays in this browser.</p>
+              <p class="av-status-warn" id="audioStatusWarn" role="status" hidden></p>
+              <section class="av-suppression" id="audioSuppression" aria-label="Live noise suppression" hidden>
+                <div class="av-suppression__head">
+                  <span class="av-suppression__label">live suppression</span>
+                  <span class="av-suppression__value" id="audioSuppressionValue">— dB</span>
                 </div>
-                <div class="voice-profile__meta">
-                  <span id="voiceProfileState">adaptive profile</span>
-                  <span id="voiceTrainingCountdown"></span>
-                </div>
-                <div class="voice-meter" aria-hidden="true">
-                  <span id="voiceTrainingMeter" class="voice-meter__bar"></span>
-                </div>
-                <div class="voice-profile__actions">
-                  <button id="trainVoiceFocus" class="btn btn--ghost" type="button">Train voice focus</button>
-                  <button id="resetVoiceFocus" class="btn btn--text" type="button">reset</button>
+                <div class="av-suppression__meter" aria-hidden="true">
+                  <span class="av-suppression__bar" id="audioSuppressionBar"></span>
                 </div>
               </section>
+              <p class="av-saved" id="audioSavedHint" hidden>✓ saved for this device</p>
             </section>
             <section data-settings-section="appearance" hidden aria-label="Appearance">
               <fieldset class="noise-mode-group">
@@ -16632,11 +17034,13 @@
       const settingsSections = Array.from(settingsRegion.querySelectorAll('.settings-body > section[data-settings-section]'))
       const audioNoiseModeInputs = Array.from(document.querySelectorAll('input[name="audioNoiseMode"]'))
       const themeModeInputs = Array.from(document.querySelectorAll('input[name="themeMode"]'))
-      const trainVoiceFocusButton = document.getElementById('trainVoiceFocus')
-      const resetVoiceFocusButton = document.getElementById('resetVoiceFocus')
-      const voiceProfileState = document.getElementById('voiceProfileState')
-      const voiceTrainingCountdown = document.getElementById('voiceTrainingCountdown')
-      const voiceTrainingMeter = document.getElementById('voiceTrainingMeter')
+      const audioNoiseStatusEls = Array.from(document.querySelectorAll('.noise-mode-status[data-mode-status]'))
+      const audioStatusWarn = document.getElementById('audioStatusWarn')
+      const audioMicHonesty = document.getElementById('audioMicHonesty')
+      const audioSuppressionSection = document.getElementById('audioSuppression')
+      const audioSuppressionValue = document.getElementById('audioSuppressionValue')
+      const audioSuppressionBar = document.getElementById('audioSuppressionBar')
+      const audioSavedHint = document.getElementById('audioSavedHint')
       const screenShareButton = document.getElementById('screenShare')
       const copyRoomLinkButton = document.getElementById('copyRoomLink')
       const recordMeetingButton = document.getElementById('recordMeeting')
@@ -17204,13 +17608,34 @@
         return cachedEndpointId
       }
       const audioSettingsAccountStoragePrefix = `${audioSettingsStorageKey}.account.`
-      const audioSettingsSchemaVersion = 7
+      // v8: unified audio+video record. Persisted nested as {version:8, audio:{…},
+      // video:{…}}; kept FLAT in memory (mode/profile/preferredInput at top level,
+      // plus a video sub-record) so every existing reader is untouched. The video
+      // sub-record is schema-only this wave — Wave 13 wires the looks pipeline onto it.
+      const audioSettingsSchemaVersion = 8
+      const defaultVideoSettings = {
+        look: 'none',
+        lookIntensity: 1,
+        preferredCamera: null
+      }
       const voiceFocusProcessorName = 'bonfire-voice-focus-processor'
       const voiceFocusRNNoiseProcessorName = 'bonfire-rnnoise-processor'
       const voiceFocusRNNoiseWorkletPath = '/public/voice-focus/rnnoise-processor.js'
       const voiceFocusRNNoiseWasmPath = '/public/voice-focus/rnnoise.wasm'
       const forcedSafariMediaPath = new URLSearchParams(window.location.search).get('forceSafariMedia') === '1'
       const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)
+      // Per-browser noise-suppression strategy (rtc §2.2). Safari/iOS WebKit's
+      // platform Voice Isolation beats our WASM worklet and runs on the OS budget,
+      // so we prefer it and never stack our worklet on top. Android Chrome keeps
+      // platform NS as the default to protect battery; RNNoise is an explicit,
+      // clearly-labelled opt-in there. Chrome/Edge/Firefox desktop run RNNoise as
+      // a true denoiser with the browser's own NS disabled so nothing double-suppresses.
+      const isIOSDevice = /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (safariBrowser && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
+      const isAndroidDevice = /Android/i.test(navigator.userAgent)
+      // WebKit prefers the platform path; our WASM worklet is not stacked there.
+      const prefersPlatformVoiceIsolation = safariBrowser || isIOSDevice
+      const audioWorkletSupported = typeof AudioWorkletNode !== 'undefined'
       // Phones expose a portrait-native camera sensor. Pinning a landscape aspect
       // ratio (see widescreenAspectRatio below) fights that sensor, and because we
       // re-tune capture on every roster change the feed ends up flipping between
@@ -17354,8 +17779,6 @@
           setThemePreference(input.value)
         })
       })
-      trainVoiceFocusButton.addEventListener('click', trainVoiceFocus)
-      resetVoiceFocusButton.addEventListener('click', resetVoiceFocusProfile)
       screenShareButton.addEventListener('click', toggleScreenShare)
       copyRoomLinkButton.addEventListener('click', copyRoomLink)
       toolButtons.forEach(button => {
@@ -17757,11 +18180,14 @@
       }
 
       function loadAudioSettings() {
+        // Default-ON on desktop (voice focus), standard on mobile to protect
+        // battery (rtc §2.3). New devices with no saved record start here.
         const defaults = {
-          mode: 'standard',
+          mode: isMobileDevice ? 'standard' : 'voice-focus',
           version: audioSettingsSchemaVersion,
           profile: { ...defaultVoiceProfile },
-          preferredInput: null
+          preferredInput: null,
+          video: { ...defaultVideoSettings }
         }
         const keys = audioSettingsStorageKeysForCurrentAccount()
         try {
@@ -17777,25 +18203,46 @@
         }
       }
 
+      function normalizeVideoSettings(video) {
+        const source = video && typeof video === 'object' ? video : {}
+        const look = ['none', 'bonfire-warm', 'studio', 'mono', 'lowlight'].includes(source.look)
+          ? source.look
+          : defaultVideoSettings.look
+        return {
+          look,
+          lookIntensity: clampNumber(source.lookIntensity, 0, 1, defaultVideoSettings.lookIntensity),
+          preferredCamera: normalizePreferredAudioInput(source.preferredCamera)
+        }
+      }
+
+      // Tolerant v7→v8 migration. v8 is nested ({audio:{…}, video:{…}}); v7 and
+      // older are flat. Either way we read what we can and default the rest —
+      // an unknown or malformed version degrades to defaults, never throws.
       function parseStoredAudioSettings(raw, defaults) {
         if (!raw) {
           return null
         }
         const saved = JSON.parse(raw)
         const savedVersion = Number(saved?.version) || 0
-        const savedMode = canonicalAudioMode(saved?.mode)
-        const mode = savedVersion >= audioSettingsSchemaVersion
+        // v8 wraps audio fields under `audio`; earlier versions kept them flat.
+        const audioSource = saved?.audio && typeof saved.audio === 'object' ? saved.audio : saved
+        const savedMode = canonicalAudioMode(audioSource?.mode)
+        // v7 already spoke voice-focus/standard/off, so honour its saved mode.
+        // Only genuinely ancient (<7) records get the legacy voice-focus/off guard.
+        const mode = savedVersion >= 7
           ? (savedMode || defaults.mode)
           : (savedMode === 'voice-focus' || savedMode === 'off' ? savedMode : defaults.mode)
-        const profile = saved?.profile && typeof saved.profile === 'object'
+        const profileSource = audioSource?.profile
+        const profile = profileSource && typeof profileSource === 'object'
           ? {
-              noiseFloor: clampNumber(saved.profile.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
-              speechFloor: clampNumber(saved.profile.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
-              trainedAt: String(saved.profile.trainedAt || '')
+              noiseFloor: clampNumber(profileSource.noiseFloor, 0.004, 0.12, defaultVoiceProfile.noiseFloor),
+              speechFloor: clampNumber(profileSource.speechFloor, 0.02, 0.45, defaultVoiceProfile.speechFloor),
+              trainedAt: String(profileSource.trainedAt || '')
             }
           : { ...defaultVoiceProfile }
-        const preferredInput = normalizePreferredAudioInput(saved?.preferredInput)
-        return { mode, version: audioSettingsSchemaVersion, profile, preferredInput }
+        const preferredInput = normalizePreferredAudioInput(audioSource?.preferredInput)
+        const video = normalizeVideoSettings(saved?.video)
+        return { mode, version: audioSettingsSchemaVersion, profile, preferredInput, video }
       }
 
       function canonicalAudioMode(mode) {
@@ -17838,9 +18285,15 @@
 
       function saveAudioSettings() {
         try {
+          // Serialize the nested v8 shape from the flat in-memory record.
           const payload = JSON.stringify({
-            ...audioSettings,
-            version: audioSettingsSchemaVersion
+            version: audioSettingsSchemaVersion,
+            audio: {
+              mode: canonicalAudioMode(audioSettings.mode) || audioSettings.mode,
+              preferredInput: audioSettings.preferredInput || null,
+              profile: audioSettings.profile || { ...defaultVoiceProfile }
+            },
+            video: normalizeVideoSettings(audioSettings.video)
           })
           window.localStorage?.setItem(audioSettingsStorageKey, payload)
           const accountKey = audioSettingsAccountStorageKey()
@@ -17879,6 +18332,57 @@
 
       function voiceFocusEnabled() {
         return audioSettings.mode === 'voice-focus'
+      }
+
+      // The single source of truth for "what actually runs" given the intent
+      // (mode) and this browser. Everything else — capture constraints, whether
+      // the WASM graph is built, and the honest status chip — reads from this so
+      // the UI can never claim a state the audio graph isn't in (rtc §2.2/§4.3).
+      function resolveSuppressionStrategy(mode = canonicalAudioMode(audioSettings.mode)) {
+        const intent = mode || 'standard'
+        // AEC is orthogonal to noise suppression and stays browser-native in every
+        // mode — never toggled. Only NS / AGC / voice-isolation vary by intent.
+        const base = {
+          mode: intent,
+          echoCancellation: true,
+          autoGainControl: true,
+          voiceIsolation: false,
+          browserNoiseSuppression: false,
+          useWorklet: false,
+          mechanism: 'none',
+          batteryHeavy: false,
+          reason: ''
+        }
+        if (intent === 'off') {
+          // Raw mic: no noise suppression, no gain shaping. Echo cancellation is
+          // the one thing kept so a group call never echoes.
+          return { ...base, autoGainControl: false, mechanism: 'none' }
+        }
+        if (intent === 'standard') {
+          // Standard cleanup: the browser's own NS + AGC, no custom DSP.
+          return { ...base, browserNoiseSuppression: true, mechanism: 'browser-ns' }
+        }
+        // voice-focus (intelligent): mechanism chosen per browser.
+        if (prefersPlatformVoiceIsolation) {
+          // Safari / iOS: platform Voice Isolation, never our WASM on top.
+          return { ...base, voiceIsolation: true, browserNoiseSuppression: true, useWorklet: false, mechanism: 'platform-isolation' }
+        }
+        if (!audioWorkletSupported) {
+          // No AudioWorklet and not WebKit → intelligent focus is impossible here;
+          // fall back honestly to the browser's own NS.
+          return { ...base, browserNoiseSuppression: true, useWorklet: false, mechanism: 'browser-ns', reason: 'audioworklet-unavailable' }
+        }
+        // Chrome / Edge / Firefox / Android Chrome: RNNoise as a TRUE denoiser with
+        // the browser's own NS disabled so nothing double-suppresses. On Android
+        // this costs battery, so it is an explicit opt-in flagged here.
+        return { ...base, browserNoiseSuppression: false, useWorklet: true, mechanism: 'rnnoise-worklet', batteryHeavy: isAndroidDevice }
+      }
+
+      // True when the selected intent can actually run on this device at all. Only
+      // false when voice-focus is chosen but there is neither a worklet nor WebKit
+      // platform isolation — in which case the radio is disabled with an honest reason.
+      function voiceFocusSupportedHere() {
+        return prefersPlatformVoiceIsolation || audioWorkletSupported
       }
 
       function effectiveMicMuted() {
@@ -17937,58 +18441,183 @@
           audioSettingsLabel.textContent = voiceFocusEnabled() ? 'voice focus' : audioModeLabel()
         }
 
-        const trainedAt = audioSettings.profile?.trainedAt || ''
-        voiceProfileState.textContent = processorState
-        resetVoiceFocusButton.disabled = !trainedAt
-        trainVoiceFocusButton.disabled = !inRoom || Boolean(voiceTrainingFrame)
-        trainVoiceFocusButton.textContent = voiceTrainingFrame ? 'Training…' : 'Train voice focus'
-        if (!voiceTrainingFrame) {
-          voiceTrainingCountdown.textContent = ''
-          voiceTrainingMeter.style.width = '0%'
-        }
+        renderAudioNoiseStatus()
+        renderAudioSavedHint()
+        renderPreferredMicHonesty()
         updateRoomClock()
       }
 
-      function voiceFocusStatusText() {
-        if (audioSettings.mode === 'off') {
-          return 'raw mic'
+      // The honesty contract (ux §6.1): a mode row reflects the ACTUAL audio-graph
+      // state, never the checked radio. Selected ≠ active — if voice focus is
+      // chosen but silently fell back, its row reads amber "fallback", not green.
+      function resolveModeStatus(mode) {
+        if (mode === 'voice-focus' && !voiceFocusSupportedHere()) {
+          return {
+            state: 'unavailable',
+            text: 'not supported on this device',
+            disable: true,
+            warn: "voice focus isn't supported here — using standard cleanup."
+          }
         }
-        if (!voiceFocusEnabled()) {
-          return 'standard cleanup active'
+        const selected = canonicalAudioMode(audioSettings.mode) === mode
+        if (!selected) {
+          // No live claim for a mode that isn't running — a hollow, honest dot.
+          return { state: 'idle', text: '' }
         }
-        const trainedAt = audioSettings.profile?.trainedAt || ''
-        const profileText = trainedAt ? ` · trained ${formatTrainedAt(trainedAt)}` : ''
+        const inRoom = roomMediaActive()
+        if (mode === 'off') {
+          return { state: 'off', text: 'off · echo cancellation only' }
+        }
+        if (mode === 'standard') {
+          return inRoom
+            ? { state: 'active', text: 'browser noise suppression' }
+            : { state: 'idle', text: 'starts when you join' }
+        }
+        // voice-focus, selected — resolve the mechanism actually in the graph.
+        const strategy = resolveSuppressionStrategy('voice-focus')
+        const battery = strategy.batteryHeavy ? ' · more battery' : ''
+        if (!inRoom) {
+          return { state: 'idle', text: 'starts when you join' }
+        }
+        if (strategy.mechanism === 'platform-isolation') {
+          return { state: 'active', text: "this browser's isolation" + battery }
+        }
         switch (voiceFocusProcessorType()) {
-          case 'rnnoise-wasm':
-            return `rnnoise voice focus active${profileText}`
+          case 'rnnoise-wasm': {
+            // `rnnoiseReady` only flips false on an explicit worklet error message.
+            // If process() dies silently (WASM trap, OS suspend) the browser just
+            // stops scheduling it — no message, no error — and the flag would keep
+            // the chip green forever. Guard on metric freshness (same staleness bar
+            // as the meter): no fresh metrics ⇒ we cannot claim "active".
+            const snapshot = voiceFocusDiagnosticsSnapshot()
+            const fresh = typeof snapshot.ageMs === 'number' && snapshot.ageMs < 4000
+            return fresh
+              ? { state: 'active', text: 'RNNoise worklet' + battery }
+              : { state: 'fallback', text: 'worklet stalled — no signal' }
+          }
           case 'rnnoise-loading':
-            return `voice focus loading${profileText}`
+            return { state: 'loading', text: 'starting…' }
+          // Every non-platform fallback tier runs our JS heuristic (or, worst case,
+          // raw passthrough) — the browser's own NS was turned off for the worklet,
+          // so it is never "browser cleanup". Label them all honestly the same way.
           case 'rnnoise-fallback':
-            return `adaptive voice focus active${profileText}`
           case 'worklet':
-            return `adaptive voice focus active${profileText}`
           case 'script':
-            return `script voice focus active${profileText}`
           case 'webaudio':
-            return `browser voice focus active${profileText}`
-          case 'muted-clone':
-            return 'voice focus training private'
+            return { state: 'fallback', text: 'heuristic cleanup (RNNoise unavailable)' }
           case 'browser':
-            return `native voice isolation active${profileText}`
+            return { state: 'active', text: "this browser's isolation" + battery }
           default:
-            return `voice focus active${profileText}`
+            return { state: 'loading', text: 'starting…' }
         }
       }
 
-      function formatTrainedAt(value) {
-        const date = new Date(value)
-        if (Number.isNaN(date.getTime())) {
-          return 'in this browser'
+      function renderAudioNoiseStatus() {
+        let warn = ''
+        audioNoiseStatusEls.forEach(el => {
+          const mode = el.dataset.modeStatus
+          const status = resolveModeStatus(mode)
+          el.dataset.state = status.state
+          const dot = el.querySelector('.noise-mode-status__dot')
+          const text = el.querySelector('.noise-mode-status__text')
+          if (dot) dot.dataset.state = status.state
+          if (text) text.textContent = status.text
+          const input = audioNoiseModeInputs.find(candidate => candidate.value === mode)
+          if (input) input.disabled = Boolean(status.disable)
+          if (status.warn) warn = status.warn
+        })
+        if (audioStatusWarn) {
+          audioStatusWarn.textContent = warn
+          audioStatusWarn.hidden = !warn
         }
-        return new Intl.DateTimeFormat(undefined, {
-          hour: 'numeric',
-          minute: '2-digit'
-        }).format(date).toLowerCase()
+        renderSuppressionMeter()
+      }
+
+      // Live suppression meter (ux §6.1): input-vs-output RMS in dB, surfaced only
+      // when our worklet is genuinely producing metrics. Platform/standard/off
+      // report no meter rather than a fake reading.
+      function renderSuppressionMeter() {
+        const snapshot = voiceFocusDiagnosticsSnapshot()
+        const hasReading = typeof snapshot.suppressionDb === 'number'
+          && voiceFocusProcessorType() === 'rnnoise-wasm'
+          && Number(snapshot.ageMs) < 4000
+        if (audioSuppressionSection) audioSuppressionSection.hidden = !hasReading
+        if (!hasReading) return
+        const db = Math.max(0, Math.min(30, snapshot.suppressionDb))
+        if (audioSuppressionBar) audioSuppressionBar.style.width = `${Math.round((db / 30) * 100)}%`
+        if (audioSuppressionValue) audioSuppressionValue.textContent = `${db.toFixed(0)} dB quieter`
+      }
+
+      function audioSettingsHasSavedRecord() {
+        try {
+          for (const key of audioSettingsStorageKeysForCurrentAccount()) {
+            if (window.localStorage?.getItem(key)) {
+              return true
+            }
+          }
+        } catch {
+          // Storage blocked — treat as "defaults on this device".
+        }
+        return false
+      }
+
+      // Per-device persistence honesty (ux §6.3): "saved for this device" once a
+      // record exists here; "using defaults" on a fresh device, never pretending
+      // another device's settings followed the user.
+      function renderAudioSavedHint() {
+        if (!audioSavedHint) return
+        audioSavedHint.textContent = audioSettingsHasSavedRecord()
+          ? '✓ saved for this device'
+          : 'using defaults on this device'
+        audioSavedHint.hidden = false
+      }
+
+      // Preferred-mic honesty (ux §6.3): if the remembered mic isn't connected,
+      // say so and name what's actually in use — never a silent swap.
+      function renderPreferredMicHonesty() {
+        if (!audioMicHonesty) return
+        const preferred = normalizePreferredAudioInput(audioSettings.preferredInput)
+        const preferredLabel = preferred?.label || ''
+        if (!preferredLabel || !localStream) {
+          audioMicHonesty.hidden = true
+          audioMicHonesty.textContent = ''
+          return
+        }
+        const options = Array.from(micSelect.options || [])
+        const connected = options.some(option =>
+          normalizedAudioInputLabel(option.textContent) === preferredLabel
+          || (preferred.deviceId && option.value === preferred.deviceId))
+        if (connected) {
+          audioMicHonesty.hidden = true
+          audioMicHonesty.textContent = ''
+          return
+        }
+        const current = (micSelect.selectedOptions?.[0]?.textContent || 'the system default mic').trim()
+        audioMicHonesty.textContent = `your usual mic (${preferredLabel}) isn't connected — using ${current}.`
+        audioMicHonesty.hidden = false
+      }
+
+      function voiceFocusStatusText() {
+        const mode = canonicalAudioMode(audioSettings.mode)
+        if (mode === 'off') {
+          return 'raw mic · echo cancellation only'
+        }
+        if (mode === 'standard') {
+          return 'standard cleanup · browser noise suppression'
+        }
+        const status = resolveModeStatus('voice-focus')
+        switch (status.state) {
+          case 'active':
+            return `voice focus active · ${status.text}`
+          case 'loading':
+            return 'voice focus starting…'
+          case 'fallback':
+            return `voice focus degraded — ${status.text}`
+          case 'unavailable':
+            return "voice focus isn't supported here — using standard cleanup"
+          default:
+            return 'voice focus ready'
+        }
       }
 
       function openSettings(options = {}) {
@@ -18072,142 +18701,11 @@
         })
       }
 
-      async function resetVoiceFocusProfile() {
-        cancelVoiceFocusTraining()
-        audioSettings = {
-          ...audioSettings,
-          profile: { ...defaultVoiceProfile }
-        }
-        saveAudioSettings()
-        renderAudioSettings()
-        try {
-          await applyAudioSettingsToLiveMicrophone({ announce: true })
-        } catch (error) {
-          console.warn('Could not reset voice focus profile', error)
-          setLog('could not reset voice focus')
-        }
-      }
-
-      async function trainVoiceFocus() {
-        if (!localStream || voiceTrainingFrame) {
-          return
-        }
-        const context = ensureAudioContext()
-        if (!context) {
-          setLog('audio focus is unavailable in this browser')
-          return
-        }
-
-        setVoiceTrainingPrivacyMute(true)
-        audioSettings = {
-          ...audioSettings,
-          mode: 'voice-focus'
-        }
-        saveAudioSettings()
-        renderAudioSettings()
-
-        try {
-          await applyAudioSettingsToLiveMicrophone({ announce: false })
-        } catch (error) {
-          setVoiceTrainingPrivacyMute(false)
-          console.warn('Could not prepare private voice focus training', error)
-          setLog('could not start voice focus training')
-          renderAudioSettings()
-          return
-        }
-
-        const trainingTrack = localAudioSourceTrack || localAudioTrack()
-        if (!trainingTrack) {
-          setVoiceTrainingPrivacyMute(false)
-          setLog('microphone is unavailable for voice focus')
-          renderAudioSettings()
-          return
-        }
-
-        const stream = new MediaStream([trainingTrack])
-        const source = context.createMediaStreamSource(stream)
-        const analyser = context.createAnalyser()
-        analyser.fftSize = 1024
-        analyser.smoothingTimeConstant = 0.35
-        source.connect(analyser)
-
-        const samples = new Float32Array(analyser.fftSize)
-        voiceTrainingSamples = []
-        const startedAt = performance.now()
-        const durationMs = 4200
-        voiceTrainingCleanup = () => {
-          try {
-            source.disconnect()
-          } catch {
-            // Already disconnected.
-          }
-          voiceTrainingCleanup = null
-        }
-
-        const tick = () => {
-          const elapsed = performance.now() - startedAt
-          analyser.getFloatTimeDomainData(samples)
-          const rms = rmsFromFloatSamples(samples)
-          voiceTrainingSamples.push(rms)
-          voiceTrainingMeter.style.width = `${Math.min(100, Math.round((rms / 0.24) * 100))}%`
-          voiceTrainingCountdown.textContent = `${Math.max(0, Math.ceil((durationMs - elapsed) / 1000))}s`
-
-          if (elapsed < durationMs) {
-            voiceTrainingFrame = requestAnimationFrame(tick)
-            renderAudioSettings()
-            return
-          }
-
-          finishVoiceFocusTraining().catch(error => {
-            console.warn('Could not finish voice focus training', error)
-            setLog('could not train voice focus')
-          })
-        }
-
-        setLog('training voice focus')
-        voiceTrainingFrame = requestAnimationFrame(tick)
-        renderAudioSettings()
-      }
-
-      async function finishVoiceFocusTraining() {
-        const samples = voiceTrainingSamples
-          .filter(sample => Number.isFinite(sample))
-          .sort((a, b) => a - b)
-        cancelVoiceFocusTraining({ keepSamples: true, keepPrivacyMute: true })
-
-        if (samples.length < 8) {
-          setVoiceTrainingPrivacyMute(false)
-          setLog('voice focus needs more microphone signal')
-          renderAudioSettings()
-          return
-        }
-
-        const noiseFloor = clampNumber(percentile(samples, 0.18), 0.004, 0.12, defaultVoiceProfile.noiseFloor)
-        const speechFloor = clampNumber(
-          Math.max(percentile(samples, 0.62), noiseFloor * 2.8, 0.035),
-          0.02,
-          0.45,
-          defaultVoiceProfile.speechFloor
-        )
-        audioSettings = {
-          ...audioSettings,
-          mode: 'voice-focus',
-          profile: {
-            noiseFloor,
-            speechFloor,
-            trainedAt: new Date().toISOString()
-          }
-        }
-        saveAudioSettings()
-        renderAudioSettings()
-        try {
-          await applyAudioSettingsToLiveMicrophone({ announce: false })
-        } finally {
-          setVoiceTrainingPrivacyMute(false)
-        }
-        setLog('voice focus trained')
-      }
-
+      // Intelligent suppression needs no per-user training (rtc §2.3): voice focus
+      // resolves to the strongest mechanism this browser has, automatically. The
+      // former train/reset ritual and its private-mute capture were retired here;
+      // cancelVoiceFocusTraining survives only as a defensive no-op for the two
+      // settings-panel callers that used to interrupt a running capture.
       function cancelVoiceFocusTraining(options = {}) {
         if (voiceTrainingFrame) {
           cancelAnimationFrame(voiceTrainingFrame)
@@ -18221,14 +18719,6 @@
           setVoiceTrainingPrivacyMute(false)
         }
         renderAudioSettings()
-      }
-
-      function percentile(sortedSamples, ratio) {
-        if (!sortedSamples.length) {
-          return 0
-        }
-        const index = Math.min(sortedSamples.length - 1, Math.max(0, Math.floor((sortedSamples.length - 1) * ratio)))
-        return sortedSamples[index]
       }
 
       function rmsFromFloatSamples(samples) {
@@ -23604,6 +24094,12 @@
           frameSize: Number(metrics.frameSize || voiceFocusDiagnostics.frameSize || 0),
           workletHealth: String(metrics.workletHealth || voiceFocusDiagnostics.workletHealth || '')
         }
+        // Live-refresh the honest chip + suppression meter while settings are open,
+        // so the dot follows the real graph (loading → active/fallback) and the
+        // meter tracks the actual metrics stream, not the selected radio.
+        if (settingsRegion?.classList.contains('visible')) {
+          renderAudioNoiseStatus()
+        }
       }
 
       function voiceFocusDiagnosticsSnapshot() {
@@ -23946,7 +24442,13 @@
         const attempts = [
           {
             label: 'preferred camera and microphone',
-            constraints: mediaConstraints
+            // Route the very first capture through the resolved strategy too, so a
+            // default voice-focus desktop doesn't request the browser's own NS
+            // (which RNNoise would then double-process) on initial join.
+            constraints: {
+              video: mediaConstraints.video,
+              audio: audioConstraintsForDevice('')
+            }
           },
           {
             label: 'relaxed microphone processing',
@@ -24036,22 +24538,34 @@
         throw lastError || new Error('camera and microphone are unavailable')
       }
 
+      // Capture-constraint flags derived from the resolved strategy. The critical
+      // change (rtc §2.2): when our RNNoise worklet is the active mechanism we ask
+      // the browser to STOP its own noise suppression so the two don't fight; when
+      // the platform is the mechanism (Safari) we ask for voiceIsolation instead.
+      // Echo cancellation is always on — orthogonal to NS, never toggled.
+      function strategyConstraintFlags() {
+        const strategy = resolveSuppressionStrategy()
+        return {
+          echoCancellation: { ideal: strategy.echoCancellation },
+          noiseSuppression: { ideal: strategy.browserNoiseSuppression },
+          autoGainControl: { ideal: strategy.autoGainControl },
+          voiceIsolation: { ideal: strategy.voiceIsolation },
+          suppressLocalAudioPlayback: { ideal: strategy.echoCancellation },
+          googEchoCancellation: strategy.echoCancellation,
+          googEchoCancellation2: strategy.echoCancellation,
+          googAutoGainControl: strategy.autoGainControl,
+          googAutoGainControl2: strategy.autoGainControl,
+          googNoiseSuppression: strategy.browserNoiseSuppression,
+          googNoiseSuppression2: strategy.browserNoiseSuppression,
+          googTypingNoiseDetection: strategy.browserNoiseSuppression,
+          googHighpassFilter: strategy.echoCancellation
+        }
+      }
+
       function audioConstraintsForDevice(deviceId) {
         const audioConstraints = {
           ...mediaConstraints.audio,
-          echoCancellation: { ideal: audioProcessingEnabled() },
-          noiseSuppression: { ideal: audioProcessingEnabled() },
-          autoGainControl: { ideal: audioProcessingEnabled() },
-          voiceIsolation: { ideal: voiceFocusEnabled() },
-          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() },
-          googEchoCancellation: audioProcessingEnabled(),
-          googEchoCancellation2: audioProcessingEnabled(),
-          googAutoGainControl: audioProcessingEnabled(),
-          googAutoGainControl2: audioProcessingEnabled(),
-          googNoiseSuppression: audioProcessingEnabled(),
-          googNoiseSuppression2: audioProcessingEnabled(),
-          googTypingNoiseDetection: audioProcessingEnabled(),
-          googHighpassFilter: audioProcessingEnabled()
+          ...strategyConstraintFlags()
         }
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
@@ -24060,22 +24574,10 @@
 
       function relaxedAudioConstraintsForDevice(deviceId) {
         const audioConstraints = {
-          echoCancellation: { ideal: audioProcessingEnabled() },
-          noiseSuppression: { ideal: audioProcessingEnabled() },
-          autoGainControl: { ideal: audioProcessingEnabled() },
-          voiceIsolation: { ideal: voiceFocusEnabled() },
-          suppressLocalAudioPlayback: { ideal: audioProcessingEnabled() },
+          ...strategyConstraintFlags(),
           channelCount: { ideal: 1 },
           sampleRate: { ideal: 48000 },
-          sampleSize: { ideal: 16 },
-          googEchoCancellation: audioProcessingEnabled(),
-          googEchoCancellation2: audioProcessingEnabled(),
-          googAutoGainControl: audioProcessingEnabled(),
-          googAutoGainControl2: audioProcessingEnabled(),
-          googNoiseSuppression: audioProcessingEnabled(),
-          googNoiseSuppression2: audioProcessingEnabled(),
-          googTypingNoiseDetection: audioProcessingEnabled(),
-          googHighpassFilter: audioProcessingEnabled()
+          sampleSize: { ideal: 16 }
         }
         return deviceId
           ? { ...audioConstraints, deviceId: { exact: deviceId } }
@@ -24103,7 +24605,12 @@
         sourceTrack.enabled = voiceTrainingPrivacyMute || !isMicMuted
         setTrackContentHint(sourceTrack, 'speech')
 
-        if (!voiceFocusEnabled()) {
+        // Only build the WASM denoiser graph when the resolved strategy actually
+        // uses our worklet. Safari/iOS voice-focus resolves to platform Voice
+        // Isolation (applied via capture constraints), and standard/off never use
+        // the worklet — those paths pass the browser-processed track straight
+        // through, so nothing is stacked on top of the platform's own processing.
+        if (!resolveSuppressionStrategy().useWorklet) {
           return { track: sourceTrack, processor: null }
         }
 
@@ -24462,6 +24969,29 @@
               })
             }
           }
+        }
+        // If the worklet's process() throws (WASM trap, OOM), the browser fires
+        // this and silently stops scheduling the node — no error message is ever
+        // posted. Without this handler rnnoiseReady would stay true forever and the
+        // honest chip would keep claiming "active" over dead cleanup. Mirror the
+        // 'error' path so the chip resolves to a truthful fallback.
+        node.onprocessorerror = event => {
+          node.bonfireReady = false
+          node.bonfireError = 'worklet-process-error'
+          if (localAudioProcessor?.rnnoiseNode === node) {
+            localAudioProcessor.rnnoiseReady = false
+            localAudioProcessor.rnnoiseError = node.bonfireError
+          }
+          updateVoiceFocusDiagnostics({
+            processor: 'rnnoise-wasm',
+            rnnoiseReady: false,
+            rnnoiseError: node.bonfireError,
+            fallbackReason: node.bonfireError,
+            frameSize: Number(node.bonfireFrameSize || 0),
+            sampleRate: localAudioProcessor?.sampleRate || audioContext?.sampleRate || 0,
+            workletHealth: 'rnnoise-fallback'
+          })
+          console.warn('RNNoise voice focus worklet crashed', event)
         }
         node?.port?.postMessage?.({
           type: 'configure',
@@ -25751,6 +26281,457 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         osEventsDispatchHandlers(event)
       }
+
+      // ===== Wave 8: Morning Brief + Portfolio Health + approval round-trip =====
+      // Two responsive sheets composed from /assistant/brief and
+      // /assistant/portfolio, plus the approval loop's requester-facing states.
+      // Light consumer of the push channel: proposal / quarantine_change /
+      // artifact_completed events refresh an open Brief and the home badge.
+      const briefOverlay = document.getElementById('briefOverlay')
+      const portfolioOverlay = document.getElementById('portfolioOverlay')
+      const briefBody = document.getElementById('briefBody')
+      const portfolioBody = document.getElementById('portfolioBody')
+      const briefGreetingEl = document.getElementById('briefGreeting')
+      const officeBriefBadge = document.getElementById('officeBriefBadge')
+      // var (not let): refreshBriefBadge can run during early boot before this
+      // block's block-scoped bindings initialize; var hoists without a TDZ.
+      var briefBadgeTimer = null
+
+      function bfEl(tag, cls, text) {
+        const node = document.createElement(tag)
+        if (cls) node.className = cls
+        if (text !== undefined && text !== null) node.textContent = String(text)
+        return node
+      }
+
+      function bfTimeAgo(iso) {
+        const then = Date.parse(String(iso || ''))
+        if (!Number.isFinite(then)) return ''
+        const mins = Math.max(0, Math.round((Date.now() - then) / 60000))
+        if (mins < 1) return 'just now'
+        if (mins < 60) return `${mins}m ago`
+        const hrs = Math.round(mins / 60)
+        if (hrs < 24) return `${hrs}h ago`
+        const days = Math.round(hrs / 24)
+        return `${days}d ago`
+      }
+
+      function bfExpiryLabel(iso) {
+        const at = Date.parse(String(iso || ''))
+        if (!Number.isFinite(at)) return ''
+        const days = Math.ceil((at - Date.now()) / 86400000)
+        if (days <= 0) return 'expires today'
+        if (days === 1) return 'expires in 1 day'
+        return `expires in ${days} days`
+      }
+
+      function bfSectionHead(title, count) {
+        const head = bfEl('div', 'brief__section-head')
+        head.appendChild(bfEl('span', 'brief__section-title', title))
+        if (count !== undefined && count !== null) {
+          head.appendChild(bfEl('span', 'brief__section-count', String(count)))
+        }
+        return head
+      }
+
+      // --- Morning Brief ---
+      async function loadBrief() {
+        if (!briefBody) return
+        briefBody.replaceChildren(bfEl('p', 'brief__empty', 'loading your brief…'))
+        try {
+          const res = await fetch('/assistant/brief', { headers: { Accept: 'application/json' } })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok || !data.brief) {
+            briefBody.replaceChildren(bfEl('p', 'brief__empty', 'the brief is unavailable right now.'))
+            return
+          }
+          renderBrief(data.brief)
+        } catch (err) {
+          briefBody.replaceChildren(bfEl('p', 'brief__empty', 'the brief could not load.'))
+        }
+      }
+
+      function renderBrief(brief) {
+        if (briefGreetingEl) {
+          const first = String(brief.greeting || '').trim()
+          briefGreetingEl.textContent = first ? `Good morning, ${first}.` : 'Morning Brief'
+        }
+        briefBody.replaceChildren()
+        const isAdmin = Boolean(brief.isAdmin)
+
+        // Pending approvals
+        const approvals = brief.approvals || {}
+        const approvalItems = approvals.items || []
+        const aSection = bfEl('section', 'brief__section')
+        aSection.appendChild(bfSectionHead('Pending approvals', approvals.count || 0))
+        if (!approvalItems.length) {
+          aSection.appendChild(bfEl('p', 'brief__empty', 'nothing waiting on a sign-off.'))
+        } else {
+          approvalItems.forEach((item) => aSection.appendChild(renderApprovalRow(item, isAdmin)))
+        }
+        briefBody.appendChild(aSection)
+
+        // Overnight / recent completions
+        const completed = brief.completed || {}
+        const cSection = bfEl('section', 'brief__section')
+        cSection.appendChild(bfSectionHead('Finished recently', completed.count || 0))
+        const completedItems = completed.items || []
+        if (!completedItems.length) {
+          cSection.appendChild(bfEl('p', 'brief__empty', 'no new finished work.'))
+        } else {
+          completedItems.forEach((item) => {
+            const row = bfEl('div', 'brief__row')
+            const main = bfEl('div', 'brief__row-main')
+            main.appendChild(bfEl('div', 'brief__row-title', item.title || 'artifact'))
+            const meta = [item.mode, bfTimeAgo(item.at)].filter(Boolean).join(' · ')
+            main.appendChild(bfEl('div', 'brief__row-meta', meta))
+            row.appendChild(main)
+            cSection.appendChild(row)
+          })
+        }
+        briefBody.appendChild(cSection)
+
+        // Board deltas
+        const board = brief.board || {}
+        const boardItems = board.items || []
+        const bSection = bfEl('section', 'brief__section')
+        bSection.appendChild(bfSectionHead('On the board', board.draftCount ? `${board.draftCount} draft${board.draftCount === 1 ? '' : 's'}` : undefined))
+        if (!boardItems.length && !board.draftCount) {
+          bSection.appendChild(bfEl('p', 'brief__empty', 'the board is quiet.'))
+        }
+        boardItems.forEach((item) => {
+          const row = bfEl('div', 'brief__row')
+          const main = bfEl('div', 'brief__row-main')
+          main.appendChild(bfEl('div', 'brief__row-title', item.summary || 'board update'))
+          main.appendChild(bfEl('div', 'brief__row-meta', bfTimeAgo(item.at)))
+          row.appendChild(main)
+          bSection.appendChild(row)
+        })
+        briefBody.appendChild(bSection)
+
+        // Unread channel activity
+        const unread = brief.unreadChannels || {}
+        const unreadItems = unread.items || []
+        const uSection = bfEl('section', 'brief__section')
+        uSection.appendChild(bfSectionHead('Unread channels', unread.count || 0))
+        if (!unreadItems.length) {
+          uSection.appendChild(bfEl('p', 'brief__empty', 'caught up on channels.'))
+        } else {
+          unreadItems.forEach((item) => {
+            const row = bfEl('div', 'brief__row')
+            const main = bfEl('div', 'brief__row-main')
+            main.appendChild(bfEl('div', 'brief__row-title', item.text || 'new message'))
+            main.appendChild(bfEl('div', 'brief__row-meta', bfTimeAgo(item.at)))
+            row.appendChild(main)
+            uSection.appendChild(row)
+          })
+        }
+        briefBody.appendChild(uSection)
+
+        // Quarantine tray
+        briefBody.appendChild(renderQuarantineTray(brief.quarantine || {}))
+      }
+
+      function renderApprovalRow(item, isAdmin) {
+        const row = bfEl('div', 'brief__row approval')
+        const main = bfEl('div', 'brief__row-main')
+        main.appendChild(bfEl('div', 'brief__row-title', item.title || 'external write'))
+        const who = item.requestedMine ? 'your request' : `requested by ${item.requestedBy || 'someone'}`
+        main.appendChild(bfEl('div', 'brief__row-meta', `${who} · ${bfTimeAgo(item.createdAt)}`))
+        row.appendChild(main)
+        if (item.canAct) {
+          const actions = bfEl('div', 'approval__actions')
+          const approve = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Approve')
+          approve.type = 'button'
+          approve.addEventListener('click', () => submitApproval(item.id, 'approve', ''))
+          const reject = bfEl('button', 'approval__btn approval__btn--reject pressable', 'Reject')
+          reject.type = 'button'
+          reject.addEventListener('click', () => beginReject(row, item.id))
+          actions.append(approve, reject)
+          row.appendChild(actions)
+        } else {
+          row.appendChild(bfEl('span', 'approval__state', `queued for ${item.waitingOn || 'sign-off'}`))
+        }
+        return row
+      }
+
+      // beginReject swaps a row's buttons for an inline reason field — the
+      // requester sees this one line on their returned card (no blocking dialog).
+      // Shared by the Brief's approval rows and the notification bell.
+      function beginReject(row, id) {
+        const actions = row.querySelector('.approval__actions')
+        if (actions) renderRejectInput(actions, id)
+      }
+
+      function renderRejectInput(actions, id, onSubmit) {
+        actions.replaceChildren()
+        const input = bfEl('input', 'approval__reason')
+        input.type = 'text'
+        input.placeholder = 'reason (the requester sees this)'
+        input.setAttribute('aria-label', 'rejection reason')
+        const send = bfEl('button', 'approval__btn approval__btn--reject pressable', 'Send rejection')
+        send.type = 'button'
+        const fire = () => { submitApproval(id, 'reject', input.value.trim()); if (onSubmit) onSubmit() }
+        send.addEventListener('click', fire)
+        input.addEventListener('keydown', (event) => { if (event.key === 'Enter') fire() })
+        actions.append(input, send)
+        input.focus()
+      }
+
+      async function submitApproval(id, action, reason) {
+        const { ok } = await postAuthJSON('/artifacts/action', { id, action, reason })
+        if (!ok) {
+          setLog && setLog('could not record that decision.')
+        }
+        loadBrief()
+        refreshBriefBadge()
+        // Reflect the decision in the bell too (the gate notification is stale
+        // once acted on).
+        if (typeof loadNotifications === 'function') loadNotifications()
+      }
+
+      // notificationApprovalActions renders the admin's one-tap approve/reject
+      // directly in the bell (design §9). Only the admin ever receives a
+      // tool="approval" notification, so these never appear for other users;
+      // the server enforces the admin gate regardless.
+      function notificationApprovalActions(entry) {
+        const actions = bfEl('div', 'approval__actions notification-item__actions')
+        const approve = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Approve')
+        approve.type = 'button'
+        approve.addEventListener('click', (event) => {
+          event.stopPropagation()
+          markNotificationsRead([entry.id])
+          submitApproval(entry.artifactId, 'approve', '')
+        })
+        const reject = bfEl('button', 'approval__btn approval__btn--reject pressable', 'Reject')
+        reject.type = 'button'
+        reject.addEventListener('click', (event) => {
+          event.stopPropagation()
+          renderRejectInput(actions, entry.artifactId, () => markNotificationsRead([entry.id]))
+        })
+        actions.append(approve, reject)
+        return actions
+      }
+
+      function renderQuarantineTray(quarantine) {
+        const entries = quarantine.entries || []
+        const canDelete = Boolean(quarantine.canDelete)
+        const section = bfEl('section', 'brief__section')
+        section.appendChild(bfSectionHead('Quarantine tray', quarantine.count || 0))
+        if (!entries.length) {
+          section.appendChild(bfEl('p', 'brief__empty', 'nothing set aside — memory is clean.'))
+          return section
+        }
+        // batch confirm: restore all (any user); confirm-all delete (admin only)
+        const batch = bfEl('div', 'tray__batch')
+        const restoreAll = bfEl('button', 'tray__btn pressable', 'Restore all')
+        restoreAll.type = 'button'
+        restoreAll.addEventListener('click', () => batchQuarantine(entries, 'restore'))
+        batch.appendChild(restoreAll)
+        if (canDelete) {
+          const confirmAll = bfEl('button', 'tray__btn tray__btn--delete pressable', 'Looks right — confirm all')
+          confirmAll.type = 'button'
+          confirmAll.addEventListener('click', () => {
+            if (window.confirm(`Permanently delete all ${entries.length} quarantined item(s)?`)) {
+              batchQuarantine(entries, 'delete')
+            }
+          })
+          batch.appendChild(confirmAll)
+        }
+        section.appendChild(batch)
+
+        entries.forEach((entry) => section.appendChild(renderTrayEntry(entry, canDelete)))
+        return section
+      }
+
+      function renderTrayEntry(entry, canDelete) {
+        const wrap = bfEl('div', 'tray__entry')
+        wrap.appendChild(bfEl('div', 'tray__title', entry.title || 'set-aside item'))
+        if (entry.reason) wrap.appendChild(bfEl('div', 'tray__reason', entry.reason))
+        const meta = bfEl('div', 'tray__meta')
+        const linkage = entry.attached ? 'was attached to a package' : (entry.published ? 'was published' : 'never attached')
+        const linkEl = bfEl('span', null, '')
+        linkEl.appendChild(document.createTextNode(linkage))
+        meta.appendChild(linkEl)
+        if (entry.createdAt) {
+          const ageEl = bfEl('span', null, '')
+          ageEl.append('age ', bfEl('b', null, bfTimeAgo(entry.createdAt)))
+          meta.appendChild(ageEl)
+        }
+        const expiry = bfExpiryLabel(entry.expiresAt)
+        if (expiry) meta.appendChild(bfEl('span', null, expiry))
+        wrap.appendChild(meta)
+
+        const actions = bfEl('div', 'tray__actions')
+        const restore = bfEl('button', 'tray__btn pressable', 'Restore for everyone')
+        restore.type = 'button'
+        restore.addEventListener('click', () => oneQuarantine(entry.id, 'restore'))
+        actions.appendChild(restore)
+        if (canDelete) {
+          const del = bfEl('button', 'tray__btn tray__btn--delete pressable', 'Delete now')
+          del.type = 'button'
+          del.addEventListener('click', () => {
+            if (window.confirm('Permanently delete this from memory now?')) {
+              oneQuarantine(entry.id, 'delete')
+            }
+          })
+          actions.appendChild(del)
+        } else {
+          // non-admins see the countdown where the delete button would be
+          actions.appendChild(bfEl('span', 'tray__countdown', bfExpiryLabel(entry.expiresAt) || 'auto-expires'))
+        }
+        wrap.appendChild(actions)
+        return wrap
+      }
+
+      async function oneQuarantine(id, action) {
+        const { ok } = await postAuthJSON(`/assistant/quarantine/${encodeURIComponent(id)}/${action}`)
+        if (!ok) setLog && setLog('could not update that item.')
+        loadBrief()
+        refreshBriefBadge()
+      }
+
+      async function batchQuarantine(entries, action) {
+        for (const entry of entries) {
+          await postAuthJSON(`/assistant/quarantine/${encodeURIComponent(entry.id)}/${action}`)
+        }
+        loadBrief()
+        refreshBriefBadge()
+      }
+
+      // --- Portfolio Health ---
+      async function loadPortfolio() {
+        if (!portfolioBody) return
+        portfolioBody.replaceChildren(bfEl('p', 'brief__empty', 'reading the book…'))
+        try {
+          const res = await fetch('/assistant/portfolio', { headers: { Accept: 'application/json' } })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            portfolioBody.replaceChildren(bfEl('p', 'brief__empty', 'portfolio health is unavailable.'))
+            return
+          }
+          renderPortfolio(data.portfolio || [])
+        } catch (err) {
+          portfolioBody.replaceChildren(bfEl('p', 'brief__empty', 'portfolio health could not load.'))
+        }
+      }
+
+      function renderPortfolio(packages) {
+        portfolioBody.replaceChildren()
+        if (!packages.length) {
+          portfolioBody.appendChild(bfEl('p', 'brief__empty', 'no venture packages in the book yet.'))
+          return
+        }
+        packages.forEach((pkg) => {
+          const row = bfEl('div', 'portfolio__row' + (pkg.stale ? ' is-stale' : ''))
+          const top = bfEl('div', 'portfolio__top')
+          top.appendChild(bfEl('span', 'portfolio__name', pkg.name || 'package'))
+          top.appendChild(bfEl('span', 'portfolio__stage', pkg.stage || ''))
+          if (pkg.readinessScore) {
+            const dial = bfEl('div', 'portfolio__dial')
+            dial.appendChild(bfEl('span', 'portfolio__score', pkg.readinessScore))
+            dial.appendChild(bfEl('span', 'portfolio__score-max', '/10'))
+            if (pkg.readinessDelta) {
+              const up = String(pkg.readinessDelta).trim().startsWith('-') ? 'down' : 'up'
+              dial.appendChild(bfEl('span', `portfolio__delta portfolio__delta--${up}`, pkg.readinessDelta))
+            }
+            top.appendChild(dial)
+          }
+          row.appendChild(top)
+
+          if (pkg.readinessScore) {
+            const track = bfEl('div', 'portfolio__metertrack')
+            const fill = bfEl('div', 'portfolio__meterfill')
+            const pct = Math.max(0, Math.min(100, (parseFloat(pkg.readinessScore) || 0) * 10))
+            fill.style.width = `${pct}%`
+            track.appendChild(fill)
+            row.appendChild(track)
+          }
+
+          const meta = bfEl('div', 'portfolio__meta')
+          const fresh = bfEl('span', null, '')
+          const days = Number(pkg.freshnessDays)
+          if (Number.isFinite(days) && days >= 0) {
+            fresh.append('last moved ', bfEl('b', null, days === 0 ? 'today' : `${days}d ago`))
+          } else {
+            fresh.append('last moved ', bfEl('b', null, 'unknown'))
+          }
+          meta.appendChild(fresh)
+          row.appendChild(meta)
+
+          const gaps = pkg.gaps || []
+          if (gaps.length) {
+            const gapRow = bfEl('div', 'portfolio__gaps')
+            gaps.forEach((gap) => gapRow.appendChild(bfEl('span', 'portfolio__gap', gap)))
+            row.appendChild(gapRow)
+          }
+          if (pkg.nudge) row.appendChild(bfEl('div', 'portfolio__nudge', pkg.nudge))
+          portfolioBody.appendChild(row)
+        })
+      }
+
+      // --- open/close + badge ---
+      function openBrief() {
+        if (!briefOverlay) return
+        briefOverlay.hidden = false
+        loadBrief()
+      }
+      function closeBrief() { if (briefOverlay) briefOverlay.hidden = true }
+      function openPortfolio() {
+        if (!portfolioOverlay) return
+        portfolioOverlay.hidden = false
+        loadPortfolio()
+      }
+      function closePortfolio() { if (portfolioOverlay) portfolioOverlay.hidden = true }
+
+      function refreshBriefIfOpen() {
+        if (briefOverlay && !briefOverlay.hidden) loadBrief()
+      }
+
+      // The home badge = items that want the user's eyes (waiting approvals +
+      // quarantined items). Debounced so an event burst is one fetch.
+      function refreshBriefBadge() {
+        // Resolved lazily: renderOfficeGreeting can fire during early boot,
+        // before this module's const element refs initialize (TDZ), so this
+        // function must not close over them.
+        if (!authedUser) return
+        const badge = document.getElementById('officeBriefBadge')
+        if (!badge) return
+        if (briefBadgeTimer) clearTimeout(briefBadgeTimer)
+        briefBadgeTimer = setTimeout(async () => {
+          briefBadgeTimer = null
+          try {
+            const res = await fetch('/assistant/brief', { headers: { Accept: 'application/json' } })
+            const data = await res.json().catch(() => ({}))
+            const brief = data.brief || {}
+            const count = (brief.approvals?.count || 0) + (brief.quarantine?.count || 0)
+            if (count > 0) {
+              badge.textContent = String(count)
+              badge.hidden = false
+            } else {
+              badge.hidden = true
+            }
+          } catch (err) { /* badge is best-effort */ }
+        }, 400)
+      }
+
+      osEventHandlers.push((event) => {
+        if (!event) return
+        if (event.kind === 'proposal' || event.kind === 'quarantine_change' || event.kind === 'artifact_completed' || event.kind === 'package_advanced') {
+          refreshBriefIfOpen()
+          refreshBriefBadge()
+        }
+      })
+
+      document.getElementById('officeBriefCard')?.addEventListener('click', openBrief)
+      document.getElementById('officePortfolioCard')?.addEventListener('click', openPortfolio)
+      briefOverlay?.querySelectorAll('[data-close-brief]').forEach((el) => el.addEventListener('click', closeBrief))
+      portfolioOverlay?.querySelectorAll('[data-close-portfolio]').forEach((el) => el.addEventListener('click', closePortfolio))
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return
+        if (briefOverlay && !briefOverlay.hidden) closeBrief()
+        if (portfolioOverlay && !portfolioOverlay.hidden) closePortfolio()
+      })
 
       function handleAuthoritativeActiveSpeaker(payload) {
         const speakerName = participantDisplayNameInRoom(payload?.name)
@@ -27963,9 +28944,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function notificationItemNode(entry) {
-        const item = document.createElement('button')
-        item.type = 'button'
-        item.className = `notification-item${entry.read ? '' : ' is-unread'}`
+        // An approval notification carries one-tap actions, so its row is a div
+        // (a button cannot legally nest the action buttons); every other row
+        // stays a single clickable button.
+        const isApproval = entry.tool === 'approval' && Boolean(entry.artifactId)
+        const item = document.createElement(isApproval ? 'div' : 'button')
+        if (!isApproval) item.type = 'button'
+        item.className = `notification-item${entry.read ? '' : ' is-unread'}${isApproval ? ' notification-item--approval' : ''}`
         item.setAttribute('role', 'listitem')
 
         const dot = document.createElement('span')
@@ -27983,7 +28968,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         body.append(text, meta)
 
         item.append(dot, body)
-        item.addEventListener('click', () => openNotificationEntry(entry))
+        if (isApproval) {
+          // the text opens the full Brief; the buttons act in place.
+          body.style.cursor = 'pointer'
+          body.addEventListener('click', () => { markNotificationsRead([entry.id]); openBrief() })
+          item.append(notificationApprovalActions(entry))
+        } else {
+          item.addEventListener('click', () => openNotificationEntry(entry))
+        }
         return item
       }
 
@@ -35323,6 +36315,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (officeLaunchGreeting) {
           officeLaunchGreeting.textContent = greeting
         }
+        // Wave 8: refresh the Morning Brief badge whenever the home renders.
+        refreshBriefBadge()
       }
 
       // Meeting identity: the server's first-class meeting record when one is

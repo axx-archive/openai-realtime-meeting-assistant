@@ -1,6 +1,11 @@
 const processorName = 'bonfire-rnnoise-processor'
 const pcmScale = 32767
 const queueCapacity = 1920
+// RNNoise is a denoiser, not a gate. The floor never slams to zero: it rides a
+// smoothed VAD between 0.5 and 1.0 so word onsets are never chopped. The one
+// exception is a soft comfort ducker for SUSTAINED non-speech (keyboard, fan),
+// which attenuates at most 12 dB (amplitude 0.251) — a gentle duck, never a mute.
+const comfortDuckGain = 0.251
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -245,32 +250,36 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
     }
 
     const forcedNoise = this.forcedNoiseFrame()
-    const frameVoice = this.frameVoiceConfidence()
     this.heapF32.set(this.inputFrame, this.inputPtr >> 2)
     const vad = clamp(Number(this.exports.k(this.statePtr, this.outputPtr, this.inputPtr)) || 0, 0, 1)
+    // Smooth RNNoise's own VAD. This shapes a gentle floor only — it is never a
+    // gate: RNNoise has already denoised the frame, so speech passes continuously.
     this.rnnoiseSpeech = this.rnnoiseSpeech * 0.72 + vad * 0.28
-    if (forcedNoise) {
-      this.rnnoiseSpeech *= 0.25
-      this.rnnoiseHoldFrames = 0
-    } else if (frameVoice > 0.42 || (this.rnnoiseSpeech > 0.45 && frameVoice > 0.24)) {
+    const smoothedVad = this.rnnoiseSpeech
+
+    // Hold recent speech so trailing consonants survive a momentary VAD dip.
+    if (smoothedVad > 0.35 || vad > 0.42) {
       this.rnnoiseHoldFrames = 10
     } else if (this.rnnoiseHoldFrames > 0) {
       this.rnnoiseHoldFrames--
     }
 
-    const targetGate = forcedNoise
-      ? this.floorGain
-      : this.rnnoiseHoldFrames > 0
-      ? 1
-      : (frameVoice < 0.24 ? this.floorGain : 0.32)
+    // Denoiser floor: 0.6 + 0.4·VAD, clamped [0.5, 1.0]. Sustained non-speech
+    // (only once the speech hold has expired) gets a soft -12 dB comfort duck,
+    // never a full mute — this is what stops word onsets being chopped.
+    let targetGate = clamp(0.6 + 0.4 * smoothedVad, 0.5, 1.0)
+    if (forcedNoise && this.rnnoiseHoldFrames <= 0) {
+      targetGate = comfortDuckGain
+    }
     this.rnnoiseGate += (targetGate - this.rnnoiseGate) * (targetGate > this.rnnoiseGate ? 0.44 : 0.3)
-    this.noiseBias = Math.min(this.noiseFloor * (this.rnnoiseSpeech > 0.55 ? 0.55 : 0.82), this.rnnoiseSpeech > 0.55 ? 0.0085 : 0.016) * this.strength
+    // No second spectral subtraction — RNNoise already removed the noise; biasing
+    // its output again only dulls consonants. Kept at 0 for metric continuity.
+    this.noiseBias = 0
 
     const outputOffset = this.outputPtr >> 2
     for (let index = 0; index < this.frameSize; index++) {
       const rnnoiseSample = clamp(this.heapF32[outputOffset + index] / pcmScale, -1, 1)
-      const biased = Math.sign(rnnoiseSample) * Math.max(0, Math.abs(rnnoiseSample) - this.noiseBias)
-      this.enqueueOutput(biased * this.rnnoiseGate)
+      this.enqueueOutput(rnnoiseSample * this.rnnoiseGate)
     }
     this.inputFill = 0
   }
@@ -297,33 +306,6 @@ class BonfireRNNoiseProcessor extends AudioWorkletProcessor {
     return (crest > 6.4 && rms < threshold * 2.15)
       || (zcr > 0.28 && rms < threshold * 2.65)
       || (zcr < 0.006 && rms < threshold * 1.55)
-  }
-
-  frameVoiceConfidence() {
-    let sum = 0
-    let peak = 0
-    let crossings = 0
-    let previous = (this.inputFrame[0] || 0) / pcmScale
-    for (let index = 0; index < this.inputFrame.length; index++) {
-      const sample = (this.inputFrame[index] || 0) / pcmScale
-      const amplitude = Math.abs(sample)
-      peak = Math.max(peak, amplitude)
-      sum += sample * sample
-      if (index > 0 && ((sample >= 0 && previous < 0) || (sample < 0 && previous >= 0))) {
-        crossings++
-      }
-      previous = sample
-    }
-    const rms = Math.sqrt(sum / Math.max(1, this.inputFrame.length))
-    const zcr = crossings / Math.max(1, this.inputFrame.length - 1)
-    const crest = peak / Math.max(rms, 0.0001)
-    const threshold = Math.max(this.noiseFloor * (this.calibrated ? 3.05 : 3.35), this.speechFloor * (this.calibrated ? 0.37 : 0.31), 0.013)
-    const closeAt = threshold * 0.58
-    const levelBlend = clamp((rms - closeAt) / Math.max(0.0001, threshold * 1.35 - closeAt), 0, 1)
-    const speechLike = zcr >= 0.006 && zcr <= 0.28 && crest < 8.4
-    const steadyVoice = rms >= threshold * 1.08 && crest < 5.8 && zcr < 0.28
-    const peakSpeech = peak >= threshold * 2.5 && rms >= closeAt && crest < 7.2 && zcr < 0.28
-    return clamp(levelBlend * (speechLike || steadyVoice ? 1 : 0.2) + (peakSpeech ? 0.28 : 0), 0, 1)
   }
 
   process(inputs, outputs) {
