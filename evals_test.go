@@ -347,6 +347,76 @@ func TestGenerationHopDeliverableSubtaskCarriesToolPrompt(t *testing.T) {
 	}
 }
 
+// TestFlywheelWritesFireOnToolTemplatedCompletion proves a tool-templated goal's
+// completion fires the flywheel: the artifact attaches to the package (attach),
+// lands stamped under its contract (context-index), and a surfaced decision is
+// written to the ledger and linked (decision-log).
+func TestFlywheelWritesFireOnToolTemplatedCompletion(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	pkg, err := app.createVenturePackage("Aurora", "serialized YA sci-fi", "aj@shareability.com")
+	if err != nil {
+		t.Fatalf("create package: %v", err)
+	}
+
+	installFakeResponder(t, goalResponderRoutes{
+		report: `{"changed":"one-pager written","headline":"Aurora one-pager ready","gap":"","next":"share","assumed_claim_count":0,"decision":"price the Aurora option at $75k"}`,
+	})
+	installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Write the Aurora one-pager",
+		CreatedBy:    "aj@shareability.com",
+		PackageID:    pkg.ID,
+		ToolTemplate: "one_pager",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	// context-index: the goal artifact carries its output contract.
+	artifact, _ := app.osArtifactByID(thread.Artifact.ID)
+	if artifact.Metadata["artifactContract"] != "one_pager_v1" {
+		t.Fatalf("goal artifact contract=%q, want one_pager_v1", artifact.Metadata["artifactContract"])
+	}
+
+	// attach: the package now lists the goal artifact.
+	record, ok := app.venturePackageByID(pkg.ID)
+	if !ok {
+		t.Fatal("package vanished")
+	}
+	if !containsString(record.ArtifactIDs, thread.Artifact.ID) {
+		t.Fatalf("package artifacts %v missing the goal artifact %s", record.ArtifactIDs, thread.Artifact.ID)
+	}
+
+	// decision-log: the surfaced decision is written, linked, and grounds the next tool.
+	var decisionID string
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if entry.Metadata["source"] == "goal_completion" && entry.Metadata["packageId"] == pkg.ID {
+			decisionID = entry.ID
+			if !strings.Contains(entry.Text, "$75k") {
+				t.Fatalf("decision text=%q, want the $75k price", entry.Text)
+			}
+		}
+	}
+	if decisionID == "" {
+		t.Fatal("goal completion did not write the surfaced decision to the ledger")
+	}
+	if !containsString(record.DecisionIDs, decisionID) {
+		t.Fatalf("package decisions %v missing the goal decision %s", record.DecisionIDs, decisionID)
+	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Endpoint + door resolution ----------------------------------------------
 
 func TestAssistantToolsEndpointGuardedOrderedComplete(t *testing.T) {
