@@ -285,12 +285,21 @@ Risks carried forward (device matrix): governor under real thermal load (hot And
 
 ## Wave 14
 
-Status: `pending`
+Status: `completed` — code (commit 090f446, reviewed PASS after 5 fixes across two devs; first dev died at session limit mid-wave, second audited + finished). **OPS-3 live verification REMAINS OPEN** (human step).
+Files: deal_room.go (560) + deal_room_test.go, acceptance_test.go, private_voice_payload_test.go, docs/plans/spectacular-os-acceptance.md (the manual matrix/demo/quiet-Tuesday scripts), index.html +~630, kanban.go/main.go/meetings.go/memory.go/frontend_latency_test.go.
+Review fixes: Deal Room foreign-artifact exposure (package-scoped binder resolution + proof test) — the critical one; mic-recovery loop bounded (3 attempts/backoff/honest give-up); payload claim turned into a regression gate (<64KB bound + instructions-only swap marker); TestIndexWave14PolishMarkers rewritten functionBody-scoped (false comment removed); Deal Room buttons to 44px on phone. First dev's ReferenceError (undefined loadDealRooms) caught by the audit.
+Shipped: wake-word (OFF-default, 4 arming preconditions, no transcript leak), delight items 6/12/14/15, device recovery per rtc §5, Deal Room capstone (crypto/rand tokens, revoke→404, escape-safe renderer, gate at the share surface).
 
-### Scope Checklist
-- [ ] Remaining delight items + wake-word (gated on voice stability)
-- [ ] Device recovery (onended, devicechange, backgrounding, reconnect polish)
-- [ ] Catch-me-up + deferred reminders verified
-- [ ] Deal Room (cuttable, external_write-gated)
-- [ ] Full acceptance: whole-wave demo + quiet-Tuesday + all pillar tests + device matrix
-- [ ] OPS-3 final deploy + live verification + memory-file update
+### OPS-3 — REMAINING (execute per docs/plans/spectacular-os-acceptance.md)
+1. Deploy: rsync committed tree (090f446) to the VPS per bonfire-vps-deploy-ops (preserve .env + data/users.json + sessions.json), compose rebuild, verify thebonfire.xyz + container health. **`.env` needs: ANTHROPIC_API_KEY (activates Fable orchestration), BONFIRE_AGENT_RUNNER=anthropic_fable, BONFIRE_EXECUTION_RUNNER=codex_sidecar, SLOP_CLASSIFIER_INTERVAL=6h.**
+2. Device matrix (acceptance doc §B) on real devices — incl. same-account macOS+iPhone simul-join, iOS lock/resume, Android thermal, looks rows.
+3. Wake-word live (§C), Deal Room end-to-end (§E), pillar spot-checks with real OpenAI (§A8-13), quiet-Tuesday journey (§D).
+4. Verify live: private grill session.update lands on gpt-realtime-2 (W12 risk); re-grill dial delta across a real "again".
+5. Update the memory file with deploy + live-verification dates.
+
+---
+
+## PROGRAM SUMMARY (2026-07-04)
+
+All 14 waves code-complete on main: 8d3e4a7 (W5) → 5782f17 (W1) → 4b5b153 (W3) → 7779513+2c0d418 (W2) → 216d147 (W4, OPS-1 push) → 449606d (W6) → 0cc84f6 (W7) → 101209e (W8) → dfbcddf (W9, OPS-2 push) → 5c9856f+6fe017a (W10) → 1bc4d1e (W12) → 18b6db3 (W13) → b703fc5 (W11) → 090f446 (W14, OPS-3 code push). Full suite green at every commit. **35 real bugs caught by the adversarial review layer pre-commit**, including: the A++ prompts never reaching generation (W10), goals hanging on sidecar subtasks + a dead approval path (W2), a notification body leak on the push channel (W3), third-party tile teardown on multi-device join (W4), a no-op grill safety revert + grounding injection (W12), WebGL context-loss blank frames (W13), a spoofable-disclosure attempt defeated (W6), and a foreign artifact exposable behind a public token (W14).
+Open follow-ups: #24 dual-visible-tile per endpoint; #25 conversational tiles stamping toolTemplate; OPS-3 live verification above.
