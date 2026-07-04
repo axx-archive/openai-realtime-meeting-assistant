@@ -257,6 +257,50 @@ func TestAnthropicFableRunnerKeylessTerminates(t *testing.T) {
 	}
 }
 
+// A per-job budget (set by newAgentJob for the deliverable subtask) overrides
+// the runner's env defaults in the outgoing request; a job with no override
+// keeps the runner default. This is the wire proof that the heavier deliverable
+// budget actually reaches the model.
+func TestAnthropicFableRunnerHonorsPerJobBudget(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	var got anthropicMessagesRequest
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		got = request
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Done")}}, nil
+	}
+
+	deliverable := newAnthropicFableRunner(app)
+	deliverable.responder = responder
+	deliverable.apiKey = func() string { return "test-key" }
+	deliverable.maxTokens = 4096
+	deliverable.effort = "low"
+	job := app.newAgentJob(scoutAgentThread{ID: "t", Mode: "design", Query: "write the deliverable"})
+	job.MaxTokens = 8192
+	job.Effort = "medium"
+	out, err := deliverable.RunJob(context.Background(), job)
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	collectProgress(out)
+	if got.MaxTokens != 8192 || got.Effort != "medium" {
+		t.Fatalf("deliverable request budget=%d/%q, want 8192/medium", got.MaxTokens, got.Effort)
+	}
+
+	planning := newAnthropicFableRunner(app)
+	planning.responder = responder
+	planning.apiKey = func() string { return "test-key" }
+	planning.maxTokens = 4096
+	planning.effort = "low"
+	out2, err := planning.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t2", Mode: "research", Query: "plan"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	collectProgress(out2)
+	if got.MaxTokens != 4096 || got.Effort != "low" {
+		t.Fatalf("planning request budget=%d/%q, want runner default 4096/low", got.MaxTokens, got.Effort)
+	}
+}
+
 func toolNames(tools []anthropicTool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {

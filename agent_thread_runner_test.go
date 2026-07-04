@@ -7,6 +7,32 @@ import (
 	"time"
 )
 
+// A /goal subtask child (goalParentId set) must NOT fire its own creator
+// notification — the parent goal engine notifies once on the terminal state, so
+// a revised subtask can't flood "Finished Recently" with v1/v2/v3 pings. A
+// standalone thread always notifies.
+func TestShouldNotifyAgentThreadCreator(t *testing.T) {
+	standalone := meetingMemoryEntry{Metadata: map[string]string{}}
+	if !shouldNotifyAgentThreadCreator(standalone) {
+		t.Fatal("standalone thread must notify its creator")
+	}
+	child := meetingMemoryEntry{Metadata: map[string]string{"goalParentId": "agent-thread-goal-1"}}
+	if shouldNotifyAgentThreadCreator(child) {
+		t.Fatal("goal subtask child must be suppressed (parent notifies once)")
+	}
+}
+
+// The deliverable flag becomes the goalDeliverable metadata key (the flag the
+// runner reads for the heavier budget); an unset flag stamps nothing.
+func TestAgentThreadGoalSpecStampsDeliverableFlag(t *testing.T) {
+	if got := (agentThreadGoalSpec{Deliverable: true}).metadata()["goalDeliverable"]; got != "true" {
+		t.Fatalf("goalDeliverable=%q, want true", got)
+	}
+	if _, present := (agentThreadGoalSpec{}).metadata()["goalDeliverable"]; present {
+		t.Fatal("goalDeliverable stamped on a non-deliverable spec")
+	}
+}
+
 func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"

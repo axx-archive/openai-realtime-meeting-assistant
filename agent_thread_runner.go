@@ -68,6 +68,10 @@ type agentThreadGoalSpec struct {
 	ParentGoalID   string
 	SubtaskID      string
 	AssignedRunner string
+	// Deliverable marks the terminal, contract-bearing subtask so the runner
+	// gives its generation a heavier effort + token budget (agent_runner_iface.go
+	// reads the goalDeliverable flag). Only the /goal engine sets it.
+	Deliverable bool
 }
 
 func (spec agentThreadGoalSpec) metadata() map[string]string {
@@ -88,6 +92,9 @@ func (spec agentThreadGoalSpec) metadata() map[string]string {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
 		}
+	}
+	if spec.Deliverable {
+		metadata["goalDeliverable"] = "true"
 	}
 	return metadata
 }
@@ -284,8 +291,13 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		app.deliverArtifactToOrigin(artifact, thread.ID)
 	}
 	// Durable milestone: the creator learns the thread finished (or failed)
-	// even if they are outside the room when the worker lands.
-	app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+	// even if they are outside the room when the worker lands. A /goal subtask
+	// child is suppressed here — the parent goal engine notifies the creator
+	// exactly once on the goal's terminal state, so one goal never fires a
+	// notification per subtask AND per revision (the v1/v2/v3 flood).
+	if shouldNotifyAgentThreadCreator(artifact) {
+		app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
+	}
 	// Goal-engine linkage: a subtask child folds its terminal result back into
 	// the parent plan, which re-drives the state machine (goal_engine.go). No-op
 	// for non-goal threads (goalParentId absent).
@@ -397,6 +409,16 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 			log.Errorf("Failed to deliver artifact %s to channel %s: %v", artifact.ID, thread.ID, err)
 		}
 	}
+}
+
+// shouldNotifyAgentThreadCreator gates the per-thread terminal notification. A
+// /goal subtask child (goalParentId set) is suppressed because the parent goal
+// engine notifies the creator once on the goal's terminal state; without this
+// gate a single goal with a revised subtask fires one notification per subtask
+// attempt (v1/v2/v3), flooding "Finished Recently". Standalone threads
+// (no goalParentId) always notify.
+func shouldNotifyAgentThreadCreator(artifact meetingMemoryEntry) bool {
+	return strings.TrimSpace(artifact.Metadata["goalParentId"]) == ""
 }
 
 func agentThreadNotificationText(message string, artifact meetingMemoryEntry) string {

@@ -91,6 +91,11 @@ type goalPlan struct {
 	Verification      goalVerification `json:"verification"`
 	DecomposeAttempts int              `json:"decomposeAttempts,omitempty"`
 	Blocker           string           `json:"blocker,omitempty"`
+	// MaxProgress is the monotonic high-water mark for the advisory percent. A
+	// revision re-queue reverts a verified subtask to running, which lowers the
+	// raw execute-phase percent; holding the high-water mark keeps the goal card
+	// from reading as running backwards while it legitimately revises.
+	MaxProgress int `json:"maxProgress,omitempty"`
 }
 
 type goalSubtask struct {
@@ -133,6 +138,10 @@ type goalReport struct {
 	GateOutcome       string   `json:"gateOutcome,omitempty"`
 	AssumedClaimCount int      `json:"assumedClaimCount"`
 	ArtifactIDs       []string `json:"artifactIds,omitempty"`
+	// DeliverableArtifactID is the salvaged best-draft child artifact of a goal
+	// that terminated needs_attention. It is attached to the package and
+	// surfaced so an 8/10 draft is never orphaned when revisions run out.
+	DeliverableArtifactID string `json:"deliverableArtifactId,omitempty"`
 }
 
 type goalVerification struct {
@@ -819,6 +828,10 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	// generic per-mode contract so they don't each try to emit the deliverable.
 	if st.ID == goalDeliverableSubtaskID(plan) {
 		spec.ToolTemplate = plan.ToolTemplate
+		// Mark it the deliverable so the runner gives its generation a heavier
+		// effort + token budget (agent_runner_anthropic.go) — the fix for the
+		// contract-bearing artifact truncating under the planning default.
+		spec.Deliverable = true
 	}
 	// Children deliver back through the fold + creator notification, not a room
 	// origin, so no origin metadata is stamped on the subtask thread.
@@ -1159,6 +1172,101 @@ func (e *goalEngine) saveWhatWorked(plan *goalPlan, parentID string) {
 	}
 }
 
+// salvageBlockedDeliverable rescues the best produced work of a goal that
+// terminated needs_attention. When a subtask produced a real deliverable but the
+// review/gate bar was missed and revisions ran out, the goal blocks — yet the
+// produced artifact is genuinely useful (an 8/10 draft the studio can finish).
+// Rather than orphan it, we attach it to the package (when set), surface it as
+// the goal's result (deliverableArtifactId), and stamp an HONEST gap line naming
+// what it missed. No gate bar is lowered: the goal is still needs_attention, but
+// the work is saved, linked, and openable.
+func (e *goalEngine) salvageBlockedDeliverable(plan *goalPlan, parentID string) {
+	st := e.bestDeliverable(plan)
+	if st == nil {
+		return
+	}
+	artifactID := strings.TrimSpace(st.ArtifactID)
+	if artifactID == "" {
+		return
+	}
+	plan.Report.DeliverableArtifactID = artifactID
+	gap := ""
+	if st.Review != nil {
+		gap = strings.TrimSpace(st.Review.Reasons)
+	}
+	if strings.TrimSpace(plan.Report.Gap) == "" {
+		plan.Report.Gap = firstNonEmptyString(gap, "the deliverable missed the review bar")
+	}
+	// Point the blocker at the saved draft so the card's error line is a next
+	// step, not a dead end. Idempotent across re-drives.
+	if !strings.Contains(plan.Blocker, "draft is saved") {
+		plan.Blocker = strings.TrimSpace(firstNonEmptyString(plan.Blocker, "goal needs attention")) +
+			" — the best draft is saved and attached; finish it or retry."
+	}
+	if strings.TrimSpace(plan.PackageID) != "" {
+		if _, err := e.app.attachToPackage(plan.PackageID, packageRefTypeArtifact, artifactID, scoutParticipantName); err != nil {
+			log.Errorf("goal %s salvage attach %s failed: %v", parentID, artifactID, err)
+		}
+	}
+}
+
+// bestDeliverable picks the subtask whose produced artifact is the goal's best
+// salvageable work: the tool deliverable subtask when it produced substantial
+// text, else the subtask with the largest produced artifact. Returns nil when no
+// subtask produced anything substantial — a short stub or error body is never
+// surfaced as a "draft to finish".
+func (e *goalEngine) bestDeliverable(plan *goalPlan) *goalSubtask {
+	const minSalvageLen = 400
+	if id := goalDeliverableSubtaskID(plan); id != "" {
+		if st := plan.subtaskByID(id); st != nil && e.producedArtifactLen(st) >= minSalvageLen {
+			return st
+		}
+	}
+	var best *goalSubtask
+	bestLen := minSalvageLen - 1
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if n := e.producedArtifactLen(st); n > bestLen {
+			bestLen = n
+			best = st
+		}
+	}
+	return best
+}
+
+func (e *goalEngine) producedArtifactLen(st *goalSubtask) int {
+	id := strings.TrimSpace(st.ArtifactID)
+	if id == "" {
+		return 0
+	}
+	artifact, ok := e.app.osArtifactByID(id)
+	if !ok {
+		return 0
+	}
+	return len(strings.TrimSpace(artifact.Text))
+}
+
+// goalRevisionNote returns an honest "revising (attempt N of 2)" line while a
+// re-queued subtask is back in flight (ready or running with a revision count),
+// so the goal card can show a deliberate revision rather than a stall. Empty
+// when no revision is in progress or the goal is terminal.
+func goalRevisionNote(plan *goalPlan) string {
+	if isTerminalGoalState(plan.State) {
+		return ""
+	}
+	attempt := 0
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.Revisions > 0 && (st.Status == subtaskReady || st.Status == subtaskRunning) && st.Revisions > attempt {
+			attempt = st.Revisions
+		}
+	}
+	if attempt == 0 {
+		return ""
+	}
+	return fmt.Sprintf("revising (attempt %d of %d)", attempt, goalMaxRevisions)
+}
+
 // --- Stage: report -----------------------------------------------------------
 
 // report is one short model call producing the 4-line Changed/Headline/Gap/Next
@@ -1369,6 +1477,20 @@ func buildGoalCommitScaffold(plan *goalPlan, command string) string {
 // artifact. body="" keeps the current artifact text (updateOSArtifactWithMetadata
 // rejects empty text, so the current body is loaded).
 func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meetingMemoryEntry {
+	status, gate, percent := goalStateDisplay(plan)
+	// Monotonic advisory percent: a revision re-queue legitimately lowers the raw
+	// execute-phase percent (a verified subtask reverts to running), which reads
+	// as the goal running backwards. Hold a high-water mark for non-terminal
+	// states so the card only ever advances; a terminal state keeps its canonical
+	// percent (verified 100 / needs_attention 72). Computed before the marshal
+	// below so MaxProgress survives in the persisted plan across fold re-drives.
+	if !isTerminalGoalState(plan.State) {
+		if percent < plan.MaxProgress {
+			percent = plan.MaxProgress
+		} else {
+			plan.MaxProgress = percent
+		}
+	}
 	raw, err := json.Marshal(plan)
 	if err != nil {
 		log.Errorf("goal %s encode plan failed: %v", parentID, err)
@@ -1379,7 +1501,6 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 			body = current.Text
 		}
 	}
-	status, gate, percent := goalStateDisplay(plan)
 	metadata := map[string]string{
 		"goalPlan":        string(raw),
 		"mode":            "goal",
@@ -1387,6 +1508,20 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		"goalStatus":      status,
 		"reviewGate":      gate,
 		"progressPercent": strconv.Itoa(percent),
+	}
+	// An honest "revising (attempt N of 2)" signal while a re-queued subtask is
+	// back in flight, so the card shows a deliberate revision rather than a
+	// stall or an oscillating bar.
+	if note := goalRevisionNote(plan); note != "" {
+		metadata["goalRevisionNote"] = note
+	}
+	// Salvaged best-draft linkage for a needs_attention goal: the openable draft
+	// id and the honest gap it missed, so the card can point at the saved work.
+	if id := strings.TrimSpace(plan.Report.DeliverableArtifactID); id != "" {
+		metadata["deliverableArtifactId"] = id
+	}
+	if gap := strings.TrimSpace(plan.Report.Gap); gap != "" {
+		metadata["goalGap"] = gap
 	}
 	if strings.TrimSpace(plan.Blocker) != "" {
 		metadata["goalBlocker"] = plan.Blocker
@@ -1410,6 +1545,12 @@ func (e *goalEngine) fail(plan *goalPlan, parentID string, blocker string) {
 // finish persists a terminal state, updates the linked card, and notifies the
 // creator — reusing the same seams the single-shot thread terminal seam uses.
 func (e *goalEngine) finish(plan *goalPlan, parentID string) {
+	// A goal that terminates needs_attention must not orphan its best work: if a
+	// subtask produced a real deliverable, salvage it (attach + surface) before
+	// composing the terminal brief.
+	if plan.State == goalStateBlocked {
+		e.salvageBlockedDeliverable(plan, parentID)
+	}
 	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
 	if strings.TrimSpace(artifact.ID) == "" {
 		if current, ok := e.app.osArtifactByID(parentID); ok {
@@ -1708,6 +1849,14 @@ func composeGoalArtifact(plan *goalPlan) string {
 	}
 	if plan.Blocker != "" {
 		lines = append(lines, "", "## Blocker", "- "+plan.Blocker)
+	}
+	if id := strings.TrimSpace(plan.Report.DeliverableArtifactID); id != "" {
+		lines = append(lines, "", "## Draft saved",
+			"- The best deliverable draft is saved and attached; it missed the review bar but is ready to finish.",
+			"- Artifact: "+id)
+		if plan.Report.Gap != "" {
+			lines = append(lines, "- Gap: "+plan.Report.Gap)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

@@ -76,6 +76,38 @@ func TestSelectedExecutionRunnerNameMatrix(t *testing.T) {
 	}
 }
 
+// A /goal deliverable subtask (goalDeliverable metadata flag) carries a heavier
+// per-job budget so its contract-bearing artifact does not truncate under the
+// planning default; every other job carries no override.
+func TestNewAgentJobDeliverableBudget(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "")
+
+	plain := app.newAgentJob(scoutAgentThread{ID: "t1", Mode: "workflow", Query: "x",
+		Artifact: meetingMemoryEntry{ID: "a1", Metadata: map[string]string{}}})
+	if plain.MaxTokens != 0 || plain.Effort != "" {
+		t.Fatalf("plain job carried a budget override: effort=%q max=%d", plain.Effort, plain.MaxTokens)
+	}
+
+	deliverable := app.newAgentJob(scoutAgentThread{ID: "t2", Mode: "design", Query: "write the one-pager",
+		Artifact: meetingMemoryEntry{ID: "a2", Metadata: map[string]string{"goalDeliverable": "true"}}})
+	if deliverable.MaxTokens != 8192 {
+		t.Fatalf("deliverable maxTokens=%d, want default 8192", deliverable.MaxTokens)
+	}
+	if deliverable.Effort != "medium" {
+		t.Fatalf("deliverable effort=%q, want default medium", deliverable.Effort)
+	}
+
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "12000")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "high")
+	overridden := app.newAgentJob(scoutAgentThread{ID: "t3", Mode: "design", Query: "y",
+		Artifact: meetingMemoryEntry{ID: "a3", Metadata: map[string]string{"goalDeliverable": "true"}}})
+	if overridden.MaxTokens != 12000 || overridden.Effort != "high" {
+		t.Fatalf("env override not honored: max=%d effort=%q", overridden.MaxTokens, overridden.Effort)
+	}
+}
+
 // scriptedRunner is a fake AgentRunner that replays a scripted progress channel
 // with no network — used to prove the progress→artifact-metadata fold.
 type scriptedRunner struct {

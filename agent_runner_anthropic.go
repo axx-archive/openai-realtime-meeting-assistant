@@ -58,6 +58,30 @@ func orchestratorTimeout() time.Duration {
 	return durationEnv("BONFIRE_ORCHESTRATOR_TIMEOUT", 5*time.Minute, 30*time.Second)
 }
 
+// deliverableMaxTokens is the larger output ceiling for the terminal,
+// contract-bearing deliverable subtask of a /goal. A full deliverable (every
+// contract section + honest receipts) needs materially more headroom than a
+// planning turn, whose default stays orchestratorMaxTokens(). Env-overridable;
+// only the deliverable subtask reads it, so planning/non-goal turns are
+// unchanged. A too-small ceiling is exactly what truncated the One-Pager and
+// burned the wasted revision passes.
+func deliverableMaxTokens() int {
+	return positiveIntEnv("BONFIRE_DELIVERABLE_MAX_TOKENS", 8192)
+}
+
+// deliverableEffort is the thinking depth for the deliverable subtask. Default
+// medium — one rung above the low planning default — so the writer has room to
+// hit the output contract without cutting off. Any of low|medium|high|xhigh|max
+// is accepted; anything else falls back to medium.
+func deliverableEffort() string {
+	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"))); effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return effort
+	default:
+		return "medium"
+	}
+}
+
 // --- Anthropic Messages API wire types ---------------------------------------
 
 type anthropicTool struct {
@@ -213,6 +237,20 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		if apiKey == "" {
 			out <- terminalErrorProgress(r.evidence(0), fmt.Errorf("ANTHROPIC_API_KEY is not configured"))
 			return
+		}
+
+		// Per-job budget: a /goal deliverable subtask carries a heavier effort +
+		// token ceiling (stamped from metadata in newAgentJob) so its
+		// contract-bearing artifact does not truncate under the planning default.
+		// The runner is built per job (selectAgentRunner), so mutating these
+		// fields is job-local; absent overrides keep the env defaults, leaving
+		// planning and non-goal threads byte-unchanged and the evidence footer
+		// honest about the effort actually used.
+		if job.MaxTokens > 0 {
+			r.maxTokens = job.MaxTokens
+		}
+		if strings.TrimSpace(job.Effort) != "" {
+			r.effort = job.Effort
 		}
 
 		system := r.systemPrompt(job)

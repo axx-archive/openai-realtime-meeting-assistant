@@ -24,6 +24,14 @@ type AgentJob struct {
 	Origin      map[string]string // originKind/originId/originMeetingId (delivery)
 	RequestedBy string            // signed-in email; provenance + authority checks
 
+	// Effort / MaxTokens override the runner's env defaults for THIS job. The
+	// /goal engine stamps a heavier budget on the deliverable subtask (via the
+	// goalDeliverable metadata flag) so the contract-bearing artifact does not
+	// truncate. Zero/empty means "use the runner default", so every other job is
+	// unchanged.
+	Effort    string
+	MaxTokens int
+
 	thread scoutAgentThread // full launch record for the wrapper providers
 }
 
@@ -91,7 +99,7 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 	if authority == "" {
 		authority = codexJobAuthorityForThread(thread)
 	}
-	return AgentJob{
+	job := AgentJob{
 		JobID:       thread.ID,
 		ArtifactID:  thread.Artifact.ID,
 		ThreadID:    thread.ID,
@@ -103,6 +111,13 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 		RequestedBy: firstNonEmptyString(strings.TrimSpace(meta["requestedBy"]), strings.TrimSpace(meta["createdBy"])),
 		thread:      thread,
 	}
+	// A /goal deliverable subtask asks for a heavier budget so its
+	// contract-bearing artifact does not truncate under the planning default.
+	if strings.EqualFold(strings.TrimSpace(meta["goalDeliverable"]), "true") {
+		job.Effort = deliverableEffort()
+		job.MaxTokens = deliverableMaxTokens()
+	}
+	return job
 }
 
 func agentJobOrigin(meta map[string]string) map[string]string {

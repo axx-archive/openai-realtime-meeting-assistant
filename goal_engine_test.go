@@ -700,6 +700,277 @@ func TestGoalEngineCommitPushIsIdempotentAcrossRestart(t *testing.T) {
 	}
 }
 
+// installAwaitableChildRunner is installFakeChildRunner with a caller-supplied
+// child body plus a WaitGroup the test can await. The child fold is genuinely
+// async (it must be — the driver holds the parent lock while dispatching, so a
+// synchronous fold would deadlock), and the goal's terminal finish() runs
+// notify + broadcast on that fold goroutine AFTER the stage is persisted. A test
+// that asserts on those late side effects must wait for the goroutine to return,
+// or it both reads too early and leaks the goroutine into the next test (where
+// broadcastAssistantEvent races the shared kanbanApp). Wait() on the returned
+// group after the goal reaches terminal guarantees every fold — including the
+// terminal one — has fully completed.
+func installAwaitableChildRunner(t *testing.T, body string) *sync.WaitGroup {
+	t.Helper()
+	var folds sync.WaitGroup
+	original := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = original })
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
+		if parent == "" {
+			return
+		}
+		// Add on the dispatching goroutine (before the spawn) so every child is
+		// counted before Wait() is ever called. Re-dispatched revisions Add while
+		// an earlier fold goroutine is still running, so the counter never returns
+		// to zero mid-run.
+		folds.Add(1)
+		go func() {
+			defer folds.Done()
+			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", body, "tester", map[string]string{
+				"threadStatus": "complete",
+				"status":       "complete",
+			})
+			if err != nil {
+				return
+			}
+			app.foldGoalChildCompletion(parent, sub, child, "complete")
+		}()
+	}
+	return &folds
+}
+
+// A goal that terminates needs_attention because the deliverable missed the
+// review bar must NOT orphan the produced draft: it is attached to the package,
+// surfaced as the goal's result, and the honest gap is stamped — no gate bar is
+// lowered (the goal is still needs_attention).
+func TestGoalEngineSalvagesBlockedDeliverableIntoPackage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	pkg, err := app.createVenturePackage("Aurora", "an IP thesis", "aj@shareability.com")
+	if err != nil {
+		t.Fatalf("createVenturePackage: %v", err)
+	}
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[{"id":"st-1","title":"One-pager draft","mode":"design","authority":"workspace_write","dependsOn":[]}]}`,
+		review:    `{"verdict":"fail","score":8,"reasons":"strong draft but the ask section is thin"}`,
+	})
+	longBody := "# Aurora One-Pager\n\n" + strings.Repeat("A substantial, contract-bearing paragraph of the one-pager deliverable. ", 20)
+	folds := installAwaitableChildRunner(t, longBody)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com", PackageID: pkg.ID})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateBlocked)
+	folds.Wait() // the terminal salvage + persist + notify have fully landed
+	childID := plan.Subtasks[0].ArtifactID
+	if childID == "" {
+		t.Fatal("subtask produced no artifact id")
+	}
+	if plan.Report.DeliverableArtifactID != childID {
+		t.Fatalf("deliverable not salvaged: report.DeliverableArtifactID=%q, want %q", plan.Report.DeliverableArtifactID, childID)
+	}
+	if !strings.Contains(plan.Report.Gap, "ask section") {
+		t.Fatalf("gap line not honest about the miss: %q", plan.Report.Gap)
+	}
+
+	artifact := mustArtifact(t, app, thread.Artifact.ID)
+	if artifact.Metadata["goalStatus"] != "needs_attention" {
+		t.Fatalf("goalStatus=%q, want needs_attention (no bar lowered)", artifact.Metadata["goalStatus"])
+	}
+	if artifact.Metadata["deliverableArtifactId"] != childID {
+		t.Fatalf("deliverableArtifactId metadata=%q, want %q", artifact.Metadata["deliverableArtifactId"], childID)
+	}
+	if artifact.Metadata["goalGap"] == "" {
+		t.Fatal("goalGap metadata not stamped")
+	}
+	if !strings.Contains(artifact.Text, "Draft saved") || !strings.Contains(artifact.Text, childID) {
+		t.Fatalf("goal brief missing the saved-draft section: %q", artifact.Text)
+	}
+
+	attached, _ := app.venturePackageByID(pkg.ID)
+	found := false
+	for _, id := range attached.ArtifactIDs {
+		if id == childID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("salvaged draft %q not attached to package: %v", childID, attached.ArtifactIDs)
+	}
+}
+
+// A requeue re-runs ONLY the failed subtask: an already-verified independent
+// sibling keeps its artifact + pass verdict and is never re-dispatched.
+func TestGoalEngineRequeuePreservesVerifiedSibling(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	var mu sync.Mutex
+	betaReviews := 0
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[
+				{"id":"st-1","title":"Alpha","mode":"research","authority":"read_only","dependsOn":[]},
+				{"id":"st-2","title":"Beta","mode":"research","authority":"read_only","dependsOn":[]}
+			]}`
+		case strings.Contains(system, "reviewer"):
+			userText := decodeAnthropicBlock(request.Messages[0].Content[0]).Text
+			if strings.Contains(userText, "Beta") {
+				mu.Lock()
+				betaReviews++
+				n := betaReviews
+				mu.Unlock()
+				if n == 1 {
+					text = `{"verdict":"fail","score":4,"reasons":"needs work"}`
+				} else {
+					text = `{"verdict":"pass","score":9,"reasons":"good now"}`
+				}
+			} else {
+				text = `{"verdict":"pass","score":9,"reasons":"alpha good"}`
+			}
+		case strings.Contains(system, "ship gate"):
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"safe"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+	launched := installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two independent probes", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	alpha, beta := 0, 0
+	for _, c := range *launched {
+		switch c.subtaskID {
+		case "st-1":
+			alpha++
+		case "st-2":
+			beta++
+		}
+	}
+	if alpha != 1 {
+		t.Fatalf("verified sibling Alpha dispatched %d times, want 1 — a requeue must not re-run it", alpha)
+	}
+	if beta != 2 {
+		t.Fatalf("failed subtask Beta dispatched %d times, want 2 (initial + one revision)", beta)
+	}
+	st1 := plan.subtaskByID("st-1")
+	if st1 == nil || st1.Attempts != 1 || st1.Review == nil || st1.Review.Verdict != goalReviewPass {
+		t.Fatalf("verified sibling not preserved: %+v (review %+v)", st1, st1.Review)
+	}
+	st2 := plan.subtaskByID("st-2")
+	if st2 == nil || st2.Attempts != 2 || st2.Revisions != 1 {
+		t.Fatalf("failed subtask state wrong: attempts=%d revisions=%d", st2.Attempts, st2.Revisions)
+	}
+}
+
+// The advisory percent never runs backwards while a subtask revises, and a
+// re-queued subtask surfaces an honest "revising (attempt N of 2)" signal.
+func TestGoalPersistProgressIsMonotonicWithRevisionNote(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	engine := newGoalEngine(app)
+
+	plan := goalPlan{
+		PlanVersion: goalPlanVersion, GoalID: "g1", Objective: "x", State: goalStateReview,
+		Subtasks: []goalSubtask{{ID: "st-1", Title: "A", Mode: "design", Status: subtaskComplete,
+			Review: &goalSubtaskReview{Verdict: goalReviewPass}}},
+		Gate: goalGate{Status: "pending"}, Verification: goalVerification{Verdict: "pending"},
+	}
+	raw, _ := json.Marshal(plan)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "x", "body", "aj@shareability.com", map[string]string{
+		"mode": "goal", "goalPlan": string(raw), "currentStage": goalStateReview,
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	engine.persist(&plan, parent.ID, "")
+	high := mustArtifact(t, app, parent.ID).Metadata["progressPercent"]
+	if high == "" {
+		t.Fatal("no progressPercent stamped")
+	}
+
+	// Simulate a revision: the subtask reverts to running with a revision count
+	// and the state falls back to execute. The raw execute percent is lower.
+	plan.State = goalStateExecute
+	plan.Subtasks[0].Status = subtaskRunning
+	plan.Subtasks[0].Revisions = 1
+	engine.persist(&plan, parent.ID, "")
+	art := mustArtifact(t, app, parent.ID)
+	if art.Metadata["progressPercent"] != high {
+		t.Fatalf("progress ran backwards on revision: %q -> %q (want monotonic)", high, art.Metadata["progressPercent"])
+	}
+	if art.Metadata["goalRevisionNote"] != "revising (attempt 1 of 2)" {
+		t.Fatalf("revision note=%q, want 'revising (attempt 1 of 2)'", art.Metadata["goalRevisionNote"])
+	}
+}
+
+// A whole goal fires exactly ONE creator notification (on the terminal state),
+// not one per subtask/revision.
+func TestGoalEngineNotifiesCreatorOnceOnTerminal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[
+			{"id":"st-1","title":"A","mode":"research","authority":"read_only","dependsOn":[]},
+			{"id":"st-2","title":"B","mode":"research","authority":"read_only","dependsOn":[]}
+		]}`,
+	})
+	folds := installAwaitableChildRunner(t, "subtask output")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two probes", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	folds.Wait() // the terminal finish() (notify + broadcast) has fully landed
+
+	// Exactly one notification references the goal artifact — the terminal one
+	// from finish() — even though two subtasks ran to completion underneath.
+	app.mu.Lock()
+	goalNotes := 0
+	for _, record := range app.notifications {
+		if record.ArtifactID == thread.Artifact.ID {
+			goalNotes++
+		}
+	}
+	app.mu.Unlock()
+	if goalNotes != 1 {
+		t.Fatalf("goal fired %d notifications, want exactly 1 (terminal only)", goalNotes)
+	}
+}
+
 func mustGoalPlan(t *testing.T, app *kanbanBoardApp, id string) goalPlan {
 	t.Helper()
 	plan, ok := decodeGoalPlan(mustArtifact(t, app, id).Metadata["goalPlan"])
