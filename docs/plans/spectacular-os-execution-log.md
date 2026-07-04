@@ -257,43 +257,29 @@ Risks carried forward: Wave 11 renders GET /assistant/tools directly (pre-ordere
 
 ## Wave 11
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Palette (button + `/`; grid; search; keyboard; empty-state handoff)
-- [ ] Input modes (inline morph + conversational prefill) → runGoalPipeline
-- [ ] Running-state stage-rail card + show-working + controls
-- [ ] Terminal states incl. gate outcome + ASSUMED count on the complete card
-- [ ] Return-to-origin card (one component, three contexts)
-- [ ] Mobile bottom sheet + compressed rail
-- [ ] Marker tests + reduced-motion
+Status: `completed` (commit b703fc5, reviewed PASS after 4 fixes)
+Files: index.html ~+840 (palette/goalcard/returncard, z-index 1340), wave11_palette_test.go (8 tests), goal_engine.go (originSurface stamp), office_events.go (event prefers originSurface).
+Review fixes: originSurface was never persisted (goal_engine now stamps it; events carry it; 2 end-to-end tests); focus trap rebuilt as one live DOM-level handler; mobile keyboard auto-open guarded; + Tools hit target extended to 44px via pseudo-element.
+Deviations (accepted): no pause/cancel until a backend endpoint exists (⋯ = open-artifact + hide, honestly labeled); conversational tiles don't stamp toolTemplate — ticket #25 (real cross-wave change: chat-threads pipeline has no toolTemplate concept).
 
 ---
 
 ## Wave 12
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] start/end_private_grill tools + dispatch (returns instructions; no server session mutation)
-- [ ] Client session.update swap + revert + 15-min timer + restart rule
-- [ ] 3-act ritual UI (pitch capture / grill / scorecard reveal)
-- [ ] Scorecard filing + package attach + readiness dial trend
-- [ ] Tests + client-swap frontend marker
+Status: `completed` (commit 1bc4d1e, reviewed PASS after 3 fixes + 2 nits)
+Files: grill.go +229, kanban.go +69, index.html +668 (.grillstage__*), wave12_private_grill_test.go (329), realtime_config_test.go +11.
+Review fixes: safety-timer revert was a no-op → forcePrivateGrillEnd POSTs the end tool directly (model-independent hard revert); grounding-content injection defense (sanitizeGrillGroundingText + DATA framing, attack-tested with a planted '# Tools' in a real artifact); provisional-grade honesty caption; z-index 1370; Act-II question wiring.
+Risks carried forward: verify live that session.update lands on gpt-realtime-2 (Wave 14/OPS-3); [close] button is nudge-only (15-min cap bounds worst case) — cheap hard-revert candidate for Wave 14; binder trend comes from attached-artifact sequence (readinessDelta only stamps same-thread re-grills).
 
 ---
 
 ## Wave 13
 
-Status: `pending`
-
-### Scope Checklist
-- [ ] Insertable-streams pipeline + canvas fallback + preview-only honest fallback
-- [ ] 4 looks + none (teardown); off by default; iOS opt-in
-- [ ] Thermal governor (shared with audio)
-- [ ] Settings picker + live preview + v8 persistence
-- [ ] video-look-smoke.mjs (far-end assertion)
-- [ ] Never-black-tile exception guard
+Status: `completed` (commits 18b6db3 + UI in b703fc5, reviewed PASS after 2 rounds / 4 issues)
+Files: public/video-looks/look.frag (157) + video-look-pipeline.js (603), scripts/video-look-smoke.mjs (172), frontend_video_looks_test.go (247), index.html ~650 (settings picker + capture seam).
+Review fixes: false-Active status on construction failure; WebGL context-loss silent-blank-frames (webglcontextlost listener); track-end {done:true} failover (the realistic unplug case — reviewer tested the real API); one-shot settled guard against teardown races.
+Smoke: 4/4 far-end look signatures on the loopback-received track, independently reproduced by review.
+Risks carried forward (device matrix): governor under real thermal load (hot Android); Safari canvas tier + iOS default-off on real devices; off-room preview may prompt for camera once.
 
 ---
 

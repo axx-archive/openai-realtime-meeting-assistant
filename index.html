@@ -3478,6 +3478,9 @@
         letter-spacing: var(--track-label-lg);
       }
       .multi-device-chip[hidden] { display: none; }
+      /* the device-switch offer sits just below the handoff chip so both can
+         coexist without overlap (rtc §5.2). */
+      .device-offer-chip { top: calc(60px + env(safe-area-inset-top)); }
       .multi-device-chip__label {
         min-width: 0;
         overflow: hidden;
@@ -16277,6 +16280,115 @@
       @keyframes goalcard-settle { from { transform: translateY(2px); } to { transform: translateY(0); } }
       @keyframes goalcard-spark { from { opacity: 1; transform: translate(0, 0) scale(1); } to { opacity: 0; transform: translate(var(--spark-dx, 0), var(--spark-dy, -14px)) scale(0.4); } }
 
+      /* ---------- Wave 14 delight pass (ux §4 items 6/12/14/15) ----------
+         Item 9 (theme-icon cross-fade) already lives at the .tool-rail__theme svg
+         rules; items 1-5/13 shipped earlier. Everything below is pinned in the
+         reduced-motion block: the STATE stays, the MOTION drops. */
+
+      /* #14 copy-link confirm — the label swaps to "copied ✓"; the link glyph
+         cross-fades down as the check reads in the text. No bounce. */
+      .topbar__copy-link svg,
+      .deal-room__copy svg {
+        transition:
+          opacity var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease),
+          filter var(--dur-fast) var(--ease);
+      }
+      .topbar__copy-link.is-copied svg,
+      .deal-room__copy.is-copied svg {
+        opacity: 0;
+        transform: scale(0.55);
+        filter: blur(3px);
+      }
+
+      /* #15 empty-state serif voice — the delight is the VOICE, not motion:
+         a quiet serif-italic line fades in where a list is empty. */
+      .t-empty-poetry {
+        font-family: var(--font-serif, Georgia, serif);
+        font-style: italic;
+        color: var(--text-3);
+        animation: bf-fade var(--dur-med) var(--ease) both;
+      }
+
+      /* #12 slop quarantine slide — an acted tray entry does a subtle exit
+         (translateY(8px) + fade) so an invisible policy becomes visible without
+         alarm; the discarded counts stay tabular so they tick, never jitter. */
+      .tray__entry.is-leaving {
+        animation: tray-slide-out 220ms var(--ease) forwards;
+        pointer-events: none;
+      }
+      @keyframes tray-slide-out { to { transform: translateY(8px); opacity: 0; } }
+      .brief__section-head b,
+      .tray__countdown { font-variant-numeric: tabular-nums; }
+
+      /* #6 package stage-advance — a forward move fills the stage pill L→R once
+         and sends a single soft ember sweep across the card. Ember = a machine
+         milestone; this fires rarely, so it earns the flourish (kept a whisper). */
+      .package-row.is-advancing { position: relative; }
+      .package-row.is-advancing::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border-radius: inherit;
+        background: linear-gradient(90deg, transparent, var(--agent-soft), transparent);
+        transform: translateX(-100%);
+        animation: pkg-card-sweep 640ms var(--ease-out) 1;
+      }
+      @keyframes pkg-card-sweep { to { transform: translateX(100%); } }
+      .package-stage.is-advancing {
+        position: relative;
+        overflow: hidden;
+      }
+      .package-stage.is-advancing::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: var(--agent-soft);
+        transform: scaleX(0);
+        transform-origin: left;
+        animation: pkg-stage-fill 300ms var(--ease) forwards;
+      }
+      @keyframes pkg-stage-fill { to { transform: scaleX(1); } }
+
+      /* Wake-word arming setting (Wave 14) — a quiet, honest opt-in row. */
+      .wake-word-setting {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 10px 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md, 10px);
+        cursor: pointer;
+      }
+      .wake-word-setting input { margin-top: 3px; flex: none; }
+      .wake-word-setting__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .wake-word-setting__text strong { font: var(--type-body-medium); color: var(--text-1); }
+      .wake-word-setting__text span { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+
+      /* Deal Room admin/requester surface (Wave 14 capstone) — the list of
+         share requests + their live state. Rows reuse the tray/approval register
+         so a pending Deal Room reads exactly like any other admin approval. */
+      .deal-room__intro { font: 12.5px var(--font-sans); color: var(--text-2); margin: 0 0 12px; }
+      .deal-room-list { display: flex; flex-direction: column; gap: 8px; }
+      .deal-room-row { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--line-1); background: var(--surface-2); }
+      .deal-room-row.is-pending { border-left: 3px solid var(--warn); }
+      .deal-room-row.is-active { border-left: 3px solid var(--agent); }
+      .deal-room-row__name { font: 500 13.5px var(--font-sans); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+      .deal-room-row__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .deal-room-row__state { font: 600 12px var(--font-sans); text-transform: uppercase; letter-spacing: 0.04em; }
+      .deal-room-row.is-pending .deal-room-row__state { color: var(--warn); }
+      .deal-room-row.is-active .deal-room-row__state { color: var(--agent); }
+      .deal-room-row__link { font: 12.5px var(--font-mono, var(--font-sans)); color: var(--text-2); overflow-wrap: anywhere; }
+      .deal-room-row__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .deal-room__copy { display: inline-flex; align-items: center; gap: 6px; }
+      /* phone: the row's .btn actions are 40px base — 4px under --hit-min; bump
+         them to the full touch target and let them fill the row (the approval/
+         tray pattern at max-width:640px). */
+      @media (max-width: 640px) {
+        .deal-room-row__actions .btn { flex: 1; min-height: var(--hit-min); }
+      }
+
       /* ---------- Reduced motion ----------
          The kit zeroes the motion tokens (--dur-fast/--dur-med/--dur-slow → 0ms,
          declared beside the token table); everything declared in token time
@@ -16327,6 +16439,14 @@
         .pip-meeting__dot { animation: none; }
         /* the loading status dot keeps its neutral colour (state); the pulse drops */
         .noise-mode-status__dot[data-state="loading"] { animation: none; }
+        /* Wave 14 delight: keep the state change, drop the movement. The copy
+           label still swaps to "copied ✓" (JS), the tray entry still leaves,
+           the stage still fills — none of it animates. */
+        .tray__entry.is-leaving { animation: none; opacity: 0; }
+        .package-row.is-advancing::after,
+        .package-stage.is-advancing::after { animation: none; }
+        .package-stage.is-advancing::after { transform: scaleX(1); }
+        .t-empty-poetry { animation: none; }
         .voice-island.is-visible { animation: none; }
         .bf-wave-bar { animation: none; }
         html, body { transition: none; }
@@ -17742,6 +17862,7 @@
             <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true">profile</button>
             <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false">account</button>
             <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false">audio &amp; video</button>
+            <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false">deal rooms</button>
             <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false">appearance</button>
           </nav>
           <div class="settings-body">
@@ -17857,6 +17978,22 @@
               </section>
               <p class="av-saved" id="audioSavedHint" hidden>✓ saved for this device</p>
 
+              <!-- Wake word (Spectacular OS, Wave 14). The PRESENCE cue (the brand
+                   mark breathing when a room transcript names Scout) is always on
+                   and harmless. ARMING — letting "Scout" during a live room voice
+                   session prompt a reply addressed to the speaker — is experimental
+                   and ships OFF until it's verified on the device matrix. Honest,
+                   per-device, default-off. -->
+              <div class="voice-profile__label">wake word</div>
+              <label class="wake-word-setting">
+                <input type="checkbox" id="wakeWordArming">
+                <span class="wake-word-setting__text">
+                  <strong>let “Scout” arm a reply</strong>
+                  <span>while a live voice session is running, saying “Scout” asks her to answer the speaker. Experimental — off until you’ve confirmed voice works on this device.</span>
+                </span>
+              </label>
+              <p class="av-saved" id="wakeWordSavedHint" hidden>✓ saved for this device</p>
+
               <!-- Video looks (Spectacular OS, Wave 13). Live self-preview through the
                    ACTUAL pipeline, chips = looks, sliders = the preset exposed. Off by
                    default everywhere; the far-end-sees-it vs preview-only distinction
@@ -17892,6 +18029,11 @@
                 <p class="av-mic-honesty" id="videoLookBatteryNote" hidden>looks may reduce battery on this device — turn off any time.</p>
                 <p class="av-saved" id="videoLookSaved" hidden>✓ saved for this device</p>
               </div>
+            </section>
+            <section data-settings-section="dealrooms" hidden aria-label="Deal Rooms">
+              <div class="voice-profile__label">deal rooms</div>
+              <p class="deal-room__intro">Read-only shareable exports of an assembled package binder. Request one from a package’s binder; a studio admin approves it into a link and can revoke it here.</p>
+              <div id="dealRoomList" class="deal-room-list" aria-live="polite"></div>
             </section>
             <section data-settings-section="appearance" hidden aria-label="Appearance">
               <fieldset class="noise-mode-group">
@@ -18887,7 +19029,9 @@
         nudgePrivateGrill("That's my pitch — go ahead and grill me.")
       })
       document.getElementById('grillStageClose')?.addEventListener('click', () => {
-        nudgePrivateGrill('End the grill now and give me my readiness report.')
+        // Hard end: force the server revert so a stuck persona can never outlive
+        // the [close] tap, rather than trusting the model to honor a spoken cue.
+        forcePrivateGrillEnd('closed by user')
       })
       document.getElementById('grillStageSave')?.addEventListener('click', () => hidePrivateGrillStage())
       document.getElementById('grillStageAgain')?.addEventListener('click', () => {
@@ -18961,6 +19105,20 @@
       })
       loginThemeToggleButton.addEventListener('click', () => syncThemeToggles(toggleTheme()))
       syncThemeToggles(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
+      // Wake-word arming toggle (Wave 14) — per-device, default off, honest hint.
+      const wakeWordArmingToggle = document.getElementById('wakeWordArming')
+      const wakeWordSavedHint = document.getElementById('wakeWordSavedHint')
+      if (wakeWordArmingToggle) {
+        wakeWordArmingToggle.checked = wakeWordArmingEnabled()
+        wakeWordArmingToggle.addEventListener('change', () => {
+          try {
+            localStorage.setItem(WAKE_WORD_ARMING_KEY, wakeWordArmingToggle.checked ? '1' : '0')
+          } catch {
+            // storage blocked (private mode) — the session still honors the toggle
+          }
+          if (wakeWordSavedHint) wakeWordSavedHint.hidden = false
+        })
+      }
       recordMeetingButton.addEventListener('click', toggleRoomRecording)
       archiveMeetingButton.addEventListener('click', archiveMeeting)
       newCardButton.addEventListener('click', () => showCardEditor())
@@ -19155,6 +19313,9 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           scheduleAuxiliaryVideoPlaybackRepair('visibility restored', 120)
+          restoreAudioAfterVisibility().catch(error => {
+            console.warn('Could not restore audio after visibility change', error)
+          })
         }
       })
       window.addEventListener('pointerdown', unlockRoomAudioPlayback, { passive: true })
@@ -19168,9 +19329,15 @@
         }
       })
       navigator.mediaDevices?.addEventListener?.('devicechange', () => {
-        refreshAudioInputDevices().catch(error => {
-          console.warn('Could not refresh audio devices', error)
-        })
+        refreshAudioInputDevices()
+          .catch(error => {
+            console.warn('Could not refresh audio devices', error)
+          })
+          .finally(() => {
+            reconcileAudioDeviceChange().catch(error => {
+              console.warn('Could not reconcile audio device change', error)
+            })
+          })
       })
       window.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
@@ -19734,6 +19901,9 @@
         if (name === 'devices') {
           renderVideoLookSettings()
           startVideoLookPreview()
+        }
+        if (name === 'dealrooms') {
+          loadDealRooms()
         }
       }
 
@@ -20968,6 +21138,105 @@
             // surface the chip again.
             multiDeviceHandoffDismissed = false
           }
+        }
+      }
+
+      // Device-switch offer chip (rtc §5.2). When a MORE-preferred mic appears
+      // mid-call (you plugged your good mic back in), we never auto-yank the
+      // live track — we surface this calm, dismissible "switch to <name>?" offer
+      // and let the human decide. Reuses the handoff chip's calm visual register.
+      let deviceOfferChip = null
+      let deviceOfferChipTargetId = ''
+      function ensureDeviceOfferChip() {
+        if (deviceOfferChip) {
+          return deviceOfferChip
+        }
+        const chip = document.createElement('div')
+        chip.className = 'multi-device-chip device-offer-chip'
+        chip.setAttribute('role', 'status')
+        chip.hidden = true
+        const label = document.createElement('span')
+        label.className = 'multi-device-chip__label'
+        const action = document.createElement('button')
+        action.type = 'button'
+        action.className = 'multi-device-chip__action'
+        action.textContent = 'switch'
+        action.addEventListener('click', async () => {
+          const targetId = deviceOfferChipTargetId
+          hideDeviceOfferChip()
+          if (!targetId) return
+          if (Array.from(micSelect.options || []).some(option => option.value === targetId)) {
+            micSelect.value = targetId
+            await switchMicrophone()
+          }
+        })
+        const dismiss = document.createElement('button')
+        dismiss.type = 'button'
+        dismiss.className = 'multi-device-chip__dismiss'
+        dismiss.setAttribute('aria-label', 'dismiss')
+        dismiss.textContent = '×'
+        dismiss.addEventListener('click', () => hideDeviceOfferChip())
+        chip.append(label, action, dismiss)
+        document.body.appendChild(chip)
+        deviceOfferChip = chip
+        return chip
+      }
+      function hideDeviceOfferChip() {
+        if (deviceOfferChip) {
+          deviceOfferChip.hidden = true
+        }
+        deviceOfferChipTargetId = ''
+      }
+      function offerDeviceSwitch(device) {
+        if (!device?.deviceId) return
+        const name = normalizedAudioInputLabel(device.label) || 'your usual mic'
+        if (deviceOfferChipTargetId === device.deviceId && deviceOfferChip && !deviceOfferChip.hidden) {
+          return
+        }
+        deviceOfferChipTargetId = device.deviceId
+        const chip = ensureDeviceOfferChip()
+        chip.querySelector('.multi-device-chip__label').textContent = `switch to ${name}?`
+        chip.hidden = false
+      }
+      function matchPreferredDevice(preferred, inputs) {
+        if (!preferred) return null
+        return inputs.find(device =>
+          (preferred.deviceId && device.deviceId === preferred.deviceId)
+          || (preferred.label && normalizedAudioInputLabel(device.label) === preferred.label)
+        ) || null
+      }
+
+      // devicechange does more than re-list (rtc §5.2): if the mic we are ACTUALLY
+      // using just vanished, run the same recovery as an ended track; if a more-
+      // preferred mic just appeared, offer — never yank — the switch.
+      async function reconcileAudioDeviceChange() {
+        if (!localStream || !navigator.mediaDevices?.enumerateDevices) {
+          hideDeviceOfferChip()
+          return
+        }
+        let devices = []
+        try {
+          devices = await navigator.mediaDevices.enumerateDevices()
+        } catch {
+          return
+        }
+        const inputs = devices.filter(device =>
+          device.kind === 'audioinput'
+          && device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications')
+        const activeId = localAudioDeviceId()
+        if (activeId && !inputs.some(device => device.deviceId === activeId)) {
+          hideDeviceOfferChip()
+          if (!isReplacingLocalAudio) {
+            await recoverLocalMicrophone()
+          }
+          return
+        }
+        const preferred = normalizePreferredAudioInput(audioSettings?.preferredInput)
+        const match = preferred ? matchPreferredDevice(preferred, inputs) : null
+        if (match && activeId && match.deviceId !== activeId) {
+          offerDeviceSwitch(match)
+        } else {
+          hideDeviceOfferChip()
         }
       }
 
@@ -23061,7 +23330,10 @@
           console.warn('Private grill force-end failed', error)
         }
         hidePrivateGrillStage()
-        nudgePrivateGrill('The grill timed out — give me my readiness report.')
+        const closingLine = reason === 'time limit reached'
+          ? 'The grill timed out — give me my readiness report.'
+          : 'Ending the grill now — give me my readiness report.'
+        nudgePrivateGrill(closingLine)
       }
 
       function stopPrivateGrillTimers() {
@@ -25198,11 +25470,34 @@
         }
       }
 
+      // rtc §5.1: a server media-drop earns ONE calm auto-attempt before we eject
+      // to a manual Rejoin; this flag makes that attempt single-shot per drop and
+      // resets on any clean (re)connection below.
+      let mediaDisconnectRecoveryTried = false
+
       function resetIceRestartRecovery() {
         clearIceRestartRetryTimer()
         iceRestartAttempts = 0
         iceRestartRecoveryStartedAt = 0
         lastIceRestartRequestAt = 0
+        mediaDisconnectRecoveryTried = false
+      }
+
+      // Server signalled our media path dropped (main.go). Rather than eject the
+      // instant it happens, show one calm "reconnecting — hold on" and auto-attempt
+      // recovery once; the bounded ICE-restart ladder escalates to a manual Rejoin
+      // only when genuinely exhausted (rtc §5.1). Falls back to today's clean leave
+      // if the peer/socket is already gone or we've already tried.
+      function handleMediaDisconnected(detail) {
+        if (!pc || !ws || ws.readyState !== WebSocket.OPEN || mediaDisconnectRecoveryTried) {
+          setLog(detail)
+          leaveRoom()
+          return
+        }
+        mediaDisconnectRecoveryTried = true
+        setConnectionState('connecting', 'reconnecting — hold on')
+        setLog('reconnecting — hold on')
+        requestIceRestart('server media disconnect')
       }
 
       function scheduleConnectionRecovery(sessionPeer) {
@@ -25261,7 +25556,12 @@
           event: 'restart_ice',
           data: JSON.stringify({ reason })
         }))
-        setConnectionState('connecting', `reconnecting media ${attempt}/${maxIceRestartAttempts}`)
+        // rtc §5.1: a single blip self-heals in <1s, so the "N/5" counter looks
+        // alarming on the first attempt — hold plain "reconnecting…" until ≥2.
+        const reconnectLabel = attempt >= 2
+          ? `reconnecting media ${attempt}/${maxIceRestartAttempts}`
+          : 'reconnecting…'
+        setConnectionState('connecting', reconnectLabel)
         setLog('reconnecting media…')
         logRoomRecovery('ice_restart_requested', { attempt, reason })
         if (iceRestartAttempts < maxIceRestartAttempts && pc && ['disconnected', 'failed'].includes(pc.connectionState)) {
@@ -27374,6 +27674,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           await replaceLocalAudioTrack(nextTrack)
           replaced = true
+          // A deliberate device pick is a fresh start for the ended-track loop.
+          resetLocalAudioRecovery()
           savePreferredAudioInput(nextTrack, selectedDeviceId)
           await refreshAudioInputDevices(nextTrack.getSettings?.().deviceId || selectedDeviceId)
           setLog(`using ${nextTrack.label || 'selected microphone'}`)
@@ -27443,11 +27745,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateHearthParticipants()
       }
 
+      // rtc §5: a mic-ended auto-rebuild must be BOUNDED, like every other
+      // recovery path (ICE restart caps at 5; media_disconnect is single-shot).
+      // A persistently flapping device — getUserMedia keeps succeeding but the
+      // track re-ends instantly — would otherwise loop rebuild forever. Cap the
+      // attempts with backoff, then stop and hand it to the human; reset the
+      // counter once a rebuilt track survives (localAudioRecoveryStableMs) or on
+      // any manual device change.
+      const maxLocalAudioRecoveryAttempts = 3
+      const localAudioRecoveryStableMs = 5000
+      let localAudioRecoveryAttempts = 0
+      let localAudioRecoveryStableTimer = null
+
+      function resetLocalAudioRecovery() {
+        localAudioRecoveryAttempts = 0
+        if (localAudioRecoveryStableTimer) {
+          window.clearTimeout(localAudioRecoveryStableTimer)
+          localAudioRecoveryStableTimer = null
+        }
+      }
+
       async function handleLocalAudioEnded() {
         if (isReplacingLocalAudio || !localStream || !ws || ws.readyState !== WebSocket.OPEN) {
           return
         }
+        if (localAudioRecoveryStableTimer) {
+          window.clearTimeout(localAudioRecoveryStableTimer)
+          localAudioRecoveryStableTimer = null
+        }
+        if (localAudioRecoveryAttempts >= maxLocalAudioRecoveryAttempts) {
+          // Give up the auto-rebuild loop rather than churn getUserMedia forever.
+          setLog('microphone unavailable — pick another in settings')
+          showToast({ text: 'microphone unavailable — pick another in settings', kind: 'note' })
+          return
+        }
+        localAudioRecoveryAttempts += 1
+        const backoffMs = Math.min(2000, 250 * Math.pow(2, localAudioRecoveryAttempts - 1))
+        await new Promise(resolve => window.setTimeout(resolve, backoffMs))
+        // Re-check state after the backoff — the room may have been left, or a
+        // manual switch may already have healed it.
+        if (isReplacingLocalAudio || !localStream || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
         await recoverLocalMicrophone()
+        // If the rebuild produced a live track, arm a stability window: surviving
+        // it clears the attempt counter so a later, unrelated unplug starts fresh.
+        const track = localAudioTrack()
+        if (track && track.readyState === 'live') {
+          localAudioRecoveryStableTimer = window.setTimeout(() => {
+            resetLocalAudioRecovery()
+          }, localAudioRecoveryStableMs)
+        }
       }
 
       async function recoverLocalMicrophone() {
@@ -27471,6 +27819,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           console.warn('Could not recover microphone', error)
           setLog('microphone disconnected; choose another mic')
           await refreshAudioInputDevices('')
+        }
+      }
+
+      // Mobile backgrounding / screen-lock (rtc §5.3): iOS Safari suspends the
+      // AudioContext on lock and may end the capture track. On return, resume the
+      // context and — if the outbound mic track died — run the same recovery as
+      // an unplug, so the room never hears dead air and never a frozen track.
+      // Guarded by state checks, so it is a no-op when nothing actually broke.
+      async function restoreAudioAfterVisibility() {
+        if (!localStream || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        if (audioContext && audioContext.state === 'suspended') {
+          await audioContext.resume().catch(() => {})
+        }
+        const track = localAudioTrack()
+        if ((!track || track.readyState === 'ended') && !isReplacingLocalAudio) {
+          setLog('resuming audio…')
+          await recoverLocalMicrophone()
         }
       }
 
@@ -28003,8 +28370,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             handleSessionReplaced(String(message.data || 'this browser session was replaced.'))
             break
           case 'media_disconnected':
-            setLog(String(message.data || 'media connection ended.'))
-            leaveRoom()
+            handleMediaDisconnected(String(message.data || 'media connection ended.'))
             break
           case 'server_shutdown':
             handleServerShutdown(message.data)
@@ -28144,6 +28510,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'quarantine_change':
             // Wave 7 stub — no producer yet; routed for the extension point.
+            break
+          case 'deal_room':
+            // a Deal Room request/approve/revoke landed for this viewer (admin
+            // gets requests, requester gets the live/declined signal). Refresh
+            // the list only when its settings panel is actually open — otherwise
+            // the next open re-fetches fresh.
+            if (settingsRegion?.classList.contains('visible') && settingsActiveSection === 'dealrooms') {
+              loadDealRooms()
+            }
             break
         }
 
@@ -28433,14 +28808,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const actions = bfEl('div', 'tray__actions')
         const restore = bfEl('button', 'tray__btn pressable', 'Restore for everyone')
         restore.type = 'button'
-        restore.addEventListener('click', () => oneQuarantine(entry.id, 'restore'))
+        restore.addEventListener('click', () => trayEntryExit(wrap, () => oneQuarantine(entry.id, 'restore')))
         actions.appendChild(restore)
         if (canDelete) {
           const del = bfEl('button', 'tray__btn tray__btn--delete pressable', 'Delete now')
           del.type = 'button'
           del.addEventListener('click', () => {
             if (window.confirm('Permanently delete this from memory now?')) {
-              oneQuarantine(entry.id, 'delete')
+              trayEntryExit(wrap, () => oneQuarantine(entry.id, 'delete'))
             }
           })
           actions.appendChild(del)
@@ -28450,6 +28825,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         wrap.appendChild(actions)
         return wrap
+      }
+
+      // #12 subtle-exit: let an acted tray entry slide out before the tray
+      // reloads, so a restore/delete reads as a deliberate departure rather than
+      // a flicker. Reduced-motion callers skip straight to the action (the CSS
+      // still hides the row; no wait needed).
+      function trayEntryExit(wrap, done) {
+        if (!wrap || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+          done()
+          return
+        }
+        wrap.classList.add('is-leaving')
+        window.setTimeout(done, 220)
       }
 
       async function oneQuarantine(id, action) {
@@ -28682,6 +29070,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (event?.kind === 'wake') {
           // Wake-word presence cue: visual pulse only, never in the feed.
           pulseScoutWake()
+          // Arming is the gated behavior (deliverable 1): only when the per-device
+          // toggle is on AND a room voice session is live AND Scout is idle does a
+          // wake actually address the speaker. armScoutForWake() is a hard no-op
+          // otherwise, so presence stays safe on its own.
+          armScoutForWake()
           return
         }
         const text = String(event?.text || event?.message || '').trim()
@@ -33450,7 +33843,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const url = window.location.href
         try {
           await navigator.clipboard.writeText(url)
-          showToast({ text: 'room link copied', kind: 'note' })
+          flashCopyConfirm(copyRoomLinkButton)
           setLog('room link copied')
         } catch {
           const input = document.createElement('input')
@@ -33462,9 +33855,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           input.select()
           document.execCommand('copy')
           input.remove()
-          showToast({ text: 'room link copied', kind: 'note' })
+          flashCopyConfirm(copyRoomLinkButton)
           setLog('room link copied')
         }
+      }
+
+      // Copy-link confirm (delight #14): swap a button's trailing text label to
+      // "copied ✓" for 1.4s and cross-fade its icon out (CSS .is-copied). No
+      // bounce. Reusable across copy affordances (room link, Deal Room share).
+      // Stores the original label so rapid repeat clicks never lose it.
+      const copyConfirmTimers = new WeakMap()
+      function flashCopyConfirm(button) {
+        if (!button) return
+        const labelNode = Array.from(button.childNodes).reverse()
+          .find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+        if (labelNode && button.dataset.copyLabel === undefined) {
+          button.dataset.copyLabel = labelNode.textContent
+        }
+        if (labelNode) labelNode.textContent = ' copied ✓'
+        button.classList.add('is-copied')
+        const prev = copyConfirmTimers.get(button)
+        if (prev) window.clearTimeout(prev)
+        copyConfirmTimers.set(button, window.setTimeout(() => {
+          if (labelNode && button.dataset.copyLabel !== undefined) {
+            labelNode.textContent = button.dataset.copyLabel
+          }
+          button.classList.remove('is-copied')
+        }, 1400))
       }
 
       function updateRoomRecordingControls() {
@@ -35513,7 +35930,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function intelEmptyNode(text) {
         const node = document.createElement('p')
-        node.className = 'intel-empty'
+        // #15 empty-state serif voice: an empty list speaks in Bonfire's own
+        // quiet register rather than a flat "none".
+        node.className = 'intel-empty t-empty-poetry'
         node.textContent = text
         return node
       }
@@ -36191,9 +36610,220 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         advance.disabled = terminal
         advance.addEventListener('click', () => advanceVenturePackage(String(record?.id || '')))
         actions.append(advance)
+        // Deal Room (Wave 14 capstone): once a package is assembled, its binder can
+        // be shared as a read-only external data room — behind the external-write
+        // admin approval, requested here at the share surface.
+        if (terminal) {
+          const share = document.createElement('button')
+          share.type = 'button'
+          share.className = 'btn btn--ghost'
+          share.textContent = 'Share as Deal Room'
+          share.addEventListener('click', () => requestDealRoomShare(String(record?.id || ''), share))
+          actions.append(share)
+        }
         details.append(actions)
         return details
       }
+
+      // Request a read-only Deal Room for an assembled package's binder. It lands
+      // as a PENDING request; the approval admin approves it into a tokenized URL.
+      async function requestDealRoomShare(packageId, button) {
+        if (!packageId) return
+        if (button) button.disabled = true
+        try {
+          const { ok, data } = await postAuthJSON('/assistant/deal-room/request', { packageId })
+          if (ok) {
+            showToast({ text: 'Deal Room requested — waiting on approval', kind: 'done' })
+            loadDealRooms()
+          } else {
+            showToast({ text: (data && data.error) || 'could not request a Deal Room', kind: 'note' })
+          }
+        } catch {
+          showToast({ text: 'could not request a Deal Room', kind: 'note' })
+        } finally {
+          if (button) button.disabled = false
+        }
+      }
+
+      // Deal Room list surface (Wave 14, settings › deal rooms). Consumes GET
+      // /assistant/deal-room/list {rooms[], canApprove}. An admin sees every
+      // room and gets approve/reject/revoke; a requester sees only their own and
+      // the live link once it is minted. The gate is the SERVER's (canApprove +
+      // admin-only resolve/revoke handlers); the client only mirrors it.
+      const dealRoomListEl = document.getElementById('dealRoomList')
+      let dealRoomsCanApprove = false
+
+      async function loadDealRooms() {
+        if (!dealRoomListEl) return
+        try {
+          const response = await fetch('/assistant/deal-room/list', { cache: 'no-store' })
+          if (!response.ok) {
+            renderDealRooms([], false)
+            return
+          }
+          const data = await response.json()
+          dealRoomsCanApprove = Boolean(data && data.canApprove)
+          renderDealRooms(Array.isArray(data && data.rooms) ? data.rooms : [], dealRoomsCanApprove)
+        } catch {
+          renderDealRooms([], dealRoomsCanApprove)
+        }
+      }
+
+      function dealRoomStateLabel(status) {
+        switch (status) {
+          case 'active': return 'live'
+          case 'pending': return 'waiting on approval'
+          case 'rejected': return 'declined'
+          case 'revoked': return 'revoked'
+          default: return String(status || '')
+        }
+      }
+
+      function renderDealRooms(rooms, canApprove) {
+        if (!dealRoomListEl) return
+        dealRoomListEl.textContent = ''
+        if (!rooms.length) {
+          dealRoomListEl.appendChild(intelEmptyNode('No Deal Rooms yet. Share an assembled package’s binder to start one.'))
+          return
+        }
+        rooms.forEach(room => {
+          const status = String(room?.status || 'pending')
+          const row = bfEl('div', 'deal-room-row')
+          if (status === 'pending') row.classList.add('is-pending')
+          if (status === 'active') row.classList.add('is-active')
+
+          row.appendChild(bfEl('div', 'deal-room-row__name', String(room?.packageName || 'Untitled package')))
+
+          const meta = bfEl('div', 'deal-room-row__meta')
+          meta.appendChild(bfEl('span', 'deal-room-row__state', dealRoomStateLabel(status)))
+          if (room?.requestedBy) meta.appendChild(bfEl('span', null, `by ${room.requestedBy}`))
+          const when = bfTimeAgo(room?.resolvedAt || room?.requestedAt)
+          if (when) meta.appendChild(bfEl('span', null, when))
+          if (status === 'rejected' && room?.reason) meta.appendChild(bfEl('span', null, `reason: ${room.reason}`))
+          row.appendChild(meta)
+
+          if (status === 'active' && room?.url) {
+            const fullURL = window.location.origin + String(room.url)
+            row.appendChild(bfEl('div', 'deal-room-row__link', fullURL))
+          }
+
+          const actions = bfEl('div', 'deal-room-row__actions')
+          if (status === 'active' && room?.url) {
+            const fullURL = window.location.origin + String(room.url)
+            const open = bfEl('a', 'btn btn--ghost', 'Open')
+            open.href = fullURL
+            open.target = '_blank'
+            open.rel = 'noopener'
+            actions.appendChild(open)
+            const copy = bfEl('button', 'btn btn--ghost deal-room__copy')
+            copy.type = 'button'
+            copy.append(dealRoomCopyIcon(), document.createTextNode(' Copy link'))
+            copy.addEventListener('click', async () => {
+              try {
+                await navigator.clipboard.writeText(fullURL)
+                flashCopyConfirm(copy)
+              } catch {
+                showToast({ text: 'could not copy the link', kind: 'note' })
+              }
+            })
+            actions.appendChild(copy)
+          }
+          if (canApprove && status === 'pending') {
+            const approve = bfEl('button', 'approval__btn approval__btn--approve', 'Approve')
+            approve.type = 'button'
+            approve.addEventListener('click', () => resolveDealRoom(String(room?.id || ''), 'approve', '', approve))
+            const reject = bfEl('button', 'approval__btn approval__btn--reject', 'Reject')
+            reject.type = 'button'
+            reject.addEventListener('click', () => beginDealRoomReject(actions, String(room?.id || '')))
+            actions.append(approve, reject)
+          }
+          if (canApprove && status === 'active') {
+            const revoke = bfEl('button', 'tray__btn tray__btn--delete', 'Revoke')
+            revoke.type = 'button'
+            revoke.addEventListener('click', () => revokeDealRoom(String(room?.id || ''), revoke))
+            actions.appendChild(revoke)
+          }
+          if (actions.childNodes.length) row.appendChild(actions)
+          dealRoomListEl.appendChild(row)
+        })
+      }
+
+      function dealRoomCopyIcon() {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        svg.setAttribute('viewBox', '0 0 24 24')
+        svg.setAttribute('width', '14')
+        svg.setAttribute('height', '14')
+        svg.setAttribute('aria-hidden', 'true')
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+        path.setAttribute('fill', 'none')
+        path.setAttribute('stroke', 'currentColor')
+        path.setAttribute('stroke-width', '1.6')
+        path.setAttribute('stroke-linecap', 'round')
+        path.setAttribute('stroke-linejoin', 'round')
+        path.setAttribute('d', 'M9 9h9v11H9zM6 15H4V4h11v2')
+        svg.appendChild(path)
+        return svg
+      }
+
+      // Reject captures its reason inline (the approval-row pattern) rather than a
+      // blocking dialog; the requester sees this one line on their declined bell.
+      function beginDealRoomReject(actions, id) {
+        if (!actions || !id) return
+        actions.replaceChildren()
+        const input = bfEl('input', 'approval__reason')
+        input.type = 'text'
+        input.placeholder = 'reason (the requester sees this)'
+        input.setAttribute('aria-label', 'rejection reason')
+        const send = bfEl('button', 'approval__btn approval__btn--reject', 'Send rejection')
+        send.type = 'button'
+        const fire = () => resolveDealRoom(id, 'reject', input.value.trim(), send)
+        send.addEventListener('click', fire)
+        input.addEventListener('keydown', event => { if (event.key === 'Enter') fire() })
+        actions.append(input, send)
+        input.focus()
+      }
+
+      async function resolveDealRoom(id, action, reason, button) {
+        if (!id) return
+        if (button) button.disabled = true
+        try {
+          const { ok, data } = await postAuthJSON('/assistant/deal-room/resolve', { id, action, reason })
+          if (ok) {
+            showToast({ text: action === 'approve' ? 'Deal Room approved — link is live' : 'Deal Room declined', kind: 'done' })
+          } else {
+            showToast({ text: (data && data.error) || 'could not update the Deal Room', kind: 'note' })
+          }
+        } catch {
+          showToast({ text: 'could not update the Deal Room', kind: 'note' })
+        } finally {
+          if (button) button.disabled = false
+          loadDealRooms()
+        }
+      }
+
+      async function revokeDealRoom(id, button) {
+        if (!id) return
+        if (!window.confirm('Revoke this Deal Room? The link will stop working immediately.')) return
+        if (button) button.disabled = true
+        try {
+          const { ok, data } = await postAuthJSON('/assistant/deal-room/revoke', { id })
+          if (ok) {
+            showToast({ text: 'Deal Room revoked — the link now 404s', kind: 'done' })
+          } else {
+            showToast({ text: (data && data.error) || 'could not revoke the Deal Room', kind: 'note' })
+          }
+        } catch {
+          showToast({ text: 'could not revoke the Deal Room', kind: 'note' })
+        } finally {
+          if (button) button.disabled = false
+          loadDealRooms()
+        }
+      }
+
+      // #6 package stage-advance: remember each package's last-rendered stage so
+      // a genuine move (not an expand/collapse re-render, not first sight on load)
+      // earns a one-shot ember sweep. First sight seeds silently.
+      const lastPackageStages = new Map()
 
       function renderPackages() {
         if (!packageListEl) {
@@ -36213,7 +36843,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           head.setAttribute('aria-expanded', expanded ? 'true' : 'false')
           const stage = document.createElement('span')
           stage.className = 'package-stage'
-          stage.textContent = String(record?.stage || 'thesis')
+          const stageNow = String(record?.stage || 'thesis')
+          stage.textContent = stageNow
+          const pkgId = String(record?.id || '')
+          if (pkgId) {
+            const seen = lastPackageStages.has(pkgId)
+            const stageMoved = seen && lastPackageStages.get(pkgId) !== stageNow
+            lastPackageStages.set(pkgId, stageNow)
+            if (stageMoved) {
+              row.classList.add('is-advancing')
+              stage.classList.add('is-advancing')
+            }
+          }
           const name = document.createElement('h3')
           name.className = 'package-row__name'
           name.textContent = String(record?.name || 'untitled package')
@@ -39513,6 +40154,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           brandMarkEl.classList.remove('is-wake')
           voiceIsland?.classList.remove('is-wake')
         }, WAKE_PULSE_DURATION)
+      }
+
+      // Wake-word ARMING (Wave 14 deliverable 1) — the gated half of presence.
+      // Ships OFF behind an explicit per-device toggle until the manual device
+      // matrix passes (rtc §6.3). Even ON, it only fires when a ROOM voice
+      // session is genuinely live and Scout is idle, so it can never fire on a
+      // typed message, a private grill, or a stray "scout" in prose (the server
+      // whole-word regex already guards that). Treating the utterance that named
+      // Scout as addressed = one spoken turn on the browser-owned realtime channel.
+      const WAKE_WORD_ARMING_KEY = 'bonfire.wakeword.arming.v1'
+      function wakeWordArmingEnabled() {
+        try {
+          return localStorage.getItem(WAKE_WORD_ARMING_KEY) === '1'
+        } catch {
+          return false
+        }
+      }
+      function armScoutForWake() {
+        if (!wakeWordArmingEnabled()) return
+        if (realtimeVoiceMode !== 'room') return
+        if (!['idle', 'listening', 'hearing'].includes(voiceIslandState)) return
+        if (!privateRealtimeVoiceDataChannel || privateRealtimeVoiceDataChannel.readyState !== 'open') return
+        const sent = sendPrivateRealtimeEvent({
+          type: 'response.create',
+          response: { output_modalities: ['audio'] }
+        })
+        if (sent) {
+          setVoiceIslandState('thinking', 'you called Scout…')
+        }
       }
 
       // Categorize tags so the chip color encodes meaning, not hash.

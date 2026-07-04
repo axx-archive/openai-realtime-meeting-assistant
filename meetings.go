@@ -695,7 +695,7 @@ func (app *kanbanBoardApp) meetingMemoryDetails(wanted map[string]struct{}) map[
 				detail.addCardID(entry.Metadata["cardId"])
 			}
 			continue
-		case meetingMemoryKindScoutChat, meetingMemoryKindMissionInsight, meetingMemoryKindDecisionPass, meetingMemoryKindPackage:
+		case meetingMemoryKindScoutChat, meetingMemoryKindMissionInsight, meetingMemoryKindDecisionPass, meetingMemoryKindPackage, meetingMemoryKindDealRoom:
 			// UI-state kinds never surface as meeting log rows.
 			continue
 		}

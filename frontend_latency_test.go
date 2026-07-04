@@ -99,7 +99,11 @@ func TestIndexProvidesRoomRecoveryAndAuthoritativeActiveSpeaker(t *testing.T) {
 		"await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })",
 		"const maxIceRestartAttempts = 5",
 		"function performIceRestart(reason, attempt)",
-		"setConnectionState('connecting', `reconnecting media ${attempt}/${maxIceRestartAttempts}`)",
+		// rtc §5.1: the "N/5" counter is held until attempt >= 2 so a single
+		// self-healing blip never shows an alarming count.
+		"const reconnectLabel = attempt >= 2",
+		"? `reconnecting media ${attempt}/${maxIceRestartAttempts}`",
+		"function handleMediaDisconnected(detail)",
 		"case 'active_speaker':",
 		"function handleAuthoritativeActiveSpeaker(payload)",
 		"function authoritativeActiveSpeakerName()",
@@ -113,6 +117,78 @@ func TestIndexProvidesRoomRecoveryAndAuthoritativeActiveSpeaker(t *testing.T) {
 	}
 	if strings.Contains(html, "ws.onclose = () => leaveRoom()") {
 		t.Fatal("unexpected websocket close should enter reconnect state, not immediately leave the room")
+	}
+}
+
+// TestIndexWave14PolishMarkers pins the Wave 14 delight, device-recovery, and
+// wake-word arming behaviors so a future index.html refactor can't silently drop
+// them. Behavioral markers are functionBody-SCOPED (the Wave-6 lesson: a flat
+// file-wide Contains can pass on an unrelated match elsewhere in a 40k-line
+// file); only genuinely top-level artifacts (CSS rules, DOM ids, module-scope
+// consts) are checked file-wide.
+func TestIndexWave14PolishMarkers(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	// Each behavior must appear INSIDE the function that owns it.
+	scoped := []struct {
+		signature string
+		markers   []string
+	}{
+		// #14 copy-link confirm
+		{"function flashCopyConfirm(button)", []string{" copied ✓", "is-copied"}},
+		// #15 empty-state serif voice
+		{"function intelEmptyNode(text)", []string{"intel-empty t-empty-poetry"}},
+		// #12 quarantine subtle-exit
+		{"function trayEntryExit(wrap, done)", []string{"is-leaving", "220"}},
+		// device recovery (rtc §5.2/§5.3)
+		{"async function reconcileAudioDeviceChange()", []string{"offerDeviceSwitch", "recoverLocalMicrophone"}},
+		{"function offerDeviceSwitch(device)", []string{"deviceOfferChipTargetId = device.deviceId", "ensureDeviceOfferChip()"}},
+		{"async function restoreAudioAfterVisibility()", []string{"audioContext.resume", "recoverLocalMicrophone"}},
+		{"function handleMediaDisconnected(detail)", []string{"mediaDisconnectRecoveryTried", "requestIceRestart"}},
+		// bounded mic-ended recovery (rtc §5: never an unbounded rebuild loop)
+		{"async function handleLocalAudioEnded()", []string{"maxLocalAudioRecoveryAttempts", "microphone unavailable — pick another in settings"}},
+		// wake-word arming safety invariant: gated on a live ROOM voice session
+		// (never a private grill, never a typed message).
+		{"function armScoutForWake()", []string{"wakeWordArmingEnabled()", "if (realtimeVoiceMode !== 'room') return"}},
+	}
+	for _, group := range scoped {
+		body := functionBody(html, group.signature)
+		if body == "" {
+			t.Fatalf("index.html missing Wave 14 function %q", group.signature)
+		}
+		for _, marker := range group.markers {
+			if !strings.Contains(body, marker) {
+				t.Fatalf("index.html: %q must appear INSIDE %s (functionBody-scoped, the Wave-6 lesson)", marker, group.signature)
+			}
+		}
+	}
+
+	// Genuinely top-level artifacts: CSS rules, DOM ids, module-scope consts.
+	for _, want := range []string{
+		".t-empty-poetry {",    // #15 CSS
+		"tray-slide-out 220ms", // #12 CSS
+		"pkg-card-sweep 640ms", // #6 CSS
+		"const lastPackageStages = new Map()",
+		"const WAKE_WORD_ARMING_KEY = 'bonfire.wakeword.arming.v1'",
+		"id=\"wakeWordArming\"",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing Wave 14 top-level marker %q", want)
+		}
+	}
+
+	// the reduced-motion block must neutralize the new motion (state kept).
+	for _, want := range []string{
+		".tray__entry.is-leaving { animation: none; opacity: 0; }",
+		".t-empty-poetry { animation: none; }",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing reduced-motion pin for Wave 14 delight: %q", want)
+		}
 	}
 }
 

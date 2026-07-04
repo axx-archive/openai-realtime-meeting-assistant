@@ -254,7 +254,11 @@ type kanbanBoardApp struct {
 	// packageMu serializes ALL venture-package mutations (the proposal-lock
 	// precedent): whole-record last-write-wins inside the lock.
 	packageMu sync.Mutex
-	closeOnce sync.Once
+	// dealRoomMu serializes ALL Deal Room mutations (request/approve/reject/
+	// revoke) the same way packageMu guards packages: whole-record
+	// last-write-wins inside the lock, broadcasts only after it is released.
+	dealRoomMu sync.Mutex
+	closeOnce  sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -3447,7 +3451,7 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// decisions render in the intel canvas ledger (and decision_pass is
 		// pure cursor bookkeeping); package records render in the intel
 		// canvas binder — none of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom {
 			continue
 		}
 		visible = append(visible, entry)
