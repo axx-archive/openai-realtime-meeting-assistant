@@ -220,7 +220,7 @@ func TestGoalHTTPEndpointLaunchesAsRequesterNoExternalWrite(t *testing.T) {
 		t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusAccepted)
 	}
 	var payload struct {
-		Thread   scoutAgentThread `json:"thread"`
+		Thread   scoutAgentThread   `json:"thread"`
 		Artifact meetingMemoryEntry `json:"artifact"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {

@@ -4023,6 +4023,81 @@
         letter-spacing: var(--track-text);
       }
 
+      /* ---------- Video looks picker (Spectacular OS, Wave 13) ---------- */
+      .video-look {
+        display: grid;
+        gap: var(--sp-3);
+        min-width: 0;
+      }
+
+      .video-look__preview {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        /* skill rule #11: a pure black/white hairline, never a tinted one */
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+      }
+
+      [data-theme="dark"] .video-look__preview {
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+      }
+
+      .video-look__video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        /* the local self-preview mirrors like every other local tile */
+        transform: scaleX(-1);
+      }
+
+      .video-look__chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+      }
+
+      .video-look-chip {
+        min-height: var(--hit-min);
+        padding: 0 var(--sp-3);
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-2);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .video-look-chip:hover {
+        border-color: var(--accent);
+      }
+
+      .video-look-chip.is-selected {
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--paper-0);
+      }
+
+      .video-look__slider {
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        align-items: center;
+        gap: var(--sp-3);
+        color: var(--text-2);
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
+      }
+
+      .video-look__slider input[type="range"] {
+        width: 100%;
+        min-height: var(--hit-min);
+        accent-color: var(--accent);
+      }
+
       .voice-profile {
         display: grid;
         gap: var(--sp-3);
@@ -15693,6 +15768,515 @@
         animation: none;
       }
 
+      /* ---------- Tool palette + /goal cards (Spectacular OS · Wave 11) ----------
+         Three doors, one pipeline: the + Tools button and the "/" first-char
+         trigger open this palette (a view onto GET /assistant/tools); Run and the
+         /goal parser converge on runGoalPipeline → POST /assistant/goal. The
+         running-state card (.goalcard__*) makes the 10-step loop legible.
+         z-ladder: .palette sits at 1340 — below the voice island (1350, Scout
+         stays reachable over the palette) and above card-detail (1200) / the
+         rail (90). Ember (--agent) = a machine is working; it never co-occurs
+         with green (--signal = a human is live). */
+      .palette {
+        position: fixed;
+        inset: 0;
+        z-index: 1340;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+      }
+      .palette[hidden] { display: none; }
+      .palette__scrim {
+        position: absolute;
+        inset: 0;
+        background: var(--scrim);
+        backdrop-filter: blur(2px);
+      }
+      .palette__sheet {
+        position: relative;
+        width: min(760px, 92vw);
+        max-height: 82vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        overflow: hidden;
+        animation: bf-popin var(--dur-med) var(--ease-spring) both;
+      }
+      .palette__search-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .palette__search-icon { color: var(--text-3); display: inline-flex; flex: none; }
+      .palette__search {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+      }
+      .palette__search:focus { outline: none; }
+      .palette__search::placeholder { color: var(--text-3); }
+      .palette__esc {
+        flex: none;
+        font: var(--type-label);
+        color: var(--text-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        padding: 3px 7px;
+        background: transparent;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .palette__esc:hover { color: var(--text-2); border-color: var(--line-2); }
+      .palette__body {
+        overflow-y: auto;
+        padding: 14px 18px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .palette__group-label {
+        font: var(--type-label);
+        color: var(--text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin: 2px 0 -4px;
+      }
+      .palette__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+        gap: 10px;
+      }
+      .palette__tile {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        text-align: left;
+        padding: 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        color: var(--text-1);
+        cursor: pointer;
+        /* one unified card-hover recipe (ux §3.2.6): translateY + shadow-2 */
+        transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        animation: bf-popin var(--dur-med) var(--ease-spring) both;
+        animation-delay: var(--palette-stagger, 0ms);
+      }
+      .palette__tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--line-2); }
+      .palette__tile:active:not([disabled]) { transform: scale(var(--press-scale)); }
+      .palette__tile:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        /* focus reads on glass even where --accent (ink) is low-contrast */
+        box-shadow: var(--glow-accent);
+      }
+      .palette__well {
+        flex: none;
+        width: var(--hit-min);
+        height: var(--hit-min);
+        display: grid;
+        place-items: center;
+        border-radius: var(--r-md);
+        background: var(--agent-soft);
+        color: var(--agent);
+      }
+      .palette__tile-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+      .palette__tile-name { font: var(--type-body-medium); color: var(--text-1); }
+      .palette__tile-promise {
+        font: var(--type-caption);
+        color: var(--text-2);
+        text-wrap: pretty;
+      }
+      .palette__match { background: var(--accent-soft); border-radius: 3px; }
+      .palette__empty {
+        padding: 26px 8px 30px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+      }
+      .palette__empty-line {
+        font-family: var(--font-serif, Georgia, serif);
+        font-style: italic;
+        font-size: 16px;
+        color: var(--text-2);
+        text-wrap: balance;
+        max-width: 34ch;
+      }
+      .palette__empty-hand {
+        font: var(--type-body-medium);
+        color: var(--text-1);
+        background: var(--agent-soft);
+        border: 1px solid var(--agent);
+        border-radius: var(--r-full);
+        padding: 8px 16px;
+        cursor: pointer;
+        transition: transform var(--dur-fast) var(--ease);
+      }
+      .palette__empty-hand:active { transform: scale(var(--press-scale)); }
+      .palette__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 18px;
+        border-top: 1px solid var(--line-1);
+        font: var(--type-label);
+        color: var(--text-3);
+      }
+      .palette__footer kbd {
+        font: var(--type-label);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        padding: 1px 5px;
+        color: var(--text-2);
+      }
+      /* Input step: the sheet morphs in place into a 1-3 field card, never a
+         second modal (ux §1.5) */
+      .palette__form { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+      .palette__form-head { display: flex; align-items: flex-start; gap: 10px; }
+      .palette__back {
+        flex: none;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        width: 32px; height: 32px;
+        display: grid; place-items: center;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .palette__back:hover { color: var(--text-1); border-color: var(--line-2); }
+      .palette__form-titles { display: flex; flex-direction: column; gap: 2px; }
+      .palette__form-title { font: var(--type-body-medium); color: var(--text-1); }
+      .palette__form-promise { font: var(--type-caption); color: var(--text-2); }
+      .palette__form-field { display: flex; flex-direction: column; gap: 6px; }
+      .palette__form-label { font: var(--type-label); color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; }
+      .palette__field {
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 9px 11px;
+        resize: none;
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+      .palette__field:focus { outline: none; border-color: var(--line-2); box-shadow: var(--glow-accent); }
+      .palette__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+      .palette__cancel {
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-body-medium);
+        padding: 8px 14px;
+        cursor: pointer;
+        min-height: var(--hit-min);
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .palette__cancel:hover { color: var(--text-1); border-color: var(--line-2); }
+      .palette__cancel:active { transform: scale(var(--press-scale)); }
+      .palette__run {
+        border: 1px solid var(--agent);
+        border-radius: var(--r-md);
+        background: var(--agent);
+        color: #fff;
+        font: var(--type-body-medium);
+        padding: 8px 18px;
+        cursor: pointer;
+        min-height: var(--hit-min);
+        transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .palette__run:hover { filter: brightness(1.06); }
+      .palette__run:active { transform: scale(var(--press-scale)); }
+      .palette__handle { display: none; }
+
+      /* --- Mobile: palette becomes a thumb-reachable bottom sheet (ux §1.8) --- */
+      @media (max-width: 640px) {
+        .palette { align-items: flex-end; padding: 0; }
+        .palette__sheet {
+          width: 100%;
+          max-width: none;
+          max-height: 88vh;
+          border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+          animation: bf-sheetin var(--dur-med) var(--ease) both;
+          padding-bottom: env(safe-area-inset-bottom);
+        }
+        .palette__grid { grid-template-columns: 1fr; }
+        .palette__tile { min-height: 64px; align-items: center; }
+        .palette__handle {
+          display: block;
+          width: 36px; height: 4px;
+          border-radius: var(--r-full);
+          background: var(--line-2);
+          margin: 8px auto 2px;
+        }
+        .palette__footer { display: none; }
+      }
+
+      /* ---------- Running-state card: the 10-step loop, made legible ---------- */
+      .goalcard {
+        position: relative;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        padding: 14px 14px 12px;
+        margin: 6px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .goalcard__head { display: flex; align-items: center; gap: 9px; }
+      .goalcard__dot {
+        flex: none;
+        width: 12px; height: 12px;
+        border-radius: var(--r-full);
+        background: var(--agent);
+        box-shadow: 0 0 0 4px var(--agent-soft);
+      }
+      /* the header dot breathes on the shared --pulse-cycle while a machine works */
+      .goalcard[data-state="running"] .goalcard__dot { animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite; }
+      .goalcard[data-state="complete"] .goalcard__dot { background: var(--text-1); box-shadow: none; }
+      .goalcard[data-state="gate"] .goalcard__dot { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent); animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite; }
+      .goalcard[data-state="error"] .goalcard__dot { background: var(--danger); box-shadow: none; }
+      .goalcard__title { font: var(--type-body-medium); color: var(--text-1); flex: 1; min-width: 0; text-wrap: balance; }
+      .goalcard__controls { display: flex; align-items: center; gap: 4px; flex: none; }
+      .goalcard__ctrl {
+        width: 30px; height: 30px;
+        display: grid; place-items: center;
+        border: 0; background: transparent;
+        color: var(--text-3);
+        border-radius: var(--r-md);
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .goalcard__ctrl:hover { color: var(--text-1); background: var(--accent-soft); }
+      .goalcard__menu { position: relative; }
+      .goalcard__menu-pop {
+        position: absolute;
+        right: 0; top: 34px;
+        z-index: 2;
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        box-shadow: var(--glass-shadow);
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        min-width: 150px;
+      }
+      .goalcard__menu-pop[hidden] { display: none; }
+      .goalcard__menu-item {
+        text-align: left;
+        border: 0; background: transparent;
+        color: var(--text-1);
+        font: var(--type-caption);
+        padding: 8px 10px;
+        border-radius: var(--r-sm);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+      }
+      .goalcard__menu-item:hover { background: var(--accent-soft); }
+      .goalcard__menu-item--danger { color: var(--danger); }
+
+      /* --- the stage rail: ten nodes, one heartbeat --- */
+      .goalcard__rail { display: flex; align-items: center; width: 100%; }
+      .goalcard__node {
+        flex: none;
+        width: 11px; height: 11px;
+        border-radius: var(--r-full);
+        border: 1.5px solid var(--line-2);
+        background: transparent;
+        position: relative;
+        z-index: 1;
+      }
+      .goalcard__node[data-node="done"] { border-color: var(--text-1); background: var(--text-1); }
+      .goalcard__node[data-node="active"] {
+        border-color: var(--agent);
+        background: var(--agent-soft);
+        box-shadow: var(--glow-agent);
+        animation: goalcard-node-breathe var(--pulse-cycle) var(--ease) infinite;
+      }
+      .goalcard[data-state="gate"] .goalcard__node[data-node="active"] { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn), 0 4px 20px color-mix(in srgb, var(--warn) 28%, transparent); animation: goalcard-node-breathe var(--pulse-cycle) var(--ease) infinite; }
+      .goalcard[data-state="error"] .goalcard__node[data-node="active"] { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); box-shadow: 0 0 0 1.5px var(--danger); animation: none; }
+      .goalcard__node.is-advancing { animation: goalcard-node-pop var(--dur-med) var(--ease-spring); }
+      .goalcard__node.is-shaking { animation: goalcard-node-shake var(--dur-fast) var(--ease); }
+      .goalcard__conn {
+        flex: 1 1 auto;
+        height: 1.5px;
+        min-width: 6px;
+        background: var(--line-2);
+        position: relative;
+        overflow: hidden;
+      }
+      /* the ember→ink wipe as a connector completes (token-timed → self-heals) */
+      .goalcard__conn::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--text-1);
+        transform: scaleX(0);
+        transform-origin: left center;
+        transition: transform var(--dur-med) var(--ease);
+      }
+      .goalcard__conn[data-filled="1"]::after { transform: scaleX(1); }
+      .goalcard__stage {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-height: 20px;
+      }
+      .goalcard__stage-line { font: var(--type-body); color: var(--text-1); transition: opacity var(--dur-med) var(--ease), filter var(--dur-med) var(--ease); }
+      .goalcard__stage-line.is-swapping { opacity: 0; filter: blur(3px); }
+      .goalcard__meta { font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-2); }
+      .goalcard__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .goalcard__disclosure {
+        border: 0; background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        cursor: pointer;
+        padding: 2px 0;
+        display: inline-flex; align-items: center; gap: 5px;
+        transition: color var(--dur-fast) var(--ease);
+      }
+      .goalcard__disclosure:hover { color: var(--text-1); }
+      .goalcard__disclosure-caret { transition: transform var(--dur-fast) var(--ease); display: inline-block; }
+      .goalcard.is-working-open .goalcard__disclosure-caret { transform: rotate(90deg); }
+      .goalcard__pct { font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-1); }
+      .goalcard__working { display: none; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
+      .goalcard.is-working-open .goalcard__working { display: flex; animation: comment-preview-open var(--dur-med) var(--ease); }
+      .goalcard__work-line { font: var(--type-caption); color: var(--text-2); text-wrap: pretty; }
+      .goalcard__result { font: var(--type-body); color: var(--text-1); text-wrap: pretty; }
+      .goalcard__trust {
+        font: var(--type-caption);
+        color: var(--text-2);
+        padding: 8px 10px;
+        border-radius: var(--r-md);
+        background: var(--agent-soft);
+        border: 1px solid color-mix(in srgb, var(--agent) 30%, transparent);
+      }
+      .goalcard__terminal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .goalcard__link {
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+        padding: 7px 13px;
+        cursor: pointer;
+        min-height: 40px;
+        transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .goalcard__link:hover { border-color: var(--line-2); }
+      .goalcard__link:active { transform: scale(var(--press-scale)); }
+      .goalcard__link--accent { border-color: var(--agent); color: var(--agent); }
+      .goalcard.is-settling { animation: goalcard-settle 180ms var(--ease-out); }
+      .goalcard__spark {
+        position: absolute;
+        left: 16px; top: 14px;
+        width: 0; height: 0;
+        pointer-events: none;
+      }
+      .goalcard__spark span {
+        position: absolute;
+        width: 4px; height: 4px;
+        border-radius: var(--r-full);
+        background: var(--agent);
+        animation: goalcard-spark 520ms var(--ease-out) forwards;
+      }
+      .goalcard__wait { font: var(--type-caption); color: var(--warn); }
+      /* compressed 5-node rail on narrow screens (ux §1.8) */
+      .goalcard__rail-count { display: none; font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-2); margin-left: 8px; }
+      @media (max-width: 640px) {
+        .goalcard:not(.is-rail-expanded) .goalcard__node[data-compressed="hide"],
+        .goalcard:not(.is-rail-expanded) .goalcard__conn[data-compressed="hide"] { display: none; }
+        .goalcard:not(.is-rail-expanded) .goalcard__rail-count { display: inline; }
+      }
+
+      /* ---------- Return-to-origin card (one component, three contexts) ---------- */
+      .returncard {
+        border: 1px solid var(--line-1);
+        border-left: 2px solid var(--agent);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        padding: 11px 13px;
+        margin: 6px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .returncard__head { display: flex; align-items: center; gap: 8px; }
+      .returncard__title { font: var(--type-body-medium); color: var(--text-1); flex: 1; min-width: 0; text-wrap: balance; }
+      .returncard__tag { font: var(--type-label); color: var(--agent); text-transform: uppercase; letter-spacing: 0.05em; flex: none; }
+      .returncard__report { display: flex; flex-direction: column; gap: 3px; }
+      .returncard__report-line { font: var(--type-caption); color: var(--text-2); text-wrap: pretty; }
+      .returncard__report-key { color: var(--text-3); }
+      .returncard__open {
+        align-self: flex-start;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-caption);
+        padding: 5px 10px;
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease);
+      }
+      .returncard__open:hover { border-color: var(--line-2); }
+      .returncard--dock { margin: 4px 0; }
+
+      /* --- composer + Tools trigger --- */
+      .scout-chat-tools {
+        flex: none;
+        position: relative;
+        width: 34px; height: 34px;
+        display: grid; place-items: center;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      /* keep the 34px glyph in visual harmony with the attach/send siblings but
+         extend the tap target to --hit-min (44px) — the extension lives inside
+         the composer's 8px flex gap, so no two hit areas overlap (skill rule 16) */
+      .scout-chat-tools::before {
+        content: "";
+        position: absolute;
+        top: 50%; left: 50%;
+        width: var(--hit-min); height: var(--hit-min);
+        transform: translate(-50%, -50%);
+      }
+      .scout-chat-tools:hover:not([disabled]) { color: var(--agent); border-color: var(--agent); background: var(--agent-soft); }
+      .scout-chat-tools:active:not([disabled]) { transform: scale(var(--press-scale)); }
+      .scout-chat-tools[disabled] { opacity: 0.5; cursor: default; }
+
+      /* keyframes: node advance spring, header/node breathe, ember-settle, spark,
+         and the honest error shake — all reduced-motion-gated below */
+      @keyframes goalcard-node-pop { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+      @keyframes goalcard-node-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+      @keyframes goalcard-node-breathe { 0%,100% { box-shadow: 0 0 0 1.5px var(--agent); } 50% { box-shadow: var(--glow-agent); } }
+      @keyframes goalcard-dot-breathe { 0%,100% { box-shadow: 0 0 0 2px var(--agent-soft); } 50% { box-shadow: 0 0 0 5px var(--agent-soft); } }
+      @keyframes goalcard-settle { from { transform: translateY(2px); } to { transform: translateY(0); } }
+      @keyframes goalcard-spark { from { opacity: 1; transform: translate(0, 0) scale(1); } to { opacity: 0; transform: translate(var(--spark-dx, 0), var(--spark-dy, -14px)) scale(0.4); } }
+
       /* ---------- Reduced motion ----------
          The kit zeroes the motion tokens (--dur-fast/--dur-med/--dur-slow → 0ms,
          declared beside the token table); everything declared in token time
@@ -15766,6 +16350,19 @@
         .grillstage__q { animation: none; }
         .grillstage__row { animation: none; }
         .grillstage__verdict { animation: none; opacity: 1; filter: none; }
+        /* Tool palette + /goal cards (Wave 11): keep every state (color, node
+           fill, terminal treatment); drop the motion. Token-timed transitions
+           (connector wipe, stage-line cross-fade, hover, press) already self-heal
+           via the zeroed --dur-* tokens; these kill the keyframe-driven pieces. */
+        .palette__sheet, .palette__tile { animation: none; }
+        .goalcard[data-state] .goalcard__dot,
+        .goalcard__node[data-node="active"],
+        .goalcard[data-state="gate"] .goalcard__node[data-node="active"] { animation: none; }
+        .goalcard__node.is-advancing, .goalcard__node.is-shaking { animation: none; }
+        .goalcard.is-settling { animation: none; }
+        /* the spark burst becomes an instant, motionless fill — no particles */
+        .goalcard__spark span { animation: none; display: none; }
+        .goalcard.is-working-open .goalcard__working { animation: none; }
         .grillstage__pressure-fill,
         .grillstage__meter-fill { transition: none; }
         /* tab-pane enters (hardcoded .4s) snap under reduced motion */
@@ -16406,6 +17003,12 @@
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path>
+                </svg>
+              </button>
+              <button id="scoutChatToolsBtn" class="scout-chat-tools" type="button" aria-label="Tools" aria-haspopup="dialog" title="Tools (or type /)" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
                 </svg>
               </button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout about any meeting" aria-label="Message Scout privately" disabled></textarea>
@@ -17253,6 +17856,42 @@
                 </div>
               </section>
               <p class="av-saved" id="audioSavedHint" hidden>✓ saved for this device</p>
+
+              <!-- Video looks (Spectacular OS, Wave 13). Live self-preview through the
+                   ACTUAL pipeline, chips = looks, sliders = the preset exposed. Off by
+                   default everywhere; the far-end-sees-it vs preview-only distinction
+                   is stated honestly in the status line. -->
+              <div class="voice-profile__label">video look</div>
+              <div class="video-look">
+                <div class="video-look__preview">
+                  <video id="videoLookPreview" class="video-look__video" muted playsinline></video>
+                </div>
+                <div class="video-look__chips" role="group" aria-label="Video look">
+                  <button type="button" class="video-look-chip pressable" data-look="none" aria-pressed="true">none</button>
+                  <button type="button" class="video-look-chip pressable" data-look="bonfire-warm" aria-pressed="false">warm</button>
+                  <button type="button" class="video-look-chip pressable" data-look="studio" aria-pressed="false">crisp</button>
+                  <button type="button" class="video-look-chip pressable" data-look="mono" aria-pressed="false">mono</button>
+                  <button type="button" class="video-look-chip pressable" data-look="lowlight" aria-pressed="false">low-light</button>
+                </div>
+                <label class="video-look__slider">
+                  <span>brightness</span>
+                  <input type="range" id="videoLookBrightness" min="0" max="100" value="50" aria-label="Brightness">
+                </label>
+                <label class="video-look__slider">
+                  <span>warmth</span>
+                  <input type="range" id="videoLookWarmth" min="0" max="100" value="50" aria-label="Warmth">
+                </label>
+                <label class="video-look__slider">
+                  <span>strength</span>
+                  <input type="range" id="videoLookIntensity" min="0" max="100" value="100" aria-label="Look strength">
+                </label>
+                <span class="noise-mode-status" id="videoLookStatus" data-state="off" aria-live="polite">
+                  <span class="noise-mode-status__dot" aria-hidden="true"></span>
+                  <span class="noise-mode-status__text">Off</span>
+                </span>
+                <p class="av-mic-honesty" id="videoLookBatteryNote" hidden>looks may reduce battery on this device — turn off any time.</p>
+                <p class="av-saved" id="videoLookSaved" hidden>✓ saved for this device</p>
+              </div>
             </section>
             <section data-settings-section="appearance" hidden aria-label="Appearance">
               <fieldset class="noise-mode-group">
@@ -17415,6 +18054,14 @@
       const audioSuppressionValue = document.getElementById('audioSuppressionValue')
       const audioSuppressionBar = document.getElementById('audioSuppressionBar')
       const audioSavedHint = document.getElementById('audioSavedHint')
+      const videoLookPreview = document.getElementById('videoLookPreview')
+      const videoLookChips = Array.from(document.querySelectorAll('.video-look-chip[data-look]'))
+      const videoLookBrightness = document.getElementById('videoLookBrightness')
+      const videoLookWarmth = document.getElementById('videoLookWarmth')
+      const videoLookIntensityInput = document.getElementById('videoLookIntensity')
+      const videoLookStatusEl = document.getElementById('videoLookStatus')
+      const videoLookSavedHint = document.getElementById('videoLookSaved')
+      const videoLookBatteryNote = document.getElementById('videoLookBatteryNote')
       const screenShareButton = document.getElementById('screenShare')
       const copyRoomLinkButton = document.getElementById('copyRoomLink')
       const recordMeetingButton = document.getElementById('recordMeeting')
@@ -17549,6 +18196,7 @@
 	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
+	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
 	      const scoutWorkStarterButtons = Array.from(document.querySelectorAll('[data-scout-starter]'))
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
@@ -17924,6 +18572,23 @@
       let queuedRemoteCandidates = []
       let localAudioSourceTrack
       let localAudioProcessor
+      // Video "looks" pipeline (Spectacular OS, Wave 13). Off by default everywhere;
+      // when a look is active the outbound camera track is the pipeline's processed
+      // track (the far end sees it), and localVideoLookRawTrack keeps the raw camera
+      // alive as the pipeline input — symmetric with the audio graph's source track.
+      let videoLookModulePromise = null
+      let localVideoLookPipeline = null
+      let localVideoLookRawTrack = null
+      let videoLookGovernorPausedAudio = false
+      let videoLookGovernorPriorAudioMode = ''
+      // Slider fine-tuning layered on the chosen preset (empty = pure preset). Keys
+      // are shader uniform names (uBrightness / uTemperature). Reset when a chip is
+      // picked so a look always starts from its recipe.
+      let videoLookAdjust = {}
+      let videoLookStatus = { state: 'off', text: 'Off', tier: 'none', governorStage: 0 }
+      let previewLookPipeline = null
+      let previewLookStream = null
+      let previewLookRawTrack = null
       let voiceFocusDiagnostics = {
         updatedAt: 0,
         inputRms: 0,
@@ -18161,6 +18826,18 @@
           setAudioNoiseMode(input.value)
         })
       })
+      videoLookChips.forEach(chip => {
+        chip.addEventListener('click', () => setVideoLook(chip.dataset.look))
+      })
+      if (videoLookBrightness) {
+        videoLookBrightness.addEventListener('input', () => setVideoLookBrightness(Number(videoLookBrightness.value)))
+      }
+      if (videoLookWarmth) {
+        videoLookWarmth.addEventListener('input', () => setVideoLookWarmth(Number(videoLookWarmth.value)))
+      }
+      if (videoLookIntensityInput) {
+        videoLookIntensityInput.addEventListener('input', () => setVideoLookIntensity(Number(videoLookIntensityInput.value) / 100))
+      }
       themeModeInputs.forEach(input => {
         input.addEventListener('change', () => {
           if (!input.checked) {
@@ -18850,6 +19527,7 @@
         renderAudioNoiseStatus()
         renderAudioSavedHint()
         renderPreferredMicHonesty()
+        renderVideoLookSettings()
         updateRoomClock()
       }
 
@@ -19044,6 +19722,7 @@
         if (settingsActiveSection === 'devices' && name !== 'devices') {
           // training privacy-mutes you to the room; never leave it running off-screen
           cancelVoiceFocusTraining()
+          stopVideoLookPreview()
         }
         settingsActiveSection = name
         settingsSections.forEach(section => {
@@ -19052,12 +19731,17 @@
         settingsNavButtons.forEach(button => {
           button.setAttribute('aria-current', String(button.dataset.settingsSection === name))
         })
+        if (name === 'devices') {
+          renderVideoLookSettings()
+          startVideoLookPreview()
+        }
       }
 
       function closeSettings(options = {}) {
         const wasOpen = settingsRegion.classList.contains('visible')
         settingsRegion.classList.remove('visible')
         cancelVoiceFocusTraining()
+        stopVideoLookPreview()
         if (wasOpen && options.restoreFocus !== false) {
           ;(settingsRestoreFocusEl || audioSettingsButton).focus()
         }
@@ -25296,8 +25980,490 @@
         const audio = await createOutboundAudioForSource(sourceTrack)
         localAudioSourceTrack = sourceTrack || undefined
         localAudioProcessor = audio.processor
-        return new MediaStream([...videoTracks, audio.track].filter(Boolean))
+        const lookedVideo = await applyVideoLookToTracks(videoTracks)
+        return new MediaStream([...lookedVideo, audio.track].filter(Boolean))
       }
+
+      // ---------- Video looks (Spectacular OS, Wave 13) ----------
+      // The seam is symmetric with the audio graph: when a look is active the raw
+      // camera track is wrapped and the PROCESSED track goes into the stream (and so
+      // to the PC via outboundTrackForKind), while the raw track is kept as the
+      // pipeline input. Look 'none' returns the raw tracks untouched — byte-identical
+      // to today, zero new code path, zero overhead (rule 8 / rtc §3.4).
+
+      function videoLookSettingsValue() {
+        const video = normalizeVideoSettings(audioSettings.video)
+        return { look: video.look, intensity: video.lookIntensity }
+      }
+
+      function loadVideoLookModule() {
+        if (!videoLookModulePromise) {
+          videoLookModulePromise = import('/public/video-looks/video-look-pipeline.js')
+            .catch(error => {
+              videoLookModulePromise = null
+              throw error
+            })
+        }
+        return videoLookModulePromise
+      }
+
+      // Returns the tier this browser can run: 'insertable' (far end sees it),
+      // 'canvas' (far end sees it, higher cost), or 'none' (preview only).
+      async function videoLookTierHere() {
+        try {
+          const mod = await loadVideoLookModule()
+          return mod.videoLookPipelineTier()
+        } catch (_) {
+          return 'none'
+        }
+      }
+
+      // Wrap the outbound video track with the active look. Any failure falls back to
+      // the raw track (never a black tile). Returns the track list for the stream.
+      async function applyVideoLookToTracks(videoTracks) {
+        const rawTrack = videoTracks[0]
+        const { look, intensity } = videoLookSettingsValue()
+        if (!rawTrack || look === 'none') {
+          teardownVideoLookPipeline()
+          return videoTracks
+        }
+        try {
+          const processed = await buildVideoLookPipeline(rawTrack, look, intensity)
+          if (!processed) {
+            // Preview-only tier: outbound stays raw, status told the truth already.
+            return videoTracks
+          }
+          localVideoLookRawTrack = rawTrack
+          return [processed, ...videoTracks.slice(1)]
+        } catch (error) {
+          console.warn('Video look pipeline unavailable; using the raw camera', error)
+          teardownVideoLookPipeline()
+          // Honest status: the far end is getting the RAW camera, not a look — never
+          // let the chip keep claiming "Active" after a construction failure.
+          videoLookStatus = { state: 'error', text: 'Off — look unavailable, using raw camera', tier: 'none', governorStage: 0 }
+          renderVideoLookSettings()
+          return videoTracks
+        }
+      }
+
+      async function buildVideoLookPipeline(rawTrack, look, intensity) {
+        const mod = await loadVideoLookModule()
+        teardownVideoLookPipeline()
+        const pipeline = new mod.VideoLookPipeline({
+          onStatus: status => {
+            videoLookStatus = status
+            renderVideoLookSettings()
+          },
+          onError: () => {
+            // A live pipeline failure mid-call: drop to the raw camera so the far end
+            // keeps seeing a real feed, then re-render the honest status.
+            recoverVideoLookToRawTrack()
+          },
+          onShedAudio: shedAudioForThermal,
+          onRestoreAudio: restoreAudioAfterThermal
+        })
+        localVideoLookPipeline = pipeline
+        const processed = await pipeline.start(rawTrack, look, intensity)
+        if (Object.keys(videoLookAdjust).length) {
+          pipeline.setLook(look, intensity, videoLookAdjust)
+        }
+        videoLookStatus = pipeline.status.tier === 'none'
+          ? { state: 'preview-only', text: 'Preview only — not supported on this browser', tier: 'none', governorStage: 0 }
+          : { state: 'active', text: 'Active — far end sees it', tier: pipeline.tier, governorStage: 0 }
+        renderVideoLookSettings()
+        return processed
+      }
+
+      function teardownVideoLookPipeline() {
+        if (localVideoLookPipeline) {
+          try { localVideoLookPipeline.stop() } catch (_) {}
+          localVideoLookPipeline = null
+        }
+        localVideoLookRawTrack = null
+        if (videoLookGovernorPausedAudio) {
+          restoreAudioAfterThermal()
+        }
+      }
+
+      // A trimmed replaceLocalVideoTrack for look swaps: it preserves isCameraOff and
+      // does NOT force the camera on. stopPrevious=false keeps the raw track alive as
+      // the pipeline input; stopPrevious=true retires the processed track.
+      async function swapOutboundVideoTrack(nextTrack, { stopPrevious = false } = {}) {
+        if (!localStream || !nextTrack) {
+          return false
+        }
+        const previousTrack = localVideoTrack()
+        const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
+        setTrackContentHint(nextTrack, cameraContentHint)
+        nextTrack.enabled = !isCameraOff
+        if (sender) {
+          try {
+            await sender.replaceTrack(nextTrack)
+            await configureOutboundSender(sender, nextTrack)
+          } catch (error) {
+            console.warn('Could not swap outbound video track for the look change', error)
+          }
+        }
+        if (previousTrack && previousTrack !== nextTrack) {
+          localStream.removeTrack(previousTrack)
+        }
+        if (!localStream.getVideoTracks().includes(nextTrack)) {
+          localStream.addTrack(nextTrack)
+        }
+        setVideoElementStream(localVideo, localStream, { local: true, force: true })
+        wireLocalVideoTrack(nextTrack)
+        if (stopPrevious && previousTrack && previousTrack !== nextTrack) {
+          previousTrack.stop()
+        }
+        return true
+      }
+
+      // Live look change from settings while in a room. A look↔look change is a pure
+      // uniform swap (same output track, instant); none↔look changes the outbound
+      // track without touching the raw camera capture.
+      async function applyLiveVideoLookChange() {
+        renderVideoLookSettings()
+        if (!localStream) {
+          return
+        }
+        const { look, intensity } = videoLookSettingsValue()
+        const current = localVideoTrack()
+        const raw = localVideoLookRawTrack && liveTrack(localVideoLookRawTrack)
+          ? localVideoLookRawTrack
+          : current
+        if (!raw) {
+          return
+        }
+
+        if (look === 'none') {
+          if (!localVideoLookPipeline) {
+            return
+          }
+          const rawTrack = localVideoLookRawTrack
+          teardownVideoLookPipeline()
+          if (rawTrack && rawTrack !== current) {
+            await swapOutboundVideoTrack(rawTrack, { stopPrevious: true })
+          }
+          videoLookStatus = { state: 'off', text: 'Off', tier: 'none', governorStage: 0 }
+          renderVideoLookSettings()
+          return
+        }
+
+        if (localVideoLookPipeline) {
+          localVideoLookPipeline.setLook(look, intensity, videoLookAdjust) // uniform swap, no track churn
+          renderVideoLookSettings()
+          return
+        }
+
+        try {
+          const processed = await buildVideoLookPipeline(raw, look, intensity)
+          if (!processed) {
+            return // preview-only tier
+          }
+          localVideoLookRawTrack = raw
+          await swapOutboundVideoTrack(processed, { stopPrevious: false })
+        } catch (error) {
+          console.warn('Could not apply the video look live; keeping the raw camera', error)
+          teardownVideoLookPipeline()
+          videoLookStatus = { state: 'error', text: 'Off — look unavailable, using raw camera', tier: 'none', governorStage: 0 }
+          renderVideoLookSettings()
+        }
+      }
+
+      // Governor stalled or a pipeline exception mid-call: restore the raw camera to
+      // the sender so the far end never sees a black or frozen tile.
+      function recoverVideoLookToRawTrack() {
+        const rawTrack = localVideoLookRawTrack
+        localVideoLookPipeline = null
+        localVideoLookRawTrack = null
+        videoLookStatus = { state: 'error', text: 'Off — look unavailable, using raw camera', tier: 'none', governorStage: 0 }
+        if (rawTrack && liveTrack(rawTrack) && rawTrack !== localVideoTrack()) {
+          swapOutboundVideoTrack(rawTrack, { stopPrevious: true }).catch(() => {})
+        }
+        renderVideoLookSettings()
+      }
+
+      // Thermal governor's final step (rtc §3.5): when the video look has already been
+      // shed and the device is still hot, ease the audio worklet down to the browser's
+      // own NS. Reuses W9's public setter — no reach into the audio graph internals.
+      function shedAudioForThermal() {
+        if (videoLookGovernorPausedAudio) {
+          return
+        }
+        if (!resolveSuppressionStrategy().useWorklet) {
+          return // nothing worklet-heavy to shed
+        }
+        videoLookGovernorPriorAudioMode = canonicalAudioMode(audioSettings.mode)
+        videoLookGovernorPausedAudio = true
+        setAudioNoiseMode('standard')
+        setLog('voice focus paused to save battery')
+      }
+
+      function restoreAudioAfterThermal() {
+        if (!videoLookGovernorPausedAudio) {
+          return
+        }
+        const priorMode = videoLookGovernorPriorAudioMode
+        videoLookGovernorPausedAudio = false
+        videoLookGovernorPriorAudioMode = ''
+        if (priorMode && priorMode !== canonicalAudioMode(audioSettings.mode)) {
+          setAudioNoiseMode(priorMode)
+        }
+      }
+
+      function setVideoLook(look) {
+        // Picking a chip is picking a recipe: clear any slider fine-tuning so the
+        // look starts from its preset, then the sliders re-expose that preset.
+        videoLookAdjust = {}
+        const next = normalizeVideoSettings({ ...audioSettings.video, look })
+        audioSettings = { ...audioSettings, video: next }
+        saveAudioSettings()
+        applyLiveVideoLookChange()
+        applyLookToPreview()
+      }
+
+      function setVideoLookIntensity(value) {
+        const next = normalizeVideoSettings({ ...audioSettings.video, lookIntensity: value })
+        audioSettings = { ...audioSettings, video: next }
+        saveAudioSettings()
+        const { look, intensity } = videoLookSettingsValue()
+        if (localVideoLookPipeline) {
+          localVideoLookPipeline.setLook(look, intensity, videoLookAdjust)
+        }
+        applyLookToPreview()
+        renderVideoLookSettings()
+      }
+
+      // The brightness / warmth sliders tune real shader uniforms on top of the
+      // preset (never a placebo): they stay adjustable after a chip is picked.
+      function setVideoLookBrightness(sliderValue) {
+        // 0..100 slider maps to a ±0.2 additive brightness override.
+        videoLookAdjust = { ...videoLookAdjust, uBrightness: (sliderValue / 100 - 0.5) * 0.4 }
+        applyLookAdjustLive()
+      }
+
+      function setVideoLookWarmth(sliderValue) {
+        // 0..100 slider maps to a ±1.0 temperature override (+ toward amber).
+        videoLookAdjust = { ...videoLookAdjust, uTemperature: (sliderValue / 100 - 0.5) * 2 }
+        applyLookAdjustLive()
+      }
+
+      function applyLookAdjustLive() {
+        const { look, intensity } = videoLookSettingsValue()
+        if (look === 'none') {
+          return
+        }
+        if (localVideoLookPipeline) {
+          localVideoLookPipeline.setLook(look, intensity, videoLookAdjust)
+        }
+        if (previewLookPipeline) {
+          previewLookPipeline.setLook(look, intensity, videoLookAdjust)
+        } else {
+          applyLookToPreview()
+        }
+      }
+
+      // Settings live self-preview (ux §6.2): your ACTUAL camera through the ACTUAL
+      // pipeline so there is zero preview/reality gap. When you are already in a room
+      // we clone the raw camera so the preview never fights the outbound capture for
+      // the device; otherwise we acquire a preview-only camera and release it on close.
+      async function startVideoLookPreview() {
+        if (!videoLookPreview || previewLookStream || previewLookPipeline) {
+          return
+        }
+        let rawTrack = null
+        try {
+          const liveRaw = localVideoLookRawTrack && liveTrack(localVideoLookRawTrack)
+            ? localVideoLookRawTrack
+            : (liveTrack(localVideoTrack()) ? localVideoTrack() : null)
+          if (liveRaw && typeof liveRaw.clone === 'function') {
+            rawTrack = liveRaw.clone()
+          } else if (navigator.mediaDevices?.getUserMedia) {
+            previewLookStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            rawTrack = previewLookStream.getVideoTracks()[0] || null
+          }
+        } catch (error) {
+          console.warn('Could not start the video look preview camera', error)
+        }
+        if (!rawTrack) {
+          // No camera available for the preview — show nothing rather than a fake.
+          renderVideoLookSettings()
+          return
+        }
+        previewLookRawTrack = rawTrack
+        await applyLookToPreview()
+      }
+
+      async function applyLookToPreview() {
+        if (!videoLookPreview || !previewLookRawTrack) {
+          return
+        }
+        const { look, intensity } = videoLookSettingsValue()
+        let mod = null
+        try {
+          mod = await loadVideoLookModule()
+        } catch (_) {
+          mod = null
+        }
+        const tier = mod ? mod.videoLookPipelineTier() : 'none'
+
+        // Preview-capable browsers run the real shader; otherwise fall back to the
+        // honest CSS-filter approximation on the preview element only.
+        if (mod && tier !== 'none' && look !== 'none') {
+          try {
+            if (previewLookPipeline) {
+              previewLookPipeline.setLook(look, intensity, videoLookAdjust)
+            } else {
+              previewLookPipeline = new mod.VideoLookPipeline({ onStatus: () => {} })
+              const processed = await previewLookPipeline.start(previewLookRawTrack, look, intensity)
+              if (processed && Object.keys(videoLookAdjust).length) {
+                previewLookPipeline.setLook(look, intensity, videoLookAdjust)
+              }
+              if (processed) {
+                videoLookPreview.srcObject = new MediaStream([processed])
+              } else {
+                // tier collapsed to none between the check and start — CSS fallback.
+                stopPreviewPipelineOnly()
+                showPreviewWithCssFilter(mod, look, intensity)
+                return
+              }
+            }
+            videoLookPreview.style.filter = 'none'
+            playPreviewElement()
+            return
+          } catch (error) {
+            console.warn('Preview pipeline failed; using CSS filter preview', error)
+            stopPreviewPipelineOnly()
+          }
+        }
+        showPreviewWithCssFilter(mod, look, intensity)
+      }
+
+      function showPreviewWithCssFilter(mod, look, intensity) {
+        if (!videoLookPreview || !previewLookRawTrack) {
+          return
+        }
+        stopPreviewPipelineOnly()
+        videoLookPreview.srcObject = new MediaStream([previewLookRawTrack])
+        videoLookPreview.style.filter = mod ? mod.cssFilterForLook(look, intensity) : 'none'
+        playPreviewElement()
+      }
+
+      function playPreviewElement() {
+        videoLookPreview.muted = true
+        videoLookPreview.playsInline = true
+        videoLookPreview.play?.().catch(() => {})
+      }
+
+      function stopPreviewPipelineOnly() {
+        if (previewLookPipeline) {
+          try { previewLookPipeline.stop() } catch (_) {}
+          previewLookPipeline = null
+        }
+      }
+
+      function stopVideoLookPreview() {
+        stopPreviewPipelineOnly()
+        if (videoLookPreview) {
+          videoLookPreview.srcObject = null
+          videoLookPreview.style.filter = 'none'
+        }
+        if (previewLookStream) {
+          previewLookStream.getTracks().forEach(track => { try { track.stop() } catch (_) {} })
+          previewLookStream = null
+        }
+        if (previewLookRawTrack) {
+          // A cloned track (in-room preview) is ours to stop; a getUserMedia track was
+          // already stopped via previewLookStream above.
+          try { previewLookRawTrack.stop() } catch (_) {}
+          previewLookRawTrack = null
+        }
+      }
+
+      // Render the look picker: chips reflect the saved look, sliders ARE the presets
+      // exposed, and the status line distinguishes far-end-sees-it / preview-only /
+      // paused / off honestly (never claiming a state the pipeline isn't in).
+      function renderVideoLookSettings() {
+        const { look, intensity } = videoLookSettingsValue()
+        videoLookChips.forEach(chip => {
+          const selected = chip.dataset.look === look
+          chip.classList.toggle('is-selected', selected)
+          chip.setAttribute('aria-pressed', String(selected))
+        })
+        const preset = videoLookPresetUniforms(look)
+        if (videoLookBrightness) {
+          videoLookBrightness.value = String(Math.round((0.5 + (preset.uBrightness || 0) * 2.5) * 100))
+        }
+        if (videoLookWarmth) {
+          videoLookWarmth.value = String(Math.round((0.5 + (preset.uTemperature || 0) * 0.5) * 100))
+        }
+        if (videoLookIntensityInput) {
+          videoLookIntensityInput.value = String(Math.round(intensity * 100))
+          videoLookIntensityInput.disabled = look === 'none'
+        }
+        renderVideoLookStatus(look)
+        if (videoLookSavedHint) {
+          videoLookSavedHint.textContent = audioSettingsHasSavedRecord()
+            ? '✓ saved for this device'
+            : 'using defaults on this device'
+          videoLookSavedHint.hidden = false
+        }
+      }
+
+      function videoLookPresetUniforms(look) {
+        // Mirrors the presets in the pipeline module for the slider read-out; the
+        // module remains the single source of truth for what the shader applies.
+        switch (look) {
+          case 'bonfire-warm': return { uBrightness: 0.012, uTemperature: 0.28 }
+          case 'studio': return { uBrightness: 0.006, uTemperature: 0 }
+          case 'mono': return { uBrightness: 0, uTemperature: 0 }
+          case 'lowlight': return { uBrightness: 0.02, uTemperature: 0 }
+          default: return { uBrightness: 0, uTemperature: 0 }
+        }
+      }
+
+      function renderVideoLookStatus(look) {
+        if (!videoLookStatusEl) {
+          return
+        }
+        let state = 'off'
+        let text = 'Off'
+        if (look !== 'none') {
+          if (videoLookStatus.state === 'paused-battery' || videoLookStatus.governorStage >= 1) {
+            state = 'paused'
+            text = 'Paused — battery'
+          } else if (videoLookStatus.state === 'preview-only') {
+            state = 'preview-only'
+            text = 'Preview only — not supported here'
+          } else if (videoLookStatus.state === 'error') {
+            state = 'off'
+            text = 'Off — using raw camera'
+          } else if (videoLookStatus.state === 'active'
+            && (videoLookStatus.tier === 'canvas' || videoLookStatus.tier === 'insertable')) {
+            // The ONLY path that may claim the far end sees a look: a confirmed
+            // active-tier build. Never default to "active" for anything else.
+            state = 'active'
+            text = 'Active — far end sees it'
+          } else if (!roomMediaActive()) {
+            state = 'idle'
+            text = 'starts when you join'
+          } else {
+            // Look selected, in room, but no confirmed active pipeline (still building,
+            // or it fell back) — the far end is on the raw camera. Say so honestly.
+            state = 'off'
+            text = 'Off — using raw camera'
+          }
+        }
+        videoLookStatusEl.dataset.state = state
+        const dot = videoLookStatusEl.querySelector('.noise-mode-status__dot')
+        const label = videoLookStatusEl.querySelector('.noise-mode-status__text')
+        if (dot) dot.dataset.state = state === 'paused' ? 'fallback' : (state === 'preview-only' ? 'unavailable' : state)
+        if (label) label.textContent = text
+        if (videoLookBatteryNote) {
+          videoLookBatteryNote.hidden = !(isIOSDevice && look !== 'none')
+        }
+      }
+
 
       async function createOutboundAudioForSource(sourceTrack) {
         if (!sourceTrack) {
@@ -28956,6 +30122,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatAttach) {
 	          scoutChatAttach.disabled = !Boolean(authedUser)
 	        }
+	        if (scoutChatToolsBtn) {
+	          // the palette + /goal launch work for any signed-in user off-room
+	          // (POST /assistant/goal needs no room join); only sign-in gates it.
+	          scoutChatToolsBtn.disabled = !Boolean(authedUser)
+	        }
 	        scoutChatHint.hidden = available
 	        if (!available) {
 	          scoutChatHint.textContent = 'sign in to ask Scout'
@@ -29461,13 +30632,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const ts = new Date().toISOString()
         appendScoutChatNode(scoutChatMessageNode('user', `/goal ${objective}`, ts))
         updateChatThreadItem(`/goal ${objective}`, ts)
+        // The /goal text door and the quick-select palette are siblings, not
+        // rivals: both converge on runGoalPipeline → POST /assistant/goal.
+        await runGoalPipeline({ objective })
+      }
+
+      // ==================================================================
+      // Wave 11 — Quick-select tool palette + /goal running-state cards.
+      // Three doors (+ Tools button, "/" first char, Scout voice) render the
+      // same tool registry (GET /assistant/tools) and converge on
+      // runGoalPipeline. The goalcard makes the persisted 10-step loop legible.
+      // ==================================================================
+
+      // runGoalPipeline is the single door the /goal parser, the palette Run, and
+      // (via initiate_goal) voice converge on. It POSTs the goal spec — objective
+      // plus optional toolTemplate/authorityHint/package — to /assistant/goal,
+      // scoped to the private chat thread as its origin surface, then renders the
+      // running goalcard in-thread. Keyless: the POST 503s and the honest line
+      // shows (the same door the composer /goal already used).
+      async function runGoalPipeline(spec) {
+        spec = spec || {}
+        const objective = String(spec.objective || '').trim()
+        if (!objective) {
+          return
+        }
+        if (!authedUser) {
+          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to launch a goal', new Date().toISOString()))
+          return
+        }
+        setActiveTool('chat')
         showScoutChatThinking('kicking off the goal')
         try {
           const thread = await ensurePersistedScoutThread()
+          const body = { objective, originSurface: spec.originSurface || `chat:${thread?.id || ''}` }
+          if (spec.toolTemplate) body.toolTemplate = String(spec.toolTemplate)
+          if (spec.package) body.package = String(spec.package)
+          if (spec.authorityHint) body.authorityHint = String(spec.authorityHint)
           const response = await fetch('/assistant/goal', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ objective, originSurface: `chat:${thread?.id || ''}` })
+            body: JSON.stringify(body)
           })
           const payload = await response.json().catch(() => ({}))
           withScoutChatThinkingHold(() => {
@@ -29477,18 +30681,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               appendScoutChatNode(scoutChatMessageNode('error', message, new Date().toISOString()))
               return
             }
-            if (payload.artifact) {
-              addArtifactEntry(payload.artifact, { select: false })
+            const artifact = payload.artifact || payload.thread?.artifact
+            if (artifact) {
+              addArtifactEntry(artifact, { select: false })
               scheduleArtifactRefresh()
-            }
-            // Render the running goal in-thread like other launched work: the
-            // thread shows the artifact reference and jumps into the work view.
-            if (payload.thread) {
-              const runningThread = { ...payload.thread }
-              if (!runningThread.artifact && payload.artifact) {
-                runningThread.artifact = payload.artifact
-              }
-              upsertScoutChatResearchNode(runningThread)
+              upsertGoalCardNode(artifact)
             }
             showToast({ text: 'goal running', kind: 'done' })
           })
@@ -29497,6 +30694,849 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not launch that goal', new Date().toISOString()))
         }
       }
+
+      // ---- the tool registry, fetched once (the one taxonomy source) ---------
+      let assistantToolsCache = null
+      let assistantToolsPromise = null
+      const paletteRecentKey = 'bonfire.palette.recent.v1'
+
+      async function loadAssistantTools(force) {
+        if (assistantToolsCache && !force) {
+          return assistantToolsCache
+        }
+        if (assistantToolsPromise && !force) {
+          return assistantToolsPromise
+        }
+        assistantToolsPromise = (async () => {
+          try {
+            const res = await fetch('/assistant/tools', { headers: { Accept: 'application/json' } })
+            const data = await res.json().catch(() => ({}))
+            assistantToolsCache = Array.isArray(data?.groups) ? data.groups : []
+          } catch {
+            assistantToolsCache = assistantToolsCache || []
+          }
+          assistantToolsPromise = null
+          return assistantToolsCache
+        })()
+        return assistantToolsPromise
+      }
+
+      function paletteAllTools() {
+        return (assistantToolsCache || []).flatMap(group => (group.tools || []).map(tool => ({ ...tool, groupLabel: group.label })))
+      }
+
+      function paletteToolById(id) {
+        return paletteAllTools().find(tool => tool.id === id) || null
+      }
+
+      function paletteRecentIds() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(paletteRecentKey) || '[]')
+          return Array.isArray(raw) ? raw.filter(Boolean).slice(0, 3) : []
+        } catch {
+          return []
+        }
+      }
+
+      function pushPaletteRecent(id) {
+        if (!id) return
+        try {
+          const next = [id, ...paletteRecentIds().filter(existing => existing !== id)].slice(0, 3)
+          localStorage.setItem(paletteRecentKey, JSON.stringify(next))
+        } catch { /* recents are best-effort */ }
+      }
+
+      // group → a small glyph (ember-tinted well). One SVG per lifecycle group.
+      function paletteGroupGlyph(group) {
+        const glyphs = {
+          ideate: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.5h6c0-1.2.4-1.9 1-2.5A6 6 0 0 0 12 3Z"/>',
+          package: '<path d="m3 8 9-5 9 5v8l-9 5-9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+          market: '<path d="M4 20V10M10 20V4M16 20v-7M4 20h16"/>',
+          portfolio: '<path d="M4 6h16M4 12h16M4 18h10"/>'
+        }
+        return glyphs[group] || glyphs.package
+      }
+
+      // ---- palette DOM (built once, appended to body) ------------------------
+      let paletteEl = null
+      let paletteSearchEl = null
+      let paletteBodyEl = null
+      let paletteSearchRowEl = null
+      let paletteFooterEl = null
+      let paletteMode = 'modal'      // 'modal' (button/mobile) | 'inline' (slash)
+      let paletteQuery = ''
+      let palettePinnedTool = null   // when showing an input step
+
+      function ensurePaletteDom() {
+        if (paletteEl) {
+          return paletteEl
+        }
+        paletteEl = document.createElement('div')
+        paletteEl.className = 'palette'
+        paletteEl.id = 'toolPalette'
+        paletteEl.hidden = true
+        paletteEl.setAttribute('role', 'dialog')
+        paletteEl.setAttribute('aria-modal', 'true')
+        paletteEl.setAttribute('aria-label', 'Tools')
+        paletteEl.innerHTML = `
+          <div class="palette__scrim" data-palette-close></div>
+          <div class="palette__sheet" role="document">
+            <div class="palette__handle" data-palette-close aria-hidden="true"></div>
+            <div class="palette__search-row">
+              <span class="palette__search-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </span>
+              <input class="palette__search" type="text" autocomplete="off" spellcheck="false" placeholder="build a market map for the fintech thesis…" aria-label="Search tools">
+              <button class="palette__esc" type="button" data-palette-close>esc</button>
+            </div>
+            <div class="palette__body"></div>
+            <div class="palette__footer">
+              <span><kbd>↑↓</kbd> navigate&nbsp;&nbsp;<kbd>↵</kbd> open&nbsp;&nbsp;<kbd>⌘↵</kbd> run with defaults</span>
+              <span aria-hidden="true">ⓘ</span>
+            </div>`
+        document.body.appendChild(paletteEl)
+        paletteSearchEl = paletteEl.querySelector('.palette__search')
+        paletteBodyEl = paletteEl.querySelector('.palette__body')
+        paletteSearchRowEl = paletteEl.querySelector('.palette__search-row')
+        paletteFooterEl = paletteEl.querySelector('.palette__footer')
+        paletteEl.querySelectorAll('[data-palette-close]').forEach(el => el.addEventListener('click', () => closeToolPalette()))
+        paletteSearchEl.addEventListener('input', () => { paletteQuery = paletteSearchEl.value; palettePinnedTool = null; paletteRenderList() })
+        paletteSearchEl.addEventListener('keydown', paletteHandleKey)
+        // A genuine focus trap on the sheet: Tab/Shift+Tab wrap within whatever is
+        // focusable RIGHT NOW — tiles, form fields, the empty-state button, esc —
+        // in every state, not just the search + tiles paletteHandleKey knows about.
+        paletteEl.addEventListener('keydown', (event) => {
+          if (event.key !== 'Tab') return
+          const focusables = Array.from(paletteEl.querySelectorAll('button, input, textarea, [tabindex]:not([tabindex="-1"])'))
+            .filter(el => !el.disabled && el.offsetParent !== null)
+          if (!focusables.length) return
+          const first = focusables[0]
+          const last = focusables[focusables.length - 1]
+          const active = document.activeElement
+          if (event.shiftKey && (active === first || !paletteEl.contains(active))) { event.preventDefault(); last.focus() }
+          else if (!event.shiftKey && (active === last || !paletteEl.contains(active))) { event.preventDefault(); first.focus() }
+        })
+        return paletteEl
+      }
+
+      function paletteIsOpen() {
+        return Boolean(paletteEl) && !paletteEl.hidden
+      }
+
+      // openToolPalette — the one entry point all three doors call.
+      function openToolPalette(source = 'button', seed = '') {
+        if (!authedUser) {
+          return
+        }
+        ensurePaletteDom()
+        paletteMode = source === 'slash' ? 'inline' : 'modal'
+        paletteQuery = String(seed || '')
+        palettePinnedTool = null
+        paletteEl.classList.toggle('palette--inline', paletteMode === 'inline')
+        paletteEl.hidden = false
+        // inline mode keeps focus in the composer (so /goal muscle-memory and
+        // free typing survive); modal mode owns its own focused search.
+        paletteSearchRowEl.hidden = paletteMode === 'inline'
+        loadAssistantTools().then(() => {
+          if (!paletteIsOpen()) return
+          paletteRenderList()
+          if (paletteMode === 'modal') {
+            paletteSearchEl.value = paletteQuery
+            // On the mobile bottom sheet do NOT auto-open the keyboard (ux §1.8):
+            // it would eat half the sheet before the tools are even seen. The
+            // first tap on the search field raises it.
+            if (!phoneLayoutQuery.matches) paletteSearchEl.focus()
+          }
+        })
+      }
+
+      function closeToolPalette(options = {}) {
+        if (!paletteEl || paletteEl.hidden) {
+          return
+        }
+        const wasInline = paletteMode === 'inline'
+        paletteEl.hidden = true
+        palettePinnedTool = null
+        if (options.restoreComposer !== false && scoutChatInput && !scoutChatInput.disabled) {
+          // strip a leading lone "/" the slash-door left behind, then refocus
+          if (wasInline && /^\/[^\s]*$/.test(scoutChatInput.value)) {
+            scoutChatInput.value = ''
+            resizeScoutChatInput()
+          }
+          scoutChatInput.focus()
+        }
+      }
+
+      function paletteFuzzyRank(tool, tokens) {
+        if (!tokens.length) return 0
+        const hay = `${tool.name} ${tool.promise} ${tool.groupLabel || ''} ${tool.id}`.toLowerCase()
+        let score = 0
+        for (const token of tokens) {
+          const at = hay.indexOf(token)
+          if (at < 0) return -1
+          score += at === 0 ? 3 : hay.includes(` ${token}`) ? 2 : 1
+        }
+        return score
+      }
+
+      function paletteHighlight(text, tokens) {
+        let html = escapeHtml(String(text || ''))
+        for (const token of tokens) {
+          if (!token) continue
+          const re = new RegExp(`(${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig')
+          html = html.replace(re, '<span class="palette__match">$1</span>')
+        }
+        return html
+      }
+
+      function paletteMakeTile(tool, tokens) {
+        const tile = document.createElement('button')
+        tile.type = 'button'
+        tile.className = 'palette__tile'
+        tile.dataset.toolId = tool.id
+        const descId = `paletteTileDesc-${tool.id}`
+        tile.setAttribute('aria-describedby', descId)
+        tile.innerHTML = `
+          <span class="palette__well" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paletteGroupGlyph(tool.group)}</svg></span>
+          <span class="palette__tile-text">
+            <span class="palette__tile-name">${paletteHighlight(tool.name, tokens)}</span>
+            <span class="palette__tile-promise" id="${descId}">${paletteHighlight(tool.promise, tokens)}</span>
+          </span>`
+        tile.addEventListener('click', () => paletteSelectTool(tool, { run: false }))
+        tile.addEventListener('keydown', paletteHandleKey)
+        return tile
+      }
+
+      function paletteRenderList() {
+        if (!paletteBodyEl) return
+        paletteBodyEl.replaceChildren()
+        const tokens = String(paletteQuery || '').toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean)
+        const all = paletteAllTools()
+        // inline slash label: composer is the search field
+        if (paletteMode === 'inline') {
+          const label = bfEl('div', 'palette__group-label', paletteQuery ? `filtering · /${paletteQuery}` : 'type to filter, ↓ to pick')
+          paletteBodyEl.appendChild(label)
+        }
+        let shown = 0
+        const stagger = (tile) => { tile.style.setProperty('--palette-stagger', `${Math.min(shown, 8) * 40}ms`); shown += 1 }
+
+        if (!tokens.length) {
+          const recentIds = paletteRecentIds()
+          const recentTools = recentIds.map(paletteToolById).filter(Boolean)
+          if (recentTools.length) {
+            paletteBodyEl.appendChild(bfEl('div', 'palette__group-label', 'Recent'))
+            const grid = bfEl('div', 'palette__grid')
+            for (const tool of recentTools) { const tile = paletteMakeTile(tool, tokens); stagger(tile); grid.appendChild(tile) }
+            paletteBodyEl.appendChild(grid)
+          }
+          for (const group of (assistantToolsCache || [])) {
+            if (!group.tools?.length) continue
+            paletteBodyEl.appendChild(bfEl('div', 'palette__group-label', group.label))
+            const grid = bfEl('div', 'palette__grid')
+            for (const tool of group.tools) { const tile = paletteMakeTile({ ...tool, groupLabel: group.label }, tokens); stagger(tile); grid.appendChild(tile) }
+            paletteBodyEl.appendChild(grid)
+          }
+        } else {
+          const ranked = all.map(tool => ({ tool, rank: paletteFuzzyRank(tool, tokens) }))
+            .filter(entry => entry.rank >= 0)
+            .sort((a, b) => b.rank - a.rank)
+          if (!ranked.length) {
+            paletteRenderEmpty(paletteQuery)
+            return
+          }
+          const grid = bfEl('div', 'palette__grid')
+          for (const entry of ranked) { const tile = paletteMakeTile(entry.tool, tokens); stagger(tile); grid.appendChild(tile) }
+          paletteBodyEl.appendChild(grid)
+        }
+      }
+
+      // poetic empty state → one-tap conversational handoff to Scout (§1.4)
+      function paletteRenderEmpty(query) {
+        const wrap = bfEl('div', 'palette__empty')
+        wrap.appendChild(bfEl('div', 'palette__empty-line', 'No tool for that yet — describe it to Scout and she’ll improvise.'))
+        const hand = bfEl('button', 'palette__empty-hand', 'Ask Scout instead')
+        hand.type = 'button'
+        hand.addEventListener('click', () => {
+          const text = String(query || '').trim()
+          closeToolPalette({ restoreComposer: false })
+          promptScoutForWork('', text ? `${text} ` : '')
+        })
+        wrap.appendChild(hand)
+        paletteBodyEl.appendChild(wrap)
+      }
+
+      function paletteTiles() {
+        return paletteEl ? Array.from(paletteEl.querySelectorAll('.palette__tile')) : []
+      }
+
+      function paletteFocusTile(index) {
+        const tiles = paletteTiles()
+        if (!tiles.length) return
+        const clamped = (index + tiles.length) % tiles.length
+        tiles[clamped].focus()
+      }
+
+      function paletteHandleKey(event) {
+        if (!paletteIsOpen()) return
+        const tiles = paletteTiles()
+        const onSearch = event.target === paletteSearchEl
+        const current = tiles.indexOf(document.activeElement)
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          closeToolPalette()
+          return
+        }
+        // Tab is trapped by the sheet-level handler bound in ensurePaletteDom,
+        // which wraps within the live focusable set in every state.
+        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          paletteFocusTile(onSearch || current < 0 ? 0 : current + 1)
+          return
+        }
+        if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+          event.preventDefault()
+          paletteFocusTile(onSearch || current < 0 ? tiles.length - 1 : current - 1)
+          return
+        }
+        if (event.key === 'Enter') {
+          const tool = current >= 0 ? paletteToolById(tiles[current].dataset.toolId) : paletteToolById(tiles[0]?.dataset.toolId)
+          if (!tool) return
+          event.preventDefault()
+          // ⌘/Ctrl+↵ runs with defaults (skips the input step)
+          paletteSelectTool(tool, { run: event.metaKey || event.ctrlKey })
+        }
+      }
+
+      // Selecting a tool: form tools morph the sheet into an input card; a
+      // ⌘↵ "run" skips it. Conversational tools hand off to the composer.
+      function paletteSelectTool(tool, options) {
+        options = options || {}
+        if (!tool) return
+        if (tool.inputMode === 'conversational') {
+          paletteConversationalHandoff(tool)
+          return
+        }
+        if (options.run || !(tool.formFields || []).some(field => field.required)) {
+          // run with defaults: launch from whatever's typed (or just the promise)
+          const objective = paletteToolObjective(tool, {})
+          pushPaletteRecent(tool.id)
+          closeToolPalette({ restoreComposer: false })
+          runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority })
+          return
+        }
+        paletteShowForm(tool)
+      }
+
+      function paletteConversationalHandoff(tool) {
+        pushPaletteRecent(tool.id)
+        closeToolPalette({ restoreComposer: false })
+        const mode = ['research', 'design', 'grill', 'workflow'].includes(tool.mode) ? tool.mode : 'research'
+        // reuse the existing promptScoutForWork machinery (§1.5b, least new code)
+        promptScoutForWork(mode, scoutStarterText(mode))
+      }
+
+      function paletteToolObjective(tool, inputs) {
+        const parts = []
+        for (const field of tool.formFields || []) {
+          const value = String(inputs[field.key] || '').trim()
+          if (value) parts.push(`${field.label.replace(/\s*\(optional\)$/i, '')}: ${value}`)
+        }
+        return parts.length ? `${tool.name} — ${parts.join('; ')}` : tool.name
+      }
+
+      // the sheet morphs in place into a compact 1-3 field card (§1.5a)
+      function paletteShowForm(tool) {
+        palettePinnedTool = tool
+        if (paletteSearchRowEl) paletteSearchRowEl.hidden = true
+        if (paletteFooterEl) paletteFooterEl.hidden = true
+        paletteBodyEl.replaceChildren()
+        const form = bfEl('div', 'palette__form')
+        const head = bfEl('div', 'palette__form-head')
+        const back = bfEl('button', 'palette__back', '')
+        back.type = 'button'
+        back.setAttribute('aria-label', 'Back to tools')
+        back.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>'
+        back.addEventListener('click', () => {
+          palettePinnedTool = null
+          if (paletteSearchRowEl) paletteSearchRowEl.hidden = paletteMode === 'inline'
+          if (paletteFooterEl) paletteFooterEl.hidden = false
+          paletteRenderList()
+          if (paletteMode === 'modal') paletteSearchEl.focus()
+        })
+        const titles = bfEl('div', 'palette__form-titles')
+        titles.appendChild(bfEl('div', 'palette__form-title', tool.name))
+        titles.appendChild(bfEl('div', 'palette__form-promise', tool.promise))
+        head.append(back, titles)
+        form.appendChild(head)
+
+        const fieldEls = {}
+        for (const field of tool.formFields || []) {
+          const wrap = bfEl('div', 'palette__form-field')
+          wrap.appendChild(bfEl('label', 'palette__form-label', field.label))
+          const input = document.createElement(field.key === 'thesis' || field.key === 'underlying' || field.key === 'structure' ? 'textarea' : 'input')
+          input.className = 'palette__field'
+          input.placeholder = field.placeholder || ''
+          if (input.tagName === 'TEXTAREA') input.rows = 2
+          input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paletteRunForm(tool, fieldEls) }
+            if (event.key === 'Escape') { event.preventDefault(); closeToolPalette() }
+          })
+          fieldEls[field.key] = { input, required: field.required }
+          wrap.appendChild(input)
+          form.appendChild(wrap)
+        }
+
+        const actions = bfEl('div', 'palette__actions')
+        const cancel = bfEl('button', 'palette__cancel', 'Cancel')
+        cancel.type = 'button'
+        cancel.addEventListener('click', () => closeToolPalette())
+        const run = bfEl('button', 'palette__run', 'Run ▸')
+        run.type = 'button'
+        run.addEventListener('click', () => paletteRunForm(tool, fieldEls))
+        actions.append(cancel, run)
+        form.appendChild(actions)
+        paletteBodyEl.appendChild(form)
+        const first = Object.values(fieldEls)[0]
+        first?.input?.focus()
+      }
+
+      function paletteRunForm(tool, fieldEls) {
+        const inputs = {}
+        let missing = null
+        for (const [key, entry] of Object.entries(fieldEls)) {
+          const value = String(entry.input.value || '').trim()
+          inputs[key] = value
+          if (entry.required && !value && !missing) missing = entry.input
+        }
+        if (missing) {
+          missing.focus()
+          missing.style.borderColor = 'var(--warn)'
+          return
+        }
+        const objective = paletteToolObjective(tool, inputs)
+        pushPaletteRecent(tool.id)
+        closeToolPalette({ restoreComposer: false })
+        runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority })
+      }
+
+      // ---- the goalcard: the 10-step loop made legible (§1.6) ----------------
+      const goalStageDefs = [
+        ['identify_goal', 'goal'],
+        ['decompose', 'break down'],
+        ['assign', 'assign'],
+        ['coordinate', 'coordinate'],
+        ['execute_in_order', 'execute'],
+        ['review_against_goal', 'review'],
+        ['gate_before_shipping', 'gate'],
+        ['save_what_worked', 'save'],
+        ['report', 'report'],
+        ['verify_goal_completed', 'verify']
+      ]
+      const goalStageLabel = {
+        identify_goal: 'Identifying the goal', decompose: 'Breaking the work down',
+        assign: 'Assigning the right agents', coordinate: 'Coordinating the plan',
+        execute_in_order: 'Executing', review_against_goal: 'Reviewing against the goal',
+        gate_before_shipping: 'At the shipping gate', save_what_worked: 'Saving what worked',
+        report: 'Writing the report', verify_goal_completed: 'Verifying completion',
+        approval_required: 'Waiting for approval', needs_attention: 'Needs attention',
+        commit_push: 'Committing', verified: 'Verified'
+      }
+
+      function isGoalArtifact(artifact) {
+        const m = artifact?.metadata || {}
+        return Boolean(m.goalPlan) || Boolean(m.goalId) || String(m.mode || '') === 'goal' || Boolean(m.goalStatus)
+      }
+
+      function goalPlanFromArtifact(artifact) {
+        const raw = artifact?.metadata?.goalPlan
+        if (!raw) return null
+        try { return typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
+      }
+
+      function goalStageIndex(currentStage, pct) {
+        const idx = goalStageDefs.findIndex(([stage]) => stage === currentStage)
+        if (idx >= 0) return idx
+        if (currentStage === 'approval_required') return 6
+        if (currentStage === 'commit_push' || currentStage === 'verified') return goalStageDefs.length
+        const value = Number(pct)
+        if (Number.isFinite(value)) return Math.max(0, Math.min(goalStageDefs.length - 1, Math.floor(value / 100 * goalStageDefs.length)))
+        return 0
+      }
+
+      function goalCardStateFor(artifact, plan) {
+        const m = artifact?.metadata || {}
+        const status = String(m.status || '').toLowerCase()
+        const goalStatus = String(m.goalStatus || '').toLowerCase()
+        const stage = String(m.currentStage || '')
+        const gate = String(m.reviewGate || '').toLowerCase()
+        if (['complete', 'completed', 'published', 'verified', 'done'].includes(status) || ['complete', 'completed', 'verified', 'done'].includes(goalStatus) || stage === 'verified') return 'complete'
+        if (stage === 'approval_required' || gate === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
+        if (goalStatus === 'needs_attention' || stage === 'needs_attention' || gate === 'error' || ['error', 'failed'].includes(status)) return 'error'
+        return 'running'
+      }
+
+      function goalArtifactTitle(artifact) {
+        const m = artifact?.metadata || {}
+        return String(m.title || m.query || m.threadQuery || 'Goal').trim() || 'Goal'
+      }
+
+      function upsertGoalCardNode(artifact) {
+        if (!scoutChatThread || !isGoalArtifact(artifact)) {
+          return null
+        }
+        const id = String(artifact?.id || '').trim()
+        if (!id) return null
+        let card = scoutChatThread.querySelector(`.goalcard[data-goal-artifact-id="${selectorEscape(id)}"]`)
+        if (!card) {
+          card = renderGoalCard(artifact)
+          appendScoutChatNode(card)
+        }
+        updateGoalCard(card, artifact)
+        goalCardEnsureTicker()
+        return card
+      }
+
+      function renderGoalCard(artifact) {
+        const card = document.createElement('article')
+        card.className = 'goalcard'
+        card.dataset.goalArtifactId = String(artifact?.id || '')
+        card.dataset.state = 'running'
+        let rail = '<div class="goalcard__rail" role="progressbar" aria-label="goal progress">'
+        goalStageDefs.forEach(([stage, label], index) => {
+          if (index > 0) rail += `<span class="goalcard__conn" data-conn="${index - 1}"${index % 2 === 1 ? ' data-compressed="hide"' : ''}></span>`
+          rail += `<span class="goalcard__node" data-node="pending" data-stage="${stage}" data-index="${index}" title="${escapeHtml(label)}"${index % 2 === 1 ? ' data-compressed="hide"' : ''}></span>`
+        })
+        rail += '<span class="goalcard__rail-count" data-rail-count></span></div>'
+        card.innerHTML = `
+          <div class="goalcard__head">
+            <span class="goalcard__dot" aria-hidden="true"></span>
+            <span class="goalcard__title"></span>
+            <span class="goalcard__controls">
+              <span class="goalcard__menu">
+                <button class="goalcard__ctrl" type="button" data-goal-menu aria-label="More" aria-haspopup="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+                </button>
+                <div class="goalcard__menu-pop" hidden>
+                  <button class="goalcard__menu-item" type="button" data-goal-open>Open as full artifact</button>
+                  <button class="goalcard__menu-item goalcard__menu-item--danger" type="button" data-goal-hide>Hide this card</button>
+                </div>
+              </span>
+            </span>
+            <span class="goalcard__spark" data-goal-spark aria-hidden="true"></span>
+          </div>
+          ${rail}
+          <div class="goalcard__stage"><span class="goalcard__stage-line" data-goal-stageline></span></div>
+          <div class="goalcard__foot">
+            <button class="goalcard__disclosure" type="button" data-goal-disclosure aria-expanded="false"><span class="goalcard__disclosure-caret" aria-hidden="true">▸</span> show working</button>
+            <span class="goalcard__meta" data-goal-meta></span>
+            <span class="goalcard__pct" data-goal-pct></span>
+          </div>
+          <div class="goalcard__working" data-goal-working></div>
+          <div class="goalcard__terminal" data-goal-terminal hidden></div>`
+
+        // rail taps expand the compressed mobile rail
+        card.querySelector('.goalcard__rail')?.addEventListener('click', () => card.classList.toggle('is-rail-expanded'))
+        const disclosure = card.querySelector('[data-goal-disclosure]')
+        disclosure?.addEventListener('click', () => {
+          const open = card.classList.toggle('is-working-open')
+          disclosure.setAttribute('aria-expanded', String(open))
+          disclosure.lastChild.textContent = open ? ' hide working' : ' show working'
+        })
+        const menuBtn = card.querySelector('[data-goal-menu]')
+        const menuPop = card.querySelector('.goalcard__menu-pop')
+        menuBtn?.addEventListener('click', (event) => { event.stopPropagation(); menuPop.hidden = !menuPop.hidden })
+        document.addEventListener('click', () => { if (menuPop) menuPop.hidden = true })
+        card.querySelector('[data-goal-open]')?.addEventListener('click', () => { const entry = card.__goalArtifact; if (entry) openAgentArtifact(entry) })
+        card.querySelector('[data-goal-hide]')?.addEventListener('click', () => card.remove())
+        return card
+      }
+
+      function updateGoalCard(card, artifact) {
+        if (!card || !artifact) return
+        card.__goalArtifact = artifact
+        const m = artifact.metadata || {}
+        const plan = goalPlanFromArtifact(artifact)
+        const state = goalCardStateFor(artifact, plan)
+        const prevState = card.dataset.state
+        card.dataset.state = state
+        card.querySelector('.goalcard__title').textContent = goalArtifactTitle(artifact)
+
+        const currentStage = String(m.currentStage || '')
+        const pct = Number(m.progressPercent)
+        const currentIndex = state === 'complete' ? goalStageDefs.length : goalStageIndex(currentStage, pct)
+        const prevIndex = Number(card.dataset.stageIndex || -1)
+
+        const nodes = card.querySelectorAll('.goalcard__node')
+        const conns = card.querySelectorAll('.goalcard__conn')
+        nodes.forEach((node, index) => {
+          let nodeState = 'pending'
+          if (state === 'complete' || index < currentIndex) nodeState = 'done'
+          else if (index === currentIndex) nodeState = 'active'
+          node.dataset.node = nodeState
+          if (nodeState === 'done' && index >= prevIndex && prevIndex >= 0 && index < currentIndex) {
+            node.classList.remove('is-advancing'); void node.offsetWidth; node.classList.add('is-advancing')
+          }
+          if (nodeState === 'active' && state === 'error' && prevState !== 'error') {
+            node.classList.remove('is-shaking'); void node.offsetWidth; node.classList.add('is-shaking')
+          }
+        })
+        conns.forEach((conn, index) => { conn.dataset.filled = (state === 'complete' || index < currentIndex) ? '1' : '0' })
+        card.dataset.stageIndex = String(currentIndex)
+        const railCount = card.querySelector('[data-rail-count]')
+        if (railCount) railCount.textContent = `${Math.min(currentIndex + 1, goalStageDefs.length)}/${goalStageDefs.length}`
+
+        // live stage line with a cross-fade on change
+        const stageLine = card.querySelector('[data-goal-stageline]')
+        const running = plan?.subtasks?.find(task => task.status === 'running')
+        const detail = running?.title || plan?.report?.headline || ''
+        const label = goalStageLabel[currentStage] || goalStageLabel[Object.keys(goalStageLabel)[currentIndex]] || 'Working'
+        const nextText = detail ? `${label} · ${detail}` : label
+        if (stageLine && stageLine.textContent !== nextText) {
+          stageLine.classList.add('is-swapping')
+          setTimeout(() => { stageLine.textContent = nextText; stageLine.classList.remove('is-swapping') }, 120)
+        } else if (stageLine && !stageLine.textContent) {
+          stageLine.textContent = nextText
+        }
+
+        // meta + percent (tabular)
+        const subtasks = plan?.subtasks || []
+        const doneCount = subtasks.filter(task => task.status === 'complete').length
+        const metaBits = []
+        if (subtasks.length) metaBits.push(`${doneCount} of ${subtasks.length} subtasks`)
+        card.__goalStartedAt = card.__goalStartedAt || Date.parse(artifact.createdAt || m.createdAt || '') || Date.now()
+        metaBits.push(goalElapsedLabel(card.__goalStartedAt))
+        card.querySelector('[data-goal-meta]').textContent = metaBits.join(' · ')
+        const pctEl = card.querySelector('[data-goal-pct]')
+        pctEl.textContent = Number.isFinite(pct) ? `${Math.round(pct)}%` : (state === 'complete' ? '100%' : '')
+
+        // working log
+        const working = card.querySelector('[data-goal-working]')
+        working.replaceChildren()
+        for (const task of subtasks) {
+          const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : task.status === 'failed' ? '✕' : '○'
+          working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${task.title || task.id}`))
+        }
+        if (!subtasks.length) working.appendChild(bfEl('div', 'goalcard__work-line', 'planning the work…'))
+
+        goalCardRenderTerminal(card, artifact, plan, state, prevState)
+      }
+
+      function goalElapsedLabel(startedAt) {
+        const secs = Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+        const mm = String(Math.floor(secs / 60)).padStart(2, '0')
+        const ss = String(secs % 60).padStart(2, '0')
+        return `${mm}:${ss}`
+      }
+
+      function goalCardRenderTerminal(card, artifact, plan, state, prevState) {
+        const terminal = card.querySelector('[data-goal-terminal]')
+        terminal.replaceChildren()
+        if (state === 'running') { terminal.hidden = true; return }
+        terminal.hidden = false
+
+        if (state === 'complete') {
+          const report = plan?.report || {}
+          const summary = report.headline || report.changed || 'Done.'
+          terminal.appendChild(bfEl('div', 'goalcard__result', summary))
+          // the trust line: gate outcome + count of ASSUMED claims (design §1.7)
+          const trustBits = []
+          if (report.gateOutcome) trustBits.push(String(report.gateOutcome))
+          const assumed = Number(report.assumedClaimCount || 0)
+          if (assumed > 0) trustBits.push(`${assumed} claim${assumed === 1 ? '' : 's'} marked ASSUMED — verify before sending`)
+          if (trustBits.length) terminal.appendChild(bfEl('div', 'goalcard__trust', trustBits.join(' · ')))
+          const actions = bfEl('div', 'goalcard__terminal-actions')
+          const open = bfEl('button', 'goalcard__link goalcard__link--accent', '▸ open artifact')
+          open.type = 'button'
+          open.addEventListener('click', () => openAgentArtifact(artifact))
+          actions.appendChild(open)
+          terminal.appendChild(actions)
+          if (prevState !== 'complete' && !card.dataset.celebrated) {
+            card.dataset.celebrated = '1'
+            goalCardCelebrate(card)
+          }
+          return
+        }
+
+        if (state === 'gate') {
+          terminal.appendChild(bfEl('div', 'goalcard__result', 'Review before shipping'))
+          const reason = plan?.gate?.reason || artifact.metadata?.reviewReason
+          if (reason) terminal.appendChild(bfEl('div', 'goalcard__work-line', reason))
+          if (canApproveExternalWrites()) {
+            const actions = bfEl('div', 'goalcard__terminal-actions approval__actions')
+            const approve = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Approve')
+            approve.type = 'button'
+            approve.addEventListener('click', () => submitApproval(artifact.id, 'approve', ''))
+            const back = bfEl('button', 'approval__btn approval__btn--reject pressable', 'Send back')
+            back.type = 'button'
+            back.addEventListener('click', () => renderRejectInput(actions, artifact.id))
+            actions.append(approve, back)
+            terminal.appendChild(actions)
+          } else {
+            terminal.appendChild(bfEl('div', 'goalcard__wait', 'waiting on AJ'))
+          }
+          return
+        }
+
+        // error
+        const message = plan?.blocker || artifact.metadata?.blocker || 'The goal stopped before finishing.'
+        terminal.appendChild(bfEl('div', 'goalcard__result', message))
+        const actions = bfEl('div', 'goalcard__terminal-actions')
+        const retry = bfEl('button', 'goalcard__link', 'Retry from here')
+        retry.type = 'button'
+        retry.addEventListener('click', async () => { await postAuthJSON('/assistant/thread-followup', { artifactId: artifact.id, text: 'retry from where it failed' }); scheduleArtifactRefresh() })
+        const restart = bfEl('button', 'goalcard__link', 'Restart')
+        restart.type = 'button'
+        restart.addEventListener('click', () => runGoalPipeline({ objective: plan?.objective || goalArtifactTitle(artifact), toolTemplate: plan?.toolTemplate || '' }))
+        const ask = bfEl('button', 'goalcard__link', 'Ask Scout')
+        ask.type = 'button'
+        ask.addEventListener('click', () => promptScoutForWork('', `About the goal "${goalArtifactTitle(artifact)}": `))
+        actions.append(retry, restart, ask)
+        terminal.appendChild(actions)
+      }
+
+      // the single 5-7 particle ember spark, once per completed goal (§4 item 1)
+      function goalCardCelebrate(card) {
+        card.classList.remove('is-settling'); void card.offsetWidth; card.classList.add('is-settling')
+        const host = card.querySelector('[data-goal-spark]')
+        if (!host) return
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return
+        host.replaceChildren()
+        const count = 6
+        for (let i = 0; i < count; i += 1) {
+          const p = document.createElement('span')
+          const angle = (Math.PI * (0.15 + 0.7 * (i / (count - 1))))
+          p.style.setProperty('--spark-dx', `${Math.round(Math.cos(angle) * 18 - 9)}px`)
+          p.style.setProperty('--spark-dy', `${Math.round(-10 - Math.random() * 12)}px`)
+          host.appendChild(p)
+        }
+        setTimeout(() => host.replaceChildren(), 620)
+      }
+
+      // one shared 1s ticker keeps elapsed honest while any goal runs
+      let goalCardTicker = null
+      function goalCardEnsureTicker() {
+        if (goalCardTicker) return
+        goalCardTicker = setInterval(() => {
+          const running = scoutChatThread?.querySelectorAll('.goalcard[data-state="running"]') || []
+          if (!running.length) { clearInterval(goalCardTicker); goalCardTicker = null; return }
+          running.forEach(card => {
+            if (!card.__goalStartedAt) return
+            const meta = card.querySelector('[data-goal-meta]')
+            if (!meta) return
+            const parts = meta.textContent.split(' · ')
+            parts[parts.length - 1] = goalElapsedLabel(card.__goalStartedAt)
+            meta.textContent = parts.join(' · ')
+          })
+        }, 1000)
+      }
+
+      // refresh every mounted goalcard from the freshest artifactEntries
+      function syncGoalCards() {
+        if (!scoutChatThread) return
+        const cards = scoutChatThread.querySelectorAll('.goalcard[data-goal-artifact-id]')
+        cards.forEach(card => {
+          const id = card.dataset.goalArtifactId
+          const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === id)
+          if (entry) updateGoalCard(card, entry)
+        })
+        goalCardEnsureTicker()
+      }
+
+      // rich-consumer refresh: title-only events invalidate; we fetch by ref.
+      let goalCardSyncTimer = null
+      function goalCardScheduleSync() {
+        if (goalCardSyncTimer) return
+        goalCardSyncTimer = setTimeout(async () => {
+          goalCardSyncTimer = null
+          if (typeof loadArtifacts === 'function' && canUseArtifactLibrary()) { await loadArtifacts() }
+          syncGoalCards()
+        }, 500)
+      }
+
+      // ---- return-to-origin card (one component, three contexts) -------------
+      function renderReturnCard(artifact, options = {}) {
+        const card = document.createElement('article')
+        card.className = 'returncard' + (options.variant === 'dock' ? ' returncard--dock' : '')
+        const head = bfEl('div', 'returncard__head')
+        head.appendChild(bfEl('span', 'returncard__title', goalArtifactTitle(artifact)))
+        head.appendChild(bfEl('span', 'returncard__tag', 'via Scout'))
+        card.appendChild(head)
+        const plan = goalPlanFromArtifact(artifact)
+        const report = plan?.report || {}
+        const rows = [['Changed', report.changed], ['Headline', report.headline], ['Gap', report.gap], ['Next', report.next]]
+          .filter(([, value]) => String(value || '').trim())
+        if (rows.length) {
+          const body = bfEl('div', 'returncard__report')
+          for (const [key, value] of rows) {
+            const line = bfEl('div', 'returncard__report-line')
+            line.appendChild(bfEl('span', 'returncard__report-key', `${key}: `))
+            line.append(document.createTextNode(String(value)))
+            body.appendChild(line)
+          }
+          card.appendChild(body)
+        }
+        const open = bfEl('button', 'returncard__open', '▸ open artifact')
+        open.type = 'button'
+        open.addEventListener('click', () => openAgentArtifact(artifact))
+        card.appendChild(open)
+        return card
+      }
+
+      // when a completed goal's origin is the open private chat thread and no
+      // goalcard already shows it, drop a compact return card there.
+      function maybeRenderReturnCard(event) {
+        if (!scoutChatThread) return
+        const origin = String(event?.originSurface || '')
+        if (!origin.startsWith('chat:')) return
+        const threadId = origin.slice('chat:'.length)
+        if (threadId && activeScoutThreadId && threadId !== activeScoutThreadId) return
+        const id = String(event.ref || '')
+        if (!id || scoutChatThread.querySelector(`.goalcard[data-goal-artifact-id="${selectorEscape(id)}"]`)) return
+        const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === id)
+        if (!entry || !isGoalArtifact(entry)) return
+        appendScoutChatNode(renderReturnCard(entry))
+      }
+
+      // ---- wire the three doors ---------------------------------------------
+      // door 1: the + Tools button
+      scoutChatToolsBtn?.addEventListener('click', () => openToolPalette('button'))
+      // door 2: "/" as the first char of an empty composer (siblings with the
+      // /goal parser: a "/goal " command closes the palette and sends normally).
+      scoutChatInput?.addEventListener('input', () => {
+        const value = scoutChatInput.value
+        const isGoalDoor = /^\/goal(\s|$)/i.test(value)
+        const isSlashToken = /^\/[^\s]*$/.test(value) && !isGoalDoor
+        if (isSlashToken) {
+          if (!paletteIsOpen()) openToolPalette('slash', value.slice(1))
+          else { paletteQuery = value.slice(1); palettePinnedTool = null; paletteRenderList() }
+        } else if (paletteIsOpen() && paletteMode === 'inline') {
+          closeToolPalette({ restoreComposer: false })
+        }
+      })
+      // in inline mode the composer keeps focus; ↓ hops into the tiles, ↵ runs
+      // the top match, Esc closes — all before the normal send handler sees it.
+      scoutChatInput?.addEventListener('keydown', (event) => {
+        if (!paletteIsOpen() || paletteMode !== 'inline') return
+        if (event.key === 'Escape') { event.preventDefault(); closeToolPalette(); return }
+        if (event.key === 'ArrowDown') { event.preventDefault(); paletteFocusTile(0); return }
+        if (event.key === 'Enter') {
+          const top = paletteTiles()[0]
+          if (top) { event.preventDefault(); event.stopPropagation(); paletteSelectTool(paletteToolById(top.dataset.toolId), { run: false }) }
+        }
+      }, true)
+      // door 3 (voice) lands via initiate_goal → the same artifact stream, which
+      // the osEvents consumer below renders as a goalcard.
+
+      // rich consumer: progress/completion events drive the stage rail + return
+      // cards. No second board refetch — osEventsRoute already re-reads the board
+      // on artifact_completed.
+      osEventHandlers.push((event) => {
+        if (!event) return
+        if (event.kind === 'artifact_progress' || event.kind === 'artifact_completed') {
+          goalCardScheduleSync()
+          if (event.kind === 'artifact_completed') maybeRenderReturnCard(event)
+        }
+      })
 
       function resizeScoutChatInput() {
         // Grow with content up to ~4 lines; settle back to the CSS min-height
@@ -36896,6 +38936,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop())
         }
+        // The look pipeline's raw camera track lives outside localStream (it is the
+        // pipeline input), so stop it explicitly before tearing the pipeline down.
+        if (localVideoLookRawTrack) {
+          try { localVideoLookRawTrack.stop() } catch (_) {}
+        }
+        teardownVideoLookPipeline()
         cleanupAudioProcessor(localAudioProcessor, { stopSource: true })
         localAudioProcessor = undefined
         localAudioSourceTrack = undefined

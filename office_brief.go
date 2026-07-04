@@ -250,7 +250,7 @@ func (app *kanbanBoardApp) morningBriefPayload(viewer *userAccount) map[string]a
 			"items": completed,
 			"count": len(completed),
 		},
-		"board":         board,
+		"board":          board,
 		"unreadChannels": unread,
 		"quarantine": map[string]any{
 			"entries":   quarantine,

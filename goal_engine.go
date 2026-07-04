@@ -468,6 +468,14 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 			metadata[key] = value
 		}
 	}
+	// originSurface is the fine-grained launch surface ("chat:<threadId>",
+	// "channel:<id>", …) the return-to-origin card routes on. It is NOT in
+	// agentThreadOriginMetadataKeys (those are the room/channel delivery keys), so
+	// stamp it explicitly or the push event falls back to the coarse originKind
+	// and the Wave 11 return card can never match its origin thread.
+	if surface := strings.TrimSpace(spec.Origin["originSurface"]); surface != "" {
+		metadata["originSurface"] = surface
+	}
 
 	// Base mode "workflow" so createOSArtifactWithMetadata actually persists the
 	// artifact (it no-ops on unknown modes) and stamps the goal-workflow

@@ -235,7 +235,14 @@ Risks carried forward: Wave 13 rides the v8 video sub-record ({look, lookIntensi
 
 ## Wave 10
 
-Status: `pending`
+Status: `completed` (commits 5c9856f + 6fe017a, reviewed PASS after 1 fix round)
+Files: tool_registry.go (471), tool_prompts.go (635), evals_test.go (496), goal_engine.go (+~160), agent_runner_anthropic.go, agent_thread_runner.go, main.go (+/assistant/tools), kanban.go (+2).
+Review fix (the program's most important): A++ prompts reached only decompose/review/gate, never GENERATION — goalDeliverableSubtaskID now stamps ToolTemplate on the deliverable subtask; both runner paths hand the writer the full tool body. Flywheel wired incl. the decision-log seam (report() emits optional decision → appendDecision + package link); scope note: logs the goal's settled decision, not mid-run subtask decisions.
+Deviations (reviewer-accepted): package_binder_v1 contract id; memo maps to stage `assembled` (no portfolio stage exists).
+Risks carried forward: Wave 11 renders GET /assistant/tools directly (pre-ordered); Wave 14 Deal Room = package_assembly + external gate AT THE SHARE SURFACE (the tool itself is deliberately not gated); investor_update_memo already forces the approval gate.
+
+<details><summary>original scope</summary>
+
 
 ### Scope Checklist
 - [ ] 12-entry tool registry (single source for palette/parser/voice/engine)
@@ -243,6 +250,8 @@ Status: `pending`
 - [ ] 12 tool bodies + rubrics + kill conditions (existing contracts preserved)
 - [ ] Golden evals ×3 + checklist evals ×9 (ship gate)
 - [ ] Flywheel wiring (attach-offer, decision-log, context-index, readiness delta)
+
+</details>
 
 ---
 

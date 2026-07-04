@@ -24,6 +24,7 @@ import (
 //     the "work finished" arrival hook);
 //   - rich consumers treat the event as an invalidation signal and fetch-by-ref
 //     on receipt (board re-read, package rail re-read).
+//
 // A missed event self-heals because the same fetch runs on the next snapshot
 // read. Consumers are idempotent by (kind, ref, at). The per-surface polling
 // paths stay in place as the fallback until the two-session acceptance test
@@ -220,7 +221,7 @@ func emitOSArtifactEvent(entry meetingMemoryEntry) {
 		Kind:          kind,
 		Ref:           entry.ID,
 		Title:         firstNonEmptyString(strings.TrimSpace(entry.Metadata["title"]), assistantToolLabel(mode)+" artifact"),
-		OriginSurface: firstNonEmptyString(strings.TrimSpace(entry.Metadata["originKind"]), "artifacts"),
+		OriginSurface: firstNonEmptyString(strings.TrimSpace(entry.Metadata["originSurface"]), strings.TrimSpace(entry.Metadata["originKind"]), "artifacts"),
 		Actor:         firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"], scoutParticipantName),
 	})
 
