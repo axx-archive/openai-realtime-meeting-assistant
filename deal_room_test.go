@@ -262,6 +262,39 @@ func TestDealRoomListScoping(t *testing.T) {
 	}
 }
 
+// TestDealRoomListNoCrossUserLeak proves the existence-leak concern from the
+// showcase is closed: a non-admin's /list payload contains ONLY their own
+// requests — never another member's room, not even its id.
+func TestDealRoomListNoCrossUserLeak(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	tim := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	caitlyn := loginAs(t, "caitlyn@shareability.com", "B0NFIRE!")
+
+	packageID, _ := seedPackageWithBinder(t, "# Aurora\n\nBody.")
+
+	// caitlyn opens a request; tim (a different non-admin) must never see it.
+	caitRec := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/request", fmt.Sprintf(`{"packageId":%q}`, packageID), caitlyn)
+	if caitRec.Code != http.StatusOK {
+		t.Fatalf("caitlyn request status=%d body=%s", caitRec.Code, caitRec.Body.String())
+	}
+	caitRoomID := fmt.Sprint(decodeJSON(t, caitRec)["id"])
+
+	timList := dealRoomRequest(t, http.MethodGet, "/assistant/deal-room/list", "", tim)
+	timPayload := decodeJSON(t, timList)
+	timRooms, _ := timPayload["rooms"].([]any)
+	if len(timRooms) != 0 {
+		t.Fatalf("tim sees %d rooms, want 0 (no cross-user leak)", len(timRooms))
+	}
+	// Belt-and-braces: caitlyn's room id must not appear anywhere in tim's body.
+	if strings.Contains(timList.Body.String(), caitRoomID) {
+		t.Fatalf("tim's /list leaked caitlyn's room id %q: %s", caitRoomID, timList.Body.String())
+	}
+}
+
 func TestDealRoomUnknownToken404(t *testing.T) {
 	dealRoomTestEnv(t)
 	recorder := dealRoomRequest(t, http.MethodGet, "/deal-room/this-token-does-not-exist", "", nil)

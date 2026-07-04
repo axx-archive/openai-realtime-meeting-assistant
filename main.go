@@ -1006,6 +1006,7 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		Objective     string `json:"objective"`
 		Package       string `json:"package"`
+		PackageID     string `json:"packageId"`
 		ToolTemplate  string `json:"toolTemplate"`
 		AuthorityHint string `json:"authorityHint"`
 		OriginSurface string `json:"originSurface"`
@@ -1030,11 +1031,19 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 		origin["originSurface"] = surface
 	}
 
+	// The palette Run form and the voice initiate_goal path both send "package";
+	// accept "packageId" as an alias so the binder/library doors can reuse the
+	// same door without a second field name.
+	packageID := strings.TrimSpace(payload.Package)
+	if packageID == "" {
+		packageID = strings.TrimSpace(payload.PackageID)
+	}
+
 	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
 		Objective:    payload.Objective,
 		CreatedBy:    user.Email,
 		Authority:    authority,
-		PackageID:    strings.TrimSpace(payload.Package),
+		PackageID:    packageID,
 		ToolTemplate: strings.TrimSpace(payload.ToolTemplate),
 		Origin:       origin,
 	})

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#F5F5F7">
     <meta name="application-name" content="Bonfire">
     <meta name="apple-mobile-web-app-title" content="Bonfire">
-    <title>Bonfire</title>
+    <title>BonfireOS</title>
     <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
     <link rel="manifest" href="/public/manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15979,6 +15979,9 @@
         transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
       .palette__field:focus { outline: none; border-color: var(--line-2); box-shadow: var(--glow-accent); }
+      /* Native affordance keeps the caret in token-free browser chrome; the
+         44px floor keeps the tap target honest on the mobile bottom sheet. */
+      .palette__pkg-select { min-height: 44px; cursor: pointer; }
       .palette__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
       .palette__cancel {
         border: 1px solid var(--line-1);
@@ -31222,6 +31225,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         ensurePaletteDom()
+        // Warm the packages list so the form's package picker (and the quick-run
+        // default) can link a launched goal to the open/most-recent venture.
+        loadPackages().catch(() => { /* the picker still offers standalone */ })
         paletteMode = source === 'slash' ? 'inline' : 'modal'
         paletteQuery = String(seed || '')
         palettePinnedTool = null
@@ -31410,11 +31416,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         if (options.run || !(tool.formFields || []).some(field => field.required)) {
-          // run with defaults: launch from whatever's typed (or just the promise)
+          // run with defaults: launch from whatever's typed (or just the promise),
+          // linked to the open/most-recent package so a quick ⌘↵ still lands in
+          // the venture binder instead of stranding the artifacts standalone.
           const objective = paletteToolObjective(tool, {})
           pushPaletteRecent(tool.id)
           closeToolPalette({ restoreComposer: false })
-          runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority })
+          runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority, package: paletteDefaultPackageId() })
           return
         }
         paletteShowForm(tool)
@@ -31435,6 +31443,58 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (value) parts.push(`${field.label.replace(/\s*\(optional\)$/i, '')}: ${value}`)
         }
         return parts.length ? `${tool.name} — ${parts.join('; ')}` : tool.name
+      }
+
+      // Which package a palette-launched goal links to by default: the one the
+      // user has expanded in the packages pane wins, else the most-recent (the
+      // packages list is newest-first). Empty string means "standalone".
+      function paletteDefaultPackageId() {
+        if (expandedPackageId && packagesData.some(record => String(record?.id || '') === expandedPackageId)) {
+          return expandedPackageId
+        }
+        return String(packagesData[0]?.id || '')
+      }
+
+      // Rebuild the picker's <option> set from the current packages list,
+      // preserving the caller's selection (or applying the default). Called once
+      // synchronously and again when a background loadPackages() resolves.
+      function populatePalettePackageOptions(select, preferredId) {
+        const want = preferredId != null ? String(preferredId) : select.value
+        select.replaceChildren()
+        const standalone = document.createElement('option')
+        standalone.value = ''
+        standalone.textContent = packagesData.length ? 'No package (standalone)' : 'No packages yet — runs standalone'
+        select.appendChild(standalone)
+        for (const record of packagesData) {
+          const id = String(record?.id || '')
+          if (!id) continue
+          const option = document.createElement('option')
+          option.value = id
+          const stage = String(record?.stage || '').trim()
+          option.textContent = stage
+            ? `${String(record?.name || 'untitled package')} · ${stage}`
+            : String(record?.name || 'untitled package')
+          select.appendChild(option)
+        }
+        select.value = packagesData.some(record => String(record?.id || '') === want) ? want : ''
+      }
+
+      // The package picker row for the form: a native <select> (mobile-usable,
+      // 44px tall) defaulting to the open/most-recent package. Best-effort
+      // loadPackages() backfills options if the pane was never opened.
+      function paletteBuildPackageField() {
+        const wrap = bfEl('div', 'palette__form-field')
+        wrap.appendChild(bfEl('label', 'palette__form-label', 'venture package'))
+        const select = document.createElement('select')
+        select.className = 'palette__field palette__pkg-select'
+        select.setAttribute('aria-label', 'Venture package for this goal')
+        populatePalettePackageOptions(select, paletteDefaultPackageId())
+        wrap.appendChild(select)
+        // Backfill if the packages list has never loaded in this session.
+        loadPackages().then(() => {
+          if (select.isConnected) populatePalettePackageOptions(select, paletteDefaultPackageId())
+        }).catch(() => { /* the picker still offers standalone */ })
+        return { wrap, select }
       }
 
       // the sheet morphs in place into a compact 1-3 field card (§1.5a)
@@ -31463,6 +31523,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         form.appendChild(head)
 
         const fieldEls = {}
+        const pkgField = paletteBuildPackageField()
         for (const field of tool.formFields || []) {
           const wrap = bfEl('div', 'palette__form-field')
           wrap.appendChild(bfEl('label', 'palette__form-label', field.label))
@@ -31471,13 +31532,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           input.placeholder = field.placeholder || ''
           if (input.tagName === 'TEXTAREA') input.rows = 2
           input.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paletteRunForm(tool, fieldEls) }
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paletteRunForm(tool, fieldEls, pkgField.select) }
             if (event.key === 'Escape') { event.preventDefault(); closeToolPalette() }
           })
           fieldEls[field.key] = { input, required: field.required }
           wrap.appendChild(input)
           form.appendChild(wrap)
         }
+        // The package picker sits last, after the tool's own fields.
+        form.appendChild(pkgField.wrap)
 
         const actions = bfEl('div', 'palette__actions')
         const cancel = bfEl('button', 'palette__cancel', 'Cancel')
@@ -31485,7 +31548,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         cancel.addEventListener('click', () => closeToolPalette())
         const run = bfEl('button', 'palette__run', 'Run ▸')
         run.type = 'button'
-        run.addEventListener('click', () => paletteRunForm(tool, fieldEls))
+        run.addEventListener('click', () => paletteRunForm(tool, fieldEls, pkgField.select))
         actions.append(cancel, run)
         form.appendChild(actions)
         paletteBodyEl.appendChild(form)
@@ -31493,7 +31556,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         first?.input?.focus()
       }
 
-      function paletteRunForm(tool, fieldEls) {
+      function paletteRunForm(tool, fieldEls, packageSelect) {
         const inputs = {}
         let missing = null
         for (const [key, entry] of Object.entries(fieldEls)) {
@@ -31507,9 +31570,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const objective = paletteToolObjective(tool, inputs)
+        const pkg = packageSelect ? String(packageSelect.value || '') : paletteDefaultPackageId()
         pushPaletteRecent(tool.id)
         closeToolPalette({ restoreComposer: false })
-        runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority })
+        runGoalPipeline({ objective, toolTemplate: tool.id, authorityHint: tool.authority, package: pkg })
       }
 
       // ---- the goalcard: the 10-step loop made legible (§1.6) ----------------
@@ -31681,7 +31745,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // live stage line with a cross-fade on change
         const stageLine = card.querySelector('[data-goal-stageline]')
         const running = plan?.subtasks?.find(task => task.status === 'running')
-        const detail = running?.title || plan?.report?.headline || ''
+        // While the engine revises a weak subtask, name it ("revising (attempt N
+        // of 2)") instead of the subtask title — the monotonic-percent fix stops
+        // the bar oscillating; this closes the loop by saying why it paused.
+        const revisionNote = String(m.goalRevisionNote || '').trim()
+        const detail = (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
         const label = goalStageLabel[currentStage] || goalStageLabel[Object.keys(goalStageLabel)[currentIndex]] || 'Working'
         const nextText = detail ? `${label} · ${detail}` : label
         if (stageLine && stageLine.textContent !== nextText) {
@@ -31770,10 +31838,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
-        // error
-        const message = plan?.blocker || artifact.metadata?.blocker || 'The goal stopped before finishing.'
+        // error / needs_attention
+        const m = artifact.metadata || {}
+        const message = plan?.blocker || m.blocker || 'The goal stopped before finishing.'
         terminal.appendChild(bfEl('div', 'goalcard__result', message))
+        // Salvage last mile: when the run fell short but the engine saved its best
+        // draft, that 8/10 work must be openable from the card, not just attached
+        // to the package. An honest one-liner names the gap it missed.
+        const deliverableId = String(m.deliverableArtifactId || '')
+        const gap = String(m.goalGap || '').trim()
         const actions = bfEl('div', 'goalcard__terminal-actions')
+        if (deliverableId) {
+          terminal.appendChild(bfEl('div', 'goalcard__trust', gap ? `draft saved · missed: ${gap}` : 'draft saved'))
+          const openDraft = bfEl('button', 'goalcard__link goalcard__link--accent', '▸ open draft')
+          openDraft.type = 'button'
+          openDraft.addEventListener('click', () => openAgentArtifact({ id: deliverableId }))
+          actions.appendChild(openDraft)
+        }
         const retry = bfEl('button', 'goalcard__link', 'Retry from here')
         retry.type = 'button'
         retry.addEventListener('click', async () => { await postAuthJSON('/assistant/thread-followup', { artifactId: artifact.id, text: 'retry from where it failed' }); scheduleArtifactRefresh() })
