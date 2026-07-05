@@ -92,18 +92,18 @@ func TestNewAgentJobDeliverableBudget(t *testing.T) {
 
 	deliverable := app.newAgentJob(scoutAgentThread{ID: "t2", Mode: "design", Query: "write the one-pager",
 		Artifact: meetingMemoryEntry{ID: "a2", Metadata: map[string]string{"goalDeliverable": "true"}}})
-	if deliverable.MaxTokens != 8192 {
-		t.Fatalf("deliverable maxTokens=%d, want default 8192", deliverable.MaxTokens)
+	if deliverable.MaxTokens != 32768 {
+		t.Fatalf("deliverable maxTokens=%d, want default 32768", deliverable.MaxTokens)
 	}
-	if deliverable.Effort != "medium" {
-		t.Fatalf("deliverable effort=%q, want default medium", deliverable.Effort)
+	if deliverable.Effort != "high" {
+		t.Fatalf("deliverable effort=%q, want default high", deliverable.Effort)
 	}
 
 	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "12000")
-	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "high")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "medium")
 	overridden := app.newAgentJob(scoutAgentThread{ID: "t3", Mode: "design", Query: "y",
 		Artifact: meetingMemoryEntry{ID: "a3", Metadata: map[string]string{"goalDeliverable": "true"}}})
-	if overridden.MaxTokens != 12000 || overridden.Effort != "high" {
+	if overridden.MaxTokens != 12000 || overridden.Effort != "medium" {
 		t.Fatalf("env override not honored: max=%d effort=%q", overridden.MaxTokens, overridden.Effort)
 	}
 }

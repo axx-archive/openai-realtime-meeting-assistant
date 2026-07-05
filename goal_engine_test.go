@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -226,6 +228,178 @@ func TestGoalEngineRespectsConcurrencyCap(t *testing.T) {
 	plan, _ := decodeGoalPlan(mustArtifact(t, app, thread.Artifact.ID).Metadata["goalPlan"])
 	if goalCountStatus(&plan, subtaskRunning) != 2 || goalCountStatus(&plan, subtaskReady) != 2 {
 		t.Fatalf("plan status counts wrong: running=%d ready=%d", goalCountStatus(&plan, subtaskRunning), goalCountStatus(&plan, subtaskReady))
+	}
+}
+
+// --- Per-user in-flight goal cap ----------------------------------------------
+
+func TestGoalLaunchEnforcesPerUserInFlightCap(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+
+	// Fill the default cap of 2 (startGoalThreadAsync is stubbed to a no-op, so
+	// both goals park in a non-terminal stage). The second launch uses a
+	// differently-cased email — same account, same bucket.
+	first, err := app.launchGoalThread(goalLaunchSpec{Objective: "Package the Aurora IP", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("first launch: %v", err)
+	}
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Draft the Vega one-pager", CreatedBy: "AJ@Shareability.com"}); err != nil {
+		t.Fatalf("second launch: %v", err)
+	}
+
+	// The third launch breaches the cap with the typed refusal naming both
+	// in-flight goals (id+title) in a speakable sentence.
+	_, err = app.launchGoalThread(goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"})
+	var capErr *errGoalUserCapExceeded
+	if !errors.As(err, &capErr) {
+		t.Fatalf("third launch err=%v, want errGoalUserCapExceeded", err)
+	}
+	if capErr.Cap != 2 || len(capErr.Goals) != 2 {
+		t.Fatalf("cap breach: cap=%d goals=%+v, want cap 2 naming 2 goals", capErr.Cap, capErr.Goals)
+	}
+	for _, goal := range capErr.Goals {
+		if goal.ID == "" || goal.Title == "" {
+			t.Fatalf("cap breach ref missing id/title: %+v", capErr.Goals)
+		}
+	}
+	if msg := capErr.Error(); !strings.Contains(msg, "Package the Aurora IP") || !strings.Contains(msg, "2 goals in flight") {
+		t.Fatalf("speakable error does not name the goals: %q", msg)
+	}
+
+	// A different account has its own bucket — never blocked by someone else's.
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Independent objective", CreatedBy: "sam@shareability.com"}); err != nil {
+		t.Fatalf("different user hit someone else's cap: %v", err)
+	}
+
+	// Driving the first goal to a terminal stage frees the slot.
+	app.runGoalThread(first.Artifact.ID)
+	waitForGoalStage(t, app, first.Artifact.ID, goalStateVerified)
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Build the Nova deck", CreatedBy: "aj@shareability.com"}); err != nil {
+		t.Fatalf("launch after a goal completed still capped: %v", err)
+	}
+}
+
+// The cap is check-then-append over the persisted store, so it must hold under
+// concurrency: cap+2 simultaneous launches from one account (differently-cased
+// emails — same bucket) must admit at most cap goals. Without the per-email
+// launch lock every goroutine observes the pre-launch count and all pass.
+func TestGoalLaunchUserCapHoldsUnderConcurrentLaunches(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+
+	const capLimit = 2
+	launches := capLimit + 2
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	succeeded := 0
+	capRefusals := 0
+	for i := 0; i < launches; i++ {
+		wg.Add(1)
+		email := "aj@shareability.com"
+		if i%2 == 1 {
+			email = "AJ@Shareability.com"
+		}
+		go func(index int, email string) {
+			defer wg.Done()
+			_, err := app.launchGoalThread(goalLaunchSpec{Objective: fmt.Sprintf("Concurrent objective %d", index), CreatedBy: email})
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				succeeded++
+			default:
+				var capErr *errGoalUserCapExceeded
+				if !errors.As(err, &capErr) {
+					t.Errorf("launch %d err=%v, want nil or errGoalUserCapExceeded", index, err)
+					return
+				}
+				capRefusals++
+			}
+		}(i, email)
+	}
+	wg.Wait()
+
+	if succeeded != capLimit || capRefusals != launches-capLimit {
+		t.Fatalf("succeeded=%d refused=%d, want exactly %d launches admitted and %d cap refusals", succeeded, capRefusals, capLimit, launches-capLimit)
+	}
+	if inFlight := app.inFlightGoalsForUser("aj@shareability.com"); len(inFlight) != capLimit {
+		t.Fatalf("in-flight goals=%d, want %d — the persisted store must agree with the admissions", len(inFlight), capLimit)
+	}
+}
+
+func TestGoalLaunchUserCapEnvOverride(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	t.Setenv("BONFIRE_GOAL_USER_CAP", "1")
+
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "Only goal allowed", CreatedBy: "aj@shareability.com"}); err != nil {
+		t.Fatalf("first launch under cap=1: %v", err)
+	}
+	_, err := app.launchGoalThread(goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"})
+	var capErr *errGoalUserCapExceeded
+	if !errors.As(err, &capErr) {
+		t.Fatalf("second launch err=%v, want errGoalUserCapExceeded under BONFIRE_GOAL_USER_CAP=1", err)
+	}
+	if capErr.Cap != 1 || len(capErr.Goals) != 1 {
+		t.Fatalf("cap breach: cap=%d goals=%+v, want cap 1 naming 1 goal", capErr.Cap, capErr.Goals)
+	}
+
+	// Raising the cap admits the same launch immediately.
+	t.Setenv("BONFIRE_GOAL_USER_CAP", "3")
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "One too many", CreatedBy: "aj@shareability.com"}); err != nil {
+		t.Fatalf("launch under raised cap: %v", err)
+	}
+}
+
+func TestGoalHTTPEndpointReturns429WhenUserCapExceeded(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	installFakeResponder(t, goalResponderRoutes{})
+	t.Setenv("BONFIRE_GOAL_USER_CAP", "1")
+
+	post := func(objective string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"objective": objective})
+		req := httptest.NewRequest(http.MethodPost, "/assistant/goal", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://localhost")
+		req.Host = "localhost"
+		for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		assistantGoalHandler(rec, req)
+		return rec
+	}
+
+	if rec := post("Package the Aurora IP"); rec.Code != http.StatusAccepted {
+		t.Fatalf("first launch status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusAccepted)
+	}
+	rec := post("One goal too many")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusTooManyRequests)
+	}
+	var payload struct {
+		OK       bool              `json:"ok"`
+		Error    string            `json:"error"`
+		Cap      int               `json:"cap"`
+		InFlight []goalInFlightRef `json:"inFlight"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode 429 body: %v (%s)", err, rec.Body.String())
+	}
+	if payload.OK || payload.Cap != 1 || len(payload.InFlight) != 1 {
+		t.Fatalf("429 body=%+v, want ok=false cap=1 one in-flight goal", payload)
+	}
+	if payload.InFlight[0].ID == "" || !strings.Contains(payload.InFlight[0].Title, "Package the Aurora IP") {
+		t.Fatalf("429 in-flight ref missing id/title: %+v", payload.InFlight)
+	}
+	if !strings.Contains(payload.Error, "Package the Aurora IP") {
+		t.Fatalf("429 error does not name the blocking goal: %q", payload.Error)
 	}
 }
 
@@ -892,6 +1066,171 @@ func TestGoalEngineRequeuePreservesVerifiedSibling(t *testing.T) {
 	st2 := plan.subtaskByID("st-2")
 	if st2 == nil || st2.Attempts != 2 || st2.Revisions != 1 {
 		t.Fatalf("failed subtask state wrong: attempts=%d revisions=%d", st2.Attempts, st2.Revisions)
+	}
+}
+
+// --- Reviewer/gate read the FULL artifact body --------------------------------
+
+// The per-subtask reviewer and the ship gate judge the artifact itself, not the
+// 220-char compactAssistantLine thumbnail. A modest body arrives whole; a
+// runaway body arrives head+tail with the truncation announced in the prompt.
+func TestGoalReviewAndGateReadFullArtifactBody(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	// Alpha's body is well past the 220-char thumbnail cut but under the review
+	// cap; Beta's blows past the cap so the head/tail truncation must kick in.
+	alphaBody := strings.Repeat("alpha evidence paragraph. ", 20) + "ALPHA-TAIL-MARKER"
+	if len(alphaBody) <= 220 || len(alphaBody) > goalReviewArtifactCap {
+		t.Fatalf("alpha body length %d must exceed the thumbnail cut and stay under the cap", len(alphaBody))
+	}
+	filler := strings.Repeat("b", goalReviewArtifactCap/2)
+	betaBody := "BETA-HEAD-MARKER " + filler + " BETA-MIDDLE-MARKER " + filler + " BETA-TAIL-MARKER"
+
+	var mu sync.Mutex
+	reviewPrompts := map[string]string{}
+	gatePrompt := ""
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		userText := decodeAnthropicBlock(request.Messages[0].Content[0]).Text
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[
+				{"id":"st-1","title":"Alpha","mode":"research","authority":"read_only","dependsOn":[]},
+				{"id":"st-2","title":"Beta","mode":"research","authority":"read_only","dependsOn":[]}
+			]}`
+		case strings.Contains(system, "reviewer"):
+			mu.Lock()
+			switch {
+			case strings.Contains(userText, "Subtask: Alpha"):
+				reviewPrompts["st-1"] = userText
+			case strings.Contains(userText, "Subtask: Beta"):
+				reviewPrompts["st-2"] = userText
+			}
+			mu.Unlock()
+			text = `{"verdict":"pass","score":9,"reasons":"meets the subtask"}`
+		case strings.Contains(system, "ship gate"):
+			mu.Lock()
+			gatePrompt = userText
+			mu.Unlock()
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"safe"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+
+	// A child runner that writes a REAL per-subtask artifact body, mirroring
+	// installFakeChildRunner but with controlled text.
+	bodies := map[string]string{"st-1": alphaBody, "st-2": betaBody}
+	originalChild := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
+		if parent == "" {
+			return
+		}
+		go func() {
+			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", bodies[sub], "tester", map[string]string{
+				"threadStatus": "complete",
+				"status":       "complete",
+			})
+			if err != nil {
+				return
+			}
+			app.foldGoalChildCompletion(parent, sub, child, "complete")
+		}()
+	}
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Two evidence probes", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Alpha's review saw the whole body, including text the old thumbnail cut.
+	alphaReview := reviewPrompts["st-1"]
+	if !strings.Contains(alphaReview, "ALPHA-TAIL-MARKER") {
+		t.Fatalf("review prompt lost the artifact tail past the 220-char thumbnail:\n%s", alphaReview)
+	}
+	if !strings.Contains(alphaReview, "Produced artifact:\n"+alphaBody) {
+		t.Fatal("review prompt does not carry Alpha's full artifact body verbatim")
+	}
+	// Beta's review saw head and tail with the truncation announced — never the
+	// silently missing middle.
+	betaReview := reviewPrompts["st-2"]
+	if !strings.Contains(betaReview, "BETA-HEAD-MARKER") || !strings.Contains(betaReview, "BETA-TAIL-MARKER") {
+		t.Fatal("truncated review prompt lost the artifact head or tail")
+	}
+	if strings.Contains(betaReview, "BETA-MIDDLE-MARKER") {
+		t.Fatal("oversized artifact was not truncated for review")
+	}
+	if !strings.Contains(betaReview, "artifact truncated for review") {
+		t.Fatal("truncation is not announced inside the review prompt")
+	}
+	// The ship gate judged artifact bodies too, labelled per subtask.
+	if !strings.Contains(gatePrompt, "Produced artifacts") || !strings.Contains(gatePrompt, "### st-1 — Alpha") {
+		t.Fatalf("gate prompt has no per-subtask artifact section:\n%.400s", gatePrompt)
+	}
+	if !strings.Contains(gatePrompt, "ALPHA-TAIL-MARKER") {
+		t.Fatal("gate prompt lost Alpha's artifact body")
+	}
+	if strings.Contains(gatePrompt, "BETA-MIDDLE-MARKER") {
+		t.Fatal("gate prompt was not capped against the runaway artifact")
+	}
+}
+
+func TestGoalReviewArtifactBodyTruncation(t *testing.T) {
+	small := "a modest artifact body"
+	if got := goalReviewArtifactBody("  " + small + "  "); got != small {
+		t.Fatalf("small body altered: %q", got)
+	}
+	exact := strings.Repeat("x", goalReviewArtifactCap)
+	if got := goalReviewArtifactBody(exact); got != exact {
+		t.Fatal("body at exactly the cap must pass through untouched")
+	}
+
+	half := goalReviewArtifactCap / 2
+	head := "HEAD" + strings.Repeat("h", half-4)
+	tail := strings.Repeat("t", half-4) + "TAIL"
+	middle := strings.Repeat("m", 10*1024)
+	got := goalReviewArtifactBody(head + middle + tail)
+	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, tail) {
+		t.Fatal("truncation must keep the exact head and tail halves")
+	}
+	if strings.Contains(got, "mmmm") {
+		t.Fatal("truncation kept the middle")
+	}
+	want := fmt.Sprintf("[... artifact truncated for review: %d bytes omitted from the middle ...]", 10*1024)
+	if !strings.Contains(got, want) {
+		t.Fatalf("truncation notice missing or wrong; got:\n%.200s", got[half-50:half+150])
+	}
+	if len(got) > goalReviewArtifactCap+256 {
+		t.Fatalf("truncated body length %d blows past the cap", len(got))
 	}
 }
 

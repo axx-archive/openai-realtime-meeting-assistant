@@ -516,6 +516,9 @@ func (app *kanbanBoardApp) attachToPackage(id string, refType string, refID stri
 				log.Errorf("Failed to stamp packageId on artifact %s: %v", refID, stampErr)
 			}
 		}
+		// Signal capture (signals.go): binding an artifact into a package binder
+		// is a positive vote on that output. Log-and-continue inside.
+		app.recordSignalEvent(updatedBy, signalEventArtifactAttached, signalValencePositive, refID, persisted.ID, nil)
 	case packageRefTypeDecision:
 		if entry, found := app.memory.entryByKindAndID(meetingMemoryKindDecision, refID); found {
 			if _, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, refID, entry.Text, map[string]string{"packageId": persisted.ID}); stampErr != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func mockAnthropicTextBlock(text string) json.RawMessage {
@@ -298,6 +299,191 @@ func TestAnthropicFableRunnerHonorsPerJobBudget(t *testing.T) {
 	collectProgress(out2)
 	if got.MaxTokens != 4096 || got.Effort != "low" {
 		t.Fatalf("planning request budget=%d/%q, want runner default 4096/low", got.MaxTokens, got.Effort)
+	}
+}
+
+// The raised Fable dials ship together: deliverables default to effort high
+// with a 32K output ceiling, and the orchestrator timeout default is 15m so
+// slow-but-good high-effort runs are not manufactured into failures.
+func TestFableDialDefaults(t *testing.T) {
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "")
+	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "")
+
+	if got := deliverableMaxTokens(); got != 32768 {
+		t.Fatalf("deliverableMaxTokens()=%d, want 32768", got)
+	}
+	if got := deliverableEffort(); got != "high" {
+		t.Fatalf("deliverableEffort()=%q, want high", got)
+	}
+	if got := orchestratorTimeout(); got != 15*time.Minute {
+		t.Fatalf("orchestratorTimeout()=%s, want 15m", got)
+	}
+}
+
+// Env overrides keep working after the default bump, and junk values fall back
+// to the new defaults instead of the old ones.
+func TestFableDialEnvOverrides(t *testing.T) {
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "65536")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "XHigh")
+	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "45m")
+
+	if got := deliverableMaxTokens(); got != 65536 {
+		t.Fatalf("deliverableMaxTokens()=%d, want 65536", got)
+	}
+	if got := deliverableEffort(); got != "xhigh" {
+		t.Fatalf("deliverableEffort()=%q, want xhigh", got)
+	}
+	if got := orchestratorTimeout(); got != 45*time.Minute {
+		t.Fatalf("orchestratorTimeout()=%s, want 45m", got)
+	}
+
+	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "not-a-number")
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "galactic")
+	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "5s") // below the 30s minimum
+
+	if got := deliverableMaxTokens(); got != 32768 {
+		t.Fatalf("invalid max tokens fell back to %d, want 32768", got)
+	}
+	if got := deliverableEffort(); got != "high" {
+		t.Fatalf("invalid effort fell back to %q, want high", got)
+	}
+	if got := orchestratorTimeout(); got != 15*time.Minute {
+		t.Fatalf("sub-minimum timeout fell back to %s, want 15m", got)
+	}
+}
+
+// sseBody assembles a Messages API SSE stream body from event payloads,
+// mirroring the wire format (event: line + data: line per event).
+func sseBody(events ...string) string {
+	var builder strings.Builder
+	for _, event := range events {
+		builder.WriteString("event: ignored\n")
+		builder.WriteString("data: ")
+		builder.WriteString(event)
+		builder.WriteString("\n\n")
+	}
+	return builder.String()
+}
+
+// The SSE accumulator must fold a streamed response into the exact struct the
+// non-stream path produced: text via content_block_delta/text_delta, tool_use
+// input via input_json_delta fragments, stop_reason and usage via
+// message_delta. Proven by decoding the equivalent non-stream JSON body and
+// comparing field by field.
+func TestDecodeAnthropicSSEStreamMatchesNonStream(t *testing.T) {
+	stream := sseBody(
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":120,"output_tokens":3},"content":[],"stop_reason":null}}`,
+		`{"type":"ping"}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-abc"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Starting on "}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"the Aurora package."}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"create_ticket","input":{}}}`,
+		`{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"title\":"}}`,
+		`{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"Orchestrated card\"}"}}`,
+		`{"type":"content_block_stop","index":2}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":58}}`,
+		`{"type":"message_stop"}`,
+	)
+
+	got, err := decodeAnthropicSSEStream(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("decodeAnthropicSSEStream: %v", err)
+	}
+
+	nonStreamBody := `{
+		"model": "claude-fable-5",
+		"stop_reason": "tool_use",
+		"usage": {"input_tokens": 120, "output_tokens": 58},
+		"content": [
+			{"type": "thinking", "thinking": "", "signature": "sig-abc"},
+			{"type": "text", "text": "Starting on the Aurora package."},
+			{"type": "tool_use", "id": "toolu_1", "name": "create_ticket", "input": {"title": "Orchestrated card"}}
+		]
+	}`
+	var want anthropicMessagesResponse
+	if err := json.Unmarshal([]byte(nonStreamBody), &want); err != nil {
+		t.Fatalf("decode non-stream fixture: %v", err)
+	}
+
+	if got.Model != want.Model || got.StopReason != want.StopReason || got.Usage != want.Usage {
+		t.Fatalf("stream envelope=%+v, want %+v", got, want)
+	}
+	if len(got.Content) != len(want.Content) {
+		t.Fatalf("stream produced %d blocks, want %d", len(got.Content), len(want.Content))
+	}
+	for i := range want.Content {
+		gotBlock, wantBlock := decodeAnthropicBlock(got.Content[i]), decodeAnthropicBlock(want.Content[i])
+		if gotBlock.Type != wantBlock.Type || gotBlock.Text != wantBlock.Text || gotBlock.ID != wantBlock.ID || gotBlock.Name != wantBlock.Name {
+			t.Fatalf("block %d = %+v, want %+v", i, gotBlock, wantBlock)
+		}
+		if gotArgs, wantArgs := decodeToolArgs(gotBlock.Input), decodeToolArgs(wantBlock.Input); len(gotArgs) != len(wantArgs) || gotArgs["title"] != wantArgs["title"] {
+			t.Fatalf("block %d input=%v, want %v", i, gotArgs, wantArgs)
+		}
+	}
+	// The reconstructed thinking block carries the accumulated signature so the
+	// assistant turn can be echoed back on the next request.
+	var thinking map[string]string
+	if err := json.Unmarshal(got.Content[0], &thinking); err != nil || thinking["signature"] != "sig-abc" {
+		t.Fatalf("thinking block signature=%q err=%v, want sig-abc", thinking["signature"], err)
+	}
+}
+
+// An argument-less tool call streams no input_json_delta; the start block's
+// empty-object input survives so decodeToolArgs still yields a usable map.
+func TestDecodeAnthropicSSEStreamKeepsEmptyToolInput(t *testing.T) {
+	stream := sseBody(
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_9","name":"do_nothing","input":{}}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}`,
+		`{"type":"message_stop"}`,
+	)
+	got, err := decodeAnthropicSSEStream(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("decodeAnthropicSSEStream: %v", err)
+	}
+	block := decodeAnthropicBlock(got.Content[0])
+	if block.Name != "do_nothing" {
+		t.Fatalf("block name=%q, want do_nothing", block.Name)
+	}
+	if args := decodeToolArgs(block.Input); len(args) != 0 {
+		t.Fatalf("empty tool input decoded to %v, want empty map", args)
+	}
+}
+
+// An in-stream error event surfaces as an error, never as a silent empty
+// verified response.
+func TestDecodeAnthropicSSEStreamErrorEvent(t *testing.T) {
+	stream := sseBody(
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+	)
+	if _, err := decodeAnthropicSSEStream(strings.NewReader(stream)); err == nil || !strings.Contains(err.Error(), "Overloaded") {
+		t.Fatalf("error event returned err=%v, want Overloaded error", err)
+	}
+}
+
+// A stream cut off before message_stop leaves StopReason empty — the runner's
+// default branch treats that as an incomplete turn (needs_attention), so a
+// dropped connection can never ship as verified.
+func TestDecodeAnthropicSSEStreamTruncatedLeavesStopReasonEmpty(t *testing.T) {
+	stream := sseBody(
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+	)
+	got, err := decodeAnthropicSSEStream(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("decodeAnthropicSSEStream: %v", err)
+	}
+	if got.StopReason != "" {
+		t.Fatalf("truncated stream StopReason=%q, want empty (incomplete)", got.StopReason)
 	}
 }
 

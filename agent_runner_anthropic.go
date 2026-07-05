@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -54,8 +55,13 @@ func orchestratorEffort() string {
 	}
 }
 
+// orchestratorTimeout bounds one orchestrator run. Default 15m: deliverable
+// subtasks now run at effort high with a 32K output ceiling, and Fable 5 single
+// turns on hard tasks can legitimately run many minutes — a 5m cap converted
+// slow-but-good runs into needs_attention failures. Ships in the same change as
+// the effort/token bump on purpose (packaging-os-analysis §1, Wave 1 item 2).
 func orchestratorTimeout() time.Duration {
-	return durationEnv("BONFIRE_ORCHESTRATOR_TIMEOUT", 5*time.Minute, 30*time.Second)
+	return durationEnv("BONFIRE_ORCHESTRATOR_TIMEOUT", 15*time.Minute, 30*time.Second)
 }
 
 // deliverableMaxTokens is the larger output ceiling for the terminal,
@@ -64,21 +70,23 @@ func orchestratorTimeout() time.Duration {
 // planning turn, whose default stays orchestratorMaxTokens(). Env-overridable;
 // only the deliverable subtask reads it, so planning/non-goal turns are
 // unchanged. A too-small ceiling is exactly what truncated the One-Pager and
-// burned the wasted revision passes.
+// burned the wasted revision passes. 32K non-streamed would sit past Anthropic's
+// HTTP ceiling, so the wire layer streams (SSE) and accumulates — see
+// createAnthropicMessagesResponseHTTP.
 func deliverableMaxTokens() int {
-	return positiveIntEnv("BONFIRE_DELIVERABLE_MAX_TOKENS", 8192)
+	return positiveIntEnv("BONFIRE_DELIVERABLE_MAX_TOKENS", 32768)
 }
 
 // deliverableEffort is the thinking depth for the deliverable subtask. Default
-// medium — one rung above the low planning default — so the writer has room to
-// hit the output contract without cutting off. Any of low|medium|high|xhigh|max
-// is accepted; anything else falls back to medium.
+// high — the deliverable IS the product; paying Fable-5 rates for medium depth
+// was the worst of both worlds (packaging-os-analysis §1). Any of
+// low|medium|high|xhigh|max is accepted; anything else falls back to high.
 func deliverableEffort() string {
 	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"))); effort {
 	case "low", "medium", "high", "xhigh", "max":
 		return effort
 	default:
-		return "medium"
+		return "high"
 	}
 }
 
@@ -137,10 +145,24 @@ type anthropicMessagesResponder func(ctx context.Context, apiKey string, request
 
 var createAnthropicMessagesResponse anthropicMessagesResponder = createAnthropicMessagesResponseHTTP
 
+// createAnthropicMessagesResponseHTTP always streams (stream:true) and
+// accumulates the SSE events back into the same anthropicMessagesResponse the
+// old non-stream path returned, so nothing above this seam changes. Always —
+// not only for large budgets — because one wire path is one set of bugs, and a
+// 32K deliverable ceiling non-streamed would hit Anthropic's HTTP timeout
+// ceiling anyway. The wall clock is bounded by ctx (the dispatcher stamps
+// Capabilities().MaxRuntime = orchestratorTimeout()); a fixed http.Client
+// timeout would cut off long legitimate streams, so a deadline is guarded in
+// here instead for callers that arrive without one.
 func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return anthropicMessagesResponse{}, fmt.Errorf("ANTHROPIC_API_KEY is not configured")
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, orchestratorTimeout())
+		defer cancel()
 	}
 	// Fable 5: thinking is always on (omit the field), and sampling params are
 	// rejected — send neither. Depth is controlled by output_config.effort.
@@ -148,6 +170,7 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		"model":      request.Model,
 		"max_tokens": request.MaxTokens,
 		"messages":   request.Messages,
+		"stream":     true,
 	}
 	if strings.TrimSpace(request.System) != "" {
 		payload["system"] = request.System
@@ -171,31 +194,207 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 	httpRequest.Header.Set("x-api-key", apiKey)
 	httpRequest.Header.Set("anthropic-version", anthropicAPIVersion)
 	httpRequest.Header.Set("content-type", "application/json")
+	httpRequest.Header.Set("accept", "text/event-stream")
 
-	response, err := (&http.Client{Timeout: 4 * time.Minute}).Do(httpRequest)
+	response, err := (&http.Client{}).Do(httpRequest)
 	if err != nil {
 		return anthropicMessagesResponse{}, fmt.Errorf("call Anthropic messages: %w", err)
 	}
 	defer response.Body.Close()
 
-	rawBody, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
-	if err != nil {
-		return anthropicMessagesResponse{}, fmt.Errorf("read Anthropic messages response: %w", err)
-	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		// Errors arrive as a plain JSON body even on stream:true requests.
 		// Reuse the OpenAI failure helper: log the upstream body server-side,
 		// return a status-only error so a 401/429 body never reaches the browser.
+		rawBody, _ := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
 		return anthropicMessagesResponse{}, apiRequestFailedError("Anthropic messages failed", response.Status, rawBody)
 	}
 
-	var body anthropicMessagesResponse
-	if err := json.Unmarshal(rawBody, &body); err != nil {
-		return anthropicMessagesResponse{}, fmt.Errorf("decode Anthropic messages response: %w", err)
-	}
-	if body.Error != nil && strings.TrimSpace(body.Error.Message) != "" {
-		return anthropicMessagesResponse{}, fmt.Errorf("Anthropic messages error: %s", strings.TrimSpace(body.Error.Message))
+	body, err := decodeAnthropicSSEStream(io.LimitReader(response.Body, 64*1024*1024))
+	if err != nil {
+		return anthropicMessagesResponse{}, err
 	}
 	return body, nil
+}
+
+// --- SSE stream accumulation ---------------------------------------------------
+
+// anthropicSSEEvent is the decoded envelope of one stream event. Only the
+// fields the accumulator needs are typed; content_block stays raw so unknown
+// block fields survive the round trip untouched.
+type anthropicSSEEvent struct {
+	Type    string `json:"type"`
+	Index   int    `json:"index"`
+	Message *struct {
+		Model string `json:"model"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+	ContentBlock json.RawMessage `json:"content_block"`
+	Delta        struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		PartialJSON string `json:"partial_json"`
+		Thinking    string `json:"thinking"`
+		Signature   string `json:"signature"`
+		StopReason  string `json:"stop_reason"`
+	} `json:"delta"`
+	Usage *struct {
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// anthropicStreamBlock accumulates one content block from content_block_start
+// through its deltas. fields keeps every start-block field raw (id, name, and
+// anything the API adds later) so finalize only rewrites what the deltas built.
+type anthropicStreamBlock struct {
+	blockType string
+	fields    map[string]json.RawMessage
+	text      strings.Builder
+	thinking  strings.Builder
+	signature strings.Builder
+	inputJSON strings.Builder
+}
+
+func newAnthropicStreamBlock(raw json.RawMessage) *anthropicStreamBlock {
+	block := &anthropicStreamBlock{fields: map[string]json.RawMessage{}}
+	_ = json.Unmarshal(raw, &block.fields)
+	block.blockType = decodeAnthropicBlock(raw).Type
+	// Seed the builders with the start block's own values (usually empty
+	// strings) so start + deltas concatenate in order.
+	var seed string
+	if rawText, ok := block.fields["text"]; ok && json.Unmarshal(rawText, &seed) == nil {
+		block.text.WriteString(seed)
+	}
+	seed = ""
+	if rawThinking, ok := block.fields["thinking"]; ok && json.Unmarshal(rawThinking, &seed) == nil {
+		block.thinking.WriteString(seed)
+	}
+	seed = ""
+	if rawSignature, ok := block.fields["signature"]; ok && json.Unmarshal(rawSignature, &seed) == nil {
+		block.signature.WriteString(seed)
+	}
+	return block
+}
+
+func (block *anthropicStreamBlock) applyDelta(event anthropicSSEEvent) {
+	switch event.Delta.Type {
+	case "text_delta":
+		block.text.WriteString(event.Delta.Text)
+	case "input_json_delta":
+		block.inputJSON.WriteString(event.Delta.PartialJSON)
+	case "thinking_delta":
+		block.thinking.WriteString(event.Delta.Thinking)
+	case "signature_delta":
+		block.signature.WriteString(event.Delta.Signature)
+	}
+}
+
+func (block *anthropicStreamBlock) finalize() (json.RawMessage, error) {
+	switch block.blockType {
+	case "text":
+		block.fields["text"], _ = json.Marshal(block.text.String())
+	case "thinking":
+		block.fields["thinking"], _ = json.Marshal(block.thinking.String())
+		if block.signature.Len() > 0 {
+			block.fields["signature"], _ = json.Marshal(block.signature.String())
+		}
+	case "tool_use":
+		// An argument-less tool call streams no input_json_delta; keep the
+		// start block's empty-object input in that case.
+		if input := strings.TrimSpace(block.inputJSON.String()); input != "" {
+			if !json.Valid([]byte(input)) {
+				return nil, fmt.Errorf("Anthropic stream tool_use input is not valid JSON")
+			}
+			block.fields["input"] = json.RawMessage(input)
+		}
+	}
+	raw, err := json.Marshal(block.fields)
+	if err != nil {
+		return nil, fmt.Errorf("encode Anthropic stream content block: %w", err)
+	}
+	return raw, nil
+}
+
+// decodeAnthropicSSEStream folds a Messages API SSE stream into the exact
+// response struct the non-stream path used to return: content_block_delta text
+// and input_json_delta accumulate per block, message_delta carries stop_reason
+// and output usage, message_start carries model and input usage. A stream that
+// dies before message_stop leaves StopReason empty, which the runner's default
+// branch already treats as an incomplete (never verified) turn.
+func decodeAnthropicSSEStream(reader io.Reader) (anthropicMessagesResponse, error) {
+	var response anthropicMessagesResponse
+	blocks := map[int]*anthropicStreamBlock{}
+
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			// event:/id:/comment lines and blank separators carry nothing the
+			// accumulator needs — the payload's own type field is dispatched on.
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
+		var event anthropicSSEEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return anthropicMessagesResponse{}, fmt.Errorf("decode Anthropic stream event: %w", err)
+		}
+		switch event.Type {
+		case "message_start":
+			if event.Message != nil {
+				response.Model = event.Message.Model
+				response.Usage.InputTokens = event.Message.Usage.InputTokens
+				response.Usage.OutputTokens = event.Message.Usage.OutputTokens
+			}
+		case "content_block_start":
+			blocks[event.Index] = newAnthropicStreamBlock(event.ContentBlock)
+		case "content_block_delta":
+			if block := blocks[event.Index]; block != nil {
+				block.applyDelta(event)
+			}
+		case "content_block_stop":
+			block := blocks[event.Index]
+			if block == nil {
+				continue
+			}
+			raw, err := block.finalize()
+			if err != nil {
+				return anthropicMessagesResponse{}, err
+			}
+			// Blocks stream strictly in order (block N stops before N+1
+			// starts), so appending on stop preserves content order.
+			response.Content = append(response.Content, raw)
+			delete(blocks, event.Index)
+		case "message_delta":
+			if event.Delta.StopReason != "" {
+				response.StopReason = event.Delta.StopReason
+			}
+			if event.Usage != nil && event.Usage.OutputTokens > 0 {
+				response.Usage.OutputTokens = event.Usage.OutputTokens
+			}
+		case "message_stop":
+			return response, nil
+		case "error":
+			if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
+				return anthropicMessagesResponse{}, fmt.Errorf("Anthropic messages error: %s", strings.TrimSpace(event.Error.Message))
+			}
+			return anthropicMessagesResponse{}, fmt.Errorf("Anthropic messages error: stream error event")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return anthropicMessagesResponse{}, fmt.Errorf("read Anthropic messages stream: %w", err)
+	}
+	return response, nil
 }
 
 // --- The runner --------------------------------------------------------------

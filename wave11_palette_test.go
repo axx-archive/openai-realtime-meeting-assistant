@@ -279,3 +279,101 @@ func TestGoalCompletionEventCarriesOriginSurface(t *testing.T) {
 		t.Fatalf("event OriginSurface=%q, want chat:thread-xyz — the return card routes on this, not the coarse originKind", completed.OriginSurface)
 	}
 }
+
+// --- Fidelity fix: the conversational door carries tool.id ------------------
+
+// paletteConversationalHandoff used to drop the tool template, so deep_research
+// launched contract-gated from Run and generic from the composer. The handoff
+// must arm tool.id and the send path must carry it to the server.
+func TestPaletteConversationalHandoffCarriesToolTemplate(t *testing.T) {
+	html := readIndexForPalette(t)
+
+	hand := functionBody(html, "function paletteConversationalHandoff(tool)")
+	if hand == "" {
+		t.Fatal("index.html missing paletteConversationalHandoff")
+	}
+	if !strings.Contains(hand, "pendingScoutToolTemplate = { toolId: tool.id") {
+		t.Error("paletteConversationalHandoff must arm pendingScoutToolTemplate = {toolId, name, threadId} — otherwise the talk-it-out door drops the tool contract")
+	}
+	if !strings.Contains(hand, "threadId: activeScoutThreadId") {
+		t.Error("the armed template must be scoped to the thread it was armed in — an unscoped template hijacks sends in other threads")
+	}
+	if !strings.Contains(hand, "renderScoutFollowUpTarget()") {
+		t.Error("paletteConversationalHandoff must render the armed chip — an invisible armed template cannot be dismissed")
+	}
+
+	// The composer send captures-and-clears the armed template (one send only),
+	// dropping a template armed for another thread instead of firing it here.
+	send := functionBody(html, "function sendScoutChat(text)")
+	if send == "" {
+		t.Fatal("index.html missing sendScoutChat")
+	}
+	for _, want := range []string{"pendingScoutToolTemplate.threadId === activeScoutThreadId", "pendingScoutToolTemplate = null", "sendScoutChatViaOffice(trimmed, files, toolTemplate)"} {
+		if !strings.Contains(send, want) {
+			t.Errorf("sendScoutChat missing %q — the armed tool template does not ride the send (thread-scoped, one send only)", want)
+		}
+	}
+
+	// The armed intent dies wherever the user walks away from it: thread
+	// switch, composer emptied, palette re-open, and the Run door.
+	renderThread := functionBody(html, "function renderActiveScoutThread()")
+	if !strings.Contains(renderThread, "pendingScoutToolTemplate.threadId !== activeScoutThreadId") {
+		t.Error("renderActiveScoutThread must drop a tool template armed for another thread")
+	}
+	chips := functionBody(html, "function renderScoutFollowUpTarget()")
+	if !strings.Contains(chips, "pendingScoutToolTemplate") || !strings.Contains(chips, "Clear armed tool") {
+		t.Error("renderScoutFollowUpTarget must render a visible, dismissible chip for the armed tool template")
+	}
+
+	// The office POST forwards toolTemplate on the wire and treats it as
+	// explicit engagement (no @scout needed, like a follow-up target).
+	office := functionBody(html, "async function sendScoutChatViaOffice(text, files = [], toolTemplate = '')")
+	if office == "" {
+		t.Fatal("index.html missing sendScoutChatViaOffice(text, files, toolTemplate)")
+	}
+	for _, want := range []string{"toolTemplate ? { text, files, toolTemplate }", "Boolean(toolTemplate)"} {
+		if !strings.Contains(office, want) {
+			t.Errorf("sendScoutChatViaOffice missing %q — toolTemplate does not reach the messages POST", want)
+		}
+	}
+}
+
+// --- Signal beacon: artifact opens are captured ------------------------------
+
+// Opening an artifact must fire the non-blocking POST /artifacts/open beacon
+// (spec §5 open/ignore signal) from both open doors: the artifact cards
+// (openAgentArtifact) and the assistant select_artifact action.
+func TestArtifactOpenBeaconWired(t *testing.T) {
+	html := readIndexForPalette(t)
+
+	beacon := functionBody(html, "function beaconArtifactOpen(artifactId)")
+	if beacon == "" {
+		t.Fatal("index.html missing beaconArtifactOpen")
+	}
+	for _, want := range []string{"'/artifacts/open'", "method: 'POST'", ".catch(() => {})"} {
+		if !strings.Contains(beacon, want) {
+			t.Errorf("beaconArtifactOpen missing %q — the open signal must be a silent fire-and-forget POST", want)
+		}
+	}
+	// Volume guardrail: the datum is open vs never-opened; re-clicks in the
+	// same session must not re-fire the beacon.
+	if !strings.Contains(beacon, "beaconedArtifactOpens.has(id)") {
+		t.Error("beaconArtifactOpen must dedupe per artifact per session — every click flooding the store is the §5 volume trap")
+	}
+
+	open := functionBody(html, "function openAgentArtifact(entry)")
+	if open == "" {
+		t.Fatal("index.html missing openAgentArtifact")
+	}
+	if !strings.Contains(open, "beaconArtifactOpen(entry.id)") {
+		t.Error("openAgentArtifact does not fire the open beacon")
+	}
+
+	actions := functionBody(html, "function handleOSAssistantActions(actions)")
+	if actions == "" {
+		t.Fatal("index.html missing handleOSAssistantActions")
+	}
+	if !strings.Contains(actions, "beaconArtifactOpen(artifactId)") {
+		t.Error("the select_artifact action does not fire the open beacon")
+	}
+}

@@ -379,7 +379,13 @@ func (app *kanbanBoardApp) publishOSArtifact(id string, published bool, updatedB
 		metadata["unpublishedAt"] = now
 	}
 
-	return app.updateOSArtifactWithMetadata(existing.ID, existing.Metadata["title"], existing.Text, updatedBy, metadata)
+	entry, changed, err := app.updateOSArtifactWithMetadata(existing.ID, existing.Metadata["title"], existing.Text, updatedBy, metadata)
+	if changed && err == nil && published && !artifactIsPublished(existing) {
+		// Signal capture (signals.go): a publish is the strongest positive vote
+		// on OS output. Log-and-continue; never fails the publish itself.
+		app.recordSignalEvent(updatedBy, signalEventArtifactPublished, signalValencePositive, entry.ID, entry.Metadata["packageId"], nil)
+	}
+	return entry, changed, err
 }
 
 func (app *kanbanBoardApp) osArtifactsSnapshot(limit int) []meetingMemoryEntry {

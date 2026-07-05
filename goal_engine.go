@@ -299,6 +299,73 @@ func goalSubtaskConcurrency() int {
 	return positiveIntEnv("BONFIRE_GOAL_CONCURRENCY", 2)
 }
 
+// --- Per-user in-flight cap ---------------------------------------------------
+
+// goalUserInFlightCap is the per-requester ceiling on concurrently running
+// goals. BONFIRE_GOAL_CONCURRENCY caps subtasks inside ONE goal; this caps how
+// many whole goals one user can have in flight at once, so a single account
+// cannot occupy the whole engine (Wave 1 item 6 — precondition for the router
+// and the flagship).
+func goalUserInFlightCap() int {
+	return positiveIntEnv("BONFIRE_GOAL_USER_CAP", 2)
+}
+
+// goalInFlightRef names one in-flight goal in a cap breach so the UI can render
+// "finish these first" and the voice path can speak them.
+type goalInFlightRef struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// errGoalUserCapExceeded is the typed launch refusal for a user already at the
+// in-flight cap. Error() is deliberately a friendly, speakable sentence — the
+// voice initiate_goal path surfaces it verbatim, and the HTTP door unpacks the
+// structured fields into the 429 body.
+type errGoalUserCapExceeded struct {
+	Cap   int
+	Goals []goalInFlightRef
+}
+
+func (e *errGoalUserCapExceeded) Error() string {
+	names := make([]string, 0, len(e.Goals))
+	for _, goal := range e.Goals {
+		names = append(names, fmt.Sprintf("%q (%s)", goal.Title, goal.ID))
+	}
+	noun := "goals"
+	if len(e.Goals) == 1 {
+		noun = "goal"
+	}
+	return fmt.Sprintf("you already have %d %s in flight — %s. Wait for one to finish (or resolve its blocker) before starting another.",
+		len(e.Goals), noun, strings.Join(names, ", "))
+}
+
+// inFlightGoalsForUser lists this user's mode=goal artifacts still in a
+// non-terminal stage (same terminality rule the boot reconciler uses: verified,
+// needs_attention, and approval_required do not count — the last waits on a
+// human, not the engine). Matching is on the requestedBy stamp launchGoalThread
+// writes for every attributed goal, normalized as an account email.
+func (app *kanbanBoardApp) inFlightGoalsForUser(email string) []goalInFlightRef {
+	email = normalizeAccountEmail(email)
+	if app == nil || app.memory == nil || email == "" {
+		return nil
+	}
+	var goals []goalInFlightRef
+	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, goalReconcileScanLimit) {
+		if artifact.Metadata["mode"] != "goal" {
+			continue
+		}
+		if isTerminalGoalState(artifact.Metadata["currentStage"]) {
+			continue
+		}
+		if normalizeAccountEmail(artifact.Metadata["requestedBy"]) != email {
+			continue
+		}
+		title := firstNonEmptyString(artifact.Metadata["title"], compactAssistantLine(artifact.Text))
+		goals = append(goals, goalInFlightRef{ID: artifact.ID, Title: title})
+	}
+	return goals
+}
+
 // goalEngineLocks serializes every mutation of one goal's plan. The driver, the
 // child-completion fold, and the boot reconciler all take the per-parent lock,
 // so a child that completes while the driver is mid-dispatch queues its fold
@@ -308,6 +375,18 @@ var goalEngineLocks sync.Map // parentArtifactID -> *sync.Mutex
 
 func goalEngineLock(parentID string) *sync.Mutex {
 	lock, _ := goalEngineLocks.LoadOrStore(strings.TrimSpace(parentID), &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+// goalUserCapLocks serializes one user's cap-check-then-launch in
+// launchGoalThread: inFlightGoalsForUser counts persisted goal artifacts, so
+// without the lock N concurrent launches from the same account all observe the
+// pre-launch count, all pass the cap, and all launch. Keyed by normalized
+// account email, mirroring goalEngineLocks.
+var goalUserCapLocks sync.Map // normalized email -> *sync.Mutex
+
+func goalUserCapLock(email string) *sync.Mutex {
+	lock, _ := goalUserCapLocks.LoadOrStore(email, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
 
@@ -408,6 +487,23 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 
 	createdBy := strings.TrimSpace(spec.CreatedBy)
+	// Per-user in-flight cap (Wave 1 item 6). Every production door (HTTP
+	// /assistant/goal, voice initiate_goal) stamps the requester, so the check
+	// lives here — one seam guards both. An unattributed launch (tests, internal
+	// callers) has no bucket and is not capped. The check counts persisted goal
+	// artifacts and the append happens below, so the check-then-append pair must
+	// be serialized per user — otherwise N concurrent launches all observe the
+	// pre-launch count and all pass. The per-email lock is held through the
+	// artifact append (goalUserCapLocks, the goalEngineLocks pattern).
+	if normalizedRequester := normalizeAccountEmail(createdBy); normalizedRequester != "" {
+		lock := goalUserCapLock(normalizedRequester)
+		lock.Lock()
+		defer lock.Unlock()
+		capLimit := goalUserInFlightCap()
+		if inFlight := app.inFlightGoalsForUser(createdBy); len(inFlight) >= capLimit {
+			return scoutAgentThread{}, &errGoalUserCapExceeded{Cap: capLimit, Goals: inFlight}
+		}
+	}
 	authority := strings.TrimSpace(spec.Authority)
 	if authority == "" {
 		authority = codexJobAuthorityForThread(scoutAgentThread{Mode: "workflow", Query: objective})
@@ -1062,10 +1158,32 @@ func (e *goalEngine) requeueOrBlock(plan *goalPlan, st *goalSubtask, reason stri
 	return true
 }
 
+// goalReviewArtifactCap bounds how much artifact body the reviewer and the
+// ship gate read per prompt. 48KB is far beyond any honest deliverable; the
+// cap only exists so a runaway artifact cannot blow the review context.
+const goalReviewArtifactCap = 48 * 1024
+
+// goalReviewArtifactBody returns the FULL artifact text for the reviewer/gate
+// prompts — the reviewer judges the work itself, never a flattened thumbnail
+// (compactAssistantLine stays the voice of progress/log lines only). Oversized
+// bodies keep their head and tail with the truncation announced inline so the
+// model knows the middle is missing rather than silently absent.
+func goalReviewArtifactBody(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= goalReviewArtifactCap {
+		return text
+	}
+	half := goalReviewArtifactCap / 2
+	omitted := len(text) - 2*half
+	return text[:half] +
+		fmt.Sprintf("\n\n[... artifact truncated for review: %d bytes omitted from the middle ...]\n\n", omitted) +
+		text[len(text)-half:]
+}
+
 func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *goalSubtask) (string, string, float64) {
 	produced := ""
 	if artifact, ok := e.app.osArtifactByID(st.ArtifactID); ok {
-		produced = compactAssistantLine(artifact.Text)
+		produced = goalReviewArtifactBody(artifact.Text)
 	}
 	system := "You are Scout's reviewer for Bonfire OS. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\"}."
 	// For a tool-templated goal, the review scores against the tool's gate rubric
@@ -1116,7 +1234,8 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 		// condition is not safe to ship regardless of completeness.
 		system += "\n\n" + toolReviewInstruction(tool) + "\nIf the kill condition is triggered, set safe=false."
 	}
-	user := "Goal: " + plan.Objective + "\nAuthority: " + plan.Authority + "\nSubtasks:\n" + goalSubtaskSummary(plan)
+	user := "Goal: " + plan.Objective + "\nAuthority: " + plan.Authority + "\nSubtasks:\n" + goalSubtaskSummary(plan) +
+		"\nProduced artifacts (judge the actual work, not the status list):\n" + e.gateArtifactSection(plan)
 	text, err := e.callModel(ctx, system, user)
 
 	plan.Gate.ReviewedBy = "gate_model"
@@ -1158,6 +1277,32 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	plan.Gate.Status = "passed"
 }
 
+// gateArtifactSection assembles every subtask's full artifact body so the ship
+// gate sees the work it is clearing, not a one-line summary per subtask. Each
+// body is capped like a review body, and the combined section passes through
+// the same cap once more so many large artifacts still cannot blow the context.
+func (e *goalEngine) gateArtifactSection(plan *goalPlan) string {
+	var builder strings.Builder
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		artifact, ok := e.app.osArtifactByID(st.ArtifactID)
+		if !ok || strings.TrimSpace(artifact.Text) == "" {
+			continue
+		}
+		builder.WriteString("### ")
+		builder.WriteString(st.ID)
+		builder.WriteString(" — ")
+		builder.WriteString(st.Title)
+		builder.WriteByte('\n')
+		builder.WriteString(goalReviewArtifactBody(artifact.Text))
+		builder.WriteString("\n\n")
+	}
+	if builder.Len() == 0 {
+		return "(no artifact bodies were produced)"
+	}
+	return goalReviewArtifactBody(strings.TrimSpace(builder.String()))
+}
+
 // --- Stage: save_what_worked -------------------------------------------------
 
 // saveWhatWorked files the passing plan into its package (idempotent) so the
@@ -1189,6 +1334,9 @@ func (e *goalEngine) salvageBlockedDeliverable(plan *goalPlan, parentID string) 
 	if artifactID == "" {
 		return
 	}
+	// A re-drive of an already-salvaged goal must not double-count the failure
+	// signal below (the salvage itself is idempotent).
+	alreadySalvaged := strings.TrimSpace(plan.Report.DeliverableArtifactID) != ""
 	plan.Report.DeliverableArtifactID = artifactID
 	gap := ""
 	if st.Review != nil {
@@ -1207,6 +1355,16 @@ func (e *goalEngine) salvageBlockedDeliverable(plan *goalPlan, parentID string) 
 		if _, err := e.app.attachToPackage(plan.PackageID, packageRefTypeArtifact, artifactID, scoutParticipantName); err != nil {
 			log.Errorf("goal %s salvage attach %s failed: %v", parentID, artifactID, err)
 		}
+	}
+	// Signal capture (spec §5 item 2): a salvage IS an agent failure worth
+	// studying — the honest gap line names exactly which bar the draft missed.
+	// Log-and-continue inside; never fails the salvage.
+	if !alreadySalvaged {
+		e.app.recordSignalEvent(plan.CreatedBy, signalEventArtifactSalvaged, signalValenceNegative, artifactID, plan.PackageID, map[string]string{
+			"goalId":    parentID,
+			"objective": plan.Objective,
+			"gap":       plan.Report.Gap,
+		})
 	}
 }
 

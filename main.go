@@ -545,6 +545,7 @@ func main() {
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
+	http.HandleFunc("/artifacts/open", artifactOpenHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
@@ -1052,6 +1053,18 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusServiceUnavailable, "the goal engine is not configured here")
 			return
 		}
+		// Per-user in-flight cap: 429 with the blocking goals (id+title) so the
+		// UI can render "finish these first" instead of a bare failure.
+		var capErr *errGoalUserCapExceeded
+		if errors.As(err, &capErr) {
+			writeAuthJSON(w, http.StatusTooManyRequests, map[string]any{
+				"ok":       false,
+				"error":    capErr.Error(),
+				"cap":      capErr.Cap,
+				"inFlight": capErr.Goals,
+			})
+			return
+		}
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1347,6 +1360,9 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 				metadata["unpublishedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 			}
 		}
+		// Signal capture (signals.go): snapshot the prior body BEFORE the update
+		// so a real human edit can store its section-level diff summary.
+		prior, hadPrior := kanbanApp.osArtifactByID(payload.ID)
 		artifact, updated, err := kanbanApp.updateOSArtifactWithMetadata(payload.ID, payload.Title, payload.Text, user.Name, metadata)
 		if err != nil {
 			status := http.StatusBadRequest
@@ -1355,6 +1371,12 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			writeAuthError(w, status, err.Error())
 			return
+		}
+		if updated && hadPrior && prior.Text != artifact.Text {
+			kanbanApp.recordSignalEvent(user.Name, signalEventArtifactEdited, signalValenceNeutral, artifact.ID, artifact.Metadata["packageId"], summarizeArtifactDiff(prior.Text, artifact.Text))
+		}
+		if updated && hadPrior && payload.Published != nil && *payload.Published && !artifactIsPublished(prior) {
+			kanbanApp.recordSignalEvent(user.Name, signalEventArtifactPublished, signalValencePositive, artifact.ID, artifact.Metadata["packageId"], nil)
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":       true,

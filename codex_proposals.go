@@ -252,6 +252,15 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 			app.advanceLinkedCard(cardID, kanbanStatusInProgress, "confirmed: "+entry.Metadata["title"])
 		}
 
+		// Signal capture (spec §5 item 6): a confirm is a human vote that the
+		// proposed workstream was worth running — a distinct seam from the
+		// approval gate's proposal_approved. Log-and-continue inside.
+		app.recordSignalEvent(userName, signalEventProposalConfirmed, signalValencePositive, thread.Artifact.ID, entry.Metadata["packageId"], map[string]string{
+			"proposalId": id,
+			"title":      entry.Metadata["title"],
+			"mode":       entry.Metadata["mode"],
+		})
+
 		payload := codexProposalPayload(updated)
 		broadcastOfficeKanbanEvent("codex_proposal", payload)
 		app.notifyProposalResolution(updated, codexProposalActionConfirm, userName)
@@ -267,6 +276,15 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 	if err != nil {
 		return nil, false, err
 	}
+
+	// Signal capture (spec §5 item 6): a dismissal is a human vote that the
+	// proposer's judgment missed — the proposal title/mode is the taste data.
+	// Log-and-continue inside.
+	app.recordSignalEvent(userName, signalEventProposalDismissed, signalValenceNegative, "", entry.Metadata["packageId"], map[string]string{
+		"proposalId": id,
+		"title":      entry.Metadata["title"],
+		"mode":       entry.Metadata["mode"],
+	})
 
 	payload := codexProposalPayload(updated)
 	broadcastOfficeKanbanEvent("codex_proposal", payload)

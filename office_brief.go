@@ -438,6 +438,14 @@ func (app *kanbanBoardApp) recordApprovalOutcome(artifact meetingMemoryEntry, ac
 	origin := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["originKind"]), "artifacts")
 	approved := strings.EqualFold(strings.TrimSpace(action), "approve")
 
+	// Signal capture (signals.go): the admin's verdict — and on a reject, the
+	// human reason verbatim — is pure taste data. Log-and-continue inside.
+	if approved {
+		app.recordSignalEvent(approverName, signalEventProposalApproved, signalValencePositive, artifact.ID, artifact.Metadata["packageId"], map[string]string{"reason": strings.TrimSpace(reason)})
+	} else {
+		app.recordSignalEvent(approverName, signalEventProposalRejected, signalValenceNegative, artifact.ID, artifact.Metadata["packageId"], map[string]string{"reason": strings.TrimSpace(reason)})
+	}
+
 	// Push-channel proposal event: title-only, so the requester's surface and
 	// the bell learn the transition and re-fetch the card by ref.
 	broadcastOSEvent(osEvent{

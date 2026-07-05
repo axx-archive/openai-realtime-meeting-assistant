@@ -497,6 +497,66 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	return cloneMemoryEntry(entry), changed, nil
 }
 
+// updateOSArtifactMetadata merges ONLY metadataUpdates onto the artifact,
+// re-reading the current entry under store.mu so a caller's earlier text
+// snapshot can never ride along and clobber a concurrent body update (the
+// openedAt-stamp race: opens happen exactly while a thread runner is writing
+// the final body, and updateOSArtifactWithMetadata overwrites text with
+// whatever is passed). Text, title, updatedBy, and updatedAt are untouched —
+// this is a bookkeeping stamp, not an edit.
+func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact id is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	index := -1
+	for candidateIndex, entry := range store.entries {
+		if entry.ID == id && entry.Kind == meetingMemoryKindOSArtifact {
+			index = candidateIndex
+			break
+		}
+	}
+	if index < 0 {
+		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+	}
+
+	previousEntry := store.entries[index]
+	entry := cloneMemoryEntry(previousEntry)
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]string{}
+	}
+	changed := false
+	for key, value := range metadataUpdates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if entry.Metadata[key] != value {
+			entry.Metadata[key] = value
+			changed = true
+		}
+	}
+	if !changed {
+		return cloneMemoryEntry(entry), false, nil
+	}
+
+	store.entries[index] = entry
+	if err := store.rewriteLocked(); err != nil {
+		store.entries[index] = previousEntry
+		return meetingMemoryEntry{}, false, err
+	}
+
+	return cloneMemoryEntry(entry), true, nil
+}
+
 func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
@@ -680,15 +740,19 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 
 // visibleEntriesLocked returns store.entries minus the entries that must never
 // reach the client memory timeline or the snapshot-fed model-context lanes:
-// quarantined/expired material (forgotten) and slop_pass cursor/audit stubs
+// quarantined/expired material (forgotten), slop_pass cursor/audit stubs
 // (pure bookkeeping — visibleMeetingMemoryEntries filters the other UI-state
-// kinds by name but predates slop_pass, so it is dropped here). Callers that
-// must SEE quarantined entries (the quarantine tray, the classifier, expiry)
-// read store.entries via entriesByRelevance/entriesOfKind, not snapshot.
+// kinds by name but predates slop_pass, so it is dropped here), and raw
+// feedback signals (signals.go: distillation-only input that may quote private
+// thread text — it must never ride memorySnapshotForClients broadcasts or the
+// snapshot-fed worker prompts). Callers that must SEE quarantined entries (the
+// quarantine tray, the classifier, expiry) read store.entries via
+// entriesByRelevance/entriesOfKind, not snapshot — future signal distillers
+// read the same way.
 func (store *meetingMemoryStore) visibleEntriesLocked() []meetingMemoryEntry {
 	visible := make([]meetingMemoryEntry, 0, len(store.entries))
 	for _, entry := range store.entries {
-		if entry.Kind == meetingMemoryKindSlopPass || memoryEntryHiddenFromRecall(entry) {
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
 		visible = append(visible, entry)
@@ -853,11 +917,13 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 
 // isUIStateMemoryKind reports the entry kinds that are workspace/UI state
 // rather than meeting knowledge — chat threads, codex proposals, mission
-// insights, decision-pass cursors, and venture-package records never enter
-// Scout's search results or model context. Kind "decision" is deliberately
-// absent: decision statements ARE knowledge and must ground Scout's answers.
+// insights, decision-pass cursors, venture-package records, and raw feedback
+// signals (signals.go: distillation-only input, never recall material) never
+// enter Scout's search results or model context. Kind "decision" is
+// deliberately absent: decision statements ARE knowledge and must ground
+// Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {

@@ -179,6 +179,12 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUp(artifactID string, replyTex
 	}
 	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), app.memorySnapshotForClients(12), time.Now())
 
+	// Signal capture (signals.go): asking for a re-run means v(N) missed — a
+	// negative signal whose payload carries WHAT was asked for. Log-and-continue.
+	app.recordSignalEvent(requestedByName, signalEventArtifactRerun, signalValenceNegative, artifact.ID, artifact.Metadata["packageId"], map[string]string{
+		"instruction": truncateAgentThreadText(replyText, 500),
+	})
+
 	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" follow-up running", map[string]any{
 		"tool":       "launch_agent_thread",

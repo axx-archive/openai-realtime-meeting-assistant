@@ -647,6 +647,14 @@ func (app *kanbanBoardApp) restoreQuarantinedEntry(id string, reviewerEmail stri
 	if err != nil {
 		return nil, err
 	}
+	// Signal capture (spec §5 item 6): a human overruling the slop classifier
+	// is a precision datum on the classifier and a vote for the entry —
+	// carrying the classifier's own reason so distillation can study where it
+	// misfires. Log-and-continue inside; never fails the restore.
+	app.recordSignalEvent(strings.TrimSpace(reviewerEmail), signalEventQuarantineRestored, signalValencePositive, restored.ID, restored.Metadata["packageId"], map[string]string{
+		"entryKind":        restored.Kind,
+		"classifierReason": strings.TrimSpace(restored.Metadata["classifierReason"]),
+	})
 	broadcastOSEvent(osEvent{
 		Kind:          osEventQuarantineChange,
 		Ref:           restored.ID,

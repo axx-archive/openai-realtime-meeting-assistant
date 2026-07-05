@@ -3,6 +3,10 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+    # .env carries every runtime key into the app container, including the
+    # OPS-3 Fable activation set (ANTHROPIC_API_KEY, BONFIRE_AGENT_RUNNER,
+    # BONFIRE_ORCHESTRATOR_*/BONFIRE_DELIVERABLE_* dials). Do not move those
+    # into an `environment:` block here — .env is the single source of truth.
     env_file:
       - .env
     volumes:
@@ -23,6 +27,10 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: codex-runner
+    # The sidecar also reads .env, so BONFIRE_CODEX_MODEL (pinned to gpt-5.5
+    # for OPS-3) reaches `codex exec` here. Keys listed under `environment:`
+    # below OVERRIDE the .env values for this service — keep BONFIRE_CODEX_MODEL
+    # and the Anthropic set out of that block.
     env_file:
       - .env
     environment:

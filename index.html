@@ -18545,6 +18545,14 @@
 	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
 	      // next send re-runs that artifact in place via followUpArtifactId
 	      let scoutFollowUpTarget = null
+	      // armed palette tool template (fidelity fix): the palette's
+	      // conversational tiles stash {toolId, name, threadId} here so the next
+	      // send in THAT thread carries it and the launched workstream inherits
+	      // the tool's contract + rubric. Scoped + rendered as a visible chip
+	      // (renderScoutFollowUpTarget, mirroring scoutFollowUpTarget) so a
+	      // forgotten armed template can never silently hijack an unrelated
+	      // later message into a contract-gated agent launch.
+	      let pendingScoutToolTemplate = null
 	      let newChatThreadVisibility = 'private'
 	      let chatThreadPollTimer = 0
 	      let chatThreadsFingerprint = ''
@@ -19276,7 +19284,16 @@
       })
       artifactCopyButton.addEventListener('click', copySelectedArtifact)
       artifactPublishButton.addEventListener('click', toggleSelectedArtifactPublished)
-      scoutChatInput.addEventListener('input', resizeScoutChatInput)
+      scoutChatInput.addEventListener('input', () => {
+        resizeScoutChatInput()
+        // emptying the composer abandons a palette-armed tool template: the
+        // armed intent died with the cleared starter text, so a later plain
+        // message must not launch the tool
+        if (pendingScoutToolTemplate && !scoutChatInput.value.trim()) {
+          pendingScoutToolTemplate = null
+          renderScoutFollowUpTarget()
+        }
+      })
       scoutChatInput.addEventListener('keydown', event => {
         // Never send mid-IME-composition: the Enter that confirms a
         // composition candidate must not submit the half-composed message.
@@ -21684,6 +21701,19 @@
         }
       }
 
+      // open/ignore signal (spec §5): fire-and-forget beacon so a delivered
+      // artifact nobody opens is measurable; failures are deliberately silent.
+      // Deduped per artifact per session (and first-open-only server-side) —
+      // the datum is open vs never-opened, so routine re-clicks while browsing
+      // the library must not spam the store's highest-volume kind.
+      const beaconedArtifactOpens = new Set()
+      function beaconArtifactOpen(artifactId) {
+        const id = String(artifactId || '').trim()
+        if (!id || !authedUser || beaconedArtifactOpens.has(id)) return
+        beaconedArtifactOpens.add(id)
+        fetch('/artifacts/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {})
+      }
+
       function openAgentArtifact(entry) {
         if (!canUseArtifactLibrary()) {
           // signed-out viewers still land on the shared intel canvas — the
@@ -21692,6 +21722,7 @@
           return
         }
         if (entry?.id) {
+          beaconArtifactOpen(entry.id)
           selectArtifact(entry.id)
         }
         setActiveTool('artifacts')
@@ -21725,6 +21756,7 @@
               setActiveTool(tool)
             }
           } else if (type === 'select_artifact' && artifactId) {
+            beaconArtifactOpen(artifactId)
             selectedArtifactId = artifactId
             selectedArtifactChanged = true
           } else if (type === 'assistant_mode') {
@@ -30739,10 +30771,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
+	        // capture-and-clear the palette-armed tool template: it rides this
+	        // send only, so an error or a later plain message never re-fires it.
+	        // A template armed for another thread is dropped instead of firing
+	        // here (the scoutFollowUpTarget scoping rule).
+	        const toolTemplate = pendingScoutToolTemplate && (!pendingScoutToolTemplate.threadId || pendingScoutToolTemplate.threadId === activeScoutThreadId)
+	          ? String(pendingScoutToolTemplate.toolId || '')
+	          : ''
+	        pendingScoutToolTemplate = null
+	        renderScoutFollowUpTarget()
 	        if (authedUser) {
 	          pendingScoutFiles = []
 	          renderPendingScoutFiles()
-	          sendScoutChatViaOffice(trimmed, files)
+	          sendScoutChatViaOffice(trimmed, files, toolTemplate)
 	          return true
 	        }
 	        if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -30756,7 +30797,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return true
 	      }
 
-	      async function sendScoutChatViaOffice(text, files = []) {
+	      async function sendScoutChatViaOffice(text, files = [], toolTemplate = '') {
 	        // capture-and-clear the armed follow-up target at entry so an error
 	        // can never leave a stale armed chip; a target armed on another
 	        // thread's card is dropped instead of mis-firing here
@@ -30773,10 +30814,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Channel agent launches additionally require an explicit "mode:"
 	        // prefix — conversational keywords must not read as a launch. A
 	        // follow-up target counts as explicit engagement (no @scout needed).
+	        // An armed tool template is an explicit palette invocation — like a
+	        // follow-up target it engages Scout regardless of channel visibility.
 	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
-	        const scoutEngaged = Boolean(followUp) || !isChannel || /@scout/i.test(text)
+	        const scoutEngaged = Boolean(followUp) || Boolean(toolTemplate) || !isChannel || /@scout/i.test(text)
 	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
-	        const threadMode = followUp || !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
+	        const threadMode = followUp ? '' : toolTemplate ? 'tool' : !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
 	        if (scoutEngaged) {
 	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}` : threadMode ? 'launching workstream' : 'thinking')
 	        }
@@ -30788,7 +30831,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
 	            method: 'POST',
 	            headers: { 'Content-Type': 'application/json' },
-	            body: JSON.stringify(followUp ? { text, files, followUpArtifactId: followUp.artifactId } : { text, files })
+	            body: JSON.stringify(followUp ? { text, files, followUpArtifactId: followUp.artifactId } : toolTemplate ? { text, files, toolTemplate } : { text, files })
 	          })
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok) {
@@ -30938,40 +30981,65 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          : 'ask Scout about any meeting'
 	      }
 
-	      // composer target chip: while armed, the next send routes through
-	      // followUpArtifactId and re-runs the target artifact in place
+	      // composer target chips: while armed, the next send routes through
+	      // followUpArtifactId (re-runs the target artifact in place) and/or the
+	      // palette-armed tool template (contract-gated workstream launch). Both
+	      // armed states MUST be visible + dismissible here — an invisible armed
+	      // template would silently hijack an unrelated later message.
 	      function renderScoutFollowUpTarget() {
 	        if (!scoutFollowUpTargetEl) {
 	          return
 	        }
 	        scoutFollowUpTargetEl.replaceChildren()
-	        scoutFollowUpTargetEl.hidden = !scoutFollowUpTarget
-	        if (!scoutFollowUpTarget) {
+	        scoutFollowUpTargetEl.hidden = !scoutFollowUpTarget && !pendingScoutToolTemplate
+	        if (!scoutFollowUpTarget && !pendingScoutToolTemplate) {
 	          if (scoutChatInput) {
 	            scoutChatInput.placeholder = scoutChatDefaultPlaceholder()
 	          }
 	          return
 	        }
-	        const chip = document.createElement('span')
-	        chip.className = 'scout-followup-chip'
-	        const label = document.createElement('span')
-	        label.className = 'scout-followup-chip__label'
-	        const query = String(scoutFollowUpTarget.query || '').trim()
-	        label.textContent = `follow-up → ${assistantToolLabelText(scoutFollowUpTarget.mode)} v${scoutFollowUpTarget.version}${query ? ` · ${query.slice(0, 48)}` : ''}`
-	        const clear = document.createElement('button')
-	        clear.type = 'button'
-	        clear.className = 'scout-followup-chip__clear'
-	        clear.setAttribute('aria-label', 'Clear follow-up target')
-	        clear.title = 'clear'
-	        clear.textContent = '×'
-	        clear.addEventListener('click', () => {
-	          scoutFollowUpTarget = null
-	          renderScoutFollowUpTarget()
-	        })
-	        chip.append(label, clear)
-	        scoutFollowUpTargetEl.appendChild(chip)
+	        const armedChip = (labelText, ariaLabel, onClear) => {
+	          const chip = document.createElement('span')
+	          chip.className = 'scout-followup-chip'
+	          const label = document.createElement('span')
+	          label.className = 'scout-followup-chip__label'
+	          label.textContent = labelText
+	          const clear = document.createElement('button')
+	          clear.type = 'button'
+	          clear.className = 'scout-followup-chip__clear'
+	          clear.setAttribute('aria-label', ariaLabel)
+	          clear.title = 'clear'
+	          clear.textContent = '×'
+	          clear.addEventListener('click', onClear)
+	          chip.append(label, clear)
+	          return chip
+	        }
+	        if (scoutFollowUpTarget) {
+	          const query = String(scoutFollowUpTarget.query || '').trim()
+	          scoutFollowUpTargetEl.appendChild(armedChip(
+	            `follow-up → ${assistantToolLabelText(scoutFollowUpTarget.mode)} v${scoutFollowUpTarget.version}${query ? ` · ${query.slice(0, 48)}` : ''}`,
+	            'Clear follow-up target',
+	            () => {
+	              scoutFollowUpTarget = null
+	              renderScoutFollowUpTarget()
+	            }
+	          ))
+	        }
+	        if (pendingScoutToolTemplate) {
+	          const toolName = String(pendingScoutToolTemplate.name || paletteToolById(pendingScoutToolTemplate.toolId)?.name || pendingScoutToolTemplate.toolId || 'tool')
+	          scoutFollowUpTargetEl.appendChild(armedChip(
+	            `tool → ${toolName} · next send launches it`,
+	            'Clear armed tool',
+	            () => {
+	              pendingScoutToolTemplate = null
+	              renderScoutFollowUpTarget()
+	            }
+	          ))
+	        }
 	        if (scoutChatInput) {
-	          scoutChatInput.placeholder = 'add answers, corrections, or new info for the next run…'
+	          scoutChatInput.placeholder = scoutFollowUpTarget
+	            ? 'add answers, corrections, or new info for the next run…'
+	            : 'describe what the tool should work on — send launches it…'
 	        }
 	      }
 
@@ -31055,6 +31123,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!authedUser) {
           appendScoutChatNode(scoutChatMessageNode('error', 'sign in to launch a goal', new Date().toISOString()))
           return
+        }
+        // a Run-door launch supersedes any armed conversational template —
+        // it must not survive to hijack the next composer send
+        if (pendingScoutToolTemplate) {
+          pendingScoutToolTemplate = null
+          renderScoutFollowUpTarget()
         }
         setActiveTool('chat')
         showScoutChatThinking('kicking off the goal')
@@ -31225,6 +31299,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         ensurePaletteDom()
+        // re-opening the palette supersedes a previously armed conversational
+        // tool: the selection made here re-arms (or launches) explicitly
+        if (pendingScoutToolTemplate) {
+          pendingScoutToolTemplate = null
+          renderScoutFollowUpTarget()
+        }
         // Warm the packages list so the form's package picker (and the quick-run
         // default) can link a launched goal to the open/most-recent venture.
         loadPackages().catch(() => { /* the picker still offers standalone */ })
@@ -31434,6 +31514,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const mode = ['research', 'design', 'grill', 'workflow'].includes(tool.mode) ? tool.mode : 'research'
         // reuse the existing promptScoutForWork machinery (§1.5b, least new code)
         promptScoutForWork(mode, scoutStarterText(mode))
+        // fidelity fix (spec §2): arm tool.id so the send carries the template
+        // and the talk-it-out door gets the same contract-gated run as Run.
+        // Armed AFTER promptScoutForWork so threadId reflects the composer the
+        // user actually landed in; the chip makes the armed state visible and
+        // dismissible (renderScoutFollowUpTarget).
+        pendingScoutToolTemplate = { toolId: tool.id, name: String(tool.name || tool.id), threadId: activeScoutThreadId }
+        renderScoutFollowUpTarget()
       }
 
       function paletteToolObjective(tool, inputs) {
@@ -33153,6 +33240,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // a follow-up armed on another thread's card must not fire here
 	        if (scoutFollowUpTarget && scoutFollowUpTarget.threadId && scoutFollowUpTarget.threadId !== activeScoutThreadId) {
 	          scoutFollowUpTarget = null
+	        }
+	        // same rule for a palette-armed tool template: switching threads
+	        // drops it rather than letting it hijack a message elsewhere
+	        if (pendingScoutToolTemplate && pendingScoutToolTemplate.threadId && pendingScoutToolTemplate.threadId !== activeScoutThreadId) {
+	          pendingScoutToolTemplate = null
 	        }
 	        renderScoutFollowUpTarget()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []

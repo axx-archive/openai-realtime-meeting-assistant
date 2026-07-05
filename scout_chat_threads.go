@@ -209,12 +209,13 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			Text               string                    `json:"text"`
 			Files              []scoutChatFileAttachment `json:"files"`
 			FollowUpArtifactId string                    `json:"followUpArtifactId"`
+			ToolTemplate       string                    `json:"toolTemplate"`
 		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		response, err := kanbanApp.appendScoutChatThreadMessage(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId)
+		response, err := kanbanApp.appendScoutChatThreadMessageWithTool(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ToolTemplate)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -276,6 +277,15 @@ func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy st
 }
 
 func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string) (map[string]any, error) {
+	return app.appendScoutChatThreadMessageWithTool(ctx, user, threadID, text, files, followUpArtifactID, "")
+}
+
+// appendScoutChatThreadMessageWithTool is appendScoutChatThreadMessage plus an
+// optional palette tool template. The palette's conversational tiles hand off
+// to the composer; carrying tool.id through the send is the §2 fidelity fix —
+// the same tool must produce the same contract-gated output from the talk-it-out
+// door as from the Run door.
+func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, toolTemplate string) (map[string]any, error) {
 	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
 	if err != nil {
 		return nil, err
@@ -351,6 +361,62 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 			return nil, err
 		}
 		response["answer"] = statusMessage
+		response["thread"] = saved
+		response["agentThread"] = agentThread
+		response["artifact"] = agentThread.Artifact
+		response["actions"] = agentThread.Actions
+		return response, nil
+	}
+
+	// A palette conversational handoff armed a tool template: launch the
+	// tool's base mode with toolTemplate stamped on the artifact, so the run
+	// resolves through the SAME toolPromptForThread machinery a palette Run or
+	// /goal deliverable uses (assembled wrapper prompt + gate rubric) instead
+	// of the generic per-mode contract. The palette tap is itself the explicit
+	// invocation, so — like an armed follow-up target — this branch runs
+	// regardless of channel visibility and never needs @scout.
+	if toolTemplate = strings.TrimSpace(toolTemplate); toolTemplate != "" {
+		tool, ok := toolByID(toolTemplate)
+		if !ok {
+			return nil, fmt.Errorf("unknown tool template %q", toolTemplate)
+		}
+		originKind := agentThreadOriginPrivateThread
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+			originKind = agentThreadOriginChannel
+		}
+		objective := firstNonBlank(text, tool.Name)
+		agentThread, err := app.launchAgentThreadWithSpec(tool.Mode, objective, user.Name, map[string]string{
+			"originKind": originKind,
+			"originId":   threadID,
+		}, agentThreadGoalSpec{
+			Objective:     objective,
+			ToolTemplate:  tool.ID,
+			OriginSurface: "chat:" + threadID,
+			RequestedBy:   normalizeAccountEmail(user.Email),
+			Authority:     tool.Authority,
+		})
+		if err != nil {
+			return nil, err
+		}
+		assistantMessage := scoutChatMessageRecord{
+			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:      "thread",
+			Role:      "scout",
+			Text:      tool.Name + " launched — running against its output contract and gate rubric",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Thread: &scoutChatThreadRef{
+				ID:         agentThread.ID,
+				Mode:       agentThread.Mode,
+				Query:      agentThread.Query,
+				Status:     agentThread.Status,
+				ArtifactID: agentThread.Artifact.ID,
+			},
+		}
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+		if err != nil {
+			return nil, err
+		}
+		response["answer"] = assistantMessage
 		response["thread"] = saved
 		response["agentThread"] = agentThread
 		response["artifact"] = agentThread.Artifact

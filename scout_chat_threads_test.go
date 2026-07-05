@@ -692,3 +692,175 @@ func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
 		t.Fatalf("thread=%#v, want archived with title intact", archivePayload.Thread)
 	}
 }
+
+// --- Palette conversational handoff carries the tool contract (§2 fidelity fix)
+
+// A conversational palette tile (deep_research, grill_pressure_test) hands off
+// to the composer; the send must carry tool.id so the launched workstream is
+// contract-gated — the same tool must never produce rubric'd output from the
+// Run door and generic output from the talk-it-out door.
+func TestScoutChatToolTemplateHandoffCarriesToolContract(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	modelCalls := 0
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		modelCalls++
+		return "conversational answer", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "the rodeo creator market", nil, "", "deep_research")
+	if err != nil {
+		t.Fatalf("append with tool template: %v", err)
+	}
+	if modelCalls != 0 {
+		t.Fatalf("modelCalls=%d, want 0 — a tool-template send launches a workstream, not a conversational answer", modelCalls)
+	}
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok {
+		t.Fatalf("response keys=%v, want an agentThread launch for a tool-template send", responseKeys(response))
+	}
+	if agentThread.Mode != "research" {
+		t.Fatalf("mode=%q, want the deep_research tool's base mode research", agentThread.Mode)
+	}
+	meta := agentThread.Artifact.Metadata
+	if meta["toolTemplate"] != "deep_research" {
+		t.Fatalf("artifact toolTemplate=%q, want deep_research — without it toolPromptForThread falls back to the generic contract", meta["toolTemplate"])
+	}
+	if meta["objective"] != "the rodeo creator market" {
+		t.Fatalf("artifact objective=%q, want the composer text", meta["objective"])
+	}
+	if meta["originSurface"] != "chat:"+private.ID {
+		t.Fatalf("artifact originSurface=%q, want chat:%s (the return card routes on it)", meta["originSurface"], private.ID)
+	}
+	if meta["requestedBy"] != "aj@shareability.com" {
+		t.Fatalf("artifact requestedBy=%q, want the requester email", meta["requestedBy"])
+	}
+	if meta["authority"] != toolAuthorityReadOnly {
+		t.Fatalf("artifact authority=%q, want the tool's registry authority %q", meta["authority"], toolAuthorityReadOnly)
+	}
+
+	// The stamped template resolves through the SAME prompt machinery a goal
+	// deliverable uses: the generation prompt is the assembled tool wrapper
+	// (contract headings + gate rubric), not the generic per-mode scaffold.
+	prompt, ok := kanbanApp.toolPromptForThread(agentThread)
+	if !ok {
+		t.Fatal("toolPromptForThread=false for the handoff thread — the tool contract is not riding the launch")
+	}
+	for _, want := range []string{"research_brief_gate_v1", "Executive Summary", "the rodeo creator market"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("assembled tool prompt missing %q", want)
+		}
+	}
+
+	// The reply is the standard thread card wired to the launched artifact.
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || answer.Kind != "thread" || answer.Thread == nil || answer.Thread.ArtifactID != agentThread.Artifact.ID {
+		t.Fatalf("answer=%#v, want a Kind=thread card referencing the launched artifact", response["answer"])
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	if !scoutChatThreadHasAgentRef(saved, agentThread.ID) {
+		t.Fatalf("persisted thread carries no ref to agent thread %s — status flips cannot land", agentThread.ID)
+	}
+
+	// An unknown template is rejected outright — never silently degraded to a
+	// generic run (that silent quality fork is the bug this fixes).
+	if _, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "whatever", nil, "", "not_a_tool"); err == nil || !strings.Contains(err.Error(), "unknown tool template") {
+		t.Fatalf("err=%v, want unknown tool template rejection", err)
+	}
+}
+
+// The handoff is an explicit palette invocation, so in a public channel it
+// launches without an @scout mention — exactly like an armed follow-up target.
+func TestScoutChatToolTemplateLaunchesInChannelWithoutMention(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "launch plan", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, channel.ID, "grill the neon signal pitch", nil, "", "grill_pressure_test")
+	if err != nil {
+		t.Fatalf("append with tool template: %v", err)
+	}
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok {
+		t.Fatalf("response keys=%v, want a launch without @scout — the palette tap is the invocation", responseKeys(response))
+	}
+	if agentThread.Mode != "grill" || agentThread.Artifact.Metadata["toolTemplate"] != "grill_pressure_test" {
+		t.Fatalf("mode=%q toolTemplate=%q, want grill/grill_pressure_test", agentThread.Mode, agentThread.Artifact.Metadata["toolTemplate"])
+	}
+	if agentThread.Artifact.Metadata["originKind"] != agentThreadOriginChannel {
+		t.Fatalf("originKind=%q, want %q for a channel handoff", agentThread.Artifact.Metadata["originKind"], agentThreadOriginChannel)
+	}
+}
+
+// The HTTP messages route decodes toolTemplate and hands it to the launch path
+// — this is the wire contract the composer's fetch relies on.
+func TestAssistantChatThreadMessagesRouteCarriesToolTemplate(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+thread.ID+"/messages", strings.NewReader(`{"text":"map the fintech landscape","toolTemplate":"deep_research"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	assistantChatThreadHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		AgentThread scoutAgentThread   `json:"agentThread"`
+		Artifact    meetingMemoryEntry `json:"artifact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Artifact.Metadata["toolTemplate"] != "deep_research" {
+		t.Fatalf("artifact toolTemplate=%q, want deep_research — the route dropped the template", payload.Artifact.Metadata["toolTemplate"])
+	}
+	if payload.AgentThread.ID == "" {
+		t.Fatalf("body=%s, want an agentThread in the response", rec.Body.String())
+	}
+}
