@@ -33,9 +33,10 @@ import (
 
 // nolint
 var (
-	addr              = flag.String("addr", ":3000", "http service address")
-	codexRunnerWorker = flag.Bool("codex-runner", false, "run the Codex sidecar queue worker")
-	upgrader          = websocket.Upgrader{
+	addr               = flag.String("addr", ":3000", "http service address")
+	codexRunnerWorker  = flag.Bool("codex-runner", false, "run the Codex sidecar queue worker")
+	renderRunnerWorker = flag.Bool("render-runner", false, "run the render sidecar queue worker (PDF export)")
+	upgrader           = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
 	}
 
@@ -478,6 +479,13 @@ func main() {
 		return
 	}
 
+	if *renderRunnerWorker {
+		if err := runRenderRunnerLoop(context.Background()); err != nil {
+			log.Errorf("Render runner stopped: %v", err)
+		}
+		return
+	}
+
 	// Init other state
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
@@ -550,6 +558,11 @@ func main() {
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)
 	http.HandleFunc("/artifacts/render", artifactRenderHandler)
 	http.HandleFunc("/artifacts/render-token", artifactRenderTokenHandler)
+	http.HandleFunc("/artifacts/blob", artifactBlobHandler)
+	http.HandleFunc("/artifacts/share", artifactShareHandler)
+	http.HandleFunc("/a/", shareLinkPublicHandler)
+	http.HandleFunc("/artifacts/export-pdf", artifactExportPDFHandler)
+	http.HandleFunc("/internal/render/jobs/result", internalRenderRunnerResultHandler)
 	http.HandleFunc("/signals/survey", signalSurveyHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
@@ -678,6 +691,7 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 				"board":        readinessAgentSnapshot(meetingBoardAgent()),
 				"missionIntel": readinessAgentSnapshot(missionIntelligenceAgent()),
 				"codexRunner":  readinessCodexRunnerSnapshot(),
+				"renderRunner": readinessRenderRunnerSnapshot(),
 			},
 		},
 	})
@@ -753,6 +767,296 @@ func readinessAgentSnapshot(agent ambientAgentConfig) map[string]any {
 		"minBatch":        agent.minBatch(),
 		"maxBatch":        agent.maxBatch(),
 	}
+}
+
+// renderSidecarAvailable reports whether the render-runner sidecar is live:
+// a fresh heartbeat on the shared volume (readinessRenderRunnerSnapshot, the
+// codex-runner twin). Missing or stale is exactly the keyless/sidecar-absent
+// degradation — the trigger route answers 503 with a clear operator message
+// instead of queueing a job nothing will ever claim.
+func renderSidecarAvailable() bool {
+	heartbeatOK, _ := readinessRenderRunnerSnapshot()["heartbeatOK"].(bool)
+	return heartbeatOK
+}
+
+// artifactExportPDFHandler serves POST /artifacts/export-pdf
+// {artifactId, kind} (packaging OS §4 item 14b) — session-gated exactly like
+// its /artifacts neighbors. It enqueues an export_pdf job for the
+// render-runner sidecar (enqueueRenderExportPDFJob) and stamps renderJobId on
+// the artifact so the callback can verify job identity, mirroring the codex
+// runnerJobId contract.
+func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "artifacts are unavailable")
+		return
+	}
+
+	payload := struct {
+		ArtifactID string `json:"artifactId"`
+		Kind       string `json:"kind"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read PDF export request")
+		return
+	}
+
+	artifact, found := kanbanApp.osArtifactByID(strings.TrimSpace(payload.ArtifactID))
+	if !found {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+	// Both kinds print an HTML document (deck: flatten law; paper: text-native
+	// direct print) — a markdown body has nothing for chromium to lay out.
+	if !artifactIsHTMLDocument(artifact) {
+		writeAuthError(w, http.StatusBadRequest, "PDF export needs an HTML artifact body (an html_deck or paper-kit document)")
+		return
+	}
+	if !renderSidecarAvailable() {
+		writeAuthError(w, http.StatusServiceUnavailable, "render sidecar not available — start the render-runner container (or run with -render-runner) to export PDFs")
+		return
+	}
+
+	// The flatten law is server-owned: the client may request an export, not
+	// choose the print path (a deck exported as "paper" would ship the layered
+	// print). Kind derives from the artifact's own declaration; a stated kind
+	// that disagrees is rejected rather than silently rewritten.
+	kind := serverRenderKindForArtifact(artifact)
+	if requested := strings.TrimSpace(payload.Kind); requested != "" && normalizeRenderJobKind(requested) != kind {
+		writeAuthError(w, http.StatusBadRequest, "export kind is derived from the artifact (paper is only for paper-kit documents) — omit kind or match it")
+		return
+	}
+	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, artifact.Text, artifact.Metadata["title"])
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Bookkeeping stamp via the metadata-only path (the openedAt precedent):
+	// a failure loses the job-identity check, never the queued job — log and
+	// continue.
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{
+		"renderJobId":  job.ID,
+		"renderStatus": renderJobStatusQueued,
+		"renderKind":   kind,
+	}); err != nil {
+		log.Errorf("Failed to stamp renderJobId on artifact %s: %v", artifact.ID, err)
+	}
+
+	writeAuthJSON(w, http.StatusAccepted, map[string]any{
+		"ok":    true,
+		"jobId": job.ID,
+		"kind":  kind,
+	})
+}
+
+// renderCallbackMaxBytes bounds the render callback body: base64 of a
+// cap-sized PDF (~4/3 × 64MB) plus JSON framing headroom.
+const renderCallbackMaxBytes = blobMaxBytes + blobMaxBytes/2
+
+// renderCallbackPDFBytes extracts the exported PDF from the callback: the
+// base64 payload wins; the shared-volume path is the fallback transport and
+// is only honored INSIDE the render queue directory — the bearer token
+// authenticates the sidecar, it does not make the callback a file-read oracle.
+func renderCallbackPDFBytes(payload renderRunnerCallbackPayload) ([]byte, error) {
+	if encoded := strings.TrimSpace(payload.PDFBase64); encoded != "" {
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("decode callback pdf: %w", err)
+		}
+		return data, nil
+	}
+	path := filepath.Clean(strings.TrimSpace(payload.PDFPath))
+	if path == "" || path == "." {
+		return nil, fmt.Errorf("callback carried no PDF")
+	}
+	if !strings.HasPrefix(path, renderRunnerQueuePath()+string(os.PathSeparator)) {
+		return nil, fmt.Errorf("callback pdf path is outside the render queue")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read callback pdf: %w", err)
+	}
+	return data, nil
+}
+
+// internalRenderRunnerResultHandler serves POST /internal/render/jobs/result —
+// the render sidecar's authenticated callback (Bearer BONFIRE_RUNNER_TOKEN,
+// the internalCodexRunnerResultHandler twin). A complete job stores the PDF
+// in the blob store, appends a {kind: pdf} asset on the artifact, and records
+// the pdf_exported signal; running/failed callbacks only stamp status
+// metadata so the viewer can narrate progress.
+func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !runnerCallbackAuthorized(r) {
+		writeSystemStatusJSON(w, r, http.StatusUnauthorized, map[string]any{
+			"ok":    false,
+			"error": "runner callback not authorized",
+		})
+		return
+	}
+	if kanbanApp == nil {
+		writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "artifacts are unavailable",
+		})
+		return
+	}
+
+	var payload renderRunnerCallbackPayload
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, renderCallbackMaxBytes)).Decode(&payload); err != nil {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "could not read render callback",
+		})
+		return
+	}
+	artifactID := strings.TrimSpace(payload.ArtifactID)
+	if artifactID == "" {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "artifact_id is required",
+		})
+		return
+	}
+	existing, exists := kanbanApp.osArtifactByID(artifactID)
+	if !exists {
+		writeSystemStatusJSON(w, r, http.StatusNotFound, map[string]any{
+			"ok":    false,
+			"error": "artifact not found",
+		})
+		return
+	}
+	// The job-identity check is MANDATORY, never best-effort: the render
+	// sidecar is the least-trusted box in the system (it executes untrusted
+	// artifact HTML), so a callback binds to an artifact ONLY through the
+	// renderJobId stamp the export trigger wrote server-side. A callback with
+	// no job_id, an artifact with no pending stamp, or a mismatched id is
+	// rejected for EVERY status — a hostile holder of the runner token can
+	// neither attach assets to nor scribble progress on arbitrary artifacts.
+	expectedJobID := strings.TrimSpace(existing.Metadata["renderJobId"])
+	callbackJobID := strings.TrimSpace(payload.JobID)
+	if callbackJobID == "" {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "job_id is required",
+		})
+		return
+	}
+	if expectedJobID == "" || callbackJobID != expectedJobID {
+		writeSystemStatusJSON(w, r, http.StatusConflict, map[string]any{
+			"ok":    false,
+			"error": "render job does not match artifact",
+		})
+		return
+	}
+
+	status := strings.ToLower(strings.TrimSpace(payload.Status))
+	// Kind comes from the server's own enqueue-time stamp, never the callback
+	// payload — the sidecar reports, the server decides what the flatten law
+	// requires. A missing stamp normalizes to deck, the strict path.
+	kind := normalizeRenderJobKind(existing.Metadata["renderKind"])
+	// renderJobId is deliberately NOT written from the callback payload: the
+	// export trigger is its only setter, so a callback can never re-point the
+	// stamp the identity check above depends on. (The success path below does
+	// clear it server-side, closing the completed-job replay window.)
+	metadata := map[string]string{
+		"renderStatus": status,
+	}
+	if payload.Error != "" {
+		metadata["renderError"] = payload.Error
+	}
+
+	if status != renderJobStatusComplete {
+		if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, metadata); err != nil {
+			writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
+			return
+		}
+		writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	// THE FLATTEN LAW at the trust boundary too: a deck deliverable that is
+	// not the flattened raster never lands as an asset.
+	if kind == renderJobKindDeck && !payload.Flattened {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "deck exports must be flattened — the layered print never ships",
+		})
+		return
+	}
+
+	pdfBytes, err := renderCallbackPDFBytes(payload)
+	if err != nil {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	ref, err := putBlob(pdfBytes, "application/pdf")
+	if err != nil {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	assetName := firstNonEmptyString(strings.TrimSpace(existing.Metadata["title"]), "artifact") + ".pdf"
+	if _, err := kanbanApp.appendArtifactAsset(artifactID, artifactAsset{
+		Ref:  ref,
+		Mime: "application/pdf",
+		Name: assetName,
+		Kind: "pdf",
+	}); err != nil {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	if payload.PageCount > 0 {
+		metadata["renderPageCount"] = strconv.Itoa(payload.PageCount)
+	}
+	metadata["renderFlattened"] = strconv.FormatBool(payload.Flattened)
+	// A completed job is spent: clearing the stamp makes the identity check
+	// above reject any replay of this callback.
+	metadata["renderJobId"] = ""
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, metadata); err != nil {
+		log.Errorf("Failed to stamp render completion on artifact %s: %v", artifactID, err)
+	}
+
+	// §5 capture: the export is a deliverable landing, one signal.
+	kanbanApp.recordSignalEvent("render_runner", signalEventPDFExported, signalValenceNeutral, artifactID, existing.Metadata["packageId"], map[string]string{
+		"jobId":     callbackJobID,
+		"kind":      kind,
+		"pageCount": strconv.Itoa(payload.PageCount),
+		"flattened": strconv.FormatBool(payload.Flattened),
+	})
+	// Let open viewers see the new asset without a reload (the codex
+	// callback's memory fan-out).
+	broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+
+	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
+		"ok":  true,
+		"ref": ref,
+	})
 }
 
 func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
@@ -1457,11 +1761,68 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAuthJSON(w, http.StatusOK, map[string]any{
+	// Cursor pagination (spec §4, Wave 3 item 13) — additive params only. A
+	// bare GET keeps today's exact response shape so the existing UI works
+	// unchanged; ?before=<artifact-id>&limit=<n> opens an older window for
+	// history scrollback. Windows preserve snapshot order (oldest → newest),
+	// matching what the client already renders.
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before"))
+	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if beforeID == "" && limitParam == "" {
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":                 true,
+			"artifacts":          kanbanApp.osArtifactsSnapshot(100),
+			"publishedArtifacts": kanbanApp.publishedOSArtifactsSnapshot(10),
+		})
+		return
+	}
+
+	limit := 100
+	if limitParam != "" {
+		parsed, err := strconv.Atoi(limitParam)
+		if err != nil || parsed < 1 {
+			writeAuthError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if parsed > 500 {
+			parsed = 500
+		}
+		limit = parsed
+	}
+
+	artifacts := kanbanApp.osArtifactsSnapshot(0)
+	end := len(artifacts)
+	if beforeID != "" {
+		end = -1
+		for index, artifact := range artifacts {
+			if artifact.ID == beforeID {
+				end = index
+				break
+			}
+		}
+		if end < 0 {
+			writeAuthError(w, http.StatusNotFound, "cursor artifact not found")
+			return
+		}
+	}
+	start := end - limit
+	if start < 0 {
+		start = 0
+	}
+	window := artifacts[start:end]
+
+	payload := map[string]any{
 		"ok":                 true,
-		"artifacts":          kanbanApp.osArtifactsSnapshot(100),
+		"artifacts":          window,
 		"publishedArtifacts": kanbanApp.publishedOSArtifactsSnapshot(10),
-	})
+		"hasMore":            start > 0,
+	}
+	if start > 0 && len(window) > 0 {
+		// nextBefore is the oldest id in this window — pass it back as
+		// ?before= to continue into strictly older artifacts.
+		payload["nextBefore"] = window[0].ID
+	}
+	writeAuthJSON(w, http.StatusOK, payload)
 }
 
 func publicAssetHandler(w http.ResponseWriter, r *http.Request) {

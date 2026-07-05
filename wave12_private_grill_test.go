@@ -331,6 +331,66 @@ func TestEndPrivateGrillRecordsGrillDeltaSignalOnceGraded(t *testing.T) {
 	}
 }
 
+// The private seam closes the grill loop too: end_private_grill hands the
+// watcher the package baseline, and once the scorecard grades the SAME watcher
+// runs the red-team panel and files the objection ledger before the delta
+// signal — the loop is wired into the existing grill agent-thread filing, not
+// a separate surface.
+func TestEndPrivateGrillWatcherClosesObjectionLoop(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	watches := stubGrillDeltaWatches(t)
+
+	record := createTestPackage(t, app, "Aurora IP", "Aurora is a prestige limited series.")
+	result, _, err := app.applyPrivateRealtimeVoiceTool("aj@shareability.com", "end_private_grill", map[string]any{
+		"package":    "Aurora IP",
+		"transcript": "Scout: who is the buyer? User: a named streamer now.",
+	})
+	if err != nil {
+		t.Fatalf("end_private_grill: %v", err)
+	}
+	artifactID := asString(result["artifactId"])
+	if len(*watches) != 1 {
+		t.Fatalf("watches=%d, want 1", len(*watches))
+	}
+
+	// The terminal seam grades the scorecard, then the watcher (keyed, with the
+	// panel responder installed) closes the loop and records the delta.
+	if _, _, err := app.memory.updateOSArtifactWithMetadata(artifactID, "", "Vision: first pass.\nREADINESS: 6.8/10", scoutParticipantName, map[string]string{"readinessScore": "6.8", "threadStatus": "complete"}); err != nil {
+		t.Fatalf("grade scorecard: %v", err)
+	}
+	installGrillPanelResponder(t,
+		`{"objections":["The streamer is named but unsigned"],"strengths_to_keep":[]}`,
+		`{"objections":["No term sheet on record"],"strengths_to_keep":["the package thesis"]}`)
+	watch := (*watches)[0]
+	app.watchGrillDeltaSignal(watch.actor, watch.artifactID, watch.packageID, watch.priorReadiness, watch.topic, time.Millisecond, time.Second)
+
+	ledger, ok := app.latestGrillObjectionLedger(record.ID)
+	if !ok || ledger.Round != 1 || ledger.GrillArtifactID != artifactID {
+		t.Fatalf("private grill did not file a round-1 ledger: %+v (ok=%v)", ledger, ok)
+	}
+	if len(ledger.Personas) != 2 {
+		t.Fatalf("ledger personas=%d, want the 2-seat red team", len(ledger.Personas))
+	}
+	// The ledger is attached to the package so the NEXT re-grill finds it.
+	refreshed, _ := app.venturePackageByID(record.ID)
+	found := false
+	for _, id := range refreshed.ArtifactIDs {
+		if artifact, ok := app.osArtifactByID(id); ok && artifact.Metadata["artifactContract"] == grillObjectionLedgerContract {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("objection ledger not attached to the package: %v", refreshed.ArtifactIDs)
+	}
+	// The delta signal still recorded (first grill: no baseline, neutral).
+	if signals := grillDeltaSignals(t, app); len(signals) != 1 || signals[0].Payload["readiness"] != "6.8" {
+		t.Fatalf("signals=%#v, want one grill_delta on the graded scorecard", signals)
+	}
+}
+
 func TestEndPrivateGrillWithoutPackageStillRevertsAndFiles(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousRunner := startAgentThreadAsync

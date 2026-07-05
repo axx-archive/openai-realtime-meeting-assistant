@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -435,6 +438,335 @@ func TestGrillTopObjectionsParsesLatestVersionOnly(t *testing.T) {
 	}
 	if got := grillTopObjections("READINESS: 5.0/10\nA scorecard with no objection heading."); got != "" {
 		t.Fatalf("objections=%q, want empty for a heading-less scorecard", got)
+	}
+}
+
+// --- Closing the grill loop (Wave 3 item 12: panel + gate first consumer) ------
+
+// installGrillPanelResponder swaps the anthropic responder with a fake that
+// answers the two red-team personas (keyed off the persona descriptions
+// grill.go defines) and the ledger synthesis call, recording every persona
+// system prompt so tests can assert each seat saw its OWN prior objections.
+func installGrillPanelResponder(t *testing.T, seedInvestorJSON string, preparedReaderJSON string) *[]string {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	var mu sync.Mutex
+	systems := &[]string{}
+	original := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = original })
+	createAnthropicMessagesResponse = func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Errorf("apiKey=%q, want test-key", apiKey)
+		}
+		text := ""
+		switch {
+		case strings.Contains(request.System, defaultGrillPersona):
+			text = seedInvestorJSON
+		case strings.Contains(request.System, defaultPrivateGrillPersona):
+			text = preparedReaderJSON
+		case strings.Contains(request.System, "synthesizing Bonfire's red-team panel"):
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("Sharpest unresolved objection, one line.")}}, nil
+		default:
+			t.Errorf("unexpected system prompt: %q", request.System)
+			return anthropicMessagesResponse{}, fmt.Errorf("unexpected system prompt")
+		}
+		mu.Lock()
+		*systems = append(*systems, request.System)
+		mu.Unlock()
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+	return systems
+}
+
+// A graded FIRST grill of a package runs the red-team panel and files an
+// objection_ledger_v1 artifact — per-persona objections + strengths_to_keep —
+// attached to the package, without touching the scorecard's readiness.
+func TestCloseGrillObjectionLoopFilesLedgerOnFirstGrill(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	scorecard, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn grill",
+		"Vision: rough.\nREADINESS: 6.5/10\n\n## Strongest objections\n- No named buyer.", "AJ",
+		map[string]string{"readinessScore": "6.5", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed scorecard: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, scorecard.ID, "AJ"); err != nil {
+		t.Fatalf("attach scorecard: %v", err)
+	}
+	systems := installGrillPanelResponder(t,
+		`{"objections":["No named buyer attached to the ask"],"strengths_to_keep":["the licensing bundle framing"]}`,
+		`{"objections":["The comp set is thin"],"strengths_to_keep":[]}`)
+
+	updated := app.closeGrillObjectionLoop(scorecard, "AJ", record.ID, "")
+
+	// First grill: nothing gates the dial.
+	if updated.Metadata["readinessScore"] != "6.5" || updated.Metadata["readinessHeld"] != "" {
+		t.Fatalf("first grill must not touch readiness: %v", updated.Metadata)
+	}
+	// The ledger filed, attached, decodable, with both personas' seats.
+	ledger, ok := app.latestGrillObjectionLedger(record.ID)
+	if !ok {
+		t.Fatal("no objection ledger filed for the package")
+	}
+	if ledger.Round != 1 || ledger.GrillArtifactID != scorecard.ID || ledger.PackageID != record.ID {
+		t.Fatalf("ledger=%+v, want round 1 anchored to the scorecard", ledger)
+	}
+	if len(ledger.Personas) != 2 {
+		t.Fatalf("ledger personas=%d, want the 2-seat red team", len(ledger.Personas))
+	}
+	seed, ok := ledger.personaByName("skeptical_seed_investor")
+	if !ok || len(seed.Objections) != 1 || seed.Objections[0] != "No named buyer attached to the ask" || len(seed.StrengthsToKeep) != 1 {
+		t.Fatalf("seed investor seat wrong: %+v", seed)
+	}
+	if _, ok := ledger.personaByName("prepared_package_reader"); !ok {
+		t.Fatalf("prepared reader seat missing: %+v", ledger.Personas)
+	}
+	if ledger.Summary == "" || ledger.GateOutcome != "" {
+		t.Fatalf("first-grill ledger wants a synthesis summary and NO gate outcome: %+v", ledger)
+	}
+	// Both persona calls saw the graded scorecard; the ledger artifact itself
+	// stays out of the readiness dial's newest-grill scan.
+	for _, system := range *systems {
+		if strings.Contains(system, "YOUR OWN objections") {
+			t.Fatalf("a first grill has no prior objections to re-present: %q", system)
+		}
+	}
+	refreshed, _ := app.venturePackageByID(record.ID)
+	if got := app.latestPackageReadiness(refreshed); got != "6.5" {
+		t.Fatalf("dial=%q after ledger attach, want 6.5 — the ledger must not hijack the newest-grill scan", got)
+	}
+}
+
+// A RE-grill re-presents each persona its OWN prior objections; when any
+// remain unverified the gate holds the readiness dial at the prior score (the
+// raw score preserved, the hold and gaps disclosed) and the grill_delta signal
+// reads the GATED score — the dial moves only on verified fixes.
+func TestGrillRegrillGateHoldsDialUntilObjectionsVerified(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	app.fileGrillObjectionLedger("AJ", "Boot Barn", grillObjectionLedger{
+		PackageID:       record.ID,
+		GrillArtifactID: "prior-scorecard",
+		Round:           1,
+		Personas: []grillPersonaObjections{
+			{Persona: "skeptical_seed_investor", Objections: []string{"No named buyer", "The $500 price point is unbacked"}},
+			{Persona: "prepared_package_reader", Objections: []string{"Rights are ASSUMED"}},
+		},
+	})
+	scorecard, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn regrill",
+		"Vision: closer.\nREADINESS: 7.4/10", "AJ",
+		map[string]string{"readinessScore": "7.4", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed regrill scorecard: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, scorecard.ID, "AJ"); err != nil {
+		t.Fatalf("attach scorecard: %v", err)
+	}
+	// The seed investor verifies one fix and leaves one standing; the prepared
+	// reader verifies everything.
+	systems := installGrillPanelResponder(t,
+		`{"objections_answered":["No named buyer"],"objections_remaining":["The $500 price point is unbacked"],"objections":[],"strengths_to_keep":[]}`,
+		`{"objections_answered":["Rights are ASSUMED"],"objections_remaining":[],"objections":[],"strengths_to_keep":[]}`)
+
+	// Drive the WIRING: the delta watcher closes the loop, then records the signal.
+	app.watchGrillDeltaSignal("AJ", scorecard.ID, record.ID, "6.2", "Boot Barn", time.Millisecond, time.Second)
+
+	// Each persona was re-presented its OWN objections, never a teammate's.
+	for _, system := range *systems {
+		switch {
+		case strings.Contains(system, defaultGrillPersona):
+			if !strings.Contains(system, "No named buyer") || !strings.Contains(system, "The $500 price point is unbacked") {
+				t.Fatalf("seed investor prompt lost its own prior objections:\n%s", system)
+			}
+			if strings.Contains(system, "Rights are ASSUMED") {
+				t.Fatalf("seed investor prompt carries the OTHER persona's objections:\n%s", system)
+			}
+		case strings.Contains(system, defaultPrivateGrillPersona):
+			if !strings.Contains(system, "Rights are ASSUMED") || strings.Contains(system, "No named buyer") {
+				t.Fatalf("prepared reader prompt must carry only its own prior objections:\n%s", system)
+			}
+		}
+	}
+
+	// The dial is HELD: readiness clamped to the prior score, the raw score and
+	// the disclosed gaps preserved.
+	graded := mustArtifact(t, app, scorecard.ID)
+	if graded.Metadata["readinessScore"] != "6.2" || graded.Metadata["readinessHeld"] != "true" {
+		t.Fatalf("dial not held on unverified fixes: %v", graded.Metadata)
+	}
+	if graded.Metadata["readinessRawScore"] != "7.4" {
+		t.Fatalf("raw score not preserved: %v", graded.Metadata)
+	}
+	if graded.Metadata["readinessGate"] != goalGateOutcomeRevise {
+		t.Fatalf("readinessGate=%q, want %q", graded.Metadata["readinessGate"], goalGateOutcomeRevise)
+	}
+	if !strings.Contains(graded.Metadata["readinessGateGaps"], "unanswered: The $500 price point is unbacked") {
+		t.Fatalf("gaps not disclosed: %q", graded.Metadata["readinessGateGaps"])
+	}
+	// The round-2 ledger recorded the re-review with the gate outcome.
+	ledger, ok := app.latestGrillObjectionLedger(record.ID)
+	if !ok || ledger.Round != 2 || ledger.GateOutcome != goalGateOutcomeRevise {
+		t.Fatalf("re-grill ledger wrong: %+v", ledger)
+	}
+	seed, _ := ledger.personaByName("skeptical_seed_investor")
+	if len(seed.ObjectionsAnswered) != 1 || len(seed.ObjectionsRemaining) != 1 {
+		t.Fatalf("seed seat re-review not recorded: %+v", seed)
+	}
+	// The delta signal read the GATED score: flat, neutral.
+	signals := grillDeltaSignals(t, app)
+	if len(signals) != 1 {
+		t.Fatalf("grill_delta signals=%d, want 1", len(signals))
+	}
+	if signals[0].Valence != signalValenceNeutral || signals[0].Payload["delta"] != "+0.0" || signals[0].Payload["readiness"] != "6.2" {
+		t.Fatalf("signal=%#v, want a neutral flat delta on the held dial", signals[0])
+	}
+	// And the package dial itself reads the held score.
+	refreshed, _ := app.venturePackageByID(record.ID)
+	if got := app.latestPackageReadiness(refreshed); got != "6.2" {
+		t.Fatalf("package dial=%q, want the held 6.2", got)
+	}
+}
+
+// When every persona verifies its prior objections answered, the gate accepts
+// and the dial moves — the readiness rise is real, delta positive.
+func TestGrillRegrillGateReleasesDialOnVerifiedFixes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	app.fileGrillObjectionLedger("AJ", "Boot Barn", grillObjectionLedger{
+		PackageID:       record.ID,
+		GrillArtifactID: "prior-scorecard",
+		Round:           1,
+		Personas: []grillPersonaObjections{
+			{Persona: "skeptical_seed_investor", Objections: []string{"No named buyer"}},
+			{Persona: "prepared_package_reader", Objections: []string{"Rights are ASSUMED"}},
+		},
+	})
+	scorecard, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn regrill",
+		"Vision: closer.\nREADINESS: 7.4/10", "AJ",
+		map[string]string{"readinessScore": "7.4", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed regrill scorecard: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, scorecard.ID, "AJ"); err != nil {
+		t.Fatalf("attach scorecard: %v", err)
+	}
+	installGrillPanelResponder(t,
+		`{"objections_answered":["No named buyer"],"objections_remaining":[],"objections":[],"strengths_to_keep":["the named streamer attachment"]}`,
+		`{"objections_answered":["Rights are ASSUMED"],"objections_remaining":[],"objections":[],"strengths_to_keep":[]}`)
+
+	app.watchGrillDeltaSignal("AJ", scorecard.ID, record.ID, "6.2", "Boot Barn", time.Millisecond, time.Second)
+
+	graded := mustArtifact(t, app, scorecard.ID)
+	if graded.Metadata["readinessScore"] != "7.4" || graded.Metadata["readinessHeld"] != "" {
+		t.Fatalf("verified fixes must release the dial: %v", graded.Metadata)
+	}
+	if graded.Metadata["readinessGate"] != goalGateOutcomeAccept {
+		t.Fatalf("readinessGate=%q, want %q", graded.Metadata["readinessGate"], goalGateOutcomeAccept)
+	}
+	ledger, ok := app.latestGrillObjectionLedger(record.ID)
+	if !ok || ledger.Round != 2 || ledger.GateOutcome != goalGateOutcomeAccept {
+		t.Fatalf("accepting ledger wrong: %+v", ledger)
+	}
+	signals := grillDeltaSignals(t, app)
+	if len(signals) != 1 || signals[0].Valence != signalValencePositive || signals[0].Payload["delta"] != "+1.2" {
+		t.Fatalf("signals=%#v, want one positive +1.2 delta on verified fixes", signals)
+	}
+}
+
+// Round semantics (the reviewOneSubtask contract): Round counts REVISION
+// rounds already spent, and the initial grill spends none — so the dial can be
+// held across TWO consecutive unverified re-grills before the force-accept
+// escape hatch fires with the gaps disclosed.
+func TestGrillRegrillGateHoldsTwiceThenForceAccepts(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	// The FIRST re-grill already happened and filed the round-2 ledger with an
+	// objection still standing (one revision round spent).
+	app.fileGrillObjectionLedger("AJ", "Boot Barn", grillObjectionLedger{
+		PackageID:       record.ID,
+		GrillArtifactID: "prior-scorecard",
+		Round:           2,
+		Personas: []grillPersonaObjections{
+			{Persona: "skeptical_seed_investor", ObjectionsRemaining: []string{"No named buyer"}},
+		},
+	})
+	unverified := `{"objections_answered":[],"objections_remaining":["No named buyer"],"objections":[],"strengths_to_keep":[]}`
+	verifiedNothingPrior := `{"objections_answered":[],"objections_remaining":[],"objections":[],"strengths_to_keep":[]}`
+	installGrillPanelResponder(t, unverified, verifiedNothingPrior)
+
+	// SECOND re-grill, still unverified: one revision round spent → the gate
+	// must revise (hold the dial), not force-accept.
+	second, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn regrill 2",
+		"Vision: closer.\nREADINESS: 7.4/10", "AJ",
+		map[string]string{"readinessScore": "7.4", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed second regrill scorecard: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, second.ID, "AJ"); err != nil {
+		t.Fatalf("attach second scorecard: %v", err)
+	}
+	app.watchGrillDeltaSignal("AJ", second.ID, record.ID, "6.2", "Boot Barn", time.Millisecond, time.Second)
+	graded := mustArtifact(t, app, second.ID)
+	if graded.Metadata["readinessGate"] != goalGateOutcomeRevise || graded.Metadata["readinessHeld"] != "true" || graded.Metadata["readinessScore"] != "6.2" {
+		t.Fatalf("second unverified re-grill must still hold the dial: %v", graded.Metadata)
+	}
+	ledger, ok := app.latestGrillObjectionLedger(record.ID)
+	if !ok || ledger.Round != 3 || ledger.GateOutcome != goalGateOutcomeRevise {
+		t.Fatalf("round-3 ledger wrong: %+v", ledger)
+	}
+
+	// THIRD re-grill, still unverified: two revision rounds spent → the escape
+	// hatch fires, the dial releases with the gaps disclosed.
+	third, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn regrill 3",
+		"Vision: shipping.\nREADINESS: 7.6/10", "AJ",
+		map[string]string{"readinessScore": "7.6", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed third regrill scorecard: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, third.ID, "AJ"); err != nil {
+		t.Fatalf("attach third scorecard: %v", err)
+	}
+	app.watchGrillDeltaSignal("AJ", third.ID, record.ID, "6.2", "Boot Barn", time.Millisecond, time.Second)
+	graded = mustArtifact(t, app, third.ID)
+	if graded.Metadata["readinessGate"] != goalGateOutcomeForceAccept {
+		t.Fatalf("readinessGate=%q, want %q after two spent revision rounds", graded.Metadata["readinessGate"], goalGateOutcomeForceAccept)
+	}
+	if graded.Metadata["readinessScore"] != "7.6" || graded.Metadata["readinessHeld"] != "" {
+		t.Fatalf("force-accept must release the dial: %v", graded.Metadata)
+	}
+	if !strings.Contains(graded.Metadata["readinessGateGaps"], "No named buyer") {
+		t.Fatalf("force-accept must disclose the gaps: %q", graded.Metadata["readinessGateGaps"])
+	}
+	ledger, ok = app.latestGrillObjectionLedger(record.ID)
+	if !ok || ledger.Round != 4 || ledger.GateOutcome != goalGateOutcomeForceAccept {
+		t.Fatalf("round-4 ledger wrong: %+v", ledger)
+	}
+}
+
+// KEYLESS the loop is a silent no-op — no model calls, no ledger, the
+// scorecard and the dial exactly as before (the sidecar-absence degrade rule).
+func TestCloseGrillObjectionLoopKeylessIsNoop(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	original := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = original })
+	createAnthropicMessagesResponse = func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Error("keyless grill loop must make no model calls")
+		return anthropicMessagesResponse{}, fmt.Errorf("keyless")
+	}
+
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	scorecard, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn grill",
+		"READINESS: 6.5/10", "AJ", map[string]string{"readinessScore": "6.5", "threadStatus": "complete"})
+	if err != nil {
+		t.Fatalf("seed scorecard: %v", err)
+	}
+	updated := app.closeGrillObjectionLoop(scorecard, "AJ", record.ID, "6.0")
+	if updated.Metadata["readinessScore"] != "6.5" || updated.Metadata["readinessGate"] != "" {
+		t.Fatalf("keyless loop mutated the scorecard: %v", updated.Metadata)
+	}
+	if _, ok := app.latestGrillObjectionLedger(record.ID); ok {
+		t.Fatal("keyless loop filed a ledger")
 	}
 }
 

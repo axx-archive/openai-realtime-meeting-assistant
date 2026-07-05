@@ -90,6 +90,20 @@ const (
 	agentRunnerStub           = "stub"
 )
 
+// defaultReviewModel is the dedicated reviewer/ship-gate model (Wave 3 item
+// 16). Reviews read WHOLE artifact bodies (goalReviewArtifactBody), so the
+// judging seat wants Opus-tier context at Opus rates rather than the Fable
+// ceiling, while orchestration (decompose/report/verify) stays on the
+// orchestrator model.
+const defaultReviewModel = "claude-opus-4-8"
+
+// reviewModel resolves the reviewer/gate model — the review-side twin of the
+// per-subtask runner override above: env-with-default, resolved once at engine
+// construction and routed per call (goal_engine.callReviewModel).
+func reviewModel() string {
+	return getenvDefault("BONFIRE_REVIEW_MODEL", defaultReviewModel)
+}
+
 // newAgentJob derives an AgentJob from a launched thread. It reads the additive
 // goal-spec metadata (absent = today's behavior) and snapshots board + memory
 // so a runner never reads a mutating board.

@@ -27,6 +27,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -164,6 +165,13 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 	// (1) expiry sweep — always, regardless of minBatch.
 	app.sweepExpiredQuarantine(priorCursor)
 
+	// (1b) distilled-signal compaction — always, deterministic and token-free:
+	// signals the Taste Analyst consumed into a living profile (stamped
+	// distilledInto, taste_analyst.go) leave the store after their 30-day
+	// reprieve. The profile carries the taste; the raw signal was only ever
+	// distillation input, never recall material.
+	app.sweepDistilledSignals(priorCursor)
+
 	// (2) classification pass — minBatch-gated.
 	candidates, transcriptCursor := app.buildSlopCandidates(agent, time.Now().UTC())
 	if len(candidates) < minBatch {
@@ -289,6 +297,13 @@ func slopCandidateEligible(entry meetingMemoryEntry, now time.Time) bool {
 	switch entry.Kind {
 	case meetingMemoryKindTranscript:
 		// eligible kind
+	case meetingMemoryKindSignal:
+		// distilled-and-aged signals are the compaction cohort (spec §5
+		// flywheel): consumed into a living profile (taste_analyst.go stamped
+		// distilledInto) and past the 30-day reprieve. They never join the
+		// model classification batch — the deterministic sweep is their only
+		// consumer — and an undistilled signal is never touched.
+		return signalCompactionEligible(entry, now)
 	case meetingMemoryKindOSArtifact:
 		// published or package-attached artifacts are load-bearing.
 		if strings.TrimSpace(entry.Metadata["published"]) == "true" {
@@ -422,6 +437,145 @@ func (app *kanbanBoardApp) sweepExpiredQuarantine(forwardCursor string) {
 			Actor:         reviewedByClassifier,
 		})
 	}
+}
+
+// signalDistilledCompactionAge is the reprieve between a signal's distillation
+// into a profile (taste_analyst.go stamps distilledInto/distilledAt) and its
+// compaction out of the store.
+const signalDistilledCompactionAge = 30 * 24 * time.Hour
+
+// signalCompactionEligible reports whether one signal has been distilled into
+// a profile AND is past the 30-day reprieve. A missing/garbled distilledAt
+// falls back to the signal's own CreatedAt — never newer, so a stamped signal
+// can never dodge compaction forever on a malformed timestamp.
+//
+// System/external signals — actor resolves to NO roster user (share_opened's
+// actor=external, pdf_exported's actor=render_runner) — have no taste analyst
+// to consume them, so distilledInto is structurally unreachable for them;
+// they age out on the same 30-day reprieve from their own CreatedAt instead
+// of accumulating forever in the RAM-held store.
+func signalCompactionEligible(entry meetingMemoryEntry, now time.Time) bool {
+	if entry.Kind != meetingMemoryKindSignal {
+		return false
+	}
+	if strings.TrimSpace(entry.Metadata[signalDistilledIntoKey]) == "" {
+		if signalActorOnRoster(entry) {
+			return false
+		}
+		return now.Sub(entry.CreatedAt) >= signalDistilledCompactionAge
+	}
+	distilledAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata[signalDistilledAtKey]))
+	if err != nil {
+		distilledAt = entry.CreatedAt
+	}
+	return now.Sub(distilledAt) >= signalDistilledCompactionAge
+}
+
+// signalActorOnRoster reports whether a signal's actor resolves to any roster
+// user via the same matcher the taste analyst admits windows with — the exact
+// set of signals that CAN eventually be distilled and must therefore wait for
+// their distilledInto stamp.
+func signalActorOnRoster(entry meetingMemoryEntry) bool {
+	for _, userName := range meetingParticipantNames {
+		if signalActorMatches(entry, userName) {
+			return true
+		}
+	}
+	return false
+}
+
+// sweepDistilledSignals hard-deletes every compaction-eligible signal in ONE
+// batched rewrite (signals are the highest-volume kind in a JSONL store held
+// in RAM and rewritten whole — never one rewrite per signal), leaving ONE
+// slop_pass audit stub per sweep that records the count and the profiles the
+// signals were distilled into, so the fact of compaction survives. No
+// per-entry events: signals are invisible UI state, not tray material.
+func (app *kanbanBoardApp) sweepDistilledSignals(forwardCursor string) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	now := time.Now().UTC()
+	ids := make([]string, 0)
+	profiles := make([]string, 0)
+	seenProfiles := map[string]struct{}{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		if !slopCandidateEligible(entry, now) {
+			continue
+		}
+		ids = append(ids, entry.ID)
+		profileID := strings.TrimSpace(entry.Metadata[signalDistilledIntoKey])
+		if _, seen := seenProfiles[profileID]; !seen && profileID != "" {
+			seenProfiles[profileID] = struct{}{}
+			profiles = append(profiles, profileID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	deleted, err := app.memory.deleteEntriesByID(ids)
+	if err != nil {
+		log.Errorf("%s signal compaction failed: %v", slopClassifierAgentName, err)
+		return
+	}
+	if deleted == 0 {
+		return
+	}
+	auditMetadata := map[string]string{
+		"compactedCount":        strconv.Itoa(deleted),
+		"deletedKind":           meetingMemoryKindSignal,
+		"distilledInto":         strings.Join(profiles, ","),
+		"reason":                "distilled into taste profile(s) and past the 30-day reprieve",
+		"deletedAt":             now.Format(time.RFC3339Nano),
+		slopClassifierCursorKey: forwardCursor,
+	}
+	if _, _, err := app.memory.appendSlopPass(durableTimestampID("slop-compaction", time.Now()), "Compacted "+strconv.Itoa(deleted)+" distilled signal(s)", auditMetadata); err != nil {
+		log.Errorf("%s signal compaction failed to write audit stub: %v", slopClassifierAgentName, err)
+	}
+}
+
+// deleteEntriesByID hard-deletes a batch of entries in ONE rewrite — the
+// compaction sweep's terminal step (deleteEntryByID would rewrite the whole
+// file once per signal). Restores the in-memory slice on a failed rewrite.
+func (store *meetingMemoryStore) deleteEntriesByID(ids []string) (int, error) {
+	if store == nil {
+		return 0, fmt.Errorf("memory store is unavailable")
+	}
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			want[id] = struct{}{}
+		}
+	}
+	if len(want) == 0 {
+		return 0, nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	previous := store.entries
+	next := make([]meetingMemoryEntry, 0, len(previous))
+	removed := make([]string, 0, len(want))
+	for _, entry := range previous {
+		if _, matched := want[entry.ID]; matched {
+			removed = append(removed, entry.ID)
+			continue
+		}
+		next = append(next, entry)
+	}
+	if len(removed) == 0 {
+		return 0, nil
+	}
+	store.entries = next
+	if err := store.rewriteLocked(); err != nil {
+		store.entries = previous
+		return 0, err
+	}
+	for _, id := range removed {
+		delete(store.seen, id)
+	}
+	return len(removed), nil
 }
 
 // slopEntryEventTitle derives a body-free label for the push channel (titles

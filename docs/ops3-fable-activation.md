@@ -120,3 +120,43 @@ docker compose exec codex-runner env | grep BONFIRE_CODEX_MODEL   # gpt-5.5
 Remove the appended lines from `.env` (or restore the backup from
 `/opt/meetingassist-backups/`), then `docker compose up -d`. Keyless deploys
 degrade gracefully to today's worker — nothing else changes.
+
+## 5. Render-runner sidecar (Wave 3 item 14b — PDF export)
+
+The PDF export toolchain ships as a second sidecar on the codex-runner
+chassis: the same Go binary in `-render-runner` mode, built from
+`Dockerfile.render` (base image + chromium + poppler-utils + fonts), behind
+the compose profile `render`. It claims `export_pdf` jobs lexically-first
+from the shared `meeting_data` volume at `/app/data/render-jobs` and POSTs
+results back with `Bearer BONFIRE_RUNNER_TOKEN` — the SAME token the codex
+sidecar already uses, so no new secret is needed in `.env`.
+
+```bash
+cd /opt/meetingassist/deploy/digitalocean
+docker compose --profile render up -d --build render-runner
+docker compose logs --tail=40 render-runner   # "Render runner started id=... queue=/app/data/render-jobs"
+```
+
+Dials (all optional; the image defaults are correct): `RENDER_CHROMIUM_BIN`
+(default `chromium`), `RENDER_PDFTOPPM_BIN` (default `pdftoppm`),
+`BONFIRE_RENDER_QUEUE_PATH`, `BONFIRE_RENDER_CALLBACK_URL`,
+`BONFIRE_RENDER_TIMEOUT` (default 3m), `BONFIRE_RENDER_MAX_PDF_BYTES`.
+
+The flatten law is enforced in the runner, not by ops: deck exports ship the
+144dpi JPEG-flattened raster PDF (the layered chromium print never leaves the
+work dir); the paper kit ("The Talk"/"The Wall") ships chromium's direct
+text-native print. Page JPEGs land beside the PDF in
+`/app/data/render-jobs/<job-id>-out/` for Wave 5's vision slide juries.
+
+Graceful absence: with the profile off (or chromium/pdftoppm missing) the
+heartbeat at `/app/data/render-runner-heartbeat.json` is absent/stale and
+jobs fail with an operator message naming the missing binary — the OS side
+surfaces this as "render sidecar not available". Nothing here needs an API
+key.
+
+NOTE (stage B, still open at this writing): the `-render-runner` flag in
+main.go, the `/internal/render/jobs/result` callback route, and the "Export
+PDF" trigger are stage-B wiring onto the exported seams `runRenderRunnerLoop`
+/ `enqueueRenderExportPDFJob` / `readinessRenderRunnerSnapshot`
+(render_runner.go). Until stage B lands, keep the `render` profile off — the
+container would exit at boot on the unknown flag.

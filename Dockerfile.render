@@ -1,0 +1,37 @@
+# Dockerfile.render — the render-runner sidecar image (packaging OS §4 "PDF
+# export", Wave 3 item 14b). Same chassis as the codex-runner: the one Go
+# binary in a new mode, layered over the same debian base as Dockerfile, plus
+# the PDF toolchain (chromium for print-to-pdf, poppler-utils for pdftoppm)
+# and fonts so decks rasterize the way they render in the viewer.
+
+FROM golang:1.26-bookworm AS build
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends pkg-config libopus-dev \
+	&& rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=1 GOOS=linux go build -o /out/meetingassist .
+
+FROM debian:bookworm-slim AS render-runner
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		ca-certificates curl libopus0 \
+		chromium poppler-utils \
+		fonts-liberation fonts-dejavu-core \
+	&& rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=build /out/meetingassist /app/meetingassist
+
+ENV RENDER_CHROMIUM_BIN=chromium
+ENV RENDER_PDFTOPPM_BIN=pdftoppm
+
+ENTRYPOINT ["/app/meetingassist", "-render-runner"]

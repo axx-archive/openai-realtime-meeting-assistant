@@ -10442,6 +10442,80 @@
         letter-spacing: var(--track-label);
       }
 
+      /* Share links panel — mint/list/revoke on the artifact detail pane */
+      .artifact-share {
+        flex: none;
+        display: grid;
+        gap: 10px;
+        padding: 14px 22px;
+        border-top: 1px solid var(--line-1);
+      }
+
+      .artifact-share[hidden] {
+        display: none !important;
+      }
+
+      .artifact-share__row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .artifact-share__url {
+        font: var(--type-caption);
+        color: var(--text-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 320px;
+      }
+
+      .artifact-share__meta {
+        font: var(--type-caption);
+        color: var(--text-3);
+      }
+
+      .artifact-share__empty {
+        margin: 0;
+        font: var(--type-caption);
+        color: var(--text-3);
+      }
+
+      /* Content-addressed artifact assets (blob store) — pdf embed + downloads */
+      .artifact-assets {
+        display: grid;
+        gap: 10px;
+        margin-top: var(--sp-3);
+      }
+
+      .artifact-assets__title {
+        margin: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-transform: lowercase;
+      }
+
+      .artifact-asset {
+        display: grid;
+        gap: 6px;
+      }
+
+      .artifact-asset__pdf {
+        width: 100%;
+        min-height: 420px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: #fff;
+      }
+
+      .artifact-asset__download {
+        font: var(--type-caption);
+        color: var(--text-2);
+        width: fit-content;
+      }
+
       #researchTool,
       #designTool,
       #grillTool {
@@ -17425,11 +17499,14 @@
                 <button id="artifactApproveButton" class="btn btn--primary" type="button" hidden disabled>Approve</button>
                 <button id="artifactRejectButton" class="btn btn--ghost" type="button" hidden disabled>Reject</button>
                 <button id="artifactRerunButton" class="btn btn--ghost" type="button" hidden disabled>Rerun</button>
+                <button id="artifactExportPdfButton" class="btn btn--ghost" type="button" hidden disabled>Export PDF</button>
+                <button id="artifactShareButton" class="btn btn--ghost" type="button" disabled>Share</button>
                 <button id="artifactEditButton" class="btn btn--ghost" type="button" disabled>Edit</button>
                 <button id="artifactSaveButton" class="btn btn--ghost" type="submit" disabled>Save</button>
                 <button id="artifactCopyButton" class="btn btn--ghost" type="button" disabled>Copy</button>
                 <button id="artifactPublishButton" class="btn btn--primary" type="button" disabled>Publish to team</button>
               </div>
+              <div id="artifactSharePanel" class="artifact-share" hidden></div>
             </form>
               </div>
             </section>
@@ -18428,6 +18505,9 @@
       const artifactCopyButton = document.getElementById('artifactCopyButton')
       const artifactPublishButton = document.getElementById('artifactPublishButton')
       const artifactSaveButton = document.getElementById('artifactSaveButton')
+      const artifactExportPdfButton = document.getElementById('artifactExportPdfButton')
+      const artifactShareButton = document.getElementById('artifactShareButton')
+      const artifactSharePanel = document.getElementById('artifactSharePanel')
       const intelMetaLine = document.getElementById('intelMetaLine')
       const intelRefreshButton = document.getElementById('intelRefreshButton')
       const intelPulseLive = document.getElementById('intelPulseLive')
@@ -19425,6 +19505,8 @@
       })
       artifactCopyButton.addEventListener('click', copySelectedArtifact)
       artifactPublishButton.addEventListener('click', toggleSelectedArtifactPublished)
+      artifactExportPdfButton?.addEventListener('click', exportSelectedArtifactPdf)
+      artifactShareButton?.addEventListener('click', toggleArtifactSharePanel)
       scoutChatInput.addEventListener('input', () => {
         resizeScoutChatInput()
         // emptying the composer abandons a palette-armed tool template: the
@@ -22362,6 +22444,7 @@
         // whose token mint fails lands back here too (forceSafe).
         if (!options.forceSafe && artifactIsHTMLDeck(entry)) {
           renderArtifactDeck(container, entry, options)
+          renderArtifactAssets(container, entry)
           return
         }
 
@@ -22421,6 +22504,58 @@
           sourceWrap.appendChild(list)
           container.appendChild(sourceWrap)
         }
+
+        renderArtifactAssets(container, entry)
+      }
+
+      /* Content-addressed assets (blob store, spec §4 item 13/14b): the
+         artifact's `assets` metadata is a JSON array of {ref, mime, name,
+         kind}. Refs are validated client-side to the 64-hex sha256 shape the
+         server enforces before ANY url is built from them. */
+      function artifactAssetEntries(entry) {
+        const raw = String(entry?.metadata?.assets || '').trim()
+        if (!raw) return []
+        try {
+          const parsed = JSON.parse(raw)
+          if (!Array.isArray(parsed)) return []
+          return parsed.filter(asset => /^[0-9a-f]{64}$/.test(String(asset?.ref || '')))
+        } catch {
+          return []
+        }
+      }
+
+      function artifactBlobUrl(asset) {
+        return `/artifacts/blob?ref=${encodeURIComponent(asset.ref)}&name=${encodeURIComponent(String(asset.name || ''))}`
+      }
+
+      /* pdf assets get the browser-native viewer (<object type="application/pdf">,
+         spec §4 viewer item 2 — no PDF.js) plus a download link; every other
+         kind is download-only. DOM-built, never innerHTML. */
+      function renderArtifactAssets(container, entry) {
+        const assets = artifactAssetEntries(entry)
+        if (!assets.length) return
+        const wrap = bfEl('section', 'artifact-assets')
+        wrap.appendChild(bfEl('h4', 'artifact-assets__title', `assets (${assets.length})`))
+        for (const asset of assets) {
+          const row = bfEl('div', 'artifact-asset')
+          const isPdf = String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf'
+          if (isPdf) {
+            const viewer = document.createElement('object')
+            viewer.type = 'application/pdf'
+            viewer.data = artifactBlobUrl(asset)
+            viewer.className = 'artifact-asset__pdf'
+            viewer.appendChild(bfEl('p', 'artifact-asset__fallback', 'PDF preview unavailable in this browser — use the download link below.'))
+            row.appendChild(viewer)
+          }
+          const link = document.createElement('a')
+          link.className = 'artifact-asset__download'
+          link.href = artifactBlobUrl(asset)
+          link.setAttribute('download', String(asset.name || asset.ref))
+          link.textContent = `download ${asset.name || asset.kind || 'asset'}`
+          row.appendChild(link)
+          wrap.appendChild(row)
+        }
+        container.appendChild(wrap)
       }
 
       function shouldArtifactSectionSpan(heading, body) {
@@ -38010,6 +38145,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           artifactRerunButton.hidden = !runnerArtifact
           artifactRerunButton.disabled = !runnerArtifact
         }
+        /* Export PDF shows only on html_deck artifacts and stays disabled
+           (with the reason as tooltip) until the render sidecar heartbeat
+           is confirmed — keyless/sidecar-absent degrades to a visible,
+           explained no-op, never a mystery 503. */
+        const deckArtifact = Boolean(artifact) && artifactIsHTMLDeck(artifact)
+        if (artifactExportPdfButton) {
+          probeRenderSidecar()
+          artifactExportPdfButton.hidden = !deckArtifact
+          artifactExportPdfButton.disabled = !deckArtifact || !renderSidecarReady
+          artifactExportPdfButton.title = deckArtifact && !renderSidecarReady
+            ? 'render sidecar not available — PDF export is disabled'
+            : ''
+        }
+        /* Share mirrors the SERVER's approval gate (status approved, or the
+           admin's humanApprovedAt stamp on landed work) so the button
+           explains itself — the route is the enforcement point. */
+        const shareable = artifactShareable(artifact)
+        if (artifactShareButton) {
+          artifactShareButton.disabled = disabled || !shareable
+          artifactShareButton.title = !disabled && !shareable
+            ? 'share links need an approved artifact'
+            : ''
+        }
+        if (artifactSharePanel && (disabled || artifactSharePanelFor !== artifact?.id)) {
+          artifactSharePanel.hidden = true
+          artifactSharePanelFor = null
+        }
         artifactDetailMode.textContent = artifact ? artifactModeLabel(artifact) : 'artifact'
         if (artifactDetailPublished) {
           artifactDetailPublished.hidden = !artifact || !published
@@ -38029,6 +38191,195 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         window.clearTimeout(artifactStatusTimer)
         if (transient) {
           artifactStatusTimer = window.setTimeout(renderArtifactDetail, 1400)
+        }
+      }
+
+      /* Client mirror of the server's share gate (share_links.go
+         artifactShareEligible): status 'approved', or the durable human
+         approval stamp (humanApprovedAt, written by the admin approve
+         action) on landed work ('complete'/'published'). The route
+         re-enforces — this only drives affordances. */
+      function artifactShareable(entry) {
+        const status = String(entry?.metadata?.status || '').trim().toLowerCase()
+        if (status === 'approved') {
+          return true
+        }
+        const humanApproved = String(entry?.metadata?.humanApprovedAt || '').trim() !== ''
+        return humanApproved && (status === 'complete' || status === 'published')
+      }
+
+      /* Render sidecar capability probe: one /readyz fetch per page load reads
+         checks.agents.renderRunner.heartbeatOK (the codex-runner twin the
+         server already exposes). Absent/stale heartbeat leaves Export PDF
+         disabled with the tooltip explaining why. */
+      let renderSidecarReady = false
+      let renderSidecarProbe = null
+      function probeRenderSidecar() {
+        if (!renderSidecarProbe) {
+          renderSidecarProbe = fetch('/readyz', { cache: 'no-store' })
+            .then(response => response.json())
+            .then(payload => {
+              renderSidecarReady = payload?.checks?.agents?.renderRunner?.heartbeatOK === true
+            })
+            .catch(() => { renderSidecarReady = false })
+            .finally(() => { renderArtifactDetail() })
+        }
+        return renderSidecarProbe
+      }
+
+      async function exportSelectedArtifactPdf() {
+        const artifact = selectedArtifact()
+        if (!artifact) {
+          return
+        }
+        artifactExportPdfButton.disabled = true
+        setArtifactDetailStatus('queueing PDF export')
+        try {
+          const response = await fetch('/artifacts/export-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artifactId: artifact.id, kind: 'deck' })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || 'PDF export failed')
+          }
+          setArtifactDetailStatus('PDF export queued', true)
+          showToast({ text: 'PDF export queued — the flattened deck lands here as an asset', kind: 'done' })
+        } catch (error) {
+          setArtifactDetailStatus('PDF export failed', true)
+          showToast({ text: error.message || 'PDF export failed', kind: 'error' })
+        } finally {
+          renderArtifactDetail()
+        }
+      }
+
+      /* ---- share links: mint / copy / list / revoke ---- */
+
+      let artifactSharePanelFor = null
+
+      function toggleArtifactSharePanel() {
+        const artifact = selectedArtifact()
+        if (!artifact || !artifactSharePanel) {
+          return
+        }
+        if (!artifactSharePanel.hidden && artifactSharePanelFor === artifact.id) {
+          artifactSharePanel.hidden = true
+          artifactSharePanelFor = null
+          return
+        }
+        artifactSharePanelFor = artifact.id
+        artifactSharePanel.hidden = false
+        renderArtifactSharePanel(artifact)
+      }
+
+      function shareLinkAbsoluteUrl(link) {
+        return new URL(link.url, window.location.origin).toString()
+      }
+
+      async function copyShareLinkUrl(link) {
+        try {
+          await navigator.clipboard.writeText(shareLinkAbsoluteUrl(link))
+          showToast({ text: 'share link copied', kind: 'note' })
+        } catch {
+          showToast({ text: 'copy failed — the link is shown in the panel', kind: 'error' })
+        }
+      }
+
+      async function renderArtifactSharePanel(artifact) {
+        if (!artifactSharePanel) return
+        artifactSharePanel.replaceChildren(bfEl('p', 'artifact-share__empty', 'loading share links…'))
+        let links = []
+        try {
+          const response = await fetch(`/artifacts/share?artifactId=${encodeURIComponent(artifact.id)}`, { cache: 'no-store' })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload.error || 'share links unavailable')
+          }
+          links = Array.isArray(payload.links) ? payload.links : []
+        } catch (error) {
+          artifactSharePanel.replaceChildren(bfEl('p', 'artifact-share__empty', error.message || 'share links unavailable'))
+          return
+        }
+        if (artifactSharePanelFor !== artifact.id) return // pane moved on mid-fetch
+        artifactSharePanel.replaceChildren()
+
+        /* Mint row: expiry choice + mint. The mint POST is the only door —
+           the server re-checks the approved/final gate. */
+        const mintRow = bfEl('div', 'artifact-share__row')
+        const expirySelect = document.createElement('select')
+        expirySelect.className = 'artifact-share__expiry'
+        expirySelect.setAttribute('aria-label', 'share link expiry')
+        for (const days of [7, 30, 90]) {
+          const option = document.createElement('option')
+          option.value = String(days)
+          option.textContent = `expires in ${days} days`
+          expirySelect.appendChild(option)
+        }
+        const mintButton = bfEl('button', 'btn btn--ghost', 'Mint share link')
+        mintButton.type = 'button'
+        mintButton.addEventListener('click', async () => {
+          mintButton.disabled = true
+          try {
+            const response = await fetch('/artifacts/share', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: artifact.id, expiresDays: Number(expirySelect.value) || 7 })
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              throw new Error(payload.error || 'share link mint failed')
+            }
+            if (payload.link?.url) {
+              await copyShareLinkUrl(payload.link)
+            }
+            renderArtifactSharePanel(artifact)
+          } catch (error) {
+            showToast({ text: error.message || 'share link mint failed', kind: 'error' })
+            mintButton.disabled = false
+          }
+        })
+        mintRow.append(expirySelect, mintButton)
+        artifactSharePanel.appendChild(mintRow)
+
+        if (!links.length) {
+          artifactSharePanel.appendChild(bfEl('p', 'artifact-share__empty', 'no share links yet — mint one to hand this artifact to someone outside the room.'))
+          return
+        }
+        for (const link of links) {
+          const row = bfEl('div', 'artifact-share__row')
+          const label = bfEl('span', 'artifact-share__url', link.url ? shareLinkAbsoluteUrl(link) : `link ${String(link.id || '').slice(-6)}`)
+          const meta = bfEl('span', 'artifact-share__meta',
+            link.status === 'revoked' ? 'revoked' : link.expired ? 'expired' : `expires ${String(link.expiresAt || '').slice(0, 10)} · ${link.openCount || 0} open${(link.openCount || 0) === 1 ? '' : 's'}`)
+          row.append(label, meta)
+          if (link.url) {
+            const copyButton = bfEl('button', 'btn btn--ghost', 'Copy')
+            copyButton.type = 'button'
+            copyButton.addEventListener('click', () => copyShareLinkUrl(link))
+            const revokeButton = bfEl('button', 'btn btn--ghost', 'Revoke')
+            revokeButton.type = 'button'
+            revokeButton.addEventListener('click', async () => {
+              revokeButton.disabled = true
+              try {
+                const response = await fetch('/artifacts/share', {
+                  method: 'DELETE',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: link.id })
+                })
+                const payload = await response.json().catch(() => ({}))
+                if (!response.ok) {
+                  throw new Error(payload.error || 'share link revoke failed')
+                }
+                showToast({ text: 'share link revoked', kind: 'done' })
+                renderArtifactSharePanel(artifact)
+              } catch (error) {
+                showToast({ text: error.message || 'share link revoke failed', kind: 'error' })
+                revokeButton.disabled = false
+              }
+            })
+            row.append(copyButton, revokeButton)
+          }
+          artifactSharePanel.appendChild(row)
         }
       }
 

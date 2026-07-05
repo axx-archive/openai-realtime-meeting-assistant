@@ -155,6 +155,12 @@ type goalReport struct {
 	// that terminated needs_attention. It is attached to the package and
 	// surfaced so an 8/10 draft is never orphaned when revisions run out.
 	DeliverableArtifactID string `json:"deliverableArtifactId,omitempty"`
+	// SavedLessons is save_what_worked's distilled output (2-4 one-line
+	// lessons: reviewer praise that survived revision, what needed revision,
+	// what the gate cleared) — persisted with the plan, mirrored into
+	// metadata["savedLessons"], and emitted once as a goal_lessons signal so
+	// the Taste Analyst can consume them.
+	SavedLessons []string `json:"savedLessons,omitempty"`
 }
 
 type goalVerification struct {
@@ -286,6 +292,7 @@ type goalEngine struct {
 	responder   anthropicMessagesResponder
 	apiKey      func() string
 	model       string
+	reviewModel string
 	effort      string
 	maxTokens   int
 	concurrency int
@@ -299,6 +306,7 @@ func newGoalEngine(app *kanbanBoardApp) *goalEngine {
 		responder:   createAnthropicMessagesResponse,
 		apiKey:      currentAnthropicAPIKey,
 		model:       orchestratorModel(),
+		reviewModel: reviewModel(),
 		effort:      orchestratorEffort(),
 		maxTokens:   orchestratorMaxTokens(),
 		concurrency: goalSubtaskConcurrency(),
@@ -420,7 +428,7 @@ func (e *goalEngine) toolPromptContextForPlan(plan *goalPlan, tool packagingTool
 		Actor:           firstNonEmptyString(plan.CreatedBy, "the studio"),
 		SuccessCriteria: "the output satisfies the " + tool.Name + " contract and passes " + firstNonEmptyString(tool.Rubric.Ref, tool.ID+"_gate"),
 	}
-	artifacts, decisions, recent, memory := e.app.goalGroundingSlots(plan.PackageID)
+	artifacts, decisions, recent, memory := e.app.goalGroundingSlotsForRequester(plan.PackageID, plan.CreatedBy)
 	ctx.PackageArtifacts = artifacts
 	ctx.RelevantDecisions = decisions
 	ctx.RelevantArtifacts = recent
@@ -467,7 +475,46 @@ func (app *kanbanBoardApp) goalGroundingSlots(packageID string) (artifacts strin
 	for _, entry := range app.memorySnapshotForClients(12) {
 		memoryLines = append(memoryLines, "- "+entry.Kind+": "+compactAssistantLine(entry.Text))
 	}
-	return strings.Join(attached, "\n"), strings.Join(decisionLines, "\n"), strings.Join(recentLines, "\n"), strings.Join(memoryLines, "\n")
+	memory = strings.Join(memoryLines, "\n")
+	// The office house style is pinned into the memory slot unconditionally
+	// once the Wave-4 distiller writes one (packaging-os §5 — injection is
+	// pinning, not search). It lives HERE, not in the requester wrapper below,
+	// so both grounding hops inherit it: the engine's decompose wrapper
+	// (toolPromptContextForPlan) and the generation hop (toolPromptForThread).
+	if style, ok := app.houseStyleArtifact(); ok && strings.TrimSpace(style.Text) != "" {
+		memory = prependGroundingBlock("Office house style (pinned):", sanitizedPinnedProfileBody(style.Text), memory)
+	}
+	return strings.Join(attached, "\n"), strings.Join(decisionLines, "\n"), strings.Join(recentLines, "\n"), memory
+}
+
+// goalGroundingSlotsForRequester is goalGroundingSlots plus the requester's
+// pinned taste profile (packaging-os §5, Wave 3 item 15): the deliverable
+// wrapper must carry the living user_profile of whoever asked, and lexical
+// slot-filling can never be trusted to find it. Requester-less callers (and
+// users without a profile yet) get goalGroundingSlots' output unchanged.
+func (app *kanbanBoardApp) goalGroundingSlotsForRequester(packageID string, requestedBy string) (artifacts string, decisions string, recent string, memory string) {
+	artifacts, decisions, recent, memory = app.goalGroundingSlots(packageID)
+	if app == nil {
+		return artifacts, decisions, recent, memory
+	}
+	if profile, ok := app.tasteProfileForRequester(requestedBy); ok && strings.TrimSpace(profile.Text) != "" {
+		memory = prependGroundingBlock("Requester taste profile (pinned):", sanitizedPinnedProfileBody(profile.Text), memory)
+	}
+	return artifacts, decisions, recent, memory
+}
+
+// prependGroundingBlock puts a pinned block ahead of an existing slot string.
+// A previously empty slot deliberately becomes non-empty — pinned taste must
+// override the wrapper's "(none on record)" default. The body is untrusted
+// (distilled from user-typed signals), so it rides between explicit
+// reference-data markers with the shared never-instructions preamble —
+// callers pass it through sanitizedPinnedProfileBody first.
+func prependGroundingBlock(heading string, body string, existing string) string {
+	block := heading + "\n" + pinnedProfilePreamble + "\n<<<PINNED PROFILE\n" + body + "\nPINNED PROFILE>>>"
+	if strings.TrimSpace(existing) == "" {
+		return block
+	}
+	return block + "\n" + existing
 }
 
 // --- Launch path -------------------------------------------------------------
@@ -1121,6 +1168,242 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	engine.drive(ctx, &plan, parentID)
 }
 
+// --- Panel primitive (spec §3 "The abstraction", Wave 3 item 12) --------------
+//
+// A panel is N parallel persona calls plus ONE synthesis call, run as goroutine
+// fan-out INSIDE a single engine step — never as engine subtasks — so the DAG
+// stays coarse and goalMaxSubtasks stays sane. One primitive covers red-team
+// quartets, judge trios, slide juries, and the typographer/story-editor pair.
+
+// goalPanelPersona is one seat on the panel: a name the synthesis (and any
+// re-review gate) can address, and the persona's own system prompt.
+type goalPanelPersona struct {
+	Name   string
+	System string
+}
+
+// goalPanelSpec configures one panel step. Every persona receives the SAME
+// task (user prompt) and the SAME strict-JSON schema appended to its own
+// system prompt; the synthesis call then reads all N replies.
+type goalPanelSpec struct {
+	Task      string
+	Schema    string
+	Personas  []goalPanelPersona
+	Synthesis string // synthesis system prompt; "" falls back to the default
+}
+
+// goalPanelVoice is one persona's raw reply (strict JSON by contract). A
+// failed call keeps its seat with Err set so the synthesis prompt can say so
+// honestly instead of silently shrinking the panel.
+type goalPanelVoice struct {
+	Persona string
+	Text    string
+	Err     error
+}
+
+type goalPanelOutcome struct {
+	Voices    []goalPanelVoice
+	Synthesis string
+}
+
+const goalPanelDefaultSynthesisSystem = "You are Scout's panel synthesizer for Bonfire OS. Read every panelist's reply below and synthesize them into one decisive result per the task's instructions. Weigh agreement between panelists heavily; name genuine disagreement instead of averaging it away."
+
+// runGoalPanel fans the personas out in parallel (each with its per-persona
+// system prompt + the shared strict-JSON schema), waits for all of them, then
+// makes one synthesis call that sees all N replies. Degrades per-seat: a
+// failed persona call is reported to the synthesizer; only a panel where
+// EVERY seat failed (or the synthesis itself fails) returns an error.
+func (e *goalEngine) runGoalPanel(ctx context.Context, spec goalPanelSpec) (goalPanelOutcome, error) {
+	if len(spec.Personas) == 0 {
+		return goalPanelOutcome{}, fmt.Errorf("panel needs at least one persona")
+	}
+	outcome := goalPanelOutcome{Voices: make([]goalPanelVoice, len(spec.Personas))}
+	var wg sync.WaitGroup
+	for index := range spec.Personas {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			persona := spec.Personas[index]
+			system := strings.TrimSpace(persona.System)
+			if schema := strings.TrimSpace(spec.Schema); schema != "" {
+				system += "\n\n" + schema
+			}
+			text, err := e.callModel(ctx, system, spec.Task)
+			outcome.Voices[index] = goalPanelVoice{Persona: persona.Name, Text: text, Err: err}
+		}(index)
+	}
+	wg.Wait()
+
+	answered := 0
+	var replies strings.Builder
+	for _, voice := range outcome.Voices {
+		replies.WriteString("### Panelist: ")
+		replies.WriteString(voice.Persona)
+		replies.WriteByte('\n')
+		if voice.Err != nil {
+			replies.WriteString("(this panelist's call failed: " + compactAssistantLine(voice.Err.Error()) + ")\n\n")
+			continue
+		}
+		answered++
+		replies.WriteString(voice.Text)
+		replies.WriteString("\n\n")
+	}
+	if answered == 0 {
+		return outcome, fmt.Errorf("every panelist call failed")
+	}
+
+	synthesisSystem := firstNonEmptyString(strings.TrimSpace(spec.Synthesis), goalPanelDefaultSynthesisSystem)
+	synthesis, err := e.callModel(ctx, synthesisSystem, spec.Task+"\n\nThe panel's replies:\n\n"+strings.TrimSpace(replies.String()))
+	if err != nil {
+		return outcome, fmt.Errorf("panel synthesis failed: %w", err)
+	}
+	outcome.Synthesis = strings.TrimSpace(synthesis)
+	return outcome, nil
+}
+
+// --- Gate primitive (spec §3 "The abstraction", Wave 3 item 12) ---------------
+//
+// Threshold + per-dimension floor + bounded rounds + force-accept-with-
+// disclosed-gaps, per the SKILL semantics the doc quotes (9.0 threshold, 7.0
+// floor, max 2 rounds). Today's tool-rubric review is the DEGENERATE one-round
+// verdict case; the grill re-review is the first dimensional consumer.
+
+const (
+	goalGateDefaultThreshold = 9.0
+	goalGateDefaultFloor     = 7.0
+	goalGateDefaultMaxRounds = 2
+)
+
+// Gate outcomes. accept ships; revise re-queues (rounds remain); blocked stops
+// the line; force_accept_with_gaps is the SKILL escape hatch — rounds are
+// spent, the spec allows shipping, and the gaps ride out DISCLOSED, never
+// hidden.
+const (
+	goalGateOutcomeAccept      = "accept"
+	goalGateOutcomeRevise      = "revise"
+	goalGateOutcomeBlocked     = "blocked"
+	goalGateOutcomeForceAccept = "force_accept_with_gaps"
+)
+
+// goalGateDimension is one scored rubric dimension; Gap names what closing it
+// would take (disclosed verbatim on a force-accept).
+type goalGateDimension struct {
+	Name  string
+	Score float64
+	Gap   string
+}
+
+// goalGateRound is one scoring pass. A non-empty Verdict wins outright — the
+// degenerate case, where the scorer (today's reviewer model against the tool
+// rubric, or a law sweep) already folded its judgement into pass/fail/revise.
+// With no Verdict, the threshold + floor policy scores the Dimensions.
+type goalGateRound struct {
+	Verdict    string
+	Dimensions []goalGateDimension
+	Reasons    string
+	Score      float64
+}
+
+// goalGateSpec configures one gate evaluation. The engine is a durable
+// round-at-a-time state machine, so the gate evaluates the CURRENT round and
+// returns the decision; the caller owns the mutation a revise implies
+// (requeueOrBlock for subtasks, the readiness hold for the grill loop).
+type goalGateSpec struct {
+	Threshold   float64 // <=0 -> 9.0
+	Floor       float64 // <=0 -> 7.0
+	MaxRounds   int     // <=0 -> 2
+	Round       int     // revision rounds already spent
+	ForceAccept bool    // rounds spent: accept with disclosed gaps instead of blocking
+	Score       func(ctx context.Context) goalGateRound
+}
+
+type goalGateDecision struct {
+	Outcome string
+	Verdict string // pass|fail|revise, for callers that persist the verdict vocabulary
+	Reasons string
+	Score   float64
+	Gaps    []string
+}
+
+// runGoalGate runs one scoring pass and decides: accept when the round passes
+// (verdict pass, or average >= threshold AND every dimension >= floor); revise
+// while rounds remain; then force-accept with the gaps disclosed when the spec
+// allows it, else blocked.
+func runGoalGate(ctx context.Context, spec goalGateSpec) goalGateDecision {
+	threshold := spec.Threshold
+	if threshold <= 0 {
+		threshold = goalGateDefaultThreshold
+	}
+	floor := spec.Floor
+	if floor <= 0 {
+		floor = goalGateDefaultFloor
+	}
+	maxRounds := spec.MaxRounds
+	if maxRounds <= 0 {
+		maxRounds = goalGateDefaultMaxRounds
+	}
+
+	round := goalGateRound{}
+	if spec.Score != nil {
+		round = spec.Score(ctx)
+	}
+
+	verdict := strings.ToLower(strings.TrimSpace(round.Verdict))
+	reasons := strings.TrimSpace(round.Reasons)
+	score := round.Score
+	var gaps []string
+	passed := false
+	switch {
+	case verdict == goalReviewPass:
+		passed = true
+	case verdict == goalReviewFail || verdict == goalReviewRevise:
+		if reasons != "" {
+			gaps = append(gaps, reasons)
+		}
+	case len(round.Dimensions) == 0:
+		verdict = goalReviewRevise
+		gaps = append(gaps, "the gate round returned no verdict and no dimension scores")
+	default:
+		sum := 0.0
+		for _, dimension := range round.Dimensions {
+			sum += dimension.Score
+			if dimension.Score < floor {
+				gap := fmt.Sprintf("%s scored %.1f, below the %.1f floor", dimension.Name, dimension.Score, floor)
+				if detail := strings.TrimSpace(dimension.Gap); detail != "" {
+					gap += " — " + detail
+				}
+				gaps = append(gaps, gap)
+			}
+		}
+		average := sum / float64(len(round.Dimensions))
+		if score == 0 {
+			score = average
+		}
+		if average < threshold {
+			gaps = append(gaps, fmt.Sprintf("average %.1f is below the %.1f threshold", average, threshold))
+		}
+		passed = len(gaps) == 0
+		if passed {
+			verdict = goalReviewPass
+		} else {
+			verdict = goalReviewRevise
+		}
+	}
+
+	decision := goalGateDecision{Verdict: verdict, Reasons: reasons, Score: score, Gaps: gaps}
+	switch {
+	case passed:
+		decision.Outcome = goalGateOutcomeAccept
+	case spec.Round < maxRounds:
+		decision.Outcome = goalGateOutcomeRevise
+	case spec.ForceAccept:
+		decision.Outcome = goalGateOutcomeForceAccept
+	default:
+		decision.Outcome = goalGateOutcomeBlocked
+	}
+	return decision
+}
+
 // --- Stage: review_against_goal ---------------------------------------------
 
 type goalReviewOutcome int
@@ -1249,7 +1532,28 @@ func goalReviewArtifactBody(text string) string {
 		text[len(text)-half:]
 }
 
+// reviewOneSubtask judges one completed subtask THROUGH the gate primitive:
+// the tool-rubric review is the degenerate one-round case (spec §3 — "today's
+// toolRubric becomes the degenerate 1-dimension case"), a single scorer (law
+// sweep first, then the reviewer model) whose folded verdict decides, with
+// rounds bounded by goalMaxRevisions. The returned triple is unchanged and
+// requeueOrBlock still applies the plan mutation, so observable behavior is
+// identical to the pre-primitive review.
 func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *goalSubtask) (string, string, float64) {
+	decision := runGoalGate(ctx, goalGateSpec{
+		MaxRounds: goalMaxRevisions,
+		Round:     st.Revisions,
+		Score: func(ctx context.Context) goalGateRound {
+			return e.scoreSubtaskAgainstRubric(ctx, plan, st)
+		},
+	})
+	return decision.Verdict, decision.Reasons, decision.Score
+}
+
+// scoreSubtaskAgainstRubric is the review's one scoring pass: the zero-cost
+// law sweep, then the reviewer model against the tool rubric, folded into a
+// verdict-driven gate round.
+func (e *goalEngine) scoreSubtaskAgainstRubric(ctx context.Context, plan *goalPlan, st *goalSubtask) goalGateRound {
 	full := ""
 	if artifact, ok := e.app.osArtifactByID(st.ArtifactID); ok {
 		full = artifact.Text
@@ -1262,7 +1566,7 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 	// oversized artifact's omitted middle cannot fake a missing heading.
 	if tool, ok := e.resolvedTool(plan); ok && st.ID == goalDeliverableSubtaskID(plan) {
 		if reason, violated := toolLawSweep(tool, full); violated {
-			return goalReviewRevise, reason, 0
+			return goalGateRound{Verdict: goalReviewRevise, Reasons: reason}
 		}
 	}
 	produced := goalReviewArtifactBody(full)
@@ -1278,10 +1582,10 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 		user += " — " + st.Detail
 	}
 	user += "\nProduced artifact:\n" + firstNonEmptyString(produced, "(the subtask produced no artifact text)")
-	text, err := e.callModel(ctx, system, user)
+	text, err := e.callReviewModel(ctx, system, user)
 	if err != nil {
 		// A reviewer error is a soft fail: re-queue rather than silently pass.
-		return goalReviewRevise, "reviewer model call failed: " + err.Error(), 0
+		return goalGateRound{Verdict: goalReviewRevise, Reasons: "reviewer model call failed: " + err.Error()}
 	}
 	var decoded struct {
 		Verdict   string   `json:"verdict"`
@@ -1290,20 +1594,22 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 		Strengths []string `json:"strengths_to_keep"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
-		return goalReviewRevise, "reviewer returned malformed JSON", 0
+		return goalGateRound{Verdict: goalReviewRevise, Reasons: "reviewer returned malformed JSON"}
 	}
 	// Fold the reviewer's explicit praise into the subtask's protect list. The
 	// merge is cumulative across rounds (persisted with the plan), so a round-2
 	// reviewer cannot silently drop what round 1 already protected.
 	st.Protect = mergeGoalProtectList(st.Protect, decoded.Strengths)
+	round := goalGateRound{Reasons: strings.TrimSpace(decoded.Reasons), Score: decoded.Score}
 	switch strings.ToLower(strings.TrimSpace(decoded.Verdict)) {
 	case goalReviewPass:
-		return goalReviewPass, strings.TrimSpace(decoded.Reasons), decoded.Score
+		round.Verdict = goalReviewPass
 	case goalReviewFail:
-		return goalReviewFail, strings.TrimSpace(decoded.Reasons), decoded.Score
+		round.Verdict = goalReviewFail
 	default:
-		return goalReviewRevise, strings.TrimSpace(decoded.Reasons), decoded.Score
+		round.Verdict = goalReviewRevise
 	}
+	return round
 }
 
 // --- Stage: gate_before_shipping --------------------------------------------
@@ -1322,7 +1628,7 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	}
 	user := "Goal: " + plan.Objective + "\nAuthority: " + plan.Authority + "\nSubtasks:\n" + goalSubtaskSummary(plan) +
 		"\nProduced artifacts (judge the actual work, not the status list):\n" + e.gateArtifactSection(plan)
-	text, err := e.callModel(ctx, system, user)
+	text, err := e.callReviewModel(ctx, system, user)
 
 	plan.Gate.ReviewedBy = "gate_model"
 	if err != nil {
@@ -1391,16 +1697,81 @@ func (e *goalEngine) gateArtifactSection(plan *goalPlan) string {
 
 // --- Stage: save_what_worked -------------------------------------------------
 
-// saveWhatWorked files the passing plan into its package (idempotent) so the
-// "business as intelligence" flywheel keeps the winning decomposition. The
-// durable record IS this artifact (mode=goal); attachToPackage links it.
+// signalEventGoalLessons: save_what_worked's distilled lessons from a goal
+// that passed its gate — the Taste Analyst's positive-example feed. Defined
+// beside its one emitter (saveWhatWorked below), like goal_cancelled.
+const signalEventGoalLessons = "goal_lessons"
+
+// goalLessonsMax caps save_what_worked's distilled lessons (spec: 2-4 one-line
+// lessons; fewer when the run has less to teach, never more).
+const goalLessonsMax = 4
+
+// saveWhatWorked is the REAL save_what_worked stage (Wave 3 items 12/15): it
+// files the passing plan into its package (idempotent — the flywheel keeps the
+// winning decomposition) AND distills 2-4 one-line lessons from the run —
+// reviewer praise that survived revision (protect-list survivors), what needed
+// revision before it passed, what the gate said when it cleared the work —
+// into the plan (mirrored to metadata["savedLessons"] by persist) plus exactly
+// ONE goal_lessons signal for the Taste Analyst. Zero model cost: the lessons
+// are distilled mechanically from state the engine already holds, per the §5
+// rule that tokens are spent at distillation, never at capture.
 func (e *goalEngine) saveWhatWorked(plan *goalPlan, parentID string) {
-	if plan.PackageID == "" {
+	if plan.PackageID != "" {
+		if _, err := e.app.attachToPackage(plan.PackageID, packageRefTypeArtifact, parentID, scoutParticipantName); err != nil {
+			log.Errorf("goal %s attachToPackage %s failed: %v", parentID, plan.PackageID, err)
+		}
+	}
+	lessons := distillGoalLessons(plan)
+	if len(lessons) == 0 {
 		return
 	}
-	if _, err := e.app.attachToPackage(plan.PackageID, packageRefTypeArtifact, parentID, scoutParticipantName); err != nil {
-		log.Errorf("goal %s attachToPackage %s failed: %v", parentID, plan.PackageID, err)
+	plan.Report.SavedLessons = lessons
+	payload := map[string]string{
+		"lessons":   strings.Join(lessons, " | "),
+		"objective": compactAssistantLine(plan.Objective),
 	}
+	if plan.ToolTemplate != "" {
+		payload["toolTemplate"] = plan.ToolTemplate
+	}
+	// recordSignalEvent logs and continues; a signal write never fails the stage.
+	e.app.recordSignalEvent(plan.CreatedBy, signalEventGoalLessons, signalValencePositive, parentID, plan.PackageID, payload)
+}
+
+// distillGoalLessons derives the lessons mechanically from the plan, in taste
+// order: praise that survived (the protect lists), what needed revision, then
+// what the ship gate cleared. Capped at goalLessonsMax; an uneventful run
+// yields fewer, and a run with nothing to teach yields none.
+func distillGoalLessons(plan *goalPlan) []string {
+	var lessons []string
+	add := func(line string) {
+		line = compactAssistantLine(line)
+		if line == "" || len(lessons) >= goalLessonsMax {
+			return
+		}
+		lessons = append(lessons, line)
+	}
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if len(st.Protect) == 0 {
+			continue
+		}
+		add(fmt.Sprintf("Praised and kept on %q: %s", st.Title, strings.Join(st.Protect, "; ")))
+	}
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.Revisions == 0 {
+			continue
+		}
+		reason := ""
+		if st.Review != nil {
+			reason = strings.TrimSpace(st.Review.Reasons)
+		}
+		add(fmt.Sprintf("%q needed %d revision(s) before it passed — final review: %s", st.Title, st.Revisions, firstNonEmptyString(reason, "no reasons recorded")))
+	}
+	if reason := strings.TrimSpace(plan.Gate.Reason); reason != "" && plan.Gate.Status == "passed" {
+		add("Gate cleared: " + reason)
+	}
+	return lessons
 }
 
 // salvageBlockedDeliverable rescues the best produced work of a goal that
@@ -1831,6 +2202,14 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 	if gap := strings.TrimSpace(plan.Report.Gap); gap != "" {
 		metadata["goalGap"] = gap
 	}
+	// save_what_worked's distilled lessons ride the artifact metadata so the
+	// Taste Analyst (and the artifact pane) can read them without decoding the
+	// plan JSON.
+	if len(plan.Report.SavedLessons) > 0 {
+		if raw, lessonsErr := json.Marshal(plan.Report.SavedLessons); lessonsErr == nil {
+			metadata["savedLessons"] = string(raw)
+		}
+	}
 	if strings.TrimSpace(plan.Blocker) != "" {
 		metadata["goalBlocker"] = plan.Blocker
 	}
@@ -2163,6 +2542,12 @@ func composeGoalArtifact(plan *goalPlan) string {
 	}
 	lines = append(lines, "- Gate outcome: "+firstNonEmptyString(plan.Report.GateOutcome, plan.Gate.Status, "pending"))
 	lines = append(lines, fmt.Sprintf("- Assumed claims: %d", plan.Report.AssumedClaimCount))
+	if len(plan.Report.SavedLessons) > 0 {
+		lines = append(lines, "", "## What worked")
+		for _, lesson := range plan.Report.SavedLessons {
+			lines = append(lines, "- "+lesson)
+		}
+	}
 	lines = append(lines, "", "## Work decomposition")
 	lines = append(lines, strings.TrimRight(goalSubtaskSummary(plan), "\n"))
 	lines = append(lines, "", "## Gate", "- Status: "+firstNonEmptyString(plan.Gate.Status, "pending"))
@@ -2205,12 +2590,27 @@ func (app *kanbanBoardApp) nowUnixNano() int64 { return time.Now().UnixNano() }
 // callModel is a single no-tools orchestrator model call returning the
 // concatenated text. It reuses the Wave-1 injectable anthropic responder.
 func (e *goalEngine) callModel(ctx context.Context, system string, user string) (string, error) {
+	return e.callModelAs(ctx, e.model, system, user)
+}
+
+// callReviewModel routes a call to the dedicated review model (Wave 3 item 16
+// — the per-subtask review and the ship gate read WHOLE artifact bodies, which
+// wants Opus-tier context at Opus rates, not the Fable ceiling). Orchestration
+// calls (decompose, panel, report, verify) stay on callModel. Same
+// env-with-override shape as the assignedRunner per-subtask pattern.
+func (e *goalEngine) callReviewModel(ctx context.Context, system string, user string) (string, error) {
+	return e.callModelAs(ctx, firstNonEmptyString(e.reviewModel, e.model), system, user)
+}
+
+// callModelAs is callModel with the model chosen per call; everything else
+// (key, effort, token ceiling, refusal handling) is shared.
+func (e *goalEngine) callModelAs(ctx context.Context, model string, system string, user string) (string, error) {
 	apiKey := strings.TrimSpace(e.apiKey())
 	if apiKey == "" {
 		return "", fmt.Errorf("ANTHROPIC_API_KEY is not configured")
 	}
 	response, err := e.responder(ctx, apiKey, anthropicMessagesRequest{
-		Model:     e.model,
+		Model:     model,
 		System:    system,
 		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(user)}}},
 		MaxTokens: e.maxTokens,

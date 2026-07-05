@@ -903,6 +903,10 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 				writeAuthError(w, http.StatusBadRequest, err.Error())
 				return
 			}
+			// Durable human-approval record (share_links.go): reviewGate/status
+			// keep moving as the resumed work runs, so the share gate keys on
+			// this stamp instead.
+			kanbanApp.stampArtifactHumanApproval(artifactID, user.Name)
 			updated, _ := kanbanApp.osArtifactByID(artifactID)
 			// Round-trip loop: fan the approval to the push channel + the
 			// requester so their origin surface flips to "approved · sent".
@@ -920,6 +924,9 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Durable human-approval record (share_links.go): survives the queued
+		// job's later reviewGate/status rewrites.
+		kanbanApp.stampArtifactHumanApproval(artifact.ID, user.Name)
 		kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
 		writeAuthJSON(w, http.StatusAccepted, map[string]any{
 			"ok":       true,

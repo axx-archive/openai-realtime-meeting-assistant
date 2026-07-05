@@ -74,6 +74,14 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 	if app == nil || app.memory == nil || strings.TrimSpace(apiKey) == "" || boolEnv(agent.disabledEnv) {
 		return
 	}
+	// Registration seam for the taste analyst (taste_analyst.go): the analyst
+	// is per-user and Anthropic-keyed, so it cannot ride this generic
+	// OpenAI-keyed loop — instead it registers alongside the first ambient
+	// agent of the boot (the brain worker, from JoinConferenceRoom), on its own
+	// key gate. Keyless (no ANTHROPIC_API_KEY) it silently never starts.
+	if agent.name != tasteAnalystAgentName {
+		app.ensureTasteAnalystStarted()
+	}
 	interval := agent.interval()
 	if interval <= 0 {
 		return

@@ -259,6 +259,185 @@ func TestMeetingMemoryUpdatesOSArtifactAndReloads(t *testing.T) {
 	}
 }
 
+// A body edit mints version+1 with lineage intact — no matter which writer
+// performed it, because every writer funnels through
+// updateOSArtifactWithMetadata — while title- and metadata-only rewrites never
+// mint versions. Lineage survives a reload.
+func TestOSArtifactBodyEditMintsVersionLineage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	created, appended, err := store.appendOSArtifact("artifact-1", "Draft body v1", map[string]string{
+		"mode":      "research",
+		"title":     "Draft",
+		"createdBy": "Scout",
+	})
+	if err != nil || !appended {
+		t.Fatalf("appendOSArtifact appended=%v err=%v, want true/nil", appended, err)
+	}
+	if got := artifactVersion(created); got != 1 {
+		t.Fatalf("fresh artifactVersion=%d, want 1", got)
+	}
+	if got := artifactParentVersionID(created); got != "" {
+		t.Fatalf("fresh parentVersionId=%q, want empty", got)
+	}
+
+	edited, changed, err := store.updateOSArtifact("artifact-1", "Draft", "Edited body v2", "AJ")
+	if err != nil || !changed {
+		t.Fatalf("updateOSArtifact changed=%v err=%v, want true/nil", changed, err)
+	}
+	if got := artifactVersion(edited); got != 2 {
+		t.Fatalf("edited artifactVersion=%d, want 2", got)
+	}
+	if got := artifactParentVersionID(edited); got != "artifact-1@v1" {
+		t.Fatalf("parentVersionId=%q, want artifact-1@v1", got)
+	}
+	history := artifactVersionHistory(edited)
+	if len(history) != 1 || history[0].V != 1 {
+		t.Fatalf("version history=%+v, want one superseded v1 record", history)
+	}
+	if history[0].EditedBy != "Scout" || history[0].At == "" {
+		t.Fatalf("v1 record=%+v, want the superseded version's editor and timestamp", history[0])
+	}
+
+	// A second body edit chains the lineage: v3 pointing at v2, journal keeps v1+v2.
+	edited, changed, err = store.updateOSArtifact("artifact-1", "", "Edited body v3", "Tom")
+	if err != nil || !changed {
+		t.Fatalf("second updateOSArtifact changed=%v err=%v, want true/nil", changed, err)
+	}
+	if got := artifactVersion(edited); got != 3 {
+		t.Fatalf("artifactVersion=%d, want 3", got)
+	}
+	if got := artifactParentVersionID(edited); got != "artifact-1@v2" {
+		t.Fatalf("parentVersionId=%q, want artifact-1@v2", got)
+	}
+	history = artifactVersionHistory(edited)
+	if len(history) != 2 || history[0].V != 1 || history[1].V != 2 {
+		t.Fatalf("version history=%+v, want v1 then v2", history)
+	}
+	if history[1].EditedBy != "AJ" {
+		t.Fatalf("v2 record editedBy=%q, want AJ (the editor who authored v2)", history[1].EditedBy)
+	}
+
+	// Metadata-only rewrites are bookkeeping, not edits: no version mint.
+	if _, changed, err := store.updateOSArtifactWithMetadata("artifact-1", "", edited.Text, "AJ", map[string]string{
+		"status": "published",
+	}); err != nil || !changed {
+		t.Fatalf("metadata-only update changed=%v err=%v, want true/nil", changed, err)
+	}
+	if _, changed, err := store.updateOSArtifactMetadata("artifact-1", map[string]string{"openedAt": "2026-07-05T00:00:00Z"}); err != nil || !changed {
+		t.Fatalf("bookkeeping stamp changed=%v err=%v, want true/nil", changed, err)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	entry, found := reloaded.entryByKindAndID(meetingMemoryKindOSArtifact, "artifact-1")
+	if !found {
+		t.Fatal("artifact missing after reload")
+	}
+	if got := artifactVersion(entry); got != 3 {
+		t.Fatalf("reloaded artifactVersion=%d, want 3 (metadata-only writes must not mint versions)", got)
+	}
+	if got := len(artifactVersionHistory(entry)); got != 2 {
+		t.Fatalf("reloaded history length=%d, want 2", got)
+	}
+}
+
+// The blob seam degrades exactly like an absent codex sidecar: wired, the
+// superseded body snapshot lands as a bodyBlobRef; erroring or absent (nil),
+// the version record is kept without a ref and the edit still succeeds.
+func TestOSArtifactVersionBlobSeamDegradesGracefully(t *testing.T) {
+	previousSeam := artifactVersionBlobStore
+	t.Cleanup(func() { artifactVersionBlobStore = previousSeam })
+
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, appended, err := store.appendOSArtifact("artifact-1", "Body v1", map[string]string{"mode": "research", "title": "T"}); err != nil || !appended {
+		t.Fatalf("appendOSArtifact appended=%v err=%v, want true/nil", appended, err)
+	}
+
+	// Wired seam: the superseded body reaches the blob store and its ref rides
+	// the version record.
+	var gotBody string
+	artifactVersionBlobStore = func(artifactID string, version int, body string) (string, error) {
+		if artifactID != "artifact-1" || version != 1 {
+			t.Fatalf("blob seam called with %s v%d, want artifact-1 v1", artifactID, version)
+		}
+		gotBody = body
+		return "blob:abc123", nil
+	}
+	edited, _, err := store.updateOSArtifact("artifact-1", "", "Body v2", "AJ")
+	if err != nil {
+		t.Fatalf("updateOSArtifact: %v", err)
+	}
+	if gotBody != "Body v1" {
+		t.Fatalf("blob seam received body=%q, want the superseded v1 body", gotBody)
+	}
+	if history := artifactVersionHistory(edited); len(history) != 1 || history[0].BodyBlobRef != "blob:abc123" {
+		t.Fatalf("history=%+v, want v1 record carrying blob:abc123", history)
+	}
+
+	// Erroring seam: lineage is kept without the ref; the edit never fails.
+	artifactVersionBlobStore = func(string, int, string) (string, error) {
+		return "", filepath.ErrBadPattern
+	}
+	edited, changed, err := store.updateOSArtifact("artifact-1", "", "Body v3", "AJ")
+	if err != nil || !changed {
+		t.Fatalf("updateOSArtifact with erroring seam changed=%v err=%v, want true/nil", changed, err)
+	}
+	history := artifactVersionHistory(edited)
+	if len(history) != 2 || history[1].V != 2 || history[1].BodyBlobRef != "" {
+		t.Fatalf("history=%+v, want a refless v2 record", history)
+	}
+
+	// Absent seam (keyless-style deploy before blobs.go wires it): same shape.
+	artifactVersionBlobStore = nil
+	edited, changed, err = store.updateOSArtifact("artifact-1", "", "Body v4", "AJ")
+	if err != nil || !changed {
+		t.Fatalf("updateOSArtifact with nil seam changed=%v err=%v, want true/nil", changed, err)
+	}
+	if got := artifactVersion(edited); got != 4 {
+		t.Fatalf("artifactVersion=%d, want 4", got)
+	}
+}
+
+// Old artifacts (written before the model was formalized) read back
+// identically: version 1, no parent, no history — and a malformed journal
+// degrades to no history instead of an error.
+func TestArtifactVersionAccessorsBackwardCompat(t *testing.T) {
+	old := meetingMemoryEntry{ID: "artifact-old", Kind: meetingMemoryKindOSArtifact, Text: "Body"}
+	if got := artifactVersion(old); got != 1 {
+		t.Fatalf("no-metadata artifactVersion=%d, want 1", got)
+	}
+	if got := artifactParentVersionID(old); got != "" {
+		t.Fatalf("no-metadata parentVersionId=%q, want empty", got)
+	}
+	if got := artifactVersionHistory(old); got != nil {
+		t.Fatalf("no-metadata history=%v, want nil", got)
+	}
+
+	malformed := meetingMemoryEntry{Metadata: map[string]string{
+		artifactVersionMetadataKey:  "not-a-number",
+		artifactVersionsMetadataKey: "{broken json",
+	}}
+	if got := artifactVersion(malformed); got != 1 {
+		t.Fatalf("malformed artifactVersion=%d, want 1", got)
+	}
+	if got := artifactVersionHistory(malformed); got != nil {
+		t.Fatalf("malformed history=%v, want nil", got)
+	}
+	// The journal restarts on a malformed value rather than blocking the edit.
+	if appended := appendArtifactVersionRecord("{broken json", artifactVersionRecord{V: 1}); !strings.Contains(appended, `"v":1`) {
+		t.Fatalf("appendArtifactVersionRecord=%q, want a fresh journal containing the record", appended)
+	}
+}
+
 func TestMeetingMemoryUpdatesOSArtifactMetadataAndReloads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.jsonl")
 	store, err := newMeetingMemoryStore(path)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,113 @@ func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
 		return true
 	}
 	return false
+}
+
+// --- First-class Artifact model: version lineage (packaging OS §4, Wave 3
+// item 13). A formalization over the existing metadata map, NOT a storage
+// migration: the JSONL shape is unchanged and artifacts written before these
+// keys existed read back identically (version 1, no parent, no history).
+const (
+	// artifactVersionMetadataKey holds the current lineage counter as a
+	// decimal string; absent == 1.
+	artifactVersionMetadataKey = "artifactVersion"
+	// artifactParentVersionIDMetadataKey points at the version this body
+	// superseded ("<artifactId>@v<N-1>"); absent on a never-edited artifact.
+	artifactParentVersionIDMetadataKey = "parentVersionId"
+	// artifactVersionsMetadataKey holds the JSON journal of superseded
+	// versions ([]artifactVersionRecord).
+	artifactVersionsMetadataKey = "artifactVersions"
+)
+
+// artifactVersionRecord is one line of the lineage journal kept under the
+// artifactVersions metadata key: the snapshot of a PRIOR version at the moment
+// an edit superseded it. BodyBlobRef points at the superseded body in the
+// content-addressed blob store when the blob seam is wired (blobs.go, same
+// wave); lineage stays intact without it — the ref is simply absent.
+type artifactVersionRecord struct {
+	V           int    `json:"v"`
+	EditedBy    string `json:"editedBy,omitempty"`
+	At          string `json:"at,omitempty"`
+	BodyBlobRef string `json:"bodyBlobRef,omitempty"`
+}
+
+// artifactVersionBlobStore is the seam blobs.go assigns (at init) to persist a
+// superseded body as a content-addressed blob and return its ref. nil — or an
+// error — degrades gracefully to a version record without a bodyBlobRef,
+// exactly how an absent codex sidecar degrades: the feature narrows, nothing
+// breaks.
+var artifactVersionBlobStore func(artifactID string, version int, body string) (string, error)
+
+// artifactVersion reads the lineage counter; artifacts written before the
+// model was formalized carry no key and read back as version 1.
+func artifactVersion(entry meetingMemoryEntry) int {
+	if version, err := strconv.Atoi(strings.TrimSpace(entry.Metadata[artifactVersionMetadataKey])); err == nil && version >= 1 {
+		return version
+	}
+	return 1
+}
+
+// artifactParentVersionID is the pointer to the superseded version; empty for
+// a never-edited artifact.
+func artifactParentVersionID(entry meetingMemoryEntry) string {
+	return strings.TrimSpace(entry.Metadata[artifactParentVersionIDMetadataKey])
+}
+
+// artifactVersionID names one version of one artifact.
+func artifactVersionID(artifactID string, version int) string {
+	return fmt.Sprintf("%s@v%d", strings.TrimSpace(artifactID), version)
+}
+
+// artifactVersionHistory decodes the lineage journal, oldest first. Malformed
+// or absent metadata reads back as no history — old artifacts stay readable.
+func artifactVersionHistory(entry meetingMemoryEntry) []artifactVersionRecord {
+	raw := strings.TrimSpace(entry.Metadata[artifactVersionsMetadataKey])
+	if raw == "" {
+		return nil
+	}
+	var records []artifactVersionRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		return nil
+	}
+	return records
+}
+
+// appendArtifactVersionRecord appends one record to the encoded journal,
+// tolerating a malformed existing value (the journal restarts rather than
+// blocking the edit).
+func appendArtifactVersionRecord(existing string, record artifactVersionRecord) string {
+	records := artifactVersionHistory(meetingMemoryEntry{Metadata: map[string]string{artifactVersionsMetadataKey: existing}})
+	records = append(records, record)
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return existing
+	}
+	return string(raw)
+}
+
+// bumpArtifactVersionLocked mints version+1 on entry — called under store.mu
+// just before a body edit lands, while entry still carries the superseded
+// body's editor/timestamp metadata. It journals the superseded version (with a
+// body blob ref when the seam is wired) and repoints parentVersionId at it.
+// Every writer funnels through updateOSArtifactWithMetadata, so gate revisions
+// and human PATCH edits inherit the same lineage for free.
+func bumpArtifactVersionLocked(entry *meetingMemoryEntry, previousBody string) {
+	prior := artifactVersion(*entry)
+	record := artifactVersionRecord{
+		V:        prior,
+		EditedBy: firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"]),
+		At:       firstNonEmptyString(entry.Metadata["updatedAt"], entry.CreatedAt.UTC().Format(time.RFC3339Nano)),
+	}
+	if artifactVersionBlobStore != nil {
+		if ref, err := artifactVersionBlobStore(entry.ID, prior, previousBody); err == nil {
+			record.BodyBlobRef = strings.TrimSpace(ref)
+		} else {
+			log.Warnf("artifact %s v%d body snapshot failed (lineage kept without ref): %v", entry.ID, prior, err)
+		}
+	}
+	entry.Metadata[artifactVersionMetadataKey] = strconv.Itoa(prior + 1)
+	entry.Metadata[artifactParentVersionIDMetadataKey] = artifactVersionID(entry.ID, prior)
+	entry.Metadata[artifactVersionsMetadataKey] = appendArtifactVersionRecord(entry.Metadata[artifactVersionsMetadataKey], record)
 }
 
 var memoryTokenPattern = regexp.MustCompile(`[a-z0-9]+`)
@@ -481,6 +589,15 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	entry.Metadata["title"] = nextTitle
 	for key, value := range normalizedMetadataUpdates {
 		entry.Metadata[key] = value
+	}
+	// Version lineage (packaging OS §4): a BODY edit — engine gate revision or
+	// human PATCH alike — mints version+1 and journals the superseded version
+	// before the new body lands. Runs after the metadata merge so the
+	// store-owned lineage keys always win, and before the updatedBy/updatedAt
+	// stamps so the journal credits the superseded version's actual editor.
+	// Title- or metadata-only rewrites never mint versions.
+	if entry.Text != text {
+		bumpArtifactVersionLocked(&entry, entry.Text)
 	}
 	if nextUpdatedBy != "" {
 		entry.Metadata["updatedBy"] = nextUpdatedBy

@@ -2005,3 +2005,511 @@ func TestGoalCancelHTTPAuthorization(t *testing.T) {
 		t.Fatalf("non-goal cancel status=%d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
+
+// --- Panel primitive (Wave 3 item 12) ------------------------------------------
+
+// newPanelTestEngine builds an engine with an injected responder and key, so
+// panel tests never touch the global responder/env swap.
+func newPanelTestEngine(t *testing.T, responder anthropicMessagesResponder) *goalEngine {
+	t.Helper()
+	engine := newGoalEngine(newIsolatedKanbanBoardApp(t))
+	engine.apiKey = func() string { return "test-key" }
+	engine.responder = responder
+	return engine
+}
+
+// N personas fan out in parallel inside ONE engine step (no subtasks), each
+// with its OWN system prompt plus the SHARED strict-JSON schema, and the
+// synthesis call sees all N replies attributed by persona.
+func TestRunGoalPanelFanOutAndSynthesisSeesAllVoices(t *testing.T) {
+	var mu sync.Mutex
+	personaSystems := []string{}
+	synthesisUser := ""
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		userText := decodeAnthropicBlock(request.Messages[0].Content[0]).Text
+		text := ""
+		switch {
+		case strings.Contains(request.System, "PERSONA-ALPHA"):
+			text = `{"vote":"alpha-verdict"}`
+		case strings.Contains(request.System, "PERSONA-BETA"):
+			text = `{"vote":"beta-verdict"}`
+		case strings.Contains(request.System, "PERSONA-GAMMA"):
+			text = `{"vote":"gamma-verdict"}`
+		case strings.Contains(request.System, "SYNTH-MARKER"):
+			mu.Lock()
+			synthesisUser = userText
+			mu.Unlock()
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("the synthesized result")}}, nil
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		mu.Lock()
+		personaSystems = append(personaSystems, request.System)
+		mu.Unlock()
+		if userText != "the shared task" {
+			t.Fatalf("persona user prompt=%q, want the shared task", userText)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+	engine := newPanelTestEngine(t, responder)
+
+	outcome, err := engine.runGoalPanel(context.Background(), goalPanelSpec{
+		Task:   "the shared task",
+		Schema: "SHARED-SCHEMA: return strict JSON",
+		Personas: []goalPanelPersona{
+			{Name: "alpha", System: "PERSONA-ALPHA"},
+			{Name: "beta", System: "PERSONA-BETA"},
+			{Name: "gamma", System: "PERSONA-GAMMA"},
+		},
+		Synthesis: "SYNTH-MARKER synthesize the panel",
+	})
+	if err != nil {
+		t.Fatalf("runGoalPanel: %v", err)
+	}
+	if outcome.Synthesis != "the synthesized result" {
+		t.Fatalf("synthesis=%q", outcome.Synthesis)
+	}
+	// Voices keep panel order and per-persona attribution.
+	if len(outcome.Voices) != 3 {
+		t.Fatalf("voices=%d, want 3", len(outcome.Voices))
+	}
+	for index, want := range []struct{ persona, text string }{
+		{"alpha", `{"vote":"alpha-verdict"}`},
+		{"beta", `{"vote":"beta-verdict"}`},
+		{"gamma", `{"vote":"gamma-verdict"}`},
+	} {
+		voice := outcome.Voices[index]
+		if voice.Persona != want.persona || voice.Text != want.text || voice.Err != nil {
+			t.Fatalf("voice[%d]=%+v, want %+v", index, voice, want)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// Every persona call carried the shared schema appended to its own prompt.
+	if len(personaSystems) != 3 {
+		t.Fatalf("persona calls=%d, want 3", len(personaSystems))
+	}
+	for _, system := range personaSystems {
+		if !strings.Contains(system, "SHARED-SCHEMA") {
+			t.Fatalf("persona system missing the shared schema: %q", system)
+		}
+	}
+	// The synthesis saw ALL N replies, attributed.
+	for _, want := range []string{"Panelist: alpha", "Panelist: beta", "Panelist: gamma", "alpha-verdict", "beta-verdict", "gamma-verdict", "the shared task"} {
+		if !strings.Contains(synthesisUser, want) {
+			t.Fatalf("synthesis prompt missing %q:\n%s", want, synthesisUser)
+		}
+	}
+}
+
+// A failed seat degrades per-persona (the synthesizer is told, honestly); a
+// panel where EVERY seat failed returns an error instead of synthesizing air.
+func TestRunGoalPanelDegradesPerSeatAndFailsWhenAllSeatsFail(t *testing.T) {
+	var synthesisUser string
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		switch {
+		case strings.Contains(request.System, "PERSONA-OK"):
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(`{"vote":"ok"}`)}}, nil
+		case strings.Contains(request.System, "PERSONA-DOWN"):
+			return anthropicMessagesResponse{}, errors.New("seat is down")
+		default:
+			synthesisUser = decodeAnthropicBlock(request.Messages[0].Content[0]).Text
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("partial synthesis")}}, nil
+		}
+	}
+	engine := newPanelTestEngine(t, responder)
+
+	outcome, err := engine.runGoalPanel(context.Background(), goalPanelSpec{
+		Task: "task",
+		Personas: []goalPanelPersona{
+			{Name: "ok", System: "PERSONA-OK"},
+			{Name: "down", System: "PERSONA-DOWN"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("one live seat must still synthesize: %v", err)
+	}
+	if outcome.Voices[1].Err == nil {
+		t.Fatal("failed seat must keep its Err")
+	}
+	if outcome.Synthesis != "partial synthesis" {
+		t.Fatalf("synthesis=%q", outcome.Synthesis)
+	}
+	if !strings.Contains(synthesisUser, "this panelist's call failed") {
+		t.Fatalf("synthesizer was not told about the failed seat:\n%s", synthesisUser)
+	}
+
+	// All seats down: error, no synthesis call.
+	allDown := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if !strings.Contains(request.System, "PERSONA-DOWN") {
+			t.Fatalf("no synthesis call may run when every seat failed; got system %q", request.System)
+		}
+		return anthropicMessagesResponse{}, errors.New("seat is down")
+	}
+	engine = newPanelTestEngine(t, allDown)
+	if _, err := engine.runGoalPanel(context.Background(), goalPanelSpec{
+		Task:     "task",
+		Personas: []goalPanelPersona{{Name: "down", System: "PERSONA-DOWN"}},
+	}); err == nil {
+		t.Fatal("an all-failed panel must return an error")
+	}
+	// An empty panel is a spec bug, not a silent pass.
+	if _, err := engine.runGoalPanel(context.Background(), goalPanelSpec{Task: "task"}); err == nil {
+		t.Fatal("a persona-less panel must return an error")
+	}
+}
+
+// --- Gate primitive (Wave 3 item 12) --------------------------------------------
+
+// Threshold + per-dimension floor + bounded rounds + force-accept-with-
+// disclosed-gaps, at the SKILL defaults (9.0 / 7.0 / 2 rounds).
+func TestRunGoalGateThresholdFloorRoundsAndForceAccept(t *testing.T) {
+	dims := func(scores ...float64) []goalGateDimension {
+		out := make([]goalGateDimension, 0, len(scores))
+		for index, score := range scores {
+			out = append(out, goalGateDimension{Name: fmt.Sprintf("dim-%d", index+1), Score: score})
+		}
+		return out
+	}
+	cases := []struct {
+		name        string
+		round       goalGateRound
+		spentRounds int
+		forceAccept bool
+		wantOutcome string
+		wantGap     string
+	}{
+		{"above threshold and floors accepts", goalGateRound{Dimensions: dims(9.5, 9.2, 9.0)}, 0, false, goalGateOutcomeAccept, ""},
+		{"floor breach revises while rounds remain", goalGateRound{Dimensions: dims(9.9, 6.0)}, 0, false, goalGateOutcomeRevise, "below the 7.0 floor"},
+		{"threshold breach revises while rounds remain", goalGateRound{Dimensions: dims(8.0, 8.5)}, 1, false, goalGateOutcomeRevise, "below the 9.0 threshold"},
+		{"rounds spent without force-accept blocks", goalGateRound{Dimensions: dims(8.0, 8.5)}, 2, false, goalGateOutcomeBlocked, "below the 9.0 threshold"},
+		{"rounds spent with force-accept ships with disclosed gaps", goalGateRound{Dimensions: dims(8.9, 6.5)}, 2, true, goalGateOutcomeForceAccept, "below the 7.0 floor"},
+		{"no verdict and no dimensions never passes", goalGateRound{}, 0, false, goalGateOutcomeRevise, "no verdict and no dimension scores"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := runGoalGate(context.Background(), goalGateSpec{
+				Round:       tc.spentRounds,
+				ForceAccept: tc.forceAccept,
+				Score:       func(context.Context) goalGateRound { return tc.round },
+			})
+			if decision.Outcome != tc.wantOutcome {
+				t.Fatalf("outcome=%q, want %q (gaps=%v)", decision.Outcome, tc.wantOutcome, decision.Gaps)
+			}
+			if tc.wantGap == "" {
+				if len(decision.Gaps) != 0 {
+					t.Fatalf("accepting decision must have no gaps: %v", decision.Gaps)
+				}
+				return
+			}
+			if !strings.Contains(strings.Join(decision.Gaps, "; "), tc.wantGap) {
+				t.Fatalf("gaps=%v, want a gap naming %q", decision.Gaps, tc.wantGap)
+			}
+		})
+	}
+
+	// A dimension gap detail is disclosed verbatim alongside the floor breach.
+	decision := runGoalGate(context.Background(), goalGateSpec{
+		Round:       goalGateDefaultMaxRounds,
+		ForceAccept: true,
+		Score: func(context.Context) goalGateRound {
+			return goalGateRound{Dimensions: []goalGateDimension{{Name: "persona", Score: 5, Gap: "unanswered: the price point"}}}
+		},
+	})
+	if decision.Outcome != goalGateOutcomeForceAccept || !strings.Contains(strings.Join(decision.Gaps, "; "), "unanswered: the price point") {
+		t.Fatalf("force-accept must disclose the dimension gap: %+v", decision)
+	}
+}
+
+// Rubric-equivalence: the degenerate verdict-driven case behaves exactly like
+// today's tool-rubric review — the reviewer's folded verdict decides (a pass
+// with a LOW score still accepts; the threshold never second-guesses it), and
+// the rounds policy matches requeueOrBlock's goalMaxRevisions bound.
+func TestRunGoalGateDegenerateVerdictCasePreservesRubricBehavior(t *testing.T) {
+	verdictRound := func(verdict string, score float64, reasons string) func(context.Context) goalGateRound {
+		return func(context.Context) goalGateRound {
+			return goalGateRound{Verdict: verdict, Score: score, Reasons: reasons}
+		}
+	}
+
+	pass := runGoalGate(context.Background(), goalGateSpec{MaxRounds: goalMaxRevisions, Round: 0, Score: verdictRound(goalReviewPass, 3, "meets the contract")})
+	if pass.Outcome != goalGateOutcomeAccept || pass.Verdict != goalReviewPass || pass.Score != 3 {
+		t.Fatalf("verdict pass with a low score must accept (the model's rubric verdict decides): %+v", pass)
+	}
+
+	for spent := 0; spent < goalMaxRevisions; spent++ {
+		revise := runGoalGate(context.Background(), goalGateSpec{MaxRounds: goalMaxRevisions, Round: spent, Score: verdictRound(goalReviewFail, 4, "does not meet the goal")})
+		if revise.Outcome != goalGateOutcomeRevise || revise.Verdict != goalReviewFail {
+			t.Fatalf("round %d: outcome=%q verdict=%q, want revise/fail while rounds remain", spent, revise.Outcome, revise.Verdict)
+		}
+	}
+	blocked := runGoalGate(context.Background(), goalGateSpec{MaxRounds: goalMaxRevisions, Round: goalMaxRevisions, Score: verdictRound(goalReviewRevise, 6, "the ask is buried")})
+	if blocked.Outcome != goalGateOutcomeBlocked || blocked.Verdict != goalReviewRevise || blocked.Reasons != "the ask is buried" {
+		t.Fatalf("rounds spent must block (no force-accept in the rubric case): %+v", blocked)
+	}
+}
+
+// --- save_what_worked distills real lessons (Wave 3 items 12/15) ----------------
+
+// The save stage distills 2-4 one-line lessons — reviewer praise that survived
+// (protect list), what needed revision, what the gate cleared — into the goal
+// artifact metadata (savedLessons) AND exactly one goal_lessons signal for the
+// Taste Analyst. Zero extra model calls.
+func TestGoalSaveWhatWorkedDistillsLessonsAndEmitsSignal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	var mu sync.Mutex
+	reviews := 0
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[{"id":"st-1","title":"Draft","mode":"design","authority":"workspace_write","dependsOn":[]}]}`
+		case strings.Contains(system, "reviewer"):
+			mu.Lock()
+			reviews++
+			n := reviews
+			mu.Unlock()
+			if n == 1 {
+				text = `{"verdict":"revise","score":6,"reasons":"the ask is buried","strengths_to_keep":["the comps table is airtight"]}`
+			} else {
+				text = `{"verdict":"pass","score":9,"reasons":"good now","strengths_to_keep":[]}`
+			}
+		case strings.Contains(system, "ship gate"):
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"complete and grounded"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+	// A contract-compliant body so the deep_research law sweep passes and the
+	// reviewer model (revise -> pass) is what drives the lessons.
+	folds := installAwaitableChildRunner(t, strings.Join(toolContractHeadings["research_brief_v2"], "\n"))
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	folds.Wait()
+
+	// The plan carries the distilled lessons, mirrored to artifact metadata.
+	if len(plan.Report.SavedLessons) < 2 || len(plan.Report.SavedLessons) > goalLessonsMax {
+		t.Fatalf("savedLessons=%v, want 2-%d one-line lessons", plan.Report.SavedLessons, goalLessonsMax)
+	}
+	artifact := mustArtifact(t, app, thread.Artifact.ID)
+	var lessons []string
+	if err := json.Unmarshal([]byte(artifact.Metadata["savedLessons"]), &lessons); err != nil {
+		t.Fatalf("savedLessons metadata not JSON: %v (%q)", err, artifact.Metadata["savedLessons"])
+	}
+	joined := strings.Join(lessons, " | ")
+	for _, want := range []string{
+		"the comps table is airtight",         // protect-list survivor (what the review praised)
+		"needed 1 revision",                   // what needed revision before it passed
+		"Gate cleared: complete and grounded", // what the gate said on the way out
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("lessons missing %q: %v", want, lessons)
+		}
+	}
+	if !strings.Contains(artifact.Text, "## What worked") {
+		t.Fatal("goal brief missing the What worked section")
+	}
+
+	// Exactly one goal_lessons signal, positive, addressed to the Taste Analyst.
+	var record signalRecord
+	count := 0
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		if decoded, ok := decodeSignalEntry(entry); ok && decoded.Event == signalEventGoalLessons {
+			record = decoded
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("goal_lessons signals=%d, want exactly 1", count)
+	}
+	if record.Valence != signalValencePositive || record.Actor != "aj@shareability.com" || record.ArtifactID != thread.Artifact.ID {
+		t.Fatalf("signal record wrong: %#v", record)
+	}
+	if !strings.Contains(record.Payload["lessons"], "the comps table is airtight") {
+		t.Fatalf("signal payload lessons=%q, want the protect-list survivor", record.Payload["lessons"])
+	}
+	if record.Payload["toolTemplate"] != "deep_research" {
+		t.Fatalf("signal toolTemplate=%q, want deep_research", record.Payload["toolTemplate"])
+	}
+}
+
+// --- Taste pinning into deliverable grounding (Wave 3 item 15) ----------------
+
+// The wrapper grounding slots carry the office house style unconditionally and
+// the requester's living profile when the requester-aware variant is used —
+// pinned, never found by lexical slot-filling (packaging-os §5).
+func TestGoalGroundingSlotsPinProfileAndHouseStyle(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	// Fresh office: nothing to pin, slots unchanged.
+	_, _, _, memory := app.goalGroundingSlotsForRequester("", "aj@shareability.com")
+	if strings.Contains(memory, "(pinned)") {
+		t.Fatalf("empty office must pin nothing into the memory slot:\n%s", memory)
+	}
+
+	seedTasteProfileArtifact(t, app, "AJ", "Kill every unnamed comp. [sig-3]")
+	seedHouseStyleArtifact(t, app, "House rule: every claim carries a receipt.")
+
+	// The base slots (also used by the generation hop, toolPromptForThread)
+	// carry the house style but never a requester profile.
+	_, _, _, memory = app.goalGroundingSlots("")
+	if !strings.Contains(memory, "Office house style (pinned):") || !strings.Contains(memory, "every claim carries a receipt") {
+		t.Fatalf("base grounding slots lost the house style:\n%s", memory)
+	}
+	if strings.Contains(memory, "Requester taste profile (pinned):") {
+		t.Fatalf("base grounding slots must not guess a requester:\n%s", memory)
+	}
+
+	// The requester-aware slots add the profile ahead of everything else.
+	_, _, _, memory = app.goalGroundingSlotsForRequester("", "aj@shareability.com")
+	if !strings.Contains(memory, "Requester taste profile (pinned):") || !strings.Contains(memory, "Kill every unnamed comp.") {
+		t.Fatalf("requester grounding slots lost the profile:\n%s", memory)
+	}
+	if !strings.Contains(memory, "Office house style (pinned):") {
+		t.Fatalf("requester grounding slots lost the house style:\n%s", memory)
+	}
+
+	// A requester without a profile degrades to the base slots.
+	_, _, _, memory = app.goalGroundingSlotsForRequester("", "tom@shareability.com")
+	if strings.Contains(memory, "Requester taste profile (pinned):") {
+		t.Fatalf("profile-less requester must not pin a profile:\n%s", memory)
+	}
+}
+
+// The deliverable wrapper context (what the decomposer hands the final,
+// contract-bearing subtask) carries the requester's pinned profile via
+// toolPromptContextForPlan.
+func TestToolPromptContextForPlanCarriesPinnedProfile(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	seedTasteProfileArtifact(t, app, "AJ", "Lead with rights, not reach. [sig-9]")
+	seedHouseStyleArtifact(t, app, "Banned: momentum language without numbers.")
+
+	tool, ok := toolByID("one_pager")
+	if !ok {
+		t.Fatal("one_pager tool missing from the registry")
+	}
+	engine := newGoalEngine(app)
+	ctx := engine.toolPromptContextForPlan(&goalPlan{Objective: "Package Aurora", CreatedBy: "aj@shareability.com"}, tool)
+	if !strings.Contains(ctx.RelevantMemory, "Requester taste profile (pinned):") || !strings.Contains(ctx.RelevantMemory, "Lead with rights, not reach.") {
+		t.Fatalf("deliverable grounding lost the requester profile:\n%s", ctx.RelevantMemory)
+	}
+	if !strings.Contains(ctx.RelevantMemory, "Office house style (pinned):") {
+		t.Fatalf("deliverable grounding lost the house style:\n%s", ctx.RelevantMemory)
+	}
+	// The pinned block must survive into the assembled wrapper the decomposer
+	// injects, not fall back to the "(none on record)" default.
+	prompt := assembleToolPrompt(tool, ctx)
+	if !strings.Contains(prompt, "Requester taste profile (pinned):") {
+		t.Fatalf("assembled tool prompt lost the pinned profile:\n%.600s", prompt)
+	}
+}
+
+// --- Review-model split (Wave 3 item 16) ---------------------------------------
+
+// Per-subtask review and the ship gate route to BONFIRE_REVIEW_MODEL while
+// orchestration (decompose, report, verify) stays on the orchestrator model —
+// the reviewer reads whole artifacts, which wants Opus context, not the Fable
+// ceiling.
+func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "")
+	t.Setenv("BONFIRE_REVIEW_MODEL", "review-model-x")
+
+	var mu sync.Mutex
+	models := map[string]string{}
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		stage := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			stage = "decompose"
+			text = `{"subtasks":[{"id":"st-1","title":"Market map","mode":"research","authority":"read_only","dependsOn":[]}]}`
+		case strings.Contains(system, "reviewer"):
+			stage = "review"
+			text = `{"verdict":"pass","score":9,"reasons":"meets the subtask"}`
+		case strings.Contains(system, "ship gate"):
+			stage = "gate"
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"safe"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			stage = "report"
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			stage = "verify"
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		mu.Lock()
+		models[stage] = request.Model
+		mu.Unlock()
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+	installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Route review to the review model", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, stage := range []string{"review", "gate"} {
+		if models[stage] != "review-model-x" {
+			t.Fatalf("%s model=%q, want the review model", stage, models[stage])
+		}
+	}
+	for _, stage := range []string{"decompose", "report", "verify"} {
+		if models[stage] != orchestratorModel() {
+			t.Fatalf("%s model=%q, want the orchestrator model %q", stage, models[stage], orchestratorModel())
+		}
+	}
+}

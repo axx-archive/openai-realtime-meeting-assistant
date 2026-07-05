@@ -283,6 +283,11 @@ func TestArtifactActionApprovePreservesGoalResumeAndNotifies(t *testing.T) {
 	if resumed.Gate.Status != "passed" {
 		t.Fatalf("gate status=%q, want passed — resumeApprovedGoal did not fire", resumed.Gate.Status)
 	}
+	// The durable human-approval record share links gate on
+	// (share_links.go artifactShareEligible) is stamped by the approve action.
+	if strings.TrimSpace(updated.Metadata[artifactHumanApprovedAtKey]) == "" {
+		t.Fatalf("approve did not stamp %s: %v", artifactHumanApprovedAtKey, updated.Metadata)
+	}
 	joelNotes := kanbanApp.notificationsForUser("joel@shareability.com", 20)
 	if !containsNotificationText(joelNotes, "Approved") {
 		t.Fatalf("goal requester was not notified: %v", joelNotes)

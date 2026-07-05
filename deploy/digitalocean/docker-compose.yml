@@ -19,6 +19,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # Rides both networks: the egress-less render_internal leg exists ONLY so
+    # the render sidecar can POST its callback here.
+    networks:
+      - default
+      - render_internal
     restart: unless-stopped
 
   codex-runner:
@@ -50,6 +55,34 @@ services:
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+    depends_on:
+      meetingassist:
+        condition: service_healthy
+    restart: unless-stopped
+
+  render-runner:
+    profiles: ["render"]
+    build:
+      context: ../..
+      dockerfile: Dockerfile.render
+    # Mirrors the codex-runner sidecar: same .env (BONFIRE_RUNNER_TOKEN is the
+    # shared callback credential), same meeting_data volume so the file-per-job
+    # queue at /app/data/render-jobs and the exported PDFs/page JPEGs are
+    # visible to both containers. The result route below lands in stage B;
+    # until then the profile simply stays off.
+    env_file:
+      - .env
+    environment:
+      BONFIRE_RENDER_QUEUE_PATH: /app/data/render-jobs
+      BONFIRE_RENDER_CALLBACK_URL: http://meetingassist:3000/internal/render/jobs/result
+    volumes:
+      - meeting_data:/app/data
+    # Untrusted artifact HTML executes in this container's chromium with
+    # --no-sandbox, so the container itself is confined to the internal-only
+    # network: it can reach meetingassist:3000 for the callback and NOTHING
+    # else — no internet egress, no coturn, no host metadata services.
+    networks:
+      - render_internal
     depends_on:
       meetingassist:
         condition: service_healthy
@@ -90,6 +123,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
+
+networks:
+  # internal: true blocks all egress beyond the network itself — the render
+  # sidecar's whole world is the app container's callback route.
+  render_internal:
+    internal: true
 
 volumes:
   caddy_data:

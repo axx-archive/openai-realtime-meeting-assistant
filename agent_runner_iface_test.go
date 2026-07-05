@@ -183,3 +183,20 @@ func TestDrainAgentProgressSurfacesTerminalError(t *testing.T) {
 		t.Fatalf("metadata=%v, want needs_attention/blocked", result.Metadata)
 	}
 }
+
+// reviewModel resolves the dedicated reviewer/ship-gate model: Opus by default
+// (reviews read whole artifacts; that wants Opus-tier context, not the Fable
+// ceiling), env-overridable like every other model dial.
+func TestReviewModelDefaultAndOverride(t *testing.T) {
+	t.Setenv("BONFIRE_REVIEW_MODEL", "")
+	if got := reviewModel(); got != defaultReviewModel {
+		t.Fatalf("reviewModel()=%q, want the default %q", got, defaultReviewModel)
+	}
+	if defaultReviewModel != "claude-opus-4-8" {
+		t.Fatalf("defaultReviewModel=%q, want claude-opus-4-8 (Wave 3 item 16)", defaultReviewModel)
+	}
+	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-sonnet-5")
+	if got := reviewModel(); got != "claude-sonnet-5" {
+		t.Fatalf("reviewModel()=%q, want the env override", got)
+	}
+}
