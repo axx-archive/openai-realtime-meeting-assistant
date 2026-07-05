@@ -377,3 +377,52 @@ func TestArtifactOpenBeaconWired(t *testing.T) {
 		t.Error("the select_artifact action does not fire the open beacon")
 	}
 }
+
+// --- Candor rubric + client-facing copy-law flags (Wave 2 item 10, data-only) --
+
+// The candor dimension is pinned on exactly the two contracts the spec names:
+// the one-pager and the investor-update memo. Bar 7+ — hedging or hype on a
+// page that leaves the building is a gate failure, not a style note.
+func TestCandorRubricDimensionsPinned(t *testing.T) {
+	const wantMeasure = "names real risks/losses plainly; no hedging or hype"
+	for _, id := range []string{"one_pager", "investor_update_memo"} {
+		tool, ok := toolByID(id)
+		if !ok {
+			t.Fatalf("tool %q missing from the registry", id)
+		}
+		found := false
+		for _, d := range tool.Rubric.Dimensions {
+			if d.Name != "Candor" {
+				continue
+			}
+			found = true
+			if d.Bar < 7 {
+				t.Errorf("%s candor bar=%d, want 7+", id, d.Bar)
+			}
+			if d.Measures != wantMeasure {
+				t.Errorf("%s candor measures=%q, want %q", id, d.Measures, wantMeasure)
+			}
+		}
+		if !found {
+			t.Errorf("%s rubric has no Candor dimension", id)
+		}
+	}
+}
+
+// ClientFacing is set on exactly the four contracts whose copy leaves the
+// building (one_pager_v1, deck_outline_v1, update_memo_v1, package_binder_v1)
+// — the law sweep bans em dashes on this class and no other, and the list is
+// registry data, never an engine hardcode.
+func TestClientFacingCopyLawFlagsPinned(t *testing.T) {
+	want := map[string]bool{
+		"one_pager":            true,
+		"deck_outline":         true,
+		"package_assembly":     true,
+		"investor_update_memo": true,
+	}
+	for _, tool := range packagingTools() {
+		if tool.ClientFacing != want[tool.ID] {
+			t.Errorf("tool %q clientFacing=%v, want %v", tool.ID, tool.ClientFacing, want[tool.ID])
+		}
+	}
+}

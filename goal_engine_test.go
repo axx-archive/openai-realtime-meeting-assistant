@@ -1318,3 +1318,690 @@ func mustGoalPlan(t *testing.T, app *kanbanBoardApp, id string) goalPlan {
 	}
 	return plan
 }
+
+// --- Protect lists: praise survives the requeue (Phase 1 mechanisms) ----------
+
+// A revise verdict's strengths_to_keep must reach the revision child as a
+// "DO NOT LOSE (protected)" block in the requeue prompt, and the accumulated
+// list persists on the plan (goal artifact metadata) so later rounds inherit
+// round-1 praise instead of relying on any single review.
+func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	var mu sync.Mutex
+	reviews := 0
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[{"id":"st-1","title":"Draft","mode":"design","authority":"workspace_write","dependsOn":[]}]}`
+		case strings.Contains(system, "reviewer"):
+			mu.Lock()
+			reviews++
+			n := reviews
+			mu.Unlock()
+			if n == 1 {
+				text = `{"verdict":"revise","score":6,"reasons":"the ask is buried","strengths_to_keep":["the comps table is airtight","the receipts appendix"]}`
+			} else {
+				// Round 2 repeats one praise (dedupe) and adds a new one (merge).
+				text = `{"verdict":"pass","score":9,"reasons":"good now","strengths_to_keep":["The comps table is airtight","the tightened logline"]}`
+			}
+		case strings.Contains(system, "ship gate"):
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"safe"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+
+	// A child runner that records every launch's query — the requeue prompt is
+	// the thing under test.
+	var queries []string
+	originalChild := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
+		if parent == "" {
+			return
+		}
+		mu.Lock()
+		queries = append(queries, thread.Query)
+		mu.Unlock()
+		go func() {
+			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", "draft body", "tester", map[string]string{
+				"threadStatus": "complete",
+				"status":       "complete",
+			})
+			if err != nil {
+				return
+			}
+			app.foldGoalChildCompletion(parent, sub, child, "complete")
+		}()
+	}
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(queries) != 2 {
+		t.Fatalf("launched %d children, want 2 (initial + one revision)", len(queries))
+	}
+	if strings.Contains(queries[0], "DO NOT LOSE") {
+		t.Fatal("the initial launch must not carry a protect block (nothing has been praised yet)")
+	}
+	requeue := queries[1]
+	if !strings.Contains(requeue, "Revision notes from the goal review (address these): the ask is buried") {
+		t.Fatalf("requeue prompt lost the revision notes:\n%s", requeue)
+	}
+	if !strings.Contains(requeue, "DO NOT LOSE (protected)") {
+		t.Fatalf("requeue prompt has no protect block:\n%s", requeue)
+	}
+	for _, strength := range []string{"- the comps table is airtight", "- the receipts appendix"} {
+		if !strings.Contains(requeue, strength) {
+			t.Fatalf("requeue prompt protect block missing %q:\n%s", strength, requeue)
+		}
+	}
+
+	// The accumulated protect list persisted with the plan: round-1 praise plus
+	// the round-2 addition, case-insensitively deduped, first-seen order.
+	st := plan.subtaskByID("st-1")
+	if st == nil {
+		t.Fatal("subtask st-1 missing from the final plan")
+	}
+	want := []string{"the comps table is airtight", "the receipts appendix", "the tightened logline"}
+	if len(st.Protect) != len(want) {
+		t.Fatalf("persisted protect list %v, want %v", st.Protect, want)
+	}
+	for i := range want {
+		if st.Protect[i] != want[i] {
+			t.Fatalf("persisted protect list %v, want %v", st.Protect, want)
+		}
+	}
+}
+
+func TestMergeGoalProtectList(t *testing.T) {
+	got := mergeGoalProtectList([]string{"the logline", " ", ""}, []string{"  The Logline  ", "the comps table"})
+	want := []string{"the logline", "the comps table"}
+	if len(got) != len(want) {
+		t.Fatalf("merged=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("merged=%v, want %v", got, want)
+		}
+	}
+	if mergeGoalProtectList(nil, []string{"", "  "}) != nil {
+		t.Fatal("all-blank input must merge to nil, not an empty slice")
+	}
+	// The cap holds, and earlier rounds' entries always survive a later round.
+	var many []string
+	for i := 0; i < goalProtectListCap+4; i++ {
+		many = append(many, fmt.Sprintf("later strength %d", i))
+	}
+	capped := mergeGoalProtectList([]string{"round one praise"}, many)
+	if len(capped) != goalProtectListCap {
+		t.Fatalf("merged %d entries, want the cap %d", len(capped), goalProtectListCap)
+	}
+	if capped[0] != "round one praise" {
+		t.Fatalf("existing praise lost under the cap: %v", capped)
+	}
+}
+
+// --- Law sweeps: deterministic checks spend no reviewer tokens ----------------
+
+// lawSweepCleanOnePagerBody is a one_pager_v1-compliant body: every contract
+// heading present, no em dash anywhere.
+func lawSweepCleanOnePagerBody() string {
+	return strings.Join([]string{
+		"Title / Logline: the hook that earns the meeting.",
+		"The Thesis: the claim, and why it is true.",
+		"Why Now: the timing argument from the market map.",
+		"Comparables: the strongest comp and its value signal.",
+		"The Team: why this studio for this IP.",
+		"The Ask: exactly what we want from the reader.",
+		"Sources appendix: every claim mapped to its package source.",
+	}, "\n")
+}
+
+// A deliverable missing its contract headings is revised mechanically — the
+// reviewer model is NEVER called, the verdict is stamped law_sweep, and the
+// mechanical reason names what is missing.
+func TestGoalLawSweepMissingHeadingSkipsReviewerModel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[{"id":"st-1","title":"One-pager","mode":"artifacts","authority":"workspace_write","dependsOn":[]}]}`
+		case strings.Contains(system, "reviewer"):
+			t.Fatal("law sweep must short-circuit BEFORE the reviewer model; a reviewer call was made")
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+
+	// The child only ever produces loose prose with no contract structure.
+	launches := 0
+	var mu sync.Mutex
+	originalChild := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
+		if parent == "" {
+			return
+		}
+		mu.Lock()
+		launches++
+		mu.Unlock()
+		go func() {
+			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", "A page of loose prose with no contract headings at all.", "tester", map[string]string{
+				"threadStatus": "complete",
+				"status":       "complete",
+			})
+			if err != nil {
+				return
+			}
+			app.foldGoalChildCompletion(parent, sub, child, "complete")
+		}()
+	}
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateBlocked)
+
+	st := plan.subtaskByID("st-1")
+	if st == nil || st.Status != subtaskBlocked {
+		t.Fatalf("subtask not blocked: %+v", st)
+	}
+	if st.Revisions != goalMaxRevisions {
+		t.Fatalf("revisions=%d, want %d", st.Revisions, goalMaxRevisions)
+	}
+	if st.Review == nil || st.Review.Verdict != goalReviewRevise || st.Review.By != "law_sweep" {
+		t.Fatalf("review not stamped as a mechanical law-sweep verdict: %+v", st.Review)
+	}
+	if !strings.Contains(st.Review.Reasons, toolLawSweepPrefix) || !strings.Contains(st.Review.Reasons, "The Ask") {
+		t.Fatalf("mechanical reason does not name the missing heading: %q", st.Review.Reasons)
+	}
+	if !strings.Contains(plan.Blocker, toolLawSweepPrefix) {
+		t.Fatalf("blocker line lost the mechanical reason: %q", plan.Blocker)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if launches != goalMaxRevisions+1 {
+		t.Fatalf("launched %d children, want %d (initial + revisions)", launches, goalMaxRevisions+1)
+	}
+}
+
+// An em dash on a client-facing contract is revised mechanically (no reviewer
+// call); the clean revision then reaches the reviewer model exactly once and
+// the goal verifies.
+func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	clean := lawSweepCleanOnePagerBody()
+	dirty := clean + "\nOne more line with an em dash — the copy law bans this."
+
+	var mu sync.Mutex
+	reviewerCalls := 0
+	responder := func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "test-key" {
+			t.Fatalf("apiKey=%q, want test-key", apiKey)
+		}
+		system := strings.ToLower(request.System)
+		text := ""
+		switch {
+		case strings.Contains(system, "decomposer"):
+			text = `{"subtasks":[{"id":"st-1","title":"One-pager","mode":"artifacts","authority":"workspace_write","dependsOn":[]}]}`
+		case strings.Contains(system, "reviewer"):
+			userText := decodeAnthropicBlock(request.Messages[0].Content[0]).Text
+			mu.Lock()
+			reviewerCalls++
+			mu.Unlock()
+			if strings.Contains(userText, "em dash — the copy law") {
+				t.Fatal("the dirty draft reached the reviewer model; the law sweep did not short-circuit")
+			}
+			text = `{"verdict":"pass","score":9,"reasons":"clean and compliant","strengths_to_keep":[]}`
+		case strings.Contains(system, "ship gate"):
+			text = `{"safe":true,"external_write_required":false,"command":"","reason":"safe"}`
+		case strings.Contains(system, "reporting a finished goal"):
+			text = `{"changed":"x","headline":"done","gap":"","next":"","assumed_claim_count":0}`
+		case strings.Contains(system, "final verifier"):
+			text = `{"verdict":"pass","reasons":"ok"}`
+		default:
+			t.Fatalf("unexpected system prompt: %q", request.System)
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+	}
+
+	originalResp := createAnthropicMessagesResponse
+	t.Cleanup(func() { createAnthropicMessagesResponse = originalResp })
+	createAnthropicMessagesResponse = responder
+	originalStart := startGoalThreadAsync
+	t.Cleanup(func() { startGoalThreadAsync = originalStart })
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	originalFold := foldGoalChildAsync
+	t.Cleanup(func() { foldGoalChildAsync = originalFold })
+	foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+		app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+	}
+
+	// Attempt 1 emits the em-dashed draft; the revision emits the clean one.
+	attempts := 0
+	var queries []string
+	originalChild := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
+		if parent == "" {
+			return
+		}
+		mu.Lock()
+		attempts++
+		queries = append(queries, thread.Query)
+		body := dirty
+		if attempts > 1 {
+			body = clean
+		}
+		mu.Unlock()
+		go func() {
+			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", body, "tester", map[string]string{
+				"threadStatus": "complete",
+				"status":       "complete",
+			})
+			if err != nil {
+				return
+			}
+			app.foldGoalChildCompletion(parent, sub, child, "complete")
+		}()
+	}
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Produce the Aurora one-pager", CreatedBy: "aj@shareability.com", ToolTemplate: "one_pager"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if reviewerCalls != 1 {
+		t.Fatalf("reviewer model called %d times, want exactly 1 (the sweep pays for round 1)", reviewerCalls)
+	}
+	if attempts != 2 {
+		t.Fatalf("child launched %d times, want 2 (initial + one mechanical revision)", attempts)
+	}
+	// The requeue prompt carried the mechanical reason to the revising child.
+	if !strings.Contains(queries[1], toolLawSweepPrefix) || !strings.Contains(queries[1], "em dash") {
+		t.Fatalf("requeue prompt lost the mechanical em-dash reason:\n%s", queries[1])
+	}
+	st := plan.subtaskByID("st-1")
+	if st == nil || st.Revisions != 1 || st.Review == nil || st.Review.Verdict != goalReviewPass || st.Review.By != "reviewer_model" {
+		t.Fatalf("final review state wrong: %+v (review %+v)", st, st.Review)
+	}
+}
+
+// toolLawSweep unit coverage: heading presence, the client-facing em-dash law,
+// and the exemption for non-client-facing contracts.
+func TestToolLawSweep(t *testing.T) {
+	onePager, ok := toolByID("one_pager")
+	if !ok || !onePager.ClientFacing {
+		t.Fatal("one_pager must exist and be client-facing")
+	}
+	clean := lawSweepCleanOnePagerBody()
+	if reason, violated := toolLawSweep(onePager, clean); violated {
+		t.Fatalf("compliant body flagged: %q", reason)
+	}
+
+	missing := strings.Replace(clean, "The Ask", "What we want", 1)
+	reason, violated := toolLawSweep(onePager, missing)
+	if !violated || !strings.Contains(reason, "The Ask") {
+		t.Fatalf("missing heading not flagged by name: violated=%v reason=%q", violated, reason)
+	}
+	if !strings.HasPrefix(reason, toolLawSweepPrefix) {
+		t.Fatalf("law-sweep reason must open with %q: %q", toolLawSweepPrefix, reason)
+	}
+
+	dashed := clean + "\nAn em dash sneaks in — right here."
+	reason, violated = toolLawSweep(onePager, dashed)
+	if !violated || !strings.Contains(reason, "em dash") {
+		t.Fatalf("client-facing em dash not flagged: violated=%v reason=%q", violated, reason)
+	}
+
+	// Internal contracts (research briefs) are exempt from the copy law.
+	research, ok := toolByID("deep_research")
+	if !ok || research.ClientFacing {
+		t.Fatal("deep_research must exist and not be client-facing")
+	}
+	researchBody := strings.Join(toolContractHeadings["research_brief_v2"], "\n") + "\nAn em dash — fine in an internal brief."
+	if reason, violated := toolLawSweep(research, researchBody); violated {
+		t.Fatalf("internal contract wrongly swept for em dashes: %q", reason)
+	}
+}
+
+// --- User-facing cancel (spec §2 "misfire economics", Wave 2 item 8c) ---------
+
+// installRecordingChildRunner is installFakeChildRunner WITHOUT the synthetic
+// completion: children stay running forever, so a test can cancel a goal
+// mid-execute and then hand-fold a straggler to prove the fold is a no-op.
+// Records subtaskID -> child artifact id.
+func installRecordingChildRunner(t *testing.T) *sync.Map {
+	t.Helper()
+	children := &sync.Map{}
+	original := startAgentThreadAsync
+	t.Cleanup(func() { startAgentThreadAsync = original })
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) {
+		meta := thread.Artifact.Metadata
+		if meta["goalParentId"] == "" {
+			return
+		}
+		children.Store(meta["goalSubtaskId"], thread.Artifact.ID)
+	}
+	return children
+}
+
+// One tap mid-execute: the goal parks terminal needs_attention with the cancel
+// record, the ready subtask is never dispatched, and a child that finishes
+// AFTER the cancel folds into a no-op (no plan mutation, no re-drive).
+func TestGoalCancelMidExecuteHaltsDispatchAndFoldsAreNoOps(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[
+			{"id":"st-1","title":"A","mode":"research","authority":"read_only","dependsOn":[]},
+			{"id":"st-2","title":"B","mode":"research","authority":"read_only","dependsOn":[]},
+			{"id":"st-3","title":"C","mode":"research","authority":"read_only","dependsOn":[]}
+		]}`,
+	})
+	children := installRecordingChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Three probes to abandon", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	// Parked at execute: two running (concurrency cap 2), st-3 still ready.
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateExecute)
+	if goalCountStatus(&plan, subtaskRunning) != 2 || goalCountStatus(&plan, subtaskReady) != 1 {
+		t.Fatalf("pre-cancel counts wrong: running=%d ready=%d, want 2/1", goalCountStatus(&plan, subtaskRunning), goalCountStatus(&plan, subtaskReady))
+	}
+
+	if err := app.cancelGoalThread(thread.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("cancelGoalThread: %v", err)
+	}
+
+	artifact := mustArtifact(t, app, thread.Artifact.ID)
+	if artifact.Metadata["currentStage"] != goalStateBlocked || artifact.Metadata["goalStatus"] != "needs_attention" {
+		t.Fatalf("cancel did not land needs_attention: stage=%q status=%q", artifact.Metadata["currentStage"], artifact.Metadata["goalStatus"])
+	}
+	if artifact.Metadata["cancelled"] != "true" || artifact.Metadata["cancelledBy"] != "aj@shareability.com" || artifact.Metadata["cancelledAt"] == "" {
+		t.Fatalf("cancel record not stamped: %v", artifact.Metadata)
+	}
+	plan = mustGoalPlan(t, app, thread.Artifact.ID)
+	if !plan.Cancelled || plan.State != goalStateBlocked || !strings.Contains(plan.Blocker, "cancelled by aj@shareability.com") {
+		t.Fatalf("plan not cancelled: cancelled=%v state=%q blocker=%q", plan.Cancelled, plan.State, plan.Blocker)
+	}
+
+	// An in-flight child finishes AFTER the cancel: the fold must be a no-op,
+	// and critically st-3 (ready) is never dispatched by a re-drive.
+	rawChildID, ok := children.Load("st-1")
+	if !ok {
+		t.Fatal("st-1 child artifact not recorded")
+	}
+	child, _, err := app.updateOSArtifactWithMetadata(rawChildID.(string), "", "late child output", "tester", map[string]string{
+		"threadStatus": "complete",
+		"status":       "complete",
+	})
+	if err != nil {
+		t.Fatalf("complete straggler child: %v", err)
+	}
+	app.foldGoalChildCompletion(thread.Artifact.ID, "st-1", child, "complete")
+
+	after := mustGoalPlan(t, app, thread.Artifact.ID)
+	if st := after.subtaskByID("st-1"); st == nil || st.Status != subtaskRunning {
+		t.Fatalf("fold after cancel mutated st-1: %+v, want the no-op to leave it running", st)
+	}
+	if after.State != goalStateBlocked {
+		t.Fatalf("fold after cancel re-drove the goal to %q", after.State)
+	}
+	if _, dispatched := children.Load("st-3"); dispatched {
+		t.Fatal("st-3 was dispatched after the cancel — dispatchReady must refuse a cancelled goal")
+	}
+
+	// The second tap is an idempotent no-op, not an error.
+	if err := app.cancelGoalThread(thread.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("second cancel: %v", err)
+	}
+}
+
+// The misfire signal: one negative goal_cancelled entry carrying the stage at
+// cancellation and the tool template — the router's tuning data.
+func TestGoalCancelEmitsNegativeMisfireSignal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installRecordingChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Deep research misfire", CreatedBy: "aj@shareability.com", ToolTemplate: "deep_research"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateExecute)
+
+	if err := app.cancelGoalThread(thread.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("cancelGoalThread: %v", err)
+	}
+
+	var record signalRecord
+	count := 0
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		if decoded, ok := decodeSignalEntry(entry); ok && decoded.Event == signalEventGoalCancelled {
+			record = decoded
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("goal_cancelled signals=%d, want exactly 1", count)
+	}
+	if record.Valence != signalValenceNegative || record.Actor != "aj@shareability.com" || record.ArtifactID != thread.Artifact.ID {
+		t.Fatalf("signal record wrong: %#v, want negative/actor/goal id", record)
+	}
+	if record.Payload["stage"] != goalStateExecute {
+		t.Fatalf("signal stage=%q, want %q (the stage at cancellation)", record.Payload["stage"], goalStateExecute)
+	}
+	if record.Payload["toolTemplate"] != "deep_research" {
+		t.Fatalf("signal toolTemplate=%q, want deep_research", record.Payload["toolTemplate"])
+	}
+	// A cancel is a deliberate abandonment: no salvage signal, nothing attached.
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		if decoded, ok := decodeSignalEntry(entry); ok && decoded.Event == signalEventArtifactSalvaged {
+			t.Fatalf("cancel ran the salvage path: %#v", decoded)
+		}
+	}
+}
+
+// A cancelled goal is terminal for cap purposes: the one tap frees the
+// requester's in-flight slot immediately.
+func TestGoalCancelFreesUserCapHeadroom(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	t.Setenv("BONFIRE_GOAL_USER_CAP", "1")
+
+	first, err := app.launchGoalThread(goalLaunchSpec{Objective: "Wrong launch", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("first launch: %v", err)
+	}
+	_, err = app.launchGoalThread(goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"})
+	var capErr *errGoalUserCapExceeded
+	if !errors.As(err, &capErr) {
+		t.Fatalf("second launch err=%v, want errGoalUserCapExceeded before the cancel", err)
+	}
+
+	if err := app.cancelGoalThread(first.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("cancelGoalThread: %v", err)
+	}
+	if inFlight := app.inFlightGoalsForUser("aj@shareability.com"); len(inFlight) != 0 {
+		t.Fatalf("in-flight goals after cancel=%d, want 0: %+v", len(inFlight), inFlight)
+	}
+	if _, err := app.launchGoalThread(goalLaunchSpec{Objective: "The launch that matters", CreatedBy: "aj@shareability.com"}); err != nil {
+		t.Fatalf("launch after cancel still capped: %v", err)
+	}
+}
+
+// A verified goal has nothing to cancel; the tap is refused, not absorbed.
+func TestGoalCancelRefusesVerifiedGoal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Finish cleanly", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	if err := app.cancelGoalThread(thread.Artifact.ID, "aj@shareability.com"); err == nil {
+		t.Fatal("cancel accepted a verified goal")
+	}
+	if plan := mustGoalPlan(t, app, thread.Artifact.ID); plan.Cancelled || plan.State != goalStateVerified {
+		t.Fatalf("refused cancel still mutated the plan: cancelled=%v state=%q", plan.Cancelled, plan.State)
+	}
+}
+
+// The HTTP door: session-gated like /assistant/goal, permitted to the goal's
+// requester or the approval admin — never a third teammate.
+func TestGoalCancelHTTPAuthorization(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	installFakeResponder(t, goalResponderRoutes{})
+	installRecordingChildRunner(t)
+
+	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{Objective: "Joel's goal", CreatedBy: "joel@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	kanbanApp.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateExecute)
+
+	post := func(cookies []*http.Cookie, goalID string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"goalId": goalID})
+		req := httptest.NewRequest(http.MethodPost, "/assistant/goal/cancel", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://localhost")
+		req.Host = "localhost"
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		assistantGoalCancelHandler(rec, req)
+		return rec
+	}
+
+	// A teammate who neither requested the goal nor is the admin gets 403, and
+	// the goal keeps running.
+	if rec := post(loginAs(t, "tyler@shareability.com", defaultMeetingRoomPassword), thread.Artifact.ID); rec.Code != http.StatusForbidden {
+		t.Fatalf("non-requester cancel status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusForbidden)
+	}
+	if got := mustArtifact(t, kanbanApp, thread.Artifact.ID).Metadata["currentStage"]; got != goalStateExecute {
+		t.Fatalf("403 cancel still mutated the goal: stage=%q", got)
+	}
+
+	// Not signed in -> 401.
+	if rec := post(nil, thread.Artifact.ID); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous cancel status=%d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	// The requester cancels their own goal.
+	joel := loginAs(t, "joel@shareability.com", defaultMeetingRoomPassword)
+	if rec := post(joel, thread.Artifact.ID); rec.Code != http.StatusOK {
+		t.Fatalf("requester cancel status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusOK)
+	}
+	artifact := mustArtifact(t, kanbanApp, thread.Artifact.ID)
+	if artifact.Metadata["cancelled"] != "true" || artifact.Metadata["currentStage"] != goalStateBlocked {
+		t.Fatalf("requester cancel did not land: %v", artifact.Metadata)
+	}
+	if artifact.Metadata["cancelledBy"] != "joel@shareability.com" {
+		t.Fatalf("cancelledBy=%q, want the requester", artifact.Metadata["cancelledBy"])
+	}
+
+	// The admin can cancel someone else's goal (admin-equivalent, mirroring the
+	// approval gate's authorization).
+	second, err := kanbanApp.launchGoalThread(goalLaunchSpec{Objective: "Joel's second goal", CreatedBy: "joel@shareability.com"})
+	if err != nil {
+		t.Fatalf("second launch: %v", err)
+	}
+	admin := loginAs(t, artifactLibraryAdminEmail, defaultMeetingRoomPassword)
+	if rec := post(admin, second.Artifact.ID); rec.Code != http.StatusOK {
+		t.Fatalf("admin cancel status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusOK)
+	}
+	if got := mustArtifact(t, kanbanApp, second.Artifact.ID).Metadata["cancelledBy"]; got != artifactLibraryAdminEmail {
+		t.Fatalf("admin cancelledBy=%q, want %q", got, artifactLibraryAdminEmail)
+	}
+
+	// Unknown goal -> 404; a non-goal artifact -> 400.
+	if rec := post(joel, "no-such-goal"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing goal status=%d, want %d", rec.Code, http.StatusNotFound)
+	}
+	plain, _, err := kanbanApp.createOSArtifact("research", "not a goal", "just a brief", "Joel")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+	if rec := post(joel, plain.ID); rec.Code != http.StatusBadRequest {
+		t.Fatalf("non-goal cancel status=%d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}

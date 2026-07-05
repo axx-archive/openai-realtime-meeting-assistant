@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -691,6 +692,567 @@ func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
 	if archivePayload.Thread.ArchivedAt == "" || archivePayload.Thread.Title != "simulcast recap" {
 		t.Fatalf("thread=%#v, want archived with title intact", archivePayload.Thread)
 	}
+}
+
+// --- The propose-confirm router (spec §2, Wave 2 item 8) ---------------------
+
+// A deliverable-shaped ask in a private thread earns a PROPOSAL — data on the
+// reply and a persisted card, never a launch and never a Q&A model call. The
+// routing turn itself must ride the registry: Haiku by default, tool schemas
+// injected from tool_registry.go, the trust-asymmetry line in the system
+// prompt.
+func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("BONFIRE_ROUTER_MODEL", "")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
+		t.Fatal("a proposal must never launch an agent thread")
+	}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	// A proposal replaces the inline answer — neither chat seam may fire.
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		t.Fatal("a proposing turn must not also run the Q&A path")
+		return "", nil
+	})
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("a proposing turn must not also run the Q&A path")
+		return "", nil
+	})
+
+	var routed anthropicMessagesRequest
+	swapAnthropicMessagesResponder(t, func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if apiKey != "sk-ant-router-test" {
+			t.Fatalf("router apiKey=%q, want the env key", apiKey)
+		}
+		routed = request
+		return anthropicMessagesResponse{
+			StopReason: "tool_use",
+			Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_router", "propose_tool_run", map[string]any{
+					"tool_id":   "comps_precedent",
+					"objective": "comps for the rodeo doc against streaming buyers",
+					"fields":    map[string]any{"thesis": "rodeo doc", "format": "film", "bogus": "dropped"},
+				}),
+			},
+		}, nil
+	})
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	text := "pull comps for the rodeo doc so we can price it"
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, text, nil, "")
+	if err != nil {
+		t.Fatalf("append routed message: %v", err)
+	}
+
+	// The routing turn: Haiku default, registry-injected schemas, muted-agent
+	// system prompt.
+	if routed.Model != "claude-haiku-4-5" {
+		t.Fatalf("router model=%q, want the Haiku default", routed.Model)
+	}
+	// No effort dial on the routing turn: claude-haiku-4-5 rejects
+	// output_config.effort with a 400, which would silently degrade EVERY
+	// proposal to an inline answer. Empty Effort keeps output_config off the
+	// wire (see TestBuildAnthropicMessagesPayloadOmitsOutputConfigWithoutEffort).
+	if routed.Effort != "" {
+		t.Fatalf("router effort=%q, want empty — Haiku 4.5 rejects output_config.effort", routed.Effort)
+	}
+	if !strings.Contains(routed.System, "under-routes is trusted") || !strings.Contains(routed.System, "over-launches is muted") {
+		t.Fatalf("router system prompt missing the trust asymmetry: %s", routed.System)
+	}
+	if len(routed.Tools) != 2 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" {
+		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream", routed.Tools)
+	}
+	for _, tool := range packagingTools() {
+		if !strings.Contains(routed.Tools[0].Description, tool.ID) {
+			t.Errorf("router tool description missing registry tool %q — the registry must stay the single taxonomy source", tool.ID)
+		}
+	}
+
+	if _, launched := response["agentThread"]; launched {
+		t.Fatalf("response keys=%v — NEVER silent-launch", responseKeys(response))
+	}
+	proposal, ok := response["proposal"].(*scoutRouterProposal)
+	if !ok {
+		t.Fatalf("proposal type=%T, want *scoutRouterProposal", response["proposal"])
+	}
+	if proposal.Kind != scoutRouterProposalKindToolRun || proposal.ToolID != "comps_precedent" {
+		t.Fatalf("proposal=%#v, want a comps_precedent tool_run", proposal)
+	}
+	if proposal.ToolName != "Comps & Precedent" || proposal.GroupLabel != "Ideate" {
+		t.Fatalf("proposal name/group=%q/%q, want registry values", proposal.ToolName, proposal.GroupLabel)
+	}
+	if proposal.Authority != toolAuthorityReadOnly {
+		t.Fatalf("proposal authority=%q, want the tool's registry authority", proposal.Authority)
+	}
+	if proposal.WeightLabel != scoutProposalWeightGoalLoop {
+		t.Fatalf("weightLabel=%q, want %q", proposal.WeightLabel, scoutProposalWeightGoalLoop)
+	}
+	if proposal.Query != text {
+		t.Fatalf("proposal query=%q, want the originating message for the Tier-0 escape", proposal.Query)
+	}
+	if proposal.Fields["thesis"] != "rodeo doc" || proposal.Fields["format"] != "film" {
+		t.Fatalf("fields=%#v, want the model's pre-fills", proposal.Fields)
+	}
+	if _, leaked := proposal.Fields["bogus"]; leaked {
+		t.Fatalf("fields=%#v — keys outside the tool's form definition must be dropped", proposal.Fields)
+	}
+	if !strings.Contains(proposal.Summary, "Comps & Precedent") || !strings.Contains(proposal.Summary, "kill condition") {
+		t.Fatalf("summary=%q, want the legible tool + kill-condition sentence", proposal.Summary)
+	}
+
+	// The card is a persisted message, so a reload re-renders it.
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || answer.Kind != scoutChatMessageKindProposal || answer.Proposal == nil {
+		t.Fatalf("answer=%#v, want a persisted Kind=proposal message", response["answer"])
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	if len(saved.Messages) != 2 || saved.Messages[1].Proposal == nil {
+		t.Fatalf("persisted messages=%#v, want user turn + proposal card", saved.Messages)
+	}
+}
+
+// The heavily-biased default: a router turn that calls no tool leaves the
+// existing Q&A path as the answer — the router's own text is never the reply.
+func TestScoutChatRouterDefaultsToInlineAnswer(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		return anthropicMessagesResponse{
+			StopReason: "end_turn",
+			Content:    []json.RawMessage{mockAnthropicTextBlock("Tier 0 — answering inline.")},
+		}, nil
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		return "we decided the market is buyers-first.", nil
+	})
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "what did we decide about the market for this?", nil, "")
+	if err != nil {
+		t.Fatalf("append question: %v", err)
+	}
+	if _, proposed := response["proposal"]; proposed {
+		t.Fatalf("response keys=%v, want no proposal for a Tier 0 verdict", responseKeys(response))
+	}
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || answer.Kind != "message" || answer.Text != "we decided the market is buyers-first." {
+		t.Fatalf("answer=%#v, want the Q&A path's inline answer, not router text", response["answer"])
+	}
+}
+
+// Keyless: no Anthropic key means no router turn — plain Q&A, never a
+// proposal, never an error (the launchGoalThread 503 posture).
+func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "test-key"
+	kanbanApp.mu.Unlock()
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Fatal("keyless deploys must never attempt a router turn")
+		return anthropicMessagesResponse{}, nil
+	})
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		return "keyless answer.", nil
+	})
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "research the market and draft a one-pager for the buyer", nil, "")
+	if err != nil {
+		t.Fatalf("keyless append must degrade to plain Q&A, got error: %v", err)
+	}
+	if _, proposed := response["proposal"]; proposed {
+		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
+	}
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || answer.Text != "keyless answer." {
+		t.Fatalf("answer=%#v, want the plain Q&A answer", response["answer"])
+	}
+}
+
+// A failed router turn is an optional refinement lost, not an error: the
+// message still gets its inline answer.
+func TestScoutChatRouterErrorDegradesToInlineAnswer(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		return anthropicMessagesResponse{}, fmt.Errorf("router upstream 500")
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		return "still answering.", nil
+	})
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "grill the neon pitch for me", nil, "")
+	if err != nil {
+		t.Fatalf("router failure must not fail the message: %v", err)
+	}
+	if _, proposed := response["proposal"]; proposed {
+		t.Fatalf("response keys=%v, want no proposal after a router error", responseKeys(response))
+	}
+	if answer, ok := response["answer"].(scoutChatMessageRecord); !ok || answer.Text != "still answering." {
+		t.Fatalf("answer=%#v, want the inline answer", response["answer"])
+	}
+}
+
+// Channels keep their explicit-invocation semantics: the router never runs
+// there (the @scout mention + prefix/keyword rules are unchanged).
+func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Fatal("the router must not run for channel messages")
+		return anthropicMessagesResponse{}, nil
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		return "channel answer.", nil
+	})
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "warroom", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout what did we decide yesterday?", nil, "")
+	if err != nil {
+		t.Fatalf("append channel mention: %v", err)
+	}
+	if _, proposed := response["proposal"]; proposed {
+		t.Fatalf("response keys=%v, want no proposal in channels", responseKeys(response))
+	}
+}
+
+// The proposal route: a dismissal records the negative signal (toolId +
+// objective payload), flips the persisted card inert, and re-asks the original
+// message as Tier 0 — committing only the scout answer.
+func TestScoutChatProposalDismissRecordsSignalAndAnswersTier0(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	var askedTier0 string
+	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		askedTier0 = request.Input
+		return "the market splits buyers-first.", nil
+	})
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	proposalMessage := scoutChatMessageRecord{
+		ID:        "scout-chat-message-proposal-1",
+		Kind:      scoutChatMessageKindProposal,
+		Role:      "scout",
+		Text:      "this is a Market Map run",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Proposal: &scoutRouterProposal{
+			Kind:        scoutRouterProposalKindToolRun,
+			ToolID:      "market_map",
+			Objective:   "map the rodeo landscape",
+			Query:       "how does the rodeo market break down?",
+			WeightLabel: scoutProposalWeightGoalLoop,
+			Summary:     "this is a Market Map run",
+		},
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages("aj@shareability.com", private.ID, proposalMessage); err != nil {
+		t.Fatalf("seed proposal card: %v", err)
+	}
+
+	body := `{"action":"dismissed","kind":"tool_run","toolId":"market_map","objective":"map the rodeo landscape","query":"how does the rodeo market break down?","messageId":"scout-chat-message-proposal-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+private.ID+"/proposal", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	assistantChatThreadHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		OK     bool                   `json:"ok"`
+		Answer scoutChatMessageRecord `json:"answer"`
+		Thread scoutChatThreadRecord  `json:"thread"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !payload.OK || payload.Answer.Text != "the market splits buyers-first." {
+		t.Fatalf("payload=%+v, want the Tier-0 answer", payload)
+	}
+	if !strings.Contains(askedTier0, "how does the rodeo market break down?") {
+		t.Fatalf("Tier-0 input=%q, want the original query re-asked", askedTier0)
+	}
+
+	// The signal (misfire economics fuel) with toolId+objective payload.
+	assertRouterSignal(t, signalEventRouterProposalDismissed, signalValenceNegative, "market_map", "map the rodeo landscape")
+
+	// The persisted card flipped inert; only the scout answer was added (no
+	// duplicate user bubble).
+	saved, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", private.ID)
+	if err != nil {
+		t.Fatalf("reload thread: %v", err)
+	}
+	if len(saved.Messages) != 2 {
+		t.Fatalf("messages=%d, want the card + the answer only", len(saved.Messages))
+	}
+	if saved.Messages[0].Proposal == nil || saved.Messages[0].Proposal.Status != "dismissed" {
+		t.Fatalf("card=%#v, want status dismissed persisted", saved.Messages[0].Proposal)
+	}
+}
+
+// seedScoutChatProposalCard persists one proposal card in the given thread and
+// returns its message id — the accept/dismiss route resolves against this
+// stored record, never against request-body fields.
+func seedScoutChatProposalCard(t *testing.T, threadID string, ownerEmail string, proposal scoutRouterProposal) string {
+	t.Helper()
+	messageID := fmt.Sprintf("scout-chat-message-proposal-%d", time.Now().UTC().UnixNano())
+	card := scoutChatMessageRecord{
+		ID:        messageID,
+		Kind:      scoutChatMessageKindProposal,
+		Role:      "scout",
+		Text:      proposal.Summary,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Proposal:  &proposal,
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages(ownerEmail, threadID, card); err != nil {
+		t.Fatalf("seed proposal card: %v", err)
+	}
+	return messageID
+}
+
+// Accepting a tool_run records the positive signal and nothing else — the
+// launch rides POST /assistant/goal with the identical palette spec, so this
+// route must never fork a second launch door for Tier 2. The signal payload
+// comes from the STORED proposal, not the request body.
+func TestScoutChatProposalAcceptToolRunRecordsSignalOnly(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
+		t.Fatal("a tool_run accept must not launch here — /assistant/goal is the only door")
+	}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	messageID := seedScoutChatProposalCard(t, private.ID, "aj@shareability.com", scoutRouterProposal{
+		Kind:      scoutRouterProposalKindToolRun,
+		ToolID:    "comps_precedent",
+		Objective: "comps for the rodeo doc",
+		Query:     "pull comps for the rodeo doc",
+	})
+
+	// The request body claims a DIFFERENT tool — the stored record must win.
+	response, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action:    "accepted",
+		Kind:      scoutRouterProposalKindWorkstream,
+		ToolID:    "market_map",
+		Mode:      "research",
+		MessageID: messageID,
+	})
+	if err != nil {
+		t.Fatalf("accept tool_run: %v", err)
+	}
+	if response["ok"] != true {
+		t.Fatalf("response=%#v, want ok", response)
+	}
+	if _, launched := response["agentThread"]; launched {
+		t.Fatalf("response keys=%v, want no launch from the proposal route for tool runs", responseKeys(response))
+	}
+	assertRouterSignal(t, signalEventRouterProposalAccepted, signalValencePositive, "comps_precedent", "comps for the rodeo doc")
+
+	// A replayed accept is rejected: the card was already claimed.
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action:    "accepted",
+		MessageID: messageID,
+	}); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Fatalf("replayed accept err=%v, want already-resolved rejection", err)
+	}
+}
+
+// Accepting a workstream IS the explicit confirm: the route launches the
+// single-shot thread, commits the run card, and records the signal.
+func TestScoutChatProposalAcceptWorkstreamLaunches(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	messageID := seedScoutChatProposalCard(t, private.ID, "aj@shareability.com", scoutRouterProposal{
+		Kind:      scoutRouterProposalKindWorkstream,
+		Mode:      "research",
+		Objective: "the rodeo creator market",
+		Query:     "what does the rodeo creator market look like?",
+	})
+
+	// The request body claims a DIFFERENT mode — the stored record must win.
+	response, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action:    "accepted",
+		Kind:      scoutRouterProposalKindWorkstream,
+		Mode:      "grill",
+		MessageID: messageID,
+	})
+	if err != nil {
+		t.Fatalf("accept workstream: %v", err)
+	}
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || agentThread.Mode != "research" {
+		t.Fatalf("response=%#v, want a running research workstream (the STORED mode)", response["agentThread"])
+	}
+	if agentThread.Query != "the rodeo creator market" {
+		t.Fatalf("agent thread query=%q, want the stored objective", agentThread.Query)
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	if !scoutChatThreadHasAgentRef(saved, agentThread.ID) {
+		t.Fatalf("persisted thread carries no ref to agent thread %s — status flips cannot land", agentThread.ID)
+	}
+	assertRouterSignal(t, signalEventRouterProposalAccepted, signalValencePositive, "research", "the rodeo creator market")
+
+	// A replayed accept never launches a duplicate workstream.
+	launches := 0
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action:    "accepted",
+		MessageID: messageID,
+	}); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Fatalf("replayed accept err=%v, want already-resolved rejection", err)
+	}
+	if launches != 0 {
+		t.Fatalf("replayed accept launched %d workstreams, want 0", launches)
+	}
+
+	// A fabricated accept for a proposal that never existed is rejected — the
+	// acceptance-rate signal only counts real router proposals.
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action:    "accepted",
+		Kind:      scoutRouterProposalKindWorkstream,
+		Mode:      "research",
+		Objective: "fabricated",
+		MessageID: "scout-chat-message-never-existed",
+	}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("fabricated accept err=%v, want proposal-not-found rejection", err)
+	}
+	// A missing message id is rejected outright.
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action: "accepted",
+		Kind:   scoutRouterProposalKindWorkstream,
+		Mode:   "research",
+	}); err == nil {
+		t.Fatal("an accept without a message id must be rejected")
+	}
+	// And a junk action is rejected before any signal is written.
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+		Action: "maybe",
+	}); err == nil {
+		t.Fatal("unknown proposal action must be rejected")
+	}
+}
+
+// assertRouterSignal finds exactly the newest router signal and checks its
+// event, valence, and toolId/objective payload (recordSignal is the seam the
+// task pins: dismissals and accepts are Q5 fuel).
+func assertRouterSignal(t *testing.T, event string, valence string, toolID string, objective string) {
+	t.Helper()
+	for _, entry := range kanbanApp.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		record, ok := decodeSignalEntry(entry)
+		if !ok || record.Event != event {
+			continue
+		}
+		if record.Valence != valence {
+			t.Fatalf("signal valence=%q, want %q", record.Valence, valence)
+		}
+		if record.Payload["toolId"] != toolID || record.Payload["objective"] != objective {
+			t.Fatalf("signal payload=%#v, want toolId=%q objective=%q", record.Payload, toolID, objective)
+		}
+		return
+	}
+	t.Fatalf("no %s signal recorded", event)
 }
 
 // --- Palette conversational handoff carries the tool contract (§2 fidelity fix)

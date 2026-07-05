@@ -35,6 +35,8 @@ func seedCompleteGrillArtifact(t *testing.T, app *kanbanBoardApp) meetingMemoryE
 func TestLaunchAgentThreadFollowUpVersionsArtifactInPlace(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
+	// Keyless-Anthropic pins the gpt-5.5 path (worker=openai_text_response).
+	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	var captured openAITextRequest
 	previousAsync := startAgentThreadFollowUpAsync
@@ -159,6 +161,7 @@ func TestLaunchAgentThreadFollowUpVersionsArtifactInPlace(t *testing.T) {
 func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	previousAsync := startAgentThreadFollowUpAsync
 	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
@@ -319,6 +322,7 @@ func TestFollowUpRejectedWhileRunning(t *testing.T) {
 func TestFollowUpUsesTextWorkerWithCodexEnvSet(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("BONFIRE_CODEX_AGENT_THREADS", "1")
 
 	responderCalls := 0
@@ -352,6 +356,7 @@ func TestFollowUpUsesTextWorkerWithCodexEnvSet(t *testing.T) {
 func TestFollowUpErrorPreservesBodyAndStatus(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	previousAsync := startAgentThreadFollowUpAsync
 	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
@@ -381,6 +386,101 @@ func TestFollowUpErrorPreservesBodyAndStatus(t *testing.T) {
 	}
 	if stored.Metadata["readinessScore"] != "6.2" {
 		t.Fatalf("readinessScore=%q, want the prior score untouched", stored.Metadata["readinessScore"])
+	}
+}
+
+// With an Anthropic key present the follow-up rides Sonnet 5 — re-baselined
+// 3000-token budget at effort low, same instructions/input as the OpenAI
+// path, honest worker stamp — and needs NO OpenAI key at all. The injected
+// gpt-5.5 responder must never run.
+func TestFollowUpRoutesToSonnetWithAnthropicKey(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("BONFIRE_CHAT_MODEL", "")
+
+	var got anthropicTextRequest
+	swapAnthropicTextResponder(t, func(_ context.Context, apiKey string, request anthropicTextRequest) (string, error) {
+		if apiKey != "sk-ant-test" {
+			t.Fatalf("apiKey=%q, want the Anthropic key", apiKey)
+		}
+		got = request
+		return "READINESS: 7.1/10\n\nWhat changed in v2: pricing objection resolved.", nil
+	})
+
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
+		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+			t.Fatal("OpenAI responder must not run when an Anthropic key is present")
+			return "", nil
+		})
+	}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	artifact := seedCompleteGrillArtifact(t, app)
+	if _, err := app.launchAgentThreadFollowUp(artifact.ID, "re-grill with the new pricing answers", "Tim", nil); err != nil {
+		t.Fatalf("launchAgentThreadFollowUp: %v", err)
+	}
+
+	if got.Model != "claude-sonnet-5" {
+		t.Fatalf("model=%q, want claude-sonnet-5", got.Model)
+	}
+	if got.MaxTokens != 3000 || got.Effort != "low" {
+		t.Fatalf("follow-up budget=%d/%q, want 3000/low", got.MaxTokens, got.Effort)
+	}
+	if !strings.Contains(got.Instructions, "What changed in v2") || !strings.Contains(got.Instructions, "READINESS") {
+		t.Fatalf("Sonnet instructions missing the follow-up contract: %q", got.Instructions)
+	}
+	if !strings.Contains(got.Input, "Follow-up request: re-grill with the new pricing answers") {
+		t.Fatalf("Sonnet input missing the follow-up request: %q", got.Input)
+	}
+
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if !ok {
+		t.Fatalf("artifact %s disappeared", artifact.ID)
+	}
+	if stored.Metadata["worker"] != agentThreadWorkerAnthropic {
+		t.Fatalf("worker=%q, want %q (the evidence stamp stays honest)", stored.Metadata["worker"], agentThreadWorkerAnthropic)
+	}
+	if stored.Metadata["workerBoundary"] != "anthropic_messages_artifact_writer" {
+		t.Fatalf("workerBoundary=%q, want anthropic_messages_artifact_writer", stored.Metadata["workerBoundary"])
+	}
+	if !strings.HasPrefix(stored.Text, "READINESS: 7.1/10") {
+		t.Fatalf("text=%q, want the Sonnet output merged on top", stored.Text)
+	}
+	if stored.Metadata["threadVersion"] != "2" || stored.Metadata["readinessScore"] != "7.1" {
+		t.Fatalf("metadata=%#v, want v2 with the new readiness score", stored.Metadata)
+	}
+}
+
+// A Sonnet follow-up failure rides the same restore path as an OpenAI one:
+// body untouched, prior terminal status back verbatim, error stamped.
+func TestFollowUpSonnetErrorPreservesBodyAndStatus(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		return "", fmt.Errorf("Anthropic chat request was declined by safety classifiers")
+	})
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
+		runApp.runAgentThreadFollowUpWithResponder(run, nil)
+	}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	artifact := seedCompleteGrillArtifact(t, app)
+	if _, err := app.launchAgentThreadFollowUp(artifact.ID, "run again", "Tim", nil); err != nil {
+		t.Fatalf("launchAgentThreadFollowUp: %v", err)
+	}
+
+	stored, _ := app.osArtifactByID(artifact.ID)
+	if stored.Text != artifact.Text {
+		t.Fatalf("text changed on a failed Sonnet follow-up:\n%q\nwant\n%q", stored.Text, artifact.Text)
+	}
+	if stored.Metadata["status"] != "complete" || stored.Metadata["threadVersion"] != "1" {
+		t.Fatalf("status=%q version=%q, want the prior terminal state restored", stored.Metadata["status"], stored.Metadata["threadVersion"])
+	}
+	if !strings.Contains(stored.Metadata["followUpError"], "declined") {
+		t.Fatalf("followUpError=%q, want the refusal error stamped", stored.Metadata["followUpError"])
 	}
 }
 

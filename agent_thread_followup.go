@@ -221,19 +221,40 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 	if responder == nil {
 		responder = createOpenAITextResponse
 	}
+	// The worker stamp records which model actually wrote this version — the
+	// evidence footer must stay honest across the Sonnet migration.
+	worker := agentThreadWorkerOpenAI
+	workerBoundary := "responses_artifact_writer"
 	output, err := func() (string, error) {
-		apiKey := app.currentOpenAIAPIKey()
-		if strings.TrimSpace(apiKey) == "" {
-			return "", fmt.Errorf("OPENAI_API_KEY is not configured")
+		var raw string
+		var responderErr error
+		// Sonnet 5 fronts follow-ups whenever an Anthropic key is present
+		// (packaging-os §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps
+		// the gpt-5.5 responder path below byte-for-byte.
+		if anthropicKey := currentAnthropicAPIKey(); anthropicKey != "" {
+			worker = agentThreadWorkerAnthropic
+			workerBoundary = "anthropic_messages_artifact_writer"
+			raw, responderErr = createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
+				Model:        chatModel(),
+				Instructions: agentThreadFollowUpInstructions(run.thread.Mode, run.version),
+				Input:        run.input,
+				Effort:       "low",
+				MaxTokens:    anthropicFollowUpMaxTokens,
+			})
+		} else {
+			apiKey := app.currentOpenAIAPIKey()
+			if strings.TrimSpace(apiKey) == "" {
+				return "", fmt.Errorf("OPENAI_API_KEY is not configured")
+			}
+			raw, responderErr = responder(ctx, apiKey, openAITextRequest{
+				Model:           meetingBrainModel(),
+				Instructions:    agentThreadFollowUpInstructions(run.thread.Mode, run.version),
+				Input:           run.input,
+				ReasoningEffort: "low",
+				Verbosity:       "medium",
+				MaxOutputTokens: 2600,
+			})
 		}
-		raw, responderErr := responder(ctx, apiKey, openAITextRequest{
-			Model:           meetingBrainModel(),
-			Instructions:    agentThreadFollowUpInstructions(run.thread.Mode, run.version),
-			Input:           run.input,
-			ReasoningEffort: "low",
-			Verbosity:       "medium",
-			MaxOutputTokens: 2600,
-		})
 		if responderErr != nil {
 			return "", responderErr
 		}
@@ -292,8 +313,8 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		"reviewGate":      "passed",
 		"completedAt":     time.Now().UTC().Format(time.RFC3339Nano),
 		"latestThreadRun": run.runID,
-		"worker":          "openai_text_response",
-		"workerBoundary":  "responses_artifact_writer",
+		"worker":          worker,
+		"workerBoundary":  workerBoundary,
 		"followUpError":   "",
 	}
 	stampReadinessMetadata(prev, run.thread.Mode, output, metadata)

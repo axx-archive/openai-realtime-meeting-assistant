@@ -92,7 +92,13 @@ type packagingTool struct {
 	FormFields         []toolFormField `json:"formFields,omitempty"`
 	Authority          string          `json:"authority"`
 	ExternalWriteGated bool            `json:"externalWriteGated"`
-	Rubric             toolRubric      `json:"rubric"`
+	// ClientFacing marks contracts whose output is copy a client/investor reads
+	// (one-pager, deck outline, update memo, package binder). The engine's
+	// deterministic law sweeps (toolLawSweep) enforce the packaging copy laws —
+	// no em dashes — on exactly this class, so the list lives here as data, not
+	// hardcoded in the engine.
+	ClientFacing bool       `json:"clientFacing"`
+	Rubric       toolRubric `json:"rubric"`
 }
 
 // KillCondition is the one-sentence non-negotiable, surfaced for quick access
@@ -190,7 +196,8 @@ func packagingTools() []packagingTool {
 				{Key: "audience", Label: "Target reader", Placeholder: "capital, talent, or a buyer", Required: true},
 				{Key: "ask", Label: "The ask", Placeholder: "exactly what you want from them", Required: true},
 			},
-			Authority: toolAuthorityWorkspaceWrite,
+			Authority:    toolAuthorityWorkspaceWrite,
+			ClientFacing: true,
 			Rubric: toolRubric{
 				Ref: "one_pager_gate_v1",
 				Dimensions: []toolRubricDimension{
@@ -198,6 +205,7 @@ func packagingTools() []packagingTool {
 					{Name: "Reader-fit", Measures: "the lead and the ask match the audience", Bar: 8},
 					{Name: "Compression", Measures: "genuinely one page, no filler, every line earns", Bar: 8},
 					{Name: "Voice", Measures: "reads like a sharp studio, not a template", Bar: 7},
+					{Name: "Candor", Measures: "names real risks/losses plainly; no hedging or hype", Bar: 7},
 				},
 				KillCondition: "any claim on the page with no receipt in the appendix.",
 			},
@@ -216,7 +224,8 @@ func packagingTools() []packagingTool {
 				{Key: "length", Label: "Length target (optional)", Placeholder: "e.g. 10-12 slides", Required: false},
 				{Key: "beats", Label: "Must-hit beats (optional)", Placeholder: "anything that must appear", Required: false},
 			},
-			Authority: toolAuthorityWorkspaceWrite,
+			Authority:    toolAuthorityWorkspaceWrite,
+			ClientFacing: true,
 			Rubric: toolRubric{
 				Ref: "deck_outline_gate_v1",
 				Dimensions: []toolRubricDimension{
@@ -364,7 +373,8 @@ func packagingTools() []packagingTool {
 			FormFields: []toolFormField{
 				{Key: "recipient", Label: "Target recipient", Placeholder: "investor, talent's team, buyer", Required: true},
 			},
-			Authority: toolAuthorityWorkspaceWrite,
+			Authority:    toolAuthorityWorkspaceWrite,
+			ClientFacing: true,
 			Rubric: toolRubric{
 				Ref: "package_assembly_gate_v1",
 				Dimensions: []toolRubricDimension{
@@ -388,6 +398,7 @@ func packagingTools() []packagingTool {
 			FormFields:         []toolFormField{{Key: "window", Label: "Time window", Placeholder: "e.g. the last two weeks", Required: true}, {Key: "recipient", Label: "Recipient", Placeholder: "LP or internal", Required: true}},
 			Authority:          toolAuthorityWorkspaceWrite,
 			ExternalWriteGated: true,
+			ClientFacing:       true,
 			Rubric: toolRubric{
 				Ref: "update_memo_gate_v1",
 				Dimensions: []toolRubricDimension{
@@ -395,6 +406,7 @@ func packagingTools() []packagingTool {
 					{Name: "Approval discipline", Measures: "it stops for human approval before it can leave the building", Bar: 8},
 					{Name: "Forwardable voice", Measures: "reads like a memo an LP could receive unedited", Bar: 7},
 					{Name: "Completeness", Measures: "what moved / decisions / what's next / what we need all present", Bar: 7},
+					{Name: "Candor", Measures: "names real risks/losses plainly; no hedging or hype", Bar: 7},
 				},
 				KillCondition: "any stated development not traceable to a decision, meeting, artifact, or package stage-advance on record.",
 			},

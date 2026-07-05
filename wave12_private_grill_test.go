@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- Allowlist: the two new tools in, the five room-only tools still out ------
@@ -262,6 +263,71 @@ func TestEndPrivateGrillFilesReportAttachesAndReportsDelta(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("filed grill artifact %q was not attached to the package (ids=%v)", artifactID, refreshed.ArtifactIDs)
+	}
+}
+
+// --- Grill-delta signal (§5 capture item 4): the private-grill seam -----------
+
+// end_private_grill hands the delta watcher the package and the prior score it
+// read BEFORE attaching the new scorecard; once the terminal seam grades the
+// report the watcher records one grill_delta signal with delta and valence.
+func TestEndPrivateGrillRecordsGrillDeltaSignalOnceGraded(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	watches := stubGrillDeltaWatches(t)
+
+	record := createTestPackage(t, app, "Aurora IP", "Aurora is a prestige limited series.")
+	prior, _, err := app.createOSArtifactWithMetadata("grill", "Aurora dry run", "Vision: sharper.\nREADINESS: 6.2/10", "AJ", map[string]string{"readinessScore": "6.2"})
+	if err != nil {
+		t.Fatalf("seed prior grill: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, prior.ID, "AJ"); err != nil {
+		t.Fatalf("attach prior grill: %v", err)
+	}
+
+	result, _, err := app.applyPrivateRealtimeVoiceTool("aj@shareability.com", "end_private_grill", map[string]any{
+		"package":    "Aurora IP",
+		"transcript": "Scout: who is the buyer? User: a named streamer now.",
+	})
+	if err != nil {
+		t.Fatalf("end_private_grill: %v", err)
+	}
+	artifactID := asString(result["artifactId"])
+	if len(*watches) != 1 {
+		t.Fatalf("watches=%d, want exactly one delta watch per private grill end", len(*watches))
+	}
+	watch := (*watches)[0]
+	if watch.artifactID != artifactID || watch.packageID != record.ID || watch.priorReadiness != "6.2" {
+		t.Fatalf("watch=%#v, want the filed scorecard with the pre-attach package baseline 6.2", watch)
+	}
+	if watch.actor != packageToolActor("aj@shareability.com") {
+		t.Fatalf("watch actor=%q, want the requester %q", watch.actor, packageToolActor("aj@shareability.com"))
+	}
+	if watch.topic != "" {
+		t.Fatalf("watch topic=%q, want empty — the private grill anchors on the package, not a topic", watch.topic)
+	}
+
+	graded := "Vision: closer.\nREADINESS: 7.4/10\n\n## Strongest objections\n- The streamer is named but unsigned."
+	if _, _, err := app.memory.updateOSArtifactWithMetadata(artifactID, "", graded, scoutParticipantName, map[string]string{"readinessScore": "7.4", "threadStatus": "complete"}); err != nil {
+		t.Fatalf("grade scorecard: %v", err)
+	}
+	app.watchGrillDeltaSignal(watch.actor, watch.artifactID, watch.packageID, watch.priorReadiness, watch.topic, time.Millisecond, time.Second)
+
+	signals := grillDeltaSignals(t, app)
+	if len(signals) != 1 {
+		t.Fatalf("grill_delta signals=%d, want 1", len(signals))
+	}
+	signal := signals[0]
+	if signal.Valence != signalValencePositive || signal.Payload["delta"] != "+1.2" || signal.Payload["readiness"] != "7.4" || signal.Payload["priorReadiness"] != "6.2" {
+		t.Fatalf("signal=%#v, want a positive +1.2 delta from 6.2 to 7.4", signal)
+	}
+	if signal.PackageID != record.ID || signal.ArtifactID != artifactID {
+		t.Fatalf("signal=%#v, want package/artifact mirrored for distiller filtering", signal)
+	}
+	if !strings.Contains(signal.Payload["objections"], "named but unsigned") {
+		t.Fatalf("objections=%q, want the scorecard's top objection", signal.Payload["objections"])
 	}
 }
 

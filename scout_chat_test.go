@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -246,41 +247,60 @@ func TestScoutChatOrdinaryQuestionOmitsBoardJSONFromModelInput(t *testing.T) {
 	}
 }
 
-func TestScoutChatLaunchesAgentThreadForWorkRequest(t *testing.T) {
+// Keyword sniffing is RETIRED (spec §2): a work-shaped message in the private
+// ws session answers like any other message — it never silently launches a
+// workstream. The propose-confirm router (HTTP typed-chat path) is the only
+// place a work-shaped ask becomes anything more, and there it is a proposal
+// card, never a launch.
+func TestScoutChatWorkShapedMessageAnswersInsteadOfLaunching(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "") // keyless: the gpt-5.5 Q&A path answers
 	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
 	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
+		t.Fatal("a typed ws message must never silently launch an agent thread")
+	}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	originalResponder := createOpenAITextResponse
+	defer func() { createOpenAITextResponse = originalResponder }()
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		return "the buyer proof lives in the Realtime 2 research brief.", nil
+	}
 
 	recorder := &chatEventRecorder{}
 	session := newCapturedChatSession(recorder)
 	defer session.close()
 
 	session.submit(app, "research the buyer proof for Realtime 2 as the UI", "AJ")
+	recorder.waitForKindCount(t, "answer", 1)
 
-	events := recorder.snapshot()
-	if got, want := strings.Join(recorder.kinds(), ","), "query,status,thread"; got != want {
-		t.Fatalf("event kinds=%q, want %q", got, want)
+	if got, want := strings.Join(recorder.kinds(), ","), "query,status,answer"; got != want {
+		t.Fatalf("event kinds=%q, want %q — keyword launches are retired", got, want)
 	}
-	thread, ok := events[2].payload["thread"].(scoutAgentThread)
-	if !ok {
-		t.Fatalf("thread payload type=%T, want scoutAgentThread", events[2].payload["thread"])
+	if got := recorder.countKind("thread"); got != 0 {
+		t.Fatalf("thread events=%d, want 0 (silent workstream launches are deleted)", got)
 	}
-	if thread.Mode != "research" || thread.Status != "running" || thread.Artifact.ID == "" {
-		t.Fatalf("thread=%#v, want running research artifact thread", thread)
-	}
-	artifact, ok := events[2].payload["artifact"].(meetingMemoryEntry)
-	if !ok {
-		t.Fatalf("artifact payload type=%T, want meetingMemoryEntry", events[2].payload["artifact"])
-	}
-	if artifact.Metadata["source"] != "scout_thread" || artifact.Metadata["threadStatus"] != "running" {
-		t.Fatalf("artifact metadata=%v, want running scout thread metadata", artifact.Metadata)
-	}
-	if events[2].payload["text"] != "research thread launched" {
-		t.Fatalf("thread text=%q, want launched summary", events[2].payload["text"])
-	}
-	if got := recorder.countKind("answer"); got != 0 {
-		t.Fatalf("answers=%d, want work thread launch instead of normal chat answer", got)
+}
+
+// Pin the retirement at the source level too: the keyword-sniff function and
+// its silent-launch plumbing must not come back under the same name.
+func TestScoutChatKeywordSniffingRetired(t *testing.T) {
+	for _, file := range []string{"scout_chat.go", "scout_chat_threads.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		source := string(raw)
+		// Comments may name the retired function as history; code may not.
+		for _, banned := range []string{"func scoutChatThreadModeForText", "scoutChatThreadModeForText(", "launchThread(app, mode"} {
+			if strings.Contains(source, banned) {
+				t.Fatalf("%s still references %q — keyword sniffing was retired for the propose-confirm router (spec §2)", file, banned)
+			}
+		}
 	}
 }
 

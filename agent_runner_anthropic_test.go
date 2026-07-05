@@ -353,6 +353,438 @@ func TestFableDialEnvOverrides(t *testing.T) {
 	}
 }
 
+// A stop_reason "refusal" retries the SAME request once against the fallback
+// model; a successful fallback turn continues the run instead of taking the
+// needs_attention branch, and provenance (metadata + evidence footer) records
+// which model produced the artifact.
+func TestAnthropicFableRunnerRefusalFallbackSuccess(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	var requests []anthropicMessagesRequest
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		requests = append(requests, request)
+		if request.Model == "claude-fable-5" {
+			return anthropicMessagesResponse{StopReason: "refusal"}, nil
+		}
+		return anthropicMessagesResponse{
+			StopReason: "end_turn",
+			Content:    []json.RawMessage{mockAnthropicTextBlock("# Chain of title\n\nClean.")},
+		}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.model = "claude-fable-5"
+	runner.fallbackModel = "claude-opus-4-8"
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "workflow", Query: "is the chain of title clean?"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	if len(requests) != 2 {
+		t.Fatalf("responder called %d times, want 2 (primary refusal + fallback)", len(requests))
+	}
+	if requests[1].Model != "claude-opus-4-8" {
+		t.Fatalf("fallback request model=%q, want claude-opus-4-8", requests[1].Model)
+	}
+	// The retry is the SAME request: only the model changes.
+	if requests[1].System != requests[0].System || requests[1].Effort != requests[0].Effort ||
+		requests[1].MaxTokens != requests[0].MaxTokens ||
+		len(requests[1].Messages) != len(requests[0].Messages) ||
+		len(requests[1].Tools) != len(requests[0].Tools) {
+		t.Fatalf("fallback request differs beyond the model: %+v vs %+v", requests[1], requests[0])
+	}
+
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err != nil {
+		t.Fatalf("fallback success terminal = %+v, want clean terminal", last)
+	}
+	if last.GoalStatus != "verified" || last.ReviewGate != "passed" {
+		t.Fatalf("fallback success status wrong: %+v", last)
+	}
+	if last.Metadata["orchestratorFallbackModel"] != "claude-opus-4-8" {
+		t.Fatalf("orchestratorFallbackModel=%q, want claude-opus-4-8", last.Metadata["orchestratorFallbackModel"])
+	}
+	if !strings.Contains(last.Text, "Fallback model: claude-opus-4-8") {
+		t.Fatalf("evidence footer missing fallback provenance: %q", last.Text)
+	}
+}
+
+// Only when the fallback ALSO refuses does the run take the existing
+// needs_attention branch — with both the stop reason and the attempted
+// fallback model recorded, and exactly one retry (no retry storm).
+func TestAnthropicFableRunnerRefusalFallbackAlsoRefuses(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	calls := 0
+	responder := func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		calls++
+		return anthropicMessagesResponse{StopReason: "refusal"}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.fallbackModel = "claude-opus-4-8"
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "workflow", Query: "x"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+	if calls != 2 {
+		t.Fatalf("responder called %d times, want exactly 2 (one fallback retry)", calls)
+	}
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err == nil {
+		t.Fatalf("double refusal must terminate with an error: %+v", last)
+	}
+	if last.GoalStatus != "needs_attention" || last.ReviewGate != "blocked" {
+		t.Fatalf("double refusal status wrong: %+v", last)
+	}
+	if last.Metadata["orchestratorStop"] != "refusal" {
+		t.Fatalf("orchestratorStop=%q, want refusal", last.Metadata["orchestratorStop"])
+	}
+	if last.Metadata["orchestratorFallbackModel"] != "claude-opus-4-8" {
+		t.Fatalf("orchestratorFallbackModel=%q, want claude-opus-4-8 (the attempted fallback)", last.Metadata["orchestratorFallbackModel"])
+	}
+}
+
+// A responder error during the fallback retry surfaces as the usual terminal
+// error, never as a silent verified run.
+func TestAnthropicFableRunnerRefusalFallbackError(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	calls := 0
+	responder := func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		calls++
+		if calls == 1 {
+			return anthropicMessagesResponse{StopReason: "refusal"}, nil
+		}
+		return anthropicMessagesResponse{}, context.DeadlineExceeded
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "workflow", Query: "x"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err == nil || last.GoalStatus != "needs_attention" {
+		t.Fatalf("fallback error terminal wrong: %+v", last)
+	}
+}
+
+// A refusal on a LATER turn — when the replayed history already carries a
+// Fable assistant turn with thinking blocks (model-specific signatures) — must
+// still recover via the fallback: the documented cross-model contract is that
+// a different model silently drops Fable thinking blocks from the replayed
+// prompt, so the runner replays the history byte-for-byte, thinking blocks
+// included, and the run continues. This is exactly the multi-turn case the
+// fallback was added for.
+func TestAnthropicFableRunnerRefusalFallbackMidRunReplaysThinkingBlocks(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	thinkingBlock, _ := json.Marshal(map[string]any{
+		"type":      "thinking",
+		"thinking":  "",
+		"signature": "fable-signature-abc123",
+	})
+
+	var requests []anthropicMessagesRequest
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		requests = append(requests, request)
+		switch len(requests) {
+		case 1:
+			// Turn 1 (primary): a Fable turn carrying a thinking block ahead of
+			// the tool call — both must be echoed into the next turn's history.
+			return anthropicMessagesResponse{
+				StopReason: "tool_use",
+				Content: []json.RawMessage{
+					json.RawMessage(thinkingBlock),
+					mockAnthropicToolUseBlock("toolu_1", "do_nothing", map[string]any{}),
+				},
+			}, nil
+		case 2:
+			// Turn 2 (primary): refusal mid-run, with thinking blocks now in history.
+			return anthropicMessagesResponse{StopReason: "refusal"}, nil
+		default:
+			// Turn 2 (fallback): serves the terminal turn.
+			return anthropicMessagesResponse{
+				StopReason: "end_turn",
+				Content:    []json.RawMessage{mockAnthropicTextBlock("# Done\n\nRecovered on the fallback.")},
+			}, nil
+		}
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.model = "claude-fable-5"
+	runner.fallbackModel = "claude-opus-4-8"
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "workflow", Query: "multi-turn"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	if len(requests) != 3 {
+		t.Fatalf("responder called %d times, want 3 (turn 1 + turn 2 refusal + fallback)", len(requests))
+	}
+	if requests[2].Model != "claude-opus-4-8" {
+		t.Fatalf("fallback model=%q, want claude-opus-4-8", requests[2].Model)
+	}
+	// The fallback replays the refused turn's history BYTE-FOR-BYTE — thinking
+	// blocks included (the API drops them server-side for a different model;
+	// client-side stripping is what breaks).
+	refused, _ := json.Marshal(requests[1].Messages)
+	replayed, _ := json.Marshal(requests[2].Messages)
+	if string(refused) != string(replayed) {
+		t.Fatalf("fallback history differs from the refused request:\nrefused:  %s\nreplayed: %s", refused, replayed)
+	}
+	foundThinking := false
+	for _, message := range requests[2].Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		for _, raw := range message.Content {
+			if decodeAnthropicBlock(raw).Type == "thinking" {
+				foundThinking = true
+			}
+		}
+	}
+	if !foundThinking {
+		t.Fatal("replayed fallback history carries no assistant thinking block — the test lost its premise")
+	}
+
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err != nil || last.GoalStatus != "verified" {
+		t.Fatalf("mid-run fallback terminal = %+v, want clean verified terminal", last)
+	}
+	if last.Metadata["orchestratorFallbackModel"] != "claude-opus-4-8" {
+		t.Fatalf("orchestratorFallbackModel=%q, want claude-opus-4-8", last.Metadata["orchestratorFallbackModel"])
+	}
+}
+
+// The refusal-fallback model defaults to claude-opus-4-8 and stays
+// env-overridable, mirroring the other Fable dials.
+func TestOrchestratorFallbackModelDial(t *testing.T) {
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "")
+	if got := orchestratorFallbackModel(); got != "claude-opus-4-8" {
+		t.Fatalf("orchestratorFallbackModel()=%q, want claude-opus-4-8", got)
+	}
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "claude-opus-4-7")
+	if got := orchestratorFallbackModel(); got != "claude-opus-4-7" {
+		t.Fatalf("orchestratorFallbackModel()=%q, want the claude-opus-4-7 override", got)
+	}
+}
+
+// Prompt-cache breakpoints land at the stable prefixes of the wire payload —
+// the last tool definition, the system prompt, and the newest two user turns —
+// never on assistant blocks, and never more than the API's 4-breakpoint cap.
+func TestBuildAnthropicMessagesPayloadCacheBreakpoints(t *testing.T) {
+	request := anthropicMessagesRequest{
+		Model:  "claude-fable-5",
+		System: "You are Scout, the in-process orchestrator.",
+		Tools: []anthropicTool{
+			{Name: "create_ticket", InputSchema: map[string]any{"type": "object"}},
+			{Name: "do_nothing", InputSchema: map[string]any{"type": "object"}},
+		},
+		Messages: []anthropicMessage{
+			{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("Goal: package the Aurora IP")}},
+			{Role: "assistant", Content: []json.RawMessage{
+				mockAnthropicTextBlock("Working."),
+				mockAnthropicToolUseBlock("toolu_1", "do_nothing", map[string]any{}),
+			}},
+			{Role: "user", Content: []json.RawMessage{anthropicToolResultBlock("toolu_1", "ok", false)}},
+			{Role: "assistant", Content: []json.RawMessage{mockAnthropicToolUseBlock("toolu_2", "do_nothing", map[string]any{})}},
+			{Role: "user", Content: []json.RawMessage{
+				anthropicToolResultBlock("toolu_2", "ok", false),
+				mockAnthropicTextBlock("continue"),
+			}},
+		},
+		MaxTokens: 4096,
+		Effort:    "low",
+	}
+
+	raw, err := buildAnthropicMessagesPayload(request)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+
+	// Never more than 4 breakpoints; this multi-turn shape uses all 4.
+	if count := strings.Count(string(raw), `"cache_control"`); count != 4 {
+		t.Fatalf("payload carries %d cache_control breakpoints, want exactly 4: %s", count, raw)
+	}
+
+	var payload struct {
+		System   []map[string]json.RawMessage `json:"system"`
+		Tools    []map[string]json.RawMessage `json:"tools"`
+		Messages []struct {
+			Role    string                       `json:"role"`
+			Content []map[string]json.RawMessage `json:"content"`
+		} `json:"messages"`
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !payload.Stream {
+		t.Fatal("payload lost stream:true")
+	}
+
+	// System becomes a block array whose text block carries the breakpoint.
+	if len(payload.System) != 1 {
+		t.Fatalf("system has %d blocks, want 1", len(payload.System))
+	}
+	if _, marked := payload.System[0]["cache_control"]; !marked {
+		t.Fatal("system prompt block missing its cache_control breakpoint")
+	}
+
+	// Only the LAST tool carries the breakpoint (tools render first; the
+	// marker caches the whole tool prefix).
+	if _, marked := payload.Tools[0]["cache_control"]; marked {
+		t.Fatal("first tool must not carry a cache_control breakpoint")
+	}
+	if _, marked := payload.Tools[1]["cache_control"]; !marked {
+		t.Fatal("last tool missing its cache_control breakpoint")
+	}
+
+	// The newest two user turns' last blocks carry the remaining breakpoints;
+	// assistant blocks (Fable thinking echo) and older user turns stay clean.
+	for i, message := range payload.Messages {
+		for j, block := range message.Content {
+			_, marked := block["cache_control"]
+			wantMarked := (i == 4 && j == 1) || (i == 2 && j == 0)
+			if marked != wantMarked {
+				t.Fatalf("message %d block %d (role %s) cache_control=%v, want %v", i, j, message.Role, marked, wantMarked)
+			}
+		}
+	}
+
+	// The caller's history is never mutated — persisted markers would
+	// accumulate past the 4-breakpoint cap on later turns of the loop.
+	for i, message := range request.Messages {
+		for j, block := range message.Content {
+			if strings.Contains(string(block), "cache_control") {
+				t.Fatalf("buildAnthropicMessagesPayload mutated request.Messages[%d].Content[%d]", i, j)
+			}
+		}
+	}
+}
+
+// An empty Effort keeps output_config OFF the wire entirely — the router turn
+// rides claude-haiku-4-5, which 400s on output_config.effort, so the omission
+// is what keeps every routing turn from silently degrading to inline answers.
+func TestBuildAnthropicMessagesPayloadOmitsOutputConfigWithoutEffort(t *testing.T) {
+	raw, err := buildAnthropicMessagesPayload(anthropicMessagesRequest{
+		Model:     "claude-haiku-4-5",
+		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("route this")}}},
+		MaxTokens: 700,
+		Effort:    "",
+	})
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if strings.Contains(string(raw), "output_config") {
+		t.Fatalf("payload carries output_config despite empty Effort (Haiku 4.5 rejects it): %s", raw)
+	}
+
+	// And a non-empty Effort still lands inside output_config.
+	raw, err = buildAnthropicMessagesPayload(anthropicMessagesRequest{
+		Model:     "claude-fable-5",
+		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("go")}}},
+		MaxTokens: 4096,
+		Effort:    "low",
+	})
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if !strings.Contains(string(raw), `"output_config":{"effort":"low"}`) {
+		t.Fatalf("payload missing output_config.effort: %s", raw)
+	}
+}
+
+// DisableThinking emits thinking:{type:"disabled"} (the chat/follow-up text
+// path on Sonnet 5, where omitting the field silently runs ADAPTIVE thinking
+// inside the same max_tokens budget); the default leaves the field off the
+// wire entirely — the Fable 5 orchestrator 400s on an explicit disabled.
+func TestBuildAnthropicMessagesPayloadThinkingDial(t *testing.T) {
+	base := anthropicMessagesRequest{
+		Model:     "claude-sonnet-5",
+		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("hi")}}},
+		MaxTokens: 800,
+	}
+
+	raw, err := buildAnthropicMessagesPayload(base)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if strings.Contains(string(raw), `"thinking"`) {
+		t.Fatalf("default payload must omit the thinking field (Fable 5 rejects explicit config): %s", raw)
+	}
+
+	base.DisableThinking = true
+	raw, err = buildAnthropicMessagesPayload(base)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if !strings.Contains(string(raw), `"thinking":{"type":"disabled"}`) {
+		t.Fatalf("DisableThinking payload missing thinking:{type:disabled}: %s", raw)
+	}
+}
+
+// The first turn of a run (one user message) and a bare request (no system, no
+// tools) stay under the breakpoint cap and keep their markers on what exists.
+func TestBuildAnthropicMessagesPayloadCacheBreakpointBounds(t *testing.T) {
+	firstTurn := anthropicMessagesRequest{
+		Model:  "claude-fable-5",
+		System: "You are Scout.",
+		Tools:  []anthropicTool{{Name: "do_nothing", InputSchema: map[string]any{"type": "object"}}},
+		Messages: []anthropicMessage{
+			{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("Goal: plan")}},
+		},
+		MaxTokens: 4096,
+	}
+	raw, err := buildAnthropicMessagesPayload(firstTurn)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if count := strings.Count(string(raw), `"cache_control"`); count != 3 {
+		t.Fatalf("first-turn payload carries %d breakpoints, want 3 (tool + system + user turn): %s", count, raw)
+	}
+
+	bare := anthropicMessagesRequest{
+		Model: "claude-fable-5",
+		Messages: []anthropicMessage{
+			{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("hello")}},
+		},
+		MaxTokens: 256,
+	}
+	raw, err = buildAnthropicMessagesPayload(bare)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	if count := strings.Count(string(raw), `"cache_control"`); count != 1 {
+		t.Fatalf("bare payload carries %d breakpoints, want 1 (user turn only): %s", count, raw)
+	}
+	if strings.Contains(string(raw), `"system"`) {
+		t.Fatalf("bare payload grew a system field: %s", raw)
+	}
+}
+
 // sseBody assembles a Messages API SSE stream body from event payloads,
 // mirroring the wire format (event: line + data: line per event).
 func sseBody(events ...string) string {

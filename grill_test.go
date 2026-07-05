@@ -194,6 +194,250 @@ func TestGrillPersonaAndTopicSanitizedBeforeInstructionSplice(t *testing.T) {
 	}
 }
 
+// --- Grill-delta signal (§5 capture item 4) ----------------------------------
+
+// grillDeltaWatch captures one awaitGrillDeltaSignalAsync hand-off.
+type grillDeltaWatch struct {
+	actor          string
+	artifactID     string
+	packageID      string
+	priorReadiness string
+	topic          string
+}
+
+// stubGrillDeltaWatches replaces the async watcher with a recorder so tests
+// drive watchGrillDeltaSignal synchronously instead of leaking pollers.
+func stubGrillDeltaWatches(t *testing.T) *[]grillDeltaWatch {
+	t.Helper()
+	watches := &[]grillDeltaWatch{}
+	previous := awaitGrillDeltaSignalAsync
+	awaitGrillDeltaSignalAsync = func(_ *kanbanBoardApp, actor string, artifactID string, packageID string, priorReadiness string, topic string) {
+		*watches = append(*watches, grillDeltaWatch{actor: actor, artifactID: artifactID, packageID: packageID, priorReadiness: priorReadiness, topic: topic})
+	}
+	t.Cleanup(func() { awaitGrillDeltaSignalAsync = previous })
+	return watches
+}
+
+// grillDeltaSignals decodes every stored grill_delta signal.
+func grillDeltaSignals(t *testing.T, app *kanbanBoardApp) []signalRecord {
+	t.Helper()
+	records := []signalRecord{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		if entry.Metadata["event"] != signalEventGrillDelta {
+			continue
+		}
+		record, ok := decodeSignalEntry(entry)
+		if !ok {
+			t.Fatalf("decodeSignalEntry failed for %q", entry.Text)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+// end_grill_session hands the delta watcher the baseline it knows
+// synchronously — the package the topic EXACTLY names and that package's
+// prior grill score — and once the terminal seam grades the scorecard the
+// watcher records one grill_delta signal with the delta, valence, and the top
+// objections (capped).
+func TestEndGrillSessionRecordsGrillDeltaSignalOnceGraded(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+	watches := stubGrillDeltaWatches(t)
+
+	// The delta baseline: the package's previous grill scorecard.
+	record := createTestPackage(t, app, "Boot Barn", "Licensing play.")
+	prior, _, err := app.createOSArtifactWithMetadata("grill", "Boot Barn dry run", "Vision: rough.\nREADINESS: 6.2/10", "AJ", map[string]string{"readinessScore": "6.2"})
+	if err != nil {
+		t.Fatalf("seed prior grill: %v", err)
+	}
+	if _, err := app.attachToPackage(record.ID, packageRefTypeArtifact, prior.ID, "AJ"); err != nil {
+		t.Fatalf("attach prior grill: %v", err)
+	}
+
+	if _, _, err := app.startGrillSession(map[string]any{"topic": "Boot Barn"}); err != nil {
+		t.Fatalf("startGrillSession: %v", err)
+	}
+	result, _, err := app.endGrillSession(map[string]any{"reason": "done"})
+	if err != nil {
+		t.Fatalf("endGrillSession: %v", err)
+	}
+	artifactID := asString(result["artifactId"])
+	if len(*watches) != 1 {
+		t.Fatalf("watches=%d, want exactly one delta watch per grill end", len(*watches))
+	}
+	watch := (*watches)[0]
+	if watch.actor != scoutParticipantName || watch.artifactID != artifactID || watch.topic != "Boot Barn" {
+		t.Fatalf("watch=%#v, want Scout watching the filed scorecard for the topic", watch)
+	}
+	if watch.packageID != record.ID || watch.priorReadiness != "6.2" {
+		t.Fatalf("watch=%#v, want the exact-topic package and its prior score as the baseline", watch)
+	}
+
+	// The terminal seam grades the scorecard (stampReadinessMetadata shape).
+	graded := strings.Join([]string{
+		"Vision: a sharper Boot Barn licensing pitch.",
+		"READINESS: 7.4/10",
+		"",
+		"## Strongest objections",
+		"- No named buyer is attached to the licensing ask.",
+		"2) The $500 price point is unbacked by any comp.",
+		"- Rights are ASSUMED, not confirmed.",
+		"- A fourth objection that must fall outside the cap.",
+		"",
+		"## Tough questions",
+		"- Who signs first?",
+	}, "\n")
+	if _, _, err := app.memory.updateOSArtifactWithMetadata(artifactID, "", graded, scoutParticipantName, map[string]string{"readinessScore": "7.4", "threadStatus": "complete"}); err != nil {
+		t.Fatalf("grade scorecard: %v", err)
+	}
+	app.watchGrillDeltaSignal(watch.actor, watch.artifactID, watch.packageID, watch.priorReadiness, watch.topic, time.Millisecond, time.Second)
+
+	signals := grillDeltaSignals(t, app)
+	if len(signals) != 1 {
+		t.Fatalf("grill_delta signals=%d, want 1", len(signals))
+	}
+	signal := signals[0]
+	if signal.Valence != signalValencePositive {
+		t.Fatalf("valence=%q, want positive — readiness rose 6.2 → 7.4", signal.Valence)
+	}
+	if signal.ArtifactID != artifactID || signal.PackageID != record.ID || signal.Actor != scoutParticipantName {
+		t.Fatalf("signal=%#v, want artifact/package/actor mirrored", signal)
+	}
+	if signal.Payload["readiness"] != "7.4" || signal.Payload["priorReadiness"] != "6.2" || signal.Payload["delta"] != "+1.2" {
+		t.Fatalf("payload=%v, want readiness 7.4, prior 6.2, delta +1.2", signal.Payload)
+	}
+	if signal.Payload["topic"] != "Boot Barn" {
+		t.Fatalf("payload=%v, want the grill topic", signal.Payload)
+	}
+	objections := signal.Payload["objections"]
+	for _, want := range []string{"No named buyer", "The $500 price point is unbacked", "Rights are ASSUMED"} {
+		if !strings.Contains(objections, want) {
+			t.Fatalf("objections=%q missing %q", objections, want)
+		}
+	}
+	if strings.Contains(objections, "fourth objection") || strings.Contains(objections, "Who signs first") {
+		t.Fatalf("objections=%q, want the top-%d cap and only the objections section", objections, grillDeltaObjectionsMax)
+	}
+}
+
+// recordGrillDeltaSignal valence contract: fell → negative, no baseline →
+// neutral with no delta key (the package's first grill), flat → neutral with
+// an explicit +0.0, ungraded → no signal at all.
+func TestRecordGrillDeltaSignalValence(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	fell, _, err := app.createOSArtifactWithMetadata("grill", "regrill", "READINESS: 4.0/10", "AJ", map[string]string{"readinessScore": "4.0"})
+	if err != nil {
+		t.Fatalf("create graded artifact: %v", err)
+	}
+	app.recordGrillDeltaSignal(fell, "AJ", "package-1", "6.0", "")
+	signals := grillDeltaSignals(t, app)
+	if len(signals) != 1 || signals[0].Valence != signalValenceNegative || signals[0].Payload["delta"] != "-2.0" {
+		t.Fatalf("signals=%#v, want one negative grill_delta with delta -2.0", signals)
+	}
+
+	first, _, err := app.createOSArtifactWithMetadata("grill", "first grill", "READINESS: 5.0/10", "AJ", map[string]string{"readinessScore": "5.0"})
+	if err != nil {
+		t.Fatalf("create first-grill artifact: %v", err)
+	}
+	app.recordGrillDeltaSignal(first, "AJ", "", "", "")
+	signals = grillDeltaSignals(t, app)
+	if len(signals) != 2 {
+		t.Fatalf("signals=%d, want 2", len(signals))
+	}
+	if signals[1].Valence != signalValenceNeutral {
+		t.Fatalf("valence=%q, want neutral for a baseline-less first grill", signals[1].Valence)
+	}
+	if _, exists := signals[1].Payload["delta"]; exists {
+		t.Fatalf("payload=%v, want NO delta key when there is no prior scorecard (delta null if first)", signals[1].Payload)
+	}
+	if _, exists := signals[1].Payload["priorReadiness"]; exists {
+		t.Fatalf("payload=%v, want no priorReadiness without a baseline", signals[1].Payload)
+	}
+
+	app.recordGrillDeltaSignal(first, "AJ", "", "5.0", "")
+	signals = grillDeltaSignals(t, app)
+	if len(signals) != 3 || signals[2].Valence != signalValenceNeutral || signals[2].Payload["delta"] != "+0.0" {
+		t.Fatalf("signals=%#v, want a neutral flat delta +0.0", signals[2:])
+	}
+
+	// An ungraded artifact records nothing.
+	ungraded, _, err := app.createOSArtifactWithMetadata("grill", "ungraded", "no readiness yet", "AJ", nil)
+	if err != nil {
+		t.Fatalf("create ungraded artifact: %v", err)
+	}
+	app.recordGrillDeltaSignal(ungraded, "AJ", "", "6.0", "")
+	if signals := grillDeltaSignals(t, app); len(signals) != 3 {
+		t.Fatalf("signals=%d, want still 3 — no score means no delta datum", len(signals))
+	}
+}
+
+// watchGrillDeltaSignal fail-soft contract: an errored run, a scorecard whose
+// READINESS line never parsed, a deleted artifact, and a deadline all record
+// nothing — the delta datum degrades, the grill never breaks.
+func TestWatchGrillDeltaSignalSkipsUngradedRuns(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	errored, _, err := app.createOSArtifactWithMetadata("grill", "errored run", "worker failed", "AJ", map[string]string{"threadStatus": "error"})
+	if err != nil {
+		t.Fatalf("create errored artifact: %v", err)
+	}
+	app.watchGrillDeltaSignal("AJ", errored.ID, "", "6.0", "", time.Millisecond, time.Second)
+
+	unparsed, _, err := app.createOSArtifactWithMetadata("grill", "unparsed run", "no readiness line", "AJ", map[string]string{"threadStatus": "complete", "readinessParse": "missing"})
+	if err != nil {
+		t.Fatalf("create unparsed artifact: %v", err)
+	}
+	app.watchGrillDeltaSignal("AJ", unparsed.ID, "", "6.0", "", time.Millisecond, time.Second)
+
+	// Unknown artifact: returns immediately.
+	app.watchGrillDeltaSignal("AJ", "missing-artifact", "", "6.0", "", time.Millisecond, time.Second)
+
+	// Never graded: the deadline gives up without a signal.
+	stuck, _, err := app.createOSArtifactWithMetadata("grill", "stuck run", "still running", "AJ", nil)
+	if err != nil {
+		t.Fatalf("create stuck artifact: %v", err)
+	}
+	app.watchGrillDeltaSignal("AJ", stuck.ID, "", "6.0", "", time.Millisecond, 10*time.Millisecond)
+
+	if signals := grillDeltaSignals(t, app); len(signals) != 0 {
+		t.Fatalf("signals=%#v, want none — ungraded runs leave no delta datum", signals)
+	}
+}
+
+// grillTopObjections reads only the latest version's Strongest-objections
+// section: archived runs already had their signal, list markers are stripped,
+// and a scorecard without the heading degrades to "".
+func TestGrillTopObjectionsParsesLatestVersionOnly(t *testing.T) {
+	body := strings.Join([]string{
+		"READINESS: 7.0/10",
+		"",
+		"## Strongest objections",
+		"1. Fresh objection one.",
+		"* Fresh objection two.",
+		"",
+		"## Tough questions",
+		"- ignored",
+		"",
+		"---",
+		"",
+		"## Previous run · v1 · 2026-07-04",
+		"",
+		"## Strongest objections",
+		"- Stale archived objection.",
+	}, "\n")
+	objections := grillTopObjections(body)
+	if objections != "Fresh objection one.; Fresh objection two." {
+		t.Fatalf("objections=%q, want the latest version's stripped list", objections)
+	}
+	if got := grillTopObjections("READINESS: 5.0/10\nA scorecard with no objection heading."); got != "" {
+		t.Fatalf("objections=%q, want empty for a heading-less scorecard", got)
+	}
+}
+
 // The wake pattern spots Scout's name as a whole word only.
 func TestScoutWakePatternMatchesWholeWordOnly(t *testing.T) {
 	for _, text := range []string{"scout", "Hey Scout,", "SCOUT?", "ask scout about it", "Scout: noted"} {

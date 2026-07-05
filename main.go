@@ -519,6 +519,8 @@ func main() {
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)
+	http.HandleFunc("/assistant/goal/cancel", assistantGoalCancelHandler)
+	http.HandleFunc("/assistant/decisions/supersede", assistantDecisionSupersedeHandler)
 	http.HandleFunc("/assistant/tools", assistantToolsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
@@ -546,6 +548,9 @@ func main() {
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)
+	http.HandleFunc("/artifacts/render", artifactRenderHandler)
+	http.HandleFunc("/artifacts/render-token", artifactRenderTokenHandler)
+	http.HandleFunc("/signals/survey", signalSurveyHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
@@ -1074,6 +1079,72 @@ func assistantGoalHandler(w http.ResponseWriter, r *http.Request) {
 		"thread":   thread,
 		"artifact": thread.Artifact,
 		"actions":  thread.Actions,
+	})
+}
+
+// assistantGoalCancelHandler is the one-tap misfire escape (spec §2 "misfire
+// economics", Wave 2 item 8c): POST {goalId} parks a running goal at
+// needs_attention, halts further subtask dispatch, and frees the requester's
+// in-flight cap slot — a wrong launch costs one tap, not six subtasks. Same
+// origin+session gates as assistantGoalHandler. Permitted to the goal's own
+// requester (requestedBy) or the approval admin, mirroring
+// artifactRunnerActionHandler's authorization split: cancel is the requester's
+// escape hatch, never a way for one teammate to kill another's running goal.
+func assistantGoalCancelHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		GoalID string `json:"goalId"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read goal cancel request")
+		return
+	}
+	goalID := strings.TrimSpace(payload.GoalID)
+	if goalID == "" {
+		writeAuthError(w, http.StatusBadRequest, "goal id is required")
+		return
+	}
+	artifact, found := kanbanApp.osArtifactByID(goalID)
+	if !found {
+		writeAuthError(w, http.StatusNotFound, "goal not found")
+		return
+	}
+	if artifact.Metadata["mode"] != "goal" {
+		writeAuthError(w, http.StatusBadRequest, "artifact is not a goal")
+		return
+	}
+	requester := normalizeAccountEmail(artifact.Metadata["requestedBy"])
+	if !isArtifactApprovalAdmin(user) && (requester == "" || normalizeAccountEmail(user.Email) != requester) {
+		writeAuthError(w, http.StatusForbidden, "only the goal's requester or an admin can cancel it")
+		return
+	}
+
+	if err := kanbanApp.cancelGoalThread(goalID, user.Email); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, _ := kanbanApp.osArtifactByID(goalID)
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"artifact": updated,
 	})
 }
 

@@ -19,6 +19,7 @@ const (
 	anthropicMessagesURL       = "https://api.anthropic.com/v1/messages"
 	anthropicAPIVersion        = "2023-06-01"
 	defaultOrchestratorModel   = "claude-fable-5"
+	defaultFallbackModel       = "claude-opus-4-8"
 	controlToolReportGoalState = "report_goal_state"
 )
 
@@ -33,6 +34,15 @@ func currentAnthropicAPIKey() string {
 
 func orchestratorModel() string {
 	return getenvDefault("BONFIRE_ORCHESTRATOR_MODEL", defaultOrchestratorModel)
+}
+
+// orchestratorFallbackModel is the refusal-fallback target. Fable 5's safety
+// classifiers can decline a benign request (HTTP 200, stop_reason "refusal") —
+// a false positive on a rights/chain-of-title prompt must not kill a goal run
+// mid-pipeline, so the loop retries the same request once on this model before
+// taking the needs_attention branch (packaging-os-analysis §1).
+func orchestratorFallbackModel() string {
+	return getenvDefault("BONFIRE_FALLBACK_MODEL", defaultFallbackModel)
 }
 
 func orchestratorMaxTurns() int {
@@ -92,10 +102,19 @@ func deliverableEffort() string {
 
 // --- Anthropic Messages API wire types ---------------------------------------
 
+// anthropicCacheControl marks a prompt-cache breakpoint. Only the ephemeral
+// type exists on the wire today.
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+}
+
+var ephemeralCacheControl = &anthropicCacheControl{Type: "ephemeral"}
+
 type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  map[string]any         `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 // anthropicMessage.Content is raw so assistant turns (including Fable 5 thinking
@@ -113,6 +132,14 @@ type anthropicMessagesRequest struct {
 	Tools     []anthropicTool
 	MaxTokens int
 	Effort    string
+	// DisableThinking sends thinking:{type:"disabled"}. Sonnet 5 runs ADAPTIVE
+	// thinking when the field is omitted (a silent default change from the
+	// 4.6-era models), and max_tokens caps thinking + text COMBINED — the
+	// chat/follow-up text path sets this so a tight chat budget is spent on
+	// the answer, matching the no-reasoning gpt-5.5 profile it replaced. Must
+	// stay false for the Fable 5 orchestrator: an explicit disabled is a 400
+	// there (thinking is always on; the field must be omitted).
+	DisableThinking bool
 }
 
 type anthropicMessagesResponse struct {
@@ -164,27 +191,9 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		ctx, cancel = context.WithTimeout(ctx, orchestratorTimeout())
 		defer cancel()
 	}
-	// Fable 5: thinking is always on (omit the field), and sampling params are
-	// rejected — send neither. Depth is controlled by output_config.effort.
-	payload := map[string]any{
-		"model":      request.Model,
-		"max_tokens": request.MaxTokens,
-		"messages":   request.Messages,
-		"stream":     true,
-	}
-	if strings.TrimSpace(request.System) != "" {
-		payload["system"] = request.System
-	}
-	if len(request.Tools) > 0 {
-		payload["tools"] = request.Tools
-	}
-	if strings.TrimSpace(request.Effort) != "" {
-		payload["output_config"] = map[string]any{"effort": request.Effort}
-	}
-
-	rawPayload, err := json.Marshal(payload)
+	rawPayload, err := buildAnthropicMessagesPayload(request)
 	if err != nil {
-		return anthropicMessagesResponse{}, fmt.Errorf("encode Anthropic messages request: %w", err)
+		return anthropicMessagesResponse{}, err
 	}
 
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicMessagesURL, bytes.NewReader(rawPayload))
@@ -215,6 +224,98 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		return anthropicMessagesResponse{}, err
 	}
 	return body, nil
+}
+
+// buildAnthropicMessagesPayload renders the wire body, placing cache_control
+// breakpoints at the stable prefixes so the 24-turn loop stops paying full
+// price to resend an unchanged prefix every turn (packaging-os-analysis §1).
+// Prompt caching is a prefix match over tools → system → messages, and the API
+// allows at most 4 breakpoints per request, so they are spent as: 1 on the
+// last tool (tools are stable across every job of one app), 1 on the system
+// prompt (stable across every turn of one run), and up to 2 on the newest user
+// turns (the incremental multi-turn pattern: the newest breakpoint walks back
+// at most 20 blocks to find the previous entry, so marking the prior user turn
+// too keeps tool-heavy turns from silently missing). Only blocks this code
+// authors (user turns) are ever marked — assistant turns carry Fable thinking
+// blocks that must round-trip byte-for-byte.
+func buildAnthropicMessagesPayload(request anthropicMessagesRequest) ([]byte, error) {
+	// Fable 5: thinking is always on (omit the field), and sampling params are
+	// rejected — send neither. Depth is controlled by output_config.effort.
+	payload := map[string]any{
+		"model":      request.Model,
+		"max_tokens": request.MaxTokens,
+		"messages":   cacheMarkedMessages(request.Messages),
+		"stream":     true,
+	}
+	if strings.TrimSpace(request.System) != "" {
+		payload["system"] = []map[string]any{{
+			"type":          "text",
+			"text":          request.System,
+			"cache_control": ephemeralCacheControl,
+		}}
+	}
+	if len(request.Tools) > 0 {
+		tools := make([]anthropicTool, len(request.Tools))
+		copy(tools, request.Tools)
+		last := tools[len(tools)-1]
+		last.CacheControl = ephemeralCacheControl
+		tools[len(tools)-1] = last
+		payload["tools"] = tools
+	}
+	if strings.TrimSpace(request.Effort) != "" {
+		payload["output_config"] = map[string]any{"effort": request.Effort}
+	}
+	if request.DisableThinking {
+		payload["thinking"] = map[string]any{"type": "disabled"}
+	}
+
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode Anthropic messages request: %w", err)
+	}
+	return rawPayload, nil
+}
+
+// cacheMarkedMessages returns a copy of messages with a cache_control
+// breakpoint on the last content block of the newest two user turns. The
+// caller's slice and its raw blocks are never mutated — the loop reuses them
+// as the growing conversation history, and persisted markers would accumulate
+// past the 4-breakpoint cap on later turns.
+func cacheMarkedMessages(messages []anthropicMessage) []anthropicMessage {
+	marked := make([]anthropicMessage, len(messages))
+	copy(marked, messages)
+	remaining := 2
+	for i := len(marked) - 1; i >= 0 && remaining > 0; i-- {
+		if marked[i].Role != "user" || len(marked[i].Content) == 0 {
+			continue
+		}
+		content := make([]json.RawMessage, len(marked[i].Content))
+		copy(content, marked[i].Content)
+		content[len(content)-1] = withAnthropicCacheControl(content[len(content)-1])
+		marked[i].Content = content
+		remaining--
+	}
+	return marked
+}
+
+// withAnthropicCacheControl stamps a cache_control field onto one raw content
+// block, returning the original bytes untouched if the block cannot be
+// decoded (a malformed block should fail API-side, not vanish here).
+func withAnthropicCacheControl(raw json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return raw
+	}
+	control, err := json.Marshal(ephemeralCacheControl)
+	if err != nil {
+		return raw
+	}
+	fields["cache_control"] = control
+	stamped, err := json.Marshal(fields)
+	if err != nil {
+		return raw
+	}
+	return stamped
 }
 
 // --- SSE stream accumulation ---------------------------------------------------
@@ -400,24 +501,31 @@ func decodeAnthropicSSEStream(reader io.Reader) (anthropicMessagesResponse, erro
 // --- The runner --------------------------------------------------------------
 
 type anthropicFableRunner struct {
-	app       *kanbanBoardApp
-	apiKey    func() string
-	model     string
-	effort    string
-	maxTurns  int
-	maxTokens int
-	responder anthropicMessagesResponder
+	app           *kanbanBoardApp
+	apiKey        func() string
+	model         string
+	fallbackModel string
+	// fallbackUsed records the fallback model once a refusal retry actually
+	// served a turn, so provenance (evidence metadata + artifact footer) names
+	// the model that produced the artifact. Job-local: the runner is built per
+	// job (selectAgentRunner).
+	fallbackUsed string
+	effort       string
+	maxTurns     int
+	maxTokens    int
+	responder    anthropicMessagesResponder
 }
 
 func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
 	return &anthropicFableRunner{
-		app:       app,
-		apiKey:    currentAnthropicAPIKey,
-		model:     orchestratorModel(),
-		effort:    orchestratorEffort(),
-		maxTurns:  orchestratorMaxTurns(),
-		maxTokens: orchestratorMaxTokens(),
-		responder: createAnthropicMessagesResponse,
+		app:           app,
+		apiKey:        currentAnthropicAPIKey,
+		model:         orchestratorModel(),
+		fallbackModel: orchestratorFallbackModel(),
+		effort:        orchestratorEffort(),
+		maxTurns:      orchestratorMaxTurns(),
+		maxTokens:     orchestratorMaxTokens(),
+		responder:     createAnthropicMessagesResponse,
 	}
 }
 
@@ -466,32 +574,58 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		// the terminal progress rather than being reset to the verified default.
 		control := AgentProgress{}
 		for turn := 1; turn <= r.maxTurns; turn++ {
-			response, err := r.responder(ctx, apiKey, anthropicMessagesRequest{
+			request := anthropicMessagesRequest{
 				Model:     r.model,
 				System:    system,
 				Messages:  messages,
 				Tools:     tools,
 				MaxTokens: r.maxTokens,
 				Effort:    r.effort,
-			})
+			}
+			response, err := r.responder(ctx, apiKey, request)
 			if err != nil {
 				out <- terminalErrorProgress(r.evidence(turn), err)
 				return
 			}
 			if response.StopReason == "refusal" {
-				metadata := r.evidence(turn)
-				metadata["orchestratorStop"] = "refusal"
-				out <- AgentProgress{
-					Terminal:        true,
-					Stage:           "gate_before_shipping",
-					ProgressPercent: 72,
-					GoalStatus:      "needs_attention",
-					ReviewGate:      "blocked",
-					Note:            "orchestrator request was declined",
-					Err:             fmt.Errorf("orchestrator request was declined by safety classifiers"),
-					Metadata:        metadata,
+				// Refusal fallback: Fable's classifiers false-positive on benign
+				// rights/security-adjacent prompts, so the SAME request is retried
+				// once on the fallback model before anything terminal. The
+				// documented hand-rolled fallback pattern is to replay the
+				// conversation AS-IS: Fable 5 thinking blocks replayed to a
+				// different model are dropped from the prompt server-side
+				// (silently, unbilled), while stripping them client-side risks
+				// ordering/signature 400s — so the messages go over unchanged,
+				// even on multi-turn runs whose history carries assistant
+				// thinking blocks (pinned by
+				// TestAnthropicFableRunnerRefusalFallbackMidRunReplaysThinkingBlocks).
+				fallbackRequest := request
+				fallbackRequest.Model = r.fallbackModel
+				fallbackResponse, fallbackErr := r.responder(ctx, apiKey, fallbackRequest)
+				if fallbackErr != nil {
+					out <- terminalErrorProgress(r.evidence(turn), fallbackErr)
+					return
 				}
-				return
+				if fallbackResponse.StopReason == "refusal" {
+					// Both models declined: only now does the run take the
+					// needs_attention branch.
+					metadata := r.evidence(turn)
+					metadata["orchestratorStop"] = "refusal"
+					metadata["orchestratorFallbackModel"] = r.fallbackModel
+					out <- AgentProgress{
+						Terminal:        true,
+						Stage:           "gate_before_shipping",
+						ProgressPercent: 72,
+						GoalStatus:      "needs_attention",
+						ReviewGate:      "blocked",
+						Note:            "orchestrator request was declined",
+						Err:             fmt.Errorf("orchestrator request was declined by safety classifiers (fallback %s also declined)", r.fallbackModel),
+						Metadata:        metadata,
+					}
+					return
+				}
+				r.fallbackUsed = r.fallbackModel
+				response = fallbackResponse
 			}
 
 			var turnText strings.Builder
@@ -780,13 +914,19 @@ func (r *anthropicFableRunner) evidenceFooter(turns int) string {
 	if turns < 1 {
 		turns = 1
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"## Orchestrator evidence",
 		"- Runner: anthropic_fable (in-process tool loop)",
 		"- Model: " + r.model,
-		"- Effort: " + r.effort,
-		"- Turns: " + strconv.Itoa(turns),
-	}, "\n")
+	}
+	if r.fallbackUsed != "" {
+		lines = append(lines, "- Fallback model: "+r.fallbackUsed+" (served after a refusal)")
+	}
+	lines = append(lines,
+		"- Effort: "+r.effort,
+		"- Turns: "+strconv.Itoa(turns),
+	)
+	return strings.Join(lines, "\n")
 }
 
 func (r *anthropicFableRunner) evidence(turn int) map[string]string {
@@ -795,6 +935,9 @@ func (r *anthropicFableRunner) evidence(turn int) map[string]string {
 		"workerBoundary":     "anthropic_fable_tool_loop",
 		"orchestratorModel":  r.model,
 		"orchestratorEffort": r.effort,
+	}
+	if r.fallbackUsed != "" {
+		metadata["orchestratorFallbackModel"] = r.fallbackUsed
 	}
 	if turn > 0 {
 		metadata["orchestratorTurns"] = strconv.Itoa(turn)

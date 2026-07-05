@@ -96,6 +96,13 @@ type goalPlan struct {
 	// raw execute-phase percent; holding the high-water mark keeps the goal card
 	// from reading as running backwards while it legitimately revises.
 	MaxProgress int `json:"maxProgress,omitempty"`
+	// Cancelled marks a user-initiated cancel (spec §2 "misfire economics"): the
+	// goal is terminal needs_attention, dispatchReady refuses further subtasks,
+	// and a still-running child's completion folds into a no-op. Persisted with
+	// the plan so the flag survives restarts alongside the cancelledBy/At record.
+	Cancelled   bool   `json:"cancelled,omitempty"`
+	CancelledBy string `json:"cancelledBy,omitempty"`
+	CancelledAt string `json:"cancelledAt,omitempty"`
 }
 
 type goalSubtask struct {
@@ -112,6 +119,12 @@ type goalSubtask struct {
 	Attempts   int                `json:"attempts"`
 	Revisions  int                `json:"revisions,omitempty"`
 	Review     *goalSubtaskReview `json:"review"`
+	// Protect is the accumulated protect list: everything a reviewer explicitly
+	// praised (strengths_to_keep) across review rounds. It lives on the subtask
+	// — persisted with the plan in the goal artifact metadata — so later rounds
+	// inherit earlier praise, and every requeue prompt carries it as the
+	// "DO NOT LOSE (protected)" block a revision must keep intact.
+	Protect []string `json:"protect,omitempty"`
 }
 
 type goalSubtaskReview struct {
@@ -880,6 +893,12 @@ func recomputeGoalReadiness(plan *goalPlan) {
 // concurrency cap. The caller holds the parent lock, so a child's fold cannot
 // interleave; the child goroutine blocks on that lock until the driver returns.
 func (e *goalEngine) dispatchReady(plan *goalPlan, parentID string) {
+	// A cancelled goal never dispatches another subtask — the whole point of the
+	// one-tap cancel (spec §2 misfire economics): a wrong launch costs the work
+	// already in flight, never the rest of the plan.
+	if plan.Cancelled {
+		return
+	}
 	running := goalCountStatus(plan, subtaskRunning)
 	for index := range plan.Subtasks {
 		if running >= e.concurrency {
@@ -907,6 +926,12 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	}
 	if st.Revisions > 0 && st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
 		query += "\n\nRevision notes from the goal review (address these): " + st.Review.Reasons
+	}
+	// The protect list rides every requeue so a revision fixes what failed
+	// WITHOUT regressing what the reviewer already praised (Phase 1 protect
+	// lists — the classic revision failure mode is losing the good parts).
+	if st.Revisions > 0 && len(st.Protect) > 0 {
+		query += "\n\nDO NOT LOSE (protected) — the review explicitly praised these; keep every one intact in the revision:\n- " + strings.Join(st.Protect, "\n- ")
 	}
 	spec := agentThreadGoalSpec{
 		Objective:      query,
@@ -1051,6 +1076,13 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	if !ok {
 		return
 	}
+	// A cancelled parent folds nothing: a child already in flight finishes on
+	// its own (no preemption seam reaches into a child goroutine or a claimed
+	// sidecar job), but its completion must not mutate the plan or re-drive the
+	// engine — the goal is terminal needs_attention with the cancel record.
+	if plan.Cancelled {
+		return
+	}
 	complete := strings.EqualFold(strings.TrimSpace(status), codexJobStatusComplete)
 	engine := newGoalEngine(app)
 
@@ -1123,11 +1155,17 @@ func (e *goalEngine) reviewSubtasks(ctx context.Context, plan *goalPlan) goalRev
 			continue
 		}
 		verdict, reasons, score := e.reviewOneSubtask(ctx, plan, st)
+		// A law-sweep verdict is mechanical (a grep, not a judgement); stamp its
+		// provenance honestly so the card never claims a model reviewed it.
+		reviewedBy := "reviewer_model"
+		if strings.HasPrefix(reasons, toolLawSweepPrefix) {
+			reviewedBy = "law_sweep"
+		}
 		if verdict == goalReviewPass {
-			st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Score: score, Reasons: reasons, By: "reviewer_model"}
+			st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Score: score, Reasons: reasons, By: reviewedBy}
 			continue
 		}
-		st.Review = &goalSubtaskReview{Verdict: verdict, Score: score, Reasons: reasons, By: "reviewer_model"}
+		st.Review = &goalSubtaskReview{Verdict: verdict, Score: score, Reasons: reasons, By: reviewedBy}
 		if !e.requeueOrBlock(plan, st, reasons) {
 			return goalReviewOutcomeBlocked
 		}
@@ -1158,6 +1196,37 @@ func (e *goalEngine) requeueOrBlock(plan *goalPlan, st *goalSubtask, reason stri
 	return true
 }
 
+// goalProtectListCap bounds the accumulated protect list so a chatty reviewer
+// cannot grow the requeue prompt without bound across revision rounds.
+const goalProtectListCap = 8
+
+// mergeGoalProtectList folds a reviewer's strengths_to_keep into the subtask's
+// inherited protect list: trimmed, deduplicated case-insensitively, first-seen
+// order, capped at goalProtectListCap. Earlier rounds' praise always survives a
+// later round (existing entries win the cap).
+func mergeGoalProtectList(existing []string, incoming []string) []string {
+	merged := make([]string, 0, len(existing)+len(incoming))
+	seen := make(map[string]bool, len(existing)+len(incoming))
+	for _, group := range [][]string{existing, incoming} {
+		for _, item := range group {
+			item = strings.TrimSpace(item)
+			key := strings.ToLower(item)
+			if item == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, item)
+			if len(merged) >= goalProtectListCap {
+				return merged
+			}
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
 // goalReviewArtifactCap bounds how much artifact body the reviewer and the
 // ship gate read per prompt. 48KB is far beyond any honest deliverable; the
 // cap only exists so a runaway artifact cannot blow the review context.
@@ -1181,11 +1250,23 @@ func goalReviewArtifactBody(text string) string {
 }
 
 func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *goalSubtask) (string, string, float64) {
-	produced := ""
+	full := ""
 	if artifact, ok := e.app.osArtifactByID(st.ArtifactID); ok {
-		produced = goalReviewArtifactBody(artifact.Text)
+		full = artifact.Text
 	}
-	system := "You are Scout's reviewer for Bonfire OS. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\"}."
+	// LAW SWEEP (zero model cost): the deliverable subtask of a tool-templated
+	// goal is grep-checked against its contract before any reviewer tokens are
+	// spent — a missing contract heading or a copy-law breach (em dash on a
+	// client-facing contract) short-circuits straight to a mechanical revise
+	// verdict. Swept on the FULL body, never the truncated review view, so an
+	// oversized artifact's omitted middle cannot fake a missing heading.
+	if tool, ok := e.resolvedTool(plan); ok && st.ID == goalDeliverableSubtaskID(plan) {
+		if reason, violated := toolLawSweep(tool, full); violated {
+			return goalReviewRevise, reason, 0
+		}
+	}
+	produced := goalReviewArtifactBody(full)
+	system := "You are Scout's reviewer for Bonfire OS. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\",\"strengths_to_keep\":[\"...\"]}. strengths_to_keep names what the work already does WELL (0-4 short phrases of explicit praise) so a revision never loses it; leave it empty if nothing stands out."
 	// For a tool-templated goal, the review scores against the tool's gate rubric
 	// (dimensions + bars + kill condition) rather than a generic "does it match"
 	// pass — the studio-grade quality bar for this contract.
@@ -1203,13 +1284,18 @@ func (e *goalEngine) reviewOneSubtask(ctx context.Context, plan *goalPlan, st *g
 		return goalReviewRevise, "reviewer model call failed: " + err.Error(), 0
 	}
 	var decoded struct {
-		Verdict string  `json:"verdict"`
-		Score   float64 `json:"score"`
-		Reasons string  `json:"reasons"`
+		Verdict   string   `json:"verdict"`
+		Score     float64  `json:"score"`
+		Reasons   string   `json:"reasons"`
+		Strengths []string `json:"strengths_to_keep"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
 		return goalReviewRevise, "reviewer returned malformed JSON", 0
 	}
+	// Fold the reviewer's explicit praise into the subtask's protect list. The
+	// merge is cumulative across rounds (persisted with the plan), so a round-2
+	// reviewer cannot silently drop what round 1 already protected.
+	st.Protect = mergeGoalProtectList(st.Protect, decoded.Strengths)
 	switch strings.ToLower(strings.TrimSpace(decoded.Verdict)) {
 	case goalReviewPass:
 		return goalReviewPass, strings.TrimSpace(decoded.Reasons), decoded.Score
@@ -1511,6 +1597,70 @@ func (e *goalEngine) verify(ctx context.Context, plan *goalPlan) bool {
 	return strings.EqualFold(strings.TrimSpace(decoded.Verdict), goalReviewPass)
 }
 
+// --- User-facing cancel (spec §2 "misfire economics", Wave 2 item 8c) ---------
+
+// signalEventGoalCancelled: a user cancelled a running goal — negative routing
+// data on whatever proposed or launched it. The payload carries the stage at
+// cancellation and the tool template so the router's tuning can learn which
+// mappings misfire. Defined beside the cancel seam rather than signals.go (the
+// one seam that emits it lives in this file).
+const signalEventGoalCancelled = "goal_cancelled"
+
+// cancelGoalThread parks a running goal at needs_attention on one tap, so a
+// wrong launch costs one tap, not six subtasks. Semantics: the plan is stamped
+// cancelled (cancelledBy/cancelledAt persisted with the plan and mirrored into
+// artifact metadata), the goal lands terminal needs_attention — which frees the
+// requester's in-flight cap slot immediately — dispatchReady refuses further
+// subtasks, and any child still running finishes on its own but folds as a
+// no-op (there is no preemption seam into a child goroutine or a claimed
+// sidecar job; the cheap, safe half is refusing NEW work). No salvage runs for
+// a cancel: the user deliberately abandoned the launch, so nothing is attached
+// to a package as a "draft to finish". Idempotent: a second cancel is a no-op.
+// Works keyless (no model calls). Authorization — the goal's requester or the
+// approval admin — is the HTTP door's job, mirroring artifactRunnerActionHandler.
+func (app *kanbanBoardApp) cancelGoalThread(parentID string, cancelledBy string) error {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return fmt.Errorf("goal id is required")
+	}
+	lock := goalEngineLock(parentID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	parent, ok := app.osArtifactByID(parentID)
+	if !ok {
+		return fmt.Errorf("goal artifact not found")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok {
+		return fmt.Errorf("goal plan not found")
+	}
+	if plan.Cancelled {
+		return nil // idempotent: the one tap already landed
+	}
+	if plan.State == goalStateVerified {
+		return fmt.Errorf("goal already finished; there is nothing to cancel")
+	}
+
+	engine := newGoalEngine(app)
+	stageAtCancel := plan.State
+	plan.Cancelled = true
+	plan.CancelledBy = firstNonEmptyString(strings.TrimSpace(cancelledBy), "unknown")
+	plan.CancelledAt = engine.now().UTC().Format(time.RFC3339Nano)
+	plan.State = goalStateBlocked
+	plan.Blocker = "cancelled by " + plan.CancelledBy
+	engine.finish(&plan, parentID)
+
+	// Misfire signal (spec §2): which stage the user pulled the cord at and
+	// which tool template misfired — the router's tuning data. recordSignalEvent
+	// logs and continues; a signal write never fails the cancel.
+	app.recordSignalEvent(plan.CancelledBy, signalEventGoalCancelled, signalValenceNegative, parentID, plan.PackageID, map[string]string{
+		"stage":        stageAtCancel,
+		"toolTemplate": plan.ToolTemplate,
+	})
+	return nil
+}
+
 // --- Stage: commit_push (external_write only, post-approval) ------------------
 
 // resumeApprovedGoal is the entry an admin approval handler calls to unblock an
@@ -1684,6 +1834,13 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 	if strings.TrimSpace(plan.Blocker) != "" {
 		metadata["goalBlocker"] = plan.Blocker
 	}
+	// The cancel record rides the artifact so the card can say who pulled the
+	// cord and when, without decoding the plan.
+	if plan.Cancelled {
+		metadata["cancelled"] = "true"
+		metadata["cancelledBy"] = plan.CancelledBy
+		metadata["cancelledAt"] = plan.CancelledAt
+	}
 	artifact, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", body, scoutParticipantName, metadata)
 	if err != nil {
 		log.Errorf("goal %s persist failed: %v", parentID, err)
@@ -1705,8 +1862,10 @@ func (e *goalEngine) fail(plan *goalPlan, parentID string, blocker string) {
 func (e *goalEngine) finish(plan *goalPlan, parentID string) {
 	// A goal that terminates needs_attention must not orphan its best work: if a
 	// subtask produced a real deliverable, salvage it (attach + surface) before
-	// composing the terminal brief.
-	if plan.State == goalStateBlocked {
+	// composing the terminal brief. A CANCELLED goal is the exception — the user
+	// deliberately abandoned the launch, so nothing gets attached to a package as
+	// a "draft to finish" (and no salvage signal double-counts the misfire).
+	if plan.State == goalStateBlocked && !plan.Cancelled {
 		e.salvageBlockedDeliverable(plan, parentID)
 	}
 	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
@@ -1720,6 +1879,9 @@ func (e *goalEngine) finish(plan *goalPlan, parentID string) {
 	if plan.State != goalStateVerified {
 		terminalStatus = "error"
 		message = "Goal needs attention"
+		if plan.Cancelled {
+			message = "Goal cancelled"
+		}
 	}
 	e.app.syncLinkedCardForArtifact(artifact, terminalStatus)
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText(message, artifact))
@@ -1799,6 +1961,12 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 	}
 	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
 	if !ok {
+		return
+	}
+	// A cancelled goal is terminal by decree: never re-queue or re-drive it,
+	// whatever states its subtasks were stranded in (the boot scan already skips
+	// its needs_attention stage; this guards a direct call).
+	if plan.Cancelled {
 		return
 	}
 	for index := range plan.Subtasks {

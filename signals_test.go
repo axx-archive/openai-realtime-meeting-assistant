@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Signals are the compounding brain's raw input: append-only, zero model
@@ -352,5 +353,260 @@ func TestArtifactOpenRouteRecordsSignalAndStampsOpenedAt(t *testing.T) {
 	}
 	if signals := kanbanApp.memory.entriesOfKind(meetingMemoryKindSignal, 0); len(signals) != 1 {
 		t.Fatalf("signals after second open=%d, want still 1 — repeat opens must not flood the store", len(signals))
+	}
+}
+
+// --- POST /signals/survey ------------------------------------------------------
+
+// postSurveySignal drives the survey route the way the browser chips do.
+func postSurveySignal(t *testing.T, body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/signals/survey", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	signalSurveyHandler(recorder, req)
+	return recorder
+}
+
+// storedSurveyRecords filters the survey chips out of the signal stream (the
+// implicit seams — attach, open, edit — share the kind).
+func storedSurveyRecords(t *testing.T, store *meetingMemoryStore) []signalRecord {
+	t.Helper()
+	surveys := []signalRecord{}
+	for _, entry := range store.entriesOfKind(meetingMemoryKindSignal, 0) {
+		record, ok := decodeSignalEntry(entry)
+		if !ok {
+			t.Fatalf("decodeSignalEntry failed for %q", entry.Text)
+		}
+		if isSurveySignalEvent(record.Event) {
+			surveys = append(surveys, record)
+		}
+	}
+	return surveys
+}
+
+// The survey taste rules (§5 "Surveys: garnish, not a surface") are pure
+// store reads — zero model calls, so the whole survey system runs KEYLESS —
+// and they enforce: max 1 stored survey per user per UTC day; never two
+// surveys for the same package+stage combination (any user, dedupe winning
+// over the rate limit so a re-tap stays an idempotent 200); suppression once
+// implicit signal volume already answers the question (rule zero).
+func TestEvaluateSurveyTasteRules(t *testing.T) {
+	// Surveys are capture, never generation: no model keys, ever.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	now := time.Now().UTC()
+
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-1", "package-1", "research", now); outcome != surveyOutcomeStore {
+		t.Fatalf("empty-store outcome=%v, want surveyOutcomeStore", outcome)
+	}
+
+	// AJ spends today's budget on package-1 at stage research.
+	if _, err := recordSignal(store, "AJ", signalEventSurveyLanded, signalValencePositive, "artifact-1", "package-1", map[string]string{"stage": "research"}); err != nil {
+		t.Fatalf("seed survey: %v", err)
+	}
+
+	// Rate limit: AJ is done for the day, even on a different package.
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-2", "package-2", "thesis", now); outcome != surveyOutcomeRateLimited {
+		t.Fatalf("same-day outcome=%v, want surveyOutcomeRateLimited", outcome)
+	}
+	// The cap is per user: Tim still has budget.
+	if outcome := evaluateSurveyTasteRules(store, "Tim", "artifact-2", "package-2", "thesis", now); outcome != surveyOutcomeStore {
+		t.Fatalf("other-user outcome=%v, want surveyOutcomeStore", outcome)
+	}
+	// Dedupe: package-1+research was answered — for ANYONE, and it beats the
+	// rate limit so AJ's re-tap reads as idempotent, not as an error.
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-1", "package-1", "research", now); outcome != surveyOutcomeDuplicate {
+		t.Fatalf("re-tap outcome=%v, want surveyOutcomeDuplicate", outcome)
+	}
+	if outcome := evaluateSurveyTasteRules(store, "Tim", "artifact-1", "package-1", "research", now); outcome != surveyOutcomeDuplicate {
+		t.Fatalf("cross-user duplicate outcome=%v, want surveyOutcomeDuplicate", outcome)
+	}
+
+	// The daily budget resets at UTC midnight...
+	tomorrow := now.Add(24 * time.Hour)
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-2", "package-2", "thesis", tomorrow); outcome != surveyOutcomeStore {
+		t.Fatalf("next-day outcome=%v, want surveyOutcomeStore", outcome)
+	}
+	// ...but package+stage dedupe never expires; only a stage ADVANCE reopens
+	// the question (genuinely new work to react to).
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-1", "package-1", "research", tomorrow); outcome != surveyOutcomeDuplicate {
+		t.Fatalf("next-day same-stage outcome=%v, want surveyOutcomeDuplicate", outcome)
+	}
+	if outcome := evaluateSurveyTasteRules(store, "AJ", "artifact-1", "package-1", "design", tomorrow); outcome != surveyOutcomeStore {
+		t.Fatalf("advanced-stage outcome=%v, want surveyOutcomeStore", outcome)
+	}
+
+	// Suppression (rule zero): below the implicit-volume threshold the ask is
+	// still worth it; at the threshold it is redundant.
+	implicitEvents := []string{signalEventArtifactOpened, signalEventArtifactEdited, signalEventArtifactRerun}
+	for i := 0; i < signalSurveyImplicitVolumeThreshold-1; i++ {
+		if _, err := recordSignal(store, "AJ", implicitEvents[i], signalValenceNeutral, "artifact-3", "", nil); err != nil {
+			t.Fatalf("seed implicit signal %d: %v", i, err)
+		}
+	}
+	if outcome := evaluateSurveyTasteRules(store, "Tim", "artifact-3", "package-3", "thesis", now); outcome != surveyOutcomeStore {
+		t.Fatalf("below-threshold outcome=%v, want surveyOutcomeStore", outcome)
+	}
+	if _, err := recordSignal(store, "AJ", implicitEvents[signalSurveyImplicitVolumeThreshold-1], signalValenceNeutral, "artifact-3", "", nil); err != nil {
+		t.Fatalf("seed final implicit signal: %v", err)
+	}
+	if outcome := evaluateSurveyTasteRules(store, "Tim", "artifact-3", "package-3", "thesis", now); outcome != surveyOutcomeSuppressed {
+		t.Fatalf("at-threshold outcome=%v, want surveyOutcomeSuppressed", outcome)
+	}
+}
+
+// POST /signals/survey: session-gated like its /artifacts neighbors; verdict
+// chips map to survey_landed(+)/survey_off(-); the note is truncated to one
+// line; and the artifact's toolTemplate/packageId/stage ride along as free
+// context. Then the taste rules bite: the same package+stage is idempotent
+// for everyone, and a user's second survey of the day is a 429.
+func TestSignalSurveyRouteRecordsSurveyWithContext(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	// Capture stays free: the route must work with no model keys at all.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	pkg, err := kanbanApp.createVenturePackage("Aurora", "an IP thesis", "AJ")
+	if err != nil {
+		t.Fatalf("createVenturePackage: %v", err)
+	}
+	artifact, _, err := kanbanApp.createOSArtifactWithMetadata("research", "deck draft", "Deck body.", "AJ", map[string]string{"toolTemplate": "one_pager"})
+	if err != nil {
+		t.Fatalf("createOSArtifactWithMetadata: %v", err)
+	}
+	// Stamps packageId onto the artifact (and emits one implicit
+	// artifact_attached signal — below the suppression threshold).
+	if _, err := kanbanApp.attachToPackage(pkg.ID, "artifact", artifact.ID, "AJ"); err != nil {
+		t.Fatalf("attachToPackage: %v", err)
+	}
+
+	// Session gate: no cookie -> 401, same contract as artifactOpenHandler.
+	if recorder := postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"landed"}`, artifact.ID), nil); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous survey status=%d, want 401", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	// Verdict is a two-chip enum, nothing else.
+	if recorder := postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"meh"}`, artifact.ID), cookies); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("bad verdict status=%d, want 400", recorder.Code)
+	}
+	// Unknown artifact -> 404.
+	if recorder := postSurveySignal(t, `{"artifactId":"missing-artifact","verdict":"landed"}`, cookies); recorder.Code != http.StatusNotFound {
+		t.Fatalf("missing artifact status=%d, want 404", recorder.Code)
+	}
+	if surveys := storedSurveyRecords(t, kanbanApp.memory); len(surveys) != 0 {
+		t.Fatalf("surveys after rejected requests=%d, want 0", len(surveys))
+	}
+
+	// "off" + an over-long note: stored with the note cut to one line.
+	longNote := strings.Repeat("n", signalSurveyNoteLimit+80)
+	recorder := postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"off","note":%q}`, artifact.ID, longNote), cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("survey status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	response := decodeJSON(t, recorder)
+	if response["stored"] != true || response["suppressed"] != false {
+		t.Fatalf("response=%v, want stored=true suppressed=false", response)
+	}
+
+	surveys := storedSurveyRecords(t, kanbanApp.memory)
+	if len(surveys) != 1 {
+		t.Fatalf("surveys=%d, want 1", len(surveys))
+	}
+	record := surveys[0]
+	if record.Event != signalEventSurveyOff || record.Valence != signalValenceNegative || record.Actor != "AJ" {
+		t.Fatalf("record=%#v, want a negative survey_off by AJ", record)
+	}
+	if record.ArtifactID != artifact.ID || record.PackageID != pkg.ID {
+		t.Fatalf("record=%#v, want artifact/package ids carried", record)
+	}
+	if len(record.Payload["note"]) == 0 || len(record.Payload["note"]) > signalSurveyNoteLimit {
+		t.Fatalf("note length=%d, want 1..%d — the note must be truncated", len(record.Payload["note"]), signalSurveyNoteLimit)
+	}
+	if record.Payload["toolTemplate"] != "one_pager" || record.Payload["stage"] != "thesis" {
+		t.Fatalf("payload=%v, want toolTemplate/stage context pulled from the artifact's package", record.Payload)
+	}
+	if _, flagged := record.Payload["suppressed"]; flagged {
+		t.Fatalf("payload=%v, want no suppressed flag on a normal store", record.Payload)
+	}
+
+	// Same package+stage again — by ANOTHER user — is idempotent: 200, not
+	// stored, no second vote.
+	timCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	recorder = postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"landed"}`, artifact.ID), timCookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("duplicate survey status=%d body=%s, want idempotent 200", recorder.Code, recorder.Body.String())
+	}
+	if response := decodeJSON(t, recorder); response["stored"] != false {
+		t.Fatalf("duplicate response=%v, want stored=false", response)
+	}
+	if surveys := storedSurveyRecords(t, kanbanApp.memory); len(surveys) != 1 {
+		t.Fatalf("surveys after duplicate=%d, want still 1", len(surveys))
+	}
+
+	// Rate limit: AJ already stored a survey today — a fresh artifact (no
+	// package, so no dedupe) is a 429.
+	second, _, err := kanbanApp.createOSArtifact("research", "second draft", "Another body.", "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+	if recorder := postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"landed"}`, second.ID), cookies); recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("second survey of the day status=%d body=%s, want 429", recorder.Code, recorder.Body.String())
+	}
+	if surveys := storedSurveyRecords(t, kanbanApp.memory); len(surveys) != 1 {
+		t.Fatalf("surveys after rate-limited request=%d, want still 1", len(surveys))
+	}
+}
+
+// Rule zero over the wire: once implicit volume on an artifact is high, the
+// survey answer comes back 200 but is stored flagged suppressed=true — the
+// analyst can calibrate the chips, but the answer never counts as fresh taste.
+func TestSignalSurveyRouteSuppressesWhenImplicitVolumeIsHigh(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	artifact, _, err := kanbanApp.createOSArtifact("research", "busy artifact", "Body.", "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact: %v", err)
+	}
+	implicitEvents := []string{signalEventArtifactOpened, signalEventArtifactEdited, signalEventArtifactPublished}
+	for i := 0; i < signalSurveyImplicitVolumeThreshold; i++ {
+		if _, err := recordSignal(kanbanApp.memory, "AJ", implicitEvents[i%len(implicitEvents)], signalValenceNeutral, artifact.ID, "", nil); err != nil {
+			t.Fatalf("seed implicit signal %d: %v", i, err)
+		}
+	}
+
+	recorder := postSurveySignal(t, fmt.Sprintf(`{"artifactId":%q,"verdict":"landed"}`, artifact.ID), loginAs(t, "tim@shareability.com", "B0NFIRE!"))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("suppressed survey status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	if response := decodeJSON(t, recorder); response["stored"] != true || response["suppressed"] != true {
+		t.Fatalf("response=%v, want stored=true suppressed=true", response)
+	}
+
+	surveys := storedSurveyRecords(t, kanbanApp.memory)
+	if len(surveys) != 1 {
+		t.Fatalf("surveys=%d, want 1 suppressed survey stored for calibration", len(surveys))
+	}
+	if surveys[0].Payload["suppressed"] != "true" {
+		t.Fatalf("payload=%v, want suppressed=true so the analyst can discount it", surveys[0].Payload)
+	}
+	if surveys[0].Event != signalEventSurveyLanded || surveys[0].Valence != signalValencePositive {
+		t.Fatalf("record=%#v, want a positive survey_landed", surveys[0])
 	}
 }

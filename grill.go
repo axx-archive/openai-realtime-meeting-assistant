@@ -10,6 +10,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -156,6 +158,18 @@ func (app *kanbanBoardApp) endGrillSession(args map[string]any) (map[string]any,
 		log.Errorf("Failed to launch grill report thread: %v", err)
 	} else {
 		artifactID = thread.Artifact.ID
+		// Grill-delta capture (§5 item 4): once the terminal seam grades this
+		// scorecard, log the grill_delta signal. The room grill has no binder
+		// linkage, so the delta baseline exists only when the dictated topic is
+		// EXACTLY a package name (the decision ledger's Part B discipline — no
+		// fuzzy guessing); otherwise the delta is null.
+		signalPackageID := ""
+		priorReadiness := ""
+		if record, found := app.venturePackageByExactName(topic); found {
+			signalPackageID = record.ID
+			priorReadiness = app.latestPackageReadiness(record)
+		}
+		awaitGrillDeltaSignalAsync(app, scoutParticipantName, artifactID, signalPackageID, priorReadiness, topic)
 	}
 
 	broadcastAssistantEvent("status", "Grill ended — report thread launched", map[string]any{
@@ -386,11 +400,16 @@ func (app *kanbanBoardApp) endPrivateGrill(args map[string]any, requesterEmail s
 	// Attach to the package so the readiness dial updates via the existing
 	// machinery: packagePayload reads the newest attached grill artifact's
 	// READINESS score, so once the worker stamps it the binder trend moves.
+	signalPackageID := ""
 	if hasPackage {
+		signalPackageID = record.ID
 		if _, attachErr := app.attachToPackage(record.ID, packageRefTypeArtifact, thread.Artifact.ID, actor); attachErr != nil {
 			log.Errorf("Failed to attach private grill report to package %s: %v", record.ID, attachErr)
 		}
 	}
+	// Grill-delta capture (§5 item 4): priorReadiness was read BEFORE the new
+	// scorecard attached, so it is exactly the package's previous grill score.
+	awaitGrillDeltaSignalAsync(app, actor, thread.Artifact.ID, signalPackageID, priorReadiness, "")
 	return result, false, nil
 }
 
@@ -477,6 +496,138 @@ func (app *kanbanBoardApp) latestPackageReadiness(record venturePackageRecord) s
 		return ""
 	}
 	return strings.TrimSpace(asString(stats["grillScore"]))
+}
+
+// --- Grill-delta signal (§5 capture item 4) ----------------------------------
+//
+// The compounding-brain datum a grill leaves behind: did the package's
+// readiness move, and which objections landed? The READINESS score is stamped
+// by the terminal seam AFTER the report thread finishes
+// (stampReadinessMetadata via agent_thread_runner.go / codex_runner_queue.go),
+// long after end{Grill,PrivateGrill} returns — so the grill seams hand a
+// watcher the delta baseline they know synchronously and the watcher records
+// the signal once the grade lands. Capture stays free: zero model calls, and a
+// grill whose report never grades (keyless fallback error, unparseable
+// READINESS line) simply leaves no signal — fail-soft, like the dial itself.
+
+// signalEventGrillDelta lives here beside its only emitter: grill.go owns both
+// grill-end seams (the room session and the private variant).
+const signalEventGrillDelta = "grill_delta"
+
+// grillDeltaObjectionsMax caps the top-objections payload list; recordSignal's
+// per-value byte cap truncates the joined text again.
+const grillDeltaObjectionsMax = 3
+
+// Watcher cadence. Constants passed by value into the goroutine so leaked
+// test watchers can never race a knob write.
+const (
+	grillDeltaSignalPollInterval = 3 * time.Second
+	grillDeltaSignalMaxWait      = 30 * time.Minute
+)
+
+// awaitGrillDeltaSignalAsync is a package var for the same reason
+// startAgentThreadAsync is: tests capture the watch instead of leaking
+// pollers, then drive watchGrillDeltaSignal synchronously.
+var awaitGrillDeltaSignalAsync = func(app *kanbanBoardApp, actor string, artifactID string, packageID string, priorReadiness string, topic string) {
+	go app.watchGrillDeltaSignal(actor, artifactID, packageID, priorReadiness, topic, grillDeltaSignalPollInterval, grillDeltaSignalMaxWait)
+}
+
+// watchGrillDeltaSignal polls the filed scorecard until the terminal seam
+// stamps its READINESS score, then records exactly one grill_delta signal.
+// Terminal without a grade — an errored run or a missing/reformatted READINESS
+// line — records nothing; so does a deleted artifact or the deadline.
+func (app *kanbanBoardApp) watchGrillDeltaSignal(actor string, artifactID string, packageID string, priorReadiness string, topic string, pollInterval time.Duration, maxWait time.Duration) {
+	if app == nil || app.memory == nil || strings.TrimSpace(artifactID) == "" {
+		return
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		artifact, ok := app.osArtifactByID(artifactID)
+		if !ok {
+			return
+		}
+		if strings.TrimSpace(artifact.Metadata["readinessScore"]) != "" {
+			app.recordGrillDeltaSignal(artifact, actor, packageID, priorReadiness, topic)
+			return
+		}
+		if artifact.Metadata["threadStatus"] == "error" || artifact.Metadata["readinessParse"] == "missing" {
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(pollInterval)
+	}
+}
+
+// recordGrillDeltaSignal appends the grill_delta signal for a graded
+// scorecard: the new readiness score, the delta vs the package's previous
+// grill scorecard (absent when this is the package's first grill — "delta
+// null if first"), and the top objections. Valence follows the dial: positive
+// when readiness rose, negative when it fell, neutral when flat or baseline-less.
+func (app *kanbanBoardApp) recordGrillDeltaSignal(artifact meetingMemoryEntry, actor string, packageID string, priorReadiness string, topic string) {
+	readiness := strings.TrimSpace(artifact.Metadata["readinessScore"])
+	if readiness == "" {
+		return
+	}
+	payload := map[string]string{"readiness": readiness}
+	if topic = strings.TrimSpace(topic); topic != "" {
+		payload["topic"] = topic
+	}
+	valence := signalValenceNeutral
+	if prior := strings.TrimSpace(priorReadiness); prior != "" {
+		payload["priorReadiness"] = prior
+		next, nextErr := strconv.ParseFloat(readiness, 64)
+		previous, prevErr := strconv.ParseFloat(prior, 64)
+		if nextErr == nil && prevErr == nil {
+			payload["delta"] = fmt.Sprintf("%+.1f", next-previous)
+			if next > previous {
+				valence = signalValencePositive
+			} else if next < previous {
+				valence = signalValenceNegative
+			}
+		}
+	}
+	if objections := grillTopObjections(artifact.Text); objections != "" {
+		payload["objections"] = objections
+	}
+	app.recordSignalEvent(actor, signalEventGrillDelta, valence, artifact.ID, packageID, payload)
+}
+
+// grillObjectionListMarker strips a leading bullet or "1." / "2)" ordinal from
+// a scorecard objection line.
+var grillObjectionListMarker = regexp.MustCompile(`^([-*•]+|\d+[.)])\s*`)
+
+// grillTopObjections pulls the first grillDeltaObjectionsMax lines from the
+// scorecard's "Strongest objections" section (latest version only — the
+// archive's objections already had their signal). A scorecard without the
+// heading yields "" — recurring-objection tracking degrades, never fails.
+func grillTopObjections(body string) string {
+	latest, _ := splitAgentThreadVersions(body)
+	inSection := false
+	objections := make([]string, 0, grillDeltaObjectionsMax)
+	for _, line := range strings.Split(latest, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if match := signalHeadingPattern.FindStringSubmatch(trimmed); match != nil {
+			if inSection {
+				break
+			}
+			inSection = strings.Contains(strings.ToLower(match[1]), "objection")
+			continue
+		}
+		if !inSection || trimmed == "" {
+			continue
+		}
+		objection := strings.TrimSpace(grillObjectionListMarker.ReplaceAllString(trimmed, ""))
+		if objection == "" {
+			continue
+		}
+		objections = append(objections, objection)
+		if len(objections) >= grillDeltaObjectionsMax {
+			break
+		}
+	}
+	return strings.Join(objections, "; ")
 }
 
 // buildPrivateGrillReportQuery shapes the grill agent-thread request from the

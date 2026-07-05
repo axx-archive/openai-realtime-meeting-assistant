@@ -7518,38 +7518,116 @@
         color: var(--text-3);
       }
 
-      .scout-work-starters {
-        flex: none;
+      /* The 4 composer pills were cut (spec §2 "cut them"): the propose-confirm
+         router replaced their quick lane — a deliverable-shaped message earns a
+         Tier 1/2 proposal card instead of a prefilled keyword launch. */
+
+      .scout-proposal-card {
+        align-self: stretch;
+        margin: 4px 0 6px;
+        padding: 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg, 12px);
+        background: var(--surface-2);
         display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 8px;
-        padding: 0 18px 10px;
+        flex-direction: column;
+        gap: 10px;
       }
 
-      .scout-work-starters button {
-        min-height: 40px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 14px;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-2);
-        color: var(--text-2);
+      .scout-proposal-card__head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .scout-proposal-card__tool {
         font: var(--type-label-lg);
         letter-spacing: var(--track-label);
-        cursor: pointer;
-        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-      }
-
-      .scout-work-starters button:hover {
-        background: var(--surface-3);
         color: var(--text-1);
       }
 
-      .scout-work-starters button:active {
+      .scout-proposal-card__group {
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-transform: lowercase;
+      }
+
+      .scout-proposal-card__summary {
+        margin: 0;
+        color: var(--text-2);
+        line-height: 1.55;
+      }
+
+      .scout-proposal-card__meta {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        color: var(--text-3);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-proposal-card__authority,
+      .scout-proposal-card__weight {
+        padding: 3px 9px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-1);
+      }
+
+      .scout-proposal-card__actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .scout-proposal-card__run {
+        min-height: 38px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--ember, var(--accent, #d84f2f));
+        color: var(--surface-0, #fff);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+      }
+
+      .scout-proposal-card__run:active {
         transform: scale(var(--press-scale));
+      }
+
+      .scout-proposal-card__escape {
+        min-height: 38px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-3);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .scout-proposal-card__escape:hover {
+        color: var(--text-1);
+      }
+
+      .scout-proposal-card__resolved {
+        margin: 0;
+        color: var(--text-3);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-proposal-card.is-resolved {
+        opacity: 0.72;
       }
 
       /* MessageBubble — you: ink, right; Scout: surface, left; the meta
@@ -10296,6 +10374,47 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         overflow-wrap: anywhere;
+      }
+
+      /* ---------- sandboxed HTML deck viewer (packaging OS §4 item 1) ----------
+         The frame shows the tokened /artifacts/render route — real text/html
+         under sandbox="allow-scripts", never an inline document, never a
+         same-origin sandbox grant. */
+      .artifact-deck {
+        display: grid;
+        gap: var(--sp-2);
+      }
+
+      .artifact-deck__head {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+      }
+
+      .artifact-deck__label {
+        font: var(--type-label);
+        color: var(--text-3);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .artifact-deck__present {
+        margin-left: auto;
+      }
+
+      .artifact-deck__frame {
+        width: 100%;
+        aspect-ratio: 16 / 10;
+        min-height: 260px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: #fff;
+      }
+
+      .artifact-deck__note {
+        margin: 0;
+        font: var(--type-caption);
+        color: var(--text-3);
       }
 
       .artifact-detail__body {
@@ -16247,6 +16366,38 @@
       .returncard__open:hover { border-color: var(--line-2); }
       .returncard--dock { margin: 4px 0; }
 
+      /* ---------- micro-survey chips (§5: garnish, never a new surface) ---------- */
+      .survey-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .survey-chips__chip {
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        padding: 4px 12px;
+        min-height: 28px;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .survey-chips__chip:hover { color: var(--text-1); border-color: var(--line-2); }
+      .survey-chips__note-row { display: flex; gap: 6px; flex: 1 1 100%; }
+      .survey-chips__note-row[hidden] { display: none; }
+      .survey-chips__note {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-caption);
+        padding: 5px 9px;
+      }
+      .survey-chips__thanks { font: var(--type-caption); color: var(--text-3); }
+      /* the goal-verified notification row nests the chips the way approvals
+         nest their one-tap actions (div row, actions clear the dot column) */
+      .notification-item--survey { flex-wrap: wrap; cursor: default; }
+      .notification-item--survey .survey-chips { width: 100%; margin-top: 8px; padding-left: 18px; }
+
       /* --- composer + Tools trigger --- */
       .scout-chat-tools {
         flex: none;
@@ -17112,12 +17263,6 @@
                   <span class="scout-chat-thinking__dot"></span>
                 </span>
               </div>
-            </div>
-            <div class="scout-work-starters" aria-label="Start Scout work">
-              <button type="button" data-scout-starter="research">research</button>
-              <button type="button" data-scout-starter="design">design</button>
-              <button type="button" data-scout-starter="grill">grill</button>
-              <button type="button" data-scout-starter="workflow">plan</button>
             </div>
             <div id="scoutFollowUpTarget" class="scout-followup-target" hidden></div>
             <div id="scoutChatPendingFiles" class="scout-chat-pending-files" hidden></div>
@@ -18343,7 +18488,6 @@
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
-	      const scoutWorkStarterButtons = Array.from(document.querySelectorAll('[data-scout-starter]'))
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
 	      const chatNewThread = document.getElementById('chatNewThread')
 	      const chatDefaultThread = document.getElementById('chatDefaultThread')
@@ -19214,9 +19358,6 @@
         button.addEventListener('click', () => setScoutTab(button.dataset.scoutTab || 'room'))
       })
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
-      scoutWorkStarterButtons.forEach(button => {
-        button.addEventListener('click', () => promptScoutForWork(button.dataset.scoutStarter || 'chat'))
-      })
 	      chatThreadSearch?.addEventListener('input', filterChatThreads)
 	      chatNewThread?.addEventListener('click', startNewScoutThread)
 	      chatScopePrivate?.addEventListener('click', () => setNewChatThreadVisibility('private'))
@@ -22140,6 +22281,68 @@
         return worker ? worker.replace(/_/g, ' ') : 'Scout'
       }
 
+      // ---- sandboxed HTML deck viewer (packaging OS §4 item 1, Wave 2 item 9) ----
+      // Mirrors the server's artifactIsHTMLDocument sniff (artifact_render.go):
+      // declared metadata type=html_deck, or a body that starts as an HTML
+      // document. Markdown that merely mentions an <html> tag mid-body stays on
+      // the escaped renderer.
+      function artifactIsHTMLDeck(entry) {
+        if (String(entry?.metadata?.type || '').trim() === 'html_deck') {
+          return true
+        }
+        const body = String(entry?.text || '').trim().toLowerCase()
+        return body.startsWith('<!doctype html') || body.startsWith('<html')
+      }
+
+      // The deck body is served as real text/html by GET /artifacts/render
+      // behind a short-lived HMAC token minted by the session-gated
+      // /artifacts/render-token neighbor. The iframe sandbox IS the security
+      // model: allow-scripts ONLY — never an inline document (that would run
+      // the deck same-origin with the OS) and never a same-origin grant.
+      function renderArtifactDeck(container, entry, options = {}) {
+        const deck = document.createElement('section')
+        deck.className = 'artifact-deck'
+        const head = bfEl('div', 'artifact-deck__head')
+        head.appendChild(bfEl('span', 'artifact-deck__label', 'html deck'))
+        const present = bfEl('button', 'btn btn--ghost artifact-deck__present', 'Present')
+        present.type = 'button'
+        present.disabled = true
+        head.appendChild(present)
+        const frame = document.createElement('iframe')
+        frame.className = 'artifact-deck__frame'
+        frame.setAttribute('sandbox', 'allow-scripts')
+        frame.title = 'sandboxed deck preview'
+        const note = bfEl('p', 'artifact-deck__note', 'minting a render token…')
+        deck.append(head, frame, note)
+        container.appendChild(deck)
+
+        const artifactId = String(entry?.id || '').trim()
+        ;(async () => {
+          try {
+            const response = await fetch(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok || !payload.url) {
+              throw new Error(payload.error || 'render token unavailable')
+            }
+            if (!deck.isConnected) return // the pane moved on while we minted
+            frame.src = payload.url
+            note.textContent = 'sandboxed preview — Present goes full screen'
+            present.disabled = false
+            // Present fullscreens the SAME sandboxed iframe — never a
+            // top-level navigation to the render URL, which would run the
+            // deck outside the iframe sandbox. (The server-side CSP sandbox
+            // directive also opaque-origins top-level opens as a backstop.)
+            present.addEventListener('click', () => frame.requestFullscreen?.())
+          } catch {
+            // No token (signed out, artifact gone, server refused): fall back
+            // to the escaped safe renderer — never an inline document.
+            if (!deck.isConnected) return
+            deck.remove()
+            renderArtifactRead(container, entry, { ...options, forceSafe: true })
+          }
+        })()
+      }
+
       function renderArtifactRead(container, entry, options = {}) {
         if (!container) {
           return
@@ -22150,6 +22353,15 @@
           empty.className = 'artifact-read__empty'
           empty.textContent = 'select an artifact to read it.'
           container.appendChild(empty)
+          return
+        }
+
+        // HTML decks render full-fidelity in the sandboxed iframe viewer
+        // WITHOUT loosening this renderer's escaping (spec §4 item 4). Every
+        // other artifact stays on the injection-safe path below — and a deck
+        // whose token mint fails lands back here too (forceSafe).
+        if (!options.forceSafe && artifactIsHTMLDeck(entry)) {
+          renderArtifactDeck(container, entry, options)
           return
         }
 
@@ -30819,7 +31031,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
 	        const scoutEngaged = Boolean(followUp) || Boolean(toolTemplate) || !isChannel || /@scout/i.test(text)
 	        const channelPrefixMode = isChannel ? scoutChannelModePrefixForText(text) : ''
-	        const threadMode = followUp ? '' : toolTemplate ? 'tool' : !scoutEngaged ? '' : isChannel ? channelPrefixMode : scoutThreadModeForText(text)
+	        // Private threads never keyword-launch anymore (the propose-confirm
+	        // router replaced scoutChatThreadModeForText server-side), so the
+	        // "launching workstream" label only applies to explicit channel
+	        // prefixes and armed tool templates.
+	        const threadMode = followUp ? '' : toolTemplate ? 'tool' : !scoutEngaged ? '' : channelPrefixMode
 	        if (scoutEngaged) {
 	          showScoutChatThinking(followUp ? `re-running ${assistantToolLabelText(followUp.mode)}` : threadMode ? 'launching workstream' : 'thinking')
 	        }
@@ -31762,6 +31978,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
                 </button>
                 <div class="goalcard__menu-pop" hidden>
                   <button class="goalcard__menu-item" type="button" data-goal-open>Open as full artifact</button>
+                  <button class="goalcard__menu-item goalcard__menu-item--danger" type="button" data-goal-cancel hidden>Cancel run</button>
                   <button class="goalcard__menu-item goalcard__menu-item--danger" type="button" data-goal-hide>Hide this card</button>
                 </div>
               </span>
@@ -31788,11 +32005,55 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         })
         const menuBtn = card.querySelector('[data-goal-menu]')
         const menuPop = card.querySelector('.goalcard__menu-pop')
-        menuBtn?.addEventListener('click', (event) => { event.stopPropagation(); menuPop.hidden = !menuPop.hidden })
+        menuBtn?.addEventListener('click', (event) => { event.stopPropagation(); menuPop.hidden = !menuPop.hidden; goalCancelDisarm(card) })
         document.addEventListener('click', () => { if (menuPop) menuPop.hidden = true })
         card.querySelector('[data-goal-open]')?.addEventListener('click', () => { const entry = card.__goalArtifact; if (entry) openAgentArtifact(entry) })
+        // cancel (spec §2 misfire economics, Wave 2 item 8c): the first tap
+        // arms the confirm step ("stop this run?"), the second tap posts — a
+        // wrong launch costs one tap, not six subtasks.
+        const cancelBtn = card.querySelector('[data-goal-cancel]')
+        cancelBtn?.addEventListener('click', (event) => {
+          event.stopPropagation()
+          if (cancelBtn.dataset.armed !== '1') {
+            cancelBtn.dataset.armed = '1'
+            cancelBtn.textContent = 'stop this run?'
+            return
+          }
+          menuPop.hidden = true
+          goalCancelDisarm(card)
+          cancelGoalFromCard(card)
+        })
         card.querySelector('[data-goal-hide]')?.addEventListener('click', () => card.remove())
         return card
+      }
+
+      function goalCancelDisarm(card) {
+        const cancelBtn = card.querySelector('[data-goal-cancel]')
+        if (!cancelBtn) return
+        delete cancelBtn.dataset.armed
+        cancelBtn.textContent = 'Cancel run'
+      }
+
+      // POST /assistant/goal/cancel {goalId} — optimistic: the card lands on
+      // the cancelled terminal immediately; the server echo (or the next
+      // sync) confirms or corrects it.
+      async function cancelGoalFromCard(card) {
+        const artifact = card.__goalArtifact
+        const goalId = String(artifact?.id || card.dataset.goalArtifactId || '').trim()
+        if (!goalId) return
+        const optimistic = {
+          ...artifact,
+          metadata: { ...(artifact?.metadata || {}), goalStatus: 'needs_attention', currentStage: 'needs_attention', blocker: 'cancelling — no new subtasks will start' }
+        }
+        updateGoalCard(card, optimistic)
+        const { ok, data } = await postAuthJSON('/assistant/goal/cancel', { goalId })
+        if (ok && data?.artifact) {
+          updateGoalCard(card, data.artifact)
+          showToast({ text: 'goal cancelled', kind: 'note' })
+          return
+        }
+        showToast({ text: data?.error || 'could not cancel the goal', kind: 'error' })
+        goalCardScheduleSync() // the re-sync corrects the optimistic state
       }
 
       function updateGoalCard(card, artifact) {
@@ -31804,6 +32065,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const prevState = card.dataset.state
         card.dataset.state = state
         card.querySelector('.goalcard__title').textContent = goalArtifactTitle(artifact)
+
+        // the cancel affordance only exists while there is something to stop
+        const cancelBtn = card.querySelector('[data-goal-cancel]')
+        if (cancelBtn) cancelBtn.hidden = !(state === 'running' || state === 'gate')
 
         const currentStage = String(m.currentStage || '')
         const pct = Number(m.progressPercent)
@@ -31898,6 +32163,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           open.addEventListener('click', () => openAgentArtifact(artifact))
           actions.appendChild(open)
           terminal.appendChild(actions)
+          // micro-survey (§5): one persistent node per card, so the terminal's
+          // re-renders never wipe a half-typed "off" note
+          if (!card.__surveyNode) card.__surveyNode = surveyChipsNode(artifact.id)
+          if (card.__surveyNode) terminal.appendChild(card.__surveyNode)
           if (prevState !== 'complete' && !card.dataset.celebrated) {
             card.dataset.celebrated = '1'
             goalCardCelebrate(card)
@@ -32014,6 +32283,70 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }, 500)
       }
 
+      // ---- micro-survey chips (§5 "garnish, not a surface", Wave 2 item 11) ---
+      // Two chips on EXISTING completion surfaces — never a new surface. The
+      // client stays dumb: POST /signals/survey {artifactId, verdict, note};
+      // the server owns every rate rule, so a 429 (or any refusal) makes the
+      // chips vanish silently instead of arguing with the user.
+      const surveyAnsweredArtifacts = new Set()
+
+      function surveyChipsNode(artifactId) {
+        const id = String(artifactId || '').trim()
+        if (!id || surveyAnsweredArtifacts.has(id)) return null
+        const wrap = bfEl('div', 'survey-chips')
+        const landed = bfEl('button', 'survey-chips__chip', 'landed')
+        landed.type = 'button'
+        const off = bfEl('button', 'survey-chips__chip', 'off')
+        off.type = 'button'
+        const noteRow = bfEl('div', 'survey-chips__note-row')
+        noteRow.hidden = true
+        const note = document.createElement('input')
+        note.type = 'text'
+        note.className = 'survey-chips__note'
+        note.placeholder = 'what was off? (optional)'
+        note.maxLength = 280
+        note.setAttribute('aria-label', 'what was off')
+        const send = bfEl('button', 'survey-chips__chip survey-chips__send', 'send')
+        send.type = 'button'
+        noteRow.append(note, send)
+        landed.addEventListener('click', () => submitArtifactSurvey(wrap, id, 'landed', ''))
+        // "off" reveals the one-line note first; a second tap (or send/Enter)
+        // posts — the note stays optional.
+        off.addEventListener('click', () => {
+          if (noteRow.hidden) { noteRow.hidden = false; note.focus(); return }
+          submitArtifactSurvey(wrap, id, 'off', note.value)
+        })
+        send.addEventListener('click', () => submitArtifactSurvey(wrap, id, 'off', note.value))
+        note.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); submitArtifactSurvey(wrap, id, 'off', note.value) }
+        })
+        wrap.append(landed, off, noteRow)
+        return wrap
+      }
+
+      async function submitArtifactSurvey(wrap, artifactId, verdict, noteText) {
+        surveyAnsweredArtifacts.add(artifactId)
+        try {
+          const { ok, status } = await postAuthJSON('/signals/survey', {
+            artifactId,
+            verdict,
+            note: String(noteText || '').trim()
+          })
+          if (status === 429 || !ok) {
+            // the server's rate rules said "not this time" — a survey must
+            // never cost the user anything, so the chips just disappear
+            // (emptied too, so a host that re-attaches the node shows nothing)
+            wrap.replaceChildren()
+            wrap.remove()
+            return
+          }
+          wrap.replaceChildren(bfEl('span', 'survey-chips__thanks', 'noted'))
+        } catch {
+          wrap.replaceChildren()
+          wrap.remove()
+        }
+      }
+
       // ---- return-to-origin card (one component, three contexts) -------------
       function renderReturnCard(artifact, options = {}) {
         const card = document.createElement('article')
@@ -32040,6 +32373,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         open.type = 'button'
         open.addEventListener('click', () => openAgentArtifact(artifact))
         card.appendChild(open)
+        const survey = surveyChipsNode(artifact?.id)
+        if (survey) card.appendChild(survey)
         return card
       }
 
@@ -32251,9 +32586,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // (a button cannot legally nest the action buttons); every other row
         // stays a single clickable button.
         const isApproval = entry.tool === 'approval' && Boolean(entry.artifactId)
-        const item = document.createElement(isApproval ? 'div' : 'button')
-        if (!isApproval) item.type = 'button'
-        item.className = `notification-item${entry.read ? '' : ' is-unread'}${isApproval ? ' notification-item--approval' : ''}`
+        // a goal-verified milestone carries the micro-survey chips (§5), so its
+        // row is a div for the same button-nesting reason approvals are
+        const isGoalVerified = !isApproval && entry.kind === 'agent' && Boolean(entry.artifactId) && entry.text.startsWith('Goal verified')
+        const item = document.createElement(isApproval || isGoalVerified ? 'div' : 'button')
+        if (!isApproval && !isGoalVerified) item.type = 'button'
+        item.className = `notification-item${entry.read ? '' : ' is-unread'}${isApproval ? ' notification-item--approval' : ''}${isGoalVerified ? ' notification-item--survey' : ''}`
         item.setAttribute('role', 'listitem')
 
         const dot = document.createElement('span')
@@ -32276,6 +32614,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           body.style.cursor = 'pointer'
           body.addEventListener('click', () => { markNotificationsRead([entry.id]); openBrief() })
           item.append(notificationApprovalActions(entry))
+        } else if (isGoalVerified) {
+          // the text still deep-links to the run; the chips act in place.
+          body.style.cursor = 'pointer'
+          body.addEventListener('click', () => openNotificationEntry(entry))
+          const survey = surveyChipsNode(entry.artifactId)
+          if (survey) item.appendChild(survey)
         } else {
           item.addEventListener('click', () => openNotificationEntry(entry))
         }
@@ -33259,6 +33603,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function scoutChatMessageRecordNode(message) {
+	        if (String(message?.kind || '') === 'proposal' && message.proposal) {
+	          return scoutProposalCardNode(message)
+	        }
 	        if (String(message?.kind || '') === 'thread' && message.thread) {
 	          const card = scoutChatResearchNode(scoutThreadFromChatMessage(message))
 	          // the launch reply is a real committed scout message (design copy:
@@ -33318,6 +33665,195 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          query: ref.query || message.text || '',
 	          status: ref.status || artifactStatusValue(artifact) || 'running',
 	          artifact
+	        }
+	      }
+
+	      // ---- the router confirmation card (spec §2 — the trust surface) ----
+	      // A proposal is DATA the server committed on the reply; this card is
+	      // the ONLY thing that turns it into a launch. Run posts the identical
+	      // spec the palette Run posts (runGoalPipeline → POST /assistant/goal
+	      // with toolTemplate for tool runs; the proposal route performs the
+	      // explicit workstream launch). "just answer instead" re-asks as Tier 0
+	      // and logs the dismissal signal. NEVER silent-launch.
+	      function scoutProposalCardNode(message) {
+	        const proposal = message.proposal || {}
+	        const card = document.createElement('div')
+	        card.className = 'scout-proposal-card'
+	        card.dataset.proposalKind = String(proposal.kind || '')
+	        card.dataset.messageId = String(message.id || '')
+
+	        const head = bfEl('div', 'scout-proposal-card__head')
+	        const isWorkstream = String(proposal.kind || '') === 'workstream'
+	        const toolName = isWorkstream
+	          ? `${assistantToolLabelText(proposal.mode)} workstream`
+	          : String(proposal.toolName || proposal.toolId || 'tool run')
+	        head.appendChild(bfEl('span', 'scout-proposal-card__tool', toolName))
+	        if (proposal.groupLabel) {
+	          head.appendChild(bfEl('span', 'scout-proposal-card__group', String(proposal.groupLabel)))
+	        }
+	        card.appendChild(head)
+
+	        // one legible sentence of what will run
+	        card.appendChild(bfEl('p', 'scout-proposal-card__summary', String(message.text || proposal.summary || '')))
+
+	        // editable pre-filled inputs — the palette form-card pattern reused:
+	        // form tools render their registry fields, conversational/workstream
+	        // proposals render one editable objective.
+	        const tool = !isWorkstream ? paletteToolById(proposal.toolId) : null
+	        if (!isWorkstream && !tool) loadAssistantTools() // best-effort: the next render gets the registry fields
+	        const fieldEls = {}
+	        let objectiveInput = null
+	        if (tool && (tool.formFields || []).length) {
+	          for (const field of tool.formFields || []) {
+	            const wrap = bfEl('div', 'palette__form-field')
+	            wrap.appendChild(bfEl('label', 'palette__form-label', field.label))
+	            const input = document.createElement(field.key === 'thesis' || field.key === 'underlying' || field.key === 'structure' ? 'textarea' : 'input')
+	            input.className = 'palette__field'
+	            input.placeholder = field.placeholder || ''
+	            if (input.tagName === 'TEXTAREA') input.rows = 2
+	            input.value = String((proposal.fields || {})[field.key] || '')
+	            fieldEls[field.key] = { input, required: field.required }
+	            wrap.appendChild(input)
+	            card.appendChild(wrap)
+	          }
+	          // the model's objective backfills the first empty required field so
+	          // Run never launches on a blank form
+	          const firstRequired = Object.values(fieldEls).find(entry => entry.required && !entry.input.value.trim())
+	          if (firstRequired) firstRequired.input.value = String(proposal.objective || '')
+	        } else {
+	          const wrap = bfEl('div', 'palette__form-field')
+	          wrap.appendChild(bfEl('label', 'palette__form-label', 'objective'))
+	          objectiveInput = document.createElement('textarea')
+	          objectiveInput.className = 'palette__field'
+	          objectiveInput.rows = 2
+	          objectiveInput.value = String(proposal.objective || '')
+	          wrap.appendChild(objectiveInput)
+	          card.appendChild(wrap)
+	        }
+
+	        // target package — tool runs only (workstreams are single passes)
+	        let pkgField = null
+	        if (!isWorkstream) {
+	          pkgField = paletteBuildPackageField()
+	          if (proposal.packageId) populatePalettePackageOptions(pkgField.select, String(proposal.packageId))
+	          card.appendChild(pkgField.wrap)
+	        }
+
+	        const meta = bfEl('div', 'scout-proposal-card__meta')
+	        if (proposal.authority) {
+	          meta.appendChild(bfEl('span', 'scout-proposal-card__authority', String(proposal.authority).replace(/_/g, ' ')))
+	        }
+	        meta.appendChild(bfEl('span', 'scout-proposal-card__weight', String(proposal.weightLabel || '')))
+	        card.appendChild(meta)
+
+	        const status = String(proposal.status || '')
+	        if (status === 'accepted' || status === 'dismissed') {
+	          markProposalCardResolved(card, status)
+	          return card
+	        }
+
+	        const actions = bfEl('div', 'scout-proposal-card__actions')
+	        const run = bfEl('button', 'scout-proposal-card__run', 'Run ▸')
+	        run.type = 'button'
+	        run.addEventListener('click', () => {
+	          if (isWorkstream) {
+	            const query = String(objectiveInput?.value || proposal.objective || '').trim()
+	            if (!query) { objectiveInput?.focus(); return }
+	            markProposalCardResolved(card, 'accepted')
+	            postScoutProposalAction('accepted', proposal, message, { objective: query })
+	            return
+	          }
+	          // identical spec to the palette Run button — reuse, do not fork
+	          const inputs = {}
+	          let missing = null
+	          for (const [key, entry] of Object.entries(fieldEls)) {
+	            const value = String(entry.input.value || '').trim()
+	            inputs[key] = value
+	            if (entry.required && !value && !missing) missing = entry.input
+	          }
+	          if (missing) {
+	            missing.focus()
+	            missing.style.borderColor = 'var(--warn)'
+	            return
+	          }
+	          const objective = tool && (tool.formFields || []).length
+	            ? paletteToolObjective(tool, inputs)
+	            : String(objectiveInput?.value || proposal.objective || '').trim()
+	          if (!objective) { objectiveInput?.focus(); return }
+	          markProposalCardResolved(card, 'accepted')
+	          postScoutProposalAction('accepted', proposal, message, { objective })
+	          runGoalPipeline({
+	            objective,
+	            toolTemplate: String(proposal.toolId || ''),
+	            authorityHint: String(proposal.authority || tool?.authority || ''),
+	            package: pkgField ? String(pkgField.select.value || '') : paletteDefaultPackageId()
+	          })
+	        })
+	        const escape = bfEl('button', 'scout-proposal-card__escape', 'just answer instead')
+	        escape.type = 'button'
+	        escape.addEventListener('click', () => {
+	          markProposalCardResolved(card, 'dismissed')
+	          showScoutChatThinking('thinking')
+	          postScoutProposalAction('dismissed', proposal, message, {})
+	        })
+	        actions.append(run, escape)
+	        card.appendChild(actions)
+	        return card
+	      }
+
+	      function markProposalCardResolved(card, status) {
+	        card.classList.add('is-resolved')
+	        card.querySelector('.scout-proposal-card__actions')?.remove()
+	        card.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = true })
+	        if (!card.querySelector('.scout-proposal-card__resolved')) {
+	          card.appendChild(bfEl('p', 'scout-proposal-card__resolved', status === 'accepted' ? 'confirmed — running' : 'dismissed — answered instead'))
+	        }
+	      }
+
+	      // posts the verdict on one proposal card: the server records the
+	      // accept/dismiss signal (router_proposal_accepted / _dismissed), flips
+	      // the persisted card inert, launches confirmed workstreams, and answers
+	      // dismissed asks as Tier 0.
+	      async function postScoutProposalAction(action, proposal, message, extras) {
+	        const threadId = String(activeScoutThreadId || '')
+	        if (!threadId) return
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(threadId)}/proposal`, {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({
+	              action,
+	              kind: String(proposal.kind || ''),
+	              toolId: String(proposal.toolId || ''),
+	              mode: String(proposal.mode || ''),
+	              objective: String(extras?.objective || proposal.objective || ''),
+	              query: String(proposal.query || ''),
+	              messageId: String(message?.id || '')
+	            })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            throw new Error(payload.error || 'proposal action failed')
+	          }
+	          const finish = () => {
+	            hideScoutChatThinking()
+	            if (payload.artifact) {
+	              addArtifactEntry(payload.artifact, { select: false })
+	              scheduleArtifactRefresh()
+	            }
+	            if (payload.thread) {
+	              upsertScoutChatThread(payload.thread)
+	              renderActiveScoutThread()
+	            }
+	          }
+	          if (action === 'dismissed' && payload.answer) {
+	            withScoutChatThinkingHold(finish)
+	          } else {
+	            finish()
+	          }
+	        } catch (error) {
+	          hideScoutChatThinking()
+	          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'proposal action failed', new Date().toISOString()))
 	        }
 	      }
 

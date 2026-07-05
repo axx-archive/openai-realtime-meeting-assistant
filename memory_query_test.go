@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -306,5 +307,170 @@ func TestQueryPrefersArtifactContext(t *testing.T) {
 	}
 	if app.queryPrefersArtifactContext("compare the roadmap cards") {
 		t.Fatal("flavored question naming no artifact must keep the board short-circuit")
+	}
+}
+
+// With an Anthropic key present, scout chat Q&A routes to Sonnet 5 with the
+// re-baselined 800-token budget at effort low; the gpt-5.5 responder must not
+// be touched even when an OpenAI key is also configured.
+func TestAnswerAssistantQueryRoutesToSonnetWithAnthropicKey(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("BONFIRE_CHAT_MODEL", "")
+
+	var got anthropicTextRequest
+	swapAnthropicTextResponder(t, func(_ context.Context, apiKey string, request anthropicTextRequest) (string, error) {
+		if apiKey != "sk-ant-test" {
+			t.Fatalf("apiKey=%q, want the Anthropic key", apiKey)
+		}
+		got = request
+		return "Pricing locked at $99/mo.", nil
+	})
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("OpenAI responder must not run when an Anthropic key is present")
+		return "", nil
+	})
+
+	answer, err := app.answerAssistantQueryWithModel(context.Background(), "what did we decide on pricing?", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("answerAssistantQueryWithModel: %v", err)
+	}
+	if answer != "Pricing locked at $99/mo." {
+		t.Fatalf("answer=%q, want the Sonnet answer", answer)
+	}
+	if got.Model != "claude-sonnet-5" {
+		t.Fatalf("model=%q, want claude-sonnet-5", got.Model)
+	}
+	if got.MaxTokens != 800 || got.Effort != "low" {
+		t.Fatalf("chat budget=%d/%q, want 800/low", got.MaxTokens, got.Effort)
+	}
+	if got.Instructions != assistantQueryInstructions() {
+		t.Fatal("Sonnet request must carry the same assistant-query instructions as the OpenAI path")
+	}
+	if !strings.Contains(got.Input, "what did we decide on pricing?") {
+		t.Fatalf("input missing the query: %q", got.Input)
+	}
+}
+
+// Keyless-Anthropic keeps the gpt-5.5 Responses path byte-for-byte: same
+// model dial, same 500-token budget, Anthropic seam untouched.
+func TestAnswerAssistantQueryKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	var got openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
+		if apiKey != "openai-key" {
+			t.Fatalf("apiKey=%q, want the OpenAI key", apiKey)
+		}
+		got = request
+		return "Pricing locked at $99/mo.", nil
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		t.Fatal("Anthropic responder must not run keyless")
+		return "", nil
+	})
+
+	if _, err := app.answerAssistantQueryWithModel(context.Background(), "what did we decide on pricing?", nil, nil, nil); err != nil {
+		t.Fatalf("answerAssistantQueryWithModel: %v", err)
+	}
+	if got.Model != meetingBrainModel() {
+		t.Fatalf("model=%q, want meetingBrainModel()", got.Model)
+	}
+	if got.MaxOutputTokens != 500 || got.ReasoningEffort != "low" {
+		t.Fatalf("openai budget=%d/%q, want unchanged 500/low", got.MaxOutputTokens, got.ReasoningEffort)
+	}
+}
+
+// Fully keyless (no OpenAI, no Anthropic) keeps today's polite configuration
+// error — the app never crashes or silently answers.
+func TestAnswerAssistantQueryKeylessBothStillErrors(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = ""
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	if _, err := app.answerAssistantQueryWithModel(context.Background(), "anything", nil, nil, nil); err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("keyless err=%v, want the OPENAI_API_KEY configuration error", err)
+	}
+}
+
+// The memory Q&A path follows the same routing rule: Sonnet 5 with the
+// 800-token chat budget when an Anthropic key is present.
+func TestAnswerMemoryQuestionRoutesToSonnetWithAnthropicKey(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("BONFIRE_CHAT_MODEL", "")
+
+	var got anthropicTextRequest
+	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		got = request
+		return "We locked pricing at $99/mo.", nil
+	})
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("OpenAI responder must not run when an Anthropic key is present")
+		return "", nil
+	})
+
+	entries := []meetingMemoryEntry{{
+		ID:        "decision-pricing",
+		Kind:      "decision",
+		Text:      "We locked pricing at $99/mo with two design partners.",
+		CreatedAt: time.Now().UTC(),
+		Metadata:  map[string]string{},
+	}}
+	answer, err := app.answerMemoryQuestionWithModel("what did we decide on pricing?", entries)
+	if err != nil {
+		t.Fatalf("answerMemoryQuestionWithModel: %v", err)
+	}
+	if answer != "We locked pricing at $99/mo." {
+		t.Fatalf("answer=%q, want the Sonnet answer", answer)
+	}
+	if got.Model != "claude-sonnet-5" || got.MaxTokens != 800 || got.Effort != "low" {
+		t.Fatalf("memory Q&A request=%q %d/%q, want claude-sonnet-5 800/low", got.Model, got.MaxTokens, got.Effort)
+	}
+	if got.Instructions != memoryQuestionInstructions() {
+		t.Fatal("Sonnet request must carry the same memory-question instructions as the OpenAI path")
+	}
+	if !strings.Contains(got.Input, "We locked pricing at $99/mo with two design partners.") {
+		t.Fatalf("input missing the memory context: %q", got.Input)
+	}
+}
+
+// Keyless-Anthropic memory Q&A keeps the gpt-5.5 path unchanged (700-token
+// budget), and the zero-entries early return survives on both routes.
+func TestAnswerMemoryQuestionKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	var got openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		got = request
+		return "answer", nil
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		t.Fatal("Anthropic responder must not run keyless")
+		return "", nil
+	})
+
+	if answer, err := app.answerMemoryQuestionWithModel("anything", nil); err != nil || answer != "" {
+		t.Fatalf("zero-entries answer=%q err=%v, want empty/nil early return", answer, err)
+	}
+
+	entries := []meetingMemoryEntry{{
+		ID:        "decision-pricing",
+		Kind:      "decision",
+		Text:      "We locked pricing at $99/mo.",
+		CreatedAt: time.Now().UTC(),
+		Metadata:  map[string]string{},
+	}}
+	if _, err := app.answerMemoryQuestionWithModel("what did we decide?", entries); err != nil {
+		t.Fatalf("answerMemoryQuestionWithModel: %v", err)
+	}
+	if got.MaxOutputTokens != 700 || got.Model != meetingBrainModel() {
+		t.Fatalf("openai budget=%d model=%q, want unchanged 700/meetingBrainModel()", got.MaxOutputTokens, got.Model)
 	}
 }

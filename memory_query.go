@@ -190,7 +190,8 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 	app.mu.Lock()
 	apiKey := app.apiKey
 	app.mu.Unlock()
-	if strings.TrimSpace(apiKey) == "" {
+	anthropicKey := currentAnthropicAPIKey()
+	if strings.TrimSpace(apiKey) == "" && anthropicKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
@@ -201,10 +202,23 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, qu
 	defer cancel()
 
 	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
+	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), history, time.Now(), includeBoard)
+	// Sonnet 5 fronts chat whenever an Anthropic key is present (packaging-os
+	// §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps the gpt-5.5 path
+	// below byte-for-byte so keyless deploys degrade exactly as before.
+	if anthropicKey != "" {
+		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
+			Model:        chatModel(),
+			Instructions: assistantQueryInstructions(),
+			Input:        input,
+			Effort:       "low",
+			MaxTokens:    anthropicChatMaxTokens,
+		})
+	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    assistantQueryInstructions(),
-		Input:           buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), history, time.Now(), includeBoard),
+		Input:           input,
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 500,
@@ -1018,7 +1032,8 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 	app.mu.Lock()
 	apiKey := app.apiKey
 	app.mu.Unlock()
-	if strings.TrimSpace(apiKey) == "" {
+	anthropicKey := currentAnthropicAPIKey()
+	if strings.TrimSpace(apiKey) == "" && anthropicKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 	if len(entries) == 0 {
@@ -1028,10 +1043,22 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 	ctx, cancel := context.WithTimeout(context.Background(), memoryQuestionRequestTimeout)
 	defer cancel()
 
+	input := buildMemoryQuestionInput(query, entries, time.Now())
+	// Same routing rule as answerAssistantQueryWithModel: Sonnet 5 when an
+	// Anthropic key is present, today's gpt-5.5 path unchanged when keyless.
+	if anthropicKey != "" {
+		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
+			Model:        chatModel(),
+			Instructions: memoryQuestionInstructions(),
+			Input:        input,
+			Effort:       "low",
+			MaxTokens:    anthropicChatMaxTokens,
+		})
+	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    memoryQuestionInstructions(),
-		Input:           buildMemoryQuestionInput(query, entries, time.Now()),
+		Input:           input,
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 700,

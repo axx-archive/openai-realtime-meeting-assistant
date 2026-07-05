@@ -77,6 +77,10 @@ type scoutChatMessageRecord struct {
 	PostedOnBehalfOf string                    `json:"postedOnBehalfOf,omitempty"`
 	Files            []scoutChatFileAttachment `json:"files,omitempty"`
 	Thread           *scoutChatThreadRef       `json:"thread,omitempty"`
+	// Proposal carries a router proposal card (Kind "proposal") — DATA the
+	// client renders as the confirmation trust surface, never an action. See
+	// the propose-confirm router in scout_chat.go.
+	Proposal *scoutRouterProposal `json:"proposal,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -201,6 +205,21 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "proposal" && r.Method == http.MethodPost {
+		var action scoutChatProposalAction
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&action); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read proposal action")
+			return
+		}
+		response, err := kanbanApp.resolveScoutChatProposal(r.Context(), user, threadID, action)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -438,9 +457,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	}
 
 	modelQuery := scoutChatMessageModelText(userMessage)
-	// Channels launch agent runs only on an explicit "mode:" prefix; private
-	// threads keep the conversational keyword detection.
-	mode := scoutChatThreadModeForText(text)
+	// Channels launch agent runs only on an explicit "mode:" prefix or an
+	// @scout mention + workstream keyword — the mention is itself the
+	// invocation. Private threads NEVER keyword-launch: the propose-confirm
+	// router below replaced scoutChatThreadModeForText (spec §2 — the only
+	// silent heavy invoke in the system, retired).
+	mode := ""
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		mode = scoutChatThreadModeForChannelText(text)
 	}
@@ -486,6 +508,34 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		response["artifact"] = agentThread.Artifact
 		response["actions"] = agentThread.Actions
 		return response, nil
+	}
+
+	// One routing turn for private threads (the typed twin of voice
+	// initiate_goal): the router may PROPOSE a tool run or a workstream — a
+	// proposal is DATA committed on the reply, NEVER a launch. The user's
+	// explicit confirm posts the identical spec the palette Run posts
+	// (POST /assistant/goal for tool runs, the proposal route for
+	// workstreams). Keyless deploys skip the turn inside
+	// routeScoutChatProposal and keep plain Q&A.
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		if proposal := app.routeScoutChatProposal(ctx, modelQuery, history); proposal != nil {
+			proposalMessage := scoutChatMessageRecord{
+				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:      scoutChatMessageKindProposal,
+				Role:      "scout",
+				Text:      proposal.Summary,
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Proposal:  proposal,
+			}
+			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, proposalMessage)
+			if err != nil {
+				return nil, err
+			}
+			response["answer"] = proposalMessage
+			response["proposal"] = proposal
+			response["thread"] = saved
+			return response, nil
+		}
 	}
 
 	result, err := app.resolveAssistantQueryContext(ctx, modelQuery, history)
@@ -534,6 +584,195 @@ func scoutWorkstreamReplyText(mode string) string {
 		return "on it — grill mode is running on the pitch. the scorecard lands in artifacts."
 	}
 	return ""
+}
+
+// scoutChatProposalAction is the POST /assistant/chat-threads/{id}/proposal
+// body: the user's verdict on one router proposal card. The card, not this
+// route, is the trust surface — this route records the verdict signal, flips
+// the persisted card inert, and (workstreams only) performs the now-explicit
+// launch. Tool-run confirms launch through POST /assistant/goal with the
+// identical palette spec; this route never duplicates that door.
+//
+// Only Action, MessageID, and Objective are read server-side: the verdict
+// resolves against the PERSISTED proposal record for MessageID, and Objective
+// is honored only because the card lets the user edit it before confirming.
+// Kind/ToolID/Mode/Query are still sent by older clients and deliberately
+// ignored — trusting them let a fabricated post launch arbitrary workstreams
+// and pollute the acceptance-rate signal.
+type scoutChatProposalAction struct {
+	Action    string `json:"action"` // accepted | dismissed
+	Kind      string `json:"kind"`   // ignored — stored record wins
+	ToolID    string `json:"toolId"` // ignored — stored record wins
+	Mode      string `json:"mode"`   // ignored — stored record wins
+	Objective string `json:"objective"`
+	Query     string `json:"query"` // ignored — stored record wins
+	MessageID string `json:"messageId"`
+}
+
+// resolveScoutChatProposal applies one accept/dismiss verdict. Claim first:
+// the verdict binds to the PERSISTED proposal record (loaded by message id
+// under the thread lock, still pending) — never to client-supplied
+// kind/mode/toolId — so a replayed or double-posted action cannot launch a
+// duplicate workstream, and a fabricated action for a proposal the router
+// never made cannot pollute the accept/dismiss acceptance-rate signal (§2
+// misfire economics — Q5 fuel from day one). Then the signal, then the side
+// effect the verdict earns. A dismissal re-asks the STORED query through the
+// normal Q&A path and commits only the scout answer — the user already said
+// it once.
+func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *userAccount, threadID string, action scoutChatProposalAction) (map[string]any, error) {
+	verb := strings.ToLower(strings.TrimSpace(action.Action))
+	switch verb {
+	case "accepted", "dismissed":
+	default:
+		return nil, fmt.Errorf("proposal action must be accepted or dismissed")
+	}
+	messageID := strings.TrimSpace(action.MessageID)
+	if messageID == "" {
+		return nil, fmt.Errorf("proposal message id is required")
+	}
+
+	// Atomically flip the still-pending card to its verdict and read back the
+	// stored proposal. A message that carries no proposal, or one already
+	// resolved, rejects HERE — before any signal is recorded or launch runs.
+	proposal, err := app.claimScoutChatProposal(threadID, user.Email, messageID, verb)
+	if err != nil {
+		return nil, err
+	}
+
+	signalEvent, valence := signalEventRouterProposalAccepted, signalValencePositive
+	if verb == "dismissed" {
+		signalEvent, valence = signalEventRouterProposalDismissed, signalValenceNegative
+	}
+	// The objective is the ONE field the card lets the user edit before
+	// confirming, so the request value wins over the stored one; kind, mode,
+	// toolId, and query always ride the stored record.
+	objective := firstNonBlank(strings.TrimSpace(action.Objective), strings.TrimSpace(proposal.Objective))
+	app.recordSignalEvent(user.Name, signalEvent, valence, "", "", map[string]string{
+		"toolId":    firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode)),
+		"objective": objective,
+	})
+
+	response := map[string]any{"ok": true}
+
+	if verb == "accepted" {
+		// Tier 1 only: the workstream confirm launches here — exactly the
+		// explicit single-shot path channels use. Tier 2 (tool_run) launches
+		// via POST /assistant/goal from the card's Run button; this branch
+		// records its signal only.
+		if strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) {
+			mode := strings.ToLower(strings.TrimSpace(proposal.Mode))
+			switch mode {
+			case "research", "design", "grill", "workflow":
+			default:
+				return nil, fmt.Errorf("workstream mode must be research, design, grill, or workflow")
+			}
+			if objective == "" {
+				return nil, fmt.Errorf("workstream objective is required")
+			}
+			agentThread, err := app.launchAgentThreadWithOrigin(mode, objective, user.Name, map[string]string{
+				"originKind": agentThreadOriginPrivateThread,
+				"originId":   threadID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			assistantMessage := scoutChatMessageRecord{
+				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:      "thread",
+				Role:      "scout",
+				Text:      assistantToolLabel(mode) + " workstream confirmed — running now",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Thread: &scoutChatThreadRef{
+					ID:         agentThread.ID,
+					Mode:       agentThread.Mode,
+					Query:      agentThread.Query,
+					Status:     agentThread.Status,
+					ArtifactID: agentThread.Artifact.ID,
+				},
+			}
+			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
+			if err != nil {
+				return nil, err
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["agentThread"] = agentThread
+			response["artifact"] = agentThread.Artifact
+			response["actions"] = agentThread.Actions
+		}
+		return response, nil
+	}
+
+	// Dismissed: the "just answer instead" escape re-asks the STORED query
+	// (the message that produced the proposal) as Tier 0.
+	query := strings.TrimSpace(proposal.Query)
+	if query == "" {
+		return response, nil
+	}
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := app.resolveAssistantQueryContext(ctx, query, scoutChatHistoryFromThread(thread))
+	if err != nil {
+		return nil, err
+	}
+	answer := strings.TrimSpace(result.answer)
+	if answer == "" {
+		answer = "no answer yet"
+	}
+	assistantMessage := scoutChatMessageRecord{
+		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+		Kind:      "message",
+		Role:      "scout",
+		Text:      answer,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
+	if err != nil {
+		return nil, err
+	}
+	response["answer"] = assistantMessage
+	response["thread"] = saved
+	return response, nil
+}
+
+// claimScoutChatProposal atomically resolves one persisted proposal card
+// through the same per-thread lock + re-read + save path as message commits:
+// it loads the card by message id, requires it to still be PENDING (empty
+// status — first verdict wins; a replay or double-post rejects), stamps the
+// verdict, persists, and returns a copy of the stored proposal record. The
+// caller acts on that record, never on request-body fields.
+func (app *kanbanBoardApp) claimScoutChatProposal(threadID string, viewerEmail string, messageID string, status string) (scoutRouterProposal, error) {
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutRouterProposal{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutRouterProposal{}, fmt.Errorf("chat thread is archived")
+	}
+	for index := range thread.Messages {
+		message := &thread.Messages[index]
+		if message.ID != messageID || message.Proposal == nil {
+			continue
+		}
+		if message.Proposal.Status != "" {
+			return scoutRouterProposal{}, fmt.Errorf("proposal was already %s", message.Proposal.Status)
+		}
+		message.Proposal.Status = status
+		thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutRouterProposal{}, err
+		}
+		claimed := *message.Proposal
+		deliverScoutChatThreadUpdate(thread, *message)
+		return claimed, nil
+	}
+	return scoutRouterProposal{}, fmt.Errorf("proposal message not found")
 }
 
 // scoutChatAuthorName resolves the display name stamped on channel messages.

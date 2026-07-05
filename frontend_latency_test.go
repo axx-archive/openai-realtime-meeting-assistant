@@ -296,11 +296,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
           <button class="tool-rail__tool" type="button" data-tool="artifacts" aria-label="Intelligence" aria-pressed="false">`,
 		`<span class="tool-rail__label">intel</span>`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
-		`<div class="scout-work-starters" aria-label="Start Scout work">`,
-		`data-scout-starter="research"`,
-		`data-scout-starter="design"`,
-		`data-scout-starter="grill"`,
-		`data-scout-starter="workflow"`,
+		// The 4 composer starter pills were cut with the propose-confirm
+		// router (spec §2); frontend_router_test.go pins their absence and the
+		// confirmation card that replaced them.
 		"function renderArtifacts()",
 		`id="chatAgentThreads" class="chat-agent-threads"`,
 		"event: 'scout_chat_reset'",

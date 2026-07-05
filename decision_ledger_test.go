@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -297,6 +301,214 @@ func TestActiveDecisionEntriesNewestFirstActiveOnly(t *testing.T) {
 			ids = append(ids, entry.ID)
 		}
 		t.Fatalf("active entries=%v, want newest-first active only", ids)
+	}
+}
+
+// markDecisionSuperseded stamps the reserved status + supersededBy/At and the
+// decision drops out of every active lane: the Scout query pinning, the
+// snapshot's active ranking — while the row itself survives as history.
+func TestMarkDecisionSupersededDropsFromActiveLanes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, _, err := app.memory.appendDecision("decision-old", "Grill tier is priced at $500 per month.", map[string]string{"status": decisionStatusActive}); err != nil {
+		t.Fatalf("append old: %v", err)
+	}
+	if _, _, err := app.memory.appendDecision("decision-new", "Grill tier is priced at $750 per month.", map[string]string{"status": decisionStatusActive}); err != nil {
+		t.Fatalf("append new: %v", err)
+	}
+
+	updated, changed, err := app.markDecisionSuperseded("decision-old", "decision-new")
+	if err != nil || !changed {
+		t.Fatalf("markDecisionSuperseded changed=%v err=%v, want true/nil", changed, err)
+	}
+	if updated.Metadata["status"] != decisionStatusSuperseded || updated.Metadata["supersededBy"] != "decision-new" {
+		t.Fatalf("metadata=%v, want superseded status pointing at decision-new", updated.Metadata)
+	}
+	if _, parseErr := time.Parse(time.RFC3339Nano, updated.Metadata["supersededAt"]); parseErr != nil {
+		t.Fatalf("supersededAt=%q, want an RFC3339Nano stamp: %v", updated.Metadata["supersededAt"], parseErr)
+	}
+
+	// Active pinning lane: only the superseding decision remains.
+	entries := app.activeDecisionEntries(decisionContextLimit)
+	if len(entries) != 1 || entries[0].ID != "decision-new" {
+		t.Fatalf("active entries=%v, want only decision-new", entries)
+	}
+	input := buildAssistantQueryInput("what did we decide on grill pricing?", nil, nil, app.activeDecisionEntries(decisionContextLimit), nil, time.Now(), false)
+	if !strings.Contains(input, "$750 per month") || strings.Contains(input, "$500 per month") {
+		t.Fatalf("query input must pin the superseding decision and drop the superseded one: %s", input)
+	}
+
+	// The wire payload carries the supersession pointers; the snapshot ranks
+	// the row after the active set instead of deleting it.
+	payload := decisionPayload(updated)
+	if payload["status"] != decisionStatusSuperseded || payload["supersededBy"] != "decision-new" || payload["supersededAt"] == "" {
+		t.Fatalf("payload=%v, want status/supersededBy/supersededAt on the wire", payload)
+	}
+	snapshot := app.decisionLedgerSnapshot(10)
+	if len(snapshot) != 2 || snapshot[0]["id"] != "decision-new" || snapshot[1]["id"] != "decision-old" || snapshot[1]["status"] != decisionStatusSuperseded {
+		t.Fatalf("snapshot=%v, want the superseded row ranked after active, never dropped", snapshot)
+	}
+}
+
+// Supersession is idempotent — first supersession wins, retries never rewrite
+// the stamp — and the stamp survives a store reload (JSONL rewrite).
+func TestMarkDecisionSupersededIdempotentAndSurvivesReload(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	for id, statement := range map[string]string{
+		"decision-old":   "Old pricing decision.",
+		"decision-new":   "New pricing decision.",
+		"decision-other": "Unrelated ownership decision.",
+	} {
+		if _, _, err := app.memory.appendDecision(id, statement, map[string]string{"status": decisionStatusActive}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+	}
+
+	first, changed, err := app.markDecisionSuperseded("decision-old", "decision-new")
+	if err != nil || !changed {
+		t.Fatalf("first supersede changed=%v err=%v, want true/nil", changed, err)
+	}
+	stampedAt := first.Metadata["supersededAt"]
+
+	// Retry with the same superseding id: no-op, stamp untouched.
+	again, changed, err := app.markDecisionSuperseded("decision-old", "decision-new")
+	if err != nil || changed {
+		t.Fatalf("idempotent retry changed=%v err=%v, want false/nil", changed, err)
+	}
+	if again.Metadata["supersededAt"] != stampedAt {
+		t.Fatalf("supersededAt=%q, want the original stamp %q preserved", again.Metadata["supersededAt"], stampedAt)
+	}
+
+	// A different superseding id cannot rewrite history either.
+	rewrite, changed, err := app.markDecisionSuperseded("decision-old", "decision-other")
+	if err != nil || changed {
+		t.Fatalf("rewrite attempt changed=%v err=%v, want false/nil", changed, err)
+	}
+	if rewrite.Metadata["supersededBy"] != "decision-new" || rewrite.Metadata["supersededAt"] != stampedAt {
+		t.Fatalf("metadata=%v, want the FIRST supersession to win", rewrite.Metadata)
+	}
+
+	// Reload from the same JSONL: the stamp and the active filter both hold.
+	reloaded, err := newMeetingMemoryStore(os.Getenv("MEETING_MEMORY_PATH"))
+	if err != nil {
+		t.Fatalf("reload memory store: %v", err)
+	}
+	entry, found := reloaded.entryByKindAndID(meetingMemoryKindDecision, "decision-old")
+	if !found || entry.Metadata["status"] != decisionStatusSuperseded || entry.Metadata["supersededBy"] != "decision-new" || entry.Metadata["supersededAt"] != stampedAt {
+		t.Fatalf("reloaded entry=%v found=%v, want the supersession stamp to survive reload", entry.Metadata, found)
+	}
+}
+
+// markDecisionSuperseded validation: both ids required and on the ledger, and
+// a decision can never supersede itself.
+func TestMarkDecisionSupersededValidation(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, _, err := app.memory.appendDecision("decision-1", "The only decision.", map[string]string{"status": decisionStatusActive}); err != nil {
+		t.Fatalf("append decision: %v", err)
+	}
+
+	if _, _, err := app.markDecisionSuperseded("decision-1", "decision-1"); err == nil || !strings.Contains(err.Error(), "supersede itself") {
+		t.Fatalf("self-supersede err=%v, want rejection", err)
+	}
+	if _, _, err := app.markDecisionSuperseded("", "decision-1"); err == nil {
+		t.Fatal("blank decision id must error")
+	}
+	if _, _, err := app.markDecisionSuperseded("decision-missing", "decision-1"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing decision err=%v, want not-found", err)
+	}
+	if _, _, err := app.markDecisionSuperseded("decision-1", "decision-missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing superseding decision err=%v, want not-found — the chain must stay resolvable", err)
+	}
+	// Nothing above may have flipped the status.
+	if entries := app.activeDecisionEntries(5); len(entries) != 1 || entries[0].ID != "decision-1" {
+		t.Fatalf("active entries=%v, want decision-1 untouched by rejected calls", entries)
+	}
+}
+
+// POST /assistant/decisions/supersede is the production invocation seam for
+// markDecisionSuperseded (Wave 2 item 11) — session-gated like the other
+// assistant routes, so the reserved superseded status is actually reachable:
+// without this route nothing could retire a stale decision from the pinned
+// "Decisions on record" lane.
+func TestAssistantDecisionSupersedeHandler(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	for id, statement := range map[string]string{
+		"decision-old": "Grill tier is priced at $500 per month.",
+		"decision-new": "Grill tier is priced at $750 per month.",
+	} {
+		if _, _, err := kanbanApp.memory.appendDecision(id, statement, map[string]string{"status": decisionStatusActive}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+	}
+	body := `{"decisionId":"decision-old","supersededById":"decision-new"}`
+
+	// Method gate.
+	rec := httptest.NewRecorder()
+	assistantDecisionSupersedeHandler(rec, httptest.NewRequest(http.MethodGet, "/assistant/decisions/supersede", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET status=%d, want 405", rec.Code)
+	}
+
+	// Session gate: signed-out flips nothing.
+	rec = httptest.NewRecorder()
+	assistantDecisionSupersedeHandler(rec, httptest.NewRequest(http.MethodPost, "/assistant/decisions/supersede", strings.NewReader(body)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out status=%d, want 401", rec.Code)
+	}
+	if entries := kanbanApp.activeDecisionEntries(5); len(entries) != 2 {
+		t.Fatalf("active entries=%d, want both untouched after the rejected call", len(entries))
+	}
+
+	// Signed-in: the stamp lands and the wire payload carries the chain.
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	post := func(payload string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/assistant/decisions/supersede", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		assistantDecisionSupersedeHandler(rec, req)
+		return rec
+	}
+	rec = post(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		OK       bool           `json:"ok"`
+		Changed  bool           `json:"changed"`
+		Decision map[string]any `json:"decision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !payload.OK || !payload.Changed {
+		t.Fatalf("payload=%+v, want ok+changed", payload)
+	}
+	if payload.Decision["status"] != decisionStatusSuperseded || payload.Decision["supersededBy"] != "decision-new" {
+		t.Fatalf("decision payload=%v, want the supersession chain", payload.Decision)
+	}
+	if entries := kanbanApp.activeDecisionEntries(5); len(entries) != 1 || entries[0].ID != "decision-new" {
+		t.Fatalf("active entries=%v, want only decision-new after the route ran", entries)
+	}
+
+	// Idempotent retry reports changed=false; unknown ids are 404; junk is 400.
+	rec = post(body)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"changed":true`) {
+		t.Fatalf("retry status=%d body=%s, want 200 with changed=false", rec.Code, rec.Body.String())
+	}
+	if rec := post(`{"decisionId":"decision-missing","supersededById":"decision-new"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing-id status=%d, want 404", rec.Code)
+	}
+	if rec := post(`{"decisionId":"decision-old","supersededById":""}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank superseding id status=%d, want 400", rec.Code)
 	}
 }
 

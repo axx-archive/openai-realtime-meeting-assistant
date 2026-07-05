@@ -206,6 +206,36 @@ var toolContractHeadings = map[string][]string{
 	"update_memo_v1":     {"What moved", "Decisions made", "What's next", "What we need", "Provenance"},
 }
 
+// --- Deterministic law sweeps (Phase 1 mechanisms, zero model cost) ----------
+
+// toolLawSweepPrefix opens every law-sweep reason so the engine can stamp the
+// verdict as mechanical ("law_sweep") rather than a reviewer-model judgement.
+const toolLawSweepPrefix = "law sweep"
+
+// toolLawSweep runs the zero-model-cost deterministic checks on a deliverable
+// artifact BEFORE any reviewer tokens are spent on it: (a) every required
+// contract heading is present (toolContractHeadings); (b) a client-facing
+// contract obeys the packaging copy law: no em dashes. A violation returns the
+// mechanical reason the engine short-circuits to a revise verdict with — work a
+// grep already proves non-compliant never reaches the reviewer model.
+func toolLawSweep(tool packagingTool, body string) (string, bool) {
+	var missing []string
+	for _, heading := range toolContractHeadings[tool.Contract] {
+		if !strings.Contains(body, heading) {
+			missing = append(missing, heading)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Sprintf("%s (%s): required contract heading(s) missing: %s. Emit the output contract's exact headings.",
+			toolLawSweepPrefix, tool.Contract, strings.Join(missing, ", ")), true
+	}
+	if tool.ClientFacing && strings.Contains(body, "—") {
+		return fmt.Sprintf("%s (%s): the copy contains an em dash; client-facing packaging copy never uses em dashes (the packaging copy law). Rewrite those sentences without them.",
+			toolLawSweepPrefix, tool.Contract), true
+	}
+	return "", false
+}
+
 // toolPromptBody returns the tool's body (role, evidence standard, exact output
 // contract, gate rubric) that drops into the wrapper's {{tool_output_contract}}
 // slot. The three exemplars are verbatim from domain §2.3; the other nine follow
@@ -315,6 +345,7 @@ audience and the comp. Never generic. One page. Ruthless.
   - Reader-fit (bar 8): the lead and the ask match {{audience}}.
   - Compression (bar 8): it is genuinely one page, no filler, every line earns.
   - Voice (bar 7): it reads like a sharp studio, not a template.
+  - Candor (bar 7): names real risks/losses plainly; no hedging or hype.
   kill_condition: any claim on the page with no receipt in the appendix.
   ship_if: all >= bar AND kill_condition not triggered.`
 
@@ -676,6 +707,7 @@ shippable without that approval.
   - Forwardable voice (bar 7): reads like a memo an LP could receive unedited.
   - Completeness (bar 7): what moved / decisions / what's next / what we need
     all present.
+  - Candor (bar 7): names real risks/losses plainly; no hedging or hype.
   kill_condition: any stated development not traceable to a decision, meeting,
     artifact, or package stage-advance on record.
   ship_if: all >= bar AND kill_condition not triggered.`

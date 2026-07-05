@@ -16,6 +16,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +27,12 @@ const (
 	decisionLedgerAgentName       = "decision ledger"
 	defaultDecisionLedgerInterval = 5 * time.Minute
 	decisionLedgerRequestTimeout  = 90 * time.Second
-	// decisionStatusActive is the only status this wave writes; "superseded"
-	// (+ metadata "supersededBy") is reserved schema for a later supersede tool.
-	decisionStatusActive = "active"
+	// decisionStatusActive is what the extraction pass writes;
+	// decisionStatusSuperseded is stamped by markDecisionSuperseded (+ metadata
+	// "supersededBy"/"supersededAt") when a newer decision replaces an entry —
+	// superseded rows keep their history but leave every active lane.
+	decisionStatusActive     = "active"
+	decisionStatusSuperseded = "superseded"
 	// decisionDedupeJaccard: a new statement whose normalized token set
 	// overlaps an existing active decision at or above this ratio is a
 	// restatement, not a new decision.
@@ -184,6 +189,105 @@ func (app *kanbanBoardApp) activeDecisionEntries(limit int) []meetingMemoryEntry
 	return newest
 }
 
+// markDecisionSuperseded implements the reserved superseded path (§5 / Wave 2
+// item 11): the older decision keeps its row — the ledger is history, never a
+// delete — but drops out of every active lane built on activeDecisionEntries:
+// the Scout query pinning (memory_query.go's "Decisions on record"), the
+// server-side dedupe window, and the already-recorded exclusion list. The
+// superseding decision must itself be on the ledger, so the chain is always
+// resolvable. Idempotent: a decision that is already superseded stays exactly
+// as first stamped (first supersession wins — retries and double-taps never
+// rewrite history), and the stamp rides the store's JSONL rewrite so it
+// survives reload.
+func (app *kanbanBoardApp) markDecisionSuperseded(decisionID string, supersededByID string) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	decisionID = strings.TrimSpace(decisionID)
+	supersededByID = strings.TrimSpace(supersededByID)
+	if decisionID == "" || supersededByID == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("decision id and superseding decision id are required")
+	}
+	if decisionID == supersededByID {
+		return meetingMemoryEntry{}, false, fmt.Errorf("a decision cannot supersede itself")
+	}
+	entry, found := app.memory.entryByKindAndID(meetingMemoryKindDecision, decisionID)
+	if !found {
+		return meetingMemoryEntry{}, false, fmt.Errorf("decision %s not found", decisionID)
+	}
+	if _, found := app.memory.entryByKindAndID(meetingMemoryKindDecision, supersededByID); !found {
+		return meetingMemoryEntry{}, false, fmt.Errorf("superseding decision %s not found", supersededByID)
+	}
+	if entry.Metadata["status"] == decisionStatusSuperseded {
+		return entry, false, nil
+	}
+	updated, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, decisionID, entry.Text, map[string]string{
+		"status":       decisionStatusSuperseded,
+		"supersededBy": supersededByID,
+		"supersededAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	if changed {
+		// Same wire event the extraction pass broadcasts, so the mission
+		// ledger re-ranks the row out of the active lane live.
+		broadcastOfficeKanbanEvent("decision", decisionPayload(updated))
+	}
+	return updated, changed, nil
+}
+
+// assistantDecisionSupersedeHandler is the invocation seam for the superseded
+// path (§5 / Wave 2 item 11): POST {decisionId, supersededById} retires a
+// stale decision from every active lane. Same origin+session gates as
+// assistantGoalCancelHandler; any signed-in user — the ledger is shared team
+// knowledge with no per-decision owner, the operation is non-destructive
+// (history is kept, chain recorded), and markDecisionSuperseded validates
+// both ids against the ledger itself.
+func assistantDecisionSupersedeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		DecisionID     string `json:"decisionId"`
+		SupersededByID string `json:"supersededById"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read supersede request")
+		return
+	}
+
+	entry, changed, err := kanbanApp.markDecisionSuperseded(payload.DecisionID, payload.SupersededByID)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeAuthError(w, status, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"changed":  changed,
+		"decision": decisionPayload(entry),
+	})
+}
+
 // decisionLedgerSnapshot shapes the newest decisions for the all-users
 // mission payload: active first, newest first within each status, capped.
 // SAFE for the signed-in-wide gate: statements are model-synthesized meeting
@@ -223,6 +327,12 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 	}
 	if packageID := strings.TrimSpace(entry.Metadata["packageId"]); packageID != "" {
 		payload["packageId"] = packageID
+	}
+	if supersededBy := strings.TrimSpace(entry.Metadata["supersededBy"]); supersededBy != "" {
+		payload["supersededBy"] = supersededBy
+	}
+	if supersededAt := strings.TrimSpace(entry.Metadata["supersededAt"]); supersededAt != "" {
+		payload["supersededAt"] = supersededAt
 	}
 
 	return payload
