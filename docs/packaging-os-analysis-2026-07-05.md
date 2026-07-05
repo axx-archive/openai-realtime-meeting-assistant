@@ -169,7 +169,7 @@ For a company whose superpower is packaging, this is the single highest-leverage
 
 **Deal Room becomes an artifact gallery**: binder narrative stays as the escaped cover page; the package's `final` artifacts link to their full-fidelity render routes behind it. Binder tuples (packages.go:603) gain type/version/gateOutcome so the binder reads "Deck v3 — gated 9.2, presenter-ready," and package_assembly's interlock gate (§3) runs across the same set.
 
-**Deferred deliberately:** the server-side render toolchain (chromium + poppler for HTML→flattened-PDF and rendered-page jury images) is the packaging-*production* dependency, not the viewer's. Agents produce HTML today; the OS's missing job — store, version, gate, display, share — is independent and comes first.
+**PDF export — pulled forward by founder decision (2026-07-05).** The original plan deferred the render toolchain to Wave 5; the founder requires that a user who wants a PDF export of the deck + talk-track can get one from the OS, matching the /packaging skill's package spec. The cheap path the original estimate missed: the codex-runner sidecar pattern (same Go binary, a mode flag, file-per-job queue, authenticated callback) is exactly the right chassis. Wave 3 adds a **render-runner sidecar**: its own image layers chromium + poppler-utils over the base; an `export_pdf` job takes an html_deck artifact → headless-chromium print-to-pdf (`--no-pdf-header-footer --virtual-time-budget=15000`) → `pdftoppm -jpeg -r 144` → pure-Go JPEG→PDF reassembly (the skill's PIL step needs no Python — DCTDecode page imposition is ~200 lines of Go) → blob store → attached as a `pdf` asset on the same artifact, with an "Export PDF" button in the viewer. The talk-track/paper kit ("The Talk", "The Wall") renders from the paper-kit template as **text-native** PDFs (no blends, no flatten — direct print-to-pdf). The skill's production trap is law server-side too: never ship the layered print; the flattened ~5MB raster is the deliverable. This also pre-builds the rendered-page images Wave 5's vision slide juries need. What remains genuinely deferred: the in-OS imagery pipeline (Midjourney has no API) and vision juries themselves.
 
 ---
 
@@ -235,17 +235,18 @@ Dependencies honored: OPS-3 gates everything agentic (launchGoalThread 503s keyl
 12. (M) **Panel + gate primitives** as engine steps (goroutine fan-out, strict-JSON pattern); **close the grill loop** as first consumer (objection_ledger_v1, persona re-review, verified-fix readiness dial).
 13. (M) **Blob store** (data/blobs/<sha256>) + native PDF embed; formalize the Artifact model (type/version/provenance); artifact-list pagination + generic download.
 14. (M) **Tokened share links** with expiry/revocation/open-logging, server-side final+approved gating.
+14b. (M) **PDF export pipeline** (pulled forward from Wave 5 by founder decision): render-runner sidecar on the codex-runner chassis (own image: chromium + poppler-utils), `export_pdf` job = print → rasterize 144dpi → pure-Go JPEG→PDF flatten → blob store → `pdf` asset on the artifact + "Export PDF" button; paper-kit (talk-track) renders text-native. Depends on item 13 (blob store).
 15. (M) **Taste Analyst worker** + profile/house-style pinning into chat and goal grounding; signal compaction; make save_what_worked emit real lessons.
 16. (M) Review-model split: BONFIRE_REVIEW_MODEL=claude-opus-4-8 via the assignedRunner pattern (goal_engine.go:737-754).
 
 ### Wave 4 — The flagship (L, ~4-6 weeks)
 17. (M) **ProcessDefinition** (versioned Go structs, per-process budgets, per-stage checkpointing, served through GET /assistant/tools).
-18. (L) **packaging_studio**: INTAKE → RED-TEAM → COMPETE → WRITE → GATE → VOICE → SHIP (HTML deck + rigor companion + findings record attached to the package). Imagery = client-supplied; no PDF flatten. Four human touchpoints wired to existing card/approval UI.
+18. (L) **packaging_studio**: INTAKE → RED-TEAM → COMPETE → WRITE → GATE → VOICE → SHIP (HTML deck + **flattened deck PDF + The Talk via the Wave-3 render-runner** + rigor companion + findings record, all attached to the package). Imagery = client-supplied. Four human touchpoints wired to existing card/approval UI.
 19. (M) **Deal Room artifact gallery** + package_assembly as the real interlock compiler.
 20. (M) **House-Style Distiller**; house judge persona + banned-patterns inheritance into packaging_studio and grill.
 
 ### Wave 5 — Production polish (L, when the flagship earns it)
-21. (L) Server-side render toolchain (chromium + poppler sidecar) → flattened-PDF export + rendered-page images; then vision slide juries via the raw-content image seam (agent_runner_anthropic.go:96-99). (Later) API image provider for the imagery stage; memory-store split if signal volume demands it.
+21. (L) Vision slide juries via the raw-content image seam (agent_runner_anthropic.go:96-99), consuming the render-runner's page images (toolchain itself moved to Wave 3 item 14b). (Later) API image provider for the imagery stage; memory-store split if signal volume demands it.
 
 ## What we are explicitly NOT doing
 
@@ -253,7 +254,7 @@ Dependencies honored: OPS-3 gates everything agentic (launchGoalThread 503s keyl
 - **No silent intelligent routing.** The confirmation tap is mandatory for goal launches until per-user quotas exist — and probably after.
 - **No ambient-worker migration off gpt-5.5.** Working, cheap, one seam. Opportunistic later, not now.
 - **No single-vendor purity.** Voice stays OpenAI permanently; chase coherence on the text/agentic side only.
-- **No in-app Midjourney and no PDF-flatten pipeline in packaging v1.** Interactive browser sessions and chromium/poppler are v1 blockers for zero narrative value.
+- **No in-app Midjourney.** Interactive browser sessions can't run server-side; imagery stays client-supplied until an API image provider lands. (The PDF-flatten pipeline was originally on this list; the founder pulled it into Wave 3 — item 14b — because the send-anywhere diligence packet is a real deliverable and the codex-runner sidecar pattern makes it cheap.)
 - **No loosening of the markdown renderer's escaping.** Fidelity comes from the separate sandboxed route; the injection-safe renderer is correct for text.
 - **No embeddings/vector search.** Pinning delivers the learned profiles reliably; lexical recall is fine for a 6-person office this year.
 - **No new survey surface.** Two chips on existing cards, rate-limited server-side, or nothing.
