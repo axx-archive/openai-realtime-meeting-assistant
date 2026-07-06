@@ -33,7 +33,7 @@ func TestIndexChatMessageDeleteControl(t *testing.T) {
 		"item.classList.add('show-delete')",
 		// own-message gating on each surface (the server enforces the same)
 		"if (own && message?.id) {",
-		"if (kind === 'user' && message?.id) {",
+		"if (kind === 'user' && message?.id && (authorEmail || !chatThreadIsChannel(selectedScoutChatThread()))) {",
 		// the CSS: hidden until hover/focus/long-press, danger only when armed
 		".scout-chat-msg:hover .scout-chat-msg__delete,",
 		".scout-chat-msg.show-delete .scout-chat-msg__delete {",

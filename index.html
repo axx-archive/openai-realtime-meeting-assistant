@@ -32966,7 +32966,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        thread.messages = messages.filter(candidate => String(candidate?.id || '') !== String(messageId))
 	        upsertScoutChatThread(thread, { select: false })
 	        if (activeScoutThreadId === String(threadId)) {
+	          // deleting re-renders the whole feed; a reader scrolled up (the
+	          // find-and-delete flow this exists for) must not get yanked to the
+	          // bottom by the re-append stick checks
+	          const stick = scoutChatIsNearBottom()
+	          const scrollTop = scoutChatThread.scrollTop
 	          renderActiveScoutThread()
+	          if (!stick) {
+	            scoutChatThread.scrollTop = scrollTop
+	          }
 	        }
 	      }
 
@@ -36577,8 +36585,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // card 073: your own committed message carries the delete control —
 	        // peer and scout bubbles never do (the server enforces the same
 	        // authorship rule). It rides the article, beside the bubble, so the
-	        // follow-up meta lift below never eats it.
-	        if (kind === 'user' && message?.id) {
+	        // follow-up meta lift below never eats it. A channel message from
+	        // before author stamping has no authorEmail — authorship is
+	        // unprovable and the server would refuse, so no control there
+	        // (private threads are single-author and keep it).
+	        if (kind === 'user' && message?.id && (authorEmail || !chatThreadIsChannel(selectedScoutChatThread()))) {
 	          node.insertBefore(attachChatMessageDeleteControl(node, () => deleteScoutChatMessage(String(message.id))), node.firstChild)
 	        }
 	        if (isFollowup) {
