@@ -445,12 +445,14 @@ func TestCodexProposalActionEndpointRejectsBadPaths(t *testing.T) {
 	}
 }
 
-// CARD 075 ("dismissed by Tyler, then it reappears"): settling a proposal
-// settles the propose-time broadcast nudge with it. The propose path stamps
-// the proposal id onto the record, resolution rewrites the stale "confirm to
-// launch" text into the outcome and stamps the resolver read — so the record
-// never replays into the resolver's unread backlog on reconnect/rejoin, on
-// any of their sockets — while everyone else's backlog carries the outcome.
+// CARD 075 ("dismissed by Tyler, then it reappears") + CARDS 062+063:
+// settling a proposal settles the propose-time broadcast nudge with it. The
+// propose path stamps the proposal id onto the record; resolution rewrites
+// the stale "confirm to launch" text into the outcome and stamps ResolvedAt,
+// which reads the record as acknowledged for EVERY account — any signed-in
+// user could have acted, so once someone has, the nudge never replays into
+// anyone's unread backlog on reconnect/rejoin. A confirm also stamps the
+// launched run's artifact so the bell entry routes to the workflow status.
 func TestCodexProposalResolutionSettlesBroadcastNotification(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 
@@ -503,6 +505,9 @@ func TestCodexProposalResolutionSettlesBroadcastNotification(t *testing.T) {
 	if !notificationReadBy(settled, "tyler@shareability.com") {
 		t.Fatal("the dismisser must be stamped read on the propose-time nudge")
 	}
+	if settled.ResolvedAt == "" {
+		t.Fatal("resolution must stamp ResolvedAt so the nudge settles for every account")
+	}
 
 	// The dismisser's rejoin replays an empty backlog: the record must not
 	// come back from the dead on a fresh socket for the same account.
@@ -517,32 +522,35 @@ func TestCodexProposalResolutionSettlesBroadcastNotification(t *testing.T) {
 		t.Fatalf("tyler backlog=%#v, want empty after dismissing the proposal", tylerBacklog)
 	}
 
-	// Everyone else still gets the record — rewritten to the outcome and
-	// carrying the linkage the client bell rewrite keys on.
+	// CARDS 062+063: the settle reads for every account, not just the
+	// resolver — tom's rejoin replays an empty backlog too, and his full
+	// list carries the outcome as read, still keyed by the proposal id.
 	tomConn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
 	writeNativeWebsocketEvent(t, tomConn, "participant", map[string]any{})
 	raw = waitForKanbanEvent(t, tomConn, "notification_backlog", 5*time.Second)
-	var tomBacklog []struct {
-		ID         string `json:"id"`
-		Text       string `json:"text"`
-		ProposalID string `json:"proposalId"`
-	}
+	var tomBacklog []map[string]any
 	if err := json.Unmarshal(raw, &tomBacklog); err != nil {
 		t.Fatalf("decode tom backlog: %v", err)
 	}
-	if len(tomBacklog) != 1 || tomBacklog[0].ID != record.ID {
-		t.Fatalf("tom backlog=%#v, want exactly the settled nudge %s", tomBacklog, record.ID)
+	if len(tomBacklog) != 0 {
+		t.Fatalf("tom backlog=%#v, want empty once anyone settled the proposal", tomBacklog)
 	}
-	if !strings.Contains(tomBacklog[0].Text, "dismissed by Tyler") || strings.Contains(tomBacklog[0].Text, "confirm to launch") {
-		t.Fatalf("tom backlog text=%q, want the outcome instead of the stale confirm nudge", tomBacklog[0].Text)
+	tomList := kanbanApp.notificationsForUser("tom@shareability.com", notificationListLimit)
+	if len(tomList) != 1 || tomList[0]["id"] != record.ID {
+		t.Fatalf("tom list=%#v, want exactly the settled nudge %s", tomList, record.ID)
 	}
-	if tomBacklog[0].ProposalID != dismissID {
-		t.Fatalf("tom backlog proposalId=%q, want %q", tomBacklog[0].ProposalID, dismissID)
+	if text := asString(tomList[0]["text"]); !strings.Contains(text, "dismissed by Tyler") || strings.Contains(text, "confirm to launch") {
+		t.Fatalf("tom list text=%q, want the outcome instead of the stale confirm nudge", text)
+	}
+	if tomList[0]["proposalId"] != dismissID || tomList[0]["read"] != true {
+		t.Fatalf("tom list entry=%#v, want proposalId %q read for every account", tomList[0], dismissID)
 	}
 
-	// Confirm settles its nudge the same way for the confirmer.
+	// Confirm settles its nudge the same way, and stamps the launched run's
+	// artifact so the bell entry routes to the resulting workflow status.
 	confirmID := propose("Coyote pricing sweep")
-	if _, _, err := kanbanApp.resolveCodexProposal(confirmID, "confirm", "Tom", "tom@shareability.com"); err != nil {
+	payload, _, err := kanbanApp.resolveCodexProposal(confirmID, "confirm", "Tom", "tom@shareability.com")
+	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
 	if launches != 1 {
@@ -552,10 +560,95 @@ func TestCodexProposalResolutionSettlesBroadcastNotification(t *testing.T) {
 	if !strings.Contains(confirmed.Text, "confirmed by Tom") || !strings.Contains(confirmed.Text, "thread launched") {
 		t.Fatalf("confirmed text=%q, want the confirmed outcome", confirmed.Text)
 	}
-	for _, unread := range kanbanApp.unreadNotificationsFor("tom@shareability.com", notificationListLimit) {
-		if unread["id"] == confirmed.ID {
-			t.Fatalf("confirmed nudge %s replayed into tom's unread backlog: %#v", confirmed.ID, unread)
+	if confirmed.ArtifactID == "" || confirmed.ArtifactID != asString(payload["threadArtifactId"]) {
+		t.Fatalf("confirmed artifactID=%q, want the launched run artifact %v", confirmed.ArtifactID, payload["threadArtifactId"])
+	}
+	for _, viewer := range []string{"tom@shareability.com", "tyler@shareability.com"} {
+		for _, unread := range kanbanApp.unreadNotificationsFor(viewer, notificationListLimit) {
+			if unread["id"] == confirmed.ID {
+				t.Fatalf("confirmed nudge %s replayed into %s's unread backlog: %#v", confirmed.ID, viewer, unread)
+			}
 		}
+	}
+}
+
+// CARDS 062+063: the propose-time nudge persists until someone acts on the
+// proposal. Generic read receipts (the panel-open mark-all sweep, a row
+// click) are refused while the proposal is pending; the receipt seam still
+// works for every other record in the same batch, and it works again once
+// the proposal is no longer pending — including the legacy case of a nudge
+// whose proposal settled before the ResolvedAt stamp existed.
+func TestCodexProposalNudgePersistsUntilActedOn(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title": "Sticky nudge audit",
+		"mode":  "research",
+		"query": "Research the sticky nudge and draft a brief.",
+	})
+	if err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+	proposalID := asString(result["proposal"].(map[string]any)["id"])
+	nudge := notificationRecord{}
+	app.mu.Lock()
+	for index := len(app.notifications) - 1; index >= 0; index-- {
+		if app.notifications[index].ProposalID == proposalID {
+			nudge = app.notifications[index]
+			break
+		}
+	}
+	app.mu.Unlock()
+	if nudge.ID == "" {
+		t.Fatalf("propose-time nudge missing the proposal linkage for %s", proposalID)
+	}
+	plain, err := app.createNotification("", "info", "plain broadcast alongside the nudge", "", "", "", false)
+	if err != nil {
+		t.Fatalf("create plain notification: %v", err)
+	}
+
+	// The sweep marks the plain record and refuses the pending nudge.
+	marked, err := app.markNotificationsRead("tyler@shareability.com", []string{nudge.ID, plain.ID})
+	if err != nil {
+		t.Fatalf("markNotificationsRead: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked=%d, want only the plain record (the pending nudge is sticky)", marked)
+	}
+	unread := app.unreadNotificationsFor("tyler@shareability.com", notificationListLimit)
+	if len(unread) != 1 || unread[0]["id"] != nudge.ID {
+		t.Fatalf("unread=%#v, want the sticky nudge %s to survive the sweep", unread, nudge.ID)
+	}
+
+	// Acting on the proposal is what settles it — for every account.
+	if _, _, err := app.resolveCodexProposal(proposalID, "dismiss", "Tyler", "tyler@shareability.com"); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	for _, viewer := range []string{"tyler@shareability.com", "tom@shareability.com"} {
+		for _, unread := range app.unreadNotificationsFor(viewer, notificationListLimit) {
+			if unread["id"] == nudge.ID {
+				t.Fatalf("settled nudge %s still unread for %s: %#v", nudge.ID, viewer, unread)
+			}
+		}
+	}
+
+	// Legacy heal: a nudge whose proposal already settled but never got the
+	// ResolvedAt stamp (records written before CARDS 062+063) must accept
+	// receipts normally instead of staying sticky forever.
+	app.mu.Lock()
+	for index := range app.notifications {
+		if app.notifications[index].ID == nudge.ID {
+			app.notifications[index].ResolvedAt = ""
+			app.notifications[index].ReadBy = nil
+		}
+	}
+	app.mu.Unlock()
+	marked, err = app.markNotificationsRead("tom@shareability.com", []string{nudge.ID})
+	if err != nil {
+		t.Fatalf("markNotificationsRead legacy: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("legacy marked=%d, want the settled-proposal nudge to accept the receipt", marked)
 	}
 }
 
@@ -598,6 +691,29 @@ func TestIndexCodexProposalWiring(t *testing.T) {
 	}
 	if strings.Contains(html, "id: `proposal-${id}`") {
 		t.Fatal("the proposal dock must not mint local-only bell ids the server cannot settle")
+	}
+
+	// CARDS 062+063: the nudge click lands on the actionable deck card — a
+	// docked card returns first (the dock keeps the data instead of dropping
+	// it), then the card scrolls into view with the one-breath flash.
+	dockBody := functionBody(html, "function scheduleCodexProposalDock(id)")
+	if !strings.Contains(dockBody, "proposal.docked = true") {
+		t.Fatal("the dock must flag the card instead of dropping its data (the nudge click un-docks it)")
+	}
+	if !strings.Contains(functionBody(html, "function renderCodexProposals()"), "!proposal.docked") {
+		t.Fatal("renderCodexProposals must hide docked cards")
+	}
+	focusBody := functionBody(html, "function focusCodexProposalCard(proposalId)")
+	for _, want := range []string{
+		"proposal.docked = false",
+		"setActiveTool('room')",
+		"data-proposal-id",
+		"scrollIntoView",
+		"is-flashed",
+	} {
+		if !strings.Contains(focusBody, want) {
+			t.Fatalf("focusCodexProposalCard missing %q", want)
+		}
 	}
 }
 

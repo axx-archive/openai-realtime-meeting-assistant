@@ -146,11 +146,42 @@ func TestDeterministicRouterGuardClosesTheSimMiss(t *testing.T) {
 		"what can you do end to end?",
 		"maybe later, not now, the full run",
 		"instead of the full run let's just talk it through",
+		// Statement-form questions with no trailing "?" — the regression the
+		// pre-guard opened: these must reach the answer brain, not arm a card.
+		"what is packaging studio",
+		"explain the packaging studio",
+		"tell me about deep research",
+		"whats the packaging studio",
+		// auxiliary-question form of "do" — the gate's flagged gap: "do we"
+		// must defer just like "do you" (both are questions, not commands).
+		"do we run the full packaging studio",
+		"do you run the full packaging studio",
 	}
 	for _, message := range deferCases {
 		t.Run("defers: "+message, func(t *testing.T) {
 			if verdict := deterministicRouterGuard(message); verdict != nil {
 				t.Fatalf("guard armed a card for a negated/question message %q — it must defer", message)
+			}
+		})
+	}
+}
+
+// "full packaging" was dropped from scoutRouterFullRunPhrases because it is a
+// substring of ordinary "compile the artifacts we already made" asks and so
+// over-armed the flagship (packaging_studio), undermining the item-2
+// package_assembly-vs-packaging_studio disambiguation. These compile-asks must
+// NOT arm the flagship end-to-end run.
+func TestScoutGuardFullPackagingDoesNotOverTriggerStudio(t *testing.T) {
+	compileAsks := []string{
+		"compile the full packaging binder we already made",
+		"assemble the full packaging deck from what we have",
+		"put together the full packaging one-pager",
+	}
+	for _, message := range compileAsks {
+		t.Run("not studio: "+message, func(t *testing.T) {
+			verdict := deterministicRouterGuard(message)
+			if verdict != nil && verdict.proposal != nil && verdict.proposal.ToolID == packagingStudioProcessID {
+				t.Fatalf("guard armed packaging_studio for a compile-ask %q — %q must not over-trigger the flagship", message, "full packaging")
 			}
 		})
 	}

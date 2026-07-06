@@ -57,6 +57,11 @@ type notificationRecord struct {
 	// settleProposalNotification can find and settle this record when the
 	// proposal resolves.
 	ProposalID string `json:"proposalId,omitempty"`
+	// ResolvedAt stamps the moment the linked proposal settled. While the
+	// proposal is pending the nudge is sticky — generic read receipts skip
+	// it — and once stamped the record reads as acknowledged for every
+	// account (the call to action is gone for everyone).
+	ResolvedAt string `json:"resolvedAt,omitempty"`
 	// DeliverAfter marks a queued deferred notification ("meeting" while
 	// waiting for the meeting to end); flushDeferredNotifications clears it,
 	// restamps CreatedAt, and pushes the record. Queued records are hidden
@@ -289,6 +294,13 @@ func notificationReadBy(record notificationRecord, viewerEmail string) bool {
 	return false
 }
 
+// notificationReadFor is the viewer-facing read state: a settled proposal
+// nudge reads as acknowledged for every account — once someone acted, the
+// call to action is moot for everyone — otherwise the ReadBy roster decides.
+func notificationReadFor(record notificationRecord, viewerEmail string) bool {
+	return record.ResolvedAt != "" || notificationReadBy(record, viewerEmail)
+}
+
 // notificationForViewer projects a record for one account: the ReadBy roster
 // stays server-side (clients only learn their own read state).
 func notificationForViewer(record notificationRecord, viewerEmail string) map[string]any {
@@ -297,7 +309,7 @@ func notificationForViewer(record notificationRecord, viewerEmail string) map[st
 		"kind":      record.Kind,
 		"text":      record.Text,
 		"createdAt": record.CreatedAt,
-		"read":      notificationReadBy(record, viewerEmail),
+		"read":      notificationReadFor(record, viewerEmail),
 	}
 	if record.UserEmail != "" {
 		payload["userEmail"] = record.UserEmail
@@ -352,7 +364,7 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 		if !notificationVisibleTo(record, viewerEmail) {
 			continue
 		}
-		if unreadOnly && notificationReadBy(record, viewerEmail) {
+		if unreadOnly && notificationReadFor(record, viewerEmail) {
 			continue
 		}
 		visible = append(visible, notificationForViewer(record, viewerEmail))
@@ -365,12 +377,15 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 
 // settleProposalNotification rewrites the propose-time broadcast nudge when
 // its codex proposal resolves: the stale "confirm to launch" text becomes the
-// outcome, the resolver joins ReadBy (so the record never replays into their
-// unread backlog on reconnect/rejoin, on any of their sockets), and the
-// updated record re-broadcasts so live bells rewrite in place. The os_event
-// mirror is skipped on purpose — notifyProposalResolution already covers the
-// typed stream.
-func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text string, resolverEmail string) {
+// outcome, the ResolvedAt stamp settles the record for every account (any
+// signed-in user could have acted, so the call to action is moot for all of
+// them and the record never replays into anyone's unread backlog), a
+// confirmed launch stamps the run artifact so the bell entry routes to the
+// resulting workflow, and the updated record re-broadcasts so live bells
+// rewrite in place. The resolver still joins ReadBy as the explicit actor
+// receipt. The os_event mirror is skipped on purpose —
+// notifyProposalResolution already covers the typed stream.
+func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text string, resolverEmail string, artifactID string) {
 	if app == nil {
 		return
 	}
@@ -380,6 +395,7 @@ func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text st
 		return
 	}
 	resolverEmail = normalizeAccountEmail(resolverEmail)
+	artifactID = strings.TrimSpace(artifactID)
 
 	app.mu.Lock()
 	var settled notificationRecord
@@ -390,6 +406,10 @@ func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text st
 			continue
 		}
 		record.Text = text
+		record.ResolvedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if artifactID != "" {
+			record.ArtifactID = artifactID
+		}
 		if resolverEmail != "" && !notificationReadBy(*record, resolverEmail) {
 			record.ReadBy = append(record.ReadBy, resolverEmail)
 		}
@@ -412,7 +432,10 @@ func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text st
 }
 
 // markNotificationsRead stamps the viewer onto ReadBy for every listed id the
-// viewer can see, persists once, and returns how many records changed.
+// viewer can see, persists once, and returns how many records changed. A
+// proposal nudge whose proposal is still pending is sticky: generic
+// view/mark-all-read receipts skip it, and only resolveCodexProposal (via
+// settleProposalNotification) settles it.
 func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []string) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("notifications are unavailable")
@@ -438,7 +461,12 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 		if _, ok := wanted[record.ID]; !ok {
 			continue
 		}
-		if !notificationVisibleTo(*record, viewerEmail) || notificationReadBy(*record, viewerEmail) {
+		if !notificationVisibleTo(*record, viewerEmail) || notificationReadFor(*record, viewerEmail) {
+			continue
+		}
+		if record.ProposalID != "" && record.ResolvedAt == "" && app.proposalAwaitingAction(record.ProposalID) {
+			// Sticky until acted on: the nudge only settles when someone
+			// confirms or dismisses the proposal itself.
 			continue
 		}
 		record.ReadBy = append(record.ReadBy, viewerEmail)

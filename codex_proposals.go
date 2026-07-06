@@ -142,6 +142,18 @@ func (app *kanbanBoardApp) codexProposalsSnapshot(limit int) []map[string]any {
 	return proposals
 }
 
+// proposalAwaitingAction reports whether a codex proposal is still waiting
+// for a human confirm or dismiss. Unknown ids report false — a nudge whose
+// proposal is gone (or settled before the notification settle stamp existed)
+// must never stay sticky in the bell.
+func (app *kanbanBoardApp) proposalAwaitingAction(proposalID string) bool {
+	if app == nil || app.memory == nil {
+		return false
+	}
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, proposalID)
+	return ok && entry.Metadata["status"] == codexProposalStatusProposed
+}
+
 // resolveCodexProposal applies a confirm or dismiss from a signed-in user.
 // Confirm launches an agent thread as the confirming user (the full existing
 // runner/artifact pipeline); dismiss just settles the proposal. Transitions
@@ -264,7 +276,9 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 		payload := codexProposalPayload(updated)
 		broadcastOfficeKanbanEvent("codex_proposal", payload)
-		app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail)
+		// The launched run's artifact rides onto the settled nudge so the bell
+		// entry routes to the resulting workflow status.
+		app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail, updated.Metadata["threadArtifactId"])
 		app.notifyProposalResolution(updated, codexProposalActionConfirm, userName)
 		return payload, true, nil
 	}
@@ -290,7 +304,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 	payload := codexProposalPayload(updated)
 	broadcastOfficeKanbanEvent("codex_proposal", payload)
-	app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail)
+	app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail, "")
 	app.notifyProposalResolution(updated, codexProposalActionDismiss, userName)
 	return payload, false, nil
 }

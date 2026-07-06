@@ -50,7 +50,7 @@ Analyst C argued against /packaging: the sim user *did* ask, twice, and a comman
 
 Before the Haiku turn in `routeScoutChatTurn` (scout_chat.go:474), a lexical check commits `scoutRouterProposalForToolID` directly when the message is work-shaped (no leading negation, not a question) and contains either:
 - an **exact registry tool/process name** ("packaging studio," "deck outline," "one-pager"), or
-- a **short, reviewed full-run phrase list**: "end to end," "the full run," "full packaging run," "0 to 100" → packaging_studio.
+- a **short, reviewed full-run phrase list**: "end to end," "the full run," "full packaging run," "0 to 100" → packaging_studio. The code (`scoutRouterFullRunPhrases`) also carries the obvious hyphen/word variants of this reviewed set — "end-to-end," "zero to 100" — plus the exact process name "packaging studio" (already an exact-name match). It deliberately does **not** carry bare "full packaging": that is a substring of ordinary package_assembly asks ("compile the full packaging binder we already made") and would over-arm the flagship, breaking the item-2 disambiguation — only the more specific "full packaging run" is included.
 
 Constraints that keep this out of the retired keyword-sniffing class (the analysis doc's "only silent heavy invoke" failure): it may only ever emit a **proposal card, never a launch**; the phrase list is capped and code-reviewed; and its dismissal signal is watched specifically. This is A's move 2 + B's move 4, merged.
 

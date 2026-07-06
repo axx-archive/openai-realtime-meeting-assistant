@@ -481,7 +481,6 @@ var scoutRouterFullRunPhrases = []string{
 	"end-to-end",
 	"the full run",
 	"full packaging run",
-	"full packaging",
 	"0 to 100",
 	"zero to 100",
 	"packaging studio",
@@ -503,7 +502,29 @@ func scoutGuardEligibleMessage(text string) bool {
 	if strings.HasSuffix(t, "?") {
 		return false
 	}
-	for _, q := range []string{"can you", "could you", "can we", "do you", "would you", "are you able", "is there a way", "what can you", "what do you", "how do i", "how do we", "how can i"} {
+	// Statement-form questions and explanatory lead-ins carry no trailing "?" but
+	// are still informational asks ("what is packaging studio", "explain the
+	// packaging studio", "tell me about deep research"). Defer them to the answer
+	// brain (which now carries the capabilities digest + offer-never-deny) rather
+	// than let the guard arm a Run card off the flagship phrase list. Imperative
+	// work asks ("package this end to end", "run the deck outline") do not lead
+	// with these tokens and stay armed. "do" is deliberately EXCLUDED: it is the
+	// one auxiliary that is also a work imperative ("do a deep research pass"), so
+	// bare "do" stays armed; its question form is caught by the "do you"/"do we"
+	// prefixes below.
+	if strings.HasPrefix(t, "tell me") {
+		return false
+	}
+	if fields := strings.Fields(t); len(fields) > 0 {
+		switch strings.Trim(fields[0], ".,!:;\"'") {
+		case "what", "whats", "what's", "which", "who", "whom", "whose",
+			"when", "where", "why", "how",
+			"is", "are", "was", "were", "does", "did",
+			"explain", "describe":
+			return false
+		}
+	}
+	for _, q := range []string{"can you", "could you", "can we", "do you", "do we", "would you", "are you able", "is there a way", "what can you", "what do you", "how do i", "how do we", "how can i"} {
 		if strings.HasPrefix(t, q) {
 			return false
 		}

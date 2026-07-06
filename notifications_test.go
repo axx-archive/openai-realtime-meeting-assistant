@@ -517,6 +517,20 @@ func TestIndexNotificationCenterWiring(t *testing.T) {
 		t.Fatal("normalizeNotificationEntry must carry the proposalId linkage")
 	}
 
+	// CARDS 062+063: proposal nudges persist until acted on — the panel-open
+	// sweep skips them, a row click never marks them read, and the click
+	// routes to the actionable deck card instead of a dead end.
+	if !strings.Contains(functionBody(html, "function markAllNotificationsRead()"), "!entry.read && !entry.proposalId") {
+		t.Fatal("markAllNotificationsRead must skip proposal nudges (they settle on proposal action, not on view)")
+	}
+	openBody := functionBody(html, "function openNotificationEntry(entry)")
+	if !strings.Contains(openBody, "const awaitsProposalAction = Boolean(entry.proposalId) && !entry.read") {
+		t.Fatal("openNotificationEntry must detect a nudge still awaiting its proposal action")
+	}
+	if !strings.Contains(openBody, "focusCodexProposalCard(entry.proposalId)") {
+		t.Fatal("openNotificationEntry must route a pending nudge to the room deck card")
+	}
+
 	if !strings.Contains(html, `class="chat-thread-item__unread notification-bell__unread"`) {
 		t.Fatal("bell unread badge must reuse the chat-thread-item__unread ink pill")
 	}

@@ -9707,6 +9707,11 @@
         animation: bf-islandin var(--dur-med) var(--ease);
       }
 
+      /* the bell nudge landed here: same one-warm-breath as the manifest card */
+      .proposal-card.is-flashed {
+        animation: manifestFlash 1.2s var(--ease) 1;
+      }
+
       .proposal-card__head {
         display: flex;
         align-items: center;
@@ -18152,6 +18157,7 @@
         #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation { animation: none; }
         .notification-panel { animation: none; }
         .proposal-card { animation: none; }
+        .proposal-card.is-flashed { animation: none; }
         .room-chat { animation: none; }
         .intel-live__dot { animation: none; }
         .intel-pulse__bar.is-live { animation: none; }
@@ -35170,7 +35176,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function markAllNotificationsRead() {
-        markNotificationsRead(notificationEntries.filter(entry => !entry.read).map(entry => entry.id))
+        // Proposal nudges stay active until someone acts on the proposal:
+        // the sweep skips them, and the server refuses their receipts too,
+        // so a bypass could never stick.
+        markNotificationsRead(notificationEntries.filter(entry => !entry.read && !entry.proposalId).map(entry => entry.id))
       }
 
       function chatThreadForArtifactId(artifactId) {
@@ -35183,13 +35192,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function openNotificationEntry(entry) {
-        markNotificationsRead([entry.id])
+        // An unread proposal nudge is still awaiting its confirm/dismiss —
+        // opening it must not clear it (the server refuses the receipt
+        // anyway); it settles when someone acts on the proposal.
+        const awaitsProposalAction = Boolean(entry.proposalId) && !entry.read
+        if (!awaitsProposalAction) {
+          markNotificationsRead([entry.id])
+        }
         setNotificationPanelOpen(false)
         if (entry.threadId) {
           // Channel notifications (post_to_channel / create_channel) deep-link
           // straight to the thread, same selection path as the chat rail.
           selectScoutChatThread(entry.threadId)
           setActiveTool('chat')
+          return
+        }
+        if (awaitsProposalAction) {
+          // Land on the actionable card in the room deck (a settled nudge
+          // skips this: a confirmed one carries the run artifact and rides
+          // the artifact route below to the workflow status instead).
+          focusCodexProposalCard(entry.proposalId)
           return
         }
         if (entry.artifactId) {
@@ -35280,7 +35302,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderCodexProposals() {
-        const visible = codexProposals.filter(proposal => proposal && proposal.id)
+        const visible = codexProposals.filter(proposal => proposal && proposal.id && !proposal.docked)
         proposalDeckList.replaceChildren(...visible.map(codexProposalNode))
         proposalDeck.hidden = visible.length === 0
       }
@@ -35329,12 +35351,35 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return
           }
           // The durable propose-time nudge is already in the bell, so docking
-          // just clears the deck. Never mint a local bell id here — a
-          // server-unknown id can never be marked read server-side, so it
-          // resurrects on every backlog replay (CARD 075).
-          codexProposals = codexProposals.filter(candidate => candidate.id !== id)
+          // just clears the deck — the card data stays so the nudge click can
+          // bring it back (focusCodexProposalCard). Never mint a local bell id
+          // here — a server-unknown id can never be marked read server-side,
+          // so it resurrects on every backlog replay (CARD 075).
+          proposal.docked = true
           renderCodexProposals()
         }, 30000))
+      }
+
+      // CARDS 062+063: a proposal nudge click lands on the actionable card in
+      // the room deck. A docked card returns first — the whole point of the
+      // click is acting on it — then the same scroll + one-breath flash as
+      // focusManifestCardForGoal.
+      function focusCodexProposalCard(proposalId) {
+        const id = String(proposalId || '')
+        const proposal = codexProposals.find(candidate => candidate.id === id)
+        if (proposal && proposal.docked) {
+          proposal.docked = false
+          renderCodexProposals()
+          // the no-cover rule still applies: the returned card re-docks in 30s
+          scheduleCodexProposalDock(id)
+        }
+        setActiveTool('room')
+        const card = proposalDeckList.querySelector(`.proposal-card[data-proposal-id="${CSS.escape(id)}"]`)
+        if (!card) return
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        card.classList.remove('is-flashed')
+        void card.offsetWidth
+        card.classList.add('is-flashed')
       }
 
       // Bell hygiene: the durable propose-time nudge flips to its outcome
