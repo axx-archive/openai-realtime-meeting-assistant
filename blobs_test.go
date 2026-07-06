@@ -557,3 +557,51 @@ func TestArtifactsPaginationWindow(t *testing.T) {
 		}
 	}
 }
+
+// The single-artifact window is additive too: ?id=<artifact-id> returns
+// exactly that artifact in the same {artifacts: [...]} shape (404 when it
+// does not exist). This is the goalcard's door to a goal parent buried under
+// 100+ of its own stage children — outside the newest-100 default window —
+// so a parked checkpoint can still render its choices.
+func TestArtifactsFetchByID(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	artifact, appended, err := kanbanApp.createOSArtifact("research", "parked goal", "# Goal record", "AJ")
+	if err != nil || !appended {
+		t.Fatalf("createOSArtifact: appended=%v err=%v", appended, err)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	get := func(target string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		artifactsHandler(recorder, req)
+		return recorder
+	}
+
+	recorder := get("/artifacts?id=" + artifact.ID)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		OK        bool                 `json:"ok"`
+		Artifacts []meetingMemoryEntry `json:"artifacts"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode by-id response: %v", err)
+	}
+	if !payload.OK || len(payload.Artifacts) != 1 || payload.Artifacts[0].ID != artifact.ID {
+		t.Fatalf("by-id window=%+v, want exactly %q", payload.Artifacts, artifact.ID)
+	}
+
+	if recorder := get("/artifacts?id=os-artifact-unknown"); recorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown id status=%d, want 404", recorder.Code)
+	}
+}

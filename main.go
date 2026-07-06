@@ -1812,6 +1812,24 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single-artifact window (additive, like pagination): ?id=<artifact-id>
+	// returns exactly that artifact in the same {artifacts: [...]} shape. The
+	// newest-100 default window drops a goal parent buried under 100+ of its
+	// own stage children; the mounted goalcard fetches it here so a parked
+	// checkpoint still renders its choices.
+	if wantID := strings.TrimSpace(r.URL.Query().Get("id")); wantID != "" {
+		artifact, found := kanbanApp.osArtifactByID(wantID)
+		if !found {
+			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"artifacts": []meetingMemoryEntry{artifact},
+		})
+		return
+	}
+
 	// Cursor pagination (spec §4, Wave 3 item 13) — additive params only. A
 	// bare GET keeps today's exact response shape so the existing UI works
 	// unchanged; ?before=<artifact-id>&limit=<n> opens an older window for

@@ -8279,15 +8279,22 @@
         font-size: 0.92em;
       }
 
-      .chat-rich a {
+      /* pasted links in every chat bubble — room chat and plain scout
+         bubbles included — inherit the voice's ink so they read in both
+         themes; anywhere-wrap keeps long URLs inside the bubble */
+      .chat-rich a,
+      .scout-chat-text a {
         color: inherit;
         font-weight: 650;
         text-decoration: underline;
         text-decoration-color: var(--line-2);
         text-underline-offset: 3px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
-      .chat-rich a:hover {
+      .chat-rich a:hover,
+      .scout-chat-text a:hover {
         text-decoration-color: currentColor;
       }
 
@@ -20106,6 +20113,13 @@
 	      let mobileChatView = 'threads'
 	      // thinking indicator minimum-display bookkeeping (design: 1.7s)
 	      let scoutChatThinkingShownAt = 0
+	      // the shimmer's law: it resolves into exactly one committed turn.
+	      // scoutChatTurnInFlight marks a reply THIS session is actually
+	      // waiting on — the only state that may show (or let a server status
+	      // echo refresh) the shimmer. hideScoutChatThinking clears it, and a
+	      // reload starts false, so persisted thread state and replayed socket
+	      // events can never conjure a shimmer with no pending turn.
+	      let scoutChatTurnInFlight = false
 	      let osAssistantMode = 'chat'
       let osAssistantVoiceActive = false
       let osAssistantVoiceRecognizer = null
@@ -32619,9 +32633,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        upsertScoutChatThread(existing, { select: false })
 	        if (activeScoutThreadId === id) {
 	          // a scout reply arriving over the socket respects the thinking
-	          // indicator's 1.7s minimum display — data lands now, render waits
+	          // indicator's 1.7s minimum display — data lands now, render waits.
+	          // A turn can resolve into a CARD instead of a scout bubble
+	          // (kind proposal/choices/manifest/thread) — those count as the
+	          // committed reply too, so the shimmer must resolve on them.
 	          const role = String(message?.role || '').toLowerCase()
-	          if ((role === 'scout' || role === 'error') && scoutChatThinkingHoldMs() > 0) {
+	          const recordKind = String(message?.kind || '')
+	          const isScoutReply = role === 'scout' || role === 'error' ||
+	            ['proposal', 'choices', 'manifest', 'thread', 'artifact'].includes(recordKind)
+	          if (isScoutReply && !scoutChatThinking.hidden) {
 	            withScoutChatThinkingHold(() => {
 	              hideScoutChatThinking()
 	              if (activeScoutThreadId === id) {
@@ -32651,13 +32671,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!trimmed && !files.length) {
 	          return false
 	        }
+	        const armedTemplate = pendingScoutToolTemplate && (!pendingScoutToolTemplate.threadId || pendingScoutToolTemplate.threadId === activeScoutThreadId)
+	          ? pendingScoutToolTemplate
+	          : null
+	        // an ARMED send launches the tool with this text as its objective —
+	        // the untouched starter prefill ("Turn this into a goal workflow: ")
+	        // is not an objective. Block the send and keep the template armed
+	        // (this also catches a real user hitting enter on the prefill).
+	        if (armedTemplate && trimmed === String(armedTemplate.prefill || '').trim()) {
+	          appendScoutChatHintChip('describe what the tool should work on')
+	          if (scoutChatInput && !scoutChatInput.disabled) scoutChatInput.focus()
+	          return false
+	        }
 	        // capture-and-clear the palette-armed tool template: it rides this
 	        // send only, so an error or a later plain message never re-fires it.
 	        // A template armed for another thread is dropped instead of firing
 	        // here (the scoutFollowUpTarget scoping rule).
-	        const toolTemplate = pendingScoutToolTemplate && (!pendingScoutToolTemplate.threadId || pendingScoutToolTemplate.threadId === activeScoutThreadId)
-	          ? String(pendingScoutToolTemplate.toolId || '')
-	          : ''
+	        const toolTemplate = armedTemplate ? String(armedTemplate.toolId || '') : ''
 	        pendingScoutToolTemplate = null
 	        renderScoutFollowUpTarget()
 	        if (authedUser) {
@@ -32670,6 +32700,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to keep chat threads', new Date().toISOString()))
 	          return true
 	        }
+	        // the ws turn's shimmer starts HERE (the server's status events can
+	        // only refresh an in-flight one, never start it)
+	        showScoutChatThinking('thinking')
 	        ws.send(JSON.stringify({
 	          event: 'scout_chat',
           data: JSON.stringify({ text: trimmed })
@@ -33406,8 +33439,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // and the talk-it-out door gets the same contract-gated run as Run.
         // Armed AFTER promptScoutForWork so threadId reflects the composer the
         // user actually landed in; the chip makes the armed state visible and
-        // dismissible (renderScoutFollowUpTarget).
-        pendingScoutToolTemplate = { toolId: tool.id, name: String(tool.name || tool.id), threadId: activeScoutThreadId }
+        // dismissible (renderScoutFollowUpTarget). prefill records the starter
+        // text WHEN the composer actually holds it — an armed send whose value
+        // still equals the untouched prefill carries no objective and must be
+        // blocked, never launched. A composer the user had already filled
+        // stamps no prefill, so their exact text still sends.
+        const starter = scoutStarterText(mode)
+        const composerHoldsStarter = String(scoutChatInput?.value || '').trim() === starter.trim()
+        pendingScoutToolTemplate = { toolId: tool.id, name: String(tool.name || tool.id), threadId: activeScoutThreadId, prefill: composerHoldsStarter ? starter : '' }
         renderScoutFollowUpTarget()
       }
 
@@ -33601,12 +33640,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const goalStatus = String(m.goalStatus || '').toLowerCase()
         const stage = String(m.currentStage || '')
         const gate = String(m.reviewGate || '').toLowerCase()
+        // the engine parks a checkpoint as plan.state=approval_required and
+        // mirrors status/threadStatus=approval_required onto the artifact —
+        // a card mounted from a thread goal-ref may hold ONLY those mirrors
+        // (the synthesized artifact has no reviewGate/currentStage), so all
+        // three shapes must resolve to the parked terminal
+        const planState = String(plan?.state || '').toLowerCase()
         if (['complete', 'completed', 'published', 'verified', 'done'].includes(status) || ['complete', 'completed', 'verified', 'done'].includes(goalStatus) || stage === 'verified') return 'complete'
         // a human stopped it — quieter than failure (sheet 2d cancelled):
         // the plan's flag survives restarts; metadata mirrors it for
         // consumers holding only the artifact row
         if (plan?.cancelled || String(m.cancelled || '').toLowerCase() === 'true' || goalStatus === 'cancelled') return 'cancelled'
-        if (stage === 'approval_required' || gate === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
+        if (stage === 'approval_required' || gate === 'approval_required' || planState === 'approval_required' || status === 'approval_required' || goalStatus === 'approval_required' || String(m.threadStatus || '').toLowerCase() === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
         if (goalStatus === 'needs_attention' || stage === 'needs_attention' || gate === 'error' || ['error', 'failed'].includes(status)) return 'error'
         return 'running'
       }
@@ -33632,9 +33677,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         // the freshest library entry wins over a synthesized minimal artifact
         const fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === id)
+        if (!fresh) {
+          // the /artifacts window is the newest 100 — a goal parent buried
+          // under its own stage children falls out of it, and the thread-ref's
+          // synthesized artifact carries no plan (so a parked checkpoint would
+          // render as the generic running body). Fetch the one artifact by id;
+          // the card upgrades in place when it lands.
+          fetchGoalArtifactById(id)
+        }
         updateGoalCard(card, fresh || artifact)
         goalCardEnsureTicker()
         return card
+      }
+
+      // single-flight fetch of one goal artifact the newest-100 window missed
+      // (GET /artifacts?id=…): the landed artifact re-enters artifactEntries
+      // and refreshes its mounted card so the parked checkpoint's parkline +
+      // options render even when 100+ newer artifacts exist.
+      const goalArtifactFetchesInFlight = new Set()
+
+      function fetchGoalArtifactById(id) {
+        const want = String(id || '').trim()
+        if (!want || !authedUser || goalArtifactFetchesInFlight.has(want)) return
+        goalArtifactFetchesInFlight.add(want)
+        fetch(`/artifacts?id=${encodeURIComponent(want)}`, { cache: 'no-store' })
+          .then(response => response.ok ? response.json() : null)
+          .then(payload => {
+            const artifact = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+            if (!artifact?.id) return
+            addArtifactEntry(artifact, { select: false })
+            const card = goalThreadCardNodes.get(String(artifact.id))
+            if (card) {
+              updateGoalCard(card, artifact)
+              syncRunlogLiveness()
+            }
+          })
+          .catch(() => {})
+          .finally(() => { goalArtifactFetchesInFlight.delete(want) })
       }
 
       function upsertGoalCardNode(artifact) {
@@ -34328,6 +34407,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const id = card.dataset.goalArtifactId
           const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === id)
           if (entry) updateGoalCard(card, entry)
+          // a mounted card whose parent fell back out of the newest-100
+          // window (loadArtifacts replaces the list wholesale) keeps itself
+          // fresh through the by-id window
+          else fetchGoalArtifactById(id)
         })
         // a state flip here is what parks or extinguishes the runlog ember
         syncRunlogLiveness()
@@ -34659,7 +34742,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const text = String(payload?.text || '')
         const ts = payload?.ts || ''
         if (kind === 'status') {
-          showScoutChatThinking(text || 'searching memory…')
+          // a status echo may only refresh a shimmer this session is
+          // actually waiting on — a replayed/broadcast status after a
+          // reload must not conjure one with no pending turn
+          if (scoutChatTurnInFlight) {
+            showScoutChatThinking(text || 'searching memory…')
+          }
           return
         }
         if (kind === 'reset') {
@@ -35229,7 +35317,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         meta.textContent = `${author} · ${scoutChatTimeLabel(message?.createdAt)}`
         const body = document.createElement('div')
         body.className = 'scout-chat-text'
-        body.textContent = String(message?.text || '')
+        // pasted links become safe anchors — DOM-built, never innerHTML
+        appendChatLinkTextNodes(body, String(message?.text || ''))
         item.append(meta, body)
         // Close-the-loop delivery: a completed Scout thread posts its card
         // back to the room; artifactId turns the bubble into a doorway to the
@@ -35638,6 +35727,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatToolSection) {
 	          chatToolSection.dataset.chatView = mobileChatView
 	        }
+	        if (mobileChatView === 'convo' && scoutChatThread) {
+	          // Pin to the latest message: the thread's nodes were appended
+	          // while the phone convo pane was display:none, so every
+	          // scrollTop write was a no-op and opening a thread landed at
+	          // the top (same class of bug setRoomChatOpen fixes).
+	          scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	          window.requestAnimationFrame(() => {
+	            scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	          })
+	        }
 	      }
 
 	      function selectScoutChatThread(id) {
@@ -35753,7 +35852,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog, .scout-chat-daybreak, .scout-choices').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog, .scout-chat-daybreak, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -35816,6 +35915,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function renderActiveScoutThread() {
+	        // a rebuild from persisted state (reload, poll, socket echo) never
+	        // shows a shimmer — only a send still in flight THIS session may
+	        // keep it up
+	        if (!scoutChatTurnInFlight) {
+	          hideScoutChatThinking()
+	        }
 	        clearScoutChatThreadNodes()
 	        // goalcards are cached nodes (goalThreadCardNodes) — detach them so
 	        // this pass re-mounts only the ones this thread's messages (or its
@@ -36111,7 +36216,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // with toolTemplate for tool runs; the proposal route performs the
 	      // explicit workstream launch). "just answer instead" re-asks as Tier 0
 	      // and logs the dismissal signal. NEVER silent-launch.
+	      //
+	      // ONE card node per proposal message id, cached at module level (the
+	      // goalThreadCardNodes pattern): the immediate-reply render and every
+	      // renderActiveScoutThread rebuild return the SAME node, so a proposal
+	      // can never mount twice or land above its own user message — the
+	      // rebuild pass detaches it with the other feed nodes and re-inserts
+	      // it at its message's position. Reuse also keeps half-edited
+	      // objective fields alive across rebuilds. A persisted status flip
+	      // (accepted/dismissed landing from the server) rebuilds the node.
+	      const scoutProposalCardNodes = new Map()
+
 	      function scoutProposalCardNode(message) {
+	        const messageId = String(message?.id || '')
+	        const status = String(message?.proposal?.status || '')
+	        const cached = messageId ? scoutProposalCardNodes.get(messageId) : null
+	        if (cached && String(cached.dataset.proposalStatus || '') === status) {
+	          return cached
+	        }
+	        const card = buildScoutProposalCardNode(message)
+	        card.dataset.proposalStatus = status
+	        if (messageId) scoutProposalCardNodes.set(messageId, card)
+	        return card
+	      }
+
+	      function buildScoutProposalCardNode(message) {
 	        const proposal = message.proposal || {}
 	        const card = document.createElement('div')
 	        card.className = 'scout-proposal-card'
@@ -36486,6 +36615,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // ---- end package manifest card ----
 
 	      function markProposalCardResolved(card, status) {
+	        // keep the cached node's status stamp in step with the local resolve
+	        // so the server echo of the same status reuses it instead of
+	        // rebuilding (scoutProposalCardNodes)
+	        card.dataset.proposalStatus = status
 	        card.classList.add('is-resolved')
 	        card.querySelector('.scout-proposal-card__actions')?.remove()
 	        card.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = true })
@@ -36680,7 +36813,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function appendChatInlineNodes(container, text) {
         const value = String(text || '')
-        const pattern = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`/g
+        const pattern = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`|(https?:\/\/[^\s<>]+)/g
         let lastIndex = 0
         let matched = false
         for (const match of value.matchAll(pattern)) {
@@ -36689,12 +36822,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)))
           }
           if (match[1] && match[2]) {
-            const link = document.createElement('a')
-            link.href = match[2]
-            link.target = '_blank'
-            link.rel = 'noreferrer noopener'
-            link.textContent = match[1]
-            container.appendChild(link)
+            container.appendChild(chatLinkNode(match[2], match[1]))
           } else if (match[3]) {
             const strong = document.createElement('strong')
             strong.textContent = match[3]
@@ -36703,6 +36831,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const code = document.createElement('code')
             code.textContent = match[4]
             container.appendChild(code)
+          } else if (match[5]) {
+            appendChatUrlNodes(container, match[5])
           }
           lastIndex = match.index + match[0].length
         }
@@ -36712,6 +36842,52 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (lastIndex < value.length) {
           container.appendChild(document.createTextNode(value.slice(lastIndex)))
+        }
+      }
+
+      // the one anchor recipe every chat surface shares: scheme-pinned
+      // http(s) href, new tab, no opener — DOM-built, never innerHTML
+      function chatLinkNode(href, label) {
+        const link = document.createElement('a')
+        link.href = href
+        link.target = '_blank'
+        link.rel = 'noreferrer noopener'
+        link.textContent = label || href
+        return link
+      }
+
+      // appendChatUrlNodes lands one matched bare URL: trailing sentence
+      // punctuation peels back into prose, the rest becomes the anchor
+      function appendChatUrlNodes(target, raw) {
+        const trail = /[.,;:!?'")\]]+$/.exec(raw)
+        const href = trail ? raw.slice(0, -trail[0].length) : raw
+        target.appendChild(chatLinkNode(href))
+        if (trail) {
+          target.appendChild(document.createTextNode(trail[0]))
+        }
+      }
+
+      // appendChatLinkTextNodes renders plain text with bare http(s) URLs
+      // lifted into safe anchors; the segments between land as text nodes,
+      // or through appendSegment when a caller layers its own pass
+      // (mention chips). DOM-built (createTextNode + textContent) —
+      // nothing here interprets HTML.
+      function appendChatLinkTextNodes(target, text, appendSegment) {
+        const value = String(text || '')
+        const plain = appendSegment || (segment => target.appendChild(document.createTextNode(segment)))
+        let cursor = 0
+        for (const match of value.matchAll(/https?:\/\/[^\s<>]+/g)) {
+          if (match.index > cursor) {
+            plain(value.slice(cursor, match.index))
+          }
+          appendChatUrlNodes(target, match[0])
+          cursor = match.index + match[0].length
+        }
+        if (cursor < value.length) {
+          plain(value.slice(cursor))
+        }
+        if (!target.childNodes.length) {
+          target.textContent = value
         }
       }
 
@@ -36839,14 +37015,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       // appendChatMentionTextNodes renders plain message text as text nodes,
-      // lifting @RosterName / @scout tokens into highlight spans. DOM-built
-      // (createTextNode + textContent) — nothing here interprets HTML, so it
-      // stays exactly as injection-safe as the body.textContent it replaced.
+      // lifting bare http(s) URLs into safe anchors and @RosterName / @scout
+      // tokens into highlight spans. URLs split first so a pasted /@handle
+      // tail never becomes a mention chip. DOM-built (createTextNode +
+      // textContent) — nothing here interprets HTML, so it stays exactly as
+      // injection-safe as the body.textContent it replaced.
       function appendChatMentionTextNodes(target, text) {
+        appendChatLinkTextNodes(target, text, segment => appendChatMentionSegmentNodes(target, segment))
+      }
+
+      // the mention-chip pass over one URL-free segment
+      function appendChatMentionSegmentNodes(target, text) {
         const value = String(text || '')
         const names = mentionRosterNames()
         if (!value || !names.length) {
-          target.textContent = value
+          if (value) {
+            target.appendChild(document.createTextNode(value))
+          }
           return
         }
         const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
@@ -36865,9 +37050,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (last < value.length) {
           target.appendChild(document.createTextNode(value.slice(last)))
-        }
-        if (!target.childNodes.length) {
-          target.textContent = value
         }
       }
 
@@ -37296,6 +37478,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function showScoutChatThinking(text) {
         const stick = scoutChatIsNearBottom()
+        scoutChatTurnInFlight = true
         scoutChatThinkingShownAt = Date.now()
         scoutChatThinkingText.textContent = text || 'thinking'
         scoutChatThinking.hidden = false
@@ -37305,6 +37488,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function hideScoutChatThinking() {
+        scoutChatTurnInFlight = false
         scoutChatThinking.hidden = true
       }
 
