@@ -805,6 +805,9 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 // for the tool. Processes carry no single rubric (each stage gates itself), so
 // their sentence names the checkpoint law instead.
 func scoutRouterToolRunSummary(tool packagingTool, objective string) string {
+	// The router-authored objective usually ends in "." — joining it before
+	// ". gate:…" / ". it parks…" ships a double period the reader sees.
+	objective = strings.TrimRight(strings.TrimSpace(objective), ".")
 	if tool.Group == toolGroupProcesses {
 		return "this is the " + tool.Name + " staged process — " + objective + ". it parks at each human checkpoint; nothing ships without your approval."
 	}

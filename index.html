@@ -8170,6 +8170,38 @@
       }
       .scout-chat-msg__expand:hover { color: var(--text-1); }
 
+      /* card 073 — delete your own misplaced message. The control speaks in
+         the attribution's quiet mono voice and stays invisible until the
+         bubble is hovered/focused (desktop) or long-pressed (touch); the
+         first tap arms "delete?" before the second commits. Token-driven, so
+         both themes hold. */
+      .scout-chat-msg__delete {
+        border: 0;
+        background: transparent;
+        padding: 0 4px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+        cursor: pointer;
+        opacity: 0;
+        transition: color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+      }
+      .scout-chat-msg:hover .scout-chat-msg__delete,
+      .scout-chat-msg:focus-within .scout-chat-msg__delete,
+      .scout-chat-msg.show-delete .scout-chat-msg__delete {
+        opacity: 1;
+      }
+      .scout-chat-msg__delete:hover,
+      .scout-chat-msg__delete[data-armed="1"] {
+        color: var(--danger);
+      }
+      /* the chat tool's row anatomy seats the control beside the bubble; it
+         rides the article, so follow-up grouping's meta lift never eats it */
+      #chatTool .scout-chat-msg > .scout-chat-msg__delete {
+        margin-bottom: 2px;
+      }
+
       #chatTool .scout-chat-msg--user {
         justify-content: flex-end;
       }
@@ -14672,6 +14704,7 @@
       /* chat — the stacked navigator's back chevron (mobile only) */
       .chat-convo-head__back {
         display: none;
+        position: relative;
         align-items: center;
         justify-content: center;
         width: 30px;
@@ -14682,6 +14715,17 @@
         color: var(--text-2);
         flex: none;
         transition: transform 0.15s var(--ease);
+      }
+
+      /* P2-3: the 30px chevron is below --hit-min — extend the tappable area to
+         a centered 44x44 transparent box (the P0-3 composer pattern) while the
+         visible glyph stays 30px. */
+      .chat-convo-head__back::before {
+        content: "";
+        position: absolute;
+        top: 50%; left: 50%;
+        width: var(--hit-min); height: var(--hit-min);
+        transform: translate(-50%, -50%);
       }
 
       .chat-convo-head__back:active {
@@ -17874,6 +17918,28 @@
         max-width: 68ch;
         margin: 0 auto;
       }
+      /* P1-3 — inside the document stage the sections read as a quiet reading
+         measure (sheet s10 spec 2e / s00 §3): single column, borderless, a mono
+         lowercase label over flowing prose at the 68ch measure. The base tile
+         treatment is KEPT for the intelligence data room — this override is
+         parented by .artifact-stage__read so only the document reader reframes. */
+      .artifact-stage__read .artifact-read__grid {
+        grid-template-columns: 1fr;
+        gap: var(--sp-6);
+      }
+      .artifact-stage__read .artifact-read__section {
+        border: 0;
+        background: none;
+        padding: 0;
+        gap: 6px;
+      }
+      .artifact-stage__read .artifact-read__section h4 {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-transform: lowercase;
+        text-wrap: initial;
+      }
       .artifact-stage__body--deck { padding: 0; }
       .artifact-stage__body--deck .artifact-deck {
         flex: 1;
@@ -20108,6 +20174,9 @@
       // mobile shell chrome (design mobile §1) — header back/bell/avatar,
       // the settings sheet head, and the chat stacked navigator
       const phoneLayoutQuery = window.matchMedia('(max-width: 640px)')
+      // P2-3: re-entrancy guard so a popstate-driven view change (OS back /
+      // edge-swipe) never re-pushes the entry it is currently unwinding.
+      let chatHistoryPopping = false
       const topbarBackButton = document.getElementById('topbarBack')
       const topbarBellButton = document.getElementById('topbarBell')
       const topbarBellBadge = document.getElementById('topbarBellBadge')
@@ -20910,10 +20979,35 @@
 	        }
 	        setMobileChatView('convo')
 	      })
-	      // mobile stacked navigator — back to the thread list
+	      // mobile stacked navigator — back to the thread list. When we own a
+	      // pushed convo entry (P2-3), pop it so the tapped chevron and the OS
+	      // back gesture stay on the same history cursor; the popstate handler
+	      // performs the view change. Otherwise fall back to a direct swap.
 	      chatConvoBack?.addEventListener('click', () => {
+	        if (history.state && history.state.view === 'convo') {
+	          history.back()
+	          return
+	        }
 	        finishChatThreadRename(false)
 	        setMobileChatView('threads')
+	      })
+	      // P2-3: OS back / edge-swipe unwinds the stacked navigation instead of
+	      // exiting the SPA — a convo returns to its thread list, a drilled-in
+	      // tool returns to the office home. Mirrors the chevron/back handlers.
+	      window.addEventListener('popstate', () => {
+	        chatHistoryPopping = true
+	        try {
+	          if (mobileChatView === 'convo' && (appShell.dataset.tool || '') === 'chat') {
+	            finishChatThreadRename(false)
+	            setMobileChatView('threads')
+	            return
+	          }
+	          if ((appShell.dataset.tool || 'office') !== 'office') {
+	            setActiveTool('office')
+	          }
+	        } finally {
+	          chatHistoryPopping = false
+	        }
 	      })
 	      chatConvoRename?.addEventListener('click', startChatThreadRename)
 	      chatConvoRenameInput?.addEventListener('keydown', event => {
@@ -21775,6 +21869,19 @@
           return ''
         }
         return participantNameFromEmail(user.email) || participantNameFromRosterValue(user.name) || ''
+      }
+
+      // P2-2 — render an account as the lowercase handle the product's voice
+      // already uses ("cancelled by aj", "waiting on aj", "aj · via scout"),
+      // never the raw email. An email maps to its roster short name when known,
+      // else falls back to the pre-@ local part; a bare value lowercases as-is.
+      function accountHandle(value) {
+        const raw = String(value || '').trim()
+        if (!raw) return ''
+        const rosterName = participantNameFromEmail(raw)
+        if (rosterName) return rosterName.toLowerCase()
+        const at = raw.indexOf('@')
+        return (at > 0 ? raw.slice(0, at) : raw).toLowerCase()
       }
 
       function selectedLoginAccountName() {
@@ -23313,12 +23420,19 @@
         if (!notificationPanel.hidden) {
           setNotificationPanelOpen(false)
         }
+        const prevTool = appShell.dataset.tool || 'office'
         const next = TOOL_IDS.includes(tool) ? tool : 'office'
         if (next === 'board') {
           // opens the board surface; editing controls stay gated by board readiness
           setBoardExpanded(true)
           closeMobileToolRailForSelection()
           return
+        }
+        // P2-3: on the phone, drilling from the office home into a tool pushes a
+        // history entry so the OS back / edge-swipe returns to the office rather
+        // than exiting the app. Guarded against popstate-driven re-entry.
+        if (!chatHistoryPopping && phoneLayoutQuery.matches && prevTool === 'office' && next !== 'office') {
+          try { history.pushState({ view: 'tool', tool: next }, '') } catch (_) {}
         }
         applyToolState(next)
         if (appShell.classList.contains('is-board-expanded')) {
@@ -24081,6 +24195,12 @@
         const progress = artifactProgressPercent(entry, artifactStatusValue(entry) === 'complete' || artifactStatusValue(entry) === 'published' ? 100 : 35)
         const summarySection = artifactPreferredSection(entry, ['Executive summary', 'Summary', 'Thesis', 'Recommendation', 'Report', 'Design intent', 'Vision', 'Goal'])
         const summary = summarySection?.body || parsed.objective || sections[0]?.body || String(entry.text || '')
+        // The hero <p> is a TRUE abstract only when it's the leading objective
+        // blurb (P1-2). A summary borrowed from a grid section (summarySection
+        // non-null, or the sections[0] fallback) would double-print the identical
+        // card one swipe below — so we drop the hero paragraph and keep only the
+        // meta chips, letting that section carry the text exactly once.
+        const heroIsAbstract = !summarySection && !!parsed.objective && summary === parsed.objective
 
         const hero = document.createElement('header')
         hero.className = 'artifact-read__hero'
@@ -24101,10 +24221,13 @@
           chip.textContent = label
           meta.appendChild(chip)
         }
-        const summaryEl = document.createElement('p')
-        summaryEl.className = 'artifact-read__summary'
-        summaryEl.textContent = compactArtifactPreview(summary || 'artifact saved')
-        hero.append(meta, summaryEl)
+        hero.appendChild(meta)
+        if (heroIsAbstract) {
+          const summaryEl = document.createElement('p')
+          summaryEl.className = 'artifact-read__summary'
+          summaryEl.textContent = compactArtifactPreview(summary || 'artifact saved')
+          hero.appendChild(summaryEl)
+        }
         container.appendChild(hero)
 
         const grid = document.createElement('div')
@@ -24113,12 +24236,30 @@
           grid.appendChild(artifactReadSectionNode('objective', parsed.objective, { wide: true }))
         }
         const rendered = sections.length ? sections : [{ h: 'artifact', body: String(entry.text || '') }]
+        // A "# Title" body head parses to a leading heading-only section that
+        // just echoes the doc title, and any empty-body section renders a "no
+        // detail yet." tile — both are noise once real content lives elsewhere
+        // (P1-2). Reserve the placeholder for a genuinely empty artifact.
+        const anySectionBody = rendered.some(section => String(section.body || '').trim())
+        const titleEchoes = new Set(
+          [artifactStageTitle(entry), artifactDisplayTitle(entry)]
+            .map(normalizedSectionName)
+            .filter(Boolean)
+        )
         rendered.forEach((section, index) => {
-          if (!section.body && !section.h) {
+          const body = String(section.body || '').trim()
+          const heading = String(section.h || '').trim()
+          if (!body && !heading) {
             return
           }
-          grid.appendChild(artifactReadSectionNode(section.h || `section ${index + 1}`, section.body || '', {
-            wide: shouldArtifactSectionSpan(section.h, section.body)
+          if (index === 0 && !body && titleEchoes.has(normalizedSectionName(heading))) {
+            return
+          }
+          if (!body && anySectionBody) {
+            return
+          }
+          grid.appendChild(artifactReadSectionNode(heading || `section ${index + 1}`, body, {
+            wide: shouldArtifactSectionSpan(heading, body)
           }))
         })
         container.appendChild(grid)
@@ -30325,6 +30466,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'room_chat_history':
             handleRoomChatHistory(message.data)
             break
+          case 'room_chat_delete':
+            handleRoomChatDeleteEvent(message.data)
+            break
           case 'notification':
             handleNotificationEvent(message.data)
             break
@@ -32766,6 +32910,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        existing.preview = payload.preview || existing.preview
 	        existing.updatedAt = payload.updatedAt || existing.updatedAt
 	        existing.visibility = payload.visibility || existing.visibility
+	        // card 073: a deletion travels as deletedMessageId instead of a
+	        // message — drop the bubble here (idempotent when this tab already
+	        // removed it on its own DELETE response)
+	        if (payload.deletedMessageId) {
+	          removeScoutChatThreadMessage(id, String(payload.deletedMessageId))
+	          return
+	        }
 	        const message = payload.message
 	        if (message?.id) {
 	          const messages = Array.isArray(existing.messages) ? existing.messages : []
@@ -32800,6 +32951,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          } else {
 	            renderActiveScoutThread()
 	          }
+	        }
+	      }
+
+	      // card 073: drop one message from local thread state and re-render —
+	      // shared by the sender's own DELETE response and the chat_thread
+	      // deletion broadcast every other tab receives. Idempotent.
+	      function removeScoutChatThreadMessage(threadId, messageId) {
+	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(threadId))
+	        if (!thread) {
+	          return
+	        }
+	        const messages = Array.isArray(thread.messages) ? thread.messages : []
+	        thread.messages = messages.filter(candidate => String(candidate?.id || '') !== String(messageId))
+	        upsertScoutChatThread(thread, { select: false })
+	        if (activeScoutThreadId === String(threadId)) {
+	          renderActiveScoutThread()
+	        }
+	      }
+
+	      async function deleteScoutChatMessage(messageId) {
+	        const threadId = activeScoutThreadId
+	        if (!threadId || !messageId) {
+	          return
+	        }
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            throw new Error(payload.error || 'could not delete the message')
+	          }
+	          // drop it locally now; the chat_thread broadcast repeats the same
+	          // removal for every other open tab
+	          removeScoutChatThreadMessage(threadId, messageId)
+	        } catch (error) {
+	          showToast({ text: error.message || 'could not delete the message', kind: 'error' })
 	        }
 	      }
 
@@ -34303,8 +34489,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (!canApproveExternalWrites()) {
-          // the resume seam is admin-gated server-side; mirror it honestly
-          wrap.appendChild(bfEl('div', 'goalcard__wait', 'waiting on AJ'))
+          // the resume seam is admin-gated server-side; mirror it honestly, in
+          // the approver's handle (sourced from the same admin-gate config)
+          wrap.appendChild(bfEl('div', 'goalcard__wait', `waiting on ${accountHandle(artifactAdminEmail)}`))
         } else {
           const post = (choice) => {
             wrap.querySelectorAll('button, input, textarea').forEach(el => { el.disabled = true })
@@ -34341,11 +34528,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             // sheet 3a: the choices sit in one pill row behind a hairline —
             // filled proceed, outlined send-back, ghost hold
             const choicesRow = bfEl('div', 'goalcard__choices')
+            // P2-1: a filled primary implies THE default door. Count proceeds
+            // first — when several proceed options fork (a genuine either/or,
+            // e.g. "brand assets provided" vs "no brand — develop identity"),
+            // render them all in the outlined base register so no false default
+            // is implied and the amber parkline stays the only loud element. A
+            // lone proceed keeps the filled primary.
+            const proceedCount = options.filter(option => option.action === 'proceed').length
             for (const option of options) {
               const choiceBtn = bfEl('button', 'goalcard__choice', option.label)
               choiceBtn.type = 'button'
-              // §4: proceed is THE primary door; revise/hold step down a register
-              if (option.action === 'proceed') choiceBtn.classList.add('goalcard__choice--primary')
+              // §4: proceed is THE primary door only when it is the sole one;
+              // revise/hold step down a register
+              if (option.action === 'proceed' && proceedCount === 1) choiceBtn.classList.add('goalcard__choice--primary')
               if (option.action === 'revise') choiceBtn.classList.add('goalcard__choice--revise')
               if (option.action === 'hold') choiceBtn.classList.add('goalcard__choice--hold')
               // a held goal resumes ONLY through proceed — mirror the server's refusal
@@ -34464,7 +34659,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             actions.append(approve, back)
             terminal.appendChild(actions)
           } else {
-            terminal.appendChild(bfEl('div', 'goalcard__wait', 'waiting on AJ'))
+            terminal.appendChild(bfEl('div', 'goalcard__wait', `waiting on ${accountHandle(artifactAdminEmail)}`))
           }
           return
         }
@@ -34474,7 +34669,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (state === 'cancelled') {
           const meta = artifact.metadata || {}
           const by = String(plan?.cancelledBy || meta.cancelledBy || '').trim() || 'you'
-          terminal.appendChild(bfEl('div', 'goalcard__cancelline', `cancelled by ${by}`))
+          terminal.appendChild(bfEl('div', 'goalcard__cancelline', `cancelled by ${accountHandle(by)}`))
           terminal.appendChild(bfEl('div', 'goalcard__salvage', 'nothing shipped — the record keeps what landed.'))
           const recordActions = bfEl('div', 'goalcard__terminal-actions')
           const openRecord = bfEl('button', 'goalcard__link', 'open the record')
@@ -35099,6 +35294,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // authoritative per-viewer sync.
           existing.kind = entry.kind
           existing.text = entry.text
+          // the settle rewrite also carries the launched run's routing —
+          // adopt it so a click lands on the artifact without waiting for
+          // the next loadNotifications sync
+          if (entry.artifactId) {
+            existing.artifactId = entry.artifactId
+          }
+          if (entry.threadId) {
+            existing.threadId = entry.threadId
+          }
           existing.read = existing.read || entry.read
           renderNotifications()
           return
@@ -35518,8 +35722,64 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function roomChatMessageIsOwn(message) {
+        // the server-stamped session email wins; name matching only covers
+        // messages persisted before the authorEmail stamp existed
+        const authorEmail = String(message?.authorEmail || '').toLowerCase()
+        const selfEmail = String(authedUser?.email || '').toLowerCase()
+        if (authorEmail && selfEmail) {
+          return authorEmail === selfEmail
+        }
         const name = String(message?.name || '')
         return Boolean(currentParticipantName) && name.toLowerCase() === currentParticipantName.toLowerCase()
+      }
+
+      // card 073 — the misplaced-message escape hatch, shared by room chat and
+      // the chat tool. A quiet delete control rides one's OWN bubbles: hidden
+      // until hover/focus (desktop) or a ~550ms long-press (touch), and the
+      // first tap arms "delete?" before the second commits. This only decides
+      // where the affordance shows — authorship is enforced server-side.
+      function attachChatMessageDeleteControl(item, onDelete) {
+        const control = document.createElement('button')
+        control.type = 'button'
+        control.className = 'scout-chat-msg__delete'
+        control.textContent = 'delete'
+        control.title = 'delete this message'
+        let disarmTimer = 0
+        control.addEventListener('click', event => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (control.dataset.armed !== '1') {
+            control.dataset.armed = '1'
+            control.textContent = 'delete?'
+            disarmTimer = window.setTimeout(() => {
+              delete control.dataset.armed
+              control.textContent = 'delete'
+            }, 2600)
+            return
+          }
+          window.clearTimeout(disarmTimer)
+          control.disabled = true
+          onDelete()
+        })
+        // long-press surfaces the control where hover does not exist; it
+        // stays visible on that bubble until the feed re-renders
+        let pressTimer = 0
+        const cancelPress = () => {
+          if (pressTimer) {
+            window.clearTimeout(pressTimer)
+            pressTimer = 0
+          }
+        }
+        item.addEventListener('pointerdown', event => {
+          if (event.pointerType !== 'touch') {
+            return
+          }
+          cancelPress()
+          pressTimer = window.setTimeout(() => item.classList.add('show-delete'), 550)
+        })
+        item.addEventListener('pointerup', cancelPress)
+        item.addEventListener('pointercancel', cancelPress)
+        return control
       }
 
       function roomChatIsNearBottom() {
@@ -35530,10 +35790,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const own = roomChatMessageIsOwn(message)
         const item = document.createElement('article')
         item.className = `scout-chat-msg ${own ? 'scout-chat-msg--user' : 'scout-chat-msg--peer'}`
+        item.dataset.messageId = String(message?.id || '')
         const meta = document.createElement('span')
         meta.className = 'scout-chat-meta'
         const author = own ? 'you' : String(message?.name || 'guest').toLowerCase()
         meta.textContent = `${author} · ${scoutChatTimeLabel(message?.createdAt)}`
+        // card 073: your own bubble carries the delete control on its meta line
+        if (own && message?.id) {
+          meta.appendChild(attachChatMessageDeleteControl(item, () => sendRoomChatDelete(String(message.id))))
+        }
         const body = document.createElement('div')
         body.className = 'scout-chat-text'
         // pasted links become safe anchors — DOM-built, never innerHTML
@@ -35612,6 +35877,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         list.forEach(message => appendRoomChatMessage(message))
         ensureRoomChatEmptyState()
         roomChatThread.scrollTop = roomChatThread.scrollHeight
+      }
+
+      function sendRoomChatDelete(id) {
+        if (!id || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        // no optimistic drop — the removal lands via the room_chat_delete
+        // broadcast, so every client (sender included) drops the same bubble
+        ws.send(JSON.stringify({
+          event: 'room_chat_delete',
+          data: JSON.stringify({ id })
+        }))
+      }
+
+      function handleRoomChatDeleteEvent(payload) {
+        const id = String(payload?.id || '')
+        if (!id) {
+          return
+        }
+        roomChatSeenIds.delete(id)
+        roomChatThread.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(id)}"]`)?.remove()
+        ensureRoomChatEmptyState()
       }
 
       function sendRoomChat(text) {
@@ -35942,9 +36229,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // the phone chat is a stacked navigator: the data attribute drives
 	      // which pane the ≤640px cascade shows; inert on desktop
 	      function setMobileChatView(view) {
+	        const wasThreads = mobileChatView !== 'convo'
 	        mobileChatView = view === 'convo' ? 'convo' : 'threads'
 	        if (chatToolSection) {
 	          chatToolSection.dataset.chatView = mobileChatView
+	        }
+	        // P2-3: entering the convo from the thread list pushes a history entry
+	        // so the OS edge-swipe / hardware back returns to the thread list
+	        // instead of exiting the SPA. Phone-layout only (the stacked navigator
+	        // is the only place this back gesture makes sense); guarded so a
+	        // popstate-driven change never re-pushes what it is unwinding.
+	        if (mobileChatView === 'convo' && wasThreads && !chatHistoryPopping && phoneLayoutQuery.matches) {
+	          try { history.pushState({ view: 'convo', thread: activeScoutThreadId || '' }, '') } catch (_) {}
 	        }
 	        if (mobileChatView === 'convo' && scoutChatThread) {
 	          // Pin to the latest message: the thread's nodes were appended
@@ -36277,6 +36573,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const isFollowup = !viaScout && text.length <= 400 && feedPrevMsgKey === followKey
 	        feedPrevMsgKey = viaScout ? '' : followKey
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
+	        node.dataset.messageId = String(message?.id || '')
+	        // card 073: your own committed message carries the delete control —
+	        // peer and scout bubbles never do (the server enforces the same
+	        // authorship rule). It rides the article, beside the bubble, so the
+	        // follow-up meta lift below never eats it.
+	        if (kind === 'user' && message?.id) {
+	          node.insertBefore(attachChatMessageDeleteControl(node, () => deleteScoutChatMessage(String(message.id))), node.firstChild)
+	        }
 	        if (isFollowup) {
 	          node.classList.add('is-followup')
 	          // sheet 3a: the group's attribution line rides the NEWEST bubble —

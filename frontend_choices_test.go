@@ -71,3 +71,26 @@ func TestIndexChoicesPillNeverLaunches(t *testing.T) {
 		}
 	}
 }
+
+// P2-1 — the checkpoint choices row must render at most one filled primary pill
+// (sheet s05: exactly one filled primary, outlined siblings). A genuine fork of
+// two proceed options ("brand assets provided" vs "develop identity") must NOT
+// paint both ink-filled — the loop counts proceeds and only lights the primary
+// when there is exactly one, so no false default is implied.
+func TestGoalCheckpointChoicesNoFalseDefault(t *testing.T) {
+	html := readIndexForChoices(t)
+	body := functionBody(html, "function goalCardRenderCheckpoint(terminal, card, artifact, plan, checkpoint)")
+	if body == "" {
+		t.Fatal("could not extract goalCardRenderCheckpoint body")
+	}
+	if !strings.Contains(body, "const proceedCount = options.filter(option => option.action === 'proceed').length") {
+		t.Error("goalCardRenderCheckpoint must count proceed options before deciding the primary door")
+	}
+	if !strings.Contains(body, "option.action === 'proceed' && proceedCount === 1") {
+		t.Error("goalcard__choice--primary must apply ONLY when there is exactly one proceed — a multi-proceed fork renders all-outlined (no false default)")
+	}
+	// guard the regression: the bare unconditional proceed→primary must be gone
+	if strings.Contains(body, "if (option.action === 'proceed') choiceBtn.classList.add('goalcard__choice--primary')") {
+		t.Error("the unconditional proceed→primary mapping still exists — a two-proceed fork would ink-fill both pills")
+	}
+}

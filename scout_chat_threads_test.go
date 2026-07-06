@@ -1475,3 +1475,34 @@ func TestScoutChatProcessTemplateHandoffLaunchesGoalPipeline(t *testing.T) {
 		t.Fatalf("goal plan ProcessID=%q ok=%v, want the process instantiated", plan.ProcessID, ok)
 	}
 }
+
+// P1-1 — a router-authored objective that ends in "." must not ship the card's
+// one sentence with a double period ("…identity.. gate:"). scoutRouterToolRunSummary
+// trims the trailing "." before both the run and the process joins.
+func TestScoutRouterToolRunSummaryTrimsTrailingPeriod(t *testing.T) {
+	runTool := packagingTool{
+		Group: toolGroupIdeate,
+		Name:  "Comps & Precedent",
+		Rubric: toolRubric{
+			Ref:           "comps_gate_v1",
+			KillCondition: "no comparable clears the bar",
+		},
+	}
+	processTool := packagingTool{
+		Group: toolGroupProcesses,
+		Name:  "Packaging Studio",
+	}
+	// Objective ends in "." — the double-period leak case from the audit.
+	objective := "develop the LONG LIGHT identity and decide to whom."
+
+	for _, tool := range []packagingTool{runTool, processTool} {
+		summary := scoutRouterToolRunSummary(tool, objective)
+		if strings.Contains(summary, "..") {
+			t.Fatalf("summary=%q leaks a double period — trailing '.' must be trimmed from the objective", summary)
+		}
+		// the single boundary period the join adds must survive
+		if !strings.Contains(summary, "to whom.") {
+			t.Fatalf("summary=%q dropped the objective's own boundary period", summary)
+		}
+	}
+}

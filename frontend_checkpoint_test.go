@@ -97,9 +97,11 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 		"go.addEventListener('click', () => post(noteText()))",
 		// resume rides the EXISTING approve seam carrying {choice}
 		"submitApproval(artifact.id, 'approve', '', choice)",
-		// admin-gated, mirrored honestly
+		// admin-gated, mirrored honestly — P2-2: the non-approver line names the
+		// approver's handle (sourced from the admin-gate config), not the old
+		// hardcoded "waiting on AJ" literal.
 		"if (!canApproveExternalWrites())",
-		"'waiting on AJ'",
+		"`waiting on ${accountHandle(artifactAdminEmail)}`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("goalCardRenderCheckpoint missing marker %q", want)

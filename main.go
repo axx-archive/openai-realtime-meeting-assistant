@@ -3803,11 +3803,34 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// Identity comes from the participant session, never the payload;
 			// persistence happens first so the echo-on-broadcast carries the
 			// durable id and everyone (sender included) renders one ordering.
-			payload, ok := kanbanApp.recordRoomChatMessage(currentParticipantName(), chat.Text)
+			// The authorEmail stamp is what later authorizes the sender — and
+			// only the sender — to delete the message.
+			payload, ok := kanbanApp.recordRoomChatMessageWithMetadata(currentParticipantName(), chat.Text, map[string]string{
+				"authorEmail": normalizeAccountEmail(sessionUser.Email),
+			})
 			if !ok {
 				continue
 			}
 			broadcastSignedInKanbanEvent("room_chat", payload)
+		case "room_chat_delete":
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before deleting room chat")
+				continue
+			}
+			deletion := struct {
+				ID string `json:"id"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &deletion); err != nil {
+				log.Errorf("Failed to unmarshal room chat delete payload: %v", err)
+				continue
+			}
+			// The payload only names the entry; whether the requester may
+			// remove it is decided from the session identity server-side.
+			payload, ok := kanbanApp.deleteRoomChatMessage(deletion.ID, sessionUser.Email, currentParticipantName())
+			if !ok {
+				continue
+			}
+			broadcastSignedInKanbanEvent("room_chat_delete", payload)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")

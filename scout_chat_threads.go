@@ -174,7 +174,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assistant/chat-threads/"), "/")
 	parts := strings.Split(suffix, "/")
-	if suffix == "" || len(parts) > 2 {
+	if suffix == "" || len(parts) > 3 {
 		http.NotFound(w, r)
 		return
 	}
@@ -267,6 +267,16 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 3 && parts[1] == "messages" && r.Method == http.MethodDelete {
+		thread, err := kanbanApp.deleteScoutChatThreadMessage(user.Email, threadID, parts[2])
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+		return
+	}
+
 	http.NotFound(w, r)
 }
 
@@ -277,6 +287,9 @@ func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 	}
 	if strings.Contains(err.Error(), "archived") {
 		status = http.StatusConflict
+	}
+	if strings.Contains(err.Error(), "your own") {
+		status = http.StatusForbidden
 	}
 	writeAuthError(w, status, err.Error())
 }
@@ -1209,6 +1222,54 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, thr
 	return thread, nil
 }
 
+// deleteScoutChatThreadMessage removes one message its author posted in the
+// wrong place — same per-thread lock + re-read + save discipline as message
+// commits. Authorship is the whole authz story: only the message's own author
+// may remove it (session email vs the server-stamped authorEmail); Scout
+// replies and other people's messages stay. Messages persisted before the
+// authorEmail stamp existed carry none — in a private thread the owner-only
+// visibility already proves authorship, so those stay deletable there.
+func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, threadID string, messageID string) (scoutChatThreadRecord, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("message id is required")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	index := -1
+	for candidate := range thread.Messages {
+		if thread.Messages[candidate].ID == messageID {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat message not found")
+	}
+	message := thread.Messages[index]
+	own := message.AuthorEmail != "" && normalizeAccountEmail(message.AuthorEmail) == normalizeAccountEmail(viewerEmail)
+	if message.AuthorEmail == "" {
+		own = scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic
+	}
+	if message.Role != "user" || !own {
+		return scoutChatThreadRecord{}, fmt.Errorf("you can only delete your own messages")
+	}
+	thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	thread.Preview = scoutChatThreadPreview(thread)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	deliverScoutChatThreadDeletion(thread, messageID)
+	return thread, nil
+}
+
 // normalizeChannelName strips a leading '#' and surrounding whitespace from a
 // spoken/typed channel reference.
 func normalizeChannelName(name string) string {
@@ -1610,6 +1671,20 @@ func deliverScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutCha
 		return
 	}
 	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadUpdatePayload(thread, message))
+}
+
+// deliverScoutChatThreadDeletion routes a message removal the same way
+// committed messages travel — broadcast for public channels, owner-targeted
+// for private threads — with deletedMessageId (instead of message) telling
+// clients to drop the bubble live.
+func deliverScoutChatThreadDeletion(thread scoutChatThreadRecord, messageID string) {
+	payload := scoutChatThreadEventPayload(thread)
+	payload["deletedMessageId"] = messageID
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		broadcastOfficeKanbanEvent("chat_thread", payload)
+		return
+	}
+	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", payload)
 }
 
 // scoutChatThreadLock returns the per-thread mutex serializing chat thread

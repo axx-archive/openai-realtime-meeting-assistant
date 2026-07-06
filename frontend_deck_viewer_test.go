@@ -133,3 +133,71 @@ func TestIndexDeckViewerSecurityContract(t *testing.T) {
 		}
 	}
 }
+
+// P1-3 — inside the artifact document stage, sections must read as a quiet
+// reading measure (sheet s10 spec 2e): single column, borderless sections, a
+// mono lowercase label voice. The base tile treatment (bordered surface-1 card,
+// headline h4) is KEPT for the intelligence data room, so the override must be
+// PARENTED by .artifact-stage__read — never a change to the base rule.
+func TestArtifactStageReadReadingMeasure(t *testing.T) {
+	html := readIndexForDeckViewer(t)
+
+	// the section shell loses its box only inside the document stage
+	sectionRule := cssBlock(html, ".artifact-stage__read .artifact-read__section {")
+	if sectionRule == "" {
+		t.Fatal("missing .artifact-stage__read .artifact-read__section override — sections still render as tiles in the reader")
+	}
+	for _, want := range []string{"border: 0", "background: none", "padding: 0"} {
+		if !strings.Contains(sectionRule, want) {
+			t.Errorf(".artifact-stage__read .artifact-read__section must zero %q (borderless reading measure)", want)
+		}
+	}
+
+	// the h4 drops to the mono lowercase label voice inside the reader only
+	h4Rule := cssBlock(html, ".artifact-stage__read .artifact-read__section h4 {")
+	if h4Rule == "" {
+		t.Fatal("missing .artifact-stage__read .artifact-read__section h4 override — the headline h4 still shouts")
+	}
+	for _, want := range []string{"var(--type-label)", "text-transform: lowercase"} {
+		if !strings.Contains(h4Rule, want) {
+			t.Errorf(".artifact-stage__read .artifact-read__section h4 must carry %q (mono lowercase label voice)", want)
+		}
+	}
+
+	// single column at the reading measure
+	gridRule := cssBlock(html, ".artifact-stage__read .artifact-read__grid {")
+	if !strings.Contains(gridRule, "grid-template-columns: 1fr") {
+		t.Error(".artifact-stage__read .artifact-read__grid must collapse to a single column")
+	}
+
+	// REGRESSION GUARD: the base .artifact-read__section rule keeps the tile
+	// treatment for the intelligence data room (bordered surface-1 card).
+	baseRule := cssBlock(html, ".artifact-read__section {")
+	if !strings.Contains(baseRule, "border: 1px solid var(--line-1)") || !strings.Contains(baseRule, "background: var(--surface-1)") {
+		t.Error("base .artifact-read__section must keep its tile treatment (data-room sections unchanged) — the reading measure is scoped to .artifact-stage__read only")
+	}
+}
+
+// cssBlock returns the "{ … }" body of the first CSS rule whose selector+brace
+// exactly matches selectorWithBrace (e.g. ".foo .bar {"). Braces are balanced,
+// so nested at-rules would be handled, but these are flat declaration blocks.
+func cssBlock(source string, selectorWithBrace string) string {
+	start := strings.Index(source, selectorWithBrace)
+	if start == -1 {
+		return ""
+	}
+	open := start + strings.Index(source[start:], "{")
+	depth := 0
+	for index := open; index < len(source); index++ {
+		switch source[index] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return source[open : index+1]
+			}
+		}
+	}
+	return ""
+}

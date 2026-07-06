@@ -84,3 +84,38 @@ func TestIndexGoalCancelPostAndOptimisticState(t *testing.T) {
 		}
 	}
 }
+
+// P2-2 — machine identity must not leak into the reader's voice: a cancelled
+// card reads the lowercase handle ("cancelled by aj"), never the full email,
+// and a waiting card names the approver's handle sourced from the admin-gate
+// config, never a hardcoded "waiting on AJ".
+func TestIndexGoalCardIdentityHandles(t *testing.T) {
+	html := readIndexForGoalCancel(t)
+
+	// accountHandle is defined: email -> roster short name, else pre-@ lowered.
+	handle := functionBody(html, "function accountHandle(value)")
+	if handle == "" {
+		t.Fatal("accountHandle(value) helper is not defined")
+	}
+	if !strings.Contains(handle, "participantNameFromEmail(raw)") || !strings.Contains(handle, "raw.slice(0, at)") {
+		t.Error("accountHandle must map an email to its roster short name, else fall back to the pre-@ local part lowercased")
+	}
+
+	// the cancel line renders THROUGH accountHandle — not the raw email.
+	body := functionBody(html, "function goalCardRenderTerminal(card, artifact, plan, state, prevState)")
+	if body == "" {
+		t.Fatal("could not extract goalCardRenderTerminal body")
+	}
+	if !strings.Contains(body, "`cancelled by ${accountHandle(by)}`") {
+		t.Error("the cancelled card must render the handle (cancelled by ${accountHandle(by)}), never the raw email")
+	}
+
+	// no hardcoded approver literal survives anywhere; the waiting line names
+	// the approver handle sourced from the same admin-gate config.
+	if strings.Contains(html, "waiting on AJ") {
+		t.Error(`the hardcoded "waiting on AJ" literal must be replaced with the approver handle`)
+	}
+	if !strings.Contains(html, "`waiting on ${accountHandle(artifactAdminEmail)}`") {
+		t.Error("the waiting line must name the approver handle (accountHandle(artifactAdminEmail))")
+	}
+}

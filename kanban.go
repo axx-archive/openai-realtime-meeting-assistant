@@ -3401,7 +3401,51 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 	if artifactID := strings.TrimSpace(entry.Metadata["artifactId"]); artifactID != "" {
 		payload["artifactId"] = artifactID
 	}
+	// The session-identity stamp: own-message detection (and the delete
+	// affordance) keys on this, never on the mutable display name.
+	if authorEmail := normalizeAccountEmail(entry.Metadata["authorEmail"]); authorEmail != "" {
+		payload["authorEmail"] = authorEmail
+	}
 	return payload
+}
+
+// deleteRoomChatMessage removes one persisted room-chat transcript entry — the
+// misplaced-message escape hatch. Identity comes from the session, never the
+// payload: the requester must be the message's author. The authorEmail stamp
+// wins; entries persisted before the stamp existed fall back to a
+// case-insensitive speaker-name match. Returns the room_chat_delete broadcast
+// payload.
+func (app *kanbanBoardApp) deleteRoomChatMessage(entryID string, requesterEmail string, requesterName string) (map[string]any, bool) {
+	if app == nil || app.memory == nil {
+		return nil, false
+	}
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		return nil, false
+	}
+	entry, ok := app.memory.entryByID(entryID)
+	if !ok || entry.Kind != meetingMemoryKindTranscript || entry.Metadata["source"] != transcriptSourceRoomChat {
+		return nil, false
+	}
+	if !roomChatEntryAuthoredBy(entry, requesterEmail, requesterName) {
+		return nil, false
+	}
+	if _, removed, err := app.memory.deleteEntryByID(entryID); err != nil || !removed {
+		if err != nil {
+			log.Errorf("Failed to delete room chat message %s: %v", entryID, err)
+		}
+		return nil, false
+	}
+	return map[string]any{"id": entryID}, true
+}
+
+// roomChatEntryAuthoredBy is the room-chat delete authz check.
+func roomChatEntryAuthoredBy(entry meetingMemoryEntry, requesterEmail string, requesterName string) bool {
+	if authorEmail := normalizeAccountEmail(entry.Metadata["authorEmail"]); authorEmail != "" {
+		return authorEmail == normalizeAccountEmail(requesterEmail)
+	}
+	speaker := strings.TrimSpace(entry.Metadata["speaker"])
+	return speaker != "" && strings.EqualFold(speaker, strings.TrimSpace(requesterName))
 }
 
 // roomChatHistory returns the newest room-chat messages of the current

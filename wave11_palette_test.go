@@ -284,7 +284,10 @@ func TestGoalcardTerminalRendersTrustLine(t *testing.T) {
 		"marked ASSUMED — verify before sending",
 		"canApproveExternalWrites()",
 		"submitApproval(artifact.id, 'approve'",
-		"waiting on AJ",
+		// P2-2: the gate's non-approver line names the approver's handle sourced
+		// from the admin-gate config — the old hardcoded "waiting on AJ" literal
+		// was replaced with the lowercase handle the product's voice uses.
+		"waiting on ${accountHandle(artifactAdminEmail)}",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("goalCardRenderTerminal missing %q — trust line or gate vocabulary broken", want)

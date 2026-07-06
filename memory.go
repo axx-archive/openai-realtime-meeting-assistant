@@ -993,10 +993,10 @@ func (store *meetingMemoryStore) entriesByRelevance(relevance string) []meetingM
 	return matched
 }
 
-// deleteEntryByID hard-deletes one entry (any kind) and rewrites the log. This
-// is the ONLY hard delete in the system — the expiry job's terminal step, always
-// paired with a slop_pass audit stub so the fact of deletion survives. Reports
-// whether an entry was removed.
+// deleteEntryByID hard-deletes one entry (any kind) and rewrites the log. Two
+// callers only: the expiry job's terminal step (always paired with a slop_pass
+// audit stub so the fact of deletion survives) and a user deleting their own
+// misplaced room-chat message. Reports whether an entry was removed.
 func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
