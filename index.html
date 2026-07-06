@@ -38466,8 +38466,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          checks.agents.renderRunner.heartbeatOK (the codex-runner twin the
          server already exposes). Absent/stale heartbeat leaves Export PDF
          disabled with the tooltip explaining why. */
-      let renderSidecarReady = false
-      let renderSidecarProbe = null
+      /* var, not let: renderArtifactDetail runs from the BOOT render pass
+         (line ~19707) — thousands of lines before this declaration executes.
+         A let here is a TDZ landmine that aborts the whole top-level script
+         on load (took down palette/meetingRecord/scoutCaptionTimer in prod,
+         2026-07-05). var hoists + initializes undefined, so the probe lazily
+         arms on first call regardless of eval order. */
+      var renderSidecarReady = false
+      var renderSidecarProbe = null
       function probeRenderSidecar() {
         if (!renderSidecarProbe) {
           renderSidecarProbe = fetch('/readyz', { cache: 'no-store' })
@@ -38510,7 +38516,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       /* ---- share links: mint / copy / list / revoke ---- */
 
-      let artifactSharePanelFor = null
+      /* var, not let: renderArtifactDetail (boot render pass) reads this
+         ~100 lines above the declaration — same TDZ class as
+         renderSidecarProbe (2026-07-05 outage). */
+      var artifactSharePanelFor = null
 
       function toggleArtifactSharePanel() {
         const artifact = selectedArtifact()
