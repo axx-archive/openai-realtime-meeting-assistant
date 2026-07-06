@@ -951,6 +951,25 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			"artifact": updated,
 			"actions":  actions,
 		})
+	case "resume":
+		// The blocked-goal recovery door: requester or admin only, goal mode
+		// only. Resets exhausted subtasks and re-drives from where it stopped.
+		if artifact.Metadata["mode"] != "goal" {
+			writeAuthError(w, http.StatusBadRequest, "resume applies to goal runs")
+			return
+		}
+		requester := strings.TrimSpace(artifact.Metadata["requestedBy"])
+		if !isArtifactApprovalAdmin(user) && !strings.EqualFold(requester, normalizeAccountEmail(user.Email)) && !strings.EqualFold(requester, user.Name) {
+			writeAuthError(w, http.StatusForbidden, "only the requester or an admin resumes a blocked run")
+			return
+		}
+		if err := kanbanApp.resumeBlockedGoal(artifactID, user.Name); err != nil {
+			writeAuthError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		updated, _ := kanbanApp.osArtifactByID(artifactID)
+		writeAuthJSON(w, http.StatusAccepted, map[string]any{"ok": true, "artifact": updated})
+		return
 	case "reject":
 		if !isArtifactApprovalAdmin(user) {
 			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")

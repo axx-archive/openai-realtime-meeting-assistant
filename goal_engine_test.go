@@ -3107,3 +3107,63 @@ func TestProcessBudgetsOverrideEngineDefaults(t *testing.T) {
 		t.Fatalf("non-process plan changed the engine envelope: timeout=%v tokens=%d", fresh.timeout, fresh.maxTokens)
 	}
 }
+
+// The blocked-goal recovery door: the live drive-through proved the
+// follow-up-based "Retry from here" never reaches a blocked process stage
+// (a writer that exhausted revisions during the API-credit outage). resume
+// resets exhausted subtasks and re-drives from exactly where it stopped.
+func TestResumeBlockedGoalResetsAndRedrives(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "process_resume_probe")
+
+	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the blocked-resume door",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_resume_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	kanbanApp.runGoalThread(thread.Artifact.ID)
+	// Let the async child folds finish (the probe parks at its checkpoint)
+	// so no goroutine re-persists over the hand-set blocked state below.
+	waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+
+	// Force the writer subtask into the blocked terminal by hand — the state
+	// the credit outage produced live.
+	parent, _ := kanbanApp.osArtifactByID(thread.Artifact.ID)
+	plan, _ := decodeGoalPlan(parent.Metadata["goalPlan"])
+	for index := range plan.Subtasks {
+		if plan.Subtasks[index].ID == "w1" {
+			plan.Subtasks[index].Status = subtaskBlocked
+			plan.Subtasks[index].Revisions = goalMaxRevisions
+		}
+	}
+	plan.State = goalStateBlocked
+	engine := newGoalEngine(kanbanApp)
+	engine.persist(&plan, thread.Artifact.ID, "")
+
+	before := len(*launched)
+	if err := kanbanApp.resumeBlockedGoal(thread.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("resumeBlockedGoal: %v", err)
+	}
+	updated, _ := kanbanApp.osArtifactByID(thread.Artifact.ID)
+	resumedPlan, _ := decodeGoalPlan(updated.Metadata["goalPlan"])
+	if resumedPlan.State == goalStateBlocked {
+		t.Fatalf("plan still blocked after resume: %s", resumedPlan.State)
+	}
+	if len(*launched) <= before {
+		t.Fatalf("resume did not re-dispatch the writer (launched %d -> %d)", before, len(*launched))
+	}
+
+	// Refusal outside the blocked state: a healthy goal cannot be "resumed".
+	if err := kanbanApp.resumeBlockedGoal(thread.Artifact.ID, "aj@shareability.com"); err == nil {
+		t.Fatal("resume of a non-blocked goal must refuse")
+	}
+}

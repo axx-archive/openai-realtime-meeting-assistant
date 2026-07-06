@@ -7568,6 +7568,13 @@
         body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-form {
           margin-right: 310px;
         }
+
+        /* the feed needs bottom clearance too — the newest messages
+           auto-scroll into the exact band the docked window covers; 190px
+           of scrollable slack clears both deck shapes (pair and single) */
+        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
+          padding-bottom: 190px;
+        }
       }
 
       .scout-chat-empty {
@@ -9170,6 +9177,22 @@
         display: none;
       }
 
+      /* the privacy caveat under the private composer — private means from
+         teammates, not from the system: these threads still feed transcripts
+         into the company brain. Channels hide it (they're public anyway). */
+      .scout-chat-brain-note {
+        flex: none;
+        margin: -6px 16px 12px;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .scout-chat-brain-note[hidden] {
+        display: none;
+      }
+
       /* design composer container: 12px 16px 14px around the pill */
       .chat-conversation .scout-chat-form {
         margin: 12px 16px 14px;
@@ -9362,6 +9385,12 @@
         #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .scout-rail {
           grid-column: 2;
           grid-row: 1;
+          /* the shell's min-height is a floor, not a ceiling — a long thread
+             would grow this column and push the composer under the fixed
+             meeting dock. Clamp the rail to the viewport (topbar + 12px
+             workspace top pad + 104px dock clearance) so the thread's own
+             overflow-y engages instead. */
+          max-height: calc(100svh - var(--shell-topbar-height, 0px) - 116px);
         }
       }
 
@@ -15106,10 +15135,15 @@
         }
       }
 
-      /* tablet: the PiP docks bottom-right — the composer clears it */
+      /* tablet: the PiP docks bottom-right — the composer clears it, and the
+         feed keeps the same scrollable slack under the newest messages */
       @media (min-width: 641px) and (max-width: 860px) {
         body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-form {
           margin-right: 288px;
+        }
+
+        body:has(#pipMeeting:not([hidden])) #appShell[data-tool="chat"] .scout-chat-thread {
+          padding-bottom: 190px;
         }
       }
 
@@ -18689,6 +18723,7 @@
               </button>
             </form>
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
+            <p id="scoutChatBrainNote" class="scout-chat-brain-note">private from teammates · recorded to the company brain</p>
           </div>
         </section>
 
@@ -19912,6 +19947,7 @@
 	      const chatConvoRename = document.getElementById('chatConvoRename')
 	      const chatConvoRenameInput = document.getElementById('chatConvoRenameInput')
 	      const chatConvoMeta = document.getElementById('chatConvoMeta')
+	      const scoutChatBrainNote = document.getElementById('scoutChatBrainNote')
       const roomChatPanel = document.getElementById('roomChatPanel')
       const roomChatThread = document.getElementById('roomChatThread')
       const roomChatForm = document.getElementById('roomChatForm')
@@ -34350,7 +34386,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // rest step down to outlined/ghost registers
         const retry = bfEl('button', 'goalcard__link goalcard__link--primary', 'Retry from here')
         retry.type = 'button'
-        retry.addEventListener('click', async () => { await postAuthJSON('/assistant/thread-followup', { artifactId: artifact.id, text: 'retry from where it failed' }); scheduleArtifactRefresh() })
+        retry.addEventListener('click', async () => {
+          // process goals resume through the blocked-goal door (the follow-up
+          // seam never reaches a blocked process stage); workstreams keep the
+          // follow-up retry
+          if (plan?.processId || plan?.toolTemplate) {
+            await postAuthJSON('/artifacts/action', { id: artifact.id, action: 'resume' })
+          } else {
+            await postAuthJSON('/assistant/thread-followup', { artifactId: artifact.id, text: 'retry from where it failed' })
+          }
+          scheduleArtifactRefresh()
+        })
         const restart = bfEl('button', 'goalcard__link', 'Restart')
         restart.type = 'button'
         restart.addEventListener('click', () => runGoalPipeline({ objective: plan?.objective || goalArtifactTitle(artifact), toolTemplate: plan?.toolTemplate || '' }))
@@ -35772,6 +35818,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatConvoMeta.textContent = isChannel
 	            ? 'public · everyone in the office'
 	            : 'private · only you and Scout'
+	        }
+	        if (scoutChatBrainNote) {
+	          // private means from teammates, not from the system — these
+	          // threads still feed the company brain; channels are public anyway
+	          scoutChatBrainNote.hidden = isChannel
 	        }
 	      }
 

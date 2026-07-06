@@ -3008,6 +3008,57 @@ func (app *kanbanBoardApp) resumeApprovedGoal(parentID string, approvedBy string
 	return app.resumeApprovedGoalWithChoice(parentID, approvedBy, "")
 }
 
+// resumeBlockedGoal is the human recovery door for a needs_attention goal
+// whose subtask exhausted its revisions (a blocked writer after an API
+// outage, a starved panel): every blocked subtask resets to ready with a
+// fresh revision budget, the plan returns to execute, and the engine
+// re-drives from exactly where it stopped. The live drive-through proved
+// "Retry from here" (a thread follow-up) never reaches a blocked PROCESS
+// stage — this does, and only this. Refused unless the goal is actually
+// needs_attention, so it can never skip a gate or a checkpoint.
+func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) error {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return fmt.Errorf("goal id is required")
+	}
+	lock := goalEngineLock(parentID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	parent, ok := app.osArtifactByID(parentID)
+	if !ok {
+		return fmt.Errorf("goal artifact not found")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok {
+		return fmt.Errorf("goal plan not found")
+	}
+	if plan.State != goalStateBlocked {
+		return fmt.Errorf("the goal is not blocked — nothing to resume")
+	}
+	reset := 0
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.Status == subtaskBlocked || st.Status == subtaskFailed {
+			st.Status = subtaskReady
+			st.Revisions = 0
+			st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "resumed by " + firstNonEmptyString(strings.TrimSpace(resumedBy), "admin") + " after the block", By: "resume_blocked"}
+			reset++
+		}
+	}
+	if reset == 0 {
+		return fmt.Errorf("no blocked subtask to resume")
+	}
+	engine := newGoalEngine(app)
+	engine.applyProcessBudgets(&plan)
+	plan.State = goalStateExecute
+	engine.persist(&plan, parentID, "")
+	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
+	defer cancel()
+	engine.drive(ctx, &plan, parentID)
+	return nil
+}
+
 // resumeApprovedGoalWithChoice is the same seam extended to carry the human's
 // {choice} (Wave 4 item 17): a goal parked at a process human_checkpoint
 // resumes here, the chosen option feeding the next stage's input. The existing
