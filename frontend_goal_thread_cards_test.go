@@ -127,7 +127,7 @@ func TestIndexStageArtifactRunlogContract(t *testing.T) {
 		`replace(/\s*\(revision \d+\)\s*/g, ' ')`,
 		"runlogOpen",
 		"runlog__entry",
-		"openArtifactStage(entry.dataset.artifactId)",
+		"openArtifactStage(entry.dataset.artifactId, entry.querySelector('.runlog__title')?.textContent || '')",
 		// while the container is open, later stages emit nothing new
 		"document.createDocumentFragment()",
 	} {

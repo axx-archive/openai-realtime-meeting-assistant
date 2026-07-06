@@ -22546,7 +22546,10 @@
       // gateOutcome, with the flat metadata mirror as the fallback)
       function artifactStageKicker(entry) {
         const m = entry?.metadata || {}
-        const bits = [String(m.type || '').trim() || artifactModeLabel(entry) || 'artifact']
+        // kind derives from the SAME sniff the body dispatch uses, so the
+        // kicker can never say "markdown" over a rendering deck
+        const sniffed = artifactIsHTMLDeck(entry) ? 'deck' : (String(m.type || '').trim() || artifactModeLabel(entry) || 'artifact')
+        const bits = [sniffed]
         const plan = isGoalArtifact(entry) ? goalPlanFromArtifact(entry) : null
         const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
         const gateScore = Number(gateTask?.review?.score)
@@ -22556,13 +22559,17 @@
         return bits.join(' · ')
       }
 
-      function artifactStageTitle(entry) {
+      function artifactStageTitle(entry, fallback) {
+        const body = String(entry?.text || '')
+        // a markup body has no previewable first line — the style block wins
+        const previewable = body && !/^\s*</.test(body) ? compactArtifactPreview(body) : ''
         return String(entry?.metadata?.title || '').trim()
           || String(entry?.metadata?.threadQuery || entry?.metadata?.query || '').trim()
-          || compactArtifactPreview(String(entry?.text || '')) || 'artifact'
+          || String(fallback || '').trim()
+          || previewable || 'artifact'
       }
 
-      async function openArtifactStage(artifactId) {
+      async function openArtifactStage(artifactId, fallbackTitle) {
         const id = String(artifactId || '').trim()
         if (!id) return
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
@@ -22584,7 +22591,7 @@
         stage.className = 'artifact-stage'
         stage.setAttribute('role', 'dialog')
         stage.setAttribute('aria-modal', 'true')
-        stage.setAttribute('aria-label', artifactStageTitle(entry))
+        stage.setAttribute('aria-label', artifactStageTitle(entry, fallbackTitle))
 
         const scrim = document.createElement('div')
         scrim.className = 'artifact-stage__scrim'
@@ -22597,7 +22604,7 @@
         headings.appendChild(bfEl('span', 'artifact-stage__kicker', artifactStageKicker(entry)))
         const title = document.createElement('h2')
         title.className = 'artifact-stage__title'
-        title.textContent = artifactStageTitle(entry)
+        title.textContent = artifactStageTitle(entry, fallbackTitle)
         headings.appendChild(title)
         const escape = bfEl('button', 'artifact-stage__escape', 'open in intelligence')
         escape.type = 'button'
@@ -33149,7 +33156,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           for (const input of inputTasks) {
             const door = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ review: ${input.title || input.id}`)
             door.type = 'button'
-            door.addEventListener('click', () => openArtifactStage(input.artifactId))
+            door.addEventListener('click', () => openArtifactStage(input.artifactId, input.title || input.id))
             doors.appendChild(door)
           }
           wrap.appendChild(doors)
@@ -33238,7 +33245,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const actions = bfEl('div', 'goalcard__terminal-actions')
           const open = bfEl('button', 'goalcard__link goalcard__link--primary', 'open the deliverable')
           open.type = 'button'
-          open.addEventListener('click', () => openArtifactStage(artifact.id))
+          open.addEventListener('click', () => openArtifactStage(artifact.id, String(artifact?.metadata?.objective || artifact?.metadata?.title || '').trim()))
           actions.appendChild(open)
           terminal.appendChild(actions)
           // the trust line (design §1.7), rebuilt as a hairline footer: the
@@ -35089,7 +35096,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          row.type = 'button'
 	          row.className = 'runlog__row'
 	          row.append(bfEl('span', 'runlog__title', ''), bfEl('span', 'runlog__meta', ''))
-	          row.addEventListener('click', () => openArtifactStage(entry.dataset.artifactId))
+	          row.addEventListener('click', () => openArtifactStage(entry.dataset.artifactId, entry.querySelector('.runlog__title')?.textContent || ''))
 	          entry.append(node, row)
 	          list.appendChild(entry)
 	        }

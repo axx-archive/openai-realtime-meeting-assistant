@@ -83,7 +83,7 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 		// review-the-draft doors open the input stages' artifacts in the
 		// chat-side artifact stage (§7 — Intelligence stays the data room)
 		"const inputTasks = (stageTask?.dependsOn || [])",
-		"openArtifactStage(input.artifactId)",
+		"openArtifactStage(input.artifactId, input.title || input.id)",
 		// inline brief exposes the judge scores + steals without leaving the card
 		"goalcard__checkpoint-brief",
 		// options → tappable choice buttons (labels, actions ride separately)

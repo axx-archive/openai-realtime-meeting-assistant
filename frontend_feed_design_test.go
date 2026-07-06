@@ -58,7 +58,7 @@ func TestIndexArtifactStageContract(t *testing.T) {
 			t.Errorf("index.html missing artifact stage style %q", want)
 		}
 	}
-	body := functionBody(html, "async function openArtifactStage(artifactId)")
+	body := functionBody(html, "async function openArtifactStage(artifactId, fallbackTitle)")
 	if body == "" {
 		t.Fatal("could not extract openArtifactStage body")
 	}
@@ -98,7 +98,7 @@ func TestIndexGoalcardHeroContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"'goalcard__link goalcard__link--primary', 'open the deliverable'",
-		"openArtifactStage(artifact.id)",
+		"openArtifactStage(artifact.id,",
 		"goalcard__trust-score",
 		"goalcard__trust-flag",
 	} {
