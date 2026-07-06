@@ -1323,6 +1323,11 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 	st.ArtifactID = firstNonEmptyString(child.ID, st.ArtifactID)
 	if complete {
 		st.Status = subtaskComplete
+		// A dispatched writer stage's deliverable lands in the origin thread as
+		// it folds (P0-2) — the inline-stage twin lives in completeProcessStage.
+		// Role-gated inside the reporter, so free-form subtasks (no role) skip.
+		app.postGoalStageMessage(parentID, st.Title, st.Role, st.ArtifactID,
+			goalStageMessageLine(st.Title, "", st.Revisions))
 	} else {
 		st.Status = subtaskFailed
 		if st.Review == nil {
@@ -1730,6 +1735,10 @@ func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *g
 	st.ArtifactID = artifact.ID
 	st.Status = subtaskComplete
 	st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: note, By: "process_stage"}
+	// The deliverable lands in the origin thread AS IT COMPLETES (P0-2), not
+	// only at the goal's terminal delivery. Role-gated inside the reporter.
+	e.app.postGoalStageMessage(parentID, stage.Title, stage.Role, artifact.ID,
+		goalStageMessageLine(stage.Title, note, st.Revisions))
 }
 
 // failProcessStage marks an inline stage failed with the reason on record; the
@@ -1997,6 +2006,22 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 			}
 		}
 	}
+	question := firstNonEmptyString(strings.TrimSpace(spec.Question), "Approve this stage to continue?")
+	// P0-4: a checkpoint that PROMISED extracted options (OptionsFrom set) but
+	// got none must never park optionless — offer mechanical defaults and
+	// disclose the miss in the question itself. Authored-free-form checkpoints
+	// (no Options, no OptionsFrom) keep their notes-as-the-choice grammar.
+	if len(options) == 0 && strings.TrimSpace(spec.OptionsFrom) != "" {
+		options = append(options, goalCheckpointOption{Label: "proceed with the recommendation"})
+		if len(stage.InputFrom) > 0 {
+			options = append(options, goalCheckpointOption{
+				Label:  "send back with notes",
+				Action: processCheckpointActionRevise,
+				Target: strings.TrimSpace(stage.InputFrom[0]),
+			})
+		}
+		question += " (options could not be extracted from " + strings.TrimSpace(spec.OptionsFrom) + " — defaults offered)"
+	}
 	// A re-park of the SAME stage (after a send-back redo) keeps LastAction
 	// from the prior record: "the most recent resume action" must survive the
 	// fresh park, or the HTTP door could mistake a just-sent-back goal for a
@@ -2007,7 +2032,7 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	}
 	plan.Checkpoint = &goalProcessCheckpoint{
 		StageID:    st.ID,
-		Question:   firstNonEmptyString(strings.TrimSpace(spec.Question), "Approve this stage to continue?"),
+		Question:   question,
 		Options:    options,
 		LastAction: lastAction,
 	}
@@ -2025,6 +2050,9 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	}); err != nil {
 		log.Errorf("goal %s checkpoint metadata failed: %v", parentID, err)
 	}
+	// The park lands in the origin thread as the call-to-action (P0-3): a goal
+	// ref message the client mounts as the full goalcard, choice card included.
+	e.app.postGoalCheckpointMessage(parentID, plan.Checkpoint.Question)
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is waiting on a human checkpoint: "+plan.Checkpoint.Question, artifact))
 }
 
@@ -2482,6 +2510,19 @@ func (e *goalEngine) scoreSubtaskAgainstRubric(ctx context.Context, plan *goalPl
 	if tool, ok := e.resolvedTool(plan); ok && st.ID == goalDeliverableSubtaskID(plan) {
 		if reason, violated := toolLawSweep(tool, full); violated {
 			return goalGateRound{Verdict: goalReviewRevise, Reasons: reason}
+		}
+	}
+	// Process stages get their own deterministic sweep: the first live
+	// packaging run shipped a markdown DESCRIPTION of the deck because no
+	// mechanical check demanded the artifact itself. Zero model cost, runs
+	// before any reviewer tokens, same revise short-circuit as the tool sweep.
+	if plan.ProcessID != "" {
+		if process, ok := processByID(plan.ProcessID); ok {
+			if stage, ok := process.stageByID(st.ID); ok {
+				if reason, violated := processStageLawSweep(stage, full); violated {
+					return goalGateRound{Verdict: goalReviewRevise, Reasons: reason}
+				}
+			}
 		}
 	}
 	produced := goalReviewArtifactBody(full)

@@ -5055,6 +5055,28 @@
         align-content: stretch;
       }
 
+      /* ≥641px the tool pages take a real viewport ceiling. Each pane below
+         (or its message log) declares overflow-y: auto + overscroll
+         contain, but the shell only ever gave it min-height — a floor, not
+         a ceiling — so the pane stretched to its content, its scrollbar
+         never engaged, and `contain` blocked the wheel from reaching the
+         page: the dead-scroll wedge. The bounded row makes each pane the
+         scroll container those rules always assumed. ≤640px keeps the phone
+         system — the page scrolls; the canvas panes relax to visible in the
+         phone block; phone chat bounds itself (design mobile §6). */
+      @media (min-width: 641px) {
+        #appShell.is-authed[data-tool="chat"] .workspace,
+        #appShell.is-authed[data-tool="memory"] .workspace,
+        #appShell.is-authed[data-tool="artifacts"] .workspace,
+        #appShell.is-authed[data-tool="research"] .workspace,
+        #appShell.is-authed[data-tool="design"] .workspace,
+        #appShell.is-authed[data-tool="grill"] .workspace,
+        #appShell.is-board-expanded .workspace {
+          grid-template-rows: minmax(0, 1fr);
+          height: calc(100dvh - var(--shell-topbar-height, 0px));
+        }
+      }
+
       /* ≥641px the shell itself clears the 60px rail (padding-left on
          #appShell.is-authed beside the header rules) — tool pages sit flush
          against the rail hairline, design canon. */
@@ -15715,6 +15737,20 @@
 
         .scout-chat-send:active {
           transform: scale(0.92);
+        }
+
+        /* phones scroll the page, not the pane: nothing bounds the canvas
+           tools' height here, so their desktop overflow-y: auto +
+           overscroll contain would leave a non-scrolling scroll container
+           that eats the touch (the dead-scroll wedge). Relax both — each
+           pane's 96px bottom padding already clears the floating tab bar. */
+        #memoryTool,
+        #artifactsTool,
+        #researchTool,
+        #designTool,
+        #grillTool {
+          overflow-y: visible;
+          overscroll-behavior: auto;
         }
 
         /* ---- intelligence (design mobile §8): 2×2 stat tiles, tighter
@@ -32133,20 +32169,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return String(m.title || m.query || m.threadQuery || 'Goal').trim() || 'Goal'
       }
 
+      // P0-1: ONE live card node per goal, cached at module level and reused
+      // across thread rebuilds — renderActiveScoutThread rebuilds the DOM on
+      // every chat_thread event, and a rebuilt checkpoint card would wipe a
+      // half-typed do_not_touch note. The cache node IS the card, forever.
+      const goalThreadCardNodes = new Map()
+
+      function goalCardNodeFor(artifact) {
+        const id = String(artifact?.id || '').trim()
+        if (!id) return null
+        let card = goalThreadCardNodes.get(id)
+        if (!card) {
+          card = renderGoalCard(artifact)
+          goalThreadCardNodes.set(id, card)
+        }
+        // the freshest library entry wins over a synthesized minimal artifact
+        const fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => String(entry?.id || '') === id)
+        updateGoalCard(card, fresh || artifact)
+        goalCardEnsureTicker()
+        return card
+      }
+
       function upsertGoalCardNode(artifact) {
         if (!scoutChatThread || !isGoalArtifact(artifact)) {
           return null
         }
-        const id = String(artifact?.id || '').trim()
-        if (!id) return null
-        let card = scoutChatThread.querySelector(`.goalcard[data-goal-artifact-id="${selectorEscape(id)}"]`)
-        if (!card) {
-          card = renderGoalCard(artifact)
+        const card = goalCardNodeFor(artifact)
+        if (!card) return null
+        if (!card.isConnected) {
+          // the launcher's instant ghost card: stamped with its thread so a
+          // rebuild re-mounts it here until a committed goal-ref message takes
+          // over the mount (same node either way — never a double card)
+          card.dataset.goalGhostThreadId = String(activeScoutThreadId || '')
           appendScoutChatNode(card)
         }
-        updateGoalCard(card, artifact)
-        goalCardEnsureTicker()
         return card
+      }
+
+      // re-append the ghost cards that belong to the active thread and were
+      // not mounted by a committed goal-ref message during this render pass
+      function remountGhostGoalCards() {
+        goalThreadCardNodes.forEach(card => {
+          if (!card.isConnected && card.dataset.goalGhostThreadId === String(activeScoutThreadId || '')) {
+            appendScoutChatNode(card)
+          }
+        })
       }
 
       function renderGoalCard(artifact) {
@@ -33961,6 +34028,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function renderActiveScoutThread() {
 	        clearScoutChatThreadNodes()
+	        // goalcards are cached nodes (goalThreadCardNodes) — detach them so
+	        // this pass re-mounts only the ones this thread's messages (or its
+	        // own ghost launches) own; nothing typed inside them is lost
+	        scoutChatThread.querySelectorAll('.goalcard').forEach(node => node.remove())
 	        const thread = selectedScoutChatThread()
 	        if (thread && (appShell.dataset.tool || '') === 'chat') {
 	          // The open conversation stays read while its updates stream in.
@@ -33982,12 +34053,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        renderScoutFollowUpTarget()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
 	        if (!messages.length) {
-	          ensureScoutChatEmptyState()
+	          remountGhostGoalCards()
+	          if (!scoutChatThread.querySelector('.goalcard')) {
+	            ensureScoutChatEmptyState()
+	          }
 	          updateChatThreadItem(chatThreadDisplayPreview(thread), thread?.updatedAt || '')
 	          return
 	        }
 	        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
 	        messages.forEach(message => appendScoutChatNode(scoutChatMessageRecordNode(message)))
+	        remountGhostGoalCards()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	      }
 
@@ -33996,7 +34071,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return scoutProposalCardNode(message)
 	        }
 	        if (String(message?.kind || '') === 'thread' && message.thread) {
-	          const card = scoutChatResearchNode(scoutThreadFromChatMessage(message))
+	          const run = scoutThreadFromChatMessage(message)
+	          // P0-1: a goal ref mounts the live goalcard in the thread — for
+	          // everyone, across reloads — instead of the research run card
+	          if (run.artifact && (String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
+	            return scoutGoalRefRecordNode(message, run.artifact)
+	          }
+	          const card = scoutChatResearchNode(run)
 	          // the launch reply is a real committed scout message (design copy:
 	          // "on it — research workstream kicked off. …") — render it as a
 	          // scout bubble with the run card beneath, not just the card, so
@@ -34008,6 +34089,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            return group
 	          }
 	          return card
+	        }
+	        if (String(message?.kind || '') === 'artifact' && message.thread) {
+	          return scoutStageArtifactNode(message)
 	        }
 	        const role = String(message?.role || '').toLowerCase()
 	        let kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
@@ -34055,6 +34139,61 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          status: ref.status || artifactStatusValue(artifact) || 'running',
 	          artifact
 	        }
+	      }
+
+	      // P0-1 latest-wins mount: the LAST goal-ref message in the thread
+	      // mounts the ONE live goalcard (goalCardNodeFor's cached node); every
+	      // earlier ref renders a one-line marker chip that jumps to the card.
+	      // syncGoalCards querySelectorAll keeps whichever mount is live updated.
+	      function scoutGoalRefRecordNode(message, artifact) {
+	        const goalId = String(artifact?.id || '')
+	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        let lastRefId = ''
+	        for (const candidate of messages) {
+	          if (String(candidate?.kind || '') === 'thread' && String(candidate?.thread?.artifactId || '') === goalId) {
+	            lastRefId = String(candidate?.id || '')
+	          }
+	        }
+	        const isLatest = !lastRefId || String(message?.id || '') === lastRefId
+	        if (!isLatest) {
+	          const marker = document.createElement('p')
+	          marker.className = 'scout-chat-system goalcard-marker'
+	          const jump = bfEl('button', 'goalcard__link', `▸ ${goalArtifactTitle(artifact)} — jump to the card`)
+	          jump.type = 'button'
+	          jump.addEventListener('click', () => {
+	            scoutChatThread.querySelector(`.goalcard[data-goal-artifact-id="${selectorEscape(goalId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+	          })
+	          marker.appendChild(jump)
+	          return marker
+	        }
+	        const card = goalCardNodeFor(artifact)
+	        if (!card) return document.createDocumentFragment()
+	        // the committed ref owns the mount now — stop the ghost re-append
+	        delete card.dataset.goalGhostThreadId
+	        const replyText = String(message?.text || '').trim()
+	        if (replyText && replyText !== String(message.thread?.query || '').trim()) {
+	          const group = document.createDocumentFragment()
+	          group.append(scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString()), card)
+	          return group
+	        }
+	        return card
+	      }
+
+	      // P0-2: a stage deliverable landing in the thread as it completes —
+	      // one narration line plus a compact tappable chip that opens the
+	      // stage artifact in the full viewer.
+	      function scoutStageArtifactNode(message) {
+	        const wrap = document.createElement('div')
+	        wrap.className = 'scout-chat-system scout-stage-artifact'
+	        wrap.appendChild(bfEl('p', 'scout-stage-artifact__line', scoutVoice(String(message?.text || ''))))
+	        const artifactId = String(message?.thread?.artifactId || '')
+	        if (artifactId) {
+	          const chip = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ ${String(message?.thread?.query || 'open the deliverable').trim() || 'open the deliverable'}`)
+	          chip.type = 'button'
+	          chip.addEventListener('click', () => openAgentArtifact({ id: artifactId }))
+	          wrap.appendChild(chip)
+	        }
+	        return wrap
 	      }
 
 	      // ---- the router confirmation card (spec §2 — the trust surface) ----

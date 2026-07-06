@@ -168,8 +168,8 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 	}
 
 	approval := packagingStudioStage(t, def, "ship_approval")
-	if len(approval.InputFrom) != 2 || approval.InputFrom[0] != "ship_compile" || approval.InputFrom[1] != "slide_jury" {
-		t.Fatalf("ship_approval inputFrom=%v, want [ship_compile slide_jury] — the approval reads the compile record AND the jury verdict/skip", approval.InputFrom)
+	if len(approval.InputFrom) != 3 || approval.InputFrom[0] != "ship_compile" || approval.InputFrom[1] != "slide_jury" || approval.InputFrom[2] != "ship_deck" {
+		t.Fatalf("ship_approval inputFrom=%v, want [ship_compile slide_jury ship_deck] — the approval reads the compile record, the jury verdict/skip, and can send the deck itself back", approval.InputFrom)
 	}
 	if approval.CheckpointSpec == nil || !strings.Contains(strings.ToLower(approval.CheckpointSpec.Question), "approve") {
 		t.Fatalf("ship_approval question must ask for the explicit ship approval: %+v", approval.CheckpointSpec)
@@ -282,18 +282,23 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 		t.Fatalf("founder_pass second option=%+v, want a revise-action send-back targeting write", sendBack)
 	}
 
-	// ... and "hold the package" actually HOLDS: the ship approval's negative
-	// option parks the goal until an explicit proceed.
+	// ... "send back" re-queues the deck build (the first live run proved a
+	// bad deck could reach this park with no way back), and "hold the package"
+	// actually HOLDS: the negative options park or re-queue until an explicit
+	// proceed.
 	approval := packagingStudioStage(t, def, "ship_approval")
-	if approval.CheckpointSpec == nil || len(approval.CheckpointSpec.Options) != 2 {
-		t.Fatalf("ship_approval options=%+v, want approve + hold", approval.CheckpointSpec)
+	if approval.CheckpointSpec == nil || len(approval.CheckpointSpec.Options) != 3 {
+		t.Fatalf("ship_approval options=%+v, want approve + send-back + hold", approval.CheckpointSpec)
 	}
-	approve, hold := approval.CheckpointSpec.Options[0], approval.CheckpointSpec.Options[1]
+	approve, deckBack, hold := approval.CheckpointSpec.Options[0], approval.CheckpointSpec.Options[1], approval.CheckpointSpec.Options[2]
 	if approve.Label != "approve the ship" || processCheckpointOptionAction(approve) != processCheckpointActionProceed {
 		t.Fatalf("ship_approval first option=%+v, want a proceed-action approve", approve)
 	}
+	if processCheckpointOptionAction(deckBack) != processCheckpointActionRevise || deckBack.Target != "ship_deck" {
+		t.Fatalf("ship_approval second option=%+v, want a revise-action send-back targeting ship_deck", deckBack)
+	}
 	if hold.Label != "hold the package" || processCheckpointOptionAction(hold) != processCheckpointActionHold {
-		t.Fatalf("ship_approval second option=%+v, want a hold-action hold", hold)
+		t.Fatalf("ship_approval third option=%+v, want a hold-action hold", hold)
 	}
 }
 

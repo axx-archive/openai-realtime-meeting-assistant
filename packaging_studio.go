@@ -366,11 +366,15 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID:        "ship_approval",
 				Title:     "Ship approval — the package leaves the building",
 				Role:      processRoleHumanCheckpoint,
-				InputFrom: []string{"ship_compile", "slide_jury"},
+				InputFrom: []string{"ship_compile", "slide_jury", "ship_deck"},
 				CheckpointSpec: &ProcessCheckpointSpec{
 					Question: "The five interlocking artifacts are filed and attached to the package — the deck, The Wall, The Talk, the rigor companion, and the findings record — with the render exports queued or their skips disclosed, and the slide jury's scoreboard (or its disclosed skip) on the findings record. Approve the ship, or hold the package.",
 					Options: []ProcessCheckpointOption{
 						{Label: "approve the ship"},
+						// The first live run proved a bad deck can reach this park
+						// with no way back short of holding forever: send-back
+						// re-queues ship_deck and cascade re-runs compile + jury.
+						{Label: "send back — rebuild the deck", Action: processCheckpointActionRevise, Target: "ship_deck"},
 						{Label: "hold the package", Action: processCheckpointActionHold},
 					},
 				},
@@ -780,6 +784,13 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 		body := strings.TrimSpace(spec.body)
 		if body == "" {
 			return filed, fmt.Errorf("ship deliverable %q has an empty body — SHIP files no blank artifact", spec.contract)
+		}
+		// The first live run filed a markdown DESCRIPTION of the deck stamped
+		// html_deck, and the mistyping rode all the way to a failed render and
+		// a starved jury. The compiler refuses to mistype: an html_deck spec
+		// whose body is not an actual HTML document fails the stage honestly.
+		if spec.artifactType == artifactTypeHTMLDeck && !strings.HasPrefix(strings.ToLower(body), "<!doctype html") {
+			return filed, fmt.Errorf("ship deliverable %q is not an HTML document (starts %q) — the ship_deck stage must produce the deck itself, not a description of it", spec.contract, compactAssistantLine(body[:min(len(body), 60)]))
 		}
 		metadata := map[string]string{
 			"artifactContract": spec.contract,

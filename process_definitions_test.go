@@ -427,3 +427,51 @@ func TestProcessesGroupServesEmptyWithoutRegistrations(t *testing.T) {
 		t.Fatal("processes group must serve an empty list, not null — the palette iterates it")
 	}
 }
+
+// The first live packaging run completed ship_deck with a markdown
+// DESCRIPTION of the deck — processStageLawSweep is the zero-cost guard that
+// makes that impossible.
+func TestProcessStageLawSweepDemandsRealDeckHTML(t *testing.T) {
+	deckStage := ProcessStage{ID: "ship_deck", OutputContract: "packaging_deck_v1"}
+	cases := []struct {
+		name    string
+		body    string
+		violate bool
+	}{
+		{"markdown description", "# packaging_deck_v1 — SHIPPED\n\n## Vision\nShip the deck.", true},
+		{"truncated html", "<!doctype html><html><body><h1>deck", true},
+		{"real deck", "<!doctype html><html><body><section>slide</section></body></html>", false},
+		{"leading whitespace ok", "\n\n  <!DOCTYPE HTML><html><body>x</body></html>", false},
+	}
+	for _, tc := range cases {
+		_, violated := processStageLawSweep(deckStage, tc.body)
+		if violated != tc.violate {
+			t.Errorf("%s: violated=%v, want %v", tc.name, violated, tc.violate)
+		}
+	}
+	if _, violated := processStageLawSweep(ProcessStage{ID: "write", OutputContract: "deck_copy_v1"}, "# markdown is fine here"); violated {
+		t.Error("non-deck contracts must not be swept by the deck rule")
+	}
+}
+
+// ship_approval carries a send-back option targeting ship_deck (the first
+// live run proved a bad deck could reach the final park with no way back).
+func TestPackagingStudioShipApprovalHasSendBack(t *testing.T) {
+	def, ok := processByID("packaging_studio")
+	if !ok {
+		t.Fatal("packaging_studio not registered")
+	}
+	stage, ok := def.stageByID("ship_approval")
+	if !ok {
+		t.Fatal("ship_approval stage missing")
+	}
+	foundRevise := false
+	for _, option := range stage.CheckpointSpec.Options {
+		if option.Action == processCheckpointActionRevise && option.Target == "ship_deck" {
+			foundRevise = true
+		}
+	}
+	if !foundRevise {
+		t.Fatalf("ship_approval options carry no revise→ship_deck send-back: %+v", stage.CheckpointSpec.Options)
+	}
+}

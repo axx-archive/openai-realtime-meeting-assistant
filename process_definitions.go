@@ -184,6 +184,28 @@ func (def ProcessDefinition) stageByID(id string) (ProcessStage, bool) {
 	return ProcessStage{}, false
 }
 
+// processStageLawSweep is the deterministic, zero-model-cost pre-check a
+// process stage's artifact must survive before any reviewer tokens are spent
+// (the process twin of toolLawSweep). Checks key on the stage's declared
+// output contract; the first entry exists because the first live packaging
+// run completed ship_deck with a markdown DESCRIPTION of the deck — a
+// deliverable whose contract demands the artifact itself must BE it.
+func processStageLawSweep(stage ProcessStage, body string) (string, bool) {
+	contract := strings.TrimSpace(stage.OutputContract)
+	trimmed := strings.TrimSpace(body)
+	switch contract {
+	case "packaging_deck_v1":
+		lowered := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lowered, "<!doctype html") {
+			return "LAW SWEEP (packaging_deck_v1): the deliverable must be the deck ITSELF — one self-contained HTML document starting with <!doctype html> — not a plan, outline, or description of it. Emit the full HTML file.", true
+		}
+		if !strings.Contains(lowered, "</html>") {
+			return "LAW SWEEP (packaging_deck_v1): the HTML document is truncated (no closing </html>). Emit the complete self-contained file.", true
+		}
+	}
+	return "", false
+}
+
 // processMaxSubtasks is the effective subtask ceiling for a process plan: the
 // authored budget when set, else the engine default. This is the ONE place the
 // Budgets.MaxSubtasks override is interpreted.
@@ -449,19 +471,37 @@ func instantiateProcessPlan(def ProcessDefinition, plan *goalPlan) error {
 }
 
 // processCheckpointOptionsFromText extracts a checkpoint's options from an
-// earlier stage's artifact: the first balanced JSON array of strings in the
-// body (the stage's output contract promises one). Lenient — anything
-// unparseable yields nil, degrading to a free-form choice rather than an
-// error.
+// earlier stage's artifact. The output contract puts the array ON ITS OWN
+// LINE at the end of the body, so scan lines from the END and parse the first
+// one that is a balanced JSON string array — markdown brackets earlier in the
+// body (links, checkboxes) can never poison the parse. The historical
+// whole-body scan (first '[' to last ']') stays as the fallback for an array
+// that shares its line with other text. Lenient — anything unparseable yields
+// nil, degrading to a free-form choice rather than an error.
 func processCheckpointOptionsFromText(text string) []string {
-	text = strings.TrimSpace(text)
-	start := strings.IndexByte(text, '[')
-	end := strings.LastIndexByte(text, ']')
+	lines := strings.Split(text, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		if options := decodeCheckpointOptionsArray(strings.TrimSpace(lines[index])); len(options) > 0 {
+			return options
+		}
+	}
+	trimmed := strings.TrimSpace(text)
+	start := strings.IndexByte(trimmed, '[')
+	end := strings.LastIndexByte(trimmed, ']')
 	if start < 0 || end < start {
 		return nil
 	}
+	return decodeCheckpointOptionsArray(trimmed[start : end+1])
+}
+
+// decodeCheckpointOptionsArray parses one candidate as a JSON string array,
+// returning the trimmed non-empty labels — nil when it is not one.
+func decodeCheckpointOptionsArray(candidate string) []string {
+	if !strings.HasPrefix(candidate, "[") || !strings.HasSuffix(candidate, "]") {
+		return nil
+	}
 	var options []string
-	if err := json.Unmarshal([]byte(text[start:end+1]), &options); err != nil {
+	if err := json.Unmarshal([]byte(candidate), &options); err != nil {
 		return nil
 	}
 	cleaned := make([]string, 0, len(options))

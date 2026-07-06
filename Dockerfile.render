@@ -18,20 +18,40 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -o /out/meetingassist .
 
+# Debian's own chromium package (150.0.7871.46-1~deb12u1) SIGTRAPs on every
+# headless print in this container no matter the confinement (verified live,
+# 2026-07-06: seccomp/apparmor unconfined + 65k fds + 1g shm all still trap;
+# Google's chrome-headless-shell at the SAME version prints fine). So the
+# image ships Chrome for Testing's chrome-headless-shell — the purpose-built
+# print-to-pdf binary — pinned to the version verified in production.
+FROM debian:bookworm-slim AS chrome-fetch
+ARG CHROME_HEADLESS_SHELL_VERSION=150.0.7871.46
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates curl unzip \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& curl -fsSLo /tmp/chs.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_HEADLESS_SHELL_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+	&& unzip -q /tmp/chs.zip -d /opt \
+	&& mv /opt/chrome-headless-shell-linux64 /opt/chrome-headless-shell
+
 FROM debian:bookworm-slim AS render-runner
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ca-certificates curl libopus0 \
-		chromium poppler-utils \
+		poppler-utils \
 		fonts-liberation fonts-dejavu-core \
+		libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+		libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+		libgbm1 libpango-1.0-0 libcairo2 libasound2 libglib2.0-0 \
+		libx11-6 libxcb1 libxext6 libexpat1 \
 	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=build /out/meetingassist /app/meetingassist
+COPY --from=chrome-fetch /opt/chrome-headless-shell /opt/chrome-headless-shell
 
-ENV RENDER_CHROMIUM_BIN=chromium
+ENV RENDER_CHROMIUM_BIN=/opt/chrome-headless-shell/chrome-headless-shell
 ENV RENDER_PDFTOPPM_BIN=pdftoppm
 
 ENTRYPOINT ["/app/meetingassist", "-render-runner"]

@@ -77,6 +77,13 @@ services:
       BONFIRE_RENDER_CALLBACK_URL: http://meetingassist:3000/internal/render/jobs/result
     volumes:
       - meeting_data:/app/data
+    # Docker's default seccomp profile SIGTRAPs modern chromium (first live
+    # run, 2026-07-05: every export died "trace/breakpoint trap"). Unconfined
+    # seccomp is the accepted fix for containerized chromium HERE because this
+    # container's blast radius is already bounded by the network isolation
+    # below — no egress, nothing to pivot to but the callback endpoint.
+    security_opt:
+      - seccomp:unconfined
     # Untrusted artifact HTML executes in this container's chromium with
     # --no-sandbox, so the container itself is confined to the internal-only
     # network: it can reach meetingassist:3000 for the callback and NOTHING
