@@ -209,8 +209,10 @@ func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.
 	}
 
 	// board auto-advance: the board stops lying about the recovered work.
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusDone {
-		t.Fatalf("status=%q after the follow-up success, want Done", status)
+	// In Progress, not Done — the deliverable informs the card's work and a
+	// human judges when the card itself is finished.
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
+		t.Fatalf("status=%q after the follow-up success, want In Progress", status)
 	}
 	// package auto-attach: the completed deliverable files into its binder.
 	attached, _ := app.venturePackageByID(pkg.ID)

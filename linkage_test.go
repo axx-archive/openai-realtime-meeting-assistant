@@ -105,10 +105,11 @@ func TestAdvanceLinkedCardIdempotentAndSafe(t *testing.T) {
 	app.advanceLinkedCard("", kanbanStatusDone, "empty")
 }
 
-// runAgentThread terminal seam: complete → Done via the completion-time fuzzy
-// fallback (direct launches carry no boardCardId), and the matched id is
-// stamped back onto the artifact so retries are stable.
-func TestRunAgentThreadCompleteAdvancesLinkedCardToDone(t *testing.T) {
+// runAgentThread terminal seam: complete → In Progress via the completion-time
+// fuzzy fallback (direct launches carry no boardCardId), and the matched id is
+// stamped back onto the artifact so retries are stable. In Progress, not Done:
+// the artifact is a deliverable ABOUT the card's work; a human judges Done.
+func TestRunAgentThreadCompleteAdvancesLinkedCardToInProgress(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.mu.Lock()
 	app.apiKey = "test-key"
@@ -130,8 +131,8 @@ func TestRunAgentThreadCompleteAdvancesLinkedCardToDone(t *testing.T) {
 	}
 	app.runAgentThread(thread)
 
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusDone {
-		t.Fatalf("status=%q, want Done after completion", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
+		t.Fatalf("status=%q, want In Progress after completion", status)
 	}
 	artifact, found := app.osArtifactByID(thread.Artifact.ID)
 	if !found {
@@ -172,8 +173,8 @@ func TestRunAgentThreadErrorAdvancesLinkedCardToBlocked(t *testing.T) {
 }
 
 // The queued-codex terminal seam: a complete callback moves the linked card
-// to Done; a retried identical callback is changed=false and must not re-move
-// a card a human has since repositioned.
+// to In Progress (a human judges Done); a retried identical callback is
+// changed=false and must not re-move a card a human has since repositioned.
 func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
@@ -212,8 +213,8 @@ func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 	if recorder := post(); recorder.Code != http.StatusOK {
 		t.Fatalf("callback status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusDone {
-		t.Fatalf("status=%q, want Done after complete callback", status)
+	if status := linkageCardStatus(t, app, card.ID); status != kanbanStatusInProgress {
+		t.Fatalf("status=%q, want In Progress after complete callback", status)
 	}
 
 	// A human pulls the card back; the retried identical callback is

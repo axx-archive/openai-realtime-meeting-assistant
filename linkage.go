@@ -4,7 +4,8 @@ package main
 // deliver at propose time, confirm stamps the card/proposal ids onto the
 // thread artifact (and moves the card to In Progress), and the two terminal
 // worker seams advance the linked card when the artifact lands (complete →
-// Done, failed/error/approval_required → Blocked). No kanbanCard schema
+// In Progress with the deliverable attached — a human decides Done;
+// failed/error/approval_required → Blocked). No kanbanCard schema
 // change — all linkage lives in memory-entry metadata (proposal: "cardId";
 // artifact: "boardCardId","proposalId").
 
@@ -148,22 +149,28 @@ func (app *kanbanBoardApp) advanceLinkedCard(cardID string, status kanbanStatus,
 }
 
 // syncLinkedCardForArtifact advances the board card linked to a finished
-// thread artifact. Column semantics follow the board's own status rules
-// ("completed/finished means Done; blocked/waiting means Blocked"): complete
-// → Done because the deliverable exists; failed/error and approval_required
-// → Blocked because a human gate IS a wait state. Artifact-content review
-// stays the artifact surface's reviewGate concern, not a board column. When
-// the artifact carries no boardCardId (direct launch_agent_thread path), a
-// completion-time fuzzy match by title/query links it, and the id is stamped
-// back onto the artifact so retries are stable.
+// thread artifact. Blocked semantics follow the board's own status rules
+// (failed/error and approval_required → Blocked because a human gate IS a
+// wait state). A COMPLETED artifact advances the card to In Progress, not
+// Done: agent threads produce briefs and plans ABOUT the card's work, and
+// marking the card Done because a plan document exists buried unfinished
+// work (the nightly-board-sweep card was closed by its own workflow plan
+// while nothing was built). A human moves the card to Done after judging
+// the deliverable actually closes it. Artifact-content review stays the
+// artifact surface's reviewGate concern, not a board column. When the
+// artifact carries no boardCardId (direct launch_agent_thread path), a
+// completion-time fuzzy match by title/query links it, and the id is
+// stamped back onto the artifact so retries are stable.
 func (app *kanbanBoardApp) syncLinkedCardForArtifact(artifact meetingMemoryEntry, terminalStatus string) {
 	if app == nil || app.memory == nil || strings.TrimSpace(artifact.ID) == "" {
 		return
 	}
 	var status kanbanStatus
+	completed := false
 	switch strings.ToLower(strings.TrimSpace(terminalStatus)) {
 	case codexJobStatusComplete:
-		status = kanbanStatusDone
+		status = kanbanStatusInProgress
+		completed = true
 	case codexJobStatusFailed, "error":
 		status = kanbanStatusBlocked
 	case codexJobStatusApprovalRequired:
@@ -176,7 +183,7 @@ func (app *kanbanBoardApp) syncLinkedCardForArtifact(artifact meetingMemoryEntry
 	// packageId files itself into its venture package. attachToPackage is
 	// idempotent, so callback retries are safe; failures only lose the binder
 	// link, never the board advance below.
-	if status == kanbanStatusDone {
+	if completed {
 		if packageID := strings.TrimSpace(artifact.Metadata["packageId"]); packageID != "" {
 			if _, err := app.attachToPackage(packageID, packageRefTypeArtifact, artifact.ID, scoutParticipantName); err != nil {
 				log.Errorf("Failed to attach artifact %s to package %s: %v", artifact.ID, packageID, err)
@@ -201,6 +208,14 @@ func (app *kanbanBoardApp) syncLinkedCardForArtifact(artifact meetingMemoryEntry
 		cardID = card.ID
 		if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, "", map[string]string{"boardCardId": cardID}); err != nil {
 			log.Errorf("Failed to stamp boardCardId on artifact %s: %v", artifact.ID, err)
+		}
+	}
+
+	// A completion retry must never demote a card a human already judged
+	// finished: In Progress is only an advance from Backlog.
+	if completed {
+		if card, ok := app.matchBoardCard("", cardID); ok && card.Status == kanbanStatusDone {
+			return
 		}
 	}
 
