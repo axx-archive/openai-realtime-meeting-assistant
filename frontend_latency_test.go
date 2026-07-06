@@ -891,7 +891,11 @@ func TestScoutChatRendersAssistantMarkdownAsRichText(t *testing.T) {
 		"const rich = kind === 'scout'",
 		"body.className = `scout-chat-text${rich ? ' chat-rich' : ''}`",
 		"appendChatRichTextNodes(body, text)",
-		"body.textContent = text",
+		// non-rich messages render through the mention-highlight pass, which is
+		// DOM-built (createTextNode + textContent) — as injection-safe as the
+		// bare body.textContent it replaced; frontend_chat_mentions_test.go
+		// holds the no-innerHTML rule inside that function.
+		"appendChatMentionTextNodes(body, text)",
 	} {
 		if !strings.Contains(scoutBody, want) {
 			t.Fatalf("scout chat body missing rich-rendering marker %q", want)

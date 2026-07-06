@@ -112,21 +112,32 @@ func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 	}
 }
 
-// The stage deliverable chip: one narration line plus a tap that opens the
-// stage artifact in the full viewer.
-func TestIndexStageArtifactChipOpensArtifact(t *testing.T) {
+// The run log (feed redesign §1): consecutive stage deliverables merge into
+// ONE .runlog container — entries dedup on the revision-stripped stage title,
+// update in place, and open the artifact in the chat-side stage (§7), never
+// as N orphan system lines.
+func TestIndexStageArtifactRunlogContract(t *testing.T) {
 	html := readIndexForGoalThreadCards(t)
 	body := functionBody(html, "function scoutStageArtifactNode(message)")
 	if body == "" {
 		t.Fatal("could not extract scoutStageArtifactNode body")
 	}
 	for _, want := range []string{
-		"openAgentArtifact({ id: artifactId })",
-		"goalcard__link",
-		"scout-chat-system",
+		// the dedup key strips the revision marker so a redo updates in place
+		`replace(/\s*\(revision \d+\)\s*/g, ' ')`,
+		"runlogOpen",
+		"runlog__entry",
+		"openArtifactStage(entry.dataset.artifactId)",
+		// while the container is open, later stages emit nothing new
+		"document.createDocumentFragment()",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scoutStageArtifactNode body missing %q", want)
 		}
+	}
+	// the record router still sends kind:"artifact" here, and the thread
+	// teardown removes the container with the other feed nodes
+	if !strings.Contains(html, ".scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog") {
+		t.Error("clearScoutChatThreadNodes must tear down .runlog containers")
 	}
 }

@@ -83,14 +83,17 @@ func TestIndexSurveyChipsRideExistingSurfaces(t *testing.T) {
 	}
 
 	// 2. the goalcard's complete terminal, with the persistent-node guard so
-	// terminal re-renders never wipe a half-typed "off" note
+	// terminal re-renders never wipe a half-typed "off" note — the chips ride
+	// inside the labeled afterword row (feed redesign §4)
 	terminal := functionBody(html, "function goalCardRenderTerminal(card, artifact, plan, state, prevState)")
 	if terminal == "" {
 		t.Fatal("could not extract goalCardRenderTerminal body")
 	}
 	for _, want := range []string{
 		"if (!card.__surveyNode) card.__surveyNode = surveyChipsNode(artifact.id)",
-		"terminal.appendChild(card.__surveyNode)",
+		"afterword.appendChild(card.__surveyNode)",
+		"goalcard__afterword",
+		"'did this land?'",
 	} {
 		if !strings.Contains(terminal, want) {
 			t.Errorf("goalCardRenderTerminal body missing %q", want)

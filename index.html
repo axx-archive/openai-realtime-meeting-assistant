@@ -153,6 +153,13 @@
         --track-label-lg: 0.04em;
         --type-numeric: 500 13px/1.2 var(--font-mono);
         --track-numeric: 0;
+        /* feed voice (§5 type scale): conversation bodies sit one step under
+           --type-body; longform bubbles breathe a touch more */
+        --type-body-sm: 400 14px/1.55 var(--font-sans);
+        --type-body-longform: 400 14px/1.6 var(--font-sans);
+
+        /* one measure — every machine card in the feed centers on this column */
+        --feed-measure: 680px;
 
         /* ---------- spacing.css ---------- */
         --sp-1: 4px;
@@ -7611,8 +7618,10 @@
         padding: 0 16px;
         border: 0;
         border-radius: var(--r-full);
-        background: var(--ember, var(--accent, #d84f2f));
-        color: var(--surface-0, #fff);
+        /* one of the two justified ember actions (§6): this tap sets a
+           machine working */
+        background: var(--agent);
+        color: #fff;
         font: var(--type-label-lg);
         letter-spacing: var(--track-label);
         cursor: pointer;
@@ -7678,7 +7687,31 @@
         flex-direction: row;
         align-items: flex-end;
         gap: 9px;
-        max-width: 62%;
+        max-width: min(62%, 56ch);
+      }
+
+      /* §3 follow-up grouping: same voice, same author — the avatar yields
+         and the rows tighten so a burst reads as one turn */
+      #chatTool .scout-chat-msg.is-followup {
+        margin-top: -6px;
+      }
+      .scout-chat-msg.is-followup .scout-chat-msg__avatar {
+        visibility: hidden;
+      }
+      .scout-chat-msg.is-followup .scout-chat-msg__author {
+        display: none;
+      }
+
+      /* §3 longform: past ~400 chars a bubble stops being a bubble — it
+         becomes a reading card on the feed measure, with the author named
+         (the .scout-chat-text recipe lives below the bubble variants so the
+         reading-card skin wins the cascade) */
+      #chatTool .scout-chat-msg--longform {
+        max-width: min(var(--feed-measure), 92%) !important;
+      }
+      .scout-chat-msg--longform .scout-chat-msg__stack {
+        flex: 1;
+        min-width: 0;
       }
 
       #chatTool .scout-chat-msg--user {
@@ -7746,7 +7779,7 @@
       .scout-chat-text {
         order: 1;
         padding: 10px 14px;
-        font: 400 13.5px/1.5 var(--font-sans);
+        font: var(--type-body-sm);
         letter-spacing: var(--track-text);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -7830,6 +7863,22 @@
         color: var(--danger);
         border: 1px solid transparent;
         border-radius: 16px 16px 16px 5px;
+      }
+
+      /* §3 longform reading card — after the bubble variants so it wins */
+      .scout-chat-msg--longform .scout-chat-text {
+        align-self: stretch;
+        background: var(--surface-2);
+        color: var(--text-1);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        padding: 16px 20px;
+        font: var(--type-body-longform);
+        letter-spacing: var(--track-text);
+        box-shadow: var(--shadow-1);
+      }
+      .scout-chat-msg--longform.scout-chat-msg--user .scout-chat-text {
+        border-top: 2px solid var(--accent);
       }
 
       /* kit: file-attachment chips above a user message bubble */
@@ -8311,13 +8360,55 @@
         display: none;
       }
 
+      /* §3 the room's voice: sans caption, centered, quiet — mono stays
+         reserved for telemetry */
       .scout-chat-system {
         margin: 0;
         align-self: center;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        max-width: 52ch;
+        text-align: center;
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
         color: var(--text-3);
         padding: 2px 0;
+      }
+
+      /* a parked run is a machine waiting NOW — the one ember dot it earns */
+      .scout-chat-note--park {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-2);
+      }
+      .scout-chat-note--park::before {
+        content: "";
+        flex: none;
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--agent);
+      }
+
+      /* §2 the surviving goal marker: one quiet underlined line, not a chip */
+      .goalcard-marker {
+        padding: 4px 10px;
+      }
+      .goalcard-marker .goalcard__link {
+        border: 0;
+        min-height: 0;
+        padding: 0;
+        background: transparent;
+        font: var(--type-caption);
+        letter-spacing: var(--track-text);
+        color: var(--text-2);
+        text-decoration: underline;
+        text-decoration-color: var(--line-2);
+        text-underline-offset: 3px;
+      }
+      .goalcard-marker .goalcard__link:hover {
+        color: var(--text-1);
+        text-decoration-color: currentColor;
+        border-color: transparent;
       }
 
       /* inline hint chip — a bare "mode:" prefix posted to a channel is a
@@ -8506,6 +8597,80 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
+      }
+
+      /* @-mention autocomplete — a zero-height anchor row between the pending
+         files strip and the composer; the list floats up over the thread so
+         nothing below reflows while it is open */
+      .scout-mention-popover {
+        position: relative;
+        height: 0;
+        margin: 0 28px;
+        z-index: 30;
+      }
+      .chat-conversation .scout-mention-popover {
+        margin: 0 16px;
+      }
+      .scout-mention-popover__list {
+        position: absolute;
+        bottom: 8px;
+        left: 14px;
+        min-width: 200px;
+        max-width: 280px;
+        max-height: 224px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        padding: 5px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        box-shadow: var(--shadow-2);
+      }
+      .scout-mention-popover__item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 6px 9px;
+        border: 0;
+        background: transparent;
+        border-radius: var(--r-sm);
+        color: var(--text-1);
+        font: var(--type-body);
+        text-align: left;
+        cursor: pointer;
+      }
+      .scout-mention-popover__item.is-active,
+      .scout-mention-popover__item:hover {
+        background: var(--surface-2);
+      }
+      .scout-mention-popover__disc {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .scout-mention-popover__hint {
+        margin-left: auto;
+        padding-left: 10px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* mentions inside sent bubbles get a quiet ink lift, no layout change */
+      .scout-chat-mention {
+        font-weight: 600;
+        color: var(--text-1);
+        text-decoration: underline;
+        text-decoration-color: var(--line-1);
+        text-underline-offset: 3px;
       }
 
       .scout-chat-hint[hidden] {
@@ -13866,7 +14031,9 @@
         background: var(--surface-1, var(--surface-2));
         color: var(--text-1);
       }
-      .approval__btn--approve { border-color: var(--agent); color: var(--agent); }
+      /* §6 ember sweep: approving is a human act, not a machine working —
+         the primary door wears ink, ember stays reserved for "working NOW" */
+      .approval__btn--approve { border-color: transparent; background: var(--accent); color: var(--on-accent); }
       .approval__btn--reject { color: var(--text-2); }
       .approval__reason {
         flex: 1;
@@ -16266,11 +16433,14 @@
       /* ---------- Running-state card: the 10-step loop, made legible ---------- */
       .goalcard {
         position: relative;
+        align-self: center;
+        width: min(var(--feed-measure), 100%);
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg);
         background: var(--surface-2);
-        padding: 14px 14px 12px;
-        margin: 6px 0;
+        box-shadow: var(--shadow-1);
+        padding: 16px 18px 14px;
+        margin: 10px 0;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -16288,7 +16458,7 @@
       .goalcard[data-state="complete"] .goalcard__dot { background: var(--text-1); box-shadow: none; }
       .goalcard[data-state="gate"] .goalcard__dot { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent); animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite; }
       .goalcard[data-state="error"] .goalcard__dot { background: var(--danger); box-shadow: none; }
-      .goalcard__title { font: var(--type-body-medium); color: var(--text-1); flex: 1; min-width: 0; text-wrap: balance; }
+      .goalcard__title { font: var(--type-headline); letter-spacing: var(--track-headline); color: var(--text-1); flex: 1; min-width: 0; text-wrap: balance; }
       .goalcard__controls { display: flex; align-items: center; gap: 4px; flex: none; }
       .goalcard__ctrl {
         width: 30px; height: 30px;
@@ -16352,6 +16522,29 @@
       .goalcard[data-state="error"] .goalcard__node[data-node="active"] { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); box-shadow: 0 0 0 1.5px var(--danger); animation: none; }
       .goalcard__node.is-advancing { animation: goalcard-node-pop var(--dur-med) var(--ease-spring); }
       .goalcard__node.is-shaking { animation: goalcard-node-shake var(--dur-fast) var(--ease); }
+      /* §4 hover names the stage — the title attr becomes a glass tooltip */
+      .goalcard__node::after {
+        content: attr(title);
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 8px);
+        transform: translateX(-50%);
+        padding: 3px 8px;
+        white-space: nowrap;
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-1);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--dur-fast) var(--ease);
+        z-index: 3;
+      }
+      .goalcard__node:hover::after { opacity: 1; }
       .goalcard__conn {
         flex: 1 1 auto;
         height: 1.5px;
@@ -16398,14 +16591,25 @@
       .goalcard.is-working-open .goalcard__working { display: flex; animation: comment-preview-open var(--dur-med) var(--ease); }
       .goalcard__work-line { font: var(--type-caption); color: var(--text-2); text-wrap: pretty; }
       .goalcard__result { font: var(--type-body); color: var(--text-1); text-wrap: pretty; }
+      /* §4 the trust line is a hairline footer, not a warm blob — the score
+         reads numeric, the ASSUMED flag reads warn, everything else is quiet */
       .goalcard__trust {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        padding: 10px 2px 0;
+        border-top: 1px solid var(--line-1);
+        background: transparent;
         font: var(--type-caption);
         color: var(--text-2);
-        padding: 8px 10px;
-        border-radius: var(--r-md);
-        background: var(--agent-soft);
-        border: 1px solid color-mix(in srgb, var(--agent) 30%, transparent);
       }
+      .goalcard__trust-score {
+        font: var(--type-numeric);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-1);
+      }
+      .goalcard__trust-flag { color: var(--warn); }
       .goalcard__terminal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .goalcard__link {
         border: 1px solid var(--line-1);
@@ -16420,8 +16624,29 @@
       }
       .goalcard__link:hover { border-color: var(--line-2); }
       .goalcard__link:active { transform: scale(var(--press-scale)); }
-      .goalcard__link--accent { border-color: var(--agent); color: var(--agent); }
+      /* §6 ember sweep: review doors and stage links are ink — ember means
+         "working NOW", never "clickable" */
+      .goalcard__link--accent { border-color: var(--line-2); color: var(--text-1); }
+      /* §4 the one primary action a finished run earns: an ink pill */
+      .goalcard__link--primary {
+        border-color: transparent;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        padding: 0 18px;
+        transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .goalcard__link--primary:hover { background: var(--accent-hover); border-color: transparent; }
       .goalcard.is-settling { animation: goalcard-settle 180ms var(--ease-out); }
+      /* §4 verified: one accent-glow flash that decays as the card lands */
+      .goalcard.is-verified-flash { animation: goalcard-verified-flash 600ms var(--ease) forwards; }
+      @keyframes goalcard-verified-flash {
+        0% { box-shadow: var(--glow-accent); }
+        100% { box-shadow: var(--shadow-1); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .goalcard.is-verified-flash { animation: none; }
+      }
       .goalcard__spark {
         position: absolute;
         left: 16px; top: 14px;
@@ -16467,9 +16692,21 @@
         white-space: pre-wrap;
         transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
-      .goalcard__choice:hover { border-color: var(--agent); }
+      .goalcard__choice:hover { border-color: var(--line-2); }
       .goalcard__choice:active { transform: scale(var(--press-scale)); }
       .goalcard__choice[disabled] { opacity: 0.55; cursor: default; }
+      /* §4 checkpoint hierarchy: proceed is THE primary door; revise/hold
+         read as what they mechanically do, one register down */
+      .goalcard__choice--primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-body-medium);
+      }
+      .goalcard__choice--primary:hover { background: var(--accent-hover); border-color: transparent; }
+      .goalcard__choice--revise,
+      .goalcard__choice--hold { color: var(--text-2); }
+      .goalcard__choice--hold { background: transparent; }
       /* negative-option teeth (Wave 4 disclosed gap): a held goal wears the
          badge; revise/hold choices read as what they mechanically DO */
       .goalcard__checkpoint-held {
@@ -16491,11 +16728,126 @@
         .goalcard:not(.is-rail-expanded) .goalcard__conn[data-compressed="hide"] { display: none; }
         .goalcard:not(.is-rail-expanded) .goalcard__rail-count { display: inline; }
       }
+      /* §4 the micro-survey afterword: labeled garnish under the terminal */
+      .goalcard__afterword {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 2px;
+      }
+      .goalcard__afterword-label { font: var(--type-caption); color: var(--text-3); }
+
+      /* ---------- §1 the run log: the run gets a container ----------
+         Consecutive stage deliverables merge into ONE card — a vertical rail
+         of landed stages instead of N orphan system lines. One lit node max:
+         the newest entry, only while its goalcard is still running. */
+      .runlog {
+        align-self: center;
+        width: min(var(--feed-measure), 100%);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        box-shadow: var(--shadow-1);
+        padding: 12px 14px;
+        margin: 6px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .runlog__head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 0 2px;
+      }
+      .runlog__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .runlog__count {
+        font: var(--type-numeric);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-3);
+      }
+      .runlog__list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+      }
+      /* the vertical rail the nodes sit on */
+      .runlog__list::before {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 8px;
+        bottom: 8px;
+        width: 1.5px;
+        background: var(--line-1);
+      }
+      .runlog__entry {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .runlog__node {
+        flex: none;
+        width: 9px;
+        height: 9px;
+        margin-left: 1px;
+        border-radius: var(--r-full);
+        border: 1.5px solid var(--text-1);
+        background: var(--surface-2);
+        position: relative;
+        z-index: 1;
+      }
+      .runlog__entry[data-done="1"] .runlog__node { background: var(--text-1); }
+      .runlog__entry[data-live="1"] .runlog__node {
+        border-color: var(--agent);
+        background: var(--agent);
+        box-shadow: 0 0 0 3px var(--agent-soft);
+        animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite;
+      }
+      .runlog__row {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        padding: 7px 8px;
+        border-radius: var(--r-sm);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+      }
+      .runlog__row:hover { background: var(--surface-3); }
+      .runlog__title {
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .runlog__meta {
+        flex: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-align: right;
+      }
 
       /* ---------- Return-to-origin card (one component, three contexts) ---------- */
       .returncard {
         border: 1px solid var(--line-1);
-        border-left: 2px solid var(--agent);
+        border-left: 2px solid var(--line-2); /* §6: ember is "working now", not provenance */
         border-radius: var(--r-md);
         background: var(--surface-2);
         padding: 11px 13px;
@@ -16555,6 +16907,137 @@
          nest their one-tap actions (div row, actions clear the dot column) */
       .notification-item--survey { flex-wrap: wrap; cursor: default; }
       .notification-item--survey .survey-chips { width: 100%; margin-top: 8px; padding-left: 18px; }
+
+      /* ---------- §7 the artifact stage: deliverables open IN the chat ----------
+         A right-side stage over the feed — the deliverable is the payoff of the
+         run, so it opens where the run lives. Intelligence stays the data room;
+         "open in intelligence" is the escape hatch, not the default. */
+      .artifact-stage {
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        display: flex;
+        justify-content: flex-end;
+      }
+      .artifact-stage__scrim {
+        position: absolute;
+        inset: 0;
+        background: var(--scrim);
+        border: 0;
+        padding: 0;
+      }
+      .artifact-stage__panel {
+        position: relative;
+        width: min(920px, 78vw);
+        height: 100%;
+        background: var(--surface-1);
+        border-left: 1px solid var(--line-1);
+        box-shadow: var(--shadow-3);
+        display: flex;
+        flex-direction: column;
+        animation: artifact-stage-in var(--dur-slow) var(--ease);
+      }
+      @keyframes artifact-stage-in {
+        from { transform: translateX(28px); opacity: 0; }
+        to { transform: none; opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .artifact-stage__panel { animation: none; }
+      }
+      .artifact-stage__head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line-1);
+      }
+      .artifact-stage__headings {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .artifact-stage__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .artifact-stage__title {
+        margin: 0;
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        color: var(--text-1);
+        text-wrap: balance;
+      }
+      .artifact-stage__escape {
+        flex: none;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        padding: 6px 12px;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__escape:hover { color: var(--text-1); border-color: var(--line-2); }
+      .artifact-stage__close {
+        flex: none;
+        width: 30px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        background: transparent;
+        color: var(--text-3);
+        border-radius: var(--r-md);
+        cursor: pointer;
+        font: var(--type-body);
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__close:hover { color: var(--text-1); background: var(--accent-soft); }
+      .artifact-stage__body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .artifact-stage__body--read {
+        overflow-y: auto;
+        padding: 24px;
+      }
+      .artifact-stage__read {
+        width: 100%;
+        max-width: 68ch;
+        margin: 0 auto;
+      }
+      .artifact-stage__body--deck { padding: 0; }
+      .artifact-stage__body--deck .artifact-deck {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px 16px 16px;
+      }
+      .artifact-stage__body--deck .artifact-deck__frame {
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border: 0;
+      }
+      .artifact-stage__pdf {
+        width: 100%;
+        height: min(72vh, 760px);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        margin-bottom: 14px;
+      }
+      @media (max-width: 860px) {
+        .artifact-stage__panel { width: 100%; }
+      }
 
       /* --- composer + Tools trigger --- */
       .scout-chat-tools {
@@ -17424,6 +17907,9 @@
             </div>
             <div id="scoutFollowUpTarget" class="scout-followup-target" hidden></div>
             <div id="scoutChatPendingFiles" class="scout-chat-pending-files" hidden></div>
+            <div id="scoutMentionPopover" class="scout-mention-popover" hidden>
+              <div id="scoutMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
+            </div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -22033,6 +22519,153 @@
           selectArtifact(entry.id)
         }
         setActiveTool('artifacts')
+      }
+
+      /* ---------- §7 the artifact stage: active work opens IN the chat ----------
+         Intelligence is the data room; the run lives in the thread — so its
+         deliverables open over the thread, in a right-side stage panel. The
+         body dispatches like the intelligence read pane: html decks ride the
+         SAME sandboxed token-render iframe (renderArtifactDeck), everything
+         else rides the injection-safe renderer (renderArtifactRead); a
+         text-less artifact whose payload is its pdf assets embeds the newest
+         pdf. "open in intelligence" stays as the data-room escape hatch. */
+      var artifactStageNode = null
+      var artifactStageReturnFocus = null
+
+      function closeArtifactStage() {
+        if (!artifactStageNode) return
+        artifactStageNode.remove()
+        artifactStageNode = null
+        const back = artifactStageReturnFocus
+        artifactStageReturnFocus = null
+        if (back && back.isConnected && typeof back.focus === 'function') back.focus()
+      }
+
+      // kicker: kind · gate score · outcome — the same provenance the
+      // goalcard trust footer reads (plan gate review score, report
+      // gateOutcome, with the flat metadata mirror as the fallback)
+      function artifactStageKicker(entry) {
+        const m = entry?.metadata || {}
+        const bits = [String(m.type || '').trim() || artifactModeLabel(entry) || 'artifact']
+        const plan = isGoalArtifact(entry) ? goalPlanFromArtifact(entry) : null
+        const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
+        const gateScore = Number(gateTask?.review?.score)
+        if (Number.isFinite(gateScore) && gateScore > 0) bits.push(`gate ${gateScore.toFixed(1)}`)
+        const outcome = String(m.gateOutcome || plan?.report?.gateOutcome || '').trim()
+        if (outcome) bits.push(outcome)
+        return bits.join(' · ')
+      }
+
+      function artifactStageTitle(entry) {
+        return String(entry?.metadata?.title || '').trim()
+          || String(entry?.metadata?.threadQuery || entry?.metadata?.query || '').trim()
+          || compactArtifactPreview(String(entry?.text || '')) || 'artifact'
+      }
+
+      async function openArtifactStage(artifactId) {
+        const id = String(artifactId || '').trim()
+        if (!id) return
+        let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
+        if (!entry && typeof loadArtifacts === 'function' && canUseArtifactLibrary()) {
+          await loadArtifacts()
+          entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
+        }
+        if (!entry) {
+          // the stage can't show what the library doesn't hold — fall back
+          // to the data room rather than an empty panel
+          openAgentArtifact({ id })
+          return
+        }
+        beaconArtifactOpen(id)
+        closeArtifactStage()
+        artifactStageReturnFocus = document.activeElement
+
+        const stage = document.createElement('div')
+        stage.className = 'artifact-stage'
+        stage.setAttribute('role', 'dialog')
+        stage.setAttribute('aria-modal', 'true')
+        stage.setAttribute('aria-label', artifactStageTitle(entry))
+
+        const scrim = document.createElement('div')
+        scrim.className = 'artifact-stage__scrim'
+        scrim.addEventListener('click', () => closeArtifactStage())
+
+        const panel = bfEl('section', 'artifact-stage__panel')
+
+        const head = bfEl('header', 'artifact-stage__head')
+        const headings = bfEl('div', 'artifact-stage__headings')
+        headings.appendChild(bfEl('span', 'artifact-stage__kicker', artifactStageKicker(entry)))
+        const title = document.createElement('h2')
+        title.className = 'artifact-stage__title'
+        title.textContent = artifactStageTitle(entry)
+        headings.appendChild(title)
+        const escape = bfEl('button', 'artifact-stage__escape', 'open in intelligence')
+        escape.type = 'button'
+        escape.addEventListener('click', () => { closeArtifactStage(); openAgentArtifact(entry) })
+        const close = bfEl('button', 'artifact-stage__close', '✕')
+        close.type = 'button'
+        close.setAttribute('aria-label', 'Close')
+        close.addEventListener('click', () => closeArtifactStage())
+        head.append(headings, escape, close)
+
+        const body = bfEl('div', 'artifact-stage__body')
+        const pdfAssets = artifactAssetEntries(entry).filter(asset =>
+          String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
+        if (artifactIsHTMLDeck(entry)) {
+          // full-fidelity deck: sandboxed iframe via the short-lived render
+          // token; Present fullscreens the SAME sandboxed frame (never a
+          // top-level open of the render URL — the iframe sandbox IS the
+          // security model)
+          body.classList.add('artifact-stage__body--deck')
+          renderArtifactDeck(body, entry, { surface: 'stage' })
+        } else if (pdfAssets.length && !String(entry.text || '').trim()) {
+          // the payload IS the pdf: embed the newest, list every asset
+          body.classList.add('artifact-stage__body--read')
+          const read = bfEl('div', 'artifact-stage__read')
+          const newest = pdfAssets[pdfAssets.length - 1]
+          const embed = document.createElement('embed')
+          embed.type = 'application/pdf'
+          embed.src = artifactBlobUrl(newest)
+          embed.className = 'artifact-stage__pdf'
+          read.appendChild(embed)
+          renderArtifactAssets(read, entry)
+          body.appendChild(read)
+        } else {
+          // markdown / plain text: the injection-safe renderer on a 68ch
+          // measure (assets, pdf previews included, ride along)
+          body.classList.add('artifact-stage__body--read')
+          const read = bfEl('div', 'artifact-stage__read')
+          renderArtifactRead(read, entry)
+          body.appendChild(read)
+        }
+
+        panel.append(head, body)
+        stage.append(scrim, panel)
+
+        // Esc closes; Tab cycles inside the panel (focus trap)
+        stage.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            closeArtifactStage()
+            return
+          }
+          if (event.key !== 'Tab') return
+          const focusables = panel.querySelectorAll('button, [href], input, textarea, select, iframe, embed, [tabindex]:not([tabindex="-1"])')
+          if (!focusables.length) return
+          const first = focusables[0]
+          const last = focusables[focusables.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
+          }
+        })
+
+        artifactStageNode = stage
+        document.body.appendChild(stage)
+        close.focus()
       }
 
       function handleOSAssistantActions(actions) {
@@ -32324,7 +32957,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const state = goalCardStateFor(artifact, plan)
         const prevState = card.dataset.state
         card.dataset.state = state
-        card.querySelector('.goalcard__title').textContent = goalArtifactTitle(artifact)
+        // §4 verified: the title wears the check once the run has landed
+        card.querySelector('.goalcard__title').textContent = (state === 'complete' ? '✓ ' : '') + goalArtifactTitle(artifact)
 
         // the cancel affordance only exists while there is something to stop
         const cancelBtn = card.querySelector('[data-goal-cancel]')
@@ -32515,7 +33149,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           for (const input of inputTasks) {
             const door = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ review: ${input.title || input.id}`)
             door.type = 'button'
-            door.addEventListener('click', () => openAgentArtifact({ id: input.artifactId }))
+            door.addEventListener('click', () => openArtifactStage(input.artifactId))
             doors.appendChild(door)
           }
           wrap.appendChild(doors)
@@ -32565,6 +33199,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             for (const option of options) {
               const choiceBtn = bfEl('button', 'goalcard__choice', option.label)
               choiceBtn.type = 'button'
+              // §4: proceed is THE primary door; revise/hold step down a register
+              if (option.action === 'proceed') choiceBtn.classList.add('goalcard__choice--primary')
               if (option.action === 'revise') choiceBtn.classList.add('goalcard__choice--revise')
               if (option.action === 'hold') choiceBtn.classList.add('goalcard__choice--hold')
               // a held goal resumes ONLY through proceed — mirror the server's refusal
@@ -32599,22 +33235,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const report = plan?.report || {}
           const summary = report.headline || report.changed || 'Done.'
           terminal.appendChild(bfEl('div', 'goalcard__result', summary))
-          // the trust line: gate outcome + count of ASSUMED claims (design §1.7)
-          const trustBits = []
-          if (report.gateOutcome) trustBits.push(String(report.gateOutcome))
-          const assumed = Number(report.assumedClaimCount || 0)
-          if (assumed > 0) trustBits.push(`${assumed} claim${assumed === 1 ? '' : 's'} marked ASSUMED — verify before sending`)
-          if (trustBits.length) terminal.appendChild(bfEl('div', 'goalcard__trust', trustBits.join(' · ')))
           const actions = bfEl('div', 'goalcard__terminal-actions')
-          const open = bfEl('button', 'goalcard__link goalcard__link--accent', '▸ open artifact')
+          const open = bfEl('button', 'goalcard__link goalcard__link--primary', 'open the deliverable')
           open.type = 'button'
-          open.addEventListener('click', () => openAgentArtifact(artifact))
+          open.addEventListener('click', () => openArtifactStage(artifact.id))
           actions.appendChild(open)
           terminal.appendChild(actions)
+          // the trust line (design §1.7), rebuilt as a hairline footer: the
+          // gate score reads numeric, the outcome reads quiet caption, the
+          // ASSUMED count reads warn — telemetry, not a warm blob
+          const trust = bfEl('div', 'goalcard__trust')
+          const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
+          const gateScore = Number(gateTask?.review?.score)
+          if (Number.isFinite(gateScore) && gateScore > 0) trust.appendChild(bfEl('span', 'goalcard__trust-score', `gate ${gateScore.toFixed(1)}`))
+          if (report.gateOutcome) trust.appendChild(bfEl('span', 'goalcard__trust-bit', String(report.gateOutcome)))
+          const assumed = Number(report.assumedClaimCount || 0)
+          if (assumed > 0) trust.appendChild(bfEl('span', 'goalcard__trust-flag', `${assumed} claim${assumed === 1 ? '' : 's'} marked ASSUMED — verify before sending`))
+          if (trust.childNodes.length) terminal.appendChild(trust)
           // micro-survey (§5): one persistent node per card, so the terminal's
-          // re-renders never wipe a half-typed "off" note
+          // re-renders never wipe a half-typed "off" note — wrapped in the
+          // labeled afterword row (empty after an answer removed the chips)
           if (!card.__surveyNode) card.__surveyNode = surveyChipsNode(artifact.id)
-          if (card.__surveyNode) terminal.appendChild(card.__surveyNode)
+          if (card.__surveyNode && card.__surveyNode.childNodes.length) {
+            const afterword = bfEl('div', 'goalcard__afterword')
+            afterword.appendChild(bfEl('span', 'goalcard__afterword-label', 'did this land?'))
+            afterword.appendChild(card.__surveyNode)
+            terminal.appendChild(afterword)
+          }
           if (prevState !== 'complete' && !card.dataset.celebrated) {
             card.dataset.celebrated = '1'
             goalCardCelebrate(card)
@@ -32683,6 +33330,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // the single 5-7 particle ember spark, once per completed goal (§4 item 1)
       function goalCardCelebrate(card) {
         card.classList.remove('is-settling'); void card.offsetWidth; card.classList.add('is-settling')
+        // §4 verified flash: one accent glow that decays as the card lands
+        card.classList.remove('is-verified-flash'); void card.offsetWidth; card.classList.add('is-verified-flash')
         const host = card.querySelector('[data-goal-spark]')
         if (!host) return
         if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return
@@ -32725,6 +33374,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === id)
           if (entry) updateGoalCard(card, entry)
         })
+        // a state flip here is what parks or extinguishes the runlog ember
+        syncRunlogLiveness()
         goalCardEnsureTicker()
       }
 
@@ -32878,6 +33529,142 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }, true)
       // door 3 (voice) lands via initiate_goal → the same artifact stream, which
       // the osEvents consumer below renders as a goalcard.
+
+      // ---- @-mention autocomplete (public channels only) ---------------------
+      // Typing "@" in a channel composer offers the roster + scout; private
+      // threads stay a 1:1 with Scout, so the popover never opens there.
+      const scoutMentionPopover = document.getElementById('scoutMentionPopover')
+      const scoutMentionList = document.getElementById('scoutMentionList')
+      let mentionMatches = []
+      let mentionActiveIndex = 0
+      let mentionAnchor = -1 // composer index of the '@' being completed
+
+      function mentionPopoverIsOpen() {
+        return Boolean(scoutMentionPopover && !scoutMentionPopover.hidden)
+      }
+
+      function mentionRosterNames() {
+        return [...participantNames(), 'scout']
+      }
+
+      function closeMentionPopover() {
+        if (scoutMentionPopover) {
+          scoutMentionPopover.hidden = true
+        }
+        mentionMatches = []
+        mentionActiveIndex = 0
+        mentionAnchor = -1
+      }
+
+      // the "@prefix" token ending at the caret, or null when the caret is not
+      // completing a mention. The rune before the '@' must not be a name rune,
+      // mirroring the server's chatMentionNames boundary (emails never count).
+      function mentionTokenAtCaret() {
+        if (!scoutChatInput || !chatThreadIsChannel(selectedScoutChatThread())) {
+          return null
+        }
+        const caret = scoutChatInput.selectionStart ?? scoutChatInput.value.length
+        const head = scoutChatInput.value.slice(0, caret)
+        const match = /(^|[^A-Za-z0-9])@([A-Za-z0-9]*)$/.exec(head)
+        if (!match) {
+          return null
+        }
+        return { anchor: caret - match[2].length - 1, prefix: match[2] }
+      }
+
+      function updateMentionAutocomplete() {
+        const token = mentionTokenAtCaret()
+        if (!token) {
+          closeMentionPopover()
+          return
+        }
+        const prefix = token.prefix.toLowerCase()
+        const matches = mentionRosterNames().filter(name => name.toLowerCase().startsWith(prefix))
+        if (!matches.length) {
+          closeMentionPopover()
+          return
+        }
+        mentionMatches = matches
+        mentionAnchor = token.anchor
+        mentionActiveIndex = Math.min(mentionActiveIndex, matches.length - 1)
+        renderMentionPopover()
+      }
+
+      function renderMentionPopover() {
+        if (!scoutMentionPopover || !scoutMentionList) return
+        scoutMentionList.innerHTML = ''
+        mentionMatches.forEach((name, index) => {
+          const item = document.createElement('button')
+          item.type = 'button'
+          item.className = 'scout-mention-popover__item'
+          item.setAttribute('role', 'option')
+          item.setAttribute('aria-selected', String(index === mentionActiveIndex))
+          if (index === mentionActiveIndex) {
+            item.classList.add('is-active')
+          }
+          const disc = document.createElement('span')
+          disc.className = 'scout-mention-popover__disc'
+          disc.setAttribute('aria-hidden', 'true')
+          disc.textContent = name === 'scout' ? '✦' : chatPeerInitials(name)
+          const label = document.createElement('span')
+          label.textContent = '@' + name
+          item.append(disc, label)
+          if (name === 'scout') {
+            const hint = document.createElement('span')
+            hint.className = 'scout-mention-popover__hint'
+            hint.textContent = 'summon scout'
+            item.appendChild(hint)
+          }
+          // mousedown would blur the composer and close the popover before the
+          // click lands — swallow it so the click can complete the mention
+          item.addEventListener('mousedown', event => event.preventDefault())
+          item.addEventListener('click', () => applyMentionCompletion(name))
+          scoutMentionList.appendChild(item)
+        })
+        scoutMentionPopover.hidden = false
+      }
+
+      function applyMentionCompletion(name) {
+        if (!scoutChatInput || mentionAnchor < 0 || !name) {
+          closeMentionPopover()
+          return
+        }
+        const value = scoutChatInput.value
+        const caret = scoutChatInput.selectionStart ?? value.length
+        const inserted = '@' + name + ' '
+        scoutChatInput.value = value.slice(0, mentionAnchor) + inserted + value.slice(caret)
+        const end = mentionAnchor + inserted.length
+        closeMentionPopover()
+        scoutChatInput.focus()
+        scoutChatInput.setSelectionRange(end, end)
+        resizeScoutChatInput()
+      }
+
+      scoutChatInput?.addEventListener('input', updateMentionAutocomplete)
+      scoutChatInput?.addEventListener('blur', closeMentionPopover)
+      // capture phase so ↑/↓/↵/Tab steer the popover before the Enter-send
+      // handler fires — same pattern as the inline palette keydown above.
+      scoutChatInput?.addEventListener('keydown', event => {
+        if (!mentionPopoverIsOpen()) return
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          closeMentionPopover()
+          return
+        }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          const step = event.key === 'ArrowDown' ? 1 : mentionMatches.length - 1
+          mentionActiveIndex = (mentionActiveIndex + step) % mentionMatches.length
+          renderMentionPopover()
+          return
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault()
+          event.stopPropagation()
+          applyMentionCompletion(mentionMatches[mentionActiveIndex] || mentionMatches[0])
+        }
+      }, true)
 
       // rich consumer: progress/completion events drive the stage rail + return
       // cards. No second board refetch — osEventsRoute already re-reads the board
@@ -34011,7 +34798,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog').forEach(node => node.remove())
+	      }
+
+	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
+	         run from the boot render pass thousands of lines before these lines
+	         execute (the renderSidecarReady TDZ lesson, 2026-07-05). runlogOpen is
+	         the ONE open .runlog container consecutive stage messages merge into;
+	         runlogMarkerGoalId dedups consecutive same-goal jump markers;
+	         feedPrevMsgKey groups consecutive same-voice bubbles as follow-ups. */
+	      var runlogOpen = null
+	      var runlogMarkerGoalId = ''
+	      var feedPrevMsgKey = ''
+
+	      function resetScoutFeedRenderPass() {
+	        runlogOpen = null
+	        runlogMarkerGoalId = ''
+	        feedPrevMsgKey = ''
+	      }
+
+	      /* §1 liveness: at most ONE lit runlog node per thread — the newest
+	         entry, and only while a goalcard in the thread is still running.
+	         Idempotent; re-run on every feed rebuild and every goalcard sync. */
+	      function syncRunlogLiveness() {
+	        if (!scoutChatThread) return
+	        const running = Boolean(scoutChatThread.querySelector('.goalcard[data-state="running"]'))
+	        scoutChatThread.querySelectorAll('.runlog').forEach(section => {
+	          const entries = section.querySelectorAll('.runlog__entry')
+	          entries.forEach((entry, index) => {
+	            if (running && index === entries.length - 1) {
+	              entry.dataset.live = '1'
+	              delete entry.dataset.done
+	            } else {
+	              entry.dataset.done = '1'
+	              delete entry.dataset.live
+	            }
+	          })
+	        })
 	      }
 
 	      function ensureScoutChatEmptyState() {
@@ -34061,22 +34884,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
+	        resetScoutFeedRenderPass()
 	        messages.forEach(message => appendScoutChatNode(scoutChatMessageRecordNode(message)))
 	        remountGhostGoalCards()
+	        syncRunlogLiveness()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	      }
 
 	      function scoutChatMessageRecordNode(message) {
-	        if (String(message?.kind || '') === 'proposal' && message.proposal) {
+	        const recordKind = String(message?.kind || '')
+	        // §1: only consecutive stage deliverables share a run log — any
+	        // other record closes the open container
+	        if (recordKind !== 'artifact') {
+	          runlogOpen = null
+	        }
+	        if (recordKind === 'proposal' && message.proposal) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
 	          return scoutProposalCardNode(message)
 	        }
-	        if (String(message?.kind || '') === 'thread' && message.thread) {
+	        if (recordKind === 'thread' && message.thread) {
+	          feedPrevMsgKey = ''
 	          const run = scoutThreadFromChatMessage(message)
 	          // P0-1: a goal ref mounts the live goalcard in the thread — for
 	          // everyone, across reloads — instead of the research run card
 	          if (run.artifact && (String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
 	            return scoutGoalRefRecordNode(message, run.artifact)
 	          }
+	          runlogMarkerGoalId = ''
 	          const card = scoutChatResearchNode(run)
 	          // the launch reply is a real committed scout message (design copy:
 	          // "on it — research workstream kicked off. …") — render it as a
@@ -34085,14 +34920,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const replyText = String(message?.text || '').trim()
 	          if (replyText && replyText !== String(message.thread?.query || '').trim()) {
 	            const group = document.createDocumentFragment()
-	            group.append(scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString()), card)
+	            group.append(scoutThreadReplyNode(replyText, message), card)
 	            return group
 	          }
 	          return card
 	        }
-	        if (String(message?.kind || '') === 'artifact' && message.thread) {
+	        if (recordKind === 'artifact' && message.thread) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
 	          return scoutStageArtifactNode(message)
 	        }
+	        runlogMarkerGoalId = ''
 	        const role = String(message?.role || '').toLowerCase()
 	        let kind = role === 'user' ? 'user' : role === 'error' ? 'error' : 'scout'
 	        // Channel messages carry server-stamped author identity; someone
@@ -34114,7 +34952,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // server-stamped postedOnBehalfOf — render a visible "via Scout" chip
 	        // next to the author so authorship is never hidden.
 	        const viaScout = Boolean(String(message?.postedOnBehalfOf || '').trim())
-	        return scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
+	        // §3 follow-up grouping: consecutive bubbles from the same voice
+	        // tighten into one turn — never for via-Scout rows (the disclosure
+	        // chip must stay visible) and never for longform reading cards
+	        // (those always name their author)
+	        const followKey = `${kind}|${authorEmail || kind}`
+	        const isFollowup = !viaScout && text.length <= 400 && feedPrevMsgKey === followKey
+	        feedPrevMsgKey = viaScout ? '' : followKey
+	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
+	        if (isFollowup) {
+	          node.classList.add('is-followup')
+	        }
+	        return node
+	      }
+
+	      // §3 the park variant: a run parked on a human is the room speaking —
+	      // a centered system line wearing the one ember dot a wait earns, not
+	      // a scout bubble. Everything else stays the launch-reply bubble.
+	      function scoutThreadReplyNode(replyText, message) {
+	        if (/^parked — /.test(replyText)) {
+	          return bfEl('p', 'scout-chat-system scout-chat-note--park', scoutVoice(replyText))
+	        }
+	        return scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString())
 	      }
 
 	      function scoutThreadFromChatMessage(message) {
@@ -34156,6 +35015,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const isLatest = !lastRefId || String(message?.id || '') === lastRefId
 	        if (!isLatest) {
+	          // §2: consecutive same-goal markers collapse — the first survives,
+	          // the rest render nothing
+	          if (runlogMarkerGoalId === goalId) {
+	            return document.createDocumentFragment()
+	          }
+	          runlogMarkerGoalId = goalId
 	          const marker = document.createElement('p')
 	          marker.className = 'scout-chat-system goalcard-marker'
 	          const jump = bfEl('button', 'goalcard__link', `▸ ${goalArtifactTitle(artifact)} — jump to the card`)
@@ -34166,6 +35031,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          marker.appendChild(jump)
 	          return marker
 	        }
+	        runlogMarkerGoalId = ''
 	        const card = goalCardNodeFor(artifact)
 	        if (!card) return document.createDocumentFragment()
 	        // the committed ref owns the mount now — stop the ghost re-append
@@ -34173,27 +35039,75 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const replyText = String(message?.text || '').trim()
 	        if (replyText && replyText !== String(message.thread?.query || '').trim()) {
 	          const group = document.createDocumentFragment()
-	          group.append(scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString()), card)
+	          group.append(scoutThreadReplyNode(replyText, message), card)
 	          return group
 	        }
 	        return card
 	      }
 
-	      // P0-2: a stage deliverable landing in the thread as it completes —
-	      // one narration line plus a compact tappable chip that opens the
-	      // stage artifact in the full viewer.
+	      // §1 the run log (P0 signature): consecutive kind:"artifact" stage
+	      // messages merge into ONE .runlog container — the run gets a spine
+	      // instead of emitting every landed stage as an orphan. The render-pass
+	      // variable runlogOpen holds the open container: while open, entries
+	      // append into it and this returns an empty DocumentFragment. A
+	      // same-key entry (the stage title, revision marker stripped) updates
+	      // in place — a revision replaces its row, never adds one.
 	      function scoutStageArtifactNode(message) {
-	        const wrap = document.createElement('div')
-	        wrap.className = 'scout-chat-system scout-stage-artifact'
-	        wrap.appendChild(bfEl('p', 'scout-stage-artifact__line', scoutVoice(String(message?.text || ''))))
 	        const artifactId = String(message?.thread?.artifactId || '')
-	        if (artifactId) {
-	          const chip = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ ${String(message?.thread?.query || 'open the deliverable').trim() || 'open the deliverable'}`)
-	          chip.type = 'button'
-	          chip.addEventListener('click', () => openAgentArtifact({ id: artifactId }))
-	          wrap.appendChild(chip)
+	        const line = String(message?.text || '')
+	        const dedupKey = String(message?.thread?.query || '').replace(/\s*\(revision \d+\)\s*/g, ' ').trim()
+	        // goalStageMessageLine grammar: "<title> is in — <note> (revision N)"
+	        const revMatch = /\(revision (\d+)\)\s*$/.exec(line)
+	        const rev = revMatch ? Number(revMatch[1]) + 1 : 1
+	        const tailParts = line.split(' is in — ')
+	        const detail = (tailParts.length > 1 ? tailParts[tailParts.length - 1] : '')
+	          .replace(/\s*\(revision \d+\)\s*$/, '')
+	          .trim()
+
+	        const wasOpen = Boolean(runlogOpen)
+	        if (!runlogOpen) {
+	          const section = document.createElement('section')
+	          section.className = 'runlog'
+	          const head = document.createElement('header')
+	          head.className = 'runlog__head'
+	          head.append(bfEl('span', 'runlog__kicker', 'run log'), bfEl('span', 'runlog__count', ''))
+	          const list = document.createElement('ol')
+	          list.className = 'runlog__list'
+	          section.append(head, list)
+	          runlogOpen = section
 	        }
-	        return wrap
+	        const list = runlogOpen.querySelector('.runlog__list')
+
+	        let entry = Array.from(list.children).find(candidate => candidate.dataset.runlogKey === dedupKey)
+	        if (!entry) {
+	          entry = document.createElement('li')
+	          entry.className = 'runlog__entry'
+	          entry.dataset.runlogKey = dedupKey
+	          const node = document.createElement('span')
+	          node.className = 'runlog__node'
+	          const row = document.createElement('button')
+	          row.type = 'button'
+	          row.className = 'runlog__row'
+	          row.append(bfEl('span', 'runlog__title', ''), bfEl('span', 'runlog__meta', ''))
+	          row.addEventListener('click', () => openArtifactStage(entry.dataset.artifactId))
+	          entry.append(node, row)
+	          list.appendChild(entry)
+	        }
+	        // newer artifactId wins in place; the rev badge names the round
+	        entry.dataset.artifactId = artifactId
+	        entry.querySelector('.runlog__title').textContent = dedupKey || 'stage deliverable'
+	        entry.querySelector('.runlog__meta').textContent = detail ? `rev ${rev} · ${detail}` : `rev ${rev}`
+	        entry.dataset.done = '1'
+	        delete entry.dataset.live
+	        const count = list.children.length
+	        runlogOpen.querySelector('.runlog__count').textContent = `${count} stage${count === 1 ? '' : 's'} landed`
+	        syncRunlogLiveness()
+	        // while the container is already mounted (or already returned this
+	        // pass), the entry landed inside it — emit nothing new
+	        if (wasOpen) {
+	          return document.createDocumentFragment()
+	        }
+	        return runlogOpen
 	      }
 
 	      // ---- the router confirmation card (spec §2 — the trust surface) ----
@@ -34562,6 +35476,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
+        // §3 longform: past ~400 chars the bubble becomes a reading card on
+        // the feed measure, and the author is always named above it
+        const longform = String(text || '').length > 400
+        if (longform) {
+          item.classList.add('scout-chat-msg--longform')
+        }
         const label = authorLabel || (kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : kind === 'peer' ? 'peer' : 'error')
         // authorship + timestamp survive as a hover tooltip — the design
         // bubbles carry no meta line
@@ -34584,7 +35504,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stack = document.createElement('div')
         stack.className = 'scout-chat-msg__stack'
 
-        if ((kind === 'peer' && authorLabel) || viaScout) {
+        if ((kind === 'peer' && authorLabel) || viaScout || longform) {
           const author = document.createElement('span')
           author.className = 'scout-chat-msg__author'
           author.textContent = kind === 'peer' && authorLabel ? authorLabel : label
@@ -34610,13 +35530,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (rich) {
             appendChatRichTextNodes(body, text)
           } else {
-            body.textContent = text
+            appendChatMentionTextNodes(body, text)
           }
           stack.appendChild(body)
         }
 
         item.appendChild(stack)
         return item
+      }
+
+      // appendChatMentionTextNodes renders plain message text as text nodes,
+      // lifting @RosterName / @scout tokens into highlight spans. DOM-built
+      // (createTextNode + textContent) — nothing here interprets HTML, so it
+      // stays exactly as injection-safe as the body.textContent it replaced.
+      function appendChatMentionTextNodes(target, text) {
+        const value = String(text || '')
+        const names = mentionRosterNames()
+        if (!value || !names.length) {
+          target.textContent = value
+          return
+        }
+        const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        const pattern = new RegExp(`(^|[^A-Za-z0-9])@(${escaped.join('|')})(?![A-Za-z0-9])`, 'gi')
+        let last = 0
+        for (const match of value.matchAll(pattern)) {
+          const start = match.index + match[1].length
+          if (start > last) {
+            target.appendChild(document.createTextNode(value.slice(last, start)))
+          }
+          const chip = document.createElement('span')
+          chip.className = 'scout-chat-mention'
+          chip.textContent = '@' + match[2]
+          target.appendChild(chip)
+          last = start + 1 + match[2].length
+        }
+        if (last < value.length) {
+          target.appendChild(document.createTextNode(value.slice(last)))
+        }
+        if (!target.childNodes.length) {
+          target.textContent = value
+        }
       }
 
       function chatPeerInitials(label) {

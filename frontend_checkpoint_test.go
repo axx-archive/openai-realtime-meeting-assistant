@@ -80,9 +80,10 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 		// the question is the legible headline
 		"goalcard__checkpoint-question",
 		"String(checkpoint.question || 'Approve this stage to continue?')",
-		// review-the-draft doors open the input stages' artifacts
+		// review-the-draft doors open the input stages' artifacts in the
+		// chat-side artifact stage (§7 — Intelligence stays the data room)
 		"const inputTasks = (stageTask?.dependsOn || [])",
-		"openAgentArtifact({ id: input.artifactId })",
+		"openArtifactStage(input.artifactId)",
 		// inline brief exposes the judge scores + steals without leaving the card
 		"goalcard__checkpoint-brief",
 		// options → tappable choice buttons (labels, actions ride separately)

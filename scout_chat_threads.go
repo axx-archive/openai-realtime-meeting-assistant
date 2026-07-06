@@ -332,6 +332,21 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	}
 	history := scoutChatHistoryFromThread(thread)
 
+	// @-mention bell nudges are collaborative-channel behavior only, and only
+	// for messages that actually persisted: every commit in this function goes
+	// through commitUserMessage, which fires the mention notifications exactly
+	// once, on the first successful save. Private threads stay a 1:1 with
+	// Scout — nobody else can read them, so nobody gets paged into them.
+	mentionsPending := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic
+	commitUserMessage := func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
+		if err == nil && mentionsPending {
+			mentionsPending = false
+			app.notifyScoutChatMentions(saved, userMessage)
+		}
+		return saved, err
+	}
+
 	response := map[string]any{
 		"ok":      true,
 		"message": userMessage,
@@ -359,7 +374,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 			// flight): commit it as a plain message so it survives in the
 			// channel history and feeds the NEXT run's team-reply context, then
 			// surface the launch error.
-			if _, commitErr := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage); commitErr != nil {
+			if _, commitErr := commitUserMessage(userMessage); commitErr != nil {
 				log.Errorf("Failed to commit follow-up reply after launch rejection: %v", commitErr)
 			}
 			return nil, err
@@ -375,7 +390,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 			Text:      assistantToolLabel(agentThread.Mode) + " follow-up v" + version + " running — the card above will update",
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, statusMessage)
+		saved, err := commitUserMessage(userMessage, statusMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -433,7 +448,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 					ArtifactID: goalThread.Artifact.ID,
 				},
 			}
-			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+			saved, err := commitUserMessage(userMessage, assistantMessage)
 			if err != nil {
 				return nil, err
 			}
@@ -476,7 +491,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 				ArtifactID: agentThread.Artifact.ID,
 			},
 		}
-		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+		saved, err := commitUserMessage(userMessage, assistantMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -493,7 +508,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	// mention. Private threads keep the always-answer behavior.
 	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMentionsScout(text)
 	if !scoutEngaged {
-		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage)
+		saved, err := commitUserMessage(userMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -543,7 +558,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 				ArtifactID: agentThread.Artifact.ID,
 			},
 		}
-		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+		saved, err := commitUserMessage(userMessage, assistantMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -572,7 +587,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 				Proposal:  proposal,
 			}
-			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, proposalMessage)
+			saved, err := commitUserMessage(userMessage, proposalMessage)
 			if err != nil {
 				return nil, err
 			}
@@ -592,7 +607,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 			Text:      err.Error(),
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		_, _ = app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, errorMessage)
+		_, _ = commitUserMessage(userMessage, errorMessage)
 		return nil, err
 	}
 	answer := strings.TrimSpace(result.answer)
@@ -606,7 +621,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		Text:      answer,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+	saved, err := commitUserMessage(userMessage, assistantMessage)
 	if err != nil {
 		return nil, err
 	}
