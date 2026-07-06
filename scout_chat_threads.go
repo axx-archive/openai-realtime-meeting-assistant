@@ -395,13 +395,58 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	// invocation, so — like an armed follow-up target — this branch runs
 	// regardless of channel visibility and never needs @scout.
 	if toolTemplate = strings.TrimSpace(toolTemplate); toolTemplate != "" {
-		tool, ok := toolByID(toolTemplate)
-		if !ok {
-			return nil, fmt.Errorf("unknown tool template %q", toolTemplate)
-		}
 		originKind := agentThreadOriginPrivateThread
 		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 			originKind = agentThreadOriginChannel
+		}
+		// A PROCESS id launches the goal pipeline — the identical spec the
+		// palette Run and /goal post — never a single agent thread: a process
+		// is staged, checkpointed work the goal engine owns.
+		if process, isProcess := processByID(toolTemplate); isProcess {
+			objective := firstNonBlank(text, process.Title)
+			goalThread, err := app.launchGoalThread(goalLaunchSpec{
+				Objective:    objective,
+				CreatedBy:    user.Name,
+				Authority:    process.Authority,
+				ToolTemplate: process.ID,
+				Origin: map[string]string{
+					"originKind":    originKind,
+					"originId":      threadID,
+					"originSurface": "chat:" + threadID,
+					"requestedBy":   normalizeAccountEmail(user.Email),
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			assistantMessage := scoutChatMessageRecord{
+				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:      "thread",
+				Role:      "scout",
+				Text:      process.Title + " launched — the staged process is running; it will park here at each human checkpoint",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Thread: &scoutChatThreadRef{
+					ID:         goalThread.ID,
+					Mode:       goalThread.Mode,
+					Query:      goalThread.Query,
+					Status:     goalThread.Status,
+					ArtifactID: goalThread.Artifact.ID,
+				},
+			}
+			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+			if err != nil {
+				return nil, err
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["agentThread"] = goalThread
+			response["artifact"] = goalThread.Artifact
+			response["actions"] = goalThread.Actions
+			return response, nil
+		}
+		tool, ok := toolByID(toolTemplate)
+		if !ok {
+			return nil, fmt.Errorf("unknown tool template %q", toolTemplate)
 		}
 		objective := firstNonBlank(text, tool.Name)
 		agentThread, err := app.launchAgentThreadWithSpec(tool.Mode, objective, user.Name, map[string]string{

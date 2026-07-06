@@ -1426,3 +1426,52 @@ func TestAssistantChatThreadMessagesRouteCarriesToolTemplate(t *testing.T) {
 		t.Fatalf("body=%s, want an agentThread in the response", rec.Body.String())
 	}
 }
+
+// A PROCESS id armed by the palette's conversational handoff must launch the
+// goal pipeline (the identical spec the palette Run posts), never a single
+// agent thread — and never the "unknown tool template" refusal that blocked
+// the first live packaging_studio run (2026-07-05).
+func TestScoutChatProcessTemplateHandoffLaunchesGoalPipeline(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	installFakeResponder(t, goalResponderRoutes{})
+
+	previousRunner := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousRunner })
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	private, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessageWithTool(context.Background(), user, private.ID, "package Station Tenn for talent and partners", nil, "", "packaging_studio")
+	if err != nil {
+		t.Fatalf("append with process template: %v", err)
+	}
+	goalThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok {
+		t.Fatalf("response keys=%v, want a goal launch for a process-template send", responseKeys(response))
+	}
+	meta := goalThread.Artifact.Metadata
+	if meta["mode"] != "goal" {
+		t.Fatalf("artifact mode=%q, want goal — a process launches the pipeline, not a workstream", meta["mode"])
+	}
+	if meta["processId"] != "packaging_studio" {
+		t.Fatalf("artifact processId=%q, want packaging_studio (processes stamp processId, not toolTemplate)", meta["processId"])
+	}
+	if meta["originSurface"] != "chat:"+private.ID {
+		t.Fatalf("artifact originSurface=%q, want chat:%s", meta["originSurface"], private.ID)
+	}
+	plan, ok := decodeGoalPlan(meta["goalPlan"])
+	if !ok || plan.ProcessID != "packaging_studio" {
+		t.Fatalf("goal plan ProcessID=%q ok=%v, want the process instantiated", plan.ProcessID, ok)
+	}
+}
