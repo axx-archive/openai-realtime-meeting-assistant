@@ -423,6 +423,46 @@ func packagingTools() []packagingTool {
 	}
 }
 
+// imageryBoardTool is the Wave 5 imagery stage's registry entry — registered
+// HIDDEN-UNTIL-PROVEN (the Hidden-ProcessDefinition precedent), and for now
+// deliberately UNREACHABLE from every launch door: it does NOT resolve through
+// toolByID and does NOT join packagingTools(). A toolByID launch would run the
+// generic text-model pipeline against imageryBoardBody — the model would file
+// an imagery_board_v1 artifact with a fabricated "Generation record" and
+// invented blob refs while generating NOTHING (runImageryBoard, the actual
+// generator in openai_images.go, has no launch path yet), violating the
+// imagery law's honesty core. The registry entry exists so the contract,
+// rubric, and prompt stay pinned by tests; wiring toolByID (routing the launch
+// through runImageryBoard) is the promotion move once the standalone output
+// earns it. Group: package — where it will surface when proven.
+func imageryBoardTool() packagingTool {
+	return packagingTool{
+		ID:        "imagery_board",
+		Group:     toolGroupPackage,
+		Name:      "Imagery Board",
+		Promise:   "Art-directed concept renders on one visual system, filed with receipts.",
+		Stages:    []string{"design"},
+		Mode:      "design",
+		Contract:  "imagery_board_v1",
+		InputMode: toolInputForm,
+		FormFields: []toolFormField{
+			{Key: "visualSystem", Label: "Visual system brief", Placeholder: "the one style block every shot carries", Required: true},
+			{Key: "shots", Label: "Shot descriptions", Placeholder: "4-6 shots, one per line, each naming its emotional temperature", Required: true},
+		},
+		Authority: toolAuthorityWorkspaceWrite,
+		Rubric: toolRubric{
+			Ref: "imagery_board_gate_v1",
+			Dimensions: []toolRubricDimension{
+				{Name: "One system", Measures: "every shot prompt carries the identical visual system block", Bar: 9},
+				{Name: "Temperature", Measures: "every shot names its emotional temperature and it matches the argument", Bar: 8},
+				{Name: "Place honesty", Measures: "real places are asked for by name when the place is the claim; geography is never invented", Bar: 8},
+				{Name: "Labeling", Measures: "every generated image carries a \"concept render\" FIG-caption label", Bar: 8},
+			},
+			KillCondition: "invented or relocated geography, or a generated image presented without its \"concept render\" label.",
+		},
+	}
+}
+
 // toolByID resolves a tool template id to its registry entry. Unknown ids return
 // ok=false so callers treat a stray toolTemplate as a plain goal (graceful
 // degradation — never an error).
@@ -436,6 +476,10 @@ func toolByID(id string) (packagingTool, bool) {
 			return tool, true
 		}
 	}
+	// imagery_board (imageryBoardTool) deliberately does NOT resolve here:
+	// until its launch is wired to runImageryBoard, resolving it would execute
+	// the tool as a generic model-written artifact that fabricates a generation
+	// record for images that never existed. Unknown stays unknown.
 	return packagingTool{}, false
 }
 

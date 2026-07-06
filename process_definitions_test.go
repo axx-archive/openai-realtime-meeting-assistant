@@ -81,6 +81,18 @@ func TestBuiltinProcessDefinitionsValidate(t *testing.T) {
 			t.Fatalf("process_probe stage %d role=%q, want %q", index, probe.Stages[index].Role, want)
 		}
 	}
+	// The probe's checkpoint options carry truthful actions: ship proceeds
+	// (the default), hold mechanically holds (the negative-option teeth).
+	choice := probe.Stages[2].CheckpointSpec
+	if choice == nil || len(choice.Options) != 2 {
+		t.Fatalf("process_probe checkpoint options=%+v, want ship + hold", choice)
+	}
+	if choice.Options[0].Label != "ship" || processCheckpointOptionAction(choice.Options[0]) != processCheckpointActionProceed {
+		t.Fatalf("probe ship option=%+v, want a proceed-action ship", choice.Options[0])
+	}
+	if choice.Options[1].Label != "hold" || processCheckpointOptionAction(choice.Options[1]) != processCheckpointActionHold {
+		t.Fatalf("probe hold option=%+v, want a hold-action hold", choice.Options[1])
+	}
 }
 
 func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
@@ -140,6 +152,34 @@ func TestValidateProcessDefinitionRejectsBadShapes(t *testing.T) {
 			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
 				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", OptionsFrom: "g1"}}
 		}), "optionsFrom"},
+		{"valid checkpoint option actions", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{
+					{Label: "ship it"},
+					{Label: "send back", Action: processCheckpointActionRevise, Target: "w1"},
+					{Label: "hold it", Action: processCheckpointActionHold},
+				}}}
+		}), ""},
+		{"checkpoint option without a label", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "  "}}}}
+		}), "no label"},
+		{"checkpoint option with an unknown action", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "explode", Action: "explode"}}}}
+		}), "unknown action"},
+		{"revise option without a target", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "send back", Action: processCheckpointActionRevise}}}}
+		}), "no target"},
+		{"revise option targeting a stage the human was not shown", mutate(func(d *ProcessDefinition) {
+			d.Stages = append(d.Stages, ProcessStage{ID: "pick", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"g1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "send back", Action: processCheckpointActionRevise, Target: "w1"}}}})
+		}), "not one of the stage's inputFrom"},
+		{"target on a non-revise option", mutate(func(d *ProcessDefinition) {
+			d.Stages[1] = ProcessStage{ID: "g1", Title: "Pick", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which?", Options: []ProcessCheckpointOption{{Label: "ship it", Target: "w1"}}}}
+		}), "without the revise action"},
 		{"more stages than the default budget", mutate(func(d *ProcessDefinition) {
 			d.Stages = nil
 			for i := 0; i < goalMaxSubtasks+1; i++ {

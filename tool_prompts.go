@@ -216,6 +216,7 @@ var toolContractHeadings = map[string][]string{
 	"economics_scan_v1":  {"Sources and uses", "The waterfall", "Base / up / down", "Hinge assumptions", "Studio position"},
 	"package_binder_v1":  {"One-pager", "Thesis", "Comparables", "Rights readiness", "Economics", "Grill readiness", "Interlocks", "Provenance appendix"},
 	"update_memo_v1":     {"What moved", "Decisions made", "What's next", "What we need", "Provenance"},
+	"imagery_board_v1":   {"Visual system", "Shot list", "Generation record"},
 }
 
 // --- Deterministic law sweeps (Phase 1 mechanisms, zero model cost) ----------
@@ -288,6 +289,8 @@ func toolPromptBody(id string) string {
 		return packageAssemblyBody
 	case "investor_update_memo":
 		return investorUpdateMemoBody
+	case "imagery_board":
+		return imageryBoardBody
 	default:
 		return "## OUTPUT CONTRACT\nProduce a durable operating artifact with evidence, receipts, and a verification note."
 	}
@@ -745,4 +748,47 @@ shippable without that approval.
   - Candor (bar 7): names real risks/losses plainly; no hedging or hype.
   kill_condition: any stated development not traceable to a decision, meeting,
     artifact, or package stage-advance on record.
+  ship_if: all >= bar AND kill_condition not triggered.`
+
+// --- Imagery Board (Wave 5, hidden-until-proven — see imageryBoardTool) ------
+
+const imageryBoardBody = `## ROLE
+You are the studio's art director building the imagery board: 4-6 shots on ONE
+visual system, generated as concept renders the deck's duotone CSS will unify.
+Imagery makes claims exactly like copy does — a coastline behind an inland
+city reads as a lie a sharp room notices silently. You art-direct; the server
+generates and files the blobs (openai_images.go).
+
+## THE IMAGERY LAW (non-negotiable, every shot)
+- ONE visual system: the identical visual system block rides EVERY shot
+  prompt. Never restyle per shot.
+- The emotional temperature is NAMED per shot and maps to the argument: drama
+  where the product speaks (proof, competition), joy where the culture speaks
+  (lifestyle, community, the cover).
+- When the place is the claim, ask for the REAL place by name. Never invent
+  or relocate geography.
+- Generated images are labeled "concept render" in filed-exhibit style (a FIG.
+  caption suffix), never passed off as photography.
+- The duotone recipe stays in the deck CSS — natural color out of the model,
+  the wash applied at render. Never bake the treatment into generation.
+
+## OUTPUT CONTRACT — imagery_board_v1:
+Visual system     — the one style block every shot carries, verbatim.
+Shot list         — each shot as a FIG.-captioned entry ("FIG. <n> — <title>
+                    (concept render)"): its named emotional temperature, the
+                    real place by name where the place is the claim, the exact
+                    generation prompt, and the image's blob ref.
+Generation record — model, size, quality, and every disclosed failure.
+
+## GATE RUBRIC (imagery_board_gate_v1)
+  - One system (bar 9): every shot prompt carries the identical visual system
+    block.
+  - Temperature (bar 8): every shot names its emotional temperature and it
+    matches the argument.
+  - Place honesty (bar 8): real places are asked for by name when the place is
+    the claim; geography is never invented.
+  - Labeling (bar 8): every generated image carries a "concept render"
+    FIG-caption label.
+  kill_condition: invented or relocated geography, or a generated image
+    presented without its "concept render" label.
   ship_if: all >= bar AND kill_condition not triggered.`

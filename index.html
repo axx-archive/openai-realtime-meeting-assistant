@@ -16434,6 +16434,18 @@
       .goalcard__choice:hover { border-color: var(--agent); }
       .goalcard__choice:active { transform: scale(var(--press-scale)); }
       .goalcard__choice[disabled] { opacity: 0.55; cursor: default; }
+      /* negative-option teeth (Wave 4 disclosed gap): a held goal wears the
+         badge; revise/hold choices read as what they mechanically DO */
+      .goalcard__checkpoint-held {
+        align-self: flex-start;
+        font: var(--type-caption);
+        color: var(--warn);
+        border: 1px solid var(--warn);
+        border-radius: var(--r-pill, 999px);
+        padding: 2px 10px;
+      }
+      .goalcard__choice--revise:hover { border-color: var(--warn); }
+      .goalcard__choice--hold:hover { border-color: var(--warn); }
       /* process-stage disclosure lines in the working log (skips, exports, choices) */
       .goalcard__work-line--detail { padding-left: 14px; color: var(--text-3); }
       /* compressed 5-node rail on narrow screens (ux §1.8) */
@@ -32399,21 +32411,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // tap that is the ONLY thing that resumes — never silent). Three shapes
       // from one renderer, all driven by the persisted {stageId, question,
       // options}: options present → tappable choice cards (the COMPETE winner
-      // pick — the option strings carry the spines, and the review door +
-      // inline brief expose the judges' scores and steals behind them); no
-      // options → one notes input whose text IS the {choice} (the INTAKE
-      // fields, the founder pass's do_not_touch notes) beside the "review the
-      // draft" door. Resume posts the EXISTING approve seam with {choice}.
-      // The node persists per card+stage (the survey-chips pattern) so the
-      // terminal's re-renders never wipe a half-typed note.
+      // pick — each option carries its mechanical {label, action}: proceed
+      // resumes, revise sends the target stage back with the notes, hold
+      // parks the goal until an explicit proceed; the review door + inline
+      // brief expose the judges' scores and steals behind them); no options →
+      // one notes input whose text IS the {choice} (the INTAKE fields, the
+      // founder pass's do_not_touch notes) beside the "review the draft"
+      // door. A held checkpoint wears the held badge and only its proceed
+      // options stay live. Resume posts the EXISTING approve seam with
+      // {choice}. The node persists per card+stage+held (the survey-chips
+      // pattern) so the terminal's re-renders never wipe a half-typed note —
+      // and a hold landing from the server re-renders the badge.
       function goalCardRenderCheckpoint(terminal, card, artifact, plan, checkpoint) {
         const stageId = String(checkpoint.stageId || '')
-        if (card.__checkpointNode && card.__checkpointStageId === stageId) {
+        const held = !!checkpoint.held
+        if (card.__checkpointNode && card.__checkpointStageId === stageId && card.__checkpointHeld === held) {
           terminal.appendChild(card.__checkpointNode)
           return
         }
         const wrap = bfEl('div', 'goalcard__checkpoint')
-        wrap.appendChild(bfEl('div', 'goalcard__result', 'Your call — the run is parked'))
+        wrap.appendChild(bfEl('div', 'goalcard__result', held ? 'Held — your call stands until you proceed' : 'Your call — the run is parked'))
+        if (held) {
+          wrap.appendChild(bfEl('div', 'goalcard__checkpoint-held', `held${checkpoint.heldBy ? ' by ' + checkpoint.heldBy : ''} — resume with a proceed choice`))
+        }
         wrap.appendChild(bfEl('div', 'goalcard__checkpoint-question', String(checkpoint.question || 'Approve this stage to continue?')))
 
         // "review the draft" doors: every input stage that produced an artifact
@@ -32448,34 +32468,56 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             submitApproval(artifact.id, 'approve', '', choice)
             goalCardScheduleSync()
           }
-          const options = Array.isArray(checkpoint.options) ? checkpoint.options.map(option => String(option || '').trim()).filter(Boolean) : []
-          if (options.length) {
-            for (const option of options) {
-              const choiceBtn = bfEl('button', 'goalcard__choice', option)
-              choiceBtn.type = 'button'
-              choiceBtn.addEventListener('click', () => post(option))
-              wrap.appendChild(choiceBtn)
-            }
-          } else {
-            // free-form checkpoint: the typed text IS the {choice} the next
-            // stage reads as grounding (INTAKE answers, do_not_touch notes)
+          // Options normalize from BOTH persisted shapes: the pre-teeth plain
+          // string (action proceed) and the {label, action} object.
+          const options = (Array.isArray(checkpoint.options) ? checkpoint.options : [])
+            .map(option => typeof option === 'string'
+              ? { label: option.trim(), action: 'proceed' }
+              : { label: String(option?.label || '').trim(), action: String(option?.action || 'proceed').trim() || 'proceed' })
+            .filter(option => option.label)
+          const hasRevise = options.some(option => option.action === 'revise')
+          // The notes input (the do_not_touch input generalized): free-form
+          // checkpoints keep it as THE choice; option checkpoints with a
+          // revise door get it as the send-back notes every tap appends
+          // ("<label> — <notes>", the prefix-matched founder-pass grammar).
+          let notes = null
+          if (!options.length || hasRevise) {
             const field = bfEl('div', 'palette__form-field')
-            field.appendChild(bfEl('label', 'palette__form-label', 'notes for the next stage (do_not_touch, answers, must-keeps)'))
-            const notes = document.createElement('textarea')
+            field.appendChild(bfEl('label', 'palette__form-label', hasRevise
+              ? 'notes for the send-back (do_not_touch lines are preserved exactly)'
+              : 'notes for the next stage (do_not_touch, answers, must-keeps)'))
+            notes = document.createElement('textarea')
             notes.className = 'palette__field'
             notes.rows = 3
             notes.placeholder = 'do_not_touch: …'
             field.appendChild(notes)
             wrap.appendChild(field)
+          }
+          const noteText = () => String(notes?.value || '').trim()
+          if (options.length) {
+            for (const option of options) {
+              const choiceBtn = bfEl('button', 'goalcard__choice', option.label)
+              choiceBtn.type = 'button'
+              if (option.action === 'revise') choiceBtn.classList.add('goalcard__choice--revise')
+              if (option.action === 'hold') choiceBtn.classList.add('goalcard__choice--hold')
+              // a held goal resumes ONLY through proceed — mirror the server's refusal
+              if (held && option.action !== 'proceed') choiceBtn.disabled = true
+              choiceBtn.addEventListener('click', () => post(noteText() ? `${option.label} — ${noteText()}` : option.label))
+              wrap.appendChild(choiceBtn)
+            }
+          } else {
+            // free-form checkpoint: the typed text IS the {choice} the next
+            // stage reads as grounding (INTAKE answers, do_not_touch notes)
             const actions = bfEl('div', 'goalcard__terminal-actions')
             const go = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Continue ▸')
             go.type = 'button'
-            go.addEventListener('click', () => post(String(notes.value || '').trim()))
+            go.addEventListener('click', () => post(noteText()))
             actions.appendChild(go)
             wrap.appendChild(actions)
           }
         }
         card.__checkpointStageId = stageId
+        card.__checkpointHeld = held
         card.__checkpointNode = wrap
         terminal.appendChild(wrap)
       }

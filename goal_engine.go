@@ -117,14 +117,64 @@ type goalPlan struct {
 }
 
 // goalProcessCheckpoint is the persisted human_checkpoint record. An empty
-// ResolvedAt means the goal is parked waiting on the choice.
+// ResolvedAt means the goal is parked waiting on the choice. Held marks a
+// hold-action choice on record: the goal STAYS parked (ResolvedAt stays
+// empty), the card renders the held badge, and only a subsequent
+// proceed-action choice resumes it.
 type goalProcessCheckpoint struct {
-	StageID    string   `json:"stageId"`
-	Question   string   `json:"question"`
-	Options    []string `json:"options,omitempty"`
-	Choice     string   `json:"choice,omitempty"`
-	ResolvedBy string   `json:"resolvedBy,omitempty"`
-	ResolvedAt string   `json:"resolvedAt,omitempty"`
+	StageID    string                 `json:"stageId"`
+	Question   string                 `json:"question"`
+	Options    []goalCheckpointOption `json:"options,omitempty"`
+	Choice     string                 `json:"choice,omitempty"`
+	ResolvedBy string                 `json:"resolvedBy,omitempty"`
+	ResolvedAt string                 `json:"resolvedAt,omitempty"`
+	Held       bool                   `json:"held,omitempty"`
+	HeldBy     string                 `json:"heldBy,omitempty"`
+	HeldAt     string                 `json:"heldAt,omitempty"`
+	// LastAction records the resolved action of the most recent resume
+	// (proceed | revise | hold) so the HTTP door can tell a sign-off from a
+	// send-back: only a proceed earns the durable approval stamp.
+	LastAction string `json:"lastAction,omitempty"`
+}
+
+// goalCheckpointOption is one persisted checkpoint choice: the label the human
+// taps plus the mechanical action it carries (ProcessCheckpointOption's shape,
+// snapshotted at park time so a re-registered definition never rewires a
+// parked goal). Action empty means proceed.
+type goalCheckpointOption struct {
+	Label  string `json:"label"`
+	Action string `json:"action,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
+// UnmarshalJSON accepts the pre-teeth persisted shape — a plain option string
+// — alongside the object form, so a goal parked before the upgrade still
+// decodes (its options all proceed, exactly what they did then).
+func (o *goalCheckpointOption) UnmarshalJSON(raw []byte) error {
+	var label string
+	if err := json.Unmarshal(raw, &label); err == nil {
+		*o = goalCheckpointOption{Label: label}
+		return nil
+	}
+	type plain goalCheckpointOption
+	var decoded plain
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	*o = goalCheckpointOption(decoded)
+	return nil
+}
+
+// action resolves the option's effective action; empty/unknown is proceed
+// (unknown never persists — validation refuses it at registration).
+func (o goalCheckpointOption) action() string {
+	switch strings.TrimSpace(o.Action) {
+	case processCheckpointActionRevise:
+		return processCheckpointActionRevise
+	case processCheckpointActionHold:
+		return processCheckpointActionHold
+	}
+	return processCheckpointActionProceed
 }
 
 type goalSubtask struct {
@@ -1069,13 +1119,13 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	if strings.TrimSpace(st.Detail) != "" {
 		query += " — " + st.Detail
 	}
-	if st.Revisions > 0 && st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
+	if goalSubtaskInRevision(st) && st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
 		query += "\n\nRevision notes from the goal review (address these): " + st.Review.Reasons
 	}
 	// The protect list rides every requeue so a revision fixes what failed
 	// WITHOUT regressing what the reviewer already praised (Phase 1 protect
 	// lists — the classic revision failure mode is losing the good parts).
-	if st.Revisions > 0 && len(st.Protect) > 0 {
+	if goalSubtaskInRevision(st) && len(st.Protect) > 0 {
 		query += "\n\nDO NOT LOSE (protected) — the review explicitly praised these; keep every one intact in the revision:\n- " + strings.Join(st.Protect, "\n- ")
 	}
 	// A process writer stage carries its authored contract and the bodies of
@@ -1631,8 +1681,14 @@ func (e *goalEngine) processStageTask(plan *goalPlan, st *goalSubtask, stage Pro
 	if contract := strings.TrimSpace(stage.OutputContract); contract != "" {
 		builder.WriteString("\n\nOutput contract: " + contract)
 	}
-	if st.Revisions > 0 && st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
+	if goalSubtaskInRevision(st) && st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
 		builder.WriteString("\n\nRevision notes (address these): " + st.Review.Reasons)
+	}
+	// The protect list rides an inline redo exactly as it rides a writer requeue
+	// (launchSubtask): a checkpoint send-back's do_not_touch lines land here, so
+	// the revision never loses what the human explicitly locked.
+	if goalSubtaskInRevision(st) && len(st.Protect) > 0 {
+		builder.WriteString("\n\nDO NOT LOSE (protected) — these are explicitly locked; keep every one intact in the revision:\n- " + strings.Join(st.Protect, "\n- "))
 	}
 	if inputs := e.processStageInputs(plan, stage); inputs != "" {
 		builder.WriteString("\n\nInput from prior stages:\n" + inputs)
@@ -1923,18 +1979,37 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	if stage.CheckpointSpec != nil {
 		spec = *stage.CheckpointSpec
 	}
-	options := append([]string{}, spec.Options...)
+	options := make([]goalCheckpointOption, 0, len(spec.Options))
+	for _, option := range spec.Options {
+		options = append(options, goalCheckpointOption{
+			Label:  strings.TrimSpace(option.Label),
+			Action: strings.TrimSpace(option.Action),
+			Target: strings.TrimSpace(option.Target),
+		})
+	}
 	if len(options) == 0 && strings.TrimSpace(spec.OptionsFrom) != "" {
 		if source := plan.subtaskByID(strings.TrimSpace(spec.OptionsFrom)); source != nil {
 			if artifact, ok := e.app.osArtifactByID(source.ArtifactID); ok {
-				options = processCheckpointOptionsFromText(artifact.Text)
+				// Extracted options carry no authored action — they all proceed.
+				for _, label := range processCheckpointOptionsFromText(artifact.Text) {
+					options = append(options, goalCheckpointOption{Label: label})
+				}
 			}
 		}
 	}
+	// A re-park of the SAME stage (after a send-back redo) keeps LastAction
+	// from the prior record: "the most recent resume action" must survive the
+	// fresh park, or the HTTP door could mistake a just-sent-back goal for a
+	// signed-off one and stamp approval.
+	lastAction := ""
+	if plan.Checkpoint != nil && plan.Checkpoint.StageID == st.ID {
+		lastAction = plan.Checkpoint.LastAction
+	}
 	plan.Checkpoint = &goalProcessCheckpoint{
-		StageID:  st.ID,
-		Question: firstNonEmptyString(strings.TrimSpace(spec.Question), "Approve this stage to continue?"),
-		Options:  options,
+		StageID:    st.ID,
+		Question:   firstNonEmptyString(strings.TrimSpace(spec.Question), "Approve this stage to continue?"),
+		Options:    options,
+		LastAction: lastAction,
 	}
 	plan.State = goalStateApproval
 	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
@@ -1953,29 +2028,82 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is waiting on a human checkpoint: "+plan.Checkpoint.Question, artifact))
 }
 
-// resumeProcessCheckpoint lands the human's choice: the checkpoint subtask
-// completes with a decision artifact carrying the choice (so downstream stages
-// that declare it as input read the choice as their grounding), and the engine
-// re-drives from execute. The caller holds the parent lock.
+// resumeProcessCheckpoint lands the human's choice BY ITS ACTION (the
+// mechanical teeth behind every option). proceed — the default, and every
+// pre-teeth option — completes the checkpoint subtask with a decision artifact
+// carrying the choice (so downstream stages that declare it as input read the
+// choice as their grounding) and re-drives from execute. revise re-queues the
+// option's target stage with the choice text as revision notes (do_not_touch
+// lines locked into the protect list) and re-arms the checkpoint to park again
+// after the redo — bounded by the same MaxRounds discipline as gates; a revise
+// on a spent budget falls back to proceed with the send-back DISCLOSED. hold
+// keeps the goal parked with the choice on the record; only a subsequent
+// proceed-action choice resumes it. The caller holds the parent lock.
 func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, approvedBy string, choice string) error {
 	checkpoint := plan.Checkpoint
 	choice = strings.TrimSpace(choice)
-	if choice != "" && len(checkpoint.Options) > 0 && !checkpointChoiceMatchesOption(checkpoint.Options, choice) {
-		return fmt.Errorf("choice %q is not one of the checkpoint options (%s)", choice, strings.Join(checkpoint.Options, ", "))
+	option, matched := checkpointOptionForChoice(checkpoint.Options, choice)
+	if choice != "" && len(checkpoint.Options) > 0 && !matched {
+		return fmt.Errorf("choice %q is not one of the checkpoint options (%s)", choice, strings.Join(checkpointOptionLabels(checkpoint.Options), ", "))
 	}
 	st := plan.subtaskByID(checkpoint.StageID)
 	if st == nil {
 		return fmt.Errorf("checkpoint stage %q is missing from the plan", checkpoint.StageID)
 	}
 	resolvedBy := firstNonEmptyString(strings.TrimSpace(approvedBy), "admin")
+	action := processCheckpointActionProceed
+	if matched {
+		action = option.action()
+	}
+	// A held goal resumes ONLY through an explicit proceed-action choice — the
+	// plain approve button (empty choice) and another negative option keep it
+	// parked, honestly refused rather than silently resumed.
+	if checkpoint.Held && (action != processCheckpointActionProceed || choice == "") {
+		return fmt.Errorf("the goal is held at %q (by %s) — resuming requires an explicit proceed choice", checkpoint.StageID, firstNonEmptyString(checkpoint.HeldBy, "admin"))
+	}
+	checkpoint.LastAction = action
+	switch action {
+	case processCheckpointActionHold:
+		return e.holdProcessCheckpoint(plan, parentID, resolvedBy, firstNonEmptyString(choice, option.Label))
+	case processCheckpointActionRevise:
+		target := plan.subtaskByID(option.Target)
+		disclosure := ""
+		switch {
+		case target == nil:
+			// Definition drift only — validation pins the target to an InputFrom
+			// stage. Degrade to proceed with the failure disclosed, never stall.
+			disclosure = "the send-back target " + option.Target + " is missing from the plan — proceeded with the request disclosed"
+		case st.Revisions >= goalMaxRevisions:
+			// The same MaxRounds discipline as gates: a spent budget never loops
+			// again; it proceeds with the send-back disclosed on the record.
+			disclosure = fmt.Sprintf("the send-back budget is spent (%d rounds) — proceeded with the request disclosed", st.Revisions)
+		default:
+			return e.reviseProcessCheckpoint(plan, parentID, st, target, resolvedBy, choice)
+		}
+		return e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, disclosure)
+	}
+	return e.proceedProcessCheckpoint(plan, parentID, st, resolvedBy, choice, "")
+}
+
+// proceedProcessCheckpoint is the proceed action: the checkpoint subtask
+// completes with the decision artifact and the engine re-drives from execute.
+// A non-empty disclosure (a revise that fell back here) rides the decision
+// record and the review reasons, never hidden.
+func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, resolvedBy string, choice string, disclosure string) error {
+	checkpoint := plan.Checkpoint
 	recordedChoice := firstNonEmptyString(choice, "(approved without an explicit choice)")
-	body := strings.Join([]string{
+	bodyLines := []string{
 		"Checkpoint decision",
 		"",
 		"- Question: " + checkpoint.Question,
 		"- Choice: " + recordedChoice,
 		"- Decided by: " + resolvedBy,
-	}, "\n")
+	}
+	reviewNote := "human checkpoint: " + recordedChoice
+	if disclosure != "" {
+		bodyLines = append(bodyLines, "- Disclosed: "+disclosure)
+		reviewNote += " (" + disclosure + ")"
+	}
 	metadata := map[string]string{
 		"source":           "process_stage",
 		"goalParentId":     parentID,
@@ -1990,19 +2118,145 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 	if plan.PackageID != "" {
 		metadata["packageId"] = plan.PackageID
 	}
-	artifact, _, err := e.app.createOSArtifactWithMetadata("workflow", "Checkpoint: "+checkpoint.Question, body, resolvedBy, metadata)
+	artifact, _, err := e.app.createOSArtifactWithMetadata("workflow", "Checkpoint: "+checkpoint.Question, strings.Join(bodyLines, "\n"), resolvedBy, metadata)
 	if err != nil || strings.TrimSpace(artifact.ID) == "" {
 		return fmt.Errorf("checkpoint decision artifact was not saved")
 	}
 	st.ArtifactID = artifact.ID
 	st.Status = subtaskComplete
-	st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: "human checkpoint: " + recordedChoice, By: resolvedBy}
+	st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: reviewNote, By: resolvedBy}
 	checkpoint.Choice = recordedChoice
 	checkpoint.ResolvedBy = resolvedBy
 	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
 	plan.State = goalStateExecute
 	e.persist(plan, parentID, "")
-	// Un-park the approval surface: the goal is running again.
+	e.unparkCheckpointSurface(parentID)
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+	e.drive(ctx, plan, parentID)
+	return nil
+}
+
+// reviseProcessCheckpoint is the revise action's happy path (budget already
+// checked by the caller): the target stage goes back in flight carrying the
+// choice text as revision notes and its do_not_touch lines as protected, the
+// checkpoint re-arms (pending, one round spent) so it parks again after the
+// redo, every completed stage BETWEEN them that depends on the target is
+// cascade-invalidated so it re-runs against the revised work, and the engine
+// re-drives from execute.
+func (e *goalEngine) reviseProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) error {
+	checkpoint := plan.Checkpoint
+	recordedChoice := firstNonEmptyString(choice, "(sent back without notes)")
+	// The checkpoint spends a round and re-arms — readiness keeps it parked
+	// until the revised target completes again, then it parks with a FRESH
+	// record (parkProcessCheckpoint replaces this resolved one). The send-back
+	// budget lives HERE, on the checkpoint stage: the target's own Revisions
+	// counter stays untouched so a founder send-back never spends the target's
+	// transient-failure retry allowance (requeueOrBlock) or a gate's rounds.
+	st.Revisions++
+	st.Status = subtaskPending
+	st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "human checkpoint sent back: " + recordedChoice, By: resolvedBy}
+	target.Status = subtaskReady
+	target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: recordedChoice, By: resolvedBy}
+	// do_not_touch lines are LAW for the redo: locked into the protect list so
+	// both the writer requeue prompt and the inline stage task carry them as
+	// the "DO NOT LOSE (protected)" block.
+	target.Protect = mergeGoalProtectList(target.Protect, checkpointProtectLines(recordedChoice))
+	// Cascade-invalidate the target's completed dependents: every stage whose
+	// inputs (transitively) include the target — the studio's gate and voice on
+	// a founder_pass send-back — resets to pending and re-runs against the
+	// revised draft, so the checkpoint re-parks beside a fresh gate verdict and
+	// a fresh presenter script, never a stale one, and ship_compile never files
+	// artifacts narrating copy that no longer exists.
+	resetGoalDependents(plan, target.ID, st.ID)
+	checkpoint.Choice = recordedChoice
+	checkpoint.ResolvedBy = resolvedBy
+	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
+	plan.State = goalStateExecute
+	e.persist(plan, parentID, "")
+	e.unparkCheckpointSurface(parentID)
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+	e.drive(ctx, plan, parentID)
+	return nil
+}
+
+// resetGoalDependents cascade-invalidates a checkpoint send-back: every
+// COMPLETED subtask whose DependsOn (transitively) includes the target resets
+// to pending so readiness re-runs it against the revised target before the
+// checkpoint (skipID, re-armed by the caller) parks again. Stages downstream
+// of the checkpoint cannot be complete while it is parked, so the reset never
+// reaches past it. Returns the reset stage ids. The reset stages carry a
+// revise-verdict review naming the cause, so their redo prompts disclose why
+// they are running again — without charging their failure-retry budget.
+func resetGoalDependents(plan *goalPlan, targetID string, skipID string) []string {
+	stale := map[string]bool{targetID: true}
+	for changed := true; changed; {
+		changed = false
+		for index := range plan.Subtasks {
+			st := &plan.Subtasks[index]
+			if stale[st.ID] {
+				continue
+			}
+			for _, dep := range st.DependsOn {
+				if stale[strings.TrimSpace(dep)] {
+					stale[st.ID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	var reset []string
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.ID == targetID || st.ID == skipID || !stale[st.ID] || st.Status != subtaskComplete {
+			continue
+		}
+		st.Status = subtaskPending
+		st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "stage " + targetID + " was revised by a checkpoint send-back — re-run against the revised work", By: "checkpoint_cascade"}
+		reset = append(reset, st.ID)
+	}
+	return reset
+}
+
+// goalSubtaskInRevision reports whether a subtask is re-running against
+// revision notes: its failure/gate budget was spent (Revisions > 0), or a
+// non-pass review sent it back — a checkpoint send-back or a cascade
+// invalidation, which deliberately do NOT charge the target's retry budget.
+func goalSubtaskInRevision(st *goalSubtask) bool {
+	if st == nil {
+		return false
+	}
+	if st.Revisions > 0 {
+		return true
+	}
+	return st.Review != nil && st.Review.Verdict != "" && st.Review.Verdict != goalReviewPass
+}
+
+// holdProcessCheckpoint is the hold action: the goal STAYS parked on the
+// approval surface, the choice goes on the plan record (Held/HeldBy/HeldAt,
+// mirrored into metadata["checkpoint"] so the card renders the held badge),
+// and nothing re-drives — a subsequent proceed-action choice is the only way
+// forward.
+func (e *goalEngine) holdProcessCheckpoint(plan *goalPlan, parentID string, heldBy string, choice string) error {
+	checkpoint := plan.Checkpoint
+	checkpoint.Held = true
+	checkpoint.HeldBy = heldBy
+	checkpoint.HeldAt = e.now().UTC().Format(time.RFC3339Nano)
+	artifact := e.persist(plan, parentID, composeGoalArtifact(plan))
+	if strings.TrimSpace(artifact.ID) == "" {
+		if current, ok := e.app.osArtifactByID(parentID); ok {
+			artifact = current
+		}
+	}
+	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is held at a checkpoint ("+compactAssistantLine(choice)+") — resume with a proceed choice.", artifact))
+	return nil
+}
+
+// unparkCheckpointSurface flips the approval surface back to running once a
+// checkpoint resolves — the goal is in flight again.
+func (e *goalEngine) unparkCheckpointSurface(parentID string) {
 	if current, ok := e.app.osArtifactByID(parentID); ok {
 		if _, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", current.Text, scoutParticipantName, map[string]string{
 			"threadStatus": "running",
@@ -2012,31 +2266,57 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 			log.Errorf("goal %s checkpoint resume metadata failed: %v", parentID, err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
-	defer cancel()
-	e.drive(ctx, plan, parentID)
-	return nil
 }
 
-// checkpointChoiceMatchesOption accepts an exact option match OR a choice
-// that STARTS with one of the options. The prefix case is the founder-pass
-// pattern (packaging OS §3 "Where humans sit"): the option is the decision
-// ("ship as-is") and the human appends the instructions the next stage must
-// honor ("ship as-is — do_not_touch: …") — those lines ride the decision
-// artifact into every stage that declares the checkpoint as input. A choice
-// that names no option is still refused.
-func checkpointChoiceMatchesOption(options []string, choice string) bool {
+// checkpointOptionForChoice returns the option a choice lands on: an exact
+// label match OR a choice that STARTS with a label. The prefix case is the
+// founder-pass pattern (packaging OS §3 "Where humans sit"): the label is the
+// decision ("ship as-is") and the human appends the instructions the next
+// stage must honor ("ship as-is — do_not_touch: …") — those lines ride the
+// decision artifact into every stage that declares the checkpoint as input,
+// and a send-back's notes become the redo's revision notes. A choice that
+// names no option matches nothing (the caller refuses it).
+func checkpointOptionForChoice(options []goalCheckpointOption, choice string) (goalCheckpointOption, bool) {
 	folded := strings.ToLower(strings.TrimSpace(choice))
 	for _, option := range options {
-		option = strings.ToLower(strings.TrimSpace(option))
-		if option == "" {
+		label := strings.ToLower(strings.TrimSpace(option.Label))
+		if label == "" {
 			continue
 		}
-		if folded == option || strings.HasPrefix(folded, option) {
-			return true
+		if folded == label || strings.HasPrefix(folded, label) {
+			return option, true
 		}
 	}
-	return false
+	return goalCheckpointOption{}, false
+}
+
+// checkpointOptionLabels flattens options to their labels (error messages, the
+// goal artifact record).
+func checkpointOptionLabels(options []goalCheckpointOption) []string {
+	labels := make([]string, 0, len(options))
+	for _, option := range options {
+		labels = append(labels, option.Label)
+	}
+	return labels
+}
+
+// checkpointProtectLines extracts the do_not_touch lines from a send-back
+// choice: any line (or trailing fragment of one) that carries a do_not_touch
+// mark becomes a protect entry the redo must keep intact. Everything else is
+// revision notes, not law.
+func checkpointProtectLines(choice string) []string {
+	var lines []string
+	for _, line := range strings.Split(choice, "\n") {
+		lowered := strings.ToLower(line)
+		index := strings.Index(lowered, "do_not_touch")
+		if index < 0 {
+			continue
+		}
+		if entry := strings.TrimSpace(line[index:]); entry != "" {
+			lines = append(lines, entry)
+		}
+	}
+	return lines
 }
 
 // --- Stage: review_against_goal ---------------------------------------------
@@ -3220,11 +3500,14 @@ func composeGoalArtifact(plan *goalPlan) string {
 	if checkpoint := plan.Checkpoint; checkpoint != nil {
 		lines = append(lines, "", "## Checkpoint", "- Question: "+checkpoint.Question)
 		if len(checkpoint.Options) > 0 {
-			lines = append(lines, "- Options: "+strings.Join(checkpoint.Options, " | "))
+			lines = append(lines, "- Options: "+strings.Join(checkpointOptionLabels(checkpoint.Options), " | "))
 		}
-		if checkpoint.ResolvedAt != "" {
+		switch {
+		case checkpoint.ResolvedAt != "":
 			lines = append(lines, "- Choice: "+checkpoint.Choice+" (by "+checkpoint.ResolvedBy+")")
-		} else {
+		case checkpoint.Held:
+			lines = append(lines, "- HELD by "+firstNonEmptyString(checkpoint.HeldBy, "admin")+" at "+checkpoint.HeldAt+" — the goal stays parked until an explicit proceed choice.")
+		default:
 			lines = append(lines, "- Waiting on a human choice.")
 		}
 	}

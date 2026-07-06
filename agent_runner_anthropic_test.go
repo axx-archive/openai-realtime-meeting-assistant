@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -916,6 +918,132 @@ func TestDecodeAnthropicSSEStreamTruncatedLeavesStopReasonEmpty(t *testing.T) {
 	}
 	if got.StopReason != "" {
 		t.Fatalf("truncated stream StopReason=%q, want empty (incomplete)", got.StopReason)
+	}
+}
+
+// The image block helper emits the exact Messages API wire shape —
+// {"type":"image","source":{"type":"base64","media_type":...,"data":...}} —
+// and the payload builder passes it through the raw-content seam untouched
+// (Wave 5 item 21: the vision slide juries ride this seam).
+func TestAnthropicImageBlockWireShape(t *testing.T) {
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10}
+	raw, err := buildAnthropicMessagesPayload(anthropicMessagesRequest{
+		Model: "claude-fable-5",
+		Messages: []anthropicMessage{{
+			Role: "user",
+			Content: []json.RawMessage{
+				anthropicImageBlock("image/jpeg", jpeg),
+				mockAnthropicTextBlock("Score this rendered page."),
+			},
+		}},
+		MaxTokens: 4096,
+	})
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+
+	var payload struct {
+		Messages []struct {
+			Content []struct {
+				Type   string `json:"type"`
+				Source struct {
+					Type      string `json:"type"`
+					MediaType string `json:"media_type"`
+					Data      string `json:"data"`
+				} `json:"source"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	block := payload.Messages[0].Content[0]
+	if block.Type != "image" || block.Source.Type != "base64" || block.Source.MediaType != "image/jpeg" {
+		t.Fatalf("image block wire shape wrong: %+v", block)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(block.Source.Data)
+	if err != nil || !bytes.Equal(decoded, jpeg) {
+		t.Fatalf("image data did not round-trip: err=%v data=%q", err, block.Source.Data)
+	}
+	if strings.Contains(block.Source.Data, "\n") {
+		t.Fatal("base64 image data carries newlines — the API rejects them")
+	}
+}
+
+// The defensive request-level image budget: more than 12 image blocks, or more
+// than ~20MB of decoded image payload, refuses to build a payload the API
+// would reject opaquely. At-cap requests still build.
+func TestBuildAnthropicMessagesPayloadImageCaps(t *testing.T) {
+	imageTurn := func(count int, size int) anthropicMessagesRequest {
+		content := make([]json.RawMessage, 0, count+1)
+		for i := 0; i < count; i++ {
+			content = append(content, anthropicImageBlock("image/jpeg", bytes.Repeat([]byte{0xab}, size)))
+		}
+		content = append(content, mockAnthropicTextBlock("score the pages"))
+		return anthropicMessagesRequest{
+			Model:     "claude-fable-5",
+			Messages:  []anthropicMessage{{Role: "user", Content: content}},
+			MaxTokens: 4096,
+		}
+	}
+
+	if _, err := buildAnthropicMessagesPayload(imageTurn(anthropicMaxRequestImages, 64)); err != nil {
+		t.Fatalf("at-cap request must build: %v", err)
+	}
+	if _, err := buildAnthropicMessagesPayload(imageTurn(anthropicMaxRequestImages+1, 64)); err == nil || !strings.Contains(err.Error(), "image blocks") {
+		t.Fatalf("13-image request built (err=%v), want the image-count cap error", err)
+	}
+	// One image whose decoded payload alone clears the ~20MB byte budget.
+	if _, err := buildAnthropicMessagesPayload(imageTurn(1, anthropicMaxRequestImageBytes+(1<<20))); err == nil || !strings.Contains(err.Error(), "image payload") {
+		t.Fatalf("oversized image payload built (err=%v), want the byte-cap error", err)
+	}
+}
+
+// Cache breakpoints never land on image blocks: within a marked user turn the
+// marker moves to the last non-image block, and an all-image turn is skipped
+// without spending the breakpoint budget.
+func TestBuildAnthropicMessagesPayloadCacheBreakpointNeverOnImages(t *testing.T) {
+	image := anthropicImageBlock("image/jpeg", []byte{0xff, 0xd8})
+	request := anthropicMessagesRequest{
+		Model: "claude-fable-5",
+		Messages: []anthropicMessage{
+			{Role: "user", Content: []json.RawMessage{mockAnthropicTextBlock("Goal: jury the deck")}},
+			{Role: "assistant", Content: []json.RawMessage{mockAnthropicTextBlock("Working.")}},
+			{Role: "user", Content: []json.RawMessage{image, mockAnthropicTextBlock("score page 1")}},
+			{Role: "assistant", Content: []json.RawMessage{mockAnthropicTextBlock("Scored.")}},
+			{Role: "user", Content: []json.RawMessage{image, image}}, // all-image turn
+		},
+		MaxTokens: 4096,
+	}
+	raw, err := buildAnthropicMessagesPayload(request)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessagesPayload: %v", err)
+	}
+	var payload struct {
+		Messages []struct {
+			Role    string                       `json:"role"`
+			Content []map[string]json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	for i, message := range payload.Messages {
+		for j, block := range message.Content {
+			_, marked := block["cache_control"]
+			// The newest markable user turns: message 2 marks its TEXT block
+			// (index 1, not the image at 0); the all-image turn (message 4) is
+			// skipped, so the budget falls back to message 0's text block.
+			wantMarked := (i == 2 && j == 1) || (i == 0 && j == 0)
+			if marked != wantMarked {
+				t.Fatalf("message %d block %d cache_control=%v, want %v", i, j, marked, wantMarked)
+			}
+			var blockType string
+			_ = json.Unmarshal(block["type"], &blockType)
+			if marked && blockType == "image" {
+				t.Fatalf("message %d block %d is a MARKED image block", i, j)
+			}
+		}
 	}
 }
 

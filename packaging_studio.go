@@ -51,12 +51,21 @@ package main
 //                   record aggregated from the run's ACTUAL stage verdicts),
 //                   all attached to the venture package, with the deck + Talk
 //                   render enqueues (or their disclosed skips).
+//  9b. SLIDE JURY   compile (Wave 5 item 21) — once the deck's PDF export has
+//                   completed and the render-runner's page JPEGs are on the
+//                   deck as {kind: image} assets, the vision jury trio SEES
+//                   the rendered pages and files a slide_jury_v1 scoreboard;
+//                   its findings land as revision notes on the findings
+//                   record (advisory — the founder decides, never an
+//                   auto-revise). Sidecar absent / keyless / export timed
+//                   out → a disclosed skip, and the ship proceeds.
 //  10. SHIP APPROVAL human_checkpoint (touchpoint 4) — with the five artifacts
 //                   filed, the goal parks on the approval surface for the
 //                   explicit ship decision; nothing leaves the building
 //                   without it.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -183,7 +192,7 @@ func packagingStudioDefinition() ProcessDefinition {
 		Description: "Take a venture from a founder's words to a gated, presenter-ready deck — red-team, rival narrative competition, identity, closed-loop gate, speechwriter, and a founder pass, shipped as an attacked-and-documented package.",
 		Group:       toolGroupProcesses,
 		Authority:   toolAuthorityWorkspaceWrite,
-		// 13 stages + headroom; the free-form cap (6) never applies to an authored
+		// 14 stages + headroom; the free-form cap (6) never applies to an authored
 		// pipeline. Tokens/wall-clock raised for a long adversarial run.
 		Budgets: ProcessBudgets{MaxSubtasks: 16, MaxTokens: 48000, WallClock: 20 * time.Minute},
 		Stages: []ProcessStage{
@@ -193,7 +202,10 @@ func packagingStudioDefinition() ProcessDefinition {
 				Role:  processRoleHumanCheckpoint,
 				CheckpointSpec: &ProcessCheckpointSpec{
 					Question: "Confirm the intake brief before the studio runs: the sources, the founder's VERBATIM words (these are law downstream), and the real audience. Do brand assets (logo, colors, type) already exist, or should the studio develop a visual identity?",
-					Options:  []string{"brand assets provided", "no brand assets — develop identity"},
+					Options: []ProcessCheckpointOption{
+						{Label: "brand assets provided"},
+						{Label: "no brand assets — develop identity"},
+					},
 				},
 			},
 			{
@@ -305,7 +317,13 @@ func packagingStudioDefinition() ProcessDefinition {
 				InputFrom: []string{"write", "voice", "gate"},
 				CheckpointSpec: &ProcessCheckpointSpec{
 					Question: "The gated draft and its presenter script are ready. Read them and decide: ship as-is, or send back — and mark any lines as do_not_touch so SHIP preserves them exactly. This is the taste pass.",
-					Options:  []string{"ship as-is", "send back for changes"},
+					// The labels tell the truth (the checkpoint-option teeth): a
+					// send-back mechanically re-queues WRITE with the founder's
+					// words as revision notes; ship-as-is proceeds.
+					Options: []ProcessCheckpointOption{
+						{Label: "ship as-is"},
+						{Label: "send back for changes", Action: processCheckpointActionRevise, Target: "write"},
+					},
 				},
 			},
 			{
@@ -333,13 +351,28 @@ func packagingStudioDefinition() ProcessDefinition {
 				Compile:    compilePackagingStudioShip,
 			},
 			{
+				ID:        "slide_jury",
+				Title:     "Slide jury — the critics see the rendered pages",
+				Role:      processRoleCompile,
+				InputFrom: []string{"ship_compile"},
+				// Documentation only — the jury stage is authored Go (below). It is
+				// ADVISORY: findings land as revision notes on the findings record,
+				// never as an auto-revise; keyless / sidecar-absent / export-timeout
+				// all disclose a skip and the ship proceeds to its approval.
+				PromptBody: "Vision jury step: once the deck's PDF export completes, the render-runner's page JPEGs go before the /packaging jury trio (headline ear, design eye, the domain-literate room gut) — each seat sees ALL pages, scores per page, names weakest_three/strongest_three, and every fix is executable or the literal word KEEP. The merged scoreboard files as slide_jury_v1 and lands as revision notes on the findings record; the founder decides what to apply. Sidecar absent or export incomplete: the skip is disclosed.",
+				Compile:    compilePackagingStudioSlideJury,
+			},
+			{
 				ID:        "ship_approval",
 				Title:     "Ship approval — the package leaves the building",
 				Role:      processRoleHumanCheckpoint,
-				InputFrom: []string{"ship_compile"},
+				InputFrom: []string{"ship_compile", "slide_jury"},
 				CheckpointSpec: &ProcessCheckpointSpec{
-					Question: "The five interlocking artifacts are filed and attached to the package — the deck, The Wall, The Talk, the rigor companion, and the findings record — with the render exports queued or their skips disclosed. Approve the ship, or hold the package.",
-					Options:  []string{"approve the ship", "hold the package"},
+					Question: "The five interlocking artifacts are filed and attached to the package — the deck, The Wall, The Talk, the rigor companion, and the findings record — with the render exports queued or their skips disclosed, and the slide jury's scoreboard (or its disclosed skip) on the findings record. Approve the ship, or hold the package.",
+					Options: []ProcessCheckpointOption{
+						{Label: "approve the ship"},
+						{Label: "hold the package", Action: processCheckpointActionHold},
+					},
 				},
 			},
 		},
@@ -470,6 +503,133 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 		lines = append(lines, "", "No venture package on this goal — the artifacts are filed unattached (disclosed).")
 	}
 	return strings.Join(lines, "\n"), map[string]string{"shipArtifactIds": strings.Join(filedIDs, ",")}, nil
+}
+
+// --- The SLIDE JURY stage -----------------------------------------------------
+
+// compilePackagingStudioSlideJury is the slide_jury stage's ProcessCompileFunc
+// (Wave 5 item 21): the optional vision jury AFTER the SHIP compile. It runs
+// only when the deck's PDF export completed and page images exist — the render
+// callback persists them as {kind: image} assets (persistRenderPageImageAssets)
+// — waiting a bounded window for the in-flight export. Every degraded path
+// (keyless, sidecar absent, export timed out or failed, the jury panel itself
+// erroring) is a DISCLOSED skip in the stage record, never a blocked ship: the
+// jury is advisory. On success the merged scoreboard files as slide_jury_v1
+// and lands as revision notes on the findings record — NOT an auto-revise; the
+// founder sees the scoreboard at ship approval and decides what to apply.
+func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parentID string, _ ProcessStage) (string, map[string]string, error) {
+	if app == nil || plan == nil {
+		return "", nil, fmt.Errorf("the slide jury stage has no app/plan to read")
+	}
+	skip := func(reason string) (string, map[string]string, error) {
+		return strings.Join([]string{
+			"Slide jury — skipped (disclosed)",
+			"",
+			"The vision jury did not run: " + reason,
+			"The package ships un-juried; export the deck PDF later and the page images will be on file for a future jury.",
+		}, "\n"), map[string]string{"slideJury": "skipped"}, nil
+	}
+
+	deck, findings, err := studioShipArtifactsForJury(app, plan)
+	if err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(deck.Metadata["renderJobId"]) == "" && len(artifactPageImageAssets(deck)) == 0 {
+		// ship_compile disclosed a render skip (sidecar absent, or a non-HTML
+		// deck): no export means no page images, so the jury has nothing to see.
+		return skip("the deck's PDF export was not queued (render sidecar absent or export skipped) — no rendered page images exist")
+	}
+	deck, ready := waitForDeckPageImages(app, deck.ID)
+	if !ready {
+		return skip(fmt.Sprintf("the deck's PDF export did not complete within the %s wait window — no rendered page images landed", slideJuryWaitTimeout()))
+	}
+	if !hasAnthropicAPIKey() {
+		return skip("no Anthropic key is configured (keyless deploy) — the jury seats cannot see")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), orchestratorTimeout())
+	defer cancel()
+	jury, err := runSlideJury(ctx, app, parentID, deck)
+	if err != nil {
+		// Advisory stage: a failed panel is disclosed, never a blocked ship.
+		return skip("the jury panel failed: " + compactAssistantLine(err.Error()))
+	}
+
+	findingsNote := appendSlideJuryRevisionNotes(app, findings, jury)
+
+	lines := []string{
+		"Slide jury — the critics saw the rendered pages",
+		"",
+		fmt.Sprintf("- %d rendered page image(s) went before the 3-seat jury (headline ear, design eye, room gut) — every seat saw all pages.", len(artifactPageImageAssets(deck))),
+		"- Merged scoreboard filed: " + slideJuryContract + " → " + jury.ID,
+		"- " + findingsNote,
+		"- Advisory by design: revision notes only, no auto-revise — the founder decides what to apply at ship approval.",
+	}
+	return strings.Join(lines, "\n"), map[string]string{"slideJuryArtifactId": jury.ID}, nil
+}
+
+// studioShipArtifactsForJury resolves the deck and findings artifacts the SHIP
+// compile filed, via the shipArtifactIds stamp on the ship_compile stage
+// record — the jury reads the run's OWN deliverables, never a lookalike.
+func studioShipArtifactsForJury(app *kanbanBoardApp, plan *goalPlan) (deck meetingMemoryEntry, findings meetingMemoryEntry, err error) {
+	st := plan.subtaskByID("ship_compile")
+	if st == nil {
+		return deck, findings, fmt.Errorf("the plan has no ship_compile stage — the jury has no deck to see")
+	}
+	record, ok := app.osArtifactByID(st.ArtifactID)
+	if !ok {
+		return deck, findings, fmt.Errorf("the ship_compile record is missing — the jury has no deck to see")
+	}
+	deckFound := false
+	for _, id := range strings.Split(record.Metadata["shipArtifactIds"], ",") {
+		artifact, ok := app.osArtifactByID(strings.TrimSpace(id))
+		if !ok {
+			continue
+		}
+		switch artifact.Metadata["artifactContract"] {
+		case packagingStudioDeckContract:
+			deck = artifact
+			deckFound = true
+		case packagingStudioFindingsContract:
+			findings = artifact
+		}
+	}
+	if !deckFound {
+		return deck, findings, fmt.Errorf("the ship compile filed no deck artifact — the jury has no deck to see")
+	}
+	return deck, findings, nil
+}
+
+// appendSlideJuryRevisionNotes lands the merged scoreboard on the findings
+// record as revision notes — appended, disclosed, and explicitly NOT applied.
+// A missing findings record degrades to a disclosed note on the stage record;
+// the scoreboard artifact stands either way.
+func appendSlideJuryRevisionNotes(app *kanbanBoardApp, findings meetingMemoryEntry, jury meetingMemoryEntry) string {
+	if strings.TrimSpace(findings.ID) == "" {
+		return "findings record missing — the scoreboard stands alone on the jury artifact (disclosed)"
+	}
+	// The merged scoreboard is the note; the per-seat transcript stays on the
+	// jury artifact (the composeStudioFindingsRecord panel-voices posture).
+	scoreboard := strings.TrimSpace(jury.Text)
+	if cut := strings.Index(scoreboard, "\n## Jury voices"); cut > 0 {
+		scoreboard = strings.TrimSpace(scoreboard[:cut])
+	}
+	body := strings.TrimSpace(findings.Text) + strings.Join([]string{
+		"",
+		"",
+		"## Slide jury — revision notes (" + slideJuryContract + ")",
+		"",
+		"The vision jury saw the rendered pages. These are REVISION NOTES — human judgment decides what to apply; nothing below was auto-revised. Full scoreboard and per-seat voices: " + jury.ID,
+		"",
+		scoreboard,
+	}, "\n")
+	if _, _, err := app.updateOSArtifactWithMetadata(findings.ID, "", body, scoutParticipantName, map[string]string{
+		"slideJuryArtifactId": jury.ID,
+	}); err != nil {
+		log.Errorf("slide jury: revision notes did not land on findings record %s: %v", findings.ID, err)
+		return "revision notes did NOT land on the findings record (" + compactAssistantLine(err.Error()) + ") — read them on the jury artifact (disclosed)"
+	}
+	return "revision notes appended to the findings record " + findings.ID
 }
 
 // studioFindingsExcerptCap bounds how much of one panel synthesis the findings

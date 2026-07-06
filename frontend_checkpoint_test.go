@@ -85,12 +85,15 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 		"openAgentArtifact({ id: input.artifactId })",
 		// inline brief exposes the judge scores + steals without leaving the card
 		"goalcard__checkpoint-brief",
-		// options → tappable choice buttons
-		"const choiceBtn = bfEl('button', 'goalcard__choice', option)",
-		"choiceBtn.addEventListener('click', () => post(option))",
+		// options → tappable choice buttons (labels, actions ride separately)
+		"const choiceBtn = bfEl('button', 'goalcard__choice', option.label)",
+		// every tap appends the typed notes as the choice suffix (the
+		// prefix-matched founder-pass grammar)
+		"post(noteText() ? `${option.label} — ${noteText()}` : option.label)",
 		// no options → the do_not_touch notes input IS the choice
 		"do_not_touch",
-		"post(String(notes.value || '').trim())",
+		"const noteText = () => String(notes?.value || '').trim()",
+		"go.addEventListener('click', () => post(noteText()))",
 		// resume rides the EXISTING approve seam carrying {choice}
 		"submitApproval(artifact.id, 'approve', '', choice)",
 		// admin-gated, mirrored honestly
@@ -104,6 +107,46 @@ func TestIndexCheckpointCardThreeShapes(t *testing.T) {
 	// the node persists per card+stage so re-renders never wipe a half-typed note
 	if !strings.Contains(body, "card.__checkpointNode && card.__checkpointStageId === stageId") {
 		t.Error("checkpoint card must persist its node per card+stage across terminal re-renders")
+	}
+}
+
+// The negative-option teeth on the card (Wave 4's disclosed gap): options
+// normalize from both persisted shapes (legacy plain string → proceed, the
+// {label, action} object), revise options expose the generalized do_not_touch
+// notes input, hold renders the held state — badge, held-aware cache key, and
+// non-proceed options disabled to mirror the server's refusal.
+func TestIndexCheckpointCardNegativeActions(t *testing.T) {
+	html := readIndexForCheckpoint(t)
+	body := functionBody(html, "function goalCardRenderCheckpoint(terminal, card, artifact, plan, checkpoint)")
+	if body == "" {
+		t.Fatal("could not extract goalCardRenderCheckpoint body")
+	}
+	for _, want := range []string{
+		// both persisted option shapes normalize; action defaults to proceed
+		"typeof option === 'string'",
+		"{ label: option.trim(), action: 'proceed' }",
+		"String(option?.action || 'proceed').trim() || 'proceed'",
+		// revise options bring the generalized send-back notes input
+		"const hasRevise = options.some(option => option.action === 'revise')",
+		"if (!options.length || hasRevise) {",
+		"'notes for the send-back (do_not_touch lines are preserved exactly)'",
+		// the actions read as what they mechanically do
+		"choiceBtn.classList.add('goalcard__choice--revise')",
+		"choiceBtn.classList.add('goalcard__choice--hold')",
+		// the held state: badge + only proceed stays live
+		"const held = !!checkpoint.held",
+		"goalcard__checkpoint-held",
+		"if (held && option.action !== 'proceed') choiceBtn.disabled = true",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("goalCardRenderCheckpoint missing negative-action marker %q", want)
+		}
+	}
+	// a hold landing from the server must re-render the badge: the persisted
+	// node's cache key carries the held state
+	if !strings.Contains(body, "card.__checkpointStageId === stageId && card.__checkpointHeld === held") ||
+		!strings.Contains(body, "card.__checkpointHeld = held") {
+		t.Error("checkpoint card cache key must include the held state so a hold re-renders")
 	}
 }
 
@@ -205,6 +248,7 @@ func TestIndexCheckpointCardStyles(t *testing.T) {
 		".goalcard__checkpoint {",
 		".goalcard__checkpoint-question {",
 		".goalcard__checkpoint-brief {",
+		".goalcard__checkpoint-held {",
 		".goalcard__choice {",
 		".goalcard__work-line--detail {",
 	} {

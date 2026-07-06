@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,17 @@ const (
 )
 
 var errAgentWorkerNotConfigured = errors.New("agent worker is not configured")
+
+// Image-bearing request budget (Wave 5 item 21, defensive wire-layer caps).
+// The vision slide juries attach the render-runner's page JPEGs as base64
+// image blocks on the raw-content seam; these bounds keep a runaway caller
+// (a 60-page deck, a corrupt raster) from assembling a request the API would
+// reject anyway. The byte cap measures the DECODED image payload (what the
+// base64 carries), so "~20MB of images" means what it says on the wire.
+const (
+	anthropicMaxRequestImages     = 12
+	anthropicMaxRequestImageBytes = 20 << 20
+)
 
 // currentAnthropicAPIKey mirrors currentOpenAIAPIKey: a single accessor so
 // tests can inject via the environment and keyless-local degrades gracefully.
@@ -239,6 +251,9 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 // authors (user turns) are ever marked — assistant turns carry Fable thinking
 // blocks that must round-trip byte-for-byte.
 func buildAnthropicMessagesPayload(request anthropicMessagesRequest) ([]byte, error) {
+	if err := validateAnthropicImageBudget(request.Messages); err != nil {
+		return nil, err
+	}
 	// Fable 5: thinking is always on (omit the field), and sampling params are
 	// rejected — send neither. Depth is controlled by output_config.effort.
 	payload := map[string]any{
@@ -277,10 +292,14 @@ func buildAnthropicMessagesPayload(request anthropicMessagesRequest) ([]byte, er
 }
 
 // cacheMarkedMessages returns a copy of messages with a cache_control
-// breakpoint on the last content block of the newest two user turns. The
-// caller's slice and its raw blocks are never mutated — the loop reuses them
-// as the growing conversation history, and persisted markers would accumulate
-// past the 4-breakpoint cap on later turns.
+// breakpoint on the last MARKABLE content block of the newest two user turns.
+// The caller's slice and its raw blocks are never mutated — the loop reuses
+// them as the growing conversation history, and persisted markers would
+// accumulate past the 4-breakpoint cap on later turns. Image blocks are never
+// marked (the defensive Wave-5 rule: a breakpoint belongs on the text that
+// follows the pages, never on a page raster itself); a turn whose every block
+// is an image is skipped without spending the breakpoint budget, so an earlier
+// user turn keeps its marker instead.
 func cacheMarkedMessages(messages []anthropicMessage) []anthropicMessage {
 	marked := make([]anthropicMessage, len(messages))
 	copy(marked, messages)
@@ -289,13 +308,60 @@ func cacheMarkedMessages(messages []anthropicMessage) []anthropicMessage {
 		if marked[i].Role != "user" || len(marked[i].Content) == 0 {
 			continue
 		}
+		markIndex := -1
+		for j := len(marked[i].Content) - 1; j >= 0; j-- {
+			if decodeAnthropicBlock(marked[i].Content[j]).Type == "image" {
+				continue
+			}
+			markIndex = j
+			break
+		}
+		if markIndex < 0 {
+			continue
+		}
 		content := make([]json.RawMessage, len(marked[i].Content))
 		copy(content, marked[i].Content)
-		content[len(content)-1] = withAnthropicCacheControl(content[len(content)-1])
+		content[markIndex] = withAnthropicCacheControl(content[markIndex])
 		marked[i].Content = content
 		remaining--
 	}
 	return marked
+}
+
+// anthropicImageBlockView is the minimal decoded view an image block needs for
+// budget accounting — never used to re-serialize the block.
+type anthropicImageBlockView struct {
+	Type   string `json:"type"`
+	Source struct {
+		Data string `json:"data"`
+	} `json:"source"`
+}
+
+// validateAnthropicImageBudget enforces the defensive request-level image caps
+// on the raw-content seam: at most anthropicMaxRequestImages image blocks and
+// ~anthropicMaxRequestImageBytes of decoded image payload per request. Callers
+// (the slide jury) budget below these caps themselves; tripping one here is a
+// bug surfaced honestly, never a request the API rejects opaquely.
+func validateAnthropicImageBudget(messages []anthropicMessage) error {
+	images := 0
+	totalBytes := 0
+	for _, message := range messages {
+		for _, raw := range message.Content {
+			var view anthropicImageBlockView
+			if err := json.Unmarshal(raw, &view); err != nil || view.Type != "image" {
+				continue
+			}
+			images++
+			totalBytes += base64.StdEncoding.DecodedLen(len(view.Source.Data))
+		}
+	}
+	if images > anthropicMaxRequestImages {
+		return fmt.Errorf("request carries %d image blocks, above the %d-image cap", images, anthropicMaxRequestImages)
+	}
+	if totalBytes > anthropicMaxRequestImageBytes {
+		return fmt.Errorf("request carries ~%dMB of image payload, above the %dMB cap", totalBytes>>20, anthropicMaxRequestImageBytes>>20)
+	}
+	return nil
 }
 
 // withAnthropicCacheControl stamps a cache_control field onto one raw content
@@ -961,6 +1027,23 @@ func terminalErrorProgress(metadata map[string]string, err error) AgentProgress 
 
 func anthropicTextBlock(text string) json.RawMessage {
 	raw, _ := json.Marshal(map[string]any{"type": "text", "text": text})
+	return raw
+}
+
+// anthropicImageBlock builds one base64 image content block — the additive
+// image support on the raw-content seam (Wave 5 item 21). The wire shape is
+// {"type":"image","source":{"type":"base64","media_type":...,"data":...}};
+// json.Marshal never emits newlines into the base64 string, which the API
+// requires.
+func anthropicImageBlock(mediaType string, data []byte) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "image",
+		"source": map[string]any{
+			"type":       "base64",
+			"media_type": strings.TrimSpace(mediaType),
+			"data":       base64.StdEncoding.EncodeToString(data),
+		},
+	})
 	return raw
 }
 

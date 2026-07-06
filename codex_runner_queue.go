@@ -870,6 +870,11 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		ID     string `json:"id"`
 		Action string `json:"action"`
 		Reason string `json:"reason"`
+		// Choice is the human_checkpoint pick (index.html submitApproval): the
+		// checkpoint's option label plus any appended notes. It MUST reach
+		// resumeApprovedGoalWithChoice — dropping it turns every negative
+		// option (hold, send back) into a silent proceed.
+		Choice string `json:"choice"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -899,18 +904,31 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// engine (commit_push), which ships exactly the command the gate
 		// recorded — not a fresh codex job re-derived from the objective text.
 		if artifact.Metadata["mode"] == "goal" {
-			if err := kanbanApp.resumeApprovedGoal(artifactID, user.Name); err != nil {
+			// The checkpoint choice rides through: a hold-action choice keeps
+			// the goal parked and a revise-action choice re-queues its target —
+			// resumeProcessCheckpoint's teeth are only real if the choice
+			// survives the HTTP door.
+			if err := kanbanApp.resumeApprovedGoalWithChoice(artifactID, user.Name, payload.Choice); err != nil {
 				writeAuthError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			// Durable human-approval record (share_links.go): reviewGate/status
-			// keep moving as the resumed work runs, so the share gate keys on
-			// this stamp instead.
-			kanbanApp.stampArtifactHumanApproval(artifactID, user.Name)
 			updated, _ := kanbanApp.osArtifactByID(artifactID)
-			// Round-trip loop: fan the approval to the push channel + the
-			// requester so their origin surface flips to "approved · sent".
-			kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
+			// Only a proceed is a sign-off. A hold parked the goal; a revise
+			// (send-back) asked for changes — including the disclosed
+			// budget-spent fallback, where the founder asked for revision and
+			// did NOT approve. Neither earns the durable approval stamp (it
+			// unlocks sharing) or the "approved · sent" fan-out.
+			if plan, ok := decodeGoalPlan(updated.Metadata["goalPlan"]); !ok || plan.Checkpoint == nil ||
+				(!plan.Checkpoint.Held && plan.Checkpoint.LastAction != processCheckpointActionRevise) {
+				// Durable human-approval record (share_links.go): reviewGate/status
+				// keep moving as the resumed work runs, so the share gate keys on
+				// this stamp instead.
+				kanbanApp.stampArtifactHumanApproval(artifactID, user.Name)
+				// Round-trip loop: fan the approval to the push channel + the
+				// requester so their origin surface flips to "approved · sent".
+				kanbanApp.recordApprovalOutcome(artifact, "approve", "", user.Name)
+				updated, _ = kanbanApp.osArtifactByID(artifactID)
+			}
 			actions := kanbanApp.osAssistantActions(updated.Metadata["threadQuery"], updated.Metadata["mode"], updated)
 			writeAuthJSON(w, http.StatusAccepted, map[string]any{
 				"ok":       true,

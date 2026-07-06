@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // packaging_studio_test.go — the flagship ProcessDefinition (Wave 4 item 18).
@@ -92,6 +95,7 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 		{"founder_pass", processRoleHumanCheckpoint},
 		{"ship_deck", processRoleWriter},
 		{"ship_compile", processRoleCompile},
+		{"slide_jury", processRoleCompile},
 		{"ship_approval", processRoleHumanCheckpoint},
 	}
 	if def.Stages[0].ID != "intake" || def.Stages[0].Role != processRoleHumanCheckpoint {
@@ -153,9 +157,19 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 			t.Fatalf("human touchpoints=%v, want %v in order", checkpoints, wantCheckpoints)
 		}
 	}
+	// The slide jury sits between the compile and the approval: authored Go
+	// (never a model call), reading the compile record's shipArtifactIds.
+	jury := packagingStudioStage(t, def, "slide_jury")
+	if jury.Compile == nil {
+		t.Fatal("slide_jury carries no Compile function — the vision jury would be orphaned")
+	}
+	if len(jury.InputFrom) != 1 || jury.InputFrom[0] != "ship_compile" {
+		t.Fatalf("slide_jury inputFrom=%v, want [ship_compile]", jury.InputFrom)
+	}
+
 	approval := packagingStudioStage(t, def, "ship_approval")
-	if len(approval.InputFrom) != 1 || approval.InputFrom[0] != "ship_compile" {
-		t.Fatalf("ship_approval inputFrom=%v, want [ship_compile] — the approval reads the compile record", approval.InputFrom)
+	if len(approval.InputFrom) != 2 || approval.InputFrom[0] != "ship_compile" || approval.InputFrom[1] != "slide_jury" {
+		t.Fatalf("ship_approval inputFrom=%v, want [ship_compile slide_jury] — the approval reads the compile record AND the jury verdict/skip", approval.InputFrom)
 	}
 	if approval.CheckpointSpec == nil || !strings.Contains(strings.ToLower(approval.CheckpointSpec.Question), "approve") {
 		t.Fatalf("ship_approval question must ask for the explicit ship approval: %+v", approval.CheckpointSpec)
@@ -223,8 +237,17 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	if intake.CheckpointSpec == nil || len(intake.CheckpointSpec.Options) != 2 {
 		t.Fatalf("intake checkpoint options=%+v, want the two brand-assets branches", intake.CheckpointSpec)
 	}
-	if !containsString(intake.CheckpointSpec.Options, "no brand assets — develop identity") {
-		t.Fatalf("intake options=%v, missing the develop-identity branch IDENTITY reads", intake.CheckpointSpec.Options)
+	intakeLabels := make([]string, 0, len(intake.CheckpointSpec.Options))
+	for _, option := range intake.CheckpointSpec.Options {
+		intakeLabels = append(intakeLabels, option.Label)
+		// Both intake branches PROCEED — the branch choice is grounding for
+		// IDENTITY, never a send-back or a hold.
+		if processCheckpointOptionAction(option) != processCheckpointActionProceed {
+			t.Fatalf("intake option %+v must proceed", option)
+		}
+	}
+	if !containsString(intakeLabels, "no brand assets — develop identity") {
+		t.Fatalf("intake options=%v, missing the develop-identity branch IDENTITY reads", intakeLabels)
 	}
 
 	choice := packagingStudioStage(t, def, "compete_choice")
@@ -244,6 +267,33 @@ func TestPackagingStudioCheckpointChoicesFlow(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(founder.CheckpointSpec.Question), "do_not_touch") {
 		t.Fatalf("founder_pass question must offer the do_not_touch mark: %q", founder.CheckpointSpec.Question)
+	}
+	// The labels tell the truth (the negative-option teeth): "send back for
+	// changes" mechanically re-queues WRITE with the founder's words as
+	// revision notes; "ship as-is" proceeds.
+	if len(founder.CheckpointSpec.Options) != 2 {
+		t.Fatalf("founder_pass options=%+v, want ship-as-is + send-back", founder.CheckpointSpec.Options)
+	}
+	shipAsIs, sendBack := founder.CheckpointSpec.Options[0], founder.CheckpointSpec.Options[1]
+	if shipAsIs.Label != "ship as-is" || processCheckpointOptionAction(shipAsIs) != processCheckpointActionProceed {
+		t.Fatalf("founder_pass first option=%+v, want a proceed-action 'ship as-is'", shipAsIs)
+	}
+	if sendBack.Label != "send back for changes" || processCheckpointOptionAction(sendBack) != processCheckpointActionRevise || sendBack.Target != "write" {
+		t.Fatalf("founder_pass second option=%+v, want a revise-action send-back targeting write", sendBack)
+	}
+
+	// ... and "hold the package" actually HOLDS: the ship approval's negative
+	// option parks the goal until an explicit proceed.
+	approval := packagingStudioStage(t, def, "ship_approval")
+	if approval.CheckpointSpec == nil || len(approval.CheckpointSpec.Options) != 2 {
+		t.Fatalf("ship_approval options=%+v, want approve + hold", approval.CheckpointSpec)
+	}
+	approve, hold := approval.CheckpointSpec.Options[0], approval.CheckpointSpec.Options[1]
+	if approve.Label != "approve the ship" || processCheckpointOptionAction(approve) != processCheckpointActionProceed {
+		t.Fatalf("ship_approval first option=%+v, want a proceed-action approve", approve)
+	}
+	if hold.Label != "hold the package" || processCheckpointOptionAction(hold) != processCheckpointActionHold {
+		t.Fatalf("ship_approval second option=%+v, want a hold-action hold", hold)
 	}
 }
 
@@ -385,6 +435,15 @@ func installStudioChildRunner(t *testing.T, outputs map[string]string) *[]captur
 // the goal id, the launched children, and the parks observed in order.
 func driveStudioRunToShipApproval(t *testing.T, app *kanbanBoardApp, packageID string) (string, *[]capturedChild, []string) {
 	t.Helper()
+	return driveStudioRunToShipApprovalWithSetup(t, app, packageID, nil)
+}
+
+// driveStudioRunToShipApprovalWithSetup is the same drive with a hook that
+// runs AFTER the fake responder is installed — the slide-jury test uses it to
+// wrap createAnthropicMessagesResponse so jury-shaped system prompts answer
+// with jury JSON while every studio route keeps flowing to the routes fake.
+func driveStudioRunToShipApprovalWithSetup(t *testing.T, app *kanbanBoardApp, packageID string, afterResponder func()) (string, *[]capturedChild, []string) {
+	t.Helper()
 	installFakeResponder(t, goalResponderRoutes{
 		// Every authored persona (red team, identity judges, architects,
 		// compete judges) answers through the fallback route.
@@ -395,6 +454,9 @@ func driveStudioRunToShipApproval(t *testing.T, app *kanbanBoardApp, packageID s
 		// The WRITE synthesizer's gated deck copy — the source of The Wall.
 		stage: "Deck copy, slide by slide, in a spoken register, quoting \"" + studioTestFounderPhrase + "\".",
 	})
+	if afterResponder != nil {
+		afterResponder()
+	}
 	launched := installStudioChildRunner(t, map[string]string{
 		"voice":     "Presenter script. Page 1 (30s): " + studioTestFounderPhrase + ". [BEAT] Close on the ask.",
 		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
@@ -506,6 +568,12 @@ func TestPackagingStudioShipFilesFiveArtifactsAndEnqueuesRenders(t *testing.T) {
 	if !renderSidecarAvailable() {
 		t.Fatal("render sidecar should read as available after a fresh heartbeat")
 	}
+	// No render callback ever fires in this test, so the slide jury's bounded
+	// wait for page images must expire fast and disclose the skip.
+	t.Setenv("BONFIRE_SLIDE_JURY_WAIT", "1s")
+	restorePoll := slideJuryPollInterval
+	slideJuryPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { slideJuryPollInterval = restorePoll })
 	pkg, err := app.createVenturePackage("Aurora", "an IP thesis", "aj@shareability.com")
 	if err != nil {
 		t.Fatalf("createVenturePackage: %v", err)
@@ -649,6 +717,18 @@ func TestPackagingStudioShipFilesFiveArtifactsAndEnqueuesRenders(t *testing.T) {
 		t.Errorf("compile record does not disclose the two render enqueues:\n%s", compileRecord.Text)
 	}
 
+	// The slide jury waited for the export, no callback ever landed page
+	// images, and the stage DISCLOSED the timeout skip — it never blocked the
+	// ship and never called a jury model.
+	jurySt := plan.subtaskByID("slide_jury")
+	if jurySt == nil || jurySt.Status != subtaskComplete {
+		t.Fatalf("slide_jury must complete (disclosed skip, not block) when the export never lands: %+v", jurySt)
+	}
+	juryRecord := mustArtifact(t, app, jurySt.ArtifactID)
+	if !strings.Contains(juryRecord.Text, "skipped (disclosed)") || !strings.Contains(juryRecord.Text, "did not complete within") {
+		t.Errorf("slide_jury record does not disclose the export-timeout skip:\n%s", juryRecord.Text)
+	}
+
 	// The explicit ship approval resumes the goal through to verified.
 	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "approve the ship"); err != nil {
 		t.Fatalf("ship approval resume: %v", err)
@@ -702,11 +782,322 @@ func TestPackagingStudioShipDisclosesSkipWithoutSidecar(t *testing.T) {
 		t.Errorf("compile record does not disclose the missing package:\n%s", compileRecord.Text)
 	}
 
+	// Sidecar-absent, the slide jury has no export to wait on: the skip is
+	// disclosed IMMEDIATELY (no renderJobId stamp, no page images) and the run
+	// still reaches its ship approval.
+	jurySt := plan.subtaskByID("slide_jury")
+	if jurySt == nil || jurySt.Status != subtaskComplete {
+		t.Fatalf("slide_jury must complete (disclosed skip) sidecar-absent: %+v", jurySt)
+	}
+	juryRecord := mustArtifact(t, app, jurySt.ArtifactID)
+	if !strings.Contains(juryRecord.Text, "skipped (disclosed)") || !strings.Contains(juryRecord.Text, "was not queued") {
+		t.Errorf("slide_jury record does not disclose the sidecar-absent skip:\n%s", juryRecord.Text)
+	}
+
 	// The ship approval still lands the run at verified.
 	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "approve the ship"); err != nil {
 		t.Fatalf("ship approval resume: %v", err)
 	}
 	waitForGoalStage(t, app, parentID, goalStateVerified)
+}
+
+// --- SLIDE JURY: the vision critics inside the REAL pipeline -----------------
+
+// The slide jury runs inside the executing pipeline once the deck's PDF export
+// completes: a simulated sidecar lands the page JPEGs as {kind: image} assets
+// the moment ship_compile stamps the render job, the jury trio + synthesis all
+// receive EVERY page as image blocks, the merged scoreboard files as
+// slide_jury_v1, and the findings record gains the revision-notes section —
+// with NOTHING auto-revised (the founder decides at ship approval).
+func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if err := writeRenderRunnerHeartbeat("test-render-runner"); err != nil {
+		t.Fatalf("write render heartbeat: %v", err)
+	}
+	t.Setenv("BONFIRE_SLIDE_JURY_WAIT", "1s")
+	restorePoll := slideJuryPollInterval
+	slideJuryPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { slideJuryPollInterval = restorePoll })
+
+	const seatJSON = `{"pages":[{"page":1,"score":6.5,"fix":"Cut the headline to seven words"},{"page":2,"score":9,"fix":"KEEP"}],"weakest_three":[1],"strongest_three":[2]}`
+	const mergedScoreboard = "Merged scoreboard: page 1 avg 6.5 — cut the headline to seven words; page 2 KEEP. weakest_three: [1]; strongest_three: [2]."
+
+	// Jury-shaped system prompts answer with jury material; everything else
+	// keeps flowing to the studio routes fake installed by the drive helper.
+	var juryMu sync.Mutex
+	var juryRequests []anthropicMessagesRequest
+	wrapJuryResponder := func() {
+		prior := createAnthropicMessagesResponse
+		createAnthropicMessagesResponse = func(ctx context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			system := strings.ToLower(request.System)
+			if !strings.Contains(system, "slide jury") {
+				return prior(ctx, apiKey, request)
+			}
+			juryMu.Lock()
+			juryRequests = append(juryRequests, request)
+			juryMu.Unlock()
+			text := seatJSON
+			if strings.Contains(system, "slide jury synthesizer") {
+				text = mergedScoreboard
+			}
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
+		}
+	}
+
+	// The simulated sidecar: the moment ship_compile files the deck and stamps
+	// its render job, the page JPEGs land as {kind: image} assets — exactly
+	// what the real callback does via persistRenderPageImageAssets.
+	go func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, artifact := range app.osArtifactsSnapshot(0) {
+				if artifact.Metadata["source"] != "packaging_studio_ship" ||
+					artifact.Metadata["artifactContract"] != packagingStudioDeckContract ||
+					strings.TrimSpace(artifact.Metadata["renderJobId"]) == "" {
+					continue
+				}
+				for index, page := range [][]byte{[]byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two")} {
+					ref, err := putBlob(page, "image/jpeg")
+					if err != nil {
+						return
+					}
+					_, _ = app.appendArtifactAsset(artifact.ID, artifactAsset{
+						Ref:  ref,
+						Mime: "image/jpeg",
+						Name: fmt.Sprintf("page-%02d.jpg", index+1),
+						Kind: "image",
+					})
+				}
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	parentID, _, parks := driveStudioRunToShipApprovalWithSetup(t, app, "", wrapJuryResponder)
+	if len(parks) != 4 {
+		t.Fatalf("goal parked %d times (%v), want the four touchpoints — the jury is never a checkpoint", len(parks), parks)
+	}
+
+	plan := waitForGoalStage(t, app, parentID, goalStateApproval)
+	jurySt := plan.subtaskByID("slide_jury")
+	if jurySt == nil || jurySt.Status != subtaskComplete {
+		t.Fatalf("slide_jury did not complete: %+v", jurySt)
+	}
+	juryRecord := mustArtifact(t, app, jurySt.ArtifactID)
+	if !strings.Contains(juryRecord.Text, "Merged scoreboard filed") {
+		t.Fatalf("slide_jury record does not report the filed scoreboard:\n%s", juryRecord.Text)
+	}
+	juryArtifactID := strings.TrimSpace(juryRecord.Metadata["slideJuryArtifactId"])
+	if juryArtifactID == "" {
+		t.Fatalf("slide_jury record carries no slideJuryArtifactId: %v", juryRecord.Metadata)
+	}
+
+	// The scoreboard artifact: contract, provenance, synthesis + voices.
+	jury := mustArtifact(t, app, juryArtifactID)
+	if jury.Metadata["artifactContract"] != slideJuryContract || jury.Metadata["source"] != slideJurySource {
+		t.Fatalf("jury artifact stamps wrong: %v", jury.Metadata)
+	}
+	if jury.Metadata["goalId"] != parentID {
+		t.Fatalf("jury goalId=%q, want the running goal %s", jury.Metadata["goalId"], parentID)
+	}
+	if !strings.Contains(jury.Text, mergedScoreboard) || !strings.Contains(jury.Text, "## Jury voices") {
+		t.Fatalf("jury artifact missing scoreboard/voices:\n%s", jury.Text)
+	}
+
+	// Every jury call — the 3 seats AND the synthesis — saw ALL page images.
+	juryMu.Lock()
+	requests := append([]anthropicMessagesRequest(nil), juryRequests...)
+	juryMu.Unlock()
+	if len(requests) != 4 {
+		t.Fatalf("jury made %d model calls, want 4 (3 seats + synthesis)", len(requests))
+	}
+	for index, request := range requests {
+		images := 0
+		for _, raw := range request.Messages[0].Content {
+			if decodeAnthropicBlock(raw).Type == "image" {
+				images++
+			}
+		}
+		if images != 2 {
+			t.Fatalf("jury call %d carries %d image blocks, want ALL 2 rendered pages", index, images)
+		}
+	}
+
+	// The findings record gained the revision-notes section — the merged
+	// scoreboard, the pointer to the full jury artifact, and NO auto-revise:
+	// WRITE and ship_deck spent zero revision rounds on the jury's account.
+	filed := studioFiledDeliverables(t, app, parentID)
+	findings := mustArtifact(t, app, filed[packagingStudioFindingsContract].ID)
+	if !strings.Contains(findings.Text, "## Slide jury — revision notes") || !strings.Contains(findings.Text, mergedScoreboard) {
+		t.Fatalf("findings record missing the jury revision notes:\n%s", findings.Text)
+	}
+	if !strings.Contains(findings.Text, juryArtifactID) {
+		t.Fatalf("findings revision notes do not name the jury artifact %s", juryArtifactID)
+	}
+	if strings.Contains(findings.Text, `"pages":[{"page":1`) {
+		t.Fatal("findings revision notes carry the per-seat transcript — only the merged scoreboard belongs there")
+	}
+	if findings.Metadata["slideJuryArtifactId"] != juryArtifactID {
+		t.Fatalf("findings slideJuryArtifactId=%q, want %s", findings.Metadata["slideJuryArtifactId"], juryArtifactID)
+	}
+	for _, stageID := range []string{"write", "ship_deck"} {
+		st := plan.subtaskByID(stageID)
+		if st == nil || st.Revisions != 0 {
+			t.Fatalf("stage %s revisions=%+v, want 0 — jury findings must never auto-revise", stageID, st)
+		}
+	}
+
+	// The ship approval still closes the run.
+	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "approve the ship"); err != nil {
+		t.Fatalf("ship approval resume: %v", err)
+	}
+	waitForGoalStage(t, app, parentID, goalStateVerified)
+}
+
+// --- The founder send-back round: revise teeth through the REAL pipeline -----
+
+// anthropicRequestText flattens a captured request's text blocks so a test can
+// assert what a prompt actually carried.
+func anthropicRequestText(request anthropicMessagesRequest) string {
+	var builder strings.Builder
+	for _, message := range request.Messages {
+		for _, raw := range message.Content {
+			var block struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &block); err == nil && block.Type == "text" {
+				builder.WriteString(block.Text)
+				builder.WriteByte('\n')
+			}
+		}
+	}
+	return builder.String()
+}
+
+// One founder send-back round through the REAL pipeline: "send back for
+// changes" at the founder pass mechanically re-queues WRITE with the founder's
+// words as revision notes and the do_not_touch line locked as protected, the
+// checkpoint re-parks with the revised draft, and the run then ships through
+// the ship approval to verified — the send-back label finally does what it
+// says, without costing the goal.
+func TestPackagingStudioFounderSendBackRequeuesWriteAndReparks(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		fallback:  "Objection: the plan assumes distribution it has not earned. strengths_to_keep: the founder's voice.",
+		synthesis: "Synthesis: the panel verdict is on the record; the winner is franchise-playbook.\n[\"cultural-moment\", \"franchise-playbook\", \"founder-conviction\"]",
+		stage:     "Deck copy, slide by slide, in a spoken register, quoting \"" + studioTestFounderPhrase + "\".",
+	})
+	// Capture the WRITE synthesizer's prompts (installFakeResponder's cleanup
+	// restores the seam), so the redo prompt is on the record.
+	var promptsMu sync.Mutex
+	var writePrompts []string
+	inner := createAnthropicMessagesResponse
+	createAnthropicMessagesResponse = func(ctx context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if strings.Contains(strings.ToLower(request.System), "process stage synthesizer") {
+			promptsMu.Lock()
+			writePrompts = append(writePrompts, anthropicRequestText(request))
+			promptsMu.Unlock()
+		}
+		return inner(ctx, apiKey, request)
+	}
+	children := installStudioChildRunner(t, map[string]string{
+		"voice":     "Presenter script. Page 1 (30s): " + studioTestFounderPhrase + ". [BEAT] Close on the ask.",
+		"ship_deck": "<!doctype html><html><head><style>body{color:#111}</style></head><body><section>Slide 1 — " + studioTestFounderPhrase + "</section></body></html>",
+	})
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Package the venture. The founder says verbatim: \"" + studioTestFounderPhrase + "\".",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: packagingStudioProcessID,
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread(packaging_studio): %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	resume := func(want string, choice string) {
+		t.Helper()
+		plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+		if plan.Checkpoint == nil || plan.Checkpoint.StageID != want {
+			t.Fatalf("parked at %+v, want the %s checkpoint", plan.Checkpoint, want)
+		}
+		if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", choice); err != nil {
+			t.Fatalf("resume %s with %q: %v", want, choice, err)
+		}
+	}
+	resume("intake", "no brand assets — develop identity")
+	resume("compete_choice", "franchise-playbook")
+
+	// The taste pass says NO: one send-back round with notes + a do_not_touch mark.
+	const protectLine = "do_not_touch: keep the closing ask exactly as first written"
+	sendBack := "send back for changes — tighten slide 3 and cut the hedge words. " + protectLine
+	resume("founder_pass", sendBack)
+
+	// The checkpoint RE-PARKED after the redo, unresolved, one round spent.
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	if plan.Checkpoint == nil || plan.Checkpoint.StageID != "founder_pass" || plan.Checkpoint.ResolvedAt != "" {
+		t.Fatalf("founder_pass did not re-park after the send-back: %+v", plan.Checkpoint)
+	}
+	founderPass := plan.subtaskByID("founder_pass")
+	if founderPass == nil || founderPass.Revisions != 1 {
+		t.Fatalf("founder_pass did not spend a send-back round: %+v", founderPass)
+	}
+	// WRITE went back in flight with the founder's words as notes and the
+	// do_not_touch line locked as protected — WITHOUT spending write's own
+	// failure-retry budget (the send-back budget lives on the checkpoint).
+	write := plan.subtaskByID("write")
+	if write == nil || write.Status != subtaskComplete || write.Revisions != 0 {
+		t.Fatalf("write was not re-queued and re-completed budget-free: %+v", write)
+	}
+	// Cascade invalidation: gate and voice depend on write, so the send-back
+	// re-ran BOTH against the revised draft — the re-parked checkpoint presents
+	// a re-gated draft and a fresh presenter script, never stale ones.
+	for _, id := range []string{"gate", "voice"} {
+		stage := plan.subtaskByID(id)
+		if stage == nil || stage.Status != subtaskComplete {
+			t.Fatalf("stage %s did not re-complete after the cascade reset: %+v", id, stage)
+		}
+	}
+	// The inline gate re-scored and stamped a fresh pass record.
+	if gate := plan.subtaskByID("gate"); gate.Review == nil || gate.Review.Verdict != goalReviewPass {
+		t.Fatalf("gate did not re-review after the cascade reset: %+v", gate.Review)
+	}
+	// The voice writer re-dispatched: two voice launches (original + cascade redo).
+	voiceLaunches := 0
+	for _, child := range *children {
+		if child.subtaskID == "voice" {
+			voiceLaunches++
+		}
+	}
+	if voiceLaunches != 2 {
+		t.Fatalf("voice launched %d times, want 2 (original + cascade redo after the send-back)", voiceLaunches)
+	}
+	if !containsString(write.Protect, protectLine) {
+		t.Fatalf("write protect list missing the do_not_touch line: %v", write.Protect)
+	}
+	promptsMu.Lock()
+	prompts := append([]string{}, writePrompts...)
+	promptsMu.Unlock()
+	if len(prompts) != 2 {
+		t.Fatalf("the WRITE synthesizer ran %d times, want 2 (original + one redo)", len(prompts))
+	}
+	if !strings.Contains(prompts[1], "Revision notes (address these): "+sendBack) {
+		t.Fatalf("the redo prompt does not carry the founder's send-back notes:\n%s", prompts[1])
+	}
+	if !strings.Contains(prompts[1], "DO NOT LOSE (protected)") || !strings.Contains(prompts[1], protectLine) {
+		t.Fatalf("the redo prompt does not lock the do_not_touch line:\n%s", prompts[1])
+	}
+
+	// Round two of the taste pass ships, and the run reaches verified through
+	// the explicit ship approval — the send-back cost a round, never the goal.
+	resume("founder_pass", "ship as-is — "+studioTestDoNotTouch)
+	resume("ship_approval", "approve the ship")
+	plan = waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	if plan.Verification.Verdict != goalReviewPass {
+		t.Fatalf("verification verdict=%q, want pass after the send-back round", plan.Verification.Verdict)
+	}
 }
 
 // --- small local helpers ----------------------------------------------------

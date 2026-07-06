@@ -864,10 +864,51 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 // cap-sized PDF (~4/3 × 64MB) plus JSON framing headroom.
 const renderCallbackMaxBytes = blobMaxBytes + blobMaxBytes/2
 
+// resolveRenderQueueFile is the ONE trust check for every shared-volume path a
+// sidecar callback names (the PDF fallback and the page JPEGs). The sidecar is
+// the least-trusted box in the system — it executes untrusted artifact HTML —
+// so a lexical prefix check is not enough: a compromised sidecar can write
+// queue/page.jpg -> /opt/meetingassist/.env and have a naive os.ReadFile follow
+// the symlink. The path must (1) sit inside the render queue BEFORE resolution,
+// (2) resolve (filepath.EvalSymlinks) to a path still inside the RESOLVED queue
+// root, and (3) be a regular file (os.Lstat on the resolved path — never a
+// device, socket, or dangling link). Returns the resolved path and its
+// FileInfo so callers can bound the read by size before it happens.
+func resolveRenderQueueFile(rawPath string) (string, os.FileInfo, error) {
+	path := filepath.Clean(strings.TrimSpace(rawPath))
+	if path == "" || path == "." {
+		return "", nil, fmt.Errorf("empty path")
+	}
+	queueRoot := renderRunnerQueuePath()
+	if !strings.HasPrefix(path, queueRoot+string(os.PathSeparator)) {
+		return "", nil, fmt.Errorf("path is outside the render queue")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve path: %w", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(queueRoot)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve render queue root: %w", err)
+	}
+	if !strings.HasPrefix(resolved, resolvedRoot+string(os.PathSeparator)) {
+		return "", nil, fmt.Errorf("path resolves outside the render queue")
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return "", nil, fmt.Errorf("stat path: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("path is not a regular file")
+	}
+	return resolved, info, nil
+}
+
 // renderCallbackPDFBytes extracts the exported PDF from the callback: the
 // base64 payload wins; the shared-volume path is the fallback transport and
-// is only honored INSIDE the render queue directory — the bearer token
-// authenticates the sidecar, it does not make the callback a file-read oracle.
+// is only honored INSIDE the render queue directory, symlink-resolved and
+// size-bounded (resolveRenderQueueFile) — the bearer token authenticates the
+// sidecar, it does not make the callback a file-read oracle.
 func renderCallbackPDFBytes(payload renderRunnerCallbackPayload) ([]byte, error) {
 	if encoded := strings.TrimSpace(payload.PDFBase64); encoded != "" {
 		data, err := base64.StdEncoding.DecodeString(encoded)
@@ -876,12 +917,15 @@ func renderCallbackPDFBytes(payload renderRunnerCallbackPayload) ([]byte, error)
 		}
 		return data, nil
 	}
-	path := filepath.Clean(strings.TrimSpace(payload.PDFPath))
-	if path == "" || path == "." {
+	if strings.TrimSpace(payload.PDFPath) == "" {
 		return nil, fmt.Errorf("callback carried no PDF")
 	}
-	if !strings.HasPrefix(path, renderRunnerQueuePath()+string(os.PathSeparator)) {
-		return nil, fmt.Errorf("callback pdf path is outside the render queue")
+	path, info, err := resolveRenderQueueFile(payload.PDFPath)
+	if err != nil {
+		return nil, fmt.Errorf("callback pdf path: %w", err)
+	}
+	if info.Size() > blobMaxBytes {
+		return nil, fmt.Errorf("callback pdf is %dMB, above the %dMB blob cap", info.Size()>>20, blobMaxBytes>>20)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1033,6 +1077,13 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if payload.PageCount > 0 {
 		metadata["renderPageCount"] = strconv.Itoa(payload.PageCount)
+	}
+	// Wave 5 item 21: the page JPEGs (previously dropped here) persist as
+	// {kind: image} assets — the rendered pages the vision slide juries see.
+	// Same path-trust rule as the PDF above; per-page failures degrade to
+	// fewer pages inside the helper, never a failed callback.
+	if persisted := persistRenderPageImageAssets(kanbanApp, artifactID, payload); persisted > 0 {
+		metadata["renderPageImages"] = strconv.Itoa(persisted)
 	}
 	metadata["renderFlattened"] = strconv.FormatBool(payload.Flattened)
 	// A completed job is spent: clearing the stamp makes the identity check

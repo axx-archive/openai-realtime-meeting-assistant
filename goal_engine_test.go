@@ -2605,8 +2605,13 @@ func TestProcessGoalInstantiatesStagesParksAndResumesWithChoice(t *testing.T) {
 	if checkpoint.StageID != "ship_choice" || checkpoint.Question == "" {
 		t.Fatalf("checkpoint metadata=%+v, want stageId ship_choice with a question", checkpoint)
 	}
-	if len(checkpoint.Options) != 2 || checkpoint.Options[0] != "ship" || checkpoint.Options[1] != "hold" {
+	if len(checkpoint.Options) != 2 || checkpoint.Options[0].Label != "ship" || checkpoint.Options[1].Label != "hold" {
 		t.Fatalf("checkpoint options=%v, want [ship hold]", checkpoint.Options)
+	}
+	// The options carry their mechanical actions: ship proceeds (the default),
+	// hold actually holds — the label finally tells the truth.
+	if checkpoint.Options[0].action() != processCheckpointActionProceed || checkpoint.Options[1].action() != processCheckpointActionHold {
+		t.Fatalf("checkpoint option actions=%v, want [proceed hold]", checkpoint.Options)
 	}
 
 	// A choice outside the options is refused; the goal stays parked.
@@ -2647,7 +2652,7 @@ func TestProcessCheckpointChoiceFeedsNextStageInput(t *testing.T) {
 		Stages: []ProcessStage{
 			{ID: "w1", Title: "Draft two directions", Role: processRoleWriter},
 			{ID: "pick", Title: "Pick a direction", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
-				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which direction?", Options: []string{"option-a", "option-b"}}},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which direction?", Options: []ProcessCheckpointOption{{Label: "option-a"}, {Label: "option-b"}}}},
 			{ID: "w2", Title: "Write the chosen direction", Role: processRoleWriter, InputFrom: []string{"pick"}},
 		},
 	})
@@ -2772,6 +2777,222 @@ func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
 	// The checkpoint never ran — nothing downstream of a blocked gate executes.
 	if pick := plan.subtaskByID("ship_choice"); pick.Status == subtaskComplete {
 		t.Fatalf("checkpoint ran past a blocked gate: %+v", pick)
+	}
+}
+
+// --- Negative checkpoint options: the mechanical teeth (Wave 4's disclosed gap) --
+
+// registerReviseProbeForTest registers a two-stage test process — writer w1,
+// then a checkpoint whose "send back" option carries Action=revise targeting
+// w1 — the smallest pipeline that exercises the send-back teeth.
+func registerReviseProbeForTest(t *testing.T, id string) {
+	t.Helper()
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID:          id,
+		Version:     1,
+		Title:       "Revise Probe",
+		Description: "Test-only: writer, then a checkpoint with a revise door.",
+		Authority:   toolAuthorityWorkspaceWrite,
+		Hidden:      true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Draft the note", Role: processRoleWriter},
+			{ID: "pass", Title: "Taste pass", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{
+					Question: "Ship the draft, or send it back?",
+					Options: []ProcessCheckpointOption{
+						{Label: "ship it"},
+						{Label: "send back", Action: processCheckpointActionRevise, Target: "w1"},
+					},
+				}},
+		},
+	})
+}
+
+// A revise-action choice re-queues the option's target stage with the choice
+// text as revision notes and the do_not_touch lines locked as protected, then
+// RE-PARKS the checkpoint after the redo — the send-back finally does what its
+// label says, and the human gets the revised work back for another look.
+func TestProcessCheckpointReviseRequeuesTargetAndReparks(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "process_revise_probe")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the revise teeth",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_revise_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+
+	sendBack := "send back — tighten the close.\ndo_not_touch: keep the opening line exactly as written"
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", sendBack); err != nil {
+		t.Fatalf("revise resume: %v", err)
+	}
+
+	// The redo ran and the goal re-parked at the SAME checkpoint, unresolved.
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	if plan.Checkpoint == nil || plan.Checkpoint.StageID != "pass" || plan.Checkpoint.ResolvedAt != "" {
+		t.Fatalf("checkpoint did not re-park after the redo: %+v", plan.Checkpoint)
+	}
+	pass := plan.subtaskByID("pass")
+	if pass == nil || pass.Revisions != 1 || pass.Status != subtaskRunning {
+		t.Fatalf("checkpoint subtask did not spend a round and re-park: %+v", pass)
+	}
+	// The writer re-launched exactly once, carrying the choice text as revision
+	// notes and the do_not_touch line as the protected block.
+	if len(*launched) != 2 || (*launched)[1].subtaskID != "w1" {
+		t.Fatalf("launched children=%+v, want the initial w1 + one send-back redo", *launched)
+	}
+	// The thread query rides compacted (one line), so assert the pieces rather
+	// than the raw multiline choice.
+	redo := (*launched)[1].query
+	if !strings.Contains(redo, "Revision notes from the goal review (address these): send back — tighten the close.") {
+		t.Fatalf("redo query does not carry the send-back notes:\n%s", redo)
+	}
+	if !strings.Contains(redo, "DO NOT LOSE (protected)") || !strings.Contains(redo, "do_not_touch: keep the opening line exactly as written") {
+		t.Fatalf("redo query does not lock the do_not_touch line as protected:\n%s", redo)
+	}
+	// The send-back budget lives on the CHECKPOINT stage; the target's own
+	// Revisions counter (the failure-retry / gate-round budget) stays untouched
+	// so a founder send-back never burns the transient-failure allowance.
+	w1 := plan.subtaskByID("w1")
+	if w1 == nil || w1.Revisions != 0 || !containsString(w1.Protect, "do_not_touch: keep the opening line exactly as written") {
+		t.Fatalf("target subtask should carry the protect list without spending its own revision budget: %+v", w1)
+	}
+
+	// The subsequent proceed choice resolves the re-parked checkpoint to verified.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "ship it"); err != nil {
+		t.Fatalf("proceed after redo: %v", err)
+	}
+	plan = waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	if plan.Checkpoint == nil || plan.Checkpoint.Choice != "ship it" || plan.Checkpoint.ResolvedAt == "" {
+		t.Fatalf("checkpoint not resolved by the proceed choice: %+v", plan.Checkpoint)
+	}
+}
+
+// A revise choice on a spent budget (the same MaxRounds discipline as gates)
+// falls back to proceed with the send-back DISCLOSED on the decision record —
+// never an unbounded loop, never a silent swallow.
+func TestProcessCheckpointReviseBudgetSpentFallsBackDisclosed(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "process_revise_budget_probe")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the revise budget",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_revise_budget_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	// Two send-backs spend the goalMaxRevisions budget; each re-parks.
+	for round := 1; round <= goalMaxRevisions; round++ {
+		waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+		if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", fmt.Sprintf("send back — round %d", round)); err != nil {
+			t.Fatalf("send-back round %d: %v", round, err)
+		}
+	}
+	// The third send-back has no budget left: it proceeds with the disclosure.
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "send back — one more polish"); err != nil {
+		t.Fatalf("budget-spent send-back: %v", err)
+	}
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	if plan.Checkpoint == nil || plan.Checkpoint.ResolvedAt == "" || plan.Checkpoint.Choice != "send back — one more polish" {
+		t.Fatalf("budget-spent revise did not resolve as proceed: %+v", plan.Checkpoint)
+	}
+	// Exactly the initial launch + goalMaxRevisions redos — the fallback never
+	// re-queued a third time.
+	if len(*launched) != 1+goalMaxRevisions {
+		t.Fatalf("launched %d writer children, want %d (initial + %d send-back redos)", len(*launched), 1+goalMaxRevisions, goalMaxRevisions)
+	}
+	// The disclosure is on the checkpoint review AND the decision artifact.
+	pass := plan.subtaskByID("pass")
+	if pass == nil || pass.Review == nil || !strings.Contains(pass.Review.Reasons, "send-back budget is spent") {
+		t.Fatalf("checkpoint review does not disclose the fallback: %+v", pass)
+	}
+	decision := mustArtifact(t, app, pass.ArtifactID)
+	if !strings.Contains(decision.Text, "- Disclosed: ") || !strings.Contains(decision.Text, "proceeded with the request disclosed") {
+		t.Fatalf("decision record does not disclose the fallback:\n%s", decision.Text)
+	}
+}
+
+// A hold-action choice keeps the goal PARKED with the choice on record: the
+// approval surface stays up, the held badge rides the checkpoint mirror, a
+// resume attempt without an explicit proceed choice is refused, and only a
+// proceed-action choice ships it.
+func TestProcessCheckpointHoldKeepsGoalParkedUntilProceed(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the hold teeth",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+
+	// The probe's "hold" option now mechanically holds.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "hold"); err != nil {
+		t.Fatalf("hold resume: %v", err)
+	}
+	artifact := mustArtifact(t, app, thread.Artifact.ID)
+	if artifact.Metadata["currentStage"] != goalStateApproval || artifact.Metadata["reviewGate"] != "approval_required" {
+		t.Fatalf("hold un-parked the goal: %v", artifact.Metadata)
+	}
+	plan, ok := decodeGoalPlan(artifact.Metadata["goalPlan"])
+	if !ok {
+		t.Fatal("goal plan missing after the hold")
+	}
+	if plan.Checkpoint == nil || !plan.Checkpoint.Held || plan.Checkpoint.HeldBy != "aj@shareability.com" || plan.Checkpoint.HeldAt == "" {
+		t.Fatalf("hold not recorded on the checkpoint: %+v", plan.Checkpoint)
+	}
+	if plan.Checkpoint.ResolvedAt != "" {
+		t.Fatalf("a held checkpoint must stay UNRESOLVED (still parked): %+v", plan.Checkpoint)
+	}
+	// The held record rides the metadata mirror (the card's held badge) and the
+	// goal artifact body discloses it.
+	var mirrored goalProcessCheckpoint
+	if err := json.Unmarshal([]byte(artifact.Metadata["checkpoint"]), &mirrored); err != nil || !mirrored.Held {
+		t.Fatalf("checkpoint mirror does not carry the held record: %v (%q)", err, artifact.Metadata["checkpoint"])
+	}
+	if !strings.Contains(artifact.Text, "HELD by aj@shareability.com") {
+		t.Fatalf("goal artifact does not record the hold:\n%s", artifact.Text)
+	}
+
+	// A plain approve (no choice) does NOT resume a held goal — and neither
+	// does holding again; both leave it parked.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", ""); err == nil {
+		t.Fatal("a held goal resumed from a choiceless approve")
+	}
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "hold"); err == nil {
+		t.Fatal("a held goal accepted a second hold as a resume")
+	}
+	if artifact = mustArtifact(t, app, thread.Artifact.ID); artifact.Metadata["currentStage"] != goalStateApproval {
+		t.Fatalf("refused resumes moved the goal off the park: %q", artifact.Metadata["currentStage"])
+	}
+
+	// The subsequent proceed-action choice is the ONLY way forward.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "ship"); err != nil {
+		t.Fatalf("proceed after hold: %v", err)
+	}
+	plan = waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	if plan.Checkpoint == nil || plan.Checkpoint.Choice != "ship" || plan.Checkpoint.ResolvedAt == "" {
+		t.Fatalf("proceed did not resolve the held checkpoint: %+v", plan.Checkpoint)
 	}
 }
 

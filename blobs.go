@@ -310,6 +310,59 @@ func (app *kanbanBoardApp) appendArtifactAsset(artifactID string, asset artifact
 	return entry, err
 }
 
+// replaceArtifactAssetsOfKind swaps ALL of an artifact's assets of one kind
+// for the given fresh set in a SINGLE metadata write. This is the re-export
+// seam: a fresh render's page images replace the previous export's pages
+// (content-addressed refs mean an edited page would otherwise linger beside
+// its replacement), and one write instead of one-per-asset keeps a long deck
+// from rewriting the growing assets JSON quadratically. Assets of other kinds
+// (the PDF, exports) are preserved untouched.
+func (app *kanbanBoardApp) replaceArtifactAssetsOfKind(artifactID string, kind string, fresh []artifactAsset) (meetingMemoryEntry, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, fmt.Errorf("artifact memory is unavailable")
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if !artifactAssetKinds[kind] {
+		return meetingMemoryEntry{}, fmt.Errorf("asset kind must be pdf, image, or export")
+	}
+	normalized := make([]artifactAsset, 0, len(fresh))
+	for _, asset := range fresh {
+		asset.Ref = strings.TrimSpace(asset.Ref)
+		if !validBlobRef(asset.Ref) {
+			return meetingMemoryEntry{}, fmt.Errorf("invalid blob ref")
+		}
+		asset.Mime = strings.TrimSpace(asset.Mime)
+		asset.Name = strings.TrimSpace(asset.Name)
+		asset.Kind = strings.ToLower(strings.TrimSpace(asset.Kind))
+		if asset.Kind != kind {
+			return meetingMemoryEntry{}, fmt.Errorf("asset kind %q does not match the replaced kind %q", asset.Kind, kind)
+		}
+		normalized = append(normalized, asset)
+	}
+
+	artifact, found := app.osArtifactByID(artifactID)
+	if !found {
+		return meetingMemoryEntry{}, fmt.Errorf("artifact not found")
+	}
+	existing := artifactAssets(artifact)
+	assets := make([]artifactAsset, 0, len(existing)+len(normalized))
+	for _, asset := range existing {
+		if asset.Kind != kind {
+			assets = append(assets, asset)
+		}
+	}
+	assets = append(assets, normalized...)
+
+	encoded, err := json.Marshal(assets)
+	if err != nil {
+		return meetingMemoryEntry{}, fmt.Errorf("encode artifact assets: %w", err)
+	}
+	entry, _, err := app.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{
+		artifactAssetsMetadataKey: string(encoded),
+	})
+	return entry, err
+}
+
 // sweepUnreferencedBlobs deletes every stored blob whose ref appears in no
 // artifact's assets metadata, returning the deleted refs. Exposed for a
 // FUTURE admin action only — deliberately NOT wired to a timer or ambient

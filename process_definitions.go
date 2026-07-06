@@ -90,15 +90,53 @@ type ProcessGateSpec struct {
 // honestly through the normal review/requeue path.
 type ProcessCompileFunc func(app *kanbanBoardApp, plan *goalPlan, parentID string, stage ProcessStage) (string, map[string]string, error)
 
+// Checkpoint option actions — the mechanical teeth behind a negative choice
+// (the disclosed gap from Wave 4's gate). proceed resolves the checkpoint and
+// the pipeline continues (the default, and the only action an OptionsFrom
+// option carries); revise re-queues the option's Target stage with the choice
+// text as revision notes, bounded by the same MaxRounds discipline as gates;
+// hold keeps the goal parked with the choice on the record until a subsequent
+// proceed-action choice resumes it.
+const (
+	processCheckpointActionProceed = "proceed"
+	processCheckpointActionRevise  = "revise"
+	processCheckpointActionHold    = "hold"
+)
+
+// ProcessCheckpointOption is one authored choice on a human_checkpoint. Label
+// is what the human taps (and what a prefix-matched choice must start with);
+// Action is what the tap mechanically DOES (empty means proceed); Target is
+// the revise action's re-queue target and must name one of the checkpoint
+// stage's own InputFrom stages — a send-back always lands on work the human
+// was actually shown.
+type ProcessCheckpointOption struct {
+	Label  string `json:"label"`
+	Action string `json:"action,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
+// processCheckpointOptionAction resolves an option's effective action: empty
+// (and anything unknown, which validation refuses at registration) is proceed.
+func processCheckpointOptionAction(option ProcessCheckpointOption) string {
+	switch strings.TrimSpace(option.Action) {
+	case processCheckpointActionRevise:
+		return processCheckpointActionRevise
+	case processCheckpointActionHold:
+		return processCheckpointActionHold
+	}
+	return processCheckpointActionProceed
+}
+
 // ProcessCheckpointSpec declares what choice the human is being asked to make
-// at a human_checkpoint stage. Options are static (authored) or read from an
-// earlier stage's output (OptionsFrom names the stage whose artifact carries a
-// JSON array of option strings — the COMPETE-verdict pattern). Both empty
-// means a free-form approval.
+// at a human_checkpoint stage. Options are static (authored, each carrying its
+// mechanical action) or read from an earlier stage's output (OptionsFrom names
+// the stage whose artifact carries a JSON array of option strings — the
+// COMPETE-verdict pattern; extracted options always proceed). Both empty means
+// a free-form approval.
 type ProcessCheckpointSpec struct {
-	Question    string   `json:"question"`
-	Options     []string `json:"options,omitempty"`
-	OptionsFrom string   `json:"optionsFrom,omitempty"`
+	Question    string                    `json:"question"`
+	Options     []ProcessCheckpointOption `json:"options,omitempty"`
+	OptionsFrom string                    `json:"optionsFrom,omitempty"`
 }
 
 // ProcessStage is one authored, ordered stage. InputFrom may reference only
@@ -255,6 +293,34 @@ func validateProcessDefinition(def ProcessDefinition) error {
 			}
 			if from := strings.TrimSpace(stage.CheckpointSpec.OptionsFrom); from != "" && !earlier[from] {
 				return fmt.Errorf("process %q checkpoint stage %q optionsFrom %q does not name an earlier stage", id, stageID, from)
+			}
+			for _, option := range stage.CheckpointSpec.Options {
+				if strings.TrimSpace(option.Label) == "" {
+					return fmt.Errorf("process %q checkpoint stage %q has an option with no label", id, stageID)
+				}
+				switch action := strings.TrimSpace(option.Action); action {
+				case "", processCheckpointActionProceed, processCheckpointActionHold:
+					if strings.TrimSpace(option.Target) != "" {
+						return fmt.Errorf("process %q checkpoint stage %q option %q carries a target without the revise action", id, stageID, option.Label)
+					}
+				case processCheckpointActionRevise:
+					target := strings.TrimSpace(option.Target)
+					if target == "" {
+						return fmt.Errorf("process %q checkpoint stage %q revise option %q has no target stage to re-queue", id, stageID, option.Label)
+					}
+					targetShown := false
+					for _, from := range stage.InputFrom {
+						if strings.TrimSpace(from) == target {
+							targetShown = true
+							break
+						}
+					}
+					if !targetShown {
+						return fmt.Errorf("process %q checkpoint stage %q revise option %q targets %q, which is not one of the stage's inputFrom — a send-back must land on work the human was shown", id, stageID, option.Label, target)
+					}
+				default:
+					return fmt.Errorf("process %q checkpoint stage %q option %q has unknown action %q", id, stageID, option.Label, action)
+				}
 			}
 		}
 		earlier[stageID] = true
@@ -475,7 +541,12 @@ func processProbeDefinition() ProcessDefinition {
 				InputFrom: []string{"note_gate"},
 				CheckpointSpec: &ProcessCheckpointSpec{
 					Question: "Ship the probe note as-is, or hold it?",
-					Options:  []string{"ship", "hold"},
+					// The label tells the truth: hold mechanically parks the goal
+					// until a subsequent proceed choice (the negative-option teeth).
+					Options: []ProcessCheckpointOption{
+						{Label: "ship"},
+						{Label: "hold", Action: processCheckpointActionHold},
+					},
 				},
 			},
 		},
