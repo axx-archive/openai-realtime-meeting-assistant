@@ -7708,6 +7708,11 @@
          reading-card skin wins the cascade) */
       #chatTool .scout-chat-msg--longform {
         max-width: min(var(--feed-measure), 92%) !important;
+        /* letters sit on the feed spine like every card — authorship stays
+           legible via the author label + the accent top rule, and the feed
+           stops zigzagging left-right as you scroll */
+        align-self: center;
+        justify-content: center;
       }
       .scout-chat-msg--longform .scout-chat-msg__stack {
         flex: 1;
@@ -8392,6 +8397,10 @@
       /* §2 the surviving goal marker: one quiet underlined line, not a chip */
       .goalcard-marker {
         padding: 4px 10px;
+        max-width: 60ch;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .goalcard-marker .goalcard__link {
         border: 0;
@@ -16788,7 +16797,7 @@
         top: 8px;
         bottom: 8px;
         width: 1.5px;
-        background: var(--line-1);
+        background: var(--line-2);
       }
       .runlog__entry {
         position: relative;
@@ -16958,6 +16967,7 @@
         flex-direction: column;
         gap: 3px;
       }
+      .artifact-stage__actions { display: flex; align-items: center; gap: 8px; }
       .artifact-stage__kicker {
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -22617,7 +22627,8 @@
         close.type = 'button'
         close.setAttribute('aria-label', 'Close')
         close.addEventListener('click', () => closeArtifactStage())
-        head.append(headings, escape, close)
+        const headActions = bfEl('div', 'artifact-stage__actions')
+        head.append(headings, headActions, escape, close)
 
         const body = bfEl('div', 'artifact-stage__body')
         const pdfAssets = artifactAssetEntries(entry).filter(asset =>
@@ -22628,7 +22639,7 @@
           // top-level open of the render URL — the iframe sandbox IS the
           // security model)
           body.classList.add('artifact-stage__body--deck')
-          renderArtifactDeck(body, entry, { surface: 'stage' })
+          renderArtifactDeck(body, entry, { surface: 'stage', presentSlot: headActions })
         } else if (pdfAssets.length && !String(entry.text || '').trim()) {
           // the payload IS the pdf: embed the newest, list every asset
           body.classList.add('artifact-stage__body--read')
@@ -23112,18 +23123,27 @@
       function renderArtifactDeck(container, entry, options = {}) {
         const deck = document.createElement('section')
         deck.className = 'artifact-deck'
-        const head = bfEl('div', 'artifact-deck__head')
-        head.appendChild(bfEl('span', 'artifact-deck__label', 'html deck'))
-        const present = bfEl('button', 'btn btn--ghost artifact-deck__present', 'Present')
+        // no label band: the stage header's kicker already says "deck", and a
+        // second chrome row read as clutter at the pixel gate. Present lives
+        // in the stage header when hosted there (options.presentSlot), else in
+        // a minimal head row.
+        const present = bfEl('button', 'btn btn--outline artifact-deck__present', 'present')
         present.type = 'button'
         present.disabled = true
-        head.appendChild(present)
+        let head = null
+        if (options.presentSlot && typeof options.presentSlot.appendChild === 'function') {
+          options.presentSlot.appendChild(present)
+        } else {
+          head = bfEl('div', 'artifact-deck__head')
+          head.appendChild(present)
+        }
         const frame = document.createElement('iframe')
         frame.className = 'artifact-deck__frame'
         frame.setAttribute('sandbox', 'allow-scripts')
         frame.title = 'sandboxed deck preview'
         const note = bfEl('p', 'artifact-deck__note', 'minting a render token…')
-        deck.append(head, frame, note)
+        if (head) deck.append(head)
+        deck.append(frame, note)
         container.appendChild(deck)
 
         const artifactId = String(entry?.id || '').trim()
