@@ -505,6 +505,18 @@ func TestIndexNotificationCenterWiring(t *testing.T) {
 		t.Fatal("handleOSAssistantActions must handle the notify action with a toast + store append")
 	}
 
+	// CARD 075: a repeat id is a server rewrite — the entry updates in place
+	// and read never flips back to unread from a viewerless broadcast; the
+	// proposal linkage rides the normalized entry for the bell rewrite.
+	// (functionBody cannot extract appendNotificationEntry — its signature's
+	// `options = {}` closes the brace walk — so grep the merge line directly.)
+	if !strings.Contains(html, "existing.read = existing.read || entry.read") {
+		t.Fatal("appendNotificationEntry must merge repeat ids without flipping read back to unread")
+	}
+	if !strings.Contains(functionBody(html, "function normalizeNotificationEntry(payload)"), "proposalId: String(payload.proposalId || '')") {
+		t.Fatal("normalizeNotificationEntry must carry the proposalId linkage")
+	}
+
 	if !strings.Contains(html, `class="chat-thread-item__unread notification-bell__unread"`) {
 		t.Fatal("bell unread badge must reuse the chat-thread-item__unread ink pill")
 	}

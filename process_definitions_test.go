@@ -335,25 +335,26 @@ func TestProcessesServeAsFifthPayloadGroupAdditive(t *testing.T) {
 
 	groups := buildToolsPayload()
 	if len(groups) != 5 {
-		t.Fatalf("payload has %d groups, want 4 tool groups + the processes group", len(groups))
+		t.Fatalf("payload has %d groups, want the flagship processes group + 4 tool groups", len(groups))
 	}
-	last := groups[len(groups)-1]
-	if last.ID != toolGroupProcesses || last.Label != "Processes" {
-		t.Fatalf("fifth group=%q/%q, want processes/Processes", last.ID, last.Label)
+	// Wave A item 4: the processes group now LEADS the payload under "End-to-end".
+	first := groups[0]
+	if first.ID != toolGroupProcesses || first.Label != "End-to-end" {
+		t.Fatalf("first group=%q/%q, want processes/End-to-end", first.ID, first.Label)
 	}
 
-	// Additive: the four tool groups and their 12 tools are untouched, and no
-	// process shadows a tool id.
+	// Additive: the four tool groups and their 12 tools are untouched (now
+	// trailing the flagship group), and no process shadows a tool id.
 	toolCount := 0
-	for _, group := range groups[:4] {
+	for _, group := range groups[1:] {
 		toolCount += len(group.Tools)
 	}
 	if toolCount != 12 {
 		t.Fatalf("the four lifecycle groups carry %d tools, want 12 — processes must be additive", toolCount)
 	}
 	var served *packagingTool
-	for index := range last.Tools {
-		entry := &last.Tools[index]
+	for index := range first.Tools {
+		entry := &first.Tools[index]
 		if entry.ID == "process_probe" {
 			t.Fatal("hidden process_probe served in the public payload")
 		}
@@ -365,7 +366,7 @@ func TestProcessesServeAsFifthPayloadGroupAdditive(t *testing.T) {
 		}
 	}
 	if served == nil {
-		t.Fatalf("visible process %q missing from the processes group: %+v", visible.ID, last.Tools)
+		t.Fatalf("visible process %q missing from the processes group: %+v", visible.ID, first.Tools)
 	}
 	// The tile contract the palette enforces on every entry.
 	if served.Group != toolGroupProcesses || served.Name != "Visible Case" || strings.TrimSpace(served.Promise) == "" {
@@ -414,16 +415,17 @@ func TestProcessesServeAsFifthPayloadGroupAdditive(t *testing.T) {
 // serves (empty), so the palette renders and the router enum is just the 12.
 func TestProcessesGroupServesEmptyWithoutRegistrations(t *testing.T) {
 	groups := buildToolsPayload()
-	last := groups[len(groups)-1]
-	if last.ID != toolGroupProcesses {
-		t.Fatalf("fifth group=%q, want processes", last.ID)
+	// Wave A item 4: the processes group now LEADS the payload.
+	first := groups[0]
+	if first.ID != toolGroupProcesses {
+		t.Fatalf("first group=%q, want processes", first.ID)
 	}
-	for _, entry := range last.Tools {
+	for _, entry := range first.Tools {
 		if entry.ID == "process_probe" {
 			t.Fatal("hidden process_probe served in the public payload")
 		}
 	}
-	if last.Tools == nil {
+	if first.Tools == nil {
 		t.Fatal("processes group must serve an empty list, not null — the palette iterates it")
 	}
 }

@@ -83,6 +83,9 @@ func TestProposeCodexTaskToolCreatesProposalAndNotifiesEveryone(t *testing.T) {
 	if !strings.Contains(record.Text, "Rodeo creator landscape brief") || !strings.Contains(record.Text, "confirm to launch") {
 		t.Fatalf("notification text=%q, want Scout proposes ... confirm to launch", record.Text)
 	}
+	if record.ProposalID != asString(proposal["id"]) {
+		t.Fatalf("notification proposalID=%q, want the proposal linkage %v", record.ProposalID, proposal["id"])
+	}
 
 	// The snapshot replayed on websocket admission carries the proposal.
 	snapshot := app.codexProposalsSnapshot(codexProposalHistoryLimit)
@@ -442,6 +445,120 @@ func TestCodexProposalActionEndpointRejectsBadPaths(t *testing.T) {
 	}
 }
 
+// CARD 075 ("dismissed by Tyler, then it reappears"): settling a proposal
+// settles the propose-time broadcast nudge with it. The propose path stamps
+// the proposal id onto the record, resolution rewrites the stale "confirm to
+// launch" text into the outcome and stamps the resolver read — so the record
+// never replays into the resolver's unread backlog on reconnect/rejoin, on
+// any of their sockets — while everyone else's backlog carries the outcome.
+func TestCodexProposalResolutionSettlesBroadcastNotification(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+
+	launches := 0
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	propose := func(title string) string {
+		t.Helper()
+		result, _, err := kanbanApp.applyToolCallArgs("propose_codex_task", map[string]any{
+			"title": title,
+			"mode":  "research",
+			"query": "Research " + title + " and draft a brief.",
+		})
+		if err != nil {
+			t.Fatalf("propose %s: %v", title, err)
+		}
+		return asString(result["proposal"].(map[string]any)["id"])
+	}
+	notificationForProposal := func(proposalID string) (notificationRecord, bool) {
+		t.Helper()
+		kanbanApp.mu.Lock()
+		defer kanbanApp.mu.Unlock()
+		for index := len(kanbanApp.notifications) - 1; index >= 0; index-- {
+			if kanbanApp.notifications[index].ProposalID == proposalID {
+				return kanbanApp.notifications[index], true
+			}
+		}
+		return notificationRecord{}, false
+	}
+
+	dismissID := propose("Stale nudge teardown")
+	record, linked := notificationForProposal(dismissID)
+	if !linked {
+		t.Fatalf("propose-time nudge missing the proposal linkage for %s", dismissID)
+	}
+
+	if _, _, err := kanbanApp.resolveCodexProposal(dismissID, "dismiss", "Tyler", "tyler@shareability.com"); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+
+	settled, _ := notificationForProposal(dismissID)
+	if settled.ID != record.ID {
+		t.Fatalf("settled record id=%q, want the propose-time record %q rewritten in place", settled.ID, record.ID)
+	}
+	if !strings.Contains(settled.Text, "dismissed by Tyler") || strings.Contains(settled.Text, "confirm to launch") {
+		t.Fatalf("settled text=%q, want the outcome instead of the stale confirm nudge", settled.Text)
+	}
+	if !notificationReadBy(settled, "tyler@shareability.com") {
+		t.Fatal("the dismisser must be stamped read on the propose-time nudge")
+	}
+
+	// The dismisser's rejoin replays an empty backlog: the record must not
+	// come back from the dead on a fresh socket for the same account.
+	tylerConn := dialIsolatedWebsocket(t, server, "tyler@shareability.com")
+	writeNativeWebsocketEvent(t, tylerConn, "participant", map[string]any{})
+	raw := waitForKanbanEvent(t, tylerConn, "notification_backlog", 5*time.Second)
+	var tylerBacklog []map[string]any
+	if err := json.Unmarshal(raw, &tylerBacklog); err != nil {
+		t.Fatalf("decode tyler backlog: %v", err)
+	}
+	if len(tylerBacklog) != 0 {
+		t.Fatalf("tyler backlog=%#v, want empty after dismissing the proposal", tylerBacklog)
+	}
+
+	// Everyone else still gets the record — rewritten to the outcome and
+	// carrying the linkage the client bell rewrite keys on.
+	tomConn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
+	writeNativeWebsocketEvent(t, tomConn, "participant", map[string]any{})
+	raw = waitForKanbanEvent(t, tomConn, "notification_backlog", 5*time.Second)
+	var tomBacklog []struct {
+		ID         string `json:"id"`
+		Text       string `json:"text"`
+		ProposalID string `json:"proposalId"`
+	}
+	if err := json.Unmarshal(raw, &tomBacklog); err != nil {
+		t.Fatalf("decode tom backlog: %v", err)
+	}
+	if len(tomBacklog) != 1 || tomBacklog[0].ID != record.ID {
+		t.Fatalf("tom backlog=%#v, want exactly the settled nudge %s", tomBacklog, record.ID)
+	}
+	if !strings.Contains(tomBacklog[0].Text, "dismissed by Tyler") || strings.Contains(tomBacklog[0].Text, "confirm to launch") {
+		t.Fatalf("tom backlog text=%q, want the outcome instead of the stale confirm nudge", tomBacklog[0].Text)
+	}
+	if tomBacklog[0].ProposalID != dismissID {
+		t.Fatalf("tom backlog proposalId=%q, want %q", tomBacklog[0].ProposalID, dismissID)
+	}
+
+	// Confirm settles its nudge the same way for the confirmer.
+	confirmID := propose("Coyote pricing sweep")
+	if _, _, err := kanbanApp.resolveCodexProposal(confirmID, "confirm", "Tom", "tom@shareability.com"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if launches != 1 {
+		t.Fatalf("launches=%d, want exactly the confirmed launch", launches)
+	}
+	confirmed, _ := notificationForProposal(confirmID)
+	if !strings.Contains(confirmed.Text, "confirmed by Tom") || !strings.Contains(confirmed.Text, "thread launched") {
+		t.Fatalf("confirmed text=%q, want the confirmed outcome", confirmed.Text)
+	}
+	for _, unread := range kanbanApp.unreadNotificationsFor("tom@shareability.com", notificationListLimit) {
+		if unread["id"] == confirmed.ID {
+			t.Fatalf("confirmed nudge %s replayed into tom's unread backlog: %#v", confirmed.ID, unread)
+		}
+	}
+}
+
 // Frontend wiring guard, following the repo's index.html grep-test pattern:
 // the proposal deck, websocket routes, and action wiring must stay together.
 func TestIndexCodexProposalWiring(t *testing.T) {
@@ -469,6 +586,18 @@ func TestIndexCodexProposalWiring(t *testing.T) {
 	}
 	if !strings.Contains(kanbanSwitch, "case 'codex_proposals':") {
 		t.Fatal("handleKanbanMessage must route the codex_proposals admission replay")
+	}
+
+	// CARD 075: the bell rewrite targets the durable propose-time record via
+	// its proposalId linkage, and the dock never mints a server-unknown bell
+	// id (which could never be marked read server-side, so it resurrected on
+	// every backlog replay).
+	bellRewrite := functionBody(html, "function resolveCodexProposalBellEntry(proposal)")
+	if !strings.Contains(bellRewrite, "candidate.proposalId === proposal.id") {
+		t.Fatal("resolveCodexProposalBellEntry must target the durable record by proposalId")
+	}
+	if strings.Contains(html, "id: `proposal-${id}`") {
+		t.Fatal("the proposal dock must not mint local-only bell ids the server cannot settle")
 	}
 }
 

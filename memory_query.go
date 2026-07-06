@@ -1140,7 +1140,7 @@ func grillReadoutLine(score int) string {
 }
 
 func assistantQueryInstructions() string {
-	return strings.Join([]string{
+	lines := []string{
 		"You are Scout, the Bonfire meeting assistant.",
 		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
 		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates when the user explicitly asks about board, card, task, status, owner, or due-date information.",
@@ -1150,9 +1150,29 @@ func assistantQueryInstructions() string {
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
 		"For short ambiguous follow-ups like \"what?\" or \"huh?\", ask one clarification question only.",
-		"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be launched as artifact-backed work threads.",
-		"Keep the answer concise and practical.",
-	}, " ")
+	}
+	// OFFER-NEVER-DENY (Wave A item 1), keyed only. When an Anthropic key is
+	// present this workspace can actually run the goal loop, so we REPLACE the
+	// pure prohibition (which made the answer brain's only safe move denial — the
+	// 2026-07-05 sim's "bigger ask than I can spin up") with the capabilities
+	// digest plus the rule: when the ask maps to a capability, name it and offer
+	// to set it up, never deny. The launch boundary still holds — Scout proposes,
+	// the user taps Run — so the model is told it cannot launch anything itself.
+	// Keyless deploys (no key) cannot run any goal loop, so they keep today's
+	// honest prohibition verbatim and never see the digest (don't overpromise).
+	if currentAnthropicAPIKey() != "" {
+		lines = append(lines,
+			"You cannot launch anything yourself from this chat answer — but this workspace CAN run every capability listed below as a one-tap confirmed goal loop.",
+			"When a request maps to a capability on that list, or the user asks whether you can do something on it, say yes plainly, name the capability, and offer to set it up; never say that work on this list is beyond this chat, and never deny a capability that is on it.",
+			assistantCapabilitiesDigest(),
+		)
+	} else {
+		lines = append(lines,
+			"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be launched as artifact-backed work threads.",
+		)
+	}
+	lines = append(lines, "Keep the answer concise and practical.")
+	return strings.Join(lines, " ")
 }
 
 func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool, pinned ...assistantPinnedNote) string {

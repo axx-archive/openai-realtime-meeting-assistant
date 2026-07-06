@@ -463,10 +463,11 @@ func TestAssistantToolsEndpointGuardedOrderedComplete(t *testing.T) {
 	if !payload.OK {
 		t.Fatal("payload ok=false")
 	}
-	// Wave 4 item 17: the processes group serves fifth, ADDITIVE — the four
-	// lifecycle groups keep their order and their full 12-tool menu, and the
-	// processes group may be empty (it lists registered ProcessDefinitions).
-	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio, toolGroupProcesses}
+	// Wave A item 4: the flagship processes group serves FIRST ("End-to-end"),
+	// then the four lifecycle groups in their unchanged order with the full
+	// 12-tool menu. The processes group may be empty (it lists registered
+	// ProcessDefinitions).
+	wantOrder := []string{toolGroupProcesses, toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio}
 	if len(payload.Groups) != len(wantOrder) {
 		t.Fatalf("got %d groups, want %d", len(payload.Groups), len(wantOrder))
 	}

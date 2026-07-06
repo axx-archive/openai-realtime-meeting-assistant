@@ -53,6 +53,10 @@ type notificationRecord struct {
 	ArtifactID string `json:"artifactId,omitempty"`
 	// ThreadID deep-links the bell entry to a chat thread/channel.
 	ThreadID string `json:"threadId,omitempty"`
+	// ProposalID links a codex-proposal nudge back to its proposal so
+	// settleProposalNotification can find and settle this record when the
+	// proposal resolves.
+	ProposalID string `json:"proposalId,omitempty"`
 	// DeliverAfter marks a queued deferred notification ("meeting" while
 	// waiting for the meeting to end); flushDeferredNotifications clears it,
 	// restamps CreatedAt, and pushes the record. Queued records are hidden
@@ -130,6 +134,13 @@ func normalizeNotificationKind(kind string) string {
 // skips the push entirely — flushDeferredNotifications delivers it when the
 // meeting ends.
 func (app *kanbanBoardApp) createNotification(userEmail string, kind string, text string, tool string, artifactID string, threadID string, deferred bool) (notificationRecord, error) {
+	return app.createLinkedNotification(userEmail, kind, text, tool, artifactID, threadID, "", deferred)
+}
+
+// createLinkedNotification is createNotification plus the proposal linkage:
+// proposalID stamps the record so settleProposalNotification can rewrite it
+// when the proposal resolves.
+func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind string, text string, tool string, artifactID string, threadID string, proposalID string, deferred bool) (notificationRecord, error) {
 	if app == nil {
 		return notificationRecord{}, fmt.Errorf("notifications are unavailable")
 	}
@@ -145,6 +156,7 @@ func (app *kanbanBoardApp) createNotification(userEmail string, kind string, tex
 		Tool:       strings.TrimSpace(tool),
 		ArtifactID: strings.TrimSpace(artifactID),
 		ThreadID:   strings.TrimSpace(threadID),
+		ProposalID: strings.TrimSpace(proposalID),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if deferred {
@@ -299,6 +311,9 @@ func notificationForViewer(record notificationRecord, viewerEmail string) map[st
 	if record.ThreadID != "" {
 		payload["threadId"] = record.ThreadID
 	}
+	if record.ProposalID != "" {
+		payload["proposalId"] = record.ProposalID
+	}
 	return payload
 }
 
@@ -346,6 +361,54 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 		}
 	}
 	return visible
+}
+
+// settleProposalNotification rewrites the propose-time broadcast nudge when
+// its codex proposal resolves: the stale "confirm to launch" text becomes the
+// outcome, the resolver joins ReadBy (so the record never replays into their
+// unread backlog on reconnect/rejoin, on any of their sockets), and the
+// updated record re-broadcasts so live bells rewrite in place. The os_event
+// mirror is skipped on purpose — notifyProposalResolution already covers the
+// typed stream.
+func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text string, resolverEmail string) {
+	if app == nil {
+		return
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	text = trimForStorage(text, 500)
+	if proposalID == "" || text == "" {
+		return
+	}
+	resolverEmail = normalizeAccountEmail(resolverEmail)
+
+	app.mu.Lock()
+	var settled notificationRecord
+	found := false
+	for index := len(app.notifications) - 1; index >= 0; index-- {
+		record := &app.notifications[index]
+		if record.ProposalID != proposalID {
+			continue
+		}
+		record.Text = text
+		if resolverEmail != "" && !notificationReadBy(*record, resolverEmail) {
+			record.ReadBy = append(record.ReadBy, resolverEmail)
+		}
+		settled = *record
+		found = true
+		break
+	}
+	var persistErr error
+	if found {
+		persistErr = app.persistNotificationsLocked()
+	}
+	app.mu.Unlock()
+	if persistErr != nil {
+		log.Errorf("Failed to persist settled proposal notification for %s: %v", proposalID, persistErr)
+	}
+	if !found {
+		return
+	}
+	broadcastSignedInKanbanEvent("notification", notificationForViewer(settled, ""))
 }
 
 // markNotificationsRead stamps the viewer onto ReadBy for every listed id the

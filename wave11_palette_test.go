@@ -36,7 +36,9 @@ func readIndexForPalette(t *testing.T) string {
 func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 	groups := buildToolsPayload()
 
-	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio, toolGroupProcesses}
+	// Wave A item 4: the flagship processes group renders FIRST ("End-to-end"),
+	// then the four lifecycle groups in their unchanged order.
+	wantOrder := []string{toolGroupProcesses, toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio}
 	if len(groups) != len(wantOrder) {
 		t.Fatalf("got %d groups, want %d", len(groups), len(wantOrder))
 	}
@@ -90,9 +92,9 @@ func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 	if seen != 12 {
 		t.Fatalf("the four lifecycle groups carry %d tools, want the full 12-tool menu (processes are additive, never replacements)", seen)
 	}
-	// The processes group never carries a tool id, and hidden processes (the
-	// test-only process_probe) never serve publicly.
-	for _, entry := range groups[len(groups)-1].Tools {
+	// The processes group (now first) never carries a tool id, and hidden
+	// processes (the test-only process_probe) never serve publicly.
+	for _, entry := range groups[0].Tools {
 		if _, isTool := toolByID(entry.ID); isTool {
 			t.Errorf("process entry %q shadows a 12-tool id", entry.ID)
 		}
@@ -108,9 +110,9 @@ func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 // contract — and the router enum picks its id up like any tool id.
 func TestPackagingStudioServesInPaletteAndRouter(t *testing.T) {
 	groups := buildToolsPayload()
-	processes := groups[len(groups)-1]
+	processes := groups[0]
 	if processes.ID != toolGroupProcesses {
-		t.Fatalf("last group=%q, want the processes group", processes.ID)
+		t.Fatalf("first group=%q, want the flagship processes group", processes.ID)
 	}
 
 	var studio *packagingTool

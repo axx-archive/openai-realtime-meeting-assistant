@@ -3406,9 +3406,9 @@
         display: inline-flex;
         align-items: center;
         gap: 9px;
-        height: 40px;
+        min-height: 40px;
         max-width: min(560px, calc(100vw - 32px));
-        padding: 0 18px;
+        padding: 9px 18px;
         border: 1px solid var(--glass-border);
         border-radius: var(--r-full);
         background: var(--glass-chrome);
@@ -3418,15 +3418,19 @@
         color: var(--text-1);
         font: var(--type-label-lg);
         letter-spacing: var(--track-label-lg);
-        white-space: nowrap;
         animation: bf-popin 0.4s var(--ease-spring);
         pointer-events: auto;
       }
 
+      /* long bodies wrap to two clamped lines instead of amputating
+         mid-sentence; the pill grows into a stadium, never a wall */
       .toast > span:not(.toast__bar) {
         min-width: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
         overflow: hidden;
-        text-overflow: ellipsis;
+        overflow-wrap: anywhere;
       }
 
       @keyframes bf-popin {
@@ -9017,6 +9021,7 @@
 	        display: inline-flex;
 	        align-items: center;
 	        justify-content: center;
+	        position: relative;
 	        width: 34px;
 	        height: 34px;
 	        flex: none;
@@ -9030,6 +9035,18 @@
 	          background var(--dur-fast) var(--ease),
 	          color var(--dur-fast) var(--ease),
 	          transform var(--dur-fast) var(--ease);
+	      }
+
+	      /* 44px hit target on the 34px glyph (the codebase's --hit-min law):
+	         a centered transparent extension, the proven .scout-chat-tools
+	         pattern — the composer is the product, per the founder */
+	      .scout-chat-attach::before,
+	      .scout-chat-send::before {
+	        content: "";
+	        position: absolute;
+	        top: 50%; left: 50%;
+	        width: var(--hit-min); height: var(--hit-min);
+	        transform: translate(-50%, -50%);
 	      }
 
 	      .scout-chat-attach:hover:not([disabled]) {
@@ -9050,6 +9067,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        position: relative;
         width: 34px;
         height: 34px;
         flex: none;
@@ -9531,7 +9549,9 @@
       }
 
       /* items follow the .assistant-message flat recipe; unread earns the ink
-         dot + full-ink text, never a hue */
+         dot + full-ink medium text, never a hue. Body type reads at the
+         message tier (--type-body-sm), not caption size — the bell is prose,
+         not chrome. */
       .notification-item {
         display: flex;
         align-items: flex-start;
@@ -9544,8 +9564,7 @@
         border-radius: var(--r-md);
         background: var(--surface-2);
         color: var(--text-2);
-        font-size: 12px;
-        line-height: 1.5;
+        font: var(--type-body-sm);
         cursor: pointer;
         transition:
           background var(--dur-fast) var(--ease),
@@ -9566,7 +9585,7 @@
         flex: none;
         width: 7px;
         height: 7px;
-        margin-top: 5px;
+        margin-top: 7px; /* optically centered on the first body line */
         border-radius: var(--r-full);
         background: var(--accent);
         opacity: 0;
@@ -9581,10 +9600,25 @@
         opacity: 1;
       }
 
+      .notification-item.is-unread .notification-item__text {
+        font-weight: 500;
+      }
+
       .notification-item__body {
+        flex: 1;
         display: grid;
-        gap: 3px;
+        gap: 4px;
         min-width: 0;
+      }
+
+      /* long bodies (chat lines, recap headlines) clamp to three lines; break
+         anywhere so an id or URL can never push the row wide */
+      .notification-item__text {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
       }
 
       .notification-item__meta {
@@ -10989,6 +11023,22 @@
 
       .artifact-read__inline-link:hover {
         text-decoration-color: currentColor;
+      }
+
+      .artifact-read__code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        background: var(--surface-3);
+        color: var(--text-1);
+        padding: 1px 6px;
+        border-radius: var(--r-sm);
+      }
+
+      .artifact-read__subhead {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        text-transform: lowercase;
       }
 
       .artifact-read__list {
@@ -15364,8 +15414,8 @@
         }
 
         .toast {
-          height: 36px;
-          padding: 0 15px;
+          min-height: 36px;
+          padding: 8px 15px;
           gap: 8px;
           max-width: 88%;
         }
@@ -16433,6 +16483,25 @@
           transform: scale(0.92);
         }
 
+        /* mobile goalcard legibility (design spec P0-4): the primary title and
+           the single loudest line — the amber "your call" — must never
+           truncate at 390. The mono meta drops to its own line so the title
+           gets full measure; it is NEVER hidden (that would drop real
+           telemetry — the done-count + elapsed, distinct from the rail count). */
+        .goalcard__head { flex-wrap: wrap; }
+        .goalcard__id { flex: 1 1 100%; min-width: 0; }
+        .goalcard__meta { order: 99; flex-basis: 100%; margin-top: 2px; }
+        .goalcard__title {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .goalcard__parkline { flex-wrap: wrap; }
+        .goalcard__parkline-label { white-space: normal; flex: 1 1 100%; }
+        /* the composer's own law (index.html §39): tap targets ≥ 44px */
+        .goalcard__choice { min-height: var(--hit-min); }
+
         /* phones scroll the page, not the pane: nothing bounds the canvas
            tools' height here, so their desktop overflow-y: auto +
            overscroll contain would leave a non-scrolling scroll container
@@ -17359,7 +17428,8 @@
       .goalcard__checkpoint-brief {
         font: var(--type-caption);
         color: var(--text-2);
-        white-space: pre-wrap;
+        display: grid;
+        gap: 8px;
         max-height: 180px;
         overflow-y: auto;
         padding: 8px 10px;
@@ -23347,8 +23417,12 @@
       function artifactStageKicker(entry) {
         const m = entry?.metadata || {}
         // kind derives from the SAME sniff the body dispatch uses, so the
-        // kicker can never say "markdown" over a rendering deck
-        const sniffed = artifactIsHTMLDeck(entry) ? 'deck' : (String(m.type || '').trim() || artifactModeLabel(entry) || 'artifact')
+        // kicker can never say "markdown" over a rendering deck; and a raw
+        // file-format word ("markdown"/"md"/"text") is never shown to the
+        // reader — it reads "document"
+        const rawKind = String(m.type || '').trim().toLowerCase()
+        const kindMap = { markdown: 'document', md: 'document', text: 'document', doc: 'document', pdf: 'pdf', html_deck: 'deck', deck: 'deck' }
+        const sniffed = artifactIsHTMLDeck(entry) ? 'deck' : (kindMap[rawKind] || artifactModeLabel(entry) || 'artifact')
         const bits = [sniffed]
         const plan = isGoalArtifact(entry) ? goalPlanFromArtifact(entry) : null
         const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
@@ -23889,6 +23963,9 @@
         const worker = String(entry?.metadata?.worker || '').trim()
         if (worker === 'codex_exec') return 'Codex worker'
         if (worker === 'openai_text_response') return 'Scout writer'
+        // model identity in the reader's voice, matching the chat letter header
+        // ("claude · fable 5") — never a raw worker slug like "anthropic fable"
+        if (/fable/i.test(worker)) return 'claude · fable 5'
         return worker ? worker.replace(/_/g, ' ') : 'Scout'
       }
 
@@ -24003,12 +24080,15 @@
         hero.className = 'artifact-read__hero'
         const meta = document.createElement('div')
         meta.className = 'artifact-read__meta'
+        // 100% beside "complete"/"published" is noise — omit the percent chip
+        // once the artifact is settled; keep it only while a run is mid-flight
+        const settled = status === 'complete' || status === 'published'
         for (const label of [
           artifactModeLabel(entry),
           status,
           artifactTimeLabel(entry),
           artifactWorkerLabel(entry),
-          `${Math.round(progress)}%`
+          settled ? '' : `${Math.round(progress)}%`
         ]) {
           if (!label) continue
           const chip = document.createElement('span')
@@ -24204,6 +24284,18 @@
             container.appendChild(quote)
             continue
           }
+          // headings: the main reader arrives heading-stripped (artifactSections),
+          // so this only fires on a RAW body — the checkpoint brief case, where
+          // a leaked "## Heading" would otherwise print its hashes verbatim.
+          const headingMatch = /^\s*#{1,6}\s+(.+)$/.exec(line)
+          if (headingMatch) {
+            flushParagraph()
+            const head = bfEl('div', 'artifact-read__subhead')
+            appendArtifactInlineNodes(head, headingMatch[1].trim().replace(/:$/, ''))
+            container.appendChild(head)
+            index += 1
+            continue
+          }
           paragraph.push(line)
           index += 1
         }
@@ -24212,21 +24304,36 @@
 
       function appendArtifactInlineNodes(container, text) {
         const value = String(text || '')
-        const markdownLink = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)/g
+        // Deliverable bodies are the text the reader reacts to; markdown source
+        // must render as language, never leak as syntax (the founder-named P0).
+        // Mirrors appendChatInlineNodes' link+bold+code — but deliberately NOT
+        // its bare-URL group, so existing artifact link behavior is unchanged.
+        const md = /\[([^\]\n]{1,140})\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`/g
         let lastIndex = 0
         let matched = false
-        for (const match of value.matchAll(markdownLink)) {
+        for (const match of value.matchAll(md)) {
           matched = true
           if (match.index > lastIndex) {
             container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)))
           }
-          const link = document.createElement('a')
-          link.className = 'artifact-read__inline-link'
-          link.href = match[2]
-          link.target = '_blank'
-          link.rel = 'noreferrer noopener'
-          link.textContent = match[1]
-          container.appendChild(link)
+          if (match[1] && match[2]) {
+            const link = document.createElement('a')
+            link.className = 'artifact-read__inline-link'
+            link.href = match[2]
+            link.target = '_blank'
+            link.rel = 'noreferrer noopener'
+            link.textContent = match[1]
+            container.appendChild(link)
+          } else if (match[3]) {
+            const strong = document.createElement('strong')
+            strong.textContent = match[3]
+            container.appendChild(strong)
+          } else if (match[4]) {
+            const code = document.createElement('code')
+            code.className = 'artifact-read__code'
+            code.textContent = match[4]
+            container.appendChild(code)
+          }
           lastIndex = match.index + match[0].length
         }
         if (!matched) {
@@ -34179,7 +34286,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // the judge scores and steals are readable without leaving the card
           const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === inputTasks[0].artifactId)
           const briefText = String(entry?.text || '').trim()
-          if (briefText) wrap.appendChild(bfEl('div', 'goalcard__checkpoint-brief', briefText))
+          if (briefText) {
+            // the single highest-stakes read in the product — render the draft
+            // as language through the safe block renderer, never a raw dump
+            // (the founder's cited markdown leak)
+            const brief = bfEl('div', 'goalcard__checkpoint-brief')
+            appendArtifactBodyNodes(brief, briefText)
+            wrap.appendChild(brief)
+          }
         }
 
         if (!canApproveExternalWrites()) {
@@ -34860,6 +34974,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           tool: String(payload.tool || ''),
           artifactId: String(payload.artifactId || ''),
           threadId: String(payload.threadId || ''),
+          proposalId: String(payload.proposalId || ''),
           createdAt: String(payload.createdAt || new Date().toISOString()),
           read: Boolean(payload.read)
         }
@@ -34966,7 +35081,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function appendNotificationEntry(payload, options = {}) {
         const entry = normalizeNotificationEntry(payload)
-        if (!entry || notificationEntries.some(existing => existing.id === entry.id)) {
+        if (!entry) {
+          return
+        }
+        const existing = notificationEntries.find(candidate => candidate.id === entry.id)
+        if (existing) {
+          // A repeat id is a server rewrite (a settled proposal nudge): adopt
+          // the new text, but never flip read back to unread — broadcast
+          // pushes are projected for no viewer, so their read:false says
+          // nothing about this account. loadNotifications stays the
+          // authoritative per-viewer sync.
+          existing.kind = entry.kind
+          existing.text = entry.text
+          existing.read = existing.read || entry.read
+          renderNotifications()
           return
         }
         notificationEntries.unshift(entry)
@@ -35200,26 +35328,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!proposal || String(proposal.status || '') !== 'proposed') {
             return
           }
+          // The durable propose-time nudge is already in the bell, so docking
+          // just clears the deck. Never mint a local bell id here — a
+          // server-unknown id can never be marked read server-side, so it
+          // resurrects on every backlog replay (CARD 075).
           codexProposals = codexProposals.filter(candidate => candidate.id !== id)
           renderCodexProposals()
-          appendNotificationEntry({
-            id: `proposal-${id}`,
-            kind: 'task',
-            tool: 'room',
-            text: `scout proposes: ${proposal.title || 'agent task'} — confirm from the room`,
-            createdAt: new Date().toISOString()
-          })
         }, 30000))
       }
 
-      // Bell hygiene: a docked proposal entry flips to its outcome instead of
-      // advertising a stale "confirm" call to action.
+      // Bell hygiene: the durable propose-time nudge flips to its outcome
+      // instead of advertising a stale "confirm" call to action. The server
+      // settles + re-broadcasts the record too (settleProposalNotification);
+      // this local rewrite mirrors its phrasing so the bell lands the same
+      // instant the card does.
       function resolveCodexProposalBellEntry(proposal) {
-        const entry = notificationEntries.find(candidate => candidate.id === `proposal-${proposal.id}`)
+        const entry = notificationEntries.find(candidate => candidate.proposalId === proposal.id)
         if (!entry) {
           return
         }
-        const by = String(proposal.confirmedBy || proposal.dismissedBy || '').toLowerCase()
+        const by = String(proposal.confirmedBy || proposal.dismissedBy || '')
         entry.text = String(proposal.status || '') === 'confirmed'
           ? `${proposal.title || 'agent task'} — confirmed${by ? ' by ' + by : ''} · thread launched`
           : `${proposal.title || 'agent task'} — dismissed${by ? ' by ' + by : ''}`
@@ -41411,6 +41539,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (mode === 'workflow') {
           return 'goal workflow'
         }
+        // a mode that already ends in artifact(s) would double to "artifacts
+        // artifact" — collapse it to the single word
+        if (/artifacts?$/i.test(mode)) {
+          return 'artifact'
+        }
         return mode ? `${mode} artifact` : 'artifact'
       }
 
@@ -41477,7 +41610,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function compactArtifactPreview(text) {
-        const compact = String(text || '').replace(/\s+/g, ' ').trim()
+        const compact = String(text || '')
+          .replace(/\s+/g, ' ')
+          // previews (hero summary, library cards, thread artifact chips) must
+          // read as prose — strip inline markdown so no ** or backtick leaks
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\[([^\]\n]{1,140})\]\(https?:\/\/[^\s)]+\)/g, '$1')
+          .trim()
         return compact.length > 142 ? `${compact.slice(0, 139)}…` : compact
       }
 

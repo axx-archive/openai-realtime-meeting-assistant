@@ -50,6 +50,41 @@ the studio process), so the objective names the existing outline as the spine an
 intake stage picks it up. When the utterance could mean either outline work or the
 built deck, the router offers the two-pill choice instead of guessing.
 
+## The flagship guarantees (Wave A — server seams)
+
+Three interlocking server fixes close the 2026-07-05 live-sim failure, where Scout
+answered a packageable ask with "that's a bigger ask than I can spin up" because the
+answer brain was told only what it could NOT do, and the router lost the literal
+full-run words ("end to end", "the full run") to the 6-turn context fold inside
+`scoutRouterInput`:
+
+1. **Capabilities digest + offer-never-deny** (`assistantCapabilitiesDigest`, keyed
+   deploys only). The chat answer prompt's pure prohibition (`memory_query.go`) is
+   REPLACED with a compact block — one line per capability (name · promise · id),
+   generated from `buildToolsPayload()` so it can never drift from what is launchable —
+   plus the rule: when a request maps to a capability, name it and offer to set it up;
+   never deny a capability on the list. Scout still cannot launch anything itself. A
+   golden test caps the block length and asserts every router-enum id appears.
+2. **Router prompt patches** (`scoutRouterSystemPrompt`): `package_assembly` is ONLY
+   "compile the artifacts we already made"; any end-to-end / full-run / from-scratch
+   language is `packaging_studio` even mid-thread about an existing package (genuinely
+   torn → `offer_choices` "compile what we have" / "the full staged run"); a correction
+   that names a different tool/process is never Tier 0 — re-route it; economics /
+   business model / unit economics / projections → `economics_waterfall`.
+3. **Deterministic pre-router guard** (`deterministicRouterGuard`, before the Haiku
+   turn): a work-shaped, non-negated message containing a reviewed full-run phrase
+   ("end to end", "the full run", "0 to 100", "packaging studio", "full packaging") →
+   `packaging_studio`, or a verbatim registry tool/process name → that capability, is
+   committed as a PROPOSAL card BEFORE the model turn, so thread-context gravity can
+   never drag the literal words off the flagship again. Propose-only, never a launch;
+   the capped phrase list never fires on "package" alone. A bare leading "no," is a
+   correction (it re-arms), not a skip; only action-negating tokens ("don't", "no need",
+   "instead of") and questions defer to the answer brain.
+
+**Flagship-first payload** (`buildToolsPayload`): the processes group renders FIRST
+under the label **"End-to-end"** (it used to render last, below all 12 instruments),
+so packaging_studio leads the palette, the digest, and the router's injected enum.
+
 ## The pill grammar (Kind `"choices"`)
 
 **Wire/storage shape** (persisted like proposals, on `scoutChatMessageRecord.Choices`):
@@ -114,6 +149,9 @@ Nothing on this list may ever launch without a Run tap.
 | 10 | `run it` typed as a reply to a proposal card *(instead of tapping Run)* | Conversation — Scout may re-offer, but text never launches; only the card's Run button does. |
 | 11 | tap a pill on a card you already answered *(second tab / stale reload)* | Rejected — "those options were already answered." First tap won. |
 | 12 | `remind me what the kill condition on the one-pager is` | Tier 0 — recall answer from the registry/memory, no card. |
+| 13 | `no, the full Packaging Studio staged run` *(as a correction to a prior proposal/answer)* | **Not a denial** — a re-route. The deterministic guard fires on the verbatim process name (a correction is never Tier 0), re-arming the Packaging Studio proposal card. Run still parks at each checkpoint. |
+| 14 | `can you run the full packaging studio from here?` | An **offer, zero denial**: Scout says yes, names the Packaging Studio staged run, and offers to set it up — never "that's a bigger ask than I can spin up." The answer brain carries the capabilities digest + offer-never-deny (keyed deploys only). |
+| 15 | `what can you actually do?` | Scout enumerates the real menu (the 12 tools + the End-to-end flagship) from the same digest the palette/router read, and offers to set any of it up — never a flat "I just answer questions." |
 
 **Watch for on every row:** the thinking shimmer resolves into exactly one committed
 turn; a reload re-renders cards and spent pills in their resolved state; the sidebar
@@ -121,9 +159,16 @@ preview updates; nothing appears in the goalcard rail until a Run tap.
 
 ## Files
 
-- `scout_chat.go` — router: `offer_choices` tool, intent map in the system prompt,
+- `scout_chat.go` — router: `offer_choices` tool, intent map in the system prompt
+  (Wave A patches: package_assembly-vs-studio, the correction rule, economics vocab),
   `scoutChatChoices` types, `routerToolByID` (processes now validate — the
-  packaging_studio enum/validation gap is closed), `scoutRouterProposalForToolID`.
+  packaging_studio enum/validation gap is closed), `scoutRouterProposalForToolID`,
+  and the Wave A `deterministicRouterGuard` + `scoutRouterFullRunPhrases` +
+  `scoutGuardEligibleMessage` (the pre-router flagship guarantee).
+- `tool_registry.go` — `buildToolsPayload` (processes group first, "End-to-end"
+  label) and `assistantCapabilitiesDigest` (the keyed self-knowledge block).
+- `memory_query.go` — `assistantQueryInstructions` (keyed offer-never-deny protocol +
+  digest; keyless keeps the honest prohibition).
 - `scout_chat_threads.go` — `Choices` on the message record, the choices commit in
   the routing branch, `POST /assistant/chat-threads/{id}/choice`,
   `resolveScoutChatChoice` / `claimScoutChatChoice`.
@@ -131,4 +176,7 @@ preview updates; nothing appears in the goalcard rail until a Run tap.
   block (`Quick-reply pills (conversational intent layer)`).
 - Tests: `scout_chat_choices_test.go` (round-trip, router choices turn, tool/plain
   pill paths, replay rejection, the four scenario routings, HTTP route, keyless),
-  `frontend_choices_test.go` (component pins + the no-launch scope check).
+  `frontend_choices_test.go` (component pins + the no-launch scope check),
+  `invocation_wave_a_test.go` (the Wave A regression fence: digest length/coverage,
+  offer-never-deny gating, the deterministic guard, the two-turn sim, the capability
+  question).

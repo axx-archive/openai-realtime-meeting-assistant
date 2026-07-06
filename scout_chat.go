@@ -373,7 +373,10 @@ func scoutRouterSystemPrompt() string {
 		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
 		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
 		"- full end-to-end packaging ('package this end to end', 'the full packaging run', 'take it from 0 to 100') -> propose_tool_run packaging_studio.",
+		"- package_assembly is ONLY 'compile the artifacts we already made into the send-ready binder'; any end-to-end / full-run / from-scratch language is packaging_studio, even when the thread was already discussing an existing package; genuinely torn between the two -> offer_choices ('compile what we have' [package_assembly] / 'the full staged run' [packaging_studio]).",
+		"- economics / business model / unit economics / projections / 'does the deal work' -> propose_tool_run economics_waterfall.",
 		"- ground truth / market digging -> deep_research; what-it-sold-for / pricing -> comps_precedent; landscape / whitespace -> market_map; hostile-room prep ('grill it', 'pressure test it') -> grill_pressure_test; who to attach -> talent_match.",
+		"When the user corrects a prior proposal or answer by naming a different tool or process ('no, the full Packaging Studio staged run'), the correction IS the work ask — propose that named id confidently; a correction is never Tier 0, re-route it.",
 		"A proposal or a question card is only ever a suggestion the user must act on; you can never launch anything. Propose at most one thing.",
 		"When in doubt, answer inline. An agent that under-routes is trusted; one that over-launches is muted.",
 	}, "\n")
@@ -466,6 +469,96 @@ func scoutRouterInput(text string, history []scoutChatTurn) string {
 	return builder.String()
 }
 
+// scoutRouterFullRunPhrases is the reviewed, capped phrase list the
+// deterministic pre-router guard matches to the flagship end-to-end run
+// (packaging_studio) — the literal words that named the full run in the
+// 2026-07-05 sim and still lost to thread-context gravity inside the Haiku turn.
+// Capped and code-reviewed on purpose (the analysis doc's keyword-sniffing
+// tripwire): "package" ALONE never appears here — only unambiguous full-run
+// phrases — and a match may only ever PROPOSE a card, never launch.
+var scoutRouterFullRunPhrases = []string{
+	"end to end",
+	"end-to-end",
+	"the full run",
+	"full packaging run",
+	"full packaging",
+	"0 to 100",
+	"zero to 100",
+	"packaging studio",
+}
+
+// scoutGuardEligibleMessage returns true when a message is work-shaped enough
+// for the deterministic guard to arm a proposal: not a question (a question
+// defers to the answer brain, which now carries the capabilities digest +
+// offer-never-deny) and not an action-negating message. A BARE leading "no" is
+// deliberately NOT a skip — "no, the full Packaging Studio staged run" is a
+// correction toward MORE work, and the design's correction rule wants it armed;
+// only tokens that negate the action itself ("don't", "no need", "instead of")
+// skip the guard.
+func scoutGuardEligibleMessage(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return false
+	}
+	if strings.HasSuffix(t, "?") {
+		return false
+	}
+	for _, q := range []string{"can you", "could you", "can we", "do you", "would you", "are you able", "is there a way", "what can you", "what do you", "how do i", "how do we", "how can i"} {
+		if strings.HasPrefix(t, q) {
+			return false
+		}
+	}
+	for _, n := range []string{"don't", "do not", "dont", "no need", "not now", "not yet", "never mind", "nevermind", "instead of", "rather than", "without ", "won't", "wont", "skip the", "hold off"} {
+		if strings.Contains(t, n) {
+			return false
+		}
+	}
+	return true
+}
+
+// deterministicRouterGuard commits a proposal card BEFORE the Haiku turn when a
+// work-shaped, non-negated message contains either a reviewed full-run phrase
+// (-> the flagship packaging_studio) or an exact registry tool/process name
+// (-> that capability). This is the flagship's second guarantee (item 3): the
+// literal words can never again be dragged off-target by the 6-turn context
+// fold inside scoutRouterInput. Propose-only — it returns the same
+// scoutRouterProposalForToolID shape a pill arms, and the card's Run stays the
+// only launch door. nil when nothing matches, so the model turn still runs.
+func deterministicRouterGuard(text string) *scoutRouterVerdict {
+	if !scoutGuardEligibleMessage(text) {
+		return nil
+	}
+	lower := strings.ToLower(text)
+	// Full-run phrases are checked FIRST so end-to-end language always wins the
+	// flagship, even mid-thread about an existing package (the sim miss:
+	// package_assembly stole the verdict).
+	for _, phrase := range scoutRouterFullRunPhrases {
+		if strings.Contains(lower, phrase) {
+			if proposal := scoutRouterProposalForToolID(packagingStudioProcessID, "", text); proposal != nil {
+				return &scoutRouterVerdict{proposal: proposal}
+			}
+		}
+	}
+	// Exact registry tool/process names, straight from the single taxonomy
+	// source. Short names are skipped to keep casual prose from tripping a card;
+	// names with punctuation ("Grill / Pressure-Test") only ever match a verbatim
+	// type-out, which is exactly the deterministic-intent signal we want.
+	for _, group := range buildToolsPayload() {
+		for _, tool := range group.Tools {
+			name := strings.ToLower(strings.TrimSpace(tool.Name))
+			if len(name) < 6 {
+				continue
+			}
+			if strings.Contains(lower, name) {
+				if proposal := scoutRouterProposalForToolID(tool.ID, "", text); proposal != nil {
+					return &scoutRouterVerdict{proposal: proposal}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // routeScoutChatTurn runs the one routing turn and returns a verdict — a
 // proposal card, a quick-reply question card — or nil for Tier 0 (answer
 // inline). nil is also every degraded path: keyless, router error,
@@ -475,6 +568,13 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 	apiKey := currentAnthropicAPIKey()
 	if apiKey == "" {
 		return nil // keyless: plain Q&A — never a proposal, never an error
+	}
+	// Deterministic pre-router guard: exact registry names + the reviewed
+	// full-run phrase list commit the matching proposal BEFORE the model turn,
+	// so thread-context gravity can never drag the literal words off the flagship
+	// again. Propose-only, never a launch (see deterministicRouterGuard).
+	if verdict := deterministicRouterGuard(text); verdict != nil {
+		return verdict
 	}
 	if ctx == nil {
 		ctx = context.Background()

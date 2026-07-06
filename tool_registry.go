@@ -43,7 +43,12 @@ var toolGroupLabels = map[string]string{
 	toolGroupPackage:   "Package",
 	toolGroupMarket:    "Market",
 	toolGroupPortfolio: "Portfolio",
-	toolGroupProcesses: "Processes",
+	// "End-to-end" (Wave A item 4): the processes group is the company's
+	// flagship lane (packaging_studio), so it leads the payload under this label
+	// instead of the trailing "Processes" it once carried. The label flows to
+	// the palette section header AND to every process proposal's GroupLabel
+	// (scoutRouterProposalForToolID reads this same map), so the two never drift.
+	toolGroupProcesses: "End-to-end",
 }
 
 // Input modes: a form tool collects 1-3 typed fields before launch; a
@@ -505,16 +510,17 @@ func buildToolsPayload() []toolsPayloadGroup {
 	for _, tool := range packagingTools() {
 		byGroup[tool.Group] = append(byGroup[tool.Group], tool)
 	}
-	groups := make([]toolsPayloadGroup, 0, len(toolGroupOrder)+1)
-	for _, id := range toolGroupOrder {
-		// Registry order within a group is already the intended display order.
-		groups = append(groups, toolsPayloadGroup{ID: id, Label: toolGroupLabels[id], Tools: byGroup[id]})
-	}
-	// The fifth group: authored processes from the process registry, mapped
-	// onto the same tile shape (Wave 4 item 17.3 — additive; the 12 tools and
-	// their four groups are untouched above). Hidden processes (test proofs
+	// FLAGSHIP FIRST (Wave A item 4): the authored processes group leads the
+	// payload under the "End-to-end" label, because packaging_studio is the
+	// company's headline capability and used to render dead last, below all 12
+	// instruments — teaching the wrong company. Hidden processes (test proofs
 	// like process_probe) stay launchable by id but never serve here, so they
 	// are absent from the palette AND from the router's injected enum.
+	//
+	// Consumers do not key on group ORDER (verified: the palette renders
+	// straight off the payload and glyphs key on group id; the router enum only
+	// needs the ids present, not positioned). Moving processes first therefore
+	// only changes what renders first and a free nudge on the enum order.
 	processes := toolsPayloadGroup{ID: toolGroupProcesses, Label: toolGroupLabels[toolGroupProcesses], Tools: []packagingTool{}}
 	for _, def := range processDefinitions() {
 		if def.Hidden {
@@ -522,7 +528,53 @@ func buildToolsPayload() []toolsPayloadGroup {
 		}
 		processes.Tools = append(processes.Tools, processPaletteEntry(def))
 	}
-	return append(groups, processes)
+	groups := make([]toolsPayloadGroup, 0, len(toolGroupOrder)+1)
+	groups = append(groups, processes)
+	for _, id := range toolGroupOrder {
+		// Registry order within a group is already the intended display order.
+		// The four lifecycle groups keep their internal order and their full
+		// 12-tool menu; only their position (after processes) moved.
+		groups = append(groups, toolsPayloadGroup{ID: id, Label: toolGroupLabels[id], Tools: byGroup[id]})
+	}
+	return groups
+}
+
+// assistantCapabilitiesDigestMaxChars caps the self-knowledge block so it can
+// never bloat the per-turn chat prompt. The golden test pins current length well
+// under this; it rides every keyed answer turn (~300 net tokens, ≈$1 per 1,000
+// turns), so a future capability with a runaway promise fails CI here first.
+const assistantCapabilitiesDigestMaxChars = 2400
+
+// assistantCapabilitiesDigest renders the compact self-knowledge block the chat
+// answer brain reads so it can name what this workspace CAN do instead of
+// dead-ending on denial (the 2026-07-05 sim: Scout called packaging "a bigger
+// ask than I can spin up" because :1153 told it only what it could NOT do).
+//
+// It is generated from buildToolsPayload() — the SAME single taxonomy source the
+// router enum (scoutRouterTools) and the palette read — so it can never drift
+// from what is actually launchable: the 12 registry tools plus every non-hidden
+// process (packaging_studio included, leading under "End-to-end"). One compact
+// line per capability: "Name — promise (id)". The id rides along so a length
+// test can assert every router-enum id appears, and so Stage 2's [[offer:id]]
+// sentinel has the ids in front of the model.
+func assistantCapabilitiesDigest() string {
+	var b strings.Builder
+	b.WriteString("# What this workspace can actually run (each is a confirmed, one-tap goal loop — you propose it, the user taps Run; nothing launches by itself):")
+	for _, group := range buildToolsPayload() {
+		if len(group.Tools) == 0 {
+			continue
+		}
+		b.WriteString("\n")
+		b.WriteString(group.Label)
+		b.WriteString(" — ")
+		parts := make([]string, 0, len(group.Tools))
+		for _, tool := range group.Tools {
+			parts = append(parts, tool.Name+": "+tool.Promise+" ("+tool.ID+")")
+		}
+		b.WriteString(strings.Join(parts, "; "))
+	}
+	b.WriteString("\nThree ways in: describe the work in chat, type / for the command lane, or tap + to browse the catalog.")
+	return b.String()
 }
 
 // assistantToolsHandler serves the tool registry to signed-in clients so the

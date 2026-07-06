@@ -232,7 +232,7 @@ func TestScoutChatChoicePillToolArmCommitsProposal(t *testing.T) {
 	if proposal.Kind != scoutRouterProposalKindToolRun || proposal.ToolID != "packaging_studio" {
 		t.Fatalf("proposal=%#v, want a packaging_studio tool_run", proposal)
 	}
-	if proposal.ToolName != "Packaging Studio" || proposal.GroupLabel != "Processes" {
+	if proposal.ToolName != "Packaging Studio" || proposal.GroupLabel != "End-to-end" {
 		t.Fatalf("proposal name/group=%q/%q, want the process registry values", proposal.ToolName, proposal.GroupLabel)
 	}
 	if proposal.Objective != "build the deck end to end from the existing outline" {
@@ -353,16 +353,23 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			toolID:     "packaging_studio",
 			objective:  "build the deck end to end using the existing outline as the spine",
 			wantName:   "Packaging Studio",
-			wantGroup:  "Processes",
+			wantGroup:  "End-to-end",
 			wantInWord: "human checkpoint",
 		},
 		{
-			name:       "full end-to-end packaging",
-			utterance:  "package this end to end, the full run",
+			// The literal full-run phrases ("end to end", "the full run",
+			// "packaging studio") now travel through the deterministic pre-router
+			// guard BEFORE the model turn (Wave A item 3), which would bypass this
+			// mocked router. This scenario therefore uses a full-run phrasing the
+			// guard does NOT catch, so it still exercises the MODEL enum-validation
+			// path for packaging_studio; the guard-caught phrases are covered by
+			// the Wave A regression fence (invocation_wave_a_test.go).
+			name:       "full packaging via the model enum",
+			utterance:  "run the whole packaging process for this venture",
 			toolID:     "packaging_studio",
 			objective:  "the full packaging run, founder's words to shipped package",
 			wantName:   "Packaging Studio",
-			wantGroup:  "Processes",
+			wantGroup:  "End-to-end",
 			wantInWord: "human checkpoint",
 		},
 	}

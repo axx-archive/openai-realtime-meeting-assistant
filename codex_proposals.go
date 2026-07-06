@@ -95,8 +95,9 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 	})
 	// Everyone-notification: any signed-in user may confirm, so the durable
 	// nudge is a broadcast; tool "room" routes the click to the room where
-	// the proposal cards live.
-	if _, err := app.createNotification("", notificationKindTask, "Scout proposes: "+title+" — confirm to launch", "room", "", "", false); err != nil {
+	// the proposal cards live. The proposal id rides on the record so
+	// resolveCodexProposal can settle the nudge when the proposal settles.
+	if _, err := app.createLinkedNotification("", notificationKindTask, "Scout proposes: "+title+" — confirm to launch", "room", "", "", entry.ID, false); err != nil {
 		log.Errorf("Failed to create codex proposal notification for %s: %v", entry.ID, err)
 	}
 
@@ -263,6 +264,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 		payload := codexProposalPayload(updated)
 		broadcastOfficeKanbanEvent("codex_proposal", payload)
+		app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail)
 		app.notifyProposalResolution(updated, codexProposalActionConfirm, userName)
 		return payload, true, nil
 	}
@@ -288,8 +290,31 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 
 	payload := codexProposalPayload(updated)
 	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail)
 	app.notifyProposalResolution(updated, codexProposalActionDismiss, userName)
 	return payload, false, nil
+}
+
+// codexProposalSettledText is the outcome line that replaces the propose-time
+// "confirm to launch" nudge; the client bell rewrite in
+// resolveCodexProposalBellEntry mirrors this phrasing exactly.
+func codexProposalSettledText(entry meetingMemoryEntry) string {
+	title := strings.TrimSpace(entry.Metadata["title"])
+	if title == "" {
+		title = "agent task"
+	}
+	if entry.Metadata["status"] == codexProposalStatusConfirmed {
+		text := title + " — confirmed"
+		if by := strings.TrimSpace(entry.Metadata["confirmedBy"]); by != "" {
+			text += " by " + by
+		}
+		return text + " · thread launched"
+	}
+	text := title + " — dismissed"
+	if by := strings.TrimSpace(entry.Metadata["dismissedBy"]); by != "" {
+		text += " by " + by
+	}
+	return text
 }
 
 // notifyProposalResolution closes the proposal round-trip: it fans the
