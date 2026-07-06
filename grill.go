@@ -805,6 +805,15 @@ func (app *kanbanBoardApp) closeGrillObjectionLoop(artifact meetingMemoryEntry, 
 
 	prior, isRegrill := app.latestGrillObjectionLedger(packageID)
 	personas := grillObjectionPanelPersonas()
+	// The house judge seat (house_style.go, Wave 4 item 20): once the distiller
+	// has written the office's living house_style, "the house" joins the red
+	// team — asking the questions this office's real investors asked and
+	// failing anything that leans on the banned-patterns list. Absent
+	// house_style (every deploy until the distiller first runs) the panel is
+	// exactly the two standing seats, unchanged.
+	if judge, ok := app.houseJudgePersona(); ok {
+		personas = append(personas, judge)
+	}
 	schema := grillObjectionPanelSchema
 	if isRegrill {
 		schema = grillObjectionRegrillSchema

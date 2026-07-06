@@ -25,9 +25,17 @@ const (
 	toolGroupPackage   = "package"
 	toolGroupMarket    = "market"
 	toolGroupPortfolio = "portfolio"
+	// toolGroupProcesses is the fifth, additive payload group (Wave 4 item 17):
+	// authored ProcessDefinitions served beside the 12 tools so every door —
+	// palette, /goal, voice, the router's propose_tool_run — reaches a process
+	// by id exactly the way it reaches a tool. The 12 tools never live here.
+	toolGroupProcesses = "processes"
 )
 
-// toolGroupOrder is the canonical group ordering for any grouped rendering.
+// toolGroupOrder is the canonical ordering of the 12-TOOL lifecycle groups.
+// The processes group is not a tool group: buildToolsPayload appends it after
+// these four, from the process registry, so this list keeps meaning "where do
+// packagingTools live" for every existing consumer.
 var toolGroupOrder = []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio}
 
 var toolGroupLabels = map[string]string{
@@ -35,6 +43,7 @@ var toolGroupLabels = map[string]string{
 	toolGroupPackage:   "Package",
 	toolGroupMarket:    "Market",
 	toolGroupPortfolio: "Portfolio",
+	toolGroupProcesses: "Processes",
 }
 
 // Input modes: a form tool collects 1-3 typed fields before launch; a
@@ -452,12 +461,24 @@ func buildToolsPayload() []toolsPayloadGroup {
 	for _, tool := range packagingTools() {
 		byGroup[tool.Group] = append(byGroup[tool.Group], tool)
 	}
-	groups := make([]toolsPayloadGroup, 0, len(toolGroupOrder))
+	groups := make([]toolsPayloadGroup, 0, len(toolGroupOrder)+1)
 	for _, id := range toolGroupOrder {
 		// Registry order within a group is already the intended display order.
 		groups = append(groups, toolsPayloadGroup{ID: id, Label: toolGroupLabels[id], Tools: byGroup[id]})
 	}
-	return groups
+	// The fifth group: authored processes from the process registry, mapped
+	// onto the same tile shape (Wave 4 item 17.3 — additive; the 12 tools and
+	// their four groups are untouched above). Hidden processes (test proofs
+	// like process_probe) stay launchable by id but never serve here, so they
+	// are absent from the palette AND from the router's injected enum.
+	processes := toolsPayloadGroup{ID: toolGroupProcesses, Label: toolGroupLabels[toolGroupProcesses], Tools: []packagingTool{}}
+	for _, def := range processDefinitions() {
+		if def.Hidden {
+			continue
+		}
+		processes.Tools = append(processes.Tools, processPaletteEntry(def))
+	}
+	return append(groups, processes)
 }
 
 // assistantToolsHandler serves the tool registry to signed-in clients so the

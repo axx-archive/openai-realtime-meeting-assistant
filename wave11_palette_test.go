@@ -29,11 +29,14 @@ func readIndexForPalette(t *testing.T) string {
 
 // The palette renders straight from GET /assistant/tools with no client-side
 // re-sorting, so every field a tile depends on must be present and well-formed
-// in the payload buildToolsPayload emits.
+// in the payload buildToolsPayload emits. Wave 4 item 17 EXTENDS the payload
+// with a fifth "processes" group — additive: the four lifecycle groups keep
+// their order and their full 12-tool menu, and every process entry satisfies
+// the same tile contract.
 func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 	groups := buildToolsPayload()
 
-	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio}
+	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio, toolGroupProcesses}
 	if len(groups) != len(wantOrder) {
 		t.Fatalf("got %d groups, want %d", len(groups), len(wantOrder))
 	}
@@ -47,7 +50,9 @@ func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 			t.Fatalf("group %q has no display label — the palette renders it as a section header", group.ID)
 		}
 		for _, tool := range group.Tools {
-			seen++
+			if group.ID != toolGroupProcesses {
+				seen++
+			}
 			if strings.TrimSpace(tool.ID) == "" {
 				t.Fatalf("a %s tool has no id (the palette keys tiles + recents on it)", group.ID)
 			}
@@ -83,7 +88,77 @@ func TestAssistantToolsPayloadDrivesPaletteContract(t *testing.T) {
 		}
 	}
 	if seen != 12 {
-		t.Fatalf("palette payload carries %d tools, want the full 12-tool menu", seen)
+		t.Fatalf("the four lifecycle groups carry %d tools, want the full 12-tool menu (processes are additive, never replacements)", seen)
+	}
+	// The processes group never carries a tool id, and hidden processes (the
+	// test-only process_probe) never serve publicly.
+	for _, entry := range groups[len(groups)-1].Tools {
+		if _, isTool := toolByID(entry.ID); isTool {
+			t.Errorf("process entry %q shadows a 12-tool id", entry.ID)
+		}
+		if entry.ID == "process_probe" {
+			t.Error("hidden process_probe must not serve in the public payload")
+		}
+	}
+}
+
+// The flagship packaging_studio serves as a processes-group tile with the exact
+// contract the palette enforces (Wave 4 item 18): conversational, no form
+// fields, a promise line, a workspace_write authority, and the shipped-deck
+// contract — and the router enum picks its id up like any tool id.
+func TestPackagingStudioServesInPaletteAndRouter(t *testing.T) {
+	groups := buildToolsPayload()
+	processes := groups[len(groups)-1]
+	if processes.ID != toolGroupProcesses {
+		t.Fatalf("last group=%q, want the processes group", processes.ID)
+	}
+
+	var studio *packagingTool
+	for index := range processes.Tools {
+		if processes.Tools[index].ID == packagingStudioProcessID {
+			studio = &processes.Tools[index]
+			break
+		}
+	}
+	if studio == nil {
+		t.Fatalf("packaging_studio missing from the processes group: %+v", processes.Tools)
+	}
+	if studio.Group != toolGroupProcesses {
+		t.Errorf("packaging_studio group=%q, want %q", studio.Group, toolGroupProcesses)
+	}
+	if strings.TrimSpace(studio.Name) == "" || strings.TrimSpace(studio.Promise) == "" {
+		t.Errorf("packaging_studio tile missing name/promise: %+v", studio)
+	}
+	if studio.InputMode != toolInputConversational || len(studio.FormFields) != 0 {
+		t.Errorf("packaging_studio must be conversational with no form fields: %+v", studio)
+	}
+	if studio.Authority != toolAuthorityWorkspaceWrite {
+		t.Errorf("packaging_studio authority=%q, want %q", studio.Authority, toolAuthorityWorkspaceWrite)
+	}
+	if studio.Contract != packagingStudioDeckContract {
+		t.Errorf("packaging_studio contract=%q, want the shipped deck %q", studio.Contract, packagingStudioDeckContract)
+	}
+	// It is a process, never a 12-tool id.
+	if _, isTool := toolByID(packagingStudioProcessID); isTool {
+		t.Error("packaging_studio shadows a 12-tool id — the taxonomies must stay separate")
+	}
+
+	// The router's injected enum proposes it like any tool id.
+	routerTools := scoutRouterTools()
+	schema, _ := routerTools[0].InputSchema["properties"].(map[string]any)
+	toolID, _ := schema["tool_id"].(map[string]any)
+	enum, ok := toolID["enum"].([]string)
+	if !ok {
+		t.Fatalf("propose_tool_run enum shape changed: %+v", toolID)
+	}
+	found := false
+	for _, id := range enum {
+		if id == packagingStudioProcessID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("router enum missing packaging_studio: %v", enum)
 	}
 }
 

@@ -287,6 +287,341 @@ func TestPackagePayloadCarriesStatsGapsAndGrillScore(t *testing.T) {
 	}
 }
 
+/* ---------- Interlock compiler (Wave 4 item 19) ---------- */
+
+// The deterministic pre-pass flags ONLY exact-label collisions: the same label
+// carrying disagreeing values across two different artifacts. Same label +
+// same value, different labels, one-word labels, and within-one-artifact
+// repetition all stay silent — the scan is conservative by design.
+func TestPackageInterlockFindingsExactLabelCollisionMatrix(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Nimbus creator platform", "")
+
+	onePager, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus one-pager", strings.Join([]string{
+		"The Series A ask is $2M.",
+		"Seed round: $1M.",
+		"Creator revenue share: 70%.",
+		"Launch window: Q1 2027.",
+		"Valuation: $30M.",               // one-word label: never compared
+		"Total budget: $5M.",             // disagrees only inside this artifact…
+		"Later note. Total budget: $6M.", // …which never flags
+	}, "\n"), "AJ", map[string]string{"artifactContract": "one_pager_v1"})
+	if err != nil {
+		t.Fatalf("create one-pager: %v", err)
+	}
+	economics, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus economics scan", strings.Join([]string{
+		"Series A ask: $3M.",
+		"Marketing budget: $4M.",        // different label than "seed round"
+		"Creator revenue share of 70%.", // same label, same value
+		"Launch window: Q1 2027.",       // same label, same value
+		"Valuation: $40M.",              // one-word label: never compared
+	}, "\n"), "AJ", map[string]string{"artifactContract": "economics_scan_v1"})
+	if err != nil {
+		t.Fatalf("create economics scan: %v", err)
+	}
+	for _, id := range []string{onePager.ID, economics.ID} {
+		if _, err := app.attachToPackage(record.ID, "artifact", id, "AJ"); err != nil {
+			t.Fatalf("attach %s: %v", id, err)
+		}
+	}
+
+	findings, ok := app.packageInterlockFindings(record.ID)
+	if !ok {
+		t.Fatal("packageInterlockFindings must resolve an existing package")
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings=%+v, want exactly the Series A ask collision", findings)
+	}
+	finding := findings[0]
+	if finding.ID != "IL-1" || finding.Kind != interlockKindValueCollision {
+		t.Fatalf("finding=%+v, want IL-1 value_collision", finding)
+	}
+	if finding.Label != "series a ask" {
+		t.Fatalf("label=%q, want the exact normalized label", finding.Label)
+	}
+	if finding.Severity != interlockSeverityMustResolve {
+		t.Fatalf("severity=%q, want must_resolve (one-pager vs economics is not the deck/rigor pair)", finding.Severity)
+	}
+	for _, want := range []string{"$2M", "$3M", "Nimbus one-pager", "Nimbus economics scan"} {
+		if !strings.Contains(finding.Detail, want) {
+			t.Fatalf("detail=%q missing %q", finding.Detail, want)
+		}
+	}
+	if len(finding.ArtifactIDs) != 2 {
+		t.Fatalf("artifactIds=%v, want both colliding artifacts", finding.ArtifactIDs)
+	}
+
+	// Formatting differences are never a contradiction.
+	if canonicalInterlockValue("$2M") != canonicalInterlockValue("$2,000,000") ||
+		canonicalInterlockValue("$2 million") != canonicalInterlockValue("$2M") ||
+		canonicalInterlockValue("70 %") != canonicalInterlockValue("70%") ||
+		canonicalInterlockValue("January 2027") != canonicalInterlockValue("Jan. 2027") {
+		t.Fatal("canonicalInterlockValue must equate formatting variants of the same value")
+	}
+
+	// A must-resolve finding may ship DISCLOSED; the sweep accepts it.
+	body := strings.Join(toolContractHeadings["package_binder_v1"], "\n") +
+		"\nIL-1 DISCLOSED: the one-pager keeps the $2M ask while economics models $3M; flagged for the founder."
+	if reason, violated := packageBinderInterlockSweep(findings, body); violated {
+		t.Fatalf("a disclosed must-resolve finding must pass the sweep, got: %s", reason)
+	}
+	// IL-1 never matches inside IL-10.
+	decoy := strings.Join(toolContractHeadings["package_binder_v1"], "\n") + "\nIL-10 RESOLVED: something else."
+	if _, violated := packageBinderInterlockSweep(findings, decoy); !violated {
+		t.Fatal("IL-10 must not satisfy finding IL-1 (token-boundary match)")
+	}
+	// A listed finding with no explicit status fails mechanically.
+	vague := strings.Join(toolContractHeadings["package_binder_v1"], "\n") + "\nIL-1 we looked at this."
+	if reason, violated := packageBinderInterlockSweep(findings, vague); !violated || !strings.HasPrefix(reason, toolLawSweepPrefix) {
+		t.Fatalf("statusless finding must fail with a law-sweep reason, got violated=%v reason=%q", violated, reason)
+	}
+}
+
+// Explicit interlocks[] rules (the Wave 3 scaffold) feed the MUST-RESOLVE list
+// when both sides are attached; orphaned counterparts and reciprocal stamps of
+// the same rule never double up.
+func TestPackageInterlockRulesFeedTheMustResolveList(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Nimbus creator platform", "")
+
+	deck, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus deck outline", "Slide list.", "AJ", map[string]string{"artifactContract": "deck_outline_v1"})
+	if err != nil {
+		t.Fatalf("create deck: %v", err)
+	}
+	onePager, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus one-pager", "The page.", "AJ", map[string]string{"artifactContract": "one_pager_v1"})
+	if err != nil {
+		t.Fatalf("create one-pager: %v", err)
+	}
+	outside, _, err := app.createOSArtifactWithMetadata("artifacts", "Unattached brief", "Not in the package.", "AJ", nil)
+	if err != nil {
+		t.Fatalf("create outside artifact: %v", err)
+	}
+	rule := "deck pricing must match one-pager pricing"
+	if _, _, err := app.setOSArtifactInterlocks(deck.ID, []artifactInterlock{
+		{WithArtifactID: onePager.ID, Rule: rule},
+		{WithArtifactID: outside.ID, Rule: "orphan rule (counterpart not attached)"},
+	}); err != nil {
+		t.Fatalf("stamp deck interlocks: %v", err)
+	}
+	// reciprocal stamp of the SAME rule collapses to one finding.
+	if _, _, err := app.setOSArtifactInterlocks(onePager.ID, []artifactInterlock{{WithArtifactID: deck.ID, Rule: rule}}); err != nil {
+		t.Fatalf("stamp one-pager interlocks: %v", err)
+	}
+	for _, id := range []string{deck.ID, onePager.ID} {
+		if _, err := app.attachToPackage(record.ID, "artifact", id, "AJ"); err != nil {
+			t.Fatalf("attach %s: %v", id, err)
+		}
+	}
+
+	findings, ok := app.packageInterlockFindings(record.ID)
+	if !ok || len(findings) != 1 {
+		t.Fatalf("findings=%+v ok=%v, want exactly the one attached-pair rule", findings, ok)
+	}
+	finding := findings[0]
+	if finding.Kind != interlockKindRule || finding.Label != rule {
+		t.Fatalf("finding=%+v, want the interlock rule honored verbatim", finding)
+	}
+	if finding.Severity != interlockSeverityMustResolve {
+		t.Fatalf("severity=%q, want must_resolve (deck vs one-pager is not the deck/rigor pair)", finding.Severity)
+	}
+	if len(finding.ArtifactIDs) != 2 {
+		t.Fatalf("artifactIds=%v, want the rule's pair", finding.ArtifactIDs)
+	}
+	if !strings.Contains(finding.Detail, "Nimbus deck outline") || !strings.Contains(finding.Detail, "Nimbus one-pager") {
+		t.Fatalf("detail=%q must name both artifacts", finding.Detail)
+	}
+}
+
+// The §4 no-contradiction rule: a MUST-RESOLVE finding between a deck-type and
+// a memo/rigor-type artifact is kill-condition-grade, and the law-sweep seam
+// (toolLawSweep → packageBinderLawSweep) enforces it mechanically: a binder
+// that ships the contradiction disclosed-open or silently short-circuits to a
+// law-sweep revise, which is what the goal engine's gate machinery acts on.
+func TestDeckVsRigorContradictionIsKillGradeAtTheLawSweepSeam(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	record := createTestPackage(t, app, "Nimbus creator platform", "")
+	deck, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus deck outline",
+		"The money slide: the Series A ask is $2M.", "AJ", map[string]string{"artifactContract": "deck_outline_v1"})
+	if err != nil {
+		t.Fatalf("create deck: %v", err)
+	}
+	rigor, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus economics scan",
+		"Series A ask: $3M under the base case.", "AJ", map[string]string{"artifactContract": "economics_scan_v1"})
+	if err != nil {
+		t.Fatalf("create rigor companion: %v", err)
+	}
+	for _, id := range []string{deck.ID, rigor.ID} {
+		if _, err := app.attachToPackage(record.ID, "artifact", id, "AJ"); err != nil {
+			t.Fatalf("attach %s: %v", id, err)
+		}
+	}
+
+	findings, ok := app.packageInterlockFindings(record.ID)
+	if !ok || len(findings) != 1 {
+		t.Fatalf("findings=%+v ok=%v, want the one deck-vs-rigor collision", findings, ok)
+	}
+	if findings[0].Severity != interlockSeverityKill {
+		t.Fatalf("severity=%q, want kill for a deck-type vs rigor-type contradiction", findings[0].Severity)
+	}
+
+	tool, ok := toolByID("package_assembly")
+	if !ok {
+		t.Fatal("package_assembly not in registry")
+	}
+	binder, _, err := app.createOSArtifactWithMetadata("workflow", "Nimbus binder", "Vision: assembling.", "AJ",
+		map[string]string{"toolTemplate": "package_assembly", "artifactContract": "package_binder_v1"})
+	if err != nil {
+		t.Fatalf("create binder artifact: %v", err)
+	}
+	section, ok := app.packageInterlockPrePass(record.ID, binder.ID)
+	if !ok || !strings.Contains(section, "IL-1") || !strings.Contains(section, "[KILL]") {
+		t.Fatalf("pre-pass section=%q ok=%v, want the IL-1 kill finding in the MUST-RESOLVE block", section, ok)
+	}
+
+	headings := strings.Join(toolContractHeadings["package_binder_v1"], "\n")
+	writeBinderBody := func(body string) {
+		t.Helper()
+		if _, _, err := app.updateOSArtifactWithMetadata(binder.ID, "", body, "", nil); err != nil {
+			t.Fatalf("write binder body: %v", err)
+		}
+	}
+
+	// Disclosed-open kill finding: rejected with kill-grade language.
+	disclosed := headings + "\nIL-1 DISCLOSED: the deck and the scan disagree on the ask."
+	writeBinderBody(disclosed)
+	reason, violated := toolLawSweep(tool, disclosed)
+	if !violated || !strings.HasPrefix(reason, toolLawSweepPrefix) {
+		t.Fatalf("disclosed kill finding must fail the law sweep, got violated=%v reason=%q", violated, reason)
+	}
+	if !strings.Contains(reason, "kill-condition-grade") || !strings.Contains(reason, "IL-1") {
+		t.Fatalf("reason=%q, want the kill-grade flag naming IL-1", reason)
+	}
+
+	// Silently omitted finding: rejected.
+	silent := headings + "\nAll consistent."
+	writeBinderBody(silent)
+	if reason, violated := toolLawSweep(tool, silent); !violated || !strings.Contains(reason, "missing") {
+		t.Fatalf("omitted finding must fail the law sweep, got violated=%v reason=%q", violated, reason)
+	}
+
+	// Resolved: the binder clears the sweep.
+	resolvedBody := headings + "\nIL-1 RESOLVED: standardized on the $3M ask from the economics scan across every section."
+	writeBinderBody(resolvedBody)
+	if reason, violated := toolLawSweep(tool, resolvedBody); violated {
+		t.Fatalf("a resolved kill finding must pass the law sweep, got: %s", reason)
+	}
+
+	// A body no pre-pass ever stamped enforces nothing (graceful degradation).
+	if reason, violated := app.packageBinderLawSweep(headings + "\nNever stamped."); violated {
+		t.Fatalf("unstamped binder bodies must not be swept, got: %s", reason)
+	}
+}
+
+// The pre-pass stamps interlockFindings JSON on the binder artifact (and its
+// goal parent), feeds the deliverable prompt through toolPromptForThread, and
+// the package_binder_v1 contract carries the Interlocks section.
+func TestPackageInterlockPrePassStampsBinderMetadataAndPrompt(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	record := createTestPackage(t, app, "Nimbus creator platform", "")
+
+	deck, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus deck outline",
+		"The money slide: the Series A ask is $2M.", "AJ", map[string]string{"artifactContract": "deck_outline_v1"})
+	if err != nil {
+		t.Fatalf("create deck: %v", err)
+	}
+	rigor, _, err := app.createOSArtifactWithMetadata("artifacts", "Nimbus economics scan",
+		"Series A ask: $3M under the base case.", "AJ", map[string]string{"artifactContract": "economics_scan_v1"})
+	if err != nil {
+		t.Fatalf("create rigor companion: %v", err)
+	}
+	for _, id := range []string{deck.ID, rigor.ID} {
+		if _, err := app.attachToPackage(record.ID, "artifact", id, "AJ"); err != nil {
+			t.Fatalf("attach %s: %v", id, err)
+		}
+	}
+
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "goal parent", "Vision: goal.", "AJ",
+		map[string]string{"toolTemplate": "package_assembly"})
+	if err != nil {
+		t.Fatalf("create goal parent: %v", err)
+	}
+	binder, _, err := app.createOSArtifactWithMetadata("workflow", "binder child", "Vision: child.", "AJ", map[string]string{
+		"toolTemplate": "package_assembly",
+		"packageId":    record.ID,
+		"objective":    "assemble the binder for Nimbus",
+		"goalParentId": parent.ID,
+	})
+	if err != nil {
+		t.Fatalf("create binder child: %v", err)
+	}
+
+	// The generation hop: the deliverable prompt carries the MUST-RESOLVE block.
+	prompt, ok := app.toolPromptForThread(scoutAgentThread{ID: "thread-1", Mode: "workflow", Query: "assemble", Artifact: binder})
+	if !ok {
+		t.Fatal("toolPromptForThread must resolve the package_assembly template")
+	}
+	for _, want := range []string{"MUST-RESOLVE", "IL-1", "Interlocks"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("deliverable prompt missing %q", want)
+		}
+	}
+
+	// Findings landed as interlockFindings JSON on the binder AND its parent.
+	for _, id := range []string{binder.ID, parent.ID} {
+		stamped, found := app.osArtifactByID(id)
+		if !found {
+			t.Fatalf("artifact %s not found", id)
+		}
+		decoded := decodePackageInterlockFindings(stamped.Metadata[packageInterlockFindingsMetadataKey])
+		if len(decoded) != 1 || decoded[0].ID != "IL-1" || decoded[0].Severity != interlockSeverityKill {
+			t.Fatalf("artifact %s interlockFindings=%+v, want the stamped IL-1 kill finding", id, decoded)
+		}
+	}
+
+	// A clean package stamps "[]" and tells the binder to say so.
+	clean := createTestPackage(t, app, "Zanzibar merch line", "")
+	cleanBinder, _, err := app.createOSArtifactWithMetadata("workflow", "clean binder", "Vision: clean.", "AJ",
+		map[string]string{"toolTemplate": "package_assembly", "packageId": clean.ID})
+	if err != nil {
+		t.Fatalf("create clean binder: %v", err)
+	}
+	section, ok := app.packageInterlockPrePass(clean.ID, cleanBinder.ID)
+	if !ok || !strings.Contains(section, "came back clean") {
+		t.Fatalf("clean section=%q ok=%v, want the clean-scan instruction", section, ok)
+	}
+	cleanStamped, _ := app.osArtifactByID(cleanBinder.ID)
+	if cleanStamped.Metadata[packageInterlockFindingsMetadataKey] != "[]" {
+		t.Fatalf("clean stamp=%q, want the explicit empty scan record", cleanStamped.Metadata[packageInterlockFindingsMetadataKey])
+	}
+
+	// No package → no pre-pass, no stamp: the binder degrades gracefully.
+	if _, ok := app.packageInterlockPrePass("package-missing", cleanBinder.ID); ok {
+		t.Fatal("pre-pass must not run without a resolvable package")
+	}
+
+	// Grep-style contract pins: the Interlocks section is part of the contract
+	// and the body teaches the machine-checked status-line format.
+	hasHeading := false
+	for _, heading := range toolContractHeadings["package_binder_v1"] {
+		if heading == "Interlocks" {
+			hasHeading = true
+		}
+	}
+	if !hasHeading {
+		t.Fatal("package_binder_v1 contract must require the Interlocks heading (law-sweep enforced)")
+	}
+	body := toolPromptBody("package_assembly")
+	for _, want := range []string{"Interlocks", `"IL-<n> RESOLVED: <how>"`, `"IL-<n> DISCLOSED: <why it ships open>"`, "MUST-RESOLVE"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("package_assembly body missing %q", want)
+		}
+	}
+}
+
 func mustFindPackage(t *testing.T, app *kanbanBoardApp, id string) venturePackageRecord {
 	t.Helper()
 	record, ok := app.venturePackageByID(id)

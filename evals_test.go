@@ -463,7 +463,10 @@ func TestAssistantToolsEndpointGuardedOrderedComplete(t *testing.T) {
 	if !payload.OK {
 		t.Fatal("payload ok=false")
 	}
-	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio}
+	// Wave 4 item 17: the processes group serves fifth, ADDITIVE — the four
+	// lifecycle groups keep their order and their full 12-tool menu, and the
+	// processes group may be empty (it lists registered ProcessDefinitions).
+	wantOrder := []string{toolGroupIdeate, toolGroupPackage, toolGroupMarket, toolGroupPortfolio, toolGroupProcesses}
 	if len(payload.Groups) != len(wantOrder) {
 		t.Fatalf("got %d groups, want %d", len(payload.Groups), len(wantOrder))
 	}
@@ -472,13 +475,16 @@ func TestAssistantToolsEndpointGuardedOrderedComplete(t *testing.T) {
 		if group.ID != wantOrder[i] {
 			t.Fatalf("group %d id=%q, want %q (lifecycle order broken)", i, group.ID, wantOrder[i])
 		}
+		if group.ID == toolGroupProcesses {
+			continue
+		}
 		if len(group.Tools) == 0 {
 			t.Fatalf("group %q is empty", group.ID)
 		}
 		total += len(group.Tools)
 	}
 	if total != 12 {
-		t.Fatalf("payload carries %d tools, want 12", total)
+		t.Fatalf("the four lifecycle groups carry %d tools, want 12 (processes are additive)", total)
 	}
 }
 

@@ -172,7 +172,19 @@ func (app *kanbanBoardApp) toolPromptForThread(thread scoutAgentThread) (string,
 			ctx.PackageName = pkg.Name
 		}
 	}
-	return assembleToolPrompt(tool, ctx), true
+	prompt := assembleToolPrompt(tool, ctx)
+	// package_assembly only: the interlock compiler's deterministic PRE-pass
+	// (packages.go, Wave 4 item 19). The findings ride the generation prompt as
+	// a MUST-RESOLVE block and are stamped on the binder artifact as
+	// interlockFindings JSON so toolLawSweep can re-check the produced body
+	// mechanically. Appended AFTER assembly so a wrapper slot can never clobber
+	// the list; absent package → the binder degrades to the plain contract.
+	if tool.ID == "package_assembly" && app != nil {
+		if section, ok := app.packageInterlockPrePass(packageID, thread.Artifact.ID); ok {
+			prompt += "\n\n" + section
+		}
+	}
+	return prompt, true
 }
 
 // toolReviewInstruction renders the tool's gate rubric as the scoring
@@ -202,7 +214,7 @@ var toolContractHeadings = map[string][]string{
 	"grill_scorecard_v2": {"READINESS:", "Strongest objections", "Tough questions", "Revised ask", "Confidence gate"},
 	"rights_map_v1":      {"Underlying rights", "Rights holders", "Encumbrances", "Open questions", "Readiness stamp"},
 	"economics_scan_v1":  {"Sources and uses", "The waterfall", "Base / up / down", "Hinge assumptions", "Studio position"},
-	"package_binder_v1":  {"One-pager", "Thesis", "Comparables", "Rights readiness", "Economics", "Grill readiness", "Provenance appendix"},
+	"package_binder_v1":  {"One-pager", "Thesis", "Comparables", "Rights readiness", "Economics", "Grill readiness", "Interlocks", "Provenance appendix"},
 	"update_memo_v1":     {"What moved", "Decisions made", "What's next", "What we need", "Provenance"},
 }
 
@@ -232,6 +244,16 @@ func toolLawSweep(tool packagingTool, body string) (string, bool) {
 	if tool.ClientFacing && strings.Contains(body, "—") {
 		return fmt.Sprintf("%s (%s): the copy contains an em dash; client-facing packaging copy never uses em dashes (the packaging copy law). Rewrite those sentences without them.",
 			toolLawSweepPrefix, tool.Contract), true
+	}
+	// package_binder_v1 only: the interlock compiler's enforcement half
+	// (packages.go). The binder's stamped pre-pass findings are re-checked
+	// deterministically against the produced body, so an unresolved MUST-RESOLVE
+	// finding — and any kill-grade vision-deck/rigor-companion contradiction —
+	// short-circuits to a mechanical revise before reviewer tokens are spent.
+	if tool.Contract == "package_binder_v1" && kanbanApp != nil {
+		if reason, violated := kanbanApp.packageBinderLawSweep(body); violated {
+			return reason, true
+		}
 	}
 	return "", false
 }
@@ -651,6 +673,11 @@ reconcile them; anything you cannot reconcile you FLAG, never bury.
 - Actively check for contradictions between sources (a comp value that
   disagrees with the economics, a right the one-pager assumes that the rights
   map flags). Reconcile or flag every one.
+- The engine runs a deterministic interlock PRE-pass across everything
+  attached and may append a MUST-RESOLVE list to this prompt. That list is not
+  optional: every finding gets a status line in the Interlocks section, and a
+  KILL-grade finding (the vision deck contradicting its rigor companion) must
+  be RESOLVED by reconciling the sources, never shipped disclosed-open.
 - Keep a provenance appendix: every section maps to the artifact it came from.
 
 ## OUTPUT CONTRACT — package_binder_v1:
@@ -660,6 +687,14 @@ Comparables         — the comp set and value read.
 Rights readiness    — the rights map's readiness stamp and open items.
 Economics           — the economics scan's headline and hinge assumptions.
 Grill readiness     — the latest READINESS score and the confidence gate.
+Interlocks          — the consistency ledger: what was checked (the pre-pass
+                      MUST-RESOLVE findings plus the package's interlock
+                      rules), what was resolved, and what ships disclosed. One
+                      status line per finding, in the EXACT machine-checked
+                      form "IL-<n> RESOLVED: <how>" or
+                      "IL-<n> DISCLOSED: <why it ships open>". KILL-grade
+                      findings must be RESOLVED. With no findings, state that
+                      the scan came back clean.
 Provenance appendix — a table: each section → the attached artifact it came
                       from; plus any CONTRADICTION FLAGGED and how it was
                       reconciled (or that it remains open).

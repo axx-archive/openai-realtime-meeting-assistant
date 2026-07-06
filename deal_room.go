@@ -14,6 +14,14 @@ package main
 // loading, and id dedupe. Records are UI/workspace state: the raw JSON never
 // enters Scout search or the client memory timeline (registered in
 // isUIStateMemoryKind + the timeline/meeting filters alongside "package").
+//
+// GALLERY (packaging OS §4 "Deal Room becomes an artifact gallery", Wave 4
+// item 19): the binder narrative stays as the escaped cover; below it the
+// package's final/approved artifacts render as a gallery — title, type badge,
+// version, gate outcome + rubric score (the Wave 3 provenance accessors) —
+// with full-fidelity links minted at page-build time. Eligibility is
+// artifactShareEligible, the SAME server-side final+approved rule share links
+// enforce, so a Deal Room token never exposes unapproved work.
 
 import (
 	"crypto/rand"
@@ -22,7 +30,9 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -58,6 +68,10 @@ type dealRoomRecord struct {
 	ResolvedBy  string `json:"resolvedBy,omitempty"`
 	ResolvedAt  string `json:"resolvedAt,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+	// ArtifactOpens maps artifactId -> lastOpenedAt (RFC3339Nano): the
+	// per-artifact debounce stamp for the public gallery's open signal
+	// (recordDealRoomArtifactOpen — the shareLinkRecord.LastOpenedAt twin).
+	ArtifactOpens map[string]string `json:"artifactOpens,omitempty"`
 }
 
 func encodeDealRoom(record dealRoomRecord) (string, error) {
@@ -201,6 +215,82 @@ func packageOwnsArtifact(record venturePackageRecord, artifactID string) bool {
 		}
 	}
 	return false
+}
+
+/* ---------- gallery (spec §4, Wave 4 item 19) ---------- */
+
+// dealRoomGalleryEntry is one gallery row: display fields pre-resolved and the
+// full-fidelity link pre-minted at page-build time (renderDealRoomPage only
+// escapes and lays out).
+type dealRoomGalleryEntry struct {
+	Title       string
+	TypeBadge   string
+	Version     int
+	GateOutcome string
+	RubricScore string
+	Href        string
+}
+
+// dealRoomGalleryEntries assembles the gallery for one active room: the
+// package's attached artifacts newest-first (the packagePayload order),
+// EXCLUDING the cover binder, gated to artifactShareEligible — the share-link
+// final+approved rule, server-side, so the gallery can never surface
+// unapproved work behind the public token. Links:
+//   - html_deck -> the sandboxed render route, with a short-lived render token
+//     minted HERE at page-build time. The Deal Room token already authorizes
+//     this viewer, so a per-page-load token (artifactRenderTokenTTL) is the
+//     correct lifetime — a leaked page goes stale on its own.
+//   - pdf -> the deal-room-scoped asset serve on this same route
+//     (?artifact=<id>). The session-gated /artifacts/blob is never handed to
+//     visitors; serveDealRoomGalleryPDF re-authorizes with the room token and
+//     narrows to THIS package's artifacts only.
+//   - everything else -> badge-only, no link (the escaped cover is the
+//     narrative surface; nothing widens beyond the two full-fidelity types).
+func (app *kanbanBoardApp) dealRoomGalleryEntries(record dealRoomRecord, pkg venturePackageRecord) []dealRoomGalleryEntry {
+	entries := []dealRoomGalleryEntry{}
+	if app == nil {
+		return entries
+	}
+	for index := len(pkg.ArtifactIDs) - 1; index >= 0; index-- {
+		artifactID := strings.TrimSpace(pkg.ArtifactIDs[index])
+		if artifactID == "" || artifactID == record.ArtifactID {
+			continue
+		}
+		artifact, ok := app.osArtifactByID(artifactID)
+		if !ok || !artifactShareEligible(artifact) {
+			continue
+		}
+		entry := dealRoomGalleryEntry{
+			Title:   firstNonEmptyString(artifact.Metadata["title"], artifact.Metadata["threadQuery"], "untitled artifact"),
+			Version: artifactVersion(artifact),
+		}
+		switch kind := artifactType(artifact); kind {
+		case artifactTypeHTMLDeck:
+			entry.TypeBadge = "deck"
+			entry.Href = "/artifacts/render?id=" + url.QueryEscape(artifact.ID) +
+				"&t=" + url.QueryEscape(mintArtifactRenderToken(artifact.ID, time.Now().Add(artifactRenderTokenTTL)))
+		case artifactTypePDF:
+			entry.TypeBadge = artifactTypePDF
+			if _, hasPDF := firstArtifactAssetOfKind(artifact, "pdf"); hasPDF {
+				entry.Href = "/deal-room/" + record.Token + "?artifact=" + url.QueryEscape(artifact.ID)
+			}
+		default:
+			entry.TypeBadge = kind
+		}
+		provenance := artifactProvenance(artifact)
+		entry.GateOutcome = provenance.GateOutcome
+		best := 0.0
+		for _, score := range provenance.RubricScores {
+			if score > best {
+				best = score
+			}
+		}
+		if best > 0 {
+			entry.RubricScore = strconv.FormatFloat(best, 'f', 1, 64)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
 // resolvePackageBinderArtifactID picks the artifact to share: the newest
@@ -582,6 +672,12 @@ func dealRoomPublicHandler(w http.ResponseWriter, r *http.Request) {
 		writeDealRoomNotFound(w)
 		return
 	}
+	// Gallery asset serve: ?artifact=<id> streams ONE package-owned pdf under
+	// this room's own authority — see serveDealRoomGalleryPDF for the scope.
+	if assetArtifactID := strings.TrimSpace(r.URL.Query().Get("artifact")); assetArtifactID != "" {
+		serveDealRoomGalleryPDF(w, record, assetArtifactID)
+		return
+	}
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
 	if !found {
 		writeDealRoomNotFound(w)
@@ -589,18 +685,121 @@ func dealRoomPublicHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	packageName := "Venture package"
 	stage := ""
+	gallery := []dealRoomGalleryEntry{}
 	if pkg, ok := kanbanApp.venturePackageByID(record.PackageID); ok {
 		if strings.TrimSpace(pkg.Name) != "" {
 			packageName = pkg.Name
 		}
 		stage = pkg.Stage
+		gallery = kanbanApp.dealRoomGalleryEntries(record, pkg)
 	}
+
+	// §5 capture: the gallery page open is the share_opened analog, recorded
+	// against the cover binder and debounced like share links.
+	kanbanApp.recordDealRoomArtifactOpen(record, artifact)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderDealRoomPage(packageName, stage, artifact.Text)))
+	_, _ = w.Write([]byte(renderDealRoomPage(packageName, stage, artifact.Text, gallery)))
+}
+
+// serveDealRoomGalleryPDF streams one gallery pdf under the Deal Room token's
+// own authority. SECURITY: /artifacts/blob is session-gated and STAYS that way
+// — Deal Room visitors never touch it. This serve re-authorizes with the
+// (already validated, active) room token and then narrows to an artifact that
+// (1) the token's package OWNS, (2) is share-eligible (final/approved — the
+// gallery rule re-checked per open, so pulling approval kills the link), and
+// (3) is pdf-typed with a stored pdf asset — so blob access never widens
+// beyond the package the token grants. Every miss is the same 404 page (no
+// enumeration).
+func serveDealRoomGalleryPDF(w http.ResponseWriter, record dealRoomRecord, artifactID string) {
+	pkg, ok := kanbanApp.venturePackageByID(record.PackageID)
+	if !ok || !packageOwnsArtifact(pkg, artifactID) {
+		writeDealRoomNotFound(w)
+		return
+	}
+	artifact, found := kanbanApp.osArtifactByID(artifactID)
+	if !found || !artifactShareEligible(artifact) || artifactType(artifact) != artifactTypePDF {
+		writeDealRoomNotFound(w)
+		return
+	}
+	asset, hasPDF := firstArtifactAssetOfKind(artifact, "pdf")
+	if !hasPDF {
+		writeDealRoomNotFound(w)
+		return
+	}
+	data, _, err := getBlob(asset.Ref)
+	if err != nil {
+		log.Errorf("Failed to read deal room pdf blob %s: %v", asset.Ref, err)
+		writeDealRoomNotFound(w)
+		return
+	}
+
+	kanbanApp.recordDealRoomArtifactOpen(record, artifact)
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", blobDownloadFilename(asset.Name, asset.Ref)))
+	if _, err := w.Write(data); err != nil {
+		log.Errorf("Failed to serve deal room pdf %s: %v", artifact.ID, err)
+	}
+}
+
+// dealRoomOpenSignalInterval debounces the open signal per (room, artifact):
+// /deal-room/{token} is a PUBLIC unauthenticated route, so a crawler or a
+// link-prefetching mail client must never grow the RAM-held JSONL store one
+// entry per hit (the shareLinkOpenSignalInterval posture, mirrored).
+const dealRoomOpenSignalInterval = time.Hour
+
+// signalEventDealRoomArtifactOpened is the §5 share_opened analog for the Deal
+// Room gallery: an external viewer opened this package artifact.
+const signalEventDealRoomArtifactOpened = "deal_room_artifact_opened"
+
+// recordDealRoomArtifactOpen stamps the per-artifact last-open on the room
+// record and logs the §5 open signal at most once per
+// dealRoomOpenSignalInterval per (room, artifact). Fail CLOSED on the signal
+// when the debounce state is unreadable (the recordShareLinkOpen precedent);
+// the stamp write itself is log-and-continue — it never fails the serve.
+func (app *kanbanBoardApp) recordDealRoomArtifactOpen(record dealRoomRecord, artifact meetingMemoryEntry) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	now := time.Now().UTC()
+	recordSignal := true
+
+	app.dealRoomMu.Lock()
+	fresh, ok := app.dealRoomByID(record.ID)
+	if !ok {
+		// Fail CLOSED: with the debounce state unreadable, this unauthenticated
+		// producer must not grow the store one entry per hit.
+		recordSignal = false
+		log.Errorf("Failed to stamp deal room open %s: record not found", record.ID)
+	} else {
+		if last, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(fresh.ArtifactOpens[artifact.ID])); parseErr == nil && now.Sub(last) < dealRoomOpenSignalInterval {
+			recordSignal = false
+		}
+		if fresh.ArtifactOpens == nil {
+			fresh.ArtifactOpens = map[string]string{}
+		}
+		fresh.ArtifactOpens[artifact.ID] = now.Format(time.RFC3339Nano)
+		if _, err := app.persistDealRoom(fresh, false); err != nil {
+			log.Errorf("Failed to stamp deal room open %s: %v", record.ID, err)
+		}
+	}
+	app.dealRoomMu.Unlock()
+
+	if !recordSignal {
+		return
+	}
+	app.recordSignalEvent("external", signalEventDealRoomArtifactOpened, signalValenceNeutral, artifact.ID, record.PackageID, map[string]string{
+		"dealRoomId":   record.ID,
+		"artifactType": artifactType(artifact),
+	})
 }
 
 func writeDealRoomNotFound(w http.ResponseWriter) {
@@ -615,9 +814,10 @@ func writeDealRoomNotFound(w http.ResponseWriter) {
 }
 
 // renderDealRoomPage assembles the full self-contained read-only page: the
-// binder body rendered from minimal, injection-safe Markdown plus a provenance
+// binder body rendered from minimal, injection-safe Markdown (the escaped
+// cover, unchanged), the final/approved artifact gallery, and a provenance
 // appendix. All artifact-derived text is HTML-escaped before formatting.
-func renderDealRoomPage(packageName string, stage string, binderBody string) string {
+func renderDealRoomPage(packageName string, stage string, binderBody string, gallery []dealRoomGalleryEntry) string {
 	title := html.EscapeString(strings.TrimSpace(packageName))
 	if title == "" {
 		title = "Deal Room"
@@ -643,9 +843,41 @@ func renderDealRoomPage(packageName string, stage string, binderBody string) str
 	page.WriteString("<article class=\"binder\">")
 	page.WriteString(renderDealRoomBinderHTML(binderBody))
 	page.WriteString("</article>")
+	page.WriteString(renderDealRoomGalleryHTML(gallery))
 	page.WriteString(provenance)
 	page.WriteString("</div></body></html>")
 	return page.String()
+}
+
+// renderDealRoomGalleryHTML lays out the gallery rows. Every artifact-derived
+// span (title, badge, gate outcome) is html.EscapeString-ed before it gets
+// structure — the binder renderer's rule. An empty gallery renders nothing:
+// the cover-only page stays exactly what it was.
+func renderDealRoomGalleryHTML(gallery []dealRoomGalleryEntry) string {
+	if len(gallery) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("<section class=\"gallery\"><h2>Package artifacts</h2><ul>")
+	for _, entry := range gallery {
+		title := html.EscapeString(strings.TrimSpace(entry.Title))
+		out.WriteString("<li>")
+		if entry.Href != "" {
+			out.WriteString("<a href=\"" + html.EscapeString(entry.Href) + "\" target=\"_blank\" rel=\"noopener\">" + title + "</a>")
+		} else {
+			out.WriteString("<span class=\"title\">" + title + "</span>")
+		}
+		out.WriteString("<span class=\"meta\"><span class=\"type\">" + html.EscapeString(entry.TypeBadge) + "</span>")
+		out.WriteString("<span class=\"version\">v" + strconv.Itoa(entry.Version) + "</span>")
+		if entry.GateOutcome != "" || entry.RubricScore != "" {
+			gate := strings.TrimSpace(strings.Join([]string{entry.GateOutcome, entry.RubricScore}, " · "))
+			gate = strings.Trim(gate, " ·")
+			out.WriteString("<span class=\"gate\">" + html.EscapeString(gate) + "</span>")
+		}
+		out.WriteString("</span></li>")
+	}
+	out.WriteString("</ul></section>")
+	return out.String()
 }
 
 const dealRoomPageCSS = `:root{color-scheme:light}
@@ -662,6 +894,17 @@ body{margin:0;background:#eef1f6;color:#1a1d24;font-family:-apple-system,BlinkMa
 .binder ul{margin:.6rem 0;padding-left:1.4rem}
 .binder li{margin:.3rem 0}
 .binder{overflow-x:auto}
+.gallery{margin-top:2rem;padding-top:1.25rem;border-top:1px solid #d5dae4}
+.gallery h2{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:#8a92a2;margin:0 0 .6rem}
+.gallery ul{list-style:none;padding:0;margin:0}
+.gallery li{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;padding:.55rem 0;border-bottom:1px solid #e2e6ee}
+.gallery a{color:#5a2fd0;font-weight:600;text-decoration:none}
+.gallery a:hover{text-decoration:underline}
+.gallery .title{font-weight:600}
+.gallery .meta{display:inline-flex;gap:.45rem;align-items:baseline;font-size:.78rem;color:#5c6472}
+.gallery .type{text-transform:uppercase;letter-spacing:.06em;background:#e6eaf2;border-radius:4px;padding:.1rem .4rem;font-weight:600}
+.gallery .version{color:#8a92a2}
+.gallery .gate{color:#2f7a4f;font-weight:600}
 .provenance{margin-top:2.5rem;padding-top:1.25rem;border-top:1px solid #d5dae4;font-size:.86rem;color:#5c6472}
 .provenance h2{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:#8a92a2;margin:0 0 .5rem}
 .provenance ul{list-style:none;padding:0;margin:0}

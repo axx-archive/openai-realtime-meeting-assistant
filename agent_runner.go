@@ -81,6 +81,10 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 	// key gate. Keyless (no ANTHROPIC_API_KEY) it silently never starts.
 	if agent.name != tasteAnalystAgentName {
 		app.ensureTasteAnalystStarted()
+		// The House-Style Distiller (house_style.go) rides the same seam: the
+		// seventh instance, per-office and Anthropic-keyed, so it registers
+		// alongside on its own key gate too. Keyless it silently never starts.
+		app.ensureHouseStyleDistillerStarted()
 	}
 	interval := agent.interval()
 	if interval <= 0 {

@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -292,6 +294,247 @@ func TestDealRoomListNoCrossUserLeak(t *testing.T) {
 	// Belt-and-braces: caitlyn's room id must not appear anywhere in tim's body.
 	if strings.Contains(timList.Body.String(), caitRoomID) {
 		t.Fatalf("tim's /list leaked caitlyn's room id %q: %s", caitRoomID, timList.Body.String())
+	}
+}
+
+/* ---------- gallery (spec §4, Wave 4 item 19) ---------- */
+
+// approveDealRoomForTest requests + approves a room for the package and
+// returns the public /deal-room/<token> url.
+func approveDealRoomForTest(t *testing.T, admin, member []*http.Cookie, packageID string) string {
+	t.Helper()
+	reqRec := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/request", fmt.Sprintf(`{"packageId":%q}`, packageID), member)
+	if reqRec.Code != http.StatusOK {
+		t.Fatalf("request status=%d body=%s", reqRec.Code, reqRec.Body.String())
+	}
+	id := fmt.Sprint(decodeJSON(t, reqRec)["id"])
+	resolveRec := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/resolve", fmt.Sprintf(`{"id":%q,"action":"approve"}`, id), admin)
+	if resolveRec.Code != http.StatusOK {
+		t.Fatalf("resolve status=%d body=%s", resolveRec.Code, resolveRec.Body.String())
+	}
+	room, _ := decodeJSON(t, resolveRec)["dealRoom"].(map[string]any)
+	url, _ := room["url"].(string)
+	if !strings.HasPrefix(url, "/deal-room/") {
+		t.Fatalf("no minted url in %v", room)
+	}
+	return url
+}
+
+// attachGalleryArtifact creates an artifact with the given metadata and
+// attaches it to the package.
+func attachGalleryArtifact(t *testing.T, packageID, title, body string, extra map[string]string) meetingMemoryEntry {
+	t.Helper()
+	metadata := map[string]string{"title": title}
+	for key, value := range extra {
+		metadata[key] = value
+	}
+	artifact, _, err := kanbanApp.createOSArtifactWithMetadata("research", title, body, "AJ", metadata)
+	if err != nil {
+		t.Fatalf("create gallery artifact %q: %v", title, err)
+	}
+	if _, err := kanbanApp.attachToPackage(packageID, "artifact", artifact.ID, "AJ"); err != nil {
+		t.Fatalf("attach gallery artifact %q: %v", title, err)
+	}
+	return artifact
+}
+
+// seedGalleryPDF stores pdf bytes as a blob and stamps them as the artifact's
+// pdf asset (the render-callback shape).
+func seedGalleryPDF(t *testing.T, artifactID string, pdfBytes []byte) {
+	t.Helper()
+	ref, err := putBlob(pdfBytes, "application/pdf")
+	if err != nil {
+		t.Fatalf("putBlob: %v", err)
+	}
+	if _, err := kanbanApp.appendArtifactAsset(artifactID, artifactAsset{Ref: ref, Mime: "application/pdf", Name: "aurora.pdf", Kind: "pdf"}); err != nil {
+		t.Fatalf("append pdf asset: %v", err)
+	}
+}
+
+func dealRoomOpenSignalCount(t *testing.T, artifactID string) int {
+	t.Helper()
+	count := 0
+	for _, entry := range kanbanApp.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		record, ok := decodeSignalEntry(entry)
+		if ok && record.Event == signalEventDealRoomArtifactOpened && record.ArtifactID == artifactID {
+			count++
+		}
+	}
+	return count
+}
+
+// The gallery renders ONLY final/approved artifacts below the (still escaped,
+// unchanged) binder cover: title + type badge + version + gateOutcome/rubric
+// score, an html_deck linking to the sandboxed render route with a page-build
+// render token that actually authorizes the render, and a pdf linking to the
+// deal-room-scoped serve — never the session-gated blob route. Draft work
+// never appears.
+func TestDealRoomGalleryRendersOnlyApprovedArtifacts(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Aurora\n\nHello <script>alert('xss')</script> world")
+
+	deckBody := "<!doctype html><html><body><h1>Aurora deck</h1></body></html>"
+	deck := attachGalleryArtifact(t, packageID, "Aurora deck", deckBody, map[string]string{
+		"type":        "html_deck",
+		"status":      "approved",
+		"gateOutcome": "passed",
+		"goalPlan":    `{"state":"done","subtasks":[{"id":"s1","review":{"verdict":"pass","score":9.2}}]}`,
+	})
+	attachGalleryArtifact(t, packageID, "Unfinished memo", "# not ready", map[string]string{"status": "draft"})
+	pdfArtifact := attachGalleryArtifact(t, packageID, "Aurora diligence pdf", "flattened export", map[string]string{"type": "pdf", "status": "approved"})
+	seedGalleryPDF(t, pdfArtifact.ID, []byte("%PDF-1.7 aurora flattened"))
+
+	url := approveDealRoomForTest(t, admin, member, packageID)
+	pageRec := dealRoomRequest(t, http.MethodGet, url, "", nil)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("page status=%d", pageRec.Code)
+	}
+	page := pageRec.Body.String()
+
+	// The escaped cover is unchanged: injected script never survives raw.
+	if strings.Contains(page, "<script>alert(") || !strings.Contains(page, "&lt;script&gt;") {
+		t.Fatal("binder cover must stay on the escaped renderer")
+	}
+
+	// Approved entries with badge, version, and gate outcome + rubric score.
+	if !strings.Contains(page, "Aurora deck") || !strings.Contains(page, "Aurora diligence pdf") {
+		t.Fatalf("gallery is missing approved artifacts: %s", page)
+	}
+	if !strings.Contains(page, ">deck</span>") || !strings.Contains(page, ">pdf</span>") {
+		t.Fatalf("gallery is missing type badges: %s", page)
+	}
+	if !strings.Contains(page, ">v1</span>") {
+		t.Fatalf("gallery is missing the version stamp: %s", page)
+	}
+	if !strings.Contains(page, "passed · 9.2") {
+		t.Fatalf("gallery is missing gateOutcome + rubric score: %s", page)
+	}
+	if strings.Contains(page, "Unfinished memo") {
+		t.Fatal("a draft artifact must never appear in the gallery")
+	}
+
+	// The deck href is the sandboxed render route with a token minted at page
+	// build — and that token authorizes the render for real.
+	renderHref := regexp.MustCompile(`/artifacts/render\?id=[^"]+`).FindString(page)
+	if renderHref == "" || !strings.Contains(renderHref, deck.ID) {
+		t.Fatalf("no render link for the deck in page: %s", page)
+	}
+	renderReq := httptest.NewRequest(http.MethodGet, html.UnescapeString(renderHref), nil)
+	renderRec := httptest.NewRecorder()
+	artifactRenderHandler(renderRec, renderReq)
+	if renderRec.Code != http.StatusOK || renderRec.Body.String() != deckBody {
+		t.Fatalf("page-build render token did not authorize the deck: status=%d", renderRec.Code)
+	}
+
+	// The pdf href is the deal-room-scoped serve; the session-gated blob route
+	// is never handed to visitors.
+	if !strings.Contains(page, html.EscapeString(url+"?artifact="+pdfArtifact.ID)) {
+		t.Fatalf("no deal-room-scoped pdf link in page: %s", page)
+	}
+	if strings.Contains(page, "/artifacts/blob") {
+		t.Fatal("gallery must never link the session-gated blob route")
+	}
+}
+
+// The pdf serve is scoped STRICTLY to the package the token grants: an
+// approved pdf attached to a different package 404s, an unattached one 404s,
+// a draft one attached to the right package 404s (approval re-checked per
+// open), a bogus token 404s — and the package's own approved pdf streams the
+// exact blob bytes.
+func TestDealRoomGalleryPDFScopedToPackage(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Aurora\n\nBody.")
+	pdfBytes := []byte("%PDF-1.7 aurora flattened")
+
+	ownPDF := attachGalleryArtifact(t, packageID, "Own pdf", "export", map[string]string{"type": "pdf", "status": "approved"})
+	seedGalleryPDF(t, ownPDF.ID, pdfBytes)
+
+	otherPkg, err := kanbanApp.createVenturePackage("Borealis", "another thesis", "AJ")
+	if err != nil {
+		t.Fatalf("create other package: %v", err)
+	}
+	foreignPDF := attachGalleryArtifact(t, otherPkg.ID, "Foreign pdf", "export", map[string]string{"type": "pdf", "status": "approved"})
+	seedGalleryPDF(t, foreignPDF.ID, pdfBytes)
+
+	unattachedPDF, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Unattached pdf", "export", "AJ", map[string]string{"title": "Unattached pdf", "type": "pdf", "status": "approved"})
+	if err != nil {
+		t.Fatalf("create unattached pdf: %v", err)
+	}
+	seedGalleryPDF(t, unattachedPDF.ID, pdfBytes)
+
+	draftPDF := attachGalleryArtifact(t, packageID, "Draft pdf", "export", map[string]string{"type": "pdf", "status": "draft"})
+	seedGalleryPDF(t, draftPDF.ID, pdfBytes)
+
+	url := approveDealRoomForTest(t, admin, member, packageID)
+
+	own := dealRoomRequest(t, http.MethodGet, url+"?artifact="+ownPDF.ID, "", nil)
+	if own.Code != http.StatusOK {
+		t.Fatalf("own pdf status=%d, want 200", own.Code)
+	}
+	if got := own.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("own pdf content-type=%q", got)
+	}
+	if own.Body.String() != string(pdfBytes) {
+		t.Fatal("own pdf must stream the exact blob bytes")
+	}
+
+	for name, artifactID := range map[string]string{
+		"foreign-package pdf": foreignPDF.ID,
+		"unattached pdf":      unattachedPDF.ID,
+		"draft attached pdf":  draftPDF.ID,
+	} {
+		if recorder := dealRoomRequest(t, http.MethodGet, url+"?artifact="+artifactID, "", nil); recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status=%d, want 404 (blob access must never widen beyond the package)", name, recorder.Code)
+		}
+	}
+
+	// A bad token never reaches the serve, even for an in-scope artifact.
+	if recorder := dealRoomRequest(t, http.MethodGet, "/deal-room/not-a-real-token?artifact="+ownPDF.ID, "", nil); recorder.Code != http.StatusNotFound {
+		t.Fatalf("bogus token pdf status=%d, want 404", recorder.Code)
+	}
+}
+
+// Gallery opens record the §5 deal_room_artifact_opened signal, debounced to
+// at most one per (room, artifact) per hour — a crawler on this public route
+// must never grow the JSONL store per hit.
+func TestDealRoomOpenSignalsDebounced(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, binderID := seedPackageWithBinder(t, "# Aurora\n\nBody.")
+	pdfArtifact := attachGalleryArtifact(t, packageID, "Aurora diligence pdf", "flattened export", map[string]string{"type": "pdf", "status": "approved"})
+	seedGalleryPDF(t, pdfArtifact.ID, []byte("%PDF-1.7 aurora flattened"))
+
+	url := approveDealRoomForTest(t, admin, member, packageID)
+
+	// Two page opens -> ONE signal against the binder cover.
+	for range 2 {
+		if recorder := dealRoomRequest(t, http.MethodGet, url, "", nil); recorder.Code != http.StatusOK {
+			t.Fatalf("page open status=%d", recorder.Code)
+		}
+	}
+	if count := dealRoomOpenSignalCount(t, binderID); count != 1 {
+		t.Fatalf("binder open signals=%d, want 1 (debounced)", count)
+	}
+
+	// Two pdf opens -> ONE signal against the pdf artifact.
+	for range 2 {
+		if recorder := dealRoomRequest(t, http.MethodGet, url+"?artifact="+pdfArtifact.ID, "", nil); recorder.Code != http.StatusOK {
+			t.Fatalf("pdf open status=%d", recorder.Code)
+		}
+	}
+	if count := dealRoomOpenSignalCount(t, pdfArtifact.ID); count != 1 {
+		t.Fatalf("pdf open signals=%d, want 1 (debounced)", count)
+	}
+
+	// The debounce stamps landed on the room record itself.
+	var room dealRoomRecord
+	for _, record := range kanbanApp.dealRoomsSnapshot() {
+		if record.PackageID == packageID {
+			room = record
+			break
+		}
+	}
+	if room.ArtifactOpens[binderID] == "" || room.ArtifactOpens[pdfArtifact.ID] == "" {
+		t.Fatalf("artifactOpens stamps missing: %v", room.ArtifactOpens)
 	}
 }
 

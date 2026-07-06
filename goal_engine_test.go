@@ -26,6 +26,14 @@ type goalResponderRoutes struct {
 	gate      string
 	report    string
 	verify    string
+	// Process runtime routes (Wave 4 item 17): the inline stage model calls.
+	processGate string // the "process gate scorer" dimensions JSON
+	synthesis   string // the "panel synthesizer" output
+	stage       string // the "process stage synthesizer" single-voice output
+	// fallback answers any OTHER system prompt (stage-authored panel persona
+	// prompts are arbitrary text). Empty keeps the strict unexpected-prompt
+	// failure for every non-process test.
+	fallback string
 }
 
 func (routes goalResponderRoutes) responder(t *testing.T) anthropicMessagesResponder {
@@ -47,8 +55,17 @@ func (routes goalResponderRoutes) responder(t *testing.T) anthropicMessagesRespo
 			text = firstNonEmptyString(routes.report, `{"changed":"packaged the IP","headline":"Aurora one-pager ready","gap":"","next":"share with investors","assumed_claim_count":1}`)
 		case strings.Contains(system, "final verifier"):
 			text = firstNonEmptyString(routes.verify, `{"verdict":"pass","reasons":"goal met"}`)
+		case strings.Contains(system, "process gate scorer"):
+			text = firstNonEmptyString(routes.processGate, `{"dimensions":[{"name":"Quality","score":9.5,"gap":""},{"name":"Completeness","score":9.0,"gap":""}],"reasons":"clears the bar"}`)
+		case strings.Contains(system, "panel synthesizer"):
+			text = firstNonEmptyString(routes.synthesis, "Synthesis: the panel agrees.")
+		case strings.Contains(system, "process stage synthesizer"):
+			text = firstNonEmptyString(routes.stage, "Stage output.")
 		default:
-			t.Fatalf("unexpected system prompt: %q", request.System)
+			if routes.fallback == "" {
+				t.Fatalf("unexpected system prompt: %q", request.System)
+			}
+			text = routes.fallback
 		}
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(text)}}, nil
 	}
@@ -59,6 +76,7 @@ type capturedChild struct {
 	subtaskID string
 	authority string
 	mode      string
+	query     string
 }
 
 // installFakeChildRunner replaces startAgentThreadAsync so a launched subtask
@@ -80,6 +98,7 @@ func installFakeChildRunner(t *testing.T) *[]capturedChild {
 			subtaskID: meta["goalSubtaskId"],
 			authority: meta["authority"],
 			mode:      thread.Mode,
+			query:     thread.Query,
 		})
 		mu.Unlock()
 		parent := meta["goalParentId"]
@@ -2511,5 +2530,359 @@ func TestGoalReviewAndGateRouteToReviewModel(t *testing.T) {
 		if models[stage] != orchestratorModel() {
 			t.Fatalf("%s model=%q, want the orchestrator model %q", stage, models[stage], orchestratorModel())
 		}
+	}
+}
+
+// --- The ProcessDefinition runtime (spec §3, Wave 4 item 17) -------------------
+
+// The probe process (writer → gate → human_checkpoint) drives the whole
+// runtime: decompose instantiates the authored stages IN ORDER (never the
+// free-form decomposer — its route is poisoned here), the writer dispatches as
+// the only child, the gate scores inline, the checkpoint parks the goal
+// approval_required-style with the {stageId, question, options} metadata, and
+// resume-with-choice lands the choice and carries the goal to verified.
+func TestProcessGoalInstantiatesStagesParksAndResumesWithChoice(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		// If the free-form decomposer ran, this would block the goal at
+		// decompose — instantiation must never call it.
+		decompose: "not json — the decomposer must not run for a process goal",
+	})
+	launched := installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the process runtime",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	if plan.ProcessID != "process_probe" {
+		t.Fatalf("plan processId=%q, want process_probe", plan.ProcessID)
+	}
+	wantStages := []struct{ id, role, status string }{
+		{"draft", processRoleWriter, subtaskComplete},
+		{"note_gate", processRoleGate, subtaskComplete},
+		{"ship_choice", processRoleHumanCheckpoint, subtaskRunning},
+	}
+	if len(plan.Subtasks) != len(wantStages) {
+		t.Fatalf("plan has %d subtasks, want %d (one per stage): %+v", len(plan.Subtasks), len(wantStages), plan.Subtasks)
+	}
+	for index, want := range wantStages {
+		st := plan.Subtasks[index]
+		if st.ID != want.id || st.Role != want.role {
+			t.Fatalf("subtask %d = %s/%s, want %s/%s (definition stages instantiate in order)", index, st.ID, st.Role, want.id, want.role)
+		}
+		if st.Status != want.status {
+			t.Fatalf("subtask %s status=%q, want %q", st.ID, st.Status, want.status)
+		}
+	}
+	// Only the WRITER dispatched a child thread; inline stages never do.
+	if len(*launched) != 1 || (*launched)[0].subtaskID != "draft" {
+		t.Fatalf("launched children=%+v, want exactly the draft writer", *launched)
+	}
+	// The gate stage left its decision artifact on the record.
+	if gateSt := plan.subtaskByID("note_gate"); gateSt.ArtifactID == "" || gateSt.Review == nil || gateSt.Review.Verdict != goalReviewPass {
+		t.Fatalf("gate stage record missing: %+v", gateSt)
+	}
+
+	// The park: approval metadata + the checkpoint card payload.
+	artifact := mustArtifact(t, app, thread.Artifact.ID)
+	if artifact.Metadata["threadStatus"] != codexJobStatusApprovalRequired || artifact.Metadata["reviewGate"] != "approval_required" {
+		t.Fatalf("checkpoint did not park on the approval surface: %v", artifact.Metadata)
+	}
+	if artifact.Metadata["processId"] != "process_probe" {
+		t.Fatalf("processId metadata=%q, want process_probe", artifact.Metadata["processId"])
+	}
+	var checkpoint goalProcessCheckpoint
+	if err := json.Unmarshal([]byte(artifact.Metadata["checkpoint"]), &checkpoint); err != nil {
+		t.Fatalf("decode checkpoint metadata: %v (%q)", err, artifact.Metadata["checkpoint"])
+	}
+	if checkpoint.StageID != "ship_choice" || checkpoint.Question == "" {
+		t.Fatalf("checkpoint metadata=%+v, want stageId ship_choice with a question", checkpoint)
+	}
+	if len(checkpoint.Options) != 2 || checkpoint.Options[0] != "ship" || checkpoint.Options[1] != "hold" {
+		t.Fatalf("checkpoint options=%v, want [ship hold]", checkpoint.Options)
+	}
+
+	// A choice outside the options is refused; the goal stays parked.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "yolo"); err == nil {
+		t.Fatal("resume accepted a choice that is not one of the checkpoint options")
+	}
+	// The real choice resumes the goal through to verified.
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "ship"); err != nil {
+		t.Fatalf("resumeApprovedGoalWithChoice: %v", err)
+	}
+	plan = waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	if plan.Checkpoint == nil || plan.Checkpoint.Choice != "ship" || plan.Checkpoint.ResolvedAt == "" {
+		t.Fatalf("checkpoint not resolved with the choice: %+v", plan.Checkpoint)
+	}
+	pick := plan.subtaskByID("ship_choice")
+	if pick == nil || pick.Status != subtaskComplete || pick.ArtifactID == "" {
+		t.Fatalf("checkpoint subtask did not complete: %+v", pick)
+	}
+	decision := mustArtifact(t, app, pick.ArtifactID)
+	if !strings.Contains(decision.Text, "ship") || !strings.Contains(decision.Text, "Checkpoint decision") {
+		t.Fatalf("checkpoint decision artifact does not carry the choice: %q", decision.Text)
+	}
+}
+
+// The chosen option must FEED the next stage's input: a writer stage that
+// declares the checkpoint as InputFrom launches with the choice in its query.
+func TestProcessCheckpointChoiceFeedsNextStageInput(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID:          "process_choice_probe",
+		Version:     1,
+		Title:       "Choice Probe",
+		Description: "Test-only: writer, checkpoint, writer.",
+		Authority:   toolAuthorityWorkspaceWrite,
+		Hidden:      true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Draft two directions", Role: processRoleWriter},
+			{ID: "pick", Title: "Pick a direction", Role: processRoleHumanCheckpoint, InputFrom: []string{"w1"},
+				CheckpointSpec: &ProcessCheckpointSpec{Question: "Which direction?", Options: []string{"option-a", "option-b"}}},
+			{ID: "w2", Title: "Write the chosen direction", Role: processRoleWriter, InputFrom: []string{"pick"}},
+		},
+	})
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Choose and write a direction",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_choice_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+
+	if err := app.resumeApprovedGoalWithChoice(thread.Artifact.ID, "aj@shareability.com", "option-b"); err != nil {
+		t.Fatalf("resumeApprovedGoalWithChoice: %v", err)
+	}
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+
+	found := false
+	for _, child := range *launched {
+		if child.subtaskID != "w2" {
+			continue
+		}
+		found = true
+		if !strings.Contains(child.query, "option-b") {
+			t.Fatalf("w2 launch query does not carry the checkpoint choice: %q", child.query)
+		}
+		if !strings.Contains(child.query, "Input from prior stages") {
+			t.Fatalf("w2 launch query does not carry the stage inputs block: %q", child.query)
+		}
+	}
+	if !found {
+		t.Fatalf("the post-checkpoint writer never launched: %+v", *launched)
+	}
+}
+
+// Sidecar-absent render: the stage records a DISCLOSED skip and the process
+// continues to verified — a render stage never blocks a sidecar-less deploy.
+func TestProcessRenderStageSkipsDisclosedWhenSidecarAbsent(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	installFakeChildRunner(t)
+	// The isolated app's temp data dir has no render-runner heartbeat, so
+	// renderSidecarAvailable() is false — exactly the sidecar-absent deploy.
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID:          "process_render_probe",
+		Version:     1,
+		Title:       "Render Probe",
+		Description: "Test-only: writer then render.",
+		Authority:   toolAuthorityWorkspaceWrite,
+		Hidden:      true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Draft the deck", Role: processRoleWriter},
+			{ID: "export", Title: "Export the deck PDF", Role: processRoleRender, InputFrom: []string{"w1"}},
+		},
+	})
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Draft and export the probe deck",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_render_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	export := plan.subtaskByID("export")
+	if export == nil || export.Status != subtaskComplete {
+		t.Fatalf("render stage must complete (skip, not block) when the sidecar is absent: %+v", export)
+	}
+	record := mustArtifact(t, app, export.ArtifactID)
+	if !strings.Contains(record.Text, "Render export skipped") || !strings.Contains(record.Text, "render sidecar not available") {
+		t.Fatalf("render skip is not disclosed: %q", record.Text)
+	}
+	if record.Metadata["renderSkipped"] != "true" {
+		t.Fatalf("render skip metadata missing: %v", record.Metadata)
+	}
+}
+
+// A failing gate re-queues its input stage with the gaps as revision notes,
+// bounded by the stage's MaxRounds, then blocks the goal (no ForceAccept).
+func TestProcessGateReviseRequeuesInputThenBlocks(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		processGate: `{"dimensions":[{"name":"Directness","score":4,"gap":"does not answer the objective"}],"reasons":"misses the point"}`,
+	})
+	launched := installFakeChildRunner(t)
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the failing gate",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateBlocked)
+	gate := plan.subtaskByID("note_gate")
+	if gate == nil || gate.Status != subtaskBlocked {
+		t.Fatalf("gate did not block after its rounds: %+v", gate)
+	}
+	if gate.Revisions != 2 {
+		t.Fatalf("gate revisions=%d, want the probe's MaxRounds 2", gate.Revisions)
+	}
+	// Initial draft launch + one re-queued launch per revise round.
+	if len(*launched) != 3 {
+		t.Fatalf("launched %d writer children, want 3 (initial + 2 gate-driven revisions): %+v", len(*launched), *launched)
+	}
+	// The re-queued writer carried the gate's gaps as revision notes.
+	if !strings.Contains((*launched)[1].query, "does not answer the objective") {
+		t.Fatalf("revision launch query missing the gate gaps: %q", (*launched)[1].query)
+	}
+	if !strings.Contains(plan.Blocker, "note_gate") {
+		t.Fatalf("blocker does not name the gate: %q", plan.Blocker)
+	}
+	// The checkpoint never ran — nothing downstream of a blocked gate executes.
+	if pick := plan.subtaskByID("ship_choice"); pick.Status == subtaskComplete {
+		t.Fatalf("checkpoint ran past a blocked gate: %+v", pick)
+	}
+}
+
+// Panel/judges stages fan out through runGoalPanel inside ONE engine step: the
+// personas answer via the fallback route, the synthesis lands as the stage
+// artifact, and no child thread dispatches for the panel.
+func TestProcessPanelStageRunsInlineThroughRunGoalPanel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{
+		fallback:  `{"take":"the persona speaks"}`,
+		synthesis: "Synthesis: the rivals agree on direction B.",
+	})
+	launched := installFakeChildRunner(t)
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID:          "process_panel_probe",
+		Version:     1,
+		Title:       "Panel Probe",
+		Description: "Test-only: writer then judge panel.",
+		Authority:   toolAuthorityWorkspaceWrite,
+		Hidden:      true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Draft the pitch", Role: processRoleWriter},
+			{ID: "judge", Title: "Judge the pitch", Role: processRoleJudges, InputFrom: []string{"w1"},
+				Personas: []ProcessPersona{
+					{Name: "Skeptical LP", System: "You are a skeptical LP judging the pitch."},
+					{Name: "Story Editor", System: "You are a story editor judging the pitch."},
+				}},
+		},
+	})
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Draft and judge the probe pitch",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_panel_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+
+	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	judge := plan.subtaskByID("judge")
+	if judge == nil || judge.Status != subtaskComplete {
+		t.Fatalf("panel stage did not complete: %+v", judge)
+	}
+	record := mustArtifact(t, app, judge.ArtifactID)
+	if !strings.Contains(record.Text, "Synthesis: the rivals agree on direction B.") {
+		t.Fatalf("panel artifact missing the synthesis: %q", record.Text)
+	}
+	for _, persona := range []string{"Skeptical LP", "Story Editor"} {
+		if !strings.Contains(record.Text, persona) {
+			t.Fatalf("panel artifact missing voice %q: %q", persona, record.Text)
+		}
+	}
+	// The panel ran inline: only the writer dispatched.
+	if len(*launched) != 1 || (*launched)[0].subtaskID != "w1" {
+		t.Fatalf("launched=%+v, want only the writer (the panel is one engine step)", *launched)
+	}
+}
+
+// Budgets override the engine defaults: MaxSubtasks admits a plan the free-form
+// cap would reject, and MaxTokens/WallClock retune the engine for the drive.
+func TestProcessBudgetsOverrideEngineDefaults(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	stages := make([]ProcessStage, 0, goalMaxSubtasks+1)
+	for i := 0; i < goalMaxSubtasks+1; i++ {
+		stages = append(stages, ProcessStage{
+			ID:    fmt.Sprintf("w%d", i+1),
+			Title: fmt.Sprintf("Writer %d", i+1),
+			Role:  processRoleWriter,
+		})
+	}
+	def := ProcessDefinition{
+		ID:          "process_budget_probe",
+		Version:     1,
+		Title:       "Budget Probe",
+		Description: "Test-only: more stages than the free-form cap.",
+		Authority:   toolAuthorityWorkspaceWrite,
+		Hidden:      true,
+		Budgets:     ProcessBudgets{MaxSubtasks: goalMaxSubtasks + 2, MaxTokens: 48000, WallClock: 25 * time.Minute},
+		Stages:      stages,
+	}
+	registerProcessDefinitionForTest(t, def)
+
+	plan := &goalPlan{PlanVersion: goalPlanVersion, ProcessID: def.ID, Authority: codexJobAuthorityWorkspaceWrite, State: goalStateDecompose}
+	if err := instantiateProcessPlan(def, plan); err != nil {
+		t.Fatalf("instantiateProcessPlan under the budget: %v", err)
+	}
+	if len(plan.Subtasks) != goalMaxSubtasks+1 {
+		t.Fatalf("instantiated %d subtasks, want %d (the budget admits past the free-form cap)", len(plan.Subtasks), goalMaxSubtasks+1)
+	}
+	// The identical plan fails under the free-form ceiling — the override is
+	// the budget, not a loosened validator.
+	if err := validateGoalPlanWithLimit(plan, goalMaxSubtasks); err == nil {
+		t.Fatal("the free-form cap should reject this plan; only the process budget admits it")
+	}
+
+	engine := newGoalEngine(app)
+	baseTimeout, baseTokens := engine.timeout, engine.maxTokens
+	engine.applyProcessBudgets(plan)
+	if engine.maxTokens != 48000 {
+		t.Fatalf("maxTokens=%d, want the budget's 48000 (was %d)", engine.maxTokens, baseTokens)
+	}
+	if engine.timeout != 25*time.Minute {
+		t.Fatalf("timeout=%v, want the budget's 25m (was %v)", engine.timeout, baseTimeout)
+	}
+
+	// A plan with no process keeps the defaults untouched.
+	fresh := newGoalEngine(app)
+	fresh.applyProcessBudgets(&goalPlan{})
+	if fresh.timeout != baseTimeout || fresh.maxTokens != baseTokens {
+		t.Fatalf("non-process plan changed the engine envelope: timeout=%v tokens=%d", fresh.timeout, fresh.maxTokens)
 	}
 }

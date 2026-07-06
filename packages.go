@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -717,6 +718,541 @@ func (app *kanbanBoardApp) venturePackagePayloads() []map[string]any {
 		payloads = append(payloads, app.packagePayload(record))
 	}
 	return payloads
+}
+
+/* ---------- Interlock compiler (Wave 4 item 19) ---------- */
+
+// package_assembly's deterministic PRE-pass (packaging OS §3 tail + §4): before
+// the binder model spends a single token, the engine scans everything attached
+// to the package pairwise for the contradictions the binder exists to catch —
+// values carrying the SAME label that disagree (the "$2M ask here, $3M ask
+// there" class), plus the explicit interlocks[] rules the Wave 3 scaffold
+// stores on artifacts (artifactInterlocks, memory_query.go). Findings feed the
+// deliverable prompt as a MUST-RESOLVE list, land on the binder artifact as
+// interlockFindings JSON, and are re-checked mechanically at review time
+// through the law-sweep seam (packageBinderLawSweep) — zero model cost end to
+// end, the toolLawSweep precedent.
+
+// packageInterlockFindingsMetadataKey holds the pre-pass findings on the
+// binder artifact (a JSON array; "[]" records a clean scan, absent means the
+// pre-pass never ran and the sweep enforces nothing).
+const packageInterlockFindingsMetadataKey = "interlockFindings"
+
+const (
+	interlockKindValueCollision = "value_collision"
+	interlockKindRule           = "interlock_rule"
+
+	interlockSeverityMustResolve = "must_resolve"
+	// interlockSeverityKill marks the vision-deck/rigor-companion class (§4's
+	// no-contradiction rule): a MUST-RESOLVE finding between a deck-type and a
+	// memo/rigor-type artifact is kill-condition-grade — the binder must
+	// reconcile it, never ship it disclosed-open.
+	interlockSeverityKill = "kill"
+)
+
+// packageInterlockFinding is one contradiction the pre-pass found. IDs are
+// deterministic (IL-1, IL-2, … in scan order) because the law sweep greps the
+// produced binder for them.
+type packageInterlockFinding struct {
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Severity    string   `json:"severity"`
+	Label       string   `json:"label"`
+	Detail      string   `json:"detail"`
+	ArtifactIDs []string `json:"artifactIds"`
+}
+
+// The three value shapes the scan understands. Conservative on purpose: bare
+// integers ("12 episodes") are NOT values — only money, percentages, and dated
+// quarters/months carry enough intent to compare across artifacts.
+var (
+	interlockMoneyRE   = regexp.MustCompile(`(?i)\$\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:[kmb]n?\b|thousand|million|billion))?`)
+	interlockPercentRE = regexp.MustCompile(`\b\d+(?:\.\d+)?\s?%`)
+	interlockDateRE    = regexp.MustCompile(`(?i)\b(?:q[1-4]\s+20\d{2}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(?:\d{1,2},?\s+)?20\d{2})\b`)
+)
+
+var interlockValueREs = []*regexp.Regexp{interlockMoneyRE, interlockPercentRE, interlockDateRE}
+
+// interlockLabelSegmentRE splits the text before a value at clause boundaries
+// (including colons, so "Slide 9: Series A ask: $2M" labels as "series a ask")
+// so a label never leaks in from the previous clause.
+var interlockLabelSegmentRE = regexp.MustCompile(`[.;!?•|:]|—|–`)
+
+var interlockLabelWordRE = regexp.MustCompile(`[A-Za-z][A-Za-z0-9'\-]*`)
+
+// Connector words trimmed off a label's tail ("the Series A ask is $2M" →
+// "series a ask") and articles off its head. A label keeps >= 2 words after
+// trimming — one-word labels ("revenue") collide constantly across honest
+// artifacts, and the scan flags only exact-label collisions it can defend.
+var interlockLabelTrailingStops = map[string]bool{
+	"is": true, "was": true, "are": true, "be": true, "of": true, "at": true,
+	"to": true, "for": true, "in": true, "on": true, "by": true, "the": true,
+	"a": true, "an": true, "about": true, "around": true, "roughly": true,
+	"approximately": true, "currently": true, "now": true, "says": true,
+	"stays": true, "remains": true, "targets": true, "near": true,
+	"under": true, "over": true,
+}
+
+var interlockLabelLeadingStops = map[string]bool{
+	"the": true, "a": true, "an": true, "our": true, "their": true, "its": true,
+	"this": true, "that": true, "and": true, "with": true, "per": true,
+	"while": true, "but": true, "so": true, "as": true,
+}
+
+const (
+	interlockLabelMaxWords = 6
+	interlockLabelMinWords = 2
+)
+
+// interlockLabelBefore derives the exact label a value is attached to: the
+// last few words of the same clause, connector-trimmed and lowercased. ""
+// means no defensible label — the value is skipped (a missed check is cheap; a
+// false contradiction in front of the binder model is not).
+func interlockLabelBefore(prefix string) string {
+	prefix = strings.TrimRight(prefix, " \t")
+	prefix = strings.TrimSuffix(prefix, ":")
+	segments := interlockLabelSegmentRE.Split(prefix, -1)
+	words := interlockLabelWordRE.FindAllString(strings.ToLower(segments[len(segments)-1]), -1)
+	if len(words) > interlockLabelMaxWords {
+		words = words[len(words)-interlockLabelMaxWords:]
+	}
+	for len(words) > 0 && interlockLabelTrailingStops[words[len(words)-1]] {
+		words = words[:len(words)-1]
+	}
+	for len(words) > 0 && interlockLabelLeadingStops[words[0]] {
+		words = words[1:]
+	}
+	if len(words) < interlockLabelMinWords {
+		return ""
+	}
+	return strings.Join(words, " ")
+}
+
+// interlockMoneySuffixes in check order — longest first so "bn" wins over "b".
+var interlockMoneySuffixes = []struct {
+	suffix string
+	factor float64
+}{
+	{"thousand", 1e3}, {"million", 1e6}, {"billion", 1e9},
+	{"bn", 1e9}, {"k", 1e3}, {"m", 1e6}, {"b", 1e9},
+}
+
+// canonicalInterlockValue normalizes a matched value so "$2M", "$2 million",
+// and "$2,000,000" compare equal — the scan flags disagreements, never
+// formatting differences.
+func canonicalInterlockValue(raw string) string {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	if strings.HasPrefix(lower, "$") {
+		rest := strings.TrimSpace(strings.TrimPrefix(lower, "$"))
+		factor := 1.0
+		for _, candidate := range interlockMoneySuffixes {
+			if strings.HasSuffix(rest, candidate.suffix) {
+				factor = candidate.factor
+				rest = strings.TrimSpace(strings.TrimSuffix(rest, candidate.suffix))
+				break
+			}
+		}
+		rest = strings.ReplaceAll(rest, ",", "")
+		if value, err := strconv.ParseFloat(rest, 64); err == nil {
+			return "$" + strconv.FormatFloat(value*factor, 'f', -1, 64)
+		}
+		return "$" + rest
+	}
+	if strings.HasSuffix(lower, "%") {
+		rest := strings.TrimSpace(strings.TrimSuffix(lower, "%"))
+		if value, err := strconv.ParseFloat(rest, 64); err == nil {
+			return strconv.FormatFloat(value, 'f', -1, 64) + "%"
+		}
+		return rest + "%"
+	}
+	// Dates: lowercase, punctuation dropped, month words truncated to their
+	// 3-letter stem so "January 2027" and "Jan. 2027" compare equal.
+	fields := strings.Fields(strings.NewReplacer(",", " ", ".", " ").Replace(lower))
+	for index, field := range fields {
+		if len(field) > 3 && field[0] >= 'a' && field[0] <= 'z' {
+			fields[index] = field[:3]
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+// interlockCanonType buckets a canonical value so the scan never compares a
+// percentage to a date under a shared label — incomparable types are not a
+// contradiction.
+func interlockCanonType(canon string) string {
+	switch {
+	case strings.HasPrefix(canon, "$"):
+		return "money"
+	case strings.HasSuffix(canon, "%"):
+		return "percent"
+	default:
+		return "date"
+	}
+}
+
+// interlockValueClaim is one (label, value) assertion extracted from one
+// artifact body.
+type interlockValueClaim struct {
+	label string
+	canon string
+	raw   string
+}
+
+// extractInterlockClaims pulls every labeled value from an artifact body, line
+// by line (a label never crosses a line break).
+func extractInterlockClaims(body string) []interlockValueClaim {
+	claims := []interlockValueClaim{}
+	for _, line := range strings.Split(body, "\n") {
+		for _, re := range interlockValueREs {
+			for _, loc := range re.FindAllStringIndex(line, -1) {
+				label := interlockLabelBefore(line[:loc[0]])
+				if label == "" {
+					continue
+				}
+				raw := strings.TrimSpace(line[loc[0]:loc[1]])
+				claims = append(claims, interlockValueClaim{label: label, canon: canonicalInterlockValue(raw), raw: raw})
+			}
+		}
+	}
+	return claims
+}
+
+// artifactInterlockClass buckets an attached artifact for the vision-deck /
+// rigor-companion rule (§4): "deck" is the narrative the room sees, "rigor" is
+// the diligence document standing behind it. Everything else is "".
+func artifactInterlockClass(entry meetingMemoryEntry) string {
+	switch strings.ToLower(strings.TrimSpace(entry.Metadata["artifactContract"])) {
+	case "deck_outline_v1":
+		return "deck"
+	case "research_brief_v2", "economics_scan_v1", "rights_map_v1", "update_memo_v1":
+		return "rigor"
+	}
+	if artifactType(entry) == artifactTypeHTMLDeck {
+		return "deck"
+	}
+	return ""
+}
+
+// packageInterlockFindings runs the deterministic pairwise consistency scan
+// across everything attached to a package: exact-label value collisions
+// between DIFFERENT artifacts, plus the explicit interlocks[] rules stored on
+// attached artifacts whose counterpart is also attached. ok=false only when
+// the package does not resolve; a clean scan returns an empty (non-nil) slice.
+func (app *kanbanBoardApp) packageInterlockFindings(packageID string) ([]packageInterlockFinding, bool) {
+	if app == nil || app.memory == nil {
+		return nil, false
+	}
+	record, ok := app.venturePackageByID(packageID)
+	if !ok {
+		return nil, false
+	}
+	type attachedArtifact struct {
+		entry meetingMemoryEntry
+		title string
+		class string
+	}
+	attached := []attachedArtifact{}
+	attachedIndex := map[string]int{}
+	for _, artifactID := range record.ArtifactIDs {
+		entry, found := app.osArtifactByID(artifactID)
+		if !found {
+			continue
+		}
+		attachedIndex[entry.ID] = len(attached)
+		attached = append(attached, attachedArtifact{
+			entry: entry,
+			title: firstNonEmptyString(entry.Metadata["title"], entry.Metadata["threadQuery"], "untitled artifact"),
+			class: artifactInterlockClass(entry),
+		})
+	}
+
+	findings := []packageInterlockFinding{}
+
+	// (1) Exact-label collisions. Per artifact, (label, value) pairs are
+	// deduplicated so a value repeated inside one document never inflates the
+	// scan; a label then flags only when two DIFFERENT artifacts assert
+	// different canonical values of the same value type — the honest,
+	// conservative read of "same label, numbers disagree".
+	type valueSighting struct {
+		artifactIndex int
+		raw           string
+	}
+	byLabel := map[string]map[string][]valueSighting{}
+	for index, artifact := range attached {
+		seen := map[string]bool{}
+		for _, claim := range extractInterlockClaims(artifact.entry.Text) {
+			key := claim.label + "\x00" + claim.canon
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if byLabel[claim.label] == nil {
+				byLabel[claim.label] = map[string][]valueSighting{}
+			}
+			byLabel[claim.label][claim.canon] = append(byLabel[claim.label][claim.canon], valueSighting{artifactIndex: index, raw: claim.raw})
+		}
+	}
+	labels := make([]string, 0, len(byLabel))
+	for label := range byLabel {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		values := byLabel[label]
+		canons := make([]string, 0, len(values))
+		for canon := range values {
+			canons = append(canons, canon)
+		}
+		sort.Strings(canons)
+		involved := map[int]bool{}
+		kill := false
+		for i := 0; i < len(canons); i++ {
+			for j := i + 1; j < len(canons); j++ {
+				if interlockCanonType(canons[i]) != interlockCanonType(canons[j]) {
+					continue
+				}
+				for _, left := range values[canons[i]] {
+					for _, right := range values[canons[j]] {
+						if left.artifactIndex == right.artifactIndex {
+							continue
+						}
+						involved[left.artifactIndex] = true
+						involved[right.artifactIndex] = true
+						if classes := map[string]bool{
+							attached[left.artifactIndex].class:  true,
+							attached[right.artifactIndex].class: true,
+						}; classes["deck"] && classes["rigor"] {
+							kill = true
+						}
+					}
+				}
+			}
+		}
+		if len(involved) == 0 {
+			continue
+		}
+		parts := []string{}
+		artifactIDs := []string{}
+		seenArtifacts := map[int]bool{}
+		for _, canon := range canons {
+			names := []string{}
+			for _, sighting := range values[canon] {
+				if !involved[sighting.artifactIndex] {
+					continue
+				}
+				names = append(names, attached[sighting.artifactIndex].title+" says "+sighting.raw)
+				if !seenArtifacts[sighting.artifactIndex] {
+					seenArtifacts[sighting.artifactIndex] = true
+					artifactIDs = append(artifactIDs, attached[sighting.artifactIndex].entry.ID)
+				}
+			}
+			if len(names) > 0 {
+				parts = append(parts, strings.Join(names, "; "))
+			}
+		}
+		sort.Strings(artifactIDs)
+		severity := interlockSeverityMustResolve
+		if kill {
+			severity = interlockSeverityKill
+		}
+		findings = append(findings, packageInterlockFinding{
+			Kind:        interlockKindValueCollision,
+			Severity:    severity,
+			Label:       label,
+			Detail:      fmt.Sprintf("%q disagrees across the package: %s.", label, strings.Join(parts, " vs ")),
+			ArtifactIDs: artifactIDs,
+		})
+	}
+
+	// (2) Explicit interlock rules (the Wave 3 scaffold). A rule counts only
+	// when both sides are attached to THIS package; reciprocal stamps of the
+	// same rule collapse to one finding.
+	seenRules := map[string]bool{}
+	for _, artifact := range attached {
+		for _, rule := range artifactInterlocks(artifact.entry) {
+			counterpartIndex, attachedToo := attachedIndex[rule.WithArtifactID]
+			if !attachedToo || rule.WithArtifactID == artifact.entry.ID {
+				continue
+			}
+			pair := []string{artifact.entry.ID, rule.WithArtifactID}
+			sort.Strings(pair)
+			key := strings.Join(pair, "\x00") + "\x00" + strings.ToLower(rule.Rule)
+			if seenRules[key] {
+				continue
+			}
+			seenRules[key] = true
+			severity := interlockSeverityMustResolve
+			if classes := map[string]bool{
+				artifact.class:                   true,
+				attached[counterpartIndex].class: true,
+			}; classes["deck"] && classes["rigor"] {
+				severity = interlockSeverityKill
+			}
+			findings = append(findings, packageInterlockFinding{
+				Kind:        interlockKindRule,
+				Severity:    severity,
+				Label:       rule.Rule,
+				Detail:      fmt.Sprintf("interlock rule between %s and %s: %s. The binder must verify the rule holds across both artifacts.", artifact.title, attached[counterpartIndex].title, rule.Rule),
+				ArtifactIDs: pair,
+			})
+		}
+	}
+
+	for index := range findings {
+		findings[index].ID = fmt.Sprintf("IL-%d", index+1)
+	}
+	return findings, true
+}
+
+// renderInterlockMustResolve turns the pre-pass findings into the MUST-RESOLVE
+// block appended to the binder's deliverable prompt. The IL-<n> status-line
+// format is load-bearing: packageBinderInterlockSweep greps the produced body
+// for it, and the format deliberately carries no em dash (the binder is
+// client-facing copy under the em-dash law).
+func renderInterlockMustResolve(packageName string, findings []packageInterlockFinding) string {
+	var builder strings.Builder
+	builder.WriteString("## INTERLOCK PRE-PASS (deterministic scan, zero model cost) — MUST-RESOLVE\n")
+	if len(findings) == 0 {
+		builder.WriteString("The engine's pairwise consistency scan across everything attached to " + packageName +
+			" came back clean: no exact-label value collisions, no pending interlock rules. Say so in the Interlocks section (what was checked, nothing to resolve or disclose).")
+		return builder.String()
+	}
+	builder.WriteString("The engine scanned every artifact attached to " + packageName + " pairwise before you started. Every finding below MUST appear in your Interlocks section as exactly one status line:\n")
+	builder.WriteString("  \"IL-<n> RESOLVED: <how you reconciled the sources>\"  or\n")
+	builder.WriteString("  \"IL-<n> DISCLOSED: <why it ships open>\"\n")
+	builder.WriteString("A [KILL] finding is kill-condition-grade (the vision deck contradicts its rigor companion): it MUST be RESOLVED by reconciling the sources, never disclosed — the deterministic law sweep rejects the binder otherwise.\n")
+	for _, finding := range findings {
+		tag := "MUST-RESOLVE"
+		if finding.Severity == interlockSeverityKill {
+			tag = "KILL"
+		}
+		fmt.Fprintf(&builder, "- %s [%s] %s\n", finding.ID, tag, finding.Detail)
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+// packageInterlockPrePass is the compiler's write half, run when the
+// package_assembly deliverable prompt is assembled (toolPromptForThread):
+// compute the findings, stamp them as interlockFindings JSON on the binder
+// artifact (and on its goal parent — the binder of record the Deal Room
+// reads), and return the MUST-RESOLVE prompt block. ok=false when the package
+// does not resolve — the binder then degrades to the pre-compiler contract.
+func (app *kanbanBoardApp) packageInterlockPrePass(packageID string, binderArtifactID string) (string, bool) {
+	findings, ok := app.packageInterlockFindings(packageID)
+	if !ok {
+		return "", false
+	}
+	record, _ := app.venturePackageByID(packageID)
+	if encoded, err := json.Marshal(findings); err == nil {
+		stampIDs := []string{strings.TrimSpace(binderArtifactID)}
+		if binder, found := app.osArtifactByID(binderArtifactID); found {
+			if parentID := strings.TrimSpace(binder.Metadata["goalParentId"]); parentID != "" {
+				stampIDs = append(stampIDs, parentID)
+			}
+		}
+		for _, stampID := range stampIDs {
+			if stampID == "" {
+				continue
+			}
+			// Metadata-only stamp (the setOSArtifactInterlocks seam): bookkeeping,
+			// never a version mint. Log-and-continue — a failed stamp must not
+			// block the binder run.
+			if _, _, stampErr := app.memory.updateOSArtifactMetadata(stampID, map[string]string{packageInterlockFindingsMetadataKey: string(encoded)}); stampErr != nil {
+				log.Errorf("Failed to stamp interlockFindings on artifact %s: %v", stampID, stampErr)
+			}
+		}
+	}
+	return renderInterlockMustResolve(record.Name, findings), true
+}
+
+// decodePackageInterlockFindings reads the stamped JSON back; malformed or
+// absent metadata reads as no findings (the artifactInterlocks discipline).
+func decodePackageInterlockFindings(raw string) []packageInterlockFinding {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var decoded []packageInterlockFinding
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil
+	}
+	return decoded
+}
+
+func isInterlockIDChar(c byte) bool {
+	return c == '-' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+// interlockStatusLine finds the first body line carrying the finding id as a
+// whole token (so IL-1 never matches inside IL-10). "" means the finding is
+// missing from the binder.
+func interlockStatusLine(body string, findingID string) string {
+	for _, line := range strings.Split(body, "\n") {
+		from := 0
+		for {
+			at := strings.Index(line[from:], findingID)
+			if at < 0 {
+				break
+			}
+			at += from
+			end := at + len(findingID)
+			startsClean := at == 0 || !isInterlockIDChar(line[at-1])
+			endsClean := end >= len(line) || !isInterlockIDChar(line[end])
+			if startsClean && endsClean {
+				return line
+			}
+			from = end
+		}
+	}
+	return ""
+}
+
+// packageBinderInterlockSweep is the deterministic enforcement half of the
+// compiler: every stamped finding must appear in the produced binder with an
+// explicit RESOLVED/DISCLOSED status line, and a kill-grade finding (vision
+// deck vs rigor companion) must be RESOLVED. Reasons open with
+// toolLawSweepPrefix so the engine stamps the verdict as mechanical and
+// short-circuits to revise (goal_engine.go's law-sweep seam) — which is
+// exactly how the existing gate machinery enforces the kill flag.
+func packageBinderInterlockSweep(findings []packageInterlockFinding, body string) (string, bool) {
+	for _, finding := range findings {
+		line := interlockStatusLine(body, finding.ID)
+		if line == "" {
+			return fmt.Sprintf("%s (package_binder_v1): interlock finding %s (%s) is missing from the Interlocks section. Add \"%s RESOLVED: <how>\" or \"%s DISCLOSED: <why it ships open>\".",
+				toolLawSweepPrefix, finding.ID, finding.Label, finding.ID, finding.ID), true
+		}
+		upper := strings.ToUpper(line)
+		resolved := strings.Contains(upper, "RESOLVED") && !strings.Contains(upper, "UNRESOLVED")
+		disclosed := strings.Contains(upper, "DISCLOSED")
+		if !resolved && !disclosed {
+			return fmt.Sprintf("%s (package_binder_v1): interlock finding %s carries no explicit status. Mark it \"%s RESOLVED: <how>\" or \"%s DISCLOSED: <why it ships open>\".",
+				toolLawSweepPrefix, finding.ID, finding.ID, finding.ID), true
+		}
+		if finding.Severity == interlockSeverityKill && !resolved {
+			return fmt.Sprintf("%s (package_binder_v1): interlock finding %s is kill-condition-grade: the vision deck and its rigor companion contradict each other (%s). A kill-grade contradiction never ships disclosed-open; reconcile the source artifacts and mark it \"%s RESOLVED: <how>\".",
+				toolLawSweepPrefix, finding.ID, finding.Label, finding.ID), true
+		}
+	}
+	return "", false
+}
+
+// packageBinderLawSweep resolves a produced binder body back to its stamped
+// pre-pass findings (exact-text match over artifacts carrying the stamp — the
+// engine's law sweep hands us the body alone) and runs the interlock sweep.
+// No stamp anywhere → no enforcement: binders that predate the compiler, and
+// packages that never ran the pre-pass, degrade gracefully.
+func (app *kanbanBoardApp) packageBinderLawSweep(body string) (string, bool) {
+	if app == nil || app.memory == nil || strings.TrimSpace(body) == "" {
+		return "", false
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		raw := strings.TrimSpace(entry.Metadata[packageInterlockFindingsMetadataKey])
+		if raw == "" || entry.Text != body {
+			continue
+		}
+		return packageBinderInterlockSweep(decodePackageInterlockFindings(raw), body)
+	}
+	return "", false
 }
 
 /* ---------- Scout tools ---------- */

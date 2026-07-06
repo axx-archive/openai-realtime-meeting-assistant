@@ -16400,6 +16400,42 @@
         animation: goalcard-spark 520ms var(--ease-out) forwards;
       }
       .goalcard__wait { font: var(--type-caption); color: var(--warn); }
+      /* checkpoint choice card (Wave 4 item 18): a goal parked at a process
+         human_checkpoint re-uses the confirmation-card grammar — one legible
+         question, review doors, tappable choices — inside the goalcard
+         terminal. No new card system; these lines only shape the options. */
+      .goalcard__checkpoint { display: flex; flex-direction: column; gap: 8px; }
+      .goalcard__checkpoint-question { font: var(--type-body-medium); color: var(--text-1); text-wrap: balance; }
+      .goalcard__checkpoint-brief {
+        font: var(--type-caption);
+        color: var(--text-2);
+        white-space: pre-wrap;
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px 10px;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+      }
+      .goalcard__choice {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-body);
+        padding: 10px 12px;
+        cursor: pointer;
+        white-space: pre-wrap;
+        transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .goalcard__choice:hover { border-color: var(--agent); }
+      .goalcard__choice:active { transform: scale(var(--press-scale)); }
+      .goalcard__choice[disabled] { opacity: 0.55; cursor: default; }
+      /* process-stage disclosure lines in the working log (skips, exports, choices) */
+      .goalcard__work-line--detail { padding-left: 14px; color: var(--text-3); }
       /* compressed 5-node rail on narrow screens (ux §1.8) */
       .goalcard__rail-count { display: none; font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-2); margin-left: 8px; }
       @media (max-width: 640px) {
@@ -29103,8 +29139,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         input.focus()
       }
 
-      async function submitApproval(id, action, reason) {
-        const { ok } = await postAuthJSON('/artifacts/action', { id, action, reason })
+      async function submitApproval(id, action, reason, choice) {
+        // choice is the human_checkpoint pick (Wave 4 item 18): it rides the
+        // SAME /artifacts/action approve seam so a checkpoint resume and a ship
+        // approval share one door. Sent only when present, so every existing
+        // approve/reject caller posts an unchanged body.
+        const body = { id, action, reason }
+        if (String(choice || '').trim()) body.choice = String(choice).trim()
+        const { ok } = await postAuthJSON('/artifacts/action', body)
         if (!ok) {
           setLog && setLog('could not record that decision.')
         }
@@ -31567,13 +31609,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } catch { /* recents are best-effort */ }
       }
 
-      // group → a small glyph (ember-tinted well). One SVG per lifecycle group.
+      // group → a small glyph (ember-tinted well). One SVG per lifecycle group,
+      // plus the fifth additive group (authored processes, Wave 4 item 18): a
+      // stage-over-stage pipeline mark, so a process tile reads as a pipeline
+      // at a glance while the four lifecycle groups stay untouched.
       function paletteGroupGlyph(group) {
         const glyphs = {
           ideate: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.5h6c0-1.2.4-1.9 1-2.5A6 6 0 0 0 12 3Z"/>',
           package: '<path d="m3 8 9-5 9 5v8l-9 5-9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
           market: '<path d="M4 20V10M10 20V4M16 20v-7M4 20h16"/>',
-          portfolio: '<path d="M4 6h16M4 12h16M4 18h10"/>'
+          portfolio: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+          processes: '<rect x="4" y="3" width="16" height="5" rx="1.5"/><rect x="4" y="16" width="16" height="5" rx="1.5"/><path d="M12 8v5m-3-2.5 3 2.5 3-2.5"/>'
         }
         return glyphs[group] || glyphs.package
       }
@@ -32236,7 +32282,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // of 2)") instead of the subtask title — the monotonic-percent fix stops
         // the bar oscillating; this closes the loop by saying why it paused.
         const revisionNote = String(m.goalRevisionNote || '').trim()
-        const detail = (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
+        // a parked human_checkpoint owns the stage line: the question IS the
+        // status ("Waiting for approval · Which spine ships?"), not a generic wait
+        const pendingCheckpoint = goalPendingCheckpoint(artifact, plan)
+        const detail = (state === 'gate' && pendingCheckpoint)
+          ? String(pendingCheckpoint.question || '')
+          : (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
         const label = goalStageLabel[currentStage] || goalStageLabel[Object.keys(goalStageLabel)[currentIndex]] || 'Working'
         const nextText = detail ? `${label} · ${detail}` : label
         if (stageLine && stageLine.textContent !== nextText) {
@@ -32257,12 +32308,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const pctEl = card.querySelector('[data-goal-pct]')
         pctEl.textContent = Number.isFinite(pct) ? `${Math.round(pct)}%` : (state === 'complete' ? '100%' : '')
 
-        // working log
+        // working log — stage titles come from the process definition (the
+        // instantiated plan carries them verbatim); process stages add one
+        // disclosure line each (skips, export status, gate scores, choices)
         const working = card.querySelector('[data-goal-working]')
         working.replaceChildren()
         for (const task of subtasks) {
           const icon = task.status === 'complete' ? '●' : task.status === 'running' ? '◍' : task.status === 'failed' ? '✕' : '○'
           working.appendChild(bfEl('div', 'goalcard__work-line', `${icon} ${task.title || task.id}`))
+          const stageDetail = goalProcessStageDetail(task, plan)
+          if (stageDetail) working.appendChild(bfEl('div', 'goalcard__work-line goalcard__work-line--detail', stageDetail))
         }
         if (!subtasks.length) working.appendChild(bfEl('div', 'goalcard__work-line', 'planning the work…'))
 
@@ -32274,6 +32329,155 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const mm = String(Math.floor(secs / 60)).padStart(2, '0')
         const ss = String(secs % 60).padStart(2, '0')
         return `${mm}:${ss}`
+      }
+
+      // ---- process visibility + checkpoint cards (Wave 4 item 18) -----------
+
+      // goalProcessStageDetail — one disclosure line under a process stage's
+      // working-log entry. Free-form goals (no role) render nothing extra.
+      // Disclosed skips read "skipped: <reason>" (the engine's honest record);
+      // render stages surface the PDF export's live status (the renderStatus
+      // stamp on the SOURCE artifact when it is loaded, else the queue note);
+      // gates show their score; checkpoints show whose call it is / what was
+      // chosen; panels/judges show the synthesis note.
+      function goalProcessStageDetail(task, plan) {
+        const role = String(task?.role || '')
+        if (!role) return ''
+        const reasons = String(task?.review?.reasons || '')
+        // any stage the engine skipped with a disclosed reason, e.g.
+        // "render skipped (disclosed): no brand assets" → "skipped: no brand assets"
+        const skipped = reasons.match(/skipped \(disclosed\):\s*(.+)/)
+        if (skipped) return `skipped: ${skipped[1]}`
+        if (role === 'render') {
+          const sourceTask = (task.dependsOn || [])
+            .map(id => (plan?.subtasks || []).find(candidate => candidate.id === id))
+            .find(candidate => candidate && candidate.artifactId)
+          const source = sourceTask
+            ? (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(entry => entry.id === sourceTask.artifactId)
+            : null
+          const status = String(source?.metadata?.renderStatus || '').trim()
+          if (status) return `pdf export · ${status}`
+          if (reasons.startsWith('render export queued')) return 'pdf export · queued'
+          return ''
+        }
+        if (role === 'gate') {
+          const score = Number(task?.review?.score)
+          if (task.status === 'complete' && Number.isFinite(score) && score > 0) return `gate · scored ${score.toFixed(1)}`
+          return ''
+        }
+        if (role === 'human_checkpoint') {
+          if (task.status === 'complete') return reasons.replace(/^human checkpoint:\s*/, 'choice: ')
+          if (task.status === 'running' || task.status === 'ready') return 'waiting on your call'
+          return ''
+        }
+        if (role === 'panel' || role === 'judges') {
+          const seats = reasons.match(/(\d+)-seat/)
+          if (task.status === 'complete' && seats) return `${seats[1]} voices, synthesized`
+          return ''
+        }
+        return ''
+      }
+
+      // goalPendingCheckpoint — the human_checkpoint a process goal is parked
+      // on: the persisted plan's record wins; the metadata["checkpoint"] mirror
+      // covers a consumer holding only the artifact row. A resolved checkpoint
+      // (resolvedAt set) renders nothing — the goal is running again.
+      function goalPendingCheckpoint(artifact, plan) {
+        let checkpoint = plan?.checkpoint || null
+        if (!checkpoint) {
+          const raw = artifact?.metadata?.checkpoint
+          if (raw) {
+            try { checkpoint = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { checkpoint = null }
+          }
+        }
+        if (!checkpoint || checkpoint.resolvedAt || !String(checkpoint.question || '').trim()) return null
+        return checkpoint
+      }
+
+      // goalCardRenderCheckpoint — the checkpoint choice card, reusing the
+      // confirmation-card grammar (one legible question, editable inputs, a
+      // tap that is the ONLY thing that resumes — never silent). Three shapes
+      // from one renderer, all driven by the persisted {stageId, question,
+      // options}: options present → tappable choice cards (the COMPETE winner
+      // pick — the option strings carry the spines, and the review door +
+      // inline brief expose the judges' scores and steals behind them); no
+      // options → one notes input whose text IS the {choice} (the INTAKE
+      // fields, the founder pass's do_not_touch notes) beside the "review the
+      // draft" door. Resume posts the EXISTING approve seam with {choice}.
+      // The node persists per card+stage (the survey-chips pattern) so the
+      // terminal's re-renders never wipe a half-typed note.
+      function goalCardRenderCheckpoint(terminal, card, artifact, plan, checkpoint) {
+        const stageId = String(checkpoint.stageId || '')
+        if (card.__checkpointNode && card.__checkpointStageId === stageId) {
+          terminal.appendChild(card.__checkpointNode)
+          return
+        }
+        const wrap = bfEl('div', 'goalcard__checkpoint')
+        wrap.appendChild(bfEl('div', 'goalcard__result', 'Your call — the run is parked'))
+        wrap.appendChild(bfEl('div', 'goalcard__checkpoint-question', String(checkpoint.question || 'Approve this stage to continue?')))
+
+        // "review the draft" doors: every input stage that produced an artifact
+        // (the founder-pass draft, the COMPETE synthesis with judge scores and
+        // best_beats_to_steal) opens in the full artifact viewer.
+        const stageTask = (plan?.subtasks || []).find(task => task.id === stageId)
+        const inputTasks = (stageTask?.dependsOn || [])
+          .map(id => (plan?.subtasks || []).find(task => task.id === id))
+          .filter(task => task && task.artifactId)
+        if (inputTasks.length) {
+          const doors = bfEl('div', 'goalcard__terminal-actions')
+          for (const input of inputTasks) {
+            const door = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ review: ${input.title || input.id}`)
+            door.type = 'button'
+            door.addEventListener('click', () => openAgentArtifact({ id: input.artifactId }))
+            doors.appendChild(door)
+          }
+          wrap.appendChild(doors)
+          // inline brief: the first input's body, when the library has it —
+          // the judge scores and steals are readable without leaving the card
+          const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === inputTasks[0].artifactId)
+          const briefText = String(entry?.text || '').trim()
+          if (briefText) wrap.appendChild(bfEl('div', 'goalcard__checkpoint-brief', briefText))
+        }
+
+        if (!canApproveExternalWrites()) {
+          // the resume seam is admin-gated server-side; mirror it honestly
+          wrap.appendChild(bfEl('div', 'goalcard__wait', 'waiting on AJ'))
+        } else {
+          const post = (choice) => {
+            wrap.querySelectorAll('button, input, textarea').forEach(el => { el.disabled = true })
+            submitApproval(artifact.id, 'approve', '', choice)
+            goalCardScheduleSync()
+          }
+          const options = Array.isArray(checkpoint.options) ? checkpoint.options.map(option => String(option || '').trim()).filter(Boolean) : []
+          if (options.length) {
+            for (const option of options) {
+              const choiceBtn = bfEl('button', 'goalcard__choice', option)
+              choiceBtn.type = 'button'
+              choiceBtn.addEventListener('click', () => post(option))
+              wrap.appendChild(choiceBtn)
+            }
+          } else {
+            // free-form checkpoint: the typed text IS the {choice} the next
+            // stage reads as grounding (INTAKE answers, do_not_touch notes)
+            const field = bfEl('div', 'palette__form-field')
+            field.appendChild(bfEl('label', 'palette__form-label', 'notes for the next stage (do_not_touch, answers, must-keeps)'))
+            const notes = document.createElement('textarea')
+            notes.className = 'palette__field'
+            notes.rows = 3
+            notes.placeholder = 'do_not_touch: …'
+            field.appendChild(notes)
+            wrap.appendChild(field)
+            const actions = bfEl('div', 'goalcard__terminal-actions')
+            const go = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Continue ▸')
+            go.type = 'button'
+            go.addEventListener('click', () => post(String(notes.value || '').trim()))
+            actions.appendChild(go)
+            wrap.appendChild(actions)
+          }
+        }
+        card.__checkpointStageId = stageId
+        card.__checkpointNode = wrap
+        terminal.appendChild(wrap)
       }
 
       function goalCardRenderTerminal(card, artifact, plan, state, prevState) {
@@ -32310,6 +32514,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (state === 'gate') {
+          // a process human_checkpoint parks on the same approval state as the
+          // ship gate; when one is pending it OWNS the terminal — the choice
+          // card, not the generic approve/send-back pair.
+          const pendingCheckpoint = goalPendingCheckpoint(artifact, plan)
+          if (pendingCheckpoint) {
+            goalCardRenderCheckpoint(terminal, card, artifact, plan, pendingCheckpoint)
+            return
+          }
           terminal.appendChild(bfEl('div', 'goalcard__result', 'Review before shipping'))
           const reason = plan?.gate?.reason || artifact.metadata?.reviewReason
           if (reason) terminal.appendChild(bfEl('div', 'goalcard__work-line', reason))
