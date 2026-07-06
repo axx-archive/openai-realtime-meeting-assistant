@@ -58,7 +58,9 @@ func TestIndexArtifactStageContract(t *testing.T) {
 			t.Errorf("index.html missing artifact stage style %q", want)
 		}
 	}
-	body := functionBody(html, "async function openArtifactStage(artifactId, fallbackTitle)")
+	// the third parameter is the manifest card's present routing
+	// (frontend_manifest_test.go pins it) — the stage contract is unchanged
+	body := functionBody(html, "async function openArtifactStage(artifactId, fallbackTitle, options)")
 	if body == "" {
 		t.Fatal("could not extract openArtifactStage body")
 	}

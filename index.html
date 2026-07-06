@@ -7517,11 +7517,46 @@
         display: flex;
         flex-direction: column;
         align-items: stretch;
-        gap: 12px;
+        /* sheet turn-3 rhythm: ~6px within a group, 24-28px between voices —
+           the gap carries the in-group beat, per-voice margins add the rest */
+        gap: 6px;
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
         padding: 20px;
+      }
+      /* hierarchy of attention (sheet turn 3): a new voice opens 24px of
+         air; the room's centered lines take 28px; machine cards follow
+         their narration line at 12px */
+      .scout-chat-thread > .scout-chat-msg:not(.is-followup) { margin-top: 18px; }
+      .scout-chat-thread > .scout-chat-system { margin-top: 22px; }
+      .scout-chat-thread > .scout-chat-daybreak { margin-top: 22px; }
+      .scout-chat-thread > .goalcard,
+      .scout-chat-thread > .runlog,
+      .scout-chat-thread > .scout-chat-research,
+      .scout-chat-thread > .scout-proposal-card,
+      .scout-chat-thread > .returncard { margin-top: 6px; }
+      .scout-chat-thread > :first-child { margin-top: 0; }
+
+      /* sheet 2f/3a date divider — "sunday · jul 5" between hairlines */
+      .scout-chat-daybreak {
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .scout-chat-daybreak::before,
+      .scout-chat-daybreak::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--line-1);
+      }
+      .scout-chat-daybreak__label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
       }
 
       /* the PiP docks bottom-right (design geometry) — the feed keeps its
@@ -7632,22 +7667,22 @@
         transform: scale(var(--press-scale));
       }
 
+      /* sheet 2b: "just answer instead" is an outlined pill beside Run it */
       .scout-proposal-card__escape {
         min-height: 38px;
-        padding: 0 12px;
-        border: 0;
+        padding: 0 16px;
+        border: 1px solid var(--line-2);
         border-radius: var(--r-full);
         background: transparent;
-        color: var(--text-3);
+        color: var(--text-1);
         font: var(--type-label-lg);
         letter-spacing: var(--track-label);
         cursor: pointer;
-        text-decoration: underline;
-        text-underline-offset: 3px;
+        transition: border-color var(--dur-fast) var(--ease);
       }
 
       .scout-proposal-card__escape:hover {
-        color: var(--text-1);
+        border-color: var(--text-3);
       }
 
       .scout-proposal-card__resolved {
@@ -7660,6 +7695,354 @@
       .scout-proposal-card.is-resolved {
         opacity: 0.72;
       }
+
+      /* ---------- Quick-reply pills (conversational intent layer) ----------
+         The dialogue design's quick-reply grammar: Scout's ONE clarifying
+         question renders as a normal scout bubble with 2-4 pills beneath —
+         the sheet's secondary-pill spec (999px radius, hairline border,
+         label type). Tapping a pill sends that text as the user's reply; a
+         tool-armed pill only ARMS the proposal card — never a launch. A
+         resolved card keeps the chosen pill lit and the rest recede. */
+      .scout-choices {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 2px 0 4px;
+        max-width: 480px;
+      }
+
+      .scout-choices__pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 32px;
+        padding: 0 14px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-2, var(--line-1));
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .scout-choices__pill:hover:not([disabled]) {
+        border-color: var(--text-3);
+        background: var(--surface-2);
+      }
+
+      .scout-choices__pill:active:not([disabled]) {
+        transform: scale(var(--press-scale));
+      }
+
+      /* the "arms a run" marker: a tool pill leads to the proposal card */
+      .scout-choices__arm {
+        font-size: 10px;
+        color: var(--text-3);
+      }
+
+      .scout-choices.is-resolved .scout-choices__pill {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .scout-choices.is-resolved .scout-choices__pill.is-selected {
+        opacity: 1;
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--on-accent, #fff);
+      }
+
+      .scout-choices.is-resolved .scout-choices__pill.is-selected .scout-choices__arm {
+        color: inherit;
+      }
+      /* ---------- end quick-reply pills ---------- */
+
+      /* ---------- Package manifest card (sheet s05 + §2c states) ----------
+         The handover moment: kicker "package · shipped" (green voice) with
+         the right-aligned mono provenance, headline, quiet subline,
+         badge/title/facts deliverable rows with pill actions, amber
+         disclosed-skip bullets, and the mono footer. Held: the whole card
+         mutes to 0.82, actions quiet to open-only, share links stay dark. */
+      .manifest-card {
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+        border-radius: 16px;
+        padding: 17px 20px 14px;
+        margin: 2px 0 4px;
+        max-width: 680px;
+        width: 100%;
+      }
+
+      .manifest-card--held {
+        background: var(--surface-1);
+        opacity: 0.82;
+      }
+
+      .manifest-card__head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .manifest-card__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        white-space: nowrap;
+      }
+
+      .manifest-card__status--shipped {
+        color: var(--live);
+      }
+
+      .manifest-card__status--skips {
+        color: var(--warn);
+      }
+
+      .manifest-card__held-pill {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 9px;
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-2);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+      }
+
+      .manifest-card__provenance {
+        margin-left: auto;
+        font: var(--type-numeric);
+        letter-spacing: var(--track-numeric);
+        color: var(--text-3);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .manifest-card__title {
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+        color: var(--text-1);
+        margin: 8px 0 2px;
+      }
+
+      .manifest-card--held .manifest-card__title {
+        color: var(--text-2);
+      }
+
+      .manifest-card__subline {
+        font: var(--type-caption);
+        color: var(--text-2);
+      }
+
+      .manifest-card--held .manifest-card__subline {
+        color: var(--text-3);
+      }
+
+      .manifest-card__rows {
+        border-top: 1px solid var(--line-1);
+        margin-top: 12px;
+      }
+
+      .manifest-card__row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 2px;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .manifest-card__row:last-child {
+        border-bottom: 0;
+      }
+
+      .manifest-card__rows + .manifest-card__skips,
+      .manifest-card__rows + .manifest-card__foot {
+        border-top: 1px solid var(--line-1);
+      }
+
+      .manifest-card__badge {
+        flex: 0 0 auto;
+        width: 44px;
+        text-align: center;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        border: 1px solid var(--line-1);
+        border-radius: 6px;
+        padding: 5px 0;
+        white-space: nowrap;
+      }
+
+      .manifest-card__row-main {
+        min-width: 0;
+        flex: 1 1 0;
+      }
+
+      .manifest-card__row-title {
+        display: block;
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .manifest-card--held .manifest-card__row-title {
+        color: var(--text-2);
+      }
+
+      .manifest-card__row-facts {
+        display: block;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .manifest-card__row-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+        flex: 0 0 auto;
+        align-items: center;
+      }
+
+      .manifest-card__pill {
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 13px;
+        border-radius: var(--r-full);
+        border: 1px solid transparent;
+        background: transparent;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        text-decoration: none;
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .manifest-card__pill:active {
+        transform: scale(var(--press-scale));
+      }
+
+      .manifest-card__pill--primary {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      .manifest-card__pill--outline {
+        border-color: var(--line-2);
+        color: var(--text-1);
+        padding: 0 12px;
+      }
+
+      .manifest-card__pill--outline:hover {
+        border-color: var(--text-3);
+      }
+
+      /* held quieting: the one remaining door reads as a whisper */
+      .manifest-card--held .manifest-card__pill {
+        background: transparent;
+        border-color: var(--line-1);
+        color: var(--text-3);
+      }
+
+      .manifest-card__skip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 2px 0;
+        font: var(--type-caption);
+        color: var(--warn);
+      }
+
+      .manifest-card__skip:last-of-type {
+        padding-bottom: 10px;
+      }
+
+      .manifest-card__skip-dot {
+        width: 5px;
+        height: 5px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--warn);
+      }
+
+      .manifest-card__skips + .manifest-card__foot {
+        border-top: 1px solid var(--line-1);
+      }
+
+      .manifest-card__foot {
+        display: flex;
+        gap: 16px;
+        align-items: baseline;
+        padding: 12px 2px 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .manifest-card__attached b {
+        font-weight: inherit;
+        color: var(--text-1);
+      }
+
+      .manifest-card__foot-link {
+        background: none;
+        border: 0;
+        padding: 0 0 1px;
+        font: inherit;
+        letter-spacing: inherit;
+        color: var(--text-2);
+        border-bottom: 1px solid var(--line-2);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .manifest-card__foot-link:hover {
+        color: var(--text-1);
+      }
+
+      /* sheet 2h mobile: the actions wrap under the row, aligned past the
+         badge column, instead of crushing the title */
+      @media (max-width: 480px) {
+        .manifest-card__row {
+          flex-wrap: wrap;
+        }
+
+        .manifest-card__row-actions {
+          margin-left: 56px;
+          width: 100%;
+          justify-content: flex-start;
+        }
+      }
+
+      /* "open the deliverable" landed here: one warm breath, then settle */
+      .manifest-card.is-flashed {
+        animation: manifestFlash 1.2s var(--ease) 1;
+      }
+
+      @keyframes manifestFlash {
+        0% { border-color: var(--line-1); }
+        25% { border-color: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 18%, transparent); }
+        100% { border-color: var(--line-1); box-shadow: none; }
+      }
+      /* ---------- end package manifest card ---------- */
 
       /* MessageBubble — you: ink, right; Scout: surface, left; the meta
          line under the bubble is the system's mono voice */
@@ -7681,20 +8064,18 @@
         align-items: flex-start;
       }
 
-      /* design §7.2 row anatomy — avatar beside the bubble stack, 62% cap.
+      /* sheet 3a row anatomy — no avatar discs on bubbles; identity lives in
+         the group header (peers) or the attribution line below (you, scout).
          Scoped to the chat tool; the room-chat rail keeps the column recipe */
       #chatTool .scout-chat-msg {
         flex-direction: row;
         align-items: flex-end;
         gap: 9px;
-        max-width: min(62%, 56ch);
+        max-width: min(480px, 85%);
       }
 
-      /* §3 follow-up grouping: same voice, same author — the avatar yields
-         and the rows tighten so a burst reads as one turn */
-      #chatTool .scout-chat-msg.is-followup {
-        margin-top: -6px;
-      }
+      /* sheet §3 follow-up grouping: same voice, same author — the header
+         yields and the rows sit on the 6px in-group beat */
       .scout-chat-msg.is-followup .scout-chat-msg__avatar {
         visibility: hidden;
       }
@@ -7702,15 +8083,15 @@
         display: none;
       }
 
-      /* §3 longform: past ~400 chars a bubble stops being a bubble — it
-         becomes a reading card on the feed measure, with the author named
-         (the .scout-chat-text recipe lives below the bubble variants so the
-         reading-card skin wins the cascade) */
+      /* sheet §3 letters: past ~400 chars a bubble stops being a bubble — it
+         becomes a letter card on the feed measure with an identity header
+         ("claude · fable 5 · on aj's account · 22:42") and a clamped body
+         behind "read the full letter" */
       #chatTool .scout-chat-msg--longform {
         max-width: min(var(--feed-measure), 92%) !important;
         /* letters sit on the feed spine like every card — authorship stays
-           legible via the author label + the accent top rule, and the feed
-           stops zigzagging left-right as you scroll */
+           legible via the identity header, and the feed stops zigzagging
+           left-right as you scroll */
         align-self: center;
         justify-content: center;
       }
@@ -7718,6 +8099,65 @@
         flex: 1;
         min-width: 0;
       }
+      /* the letter card's identity header row (sheet 3a) */
+      .scout-chat-msg__idrow {
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 6px; /* + the stack's 4px gap = the sheet's 10px */
+      }
+      .scout-chat-msg__idbadge {
+        display: inline-flex;
+        width: 20px;
+        height: 20px;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        flex: none;
+        font: 600 8px/1 var(--font-sans);
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+      .scout-chat-msg__idname {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .scout-chat-msg__idtime {
+        margin-left: auto;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+      }
+      /* the clamp + its expander — wired, not decorative */
+      .scout-chat-msg--longform .scout-chat-text.is-clamped {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .scout-chat-msg__expand {
+        order: 2;
+        align-self: flex-start;
+        margin-top: 10px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease);
+      }
+      .scout-chat-msg__expand:hover { color: var(--text-1); }
 
       #chatTool .scout-chat-msg--user {
         justify-content: flex-end;
@@ -7755,30 +8195,45 @@
         align-items: flex-end;
       }
 
+      /* sheet 3a group header — "Tyler 22:41" above the first bubble */
       .scout-chat-msg__author {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        font: var(--type-caption-medium);
+        color: var(--text-2);
+        padding: 0 4px;
+      }
+      .scout-chat-msg__author-time {
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
-        padding-left: 4px;
+        white-space: nowrap;
       }
 
-      /* disclosure chip: a message Scout posted on the user's behalf. ember
-         (a machine acted), always visible, never hidden. */
-      .scout-chat-msg__via {
+      /* sheet 3a attribution line — "aj · via scout · 22:39" BELOW the
+         bubble, the system's quiet mono voice */
+      .scout-chat-msg__meta {
+        order: 2;
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        padding: 1px 6px;
-        border-radius: var(--r-full);
-        background: var(--agent-soft);
-        color: var(--agent);
-        font: 600 10px/1.4 var(--font-sans);
-        letter-spacing: 0.02em;
-        text-transform: none;
-        vertical-align: middle;
+        gap: 7px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        padding: 0 4px;
+        white-space: nowrap;
       }
-      #chatTool .scout-chat-msg--user .scout-chat-msg__stack .scout-chat-msg__via {
-        margin-left: auto;
+
+      /* disclosure: a message Scout posted on the user's behalf reads
+         "via Scout" on the attribution line — visible, never hidden. The
+         sheet's perfection pass retires the ember chip: settled provenance
+         recedes to the mono line; ember stays reserved for working-NOW. */
+      .scout-chat-msg__via {
+        display: inline;
+        font: inherit;
+        letter-spacing: inherit;
+        color: inherit;
       }
 
       .scout-chat-text {
@@ -7848,18 +8303,27 @@
         color: var(--text-2);
       }
 
+      /* sheet 3a bubble skins — you: ink, 18/18/6/18; others: surface with a
+         hairline, 18/18/18/6; follow-ups tuck the joined corner to 6px */
       .scout-chat-msg--user .scout-chat-text {
         background: var(--accent);
         color: var(--on-accent);
         border: 1px solid transparent;
-        border-radius: 16px 16px 5px 16px;
+        border-radius: 18px 18px 6px 18px;
+      }
+      .scout-chat-msg--user.is-followup .scout-chat-text {
+        border-radius: 18px 6px 6px 18px;
       }
 
       .scout-chat-msg--scout .scout-chat-text {
-        background: var(--surface-3);
+        background: var(--surface-2);
         color: var(--text-1);
-        border: 1px solid transparent;
-        border-radius: 16px 16px 16px 5px;
+        border: 1px solid var(--line-1);
+        border-radius: 18px 18px 18px 6px;
+      }
+      .scout-chat-msg--scout.is-followup .scout-chat-text,
+      .scout-chat-msg--peer.is-followup .scout-chat-text {
+        border-radius: 6px 18px 18px 18px;
       }
 
       /* color = state: an error bubble wears danger, nothing else does */
@@ -7867,22 +8331,29 @@
         background: var(--danger-soft);
         color: var(--danger);
         border: 1px solid transparent;
-        border-radius: 16px 16px 16px 5px;
+        border-radius: 18px 18px 18px 6px;
       }
 
-      /* §3 longform reading card — after the bubble variants so it wins */
+      /* sheet §3 letter card — after the bubble variants so it wins */
       .scout-chat-msg--longform .scout-chat-text {
         align-self: stretch;
-        background: var(--surface-2);
+        background: var(--surface-1);
         color: var(--text-1);
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-lg);
-        padding: 16px 20px;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
         font: var(--type-body-longform);
         letter-spacing: var(--track-text);
-        box-shadow: var(--shadow-1);
+        box-shadow: none;
       }
-      .scout-chat-msg--longform.scout-chat-msg--user .scout-chat-text {
+      /* the card chrome rides the stack so header/body/expander share it */
+      .scout-chat-msg--longform .scout-chat-msg__stack {
+        border: 1px solid var(--line-1);
+        background: var(--surface-1);
+        border-radius: var(--r-lg);
+        padding: 16px 20px 15px;
+      }
+      .scout-chat-msg--longform.scout-chat-msg--user .scout-chat-msg__stack {
         border-top: 2px solid var(--accent);
       }
 
@@ -8365,15 +8836,15 @@
         display: none;
       }
 
-      /* §3 the room's voice: sans caption, centered, quiet — mono stays
-         reserved for telemetry */
+      /* sheet 3a the room's voice: centered mono label, quiet — the same
+         register as every settled system fact */
       .scout-chat-system {
         margin: 0;
         align-self: center;
-        max-width: 52ch;
+        max-width: 60ch;
         text-align: center;
-        font: var(--type-caption);
-        letter-spacing: var(--track-text);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         color: var(--text-3);
         padding: 2px 0;
       }
@@ -8382,7 +8853,7 @@
       .scout-chat-note--park {
         display: inline-flex;
         align-items: center;
-        gap: 7px;
+        gap: 8px;
         color: var(--text-2);
       }
       .scout-chat-note--park::before {
@@ -8392,6 +8863,7 @@
         height: 6px;
         border-radius: var(--r-full);
         background: var(--agent);
+        animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite;
       }
 
       /* §2 the surviving goal marker: one quiet underlined line, not a chip */
@@ -8673,13 +9145,18 @@
         letter-spacing: var(--track-label);
       }
 
-      /* mentions inside sent bubbles get a quiet ink lift, no layout change */
+      /* sheet 3a mention chip — a soft ink lift inside the bubble */
       .scout-chat-mention {
-        font-weight: 600;
-        color: var(--text-1);
-        text-decoration: underline;
-        text-decoration-color: var(--line-1);
-        text-underline-offset: 3px;
+        background: var(--accent-soft);
+        border-radius: 5px;
+        padding: 1px 4px;
+        font-weight: 500;
+        color: inherit;
+      }
+      /* on the ink bubble the soft ink wash vanishes — mix from the bubble's
+         own text color so the chip reads in both themes */
+      .scout-chat-msg--user .scout-chat-mention {
+        background: color-mix(in srgb, currentColor 16%, transparent);
       }
 
       .scout-chat-hint[hidden] {
@@ -8834,10 +9311,10 @@
       }
 
       .scout-chat-msg--peer .scout-chat-text {
-        background: var(--surface-3);
+        background: var(--surface-2);
         color: var(--text-1);
-        border: 1px solid transparent;
-        border-radius: 16px 16px 16px 5px;
+        border: 1px solid var(--line-1);
+        border-radius: 18px 18px 18px 6px;
       }
 
       /* the rail shows one pane at a time — chat swaps in over the Scout
@@ -16448,26 +16925,81 @@
         border-radius: var(--r-lg);
         background: var(--surface-2);
         box-shadow: var(--shadow-1);
-        padding: 16px 18px 14px;
+        padding: 18px 20px 16px;
         margin: 10px 0;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 14px;
       }
-      .goalcard__head { display: flex; align-items: center; gap: 9px; }
-      .goalcard__dot {
+      /* sheet 2d held: the whole card quiets while a human pin stands */
+      .goalcard[data-held="1"] { background: var(--surface-1); opacity: 0.82; }
+      /* sheet 3a parked: the card's edge firms up while it needs a human */
+      .goalcard[data-state="gate"] { border-color: var(--line-2); }
+      /* sheet 2d cancelled: a human stopped it — the card recedes to mono */
+      .goalcard[data-state="cancelled"] { background: var(--surface-1); box-shadow: none; }
+      .goalcard[data-state="cancelled"] .goalcard__rail,
+      .goalcard[data-state="cancelled"] .goalcard__foot,
+      .goalcard[data-state="cancelled"] .goalcard__meta { display: none; }
+      .goalcard__cancelline {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .goalcard[data-state="cancelled"] .goalcard__title { color: var(--text-2); }
+      .goalcard[data-state="cancelled"] .goalcard__badge { display: none; }
+      .goalcard__head { display: flex; align-items: flex-start; gap: 14px; }
+      /* --- the state badge: ring while running, glyph disc once settled --- */
+      .goalcard__badge {
+        position: relative;
         flex: none;
-        width: 12px; height: 12px;
-        border-radius: var(--r-full);
-        background: var(--agent);
-        box-shadow: 0 0 0 4px var(--agent-soft);
+        display: inline-grid;
+        place-items: center;
+        min-width: 22px;
+        min-height: 22px;
+        margin-top: 1px;
       }
-      /* the header dot breathes on the shared --pulse-cycle while a machine works */
-      .goalcard[data-state="running"] .goalcard__dot { animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite; }
-      .goalcard[data-state="complete"] .goalcard__dot { background: var(--text-1); box-shadow: none; }
-      .goalcard[data-state="gate"] .goalcard__dot { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent); animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite; }
-      .goalcard[data-state="error"] .goalcard__dot { background: var(--danger); box-shadow: none; }
-      .goalcard__title { font: var(--type-headline); letter-spacing: var(--track-headline); color: var(--text-1); flex: 1; min-width: 0; text-wrap: balance; }
+      .goalcard__ring { display: block; transform: rotate(-90deg); }
+      .goalcard__ring-track { stroke: var(--surface-3); }
+      .goalcard__ring-fill {
+        stroke: var(--agent);
+        transition: stroke-dashoffset var(--dur-slow) var(--ease);
+      }
+      .goalcard__pct {
+        position: absolute;
+        font: 500 10px/1 var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        color: var(--agent);
+      }
+      .goalcard__glyph {
+        display: inline-flex;
+        width: 22px; height: 22px;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r-full);
+      }
+      /* GREEN success voice (sheet overrules the old green-is-live-only law):
+         a verified run wears the live check */
+      .goalcard__glyph--complete { background: var(--live-soft); color: var(--live); }
+      .goalcard__glyph--error { background: var(--danger-soft); color: var(--danger); }
+      .goalcard__glyph--gate::before {
+        content: "";
+        width: 7px; height: 7px;
+        border-radius: var(--r-full);
+        background: var(--warn);
+        animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite;
+      }
+      .goalcard__id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+      /* the running card's ember mono kicker — "packaging studio · execute" */
+      .goalcard__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--agent);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .goalcard__kicker[hidden] { display: none; }
+      .goalcard__title { font: var(--type-headline); letter-spacing: var(--track-headline); color: var(--text-1); min-width: 0; text-wrap: balance; }
       .goalcard__controls { display: flex; align-items: center; gap: 4px; flex: none; }
       .goalcard__ctrl {
         width: 30px; height: 30px;
@@ -16509,22 +17041,26 @@
       .goalcard__menu-item:hover { background: var(--accent-soft); }
       .goalcard__menu-item--danger { color: var(--danger); }
 
-      /* --- the stage rail: ten nodes, one heartbeat --- */
-      .goalcard__rail { display: flex; align-items: center; width: 100%; }
+      /* --- the stage rail (sheet 3a): 5px dots, one 8px ember heartbeat ---
+         hidden once the run settles — verified rides the green bar instead */
+      .goalcard__rail { display: flex; align-items: center; width: 100%; min-height: 8px; }
+      .goalcard[data-state="complete"] .goalcard__rail,
+      .goalcard[data-state="error"] .goalcard__rail { display: none; }
       .goalcard__node {
         flex: none;
-        width: 11px; height: 11px;
+        width: 5px; height: 5px;
         border-radius: var(--r-full);
-        border: 1.5px solid var(--line-2);
+        border: 1px solid var(--line-2);
         background: transparent;
         position: relative;
         z-index: 1;
       }
       .goalcard__node[data-node="done"] { border-color: var(--text-1); background: var(--text-1); }
       .goalcard__node[data-node="active"] {
-        border-color: var(--agent);
-        background: var(--agent-soft);
-        box-shadow: var(--glow-agent);
+        width: 8px; height: 8px;
+        border: 0;
+        background: var(--agent);
+        box-shadow: 0 0 0 3px var(--agent-soft);
         animation: goalcard-node-breathe var(--pulse-cycle) var(--ease) infinite;
       }
       .goalcard[data-state="gate"] .goalcard__node[data-node="active"] { border-color: var(--warn); box-shadow: 0 0 0 1.5px var(--warn), 0 4px 20px color-mix(in srgb, var(--warn) 28%, transparent); animation: goalcard-node-breathe var(--pulse-cycle) var(--ease) infinite; }
@@ -16558,7 +17094,7 @@
         flex: 1 1 auto;
         height: 1.5px;
         min-width: 6px;
-        background: var(--line-2);
+        background: var(--line-1);
         position: relative;
         overflow: hidden;
       }
@@ -16573,75 +17109,145 @@
         transition: transform var(--dur-med) var(--ease);
       }
       .goalcard__conn[data-filled="1"]::after { transform: scaleX(1); }
+      /* the subtitle under the title (sheet 3a): one quiet caption line */
       .goalcard__stage {
         display: flex;
         align-items: baseline;
         gap: 8px;
-        min-height: 20px;
+        min-width: 0;
       }
-      .goalcard__stage-line { font: var(--type-body); color: var(--text-1); transition: opacity var(--dur-med) var(--ease), filter var(--dur-med) var(--ease); }
+      .goalcard__stage-line {
+        font: var(--type-caption);
+        color: var(--text-2);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        transition: opacity var(--dur-med) var(--ease), filter var(--dur-med) var(--ease);
+      }
       .goalcard__stage-line.is-swapping { opacity: 0; filter: blur(3px); }
-      .goalcard__meta { font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-2); }
+      /* "10 of 14 · 23:03" — mono telemetry, top right */
+      .goalcard__meta {
+        font: var(--type-numeric);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-3);
+        flex: none;
+        align-self: flex-start;
+        margin-top: 2px;
+        white-space: nowrap;
+      }
+      .goalcard[data-state="complete"] .goalcard__meta { display: none; }
       .goalcard__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .goalcard[data-state="complete"] .goalcard__foot { display: none; }
+      /* sheet 3a: "show working" is the system's mono voice */
       .goalcard__disclosure {
         border: 0; background: transparent;
-        color: var(--text-2);
-        font: var(--type-caption);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         cursor: pointer;
         padding: 2px 0;
-        display: inline-flex; align-items: center; gap: 5px;
+        display: inline-flex; align-items: center; gap: 6px;
+        white-space: nowrap;
         transition: color var(--dur-fast) var(--ease);
       }
       .goalcard__disclosure:hover { color: var(--text-1); }
       .goalcard__disclosure-caret { transition: transform var(--dur-fast) var(--ease); display: inline-block; }
       .goalcard.is-working-open .goalcard__disclosure-caret { transform: rotate(90deg); }
-      .goalcard__pct { font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-1); }
+      /* the "watch report" pill on the running foot */
+      .goalcard__watch {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 14px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        white-space: nowrap;
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .goalcard__watch:hover { border-color: var(--text-3); }
+      .goalcard__watch:active { transform: scale(var(--press-scale)); }
+      .goalcard__watch[hidden] { display: none; }
+      /* the verified bar (sheet 3a): green voice + one mono readout */
+      .goalcard__bar { display: flex; align-items: center; gap: 14px; }
+      .goalcard__bar[hidden] { display: none; }
+      .goalcard__bar-fill {
+        flex: 1;
+        height: 2px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        opacity: 0.75;
+      }
+      .goalcard__bar-meta {
+        flex: none;
+        font: var(--type-numeric);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-3);
+        white-space: nowrap;
+      }
       .goalcard__working { display: none; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
       .goalcard.is-working-open .goalcard__working { display: flex; animation: comment-preview-open var(--dur-med) var(--ease); }
       .goalcard__work-line { font: var(--type-caption); color: var(--text-2); text-wrap: pretty; }
       .goalcard__result { font: var(--type-body); color: var(--text-1); text-wrap: pretty; }
       /* §4 the trust line is a hairline footer, not a warm blob — the score
          reads numeric, the ASSUMED flag reads warn, everything else is quiet */
+      /* sheet 3a: one calm provenance band — full-bleed, surface-1, mono */
       .goalcard__trust {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         flex-wrap: wrap;
-        gap: 4px 14px;
-        padding: 10px 2px 0;
+        gap: 4px 12px;
+        margin: 2px -20px -16px;
+        padding: 12px 20px;
         border-top: 1px solid var(--line-1);
-        background: transparent;
-        font: var(--type-caption);
+        border-radius: 0 0 var(--r-lg) var(--r-lg);
+        background: var(--surface-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         color: var(--text-2);
       }
       .goalcard__trust-score {
         font: var(--type-numeric);
         font-variant-numeric: tabular-nums;
-        color: var(--text-1);
+        color: var(--text-2);
       }
       .goalcard__trust-flag { color: var(--warn); }
-      .goalcard__terminal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .goalcard__trust .goalcard__disclosure { margin-left: auto; }
+      .goalcard__terminal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      /* sheet buttons: pills — filled ink primary, outlined secondary, ghost */
       .goalcard__link {
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-md);
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
         background: transparent;
         color: var(--text-1);
-        font: var(--type-body-medium);
-        padding: 7px 13px;
+        font: var(--type-caption-medium);
+        padding: 0 16px;
         cursor: pointer;
-        min-height: 40px;
+        min-height: 38px;
+        white-space: nowrap;
         transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
-      .goalcard__link:hover { border-color: var(--line-2); }
+      .goalcard__link:hover { border-color: var(--text-3); }
       .goalcard__link:active { transform: scale(var(--press-scale)); }
       /* §6 ember sweep: review doors and stage links are ink — ember means
          "working NOW", never "clickable" */
       .goalcard__link--accent { border-color: var(--line-2); color: var(--text-1); }
+      /* the ghost register — quiet, borderless, for the third door */
+      .goalcard__link--ghost { border-color: transparent; color: var(--text-2); }
+      .goalcard__link--ghost:hover { border-color: transparent; color: var(--text-1); }
       /* §4 the one primary action a finished run earns: an ink pill */
       .goalcard__link--primary {
         border-color: transparent;
         border-radius: var(--r-full);
         background: var(--accent);
         color: var(--on-accent);
+        font: var(--type-body-medium);
         padding: 0 18px;
         transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
@@ -16669,13 +17275,46 @@
         background: var(--agent);
         animation: goalcard-spark 520ms var(--ease-out) forwards;
       }
-      .goalcard__wait { font: var(--type-caption); color: var(--warn); }
+      .goalcard__wait { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); }
+      /* the salvage line on a failed run — quiet, honest, not a band */
+      .goalcard__salvage { font: var(--type-caption); color: var(--text-2); }
+      /* sheet 3a parkline — amber dot + mono call + honest checkpoint count */
+      .goalcard__parkline {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+      .goalcard__parkline-dot {
+        flex: none;
+        width: 7px; height: 7px;
+        border-radius: var(--r-full);
+        background: var(--warn);
+        animation: goalcard-dot-breathe var(--pulse-cycle) var(--ease) infinite;
+      }
+      .goalcard__parkline-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--warn);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .goalcard__parkline-count {
+        margin-left: auto;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+      }
       /* checkpoint choice card (Wave 4 item 18): a goal parked at a process
          human_checkpoint re-uses the confirmation-card grammar — one legible
          question, review doors, tappable choices — inside the goalcard
          terminal. No new card system; these lines only shape the options. */
       .goalcard__checkpoint { display: flex; flex-direction: column; gap: 8px; }
-      .goalcard__checkpoint-question { font: var(--type-body-medium); color: var(--text-1); text-wrap: balance; }
+      /* sheet 3a: the checkpoint question is the card's headline moment */
+      .goalcard__checkpoint-question { font: var(--type-headline); letter-spacing: var(--track-headline); color: var(--text-1); text-wrap: balance; margin-top: 4px; }
+      .goalcard__checkpoint-note { font: var(--type-body-sm); color: var(--text-2); max-width: 56ch; }
       .goalcard__checkpoint-brief {
         font: var(--type-caption);
         color: var(--text-2);
@@ -16687,21 +17326,73 @@
         border: 1px solid var(--line-1);
         background: var(--surface-2);
       }
-      .goalcard__choice {
-        display: block;
-        width: 100%;
-        text-align: left;
-        border: 1px solid var(--line-1);
+      /* inside the goalcard the approve/send-back pair joins the pill
+         grammar (bell + tray keep their own recipe) */
+      .goalcard [data-goal-terminal] .approval__btn {
+        min-height: 38px;
+        padding: 0 18px;
+        border-radius: var(--r-full);
+        font: var(--type-body-medium);
+        background: transparent;
+        border-color: var(--line-2);
+      }
+      .goalcard [data-goal-terminal] .approval__btn--approve {
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+      .goalcard [data-goal-terminal] .approval__btn--reject { color: var(--text-1); font: var(--type-caption-medium); padding: 0 16px; }
+      .goalcard [data-goal-terminal] .approval__actions {
+        margin-top: 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-1);
+      }
+      .goalcard [data-goal-terminal] .approval__reason {
         border-radius: var(--r-md);
-        background: var(--surface-2);
+        border-color: var(--line-2);
+        background: var(--surface-1);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      /* sheet 3a review doors: smaller mono pills a register under the
+         decision row — first door line-2/ink, the rest line-1/quiet */
+      .goalcard__checkpoint .goalcard__terminal-actions { gap: 8px; }
+      .goalcard__checkpoint .goalcard__link {
+        min-height: 30px;
+        padding: 0 13px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .goalcard__checkpoint .goalcard__link--accent ~ .goalcard__link--accent {
+        border-color: var(--line-1);
+        color: var(--text-2);
+      }
+      /* sheet 3a: the decision row sits behind a hairline, pills in one line */
+      .goalcard__choices {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-top: 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-1);
+      }
+      .goalcard__choice {
+        display: inline-flex;
+        align-items: center;
+        width: auto;
+        text-align: left;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
         color: var(--text-1);
-        font: var(--type-body);
-        padding: 10px 12px;
+        font: var(--type-caption-medium);
+        padding: 0 16px;
+        min-height: 38px;
         cursor: pointer;
-        white-space: pre-wrap;
+        white-space: nowrap;
         transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
-      .goalcard__choice:hover { border-color: var(--line-2); }
+      .goalcard__choice:hover { border-color: var(--text-3); }
       .goalcard__choice:active { transform: scale(var(--press-scale)); }
       .goalcard__choice[disabled] { opacity: 0.55; cursor: default; }
       /* §4 checkpoint hierarchy: proceed is THE primary door; revise/hold
@@ -16711,23 +17402,49 @@
         background: var(--accent);
         color: var(--on-accent);
         font: var(--type-body-medium);
+        padding: 0 18px;
       }
       .goalcard__choice--primary:hover { background: var(--accent-hover); border-color: transparent; }
-      .goalcard__choice--revise,
-      .goalcard__choice--hold { color: var(--text-2); }
-      .goalcard__choice--hold { background: transparent; }
+      .goalcard__choice--revise { color: var(--text-1); }
+      .goalcard__choice--hold { color: var(--text-2); border-color: transparent; }
       /* negative-option teeth (Wave 4 disclosed gap): a held goal wears the
          badge; revise/hold choices read as what they mechanically DO */
       .goalcard__checkpoint-held {
         align-self: flex-start;
-        font: var(--type-caption);
-        color: var(--warn);
-        border: 1px solid var(--warn);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        border: 1px solid var(--line-2);
         border-radius: var(--r-pill, 999px);
-        padding: 2px 10px;
+        padding: 3px 10px;
       }
       .goalcard__choice--revise:hover { border-color: var(--warn); }
       .goalcard__choice--hold:hover { border-color: var(--warn); }
+      /* the send-back notes well (sheet 2d): a focused, recorded field */
+      .goalcard__checkpoint .palette__form-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+        padding: 12px 14px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .goalcard__checkpoint .palette__form-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .goalcard__checkpoint .palette__field {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        font: var(--type-body-sm);
+        color: var(--text-1);
+      }
+      .goalcard__checkpoint .palette__field:focus { outline: none; }
       /* process-stage disclosure lines in the working log (skips, exports, choices) */
       .goalcard__work-line--detail { padding-left: 14px; color: var(--text-3); }
       /* compressed 5-node rail on narrow screens (ux §1.8) */
@@ -16737,15 +17454,22 @@
         .goalcard:not(.is-rail-expanded) .goalcard__conn[data-compressed="hide"] { display: none; }
         .goalcard:not(.is-rail-expanded) .goalcard__rail-count { display: inline; }
       }
-      /* §4 the micro-survey afterword: labeled garnish under the terminal */
+      /* sheet 3a the micro-survey afterword: a centered, detached whisper —
+         "did this land? [landed] [off]" (it stays inside the card so the
+         persistent survey node survives terminal re-renders) */
       .goalcard__afterword {
         display: flex;
         align-items: center;
+        justify-content: center;
         flex-wrap: wrap;
         gap: 10px;
-        margin-top: 2px;
+        margin-top: 12px;
       }
-      .goalcard__afterword-label { font: var(--type-caption); color: var(--text-3); }
+      .goalcard__afterword-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
 
       /* ---------- §1 the run log: the run gets a container ----------
          Consecutive stage deliverables merge into ONE card — a vertical rail
@@ -16758,7 +17482,7 @@
         border-radius: var(--r-lg);
         background: var(--surface-2);
         box-shadow: var(--shadow-1);
-        padding: 12px 14px;
+        padding: 14px 20px 15px;
         margin: 6px 0;
         display: flex;
         flex-direction: column;
@@ -16774,7 +17498,7 @@
       .runlog__kicker {
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--text-3);
+        color: var(--text-2);
       }
       .runlog__count {
         font: var(--type-numeric);
@@ -16789,35 +17513,39 @@
         display: flex;
         flex-direction: column;
       }
-      /* the vertical rail the nodes sit on */
+      /* the vertical rail the nodes sit on (sheet 3a: a quiet hairline) */
       .runlog__list::before {
         content: "";
         position: absolute;
-        left: 5px;
-        top: 8px;
-        bottom: 8px;
+        left: 4px;
+        top: 12px;
+        bottom: 12px;
         width: 1.5px;
-        background: var(--line-2);
+        background: var(--line-1);
       }
       .runlog__entry {
         position: relative;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
       }
+      /* landed stages read as 7px ink dots; the working one is the 9px ember */
       .runlog__node {
         flex: none;
-        width: 9px;
-        height: 9px;
+        width: 7px;
+        height: 7px;
         margin-left: 1px;
         border-radius: var(--r-full);
-        border: 1.5px solid var(--text-1);
+        border: 1px solid var(--text-1);
         background: var(--surface-2);
         position: relative;
         z-index: 1;
       }
       .runlog__entry[data-done="1"] .runlog__node { background: var(--text-1); }
       .runlog__entry[data-live="1"] .runlog__node {
+        width: 9px;
+        height: 9px;
+        margin-left: 0;
         border-color: var(--agent);
         background: var(--agent);
         box-shadow: 0 0 0 3px var(--agent-soft);
@@ -16852,6 +17580,8 @@
         color: var(--text-3);
         text-align: right;
       }
+      /* the working entry's right meta flips ember while it runs */
+      .runlog__entry[data-live="1"] .runlog__meta { color: var(--agent); }
 
       /* ---------- Return-to-origin card (one component, three contexts) ---------- */
       .returncard {
@@ -16885,20 +17615,26 @@
       .returncard__open:hover { border-color: var(--line-2); }
       .returncard--dock { margin: 4px 0; }
 
-      /* ---------- micro-survey chips (§5: garnish, never a new surface) ---------- */
-      .survey-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      /* ---------- micro-survey chips (§5 garnish → sheet 3a whisper) ---------- */
+      .survey-chips { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }
       .survey-chips__chip {
+        display: inline-flex;
+        align-items: center;
         border: 1px solid var(--line-1);
         border-radius: var(--r-full);
         background: transparent;
-        color: var(--text-2);
-        font: var(--type-caption);
-        padding: 4px 12px;
-        min-height: 28px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        padding: 0 13px;
+        min-height: 26px;
+        white-space: nowrap;
         cursor: pointer;
         transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
-      .survey-chips__chip:hover { color: var(--text-1); border-color: var(--line-2); }
+      /* "landed" leads a register up (sheet: line-2 border, full ink) */
+      .survey-chips__chip:first-child { border-color: var(--line-2); color: var(--text-1); }
+      .survey-chips__chip:hover { color: var(--text-1); border-color: var(--text-3); }
       .survey-chips__note-row { display: flex; gap: 6px; flex: 1 1 100%; }
       .survey-chips__note-row[hidden] { display: none; }
       .survey-chips__note {
@@ -17280,9 +18016,13 @@
            (connector wipe, stage-line cross-fade, hover, press) already self-heal
            via the zeroed --dur-* tokens; these kill the keyframe-driven pieces. */
         .palette__sheet, .palette__tile { animation: none; }
-        .goalcard[data-state] .goalcard__dot,
+        .goalcard__glyph--gate::before,
+        .goalcard__parkline-dot,
+        .scout-chat-note--park::before,
+        .runlog__entry[data-live="1"] .runlog__node,
         .goalcard__node[data-node="active"],
         .goalcard[data-state="gate"] .goalcard__node[data-node="active"] { animation: none; }
+        .goalcard__ring-fill { transition: none; }
         .goalcard__node.is-advancing, .goalcard__node.is-shaking { animation: none; }
         .goalcard.is-settling { animation: none; }
         /* the spark burst becomes an instant, motionless fill — no particles */
@@ -22583,7 +23323,7 @@
           || previewable || 'artifact'
       }
 
-      async function openArtifactStage(artifactId, fallbackTitle) {
+      async function openArtifactStage(artifactId, fallbackTitle, options) {
         const id = String(artifactId || '').trim()
         if (!id) return
         let entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === id)
@@ -22639,7 +23379,7 @@
           // top-level open of the render URL — the iframe sandbox IS the
           // security model)
           body.classList.add('artifact-stage__body--deck')
-          renderArtifactDeck(body, entry, { surface: 'stage', presentSlot: headActions })
+          renderArtifactDeck(body, entry, { surface: 'stage', presentSlot: headActions, autoPresent: Boolean(options?.present) })
         } else if (pdfAssets.length && !String(entry.text || '').trim()) {
           // the payload IS the pdf: embed the newest, list every asset
           body.classList.add('artifact-stage__body--read')
@@ -23163,6 +23903,11 @@
             // deck outside the iframe sandbox. (The server-side CSP sandbox
             // directive also opaque-origins top-level opens as a backstop.)
             present.addEventListener('click', () => frame.requestFullscreen?.())
+            // the manifest's present pill: go straight to presenter mode on
+            // the SAME sandboxed frame; a browser that refuses (transient
+            // activation expired while the token minted) leaves the stage
+            // open with Present a tap away — never an error
+            if (options.autoPresent) frame.requestFullscreen?.()?.catch?.(() => {})
           } catch {
             // No token (signed out, artifact gone, server refused): fall back
             // to the escaped safe renderer — never an inline document.
@@ -32823,6 +33568,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stage = String(m.currentStage || '')
         const gate = String(m.reviewGate || '').toLowerCase()
         if (['complete', 'completed', 'published', 'verified', 'done'].includes(status) || ['complete', 'completed', 'verified', 'done'].includes(goalStatus) || stage === 'verified') return 'complete'
+        // a human stopped it — quieter than failure (sheet 2d cancelled):
+        // the plan's flag survives restarts; metadata mirrors it for
+        // consumers holding only the artifact row
+        if (plan?.cancelled || String(m.cancelled || '').toLowerCase() === 'true' || goalStatus === 'cancelled') return 'cancelled'
         if (stage === 'approval_required' || gate === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
         if (goalStatus === 'needs_attention' || stage === 'needs_attention' || gate === 'error' || ['error', 'failed'].includes(status)) return 'error'
         return 'running'
@@ -32893,8 +33642,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         rail += '<span class="goalcard__rail-count" data-rail-count></span></div>'
         card.innerHTML = `
           <div class="goalcard__head">
-            <span class="goalcard__dot" aria-hidden="true"></span>
-            <span class="goalcard__title"></span>
+            <span class="goalcard__badge" data-goal-badge aria-hidden="true">
+              <svg class="goalcard__ring" width="44" height="44" viewBox="0 0 44 44"><circle class="goalcard__ring-track" cx="22" cy="22" r="19" fill="none" stroke-width="2.5"></circle><circle class="goalcard__ring-fill" data-goal-ring cx="22" cy="22" r="19" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="119.4" stroke-dashoffset="119.4"></circle></svg>
+              <span class="goalcard__pct" data-goal-pct></span>
+            </span>
+            <span class="goalcard__id">
+              <span class="goalcard__kicker" data-goal-kicker hidden></span>
+              <span class="goalcard__title"></span>
+              <span class="goalcard__stage"><span class="goalcard__stage-line" data-goal-stageline></span></span>
+            </span>
+            <span class="goalcard__meta" data-goal-meta></span>
             <span class="goalcard__controls">
               <span class="goalcard__menu">
                 <button class="goalcard__ctrl" type="button" data-goal-menu aria-label="More" aria-haspopup="true">
@@ -32910,11 +33667,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             <span class="goalcard__spark" data-goal-spark aria-hidden="true"></span>
           </div>
           ${rail}
-          <div class="goalcard__stage"><span class="goalcard__stage-line" data-goal-stageline></span></div>
+          <div class="goalcard__bar" data-goal-bar hidden><span class="goalcard__bar-fill" aria-hidden="true"></span><span class="goalcard__bar-meta" data-goal-barmeta></span></div>
           <div class="goalcard__foot">
             <button class="goalcard__disclosure" type="button" data-goal-disclosure aria-expanded="false"><span class="goalcard__disclosure-caret" aria-hidden="true">▸</span> show working</button>
-            <span class="goalcard__meta" data-goal-meta></span>
-            <span class="goalcard__pct" data-goal-pct></span>
+            <button class="goalcard__watch" type="button" data-goal-watch hidden>watch report</button>
           </div>
           <div class="goalcard__working" data-goal-working></div>
           <div class="goalcard__terminal" data-goal-terminal hidden></div>`
@@ -32922,10 +33678,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // rail taps expand the compressed mobile rail
         card.querySelector('.goalcard__rail')?.addEventListener('click', () => card.classList.toggle('is-rail-expanded'))
         const disclosure = card.querySelector('[data-goal-disclosure]')
+        // the verified terminal re-seats this button inside the provenance
+        // band (sheet 3a) — keep a handle that survives terminal rebuilds
+        card.__disclosureBtn = disclosure
         disclosure?.addEventListener('click', () => {
           const open = card.classList.toggle('is-working-open')
           disclosure.setAttribute('aria-expanded', String(open))
           disclosure.lastChild.textContent = open ? ' hide working' : ' show working'
+        })
+        // sheet 3a running foot: "watch report" opens the live goal artifact
+        // in the chat-side stage without leaving the thread
+        card.querySelector('[data-goal-watch]')?.addEventListener('click', () => {
+          const entry = card.__goalArtifact
+          if (entry) openArtifactStage(entry.id, goalArtifactTitle(entry))
         })
         const menuBtn = card.querySelector('[data-goal-menu]')
         const menuPop = card.querySelector('.goalcard__menu-pop')
@@ -32988,8 +33753,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const state = goalCardStateFor(artifact, plan)
         const prevState = card.dataset.state
         card.dataset.state = state
-        // §4 verified: the title wears the check once the run has landed
-        card.querySelector('.goalcard__title').textContent = (state === 'complete' ? '✓ ' : '') + goalArtifactTitle(artifact)
+        // sheet 3a: the state badge carries the verdict (ring → check/x),
+        // so the title stays the plain goal name
+        card.querySelector('.goalcard__title').textContent = goalArtifactTitle(artifact)
 
         // the cancel affordance only exists while there is something to stop
         const cancelBtn = card.querySelector('[data-goal-cancel]')
@@ -33029,6 +33795,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // a parked human_checkpoint owns the stage line: the question IS the
         // status ("Waiting for approval · Which spine ships?"), not a generic wait
         const pendingCheckpoint = goalPendingCheckpoint(artifact, plan)
+        // the held quieting only stands while a held checkpoint is pending
+        card.dataset.held = state === 'gate' && pendingCheckpoint?.held ? '1' : ''
         const detail = (state === 'gate' && pendingCheckpoint)
           ? String(pendingCheckpoint.question || '')
           : (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
@@ -33041,16 +33809,70 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           stageLine.textContent = nextText
         }
 
-        // meta + percent (tabular)
+        // sheet 3a kicker — the running card's ember mono line
+        // ("packaging studio · execute"); other states stay quiet
+        const kicker = card.querySelector('[data-goal-kicker]')
+        if (kicker) {
+          const processName = String(plan?.toolTemplate || m.toolTemplate || '').trim().replace(/[_-]+/g, ' ')
+          const stageWord = (goalStageDefs[Math.min(currentIndex, goalStageDefs.length - 1)] || [])[1] || 'working'
+          kicker.textContent = `${processName || 'goal loop'} · ${stageWord}`
+          kicker.hidden = state !== 'running'
+        }
+
+        // meta + percent (tabular) — sheet: "10 of 14 · 23:03" top right
         const subtasks = plan?.subtasks || []
         const doneCount = subtasks.filter(task => task.status === 'complete').length
         const metaBits = []
-        if (subtasks.length) metaBits.push(`${doneCount} of ${subtasks.length} subtasks`)
+        if (subtasks.length) metaBits.push(`${doneCount} of ${subtasks.length}`)
         card.__goalStartedAt = card.__goalStartedAt || Date.parse(artifact.createdAt || m.createdAt || '') || Date.now()
-        metaBits.push(goalElapsedLabel(card.__goalStartedAt))
+        metaBits.push(state === 'error' || state === 'cancelled' ? 'stopped' : goalElapsedLabel(card.__goalStartedAt))
         card.querySelector('[data-goal-meta]').textContent = metaBits.join(' · ')
+        const shownPct = Number.isFinite(pct)
+          ? Math.round(pct)
+          : (state === 'complete' ? 100 : Math.round(currentIndex / goalStageDefs.length * 100))
         const pctEl = card.querySelector('[data-goal-pct]')
-        pctEl.textContent = Number.isFinite(pct) ? `${Math.round(pct)}%` : (state === 'complete' ? '100%' : '')
+        pctEl.textContent = `${shownPct}%`
+
+        // the ring cluster (sheet 1d/3a): stroke sweep = percent; the badge
+        // swaps to the state glyph once the run leaves "running"
+        const ring = card.querySelector('[data-goal-ring]')
+        if (ring) ring.setAttribute('stroke-dashoffset', (119.4 * (1 - Math.max(0, Math.min(100, shownPct)) / 100)).toFixed(1))
+        const badge = card.querySelector('[data-goal-badge]')
+        if (badge && card.dataset.badgeState !== state) {
+          card.dataset.badgeState = state
+          const ringSvg = badge.querySelector('.goalcard__ring')
+          const glyph = badge.querySelector('.goalcard__glyph')
+          glyph?.remove()
+          if (state === 'complete' || state === 'error' || state === 'gate') {
+            const mark = document.createElement('span')
+            mark.className = `goalcard__glyph goalcard__glyph--${state}`
+            mark.innerHTML = state === 'complete'
+              ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>'
+              : state === 'error'
+                ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+                : ''
+            badge.appendChild(mark)
+          }
+          if (ringSvg) ringSvg.style.display = state === 'running' ? '' : 'none'
+          pctEl.style.display = state === 'running' ? '' : 'none'
+        }
+
+        // the verified bar (sheet 3a): a calm green line + one mono readout
+        const bar = card.querySelector('[data-goal-bar]')
+        if (bar) {
+          bar.hidden = state !== 'complete'
+          if (state === 'complete') {
+            // freeze total runtime the moment the run lands — the readout is
+            // "how long it took", not a clock that keeps counting
+            if (!card.__goalFinishedAt) card.__goalFinishedAt = Date.now()
+            const barBits = []
+            if (subtasks.length) barBits.push(`${doneCount} of ${subtasks.length}`)
+            barBits.push(goalTotalLabel(card.__goalStartedAt, card.__goalFinishedAt), '100%')
+            card.querySelector('[data-goal-barmeta]').textContent = barBits.join(' · ')
+          }
+        }
+        const watchBtn = card.querySelector('[data-goal-watch]')
+        if (watchBtn) watchBtn.hidden = state !== 'running'
 
         // working log — stage titles come from the process definition (the
         // instantiated plan carries them verbatim); process stages add one
@@ -33070,6 +33892,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function goalElapsedLabel(startedAt) {
         const secs = Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+        const mm = String(Math.floor(secs / 60)).padStart(2, '0')
+        const ss = String(secs % 60).padStart(2, '0')
+        return `${mm}:${ss}`
+      }
+
+      // total runtime, frozen between two stamps ("548:34" on the green bar)
+      function goalTotalLabel(startedAt, finishedAt) {
+        const secs = Math.max(0, Math.round(((finishedAt || Date.now()) - startedAt) / 1000))
         const mm = String(Math.floor(secs / 60)).padStart(2, '0')
         const ss = String(secs % 60).padStart(2, '0')
         return `${mm}:${ss}`
@@ -33157,12 +33987,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function goalCardRenderCheckpoint(terminal, card, artifact, plan, checkpoint) {
         const stageId = String(checkpoint.stageId || '')
         const held = !!checkpoint.held
+        // sheet 2d held: the whole card quiets while a human pin stands
+        card.dataset.held = held ? '1' : ''
         if (card.__checkpointNode && card.__checkpointStageId === stageId && card.__checkpointHeld === held) {
           terminal.appendChild(card.__checkpointNode)
           return
         }
         const wrap = bfEl('div', 'goalcard__checkpoint')
-        wrap.appendChild(bfEl('div', 'goalcard__result', held ? 'Held — your call stands until you proceed' : 'Your call — the run is parked'))
+        // sheet 3a parkline — amber dot + "your call — the run is parked"
+        // mono, with "checkpoint N of M" keeping honest count on the right
+        const parkline = bfEl('div', 'goalcard__parkline')
+        parkline.appendChild(bfEl('span', 'goalcard__parkline-dot', ''))
+        parkline.appendChild(bfEl('span', 'goalcard__parkline-label', held ? 'held — your call stands until you proceed' : 'your call — the run is parked'))
+        const checkpoints = (plan?.subtasks || []).filter(task => String(task?.role || '') === 'human_checkpoint')
+        const checkpointIndex = checkpoints.findIndex(task => task.id === stageId)
+        if (checkpointIndex >= 0 && checkpoints.length) {
+          parkline.appendChild(bfEl('span', 'goalcard__parkline-count', `checkpoint ${checkpointIndex + 1} of ${checkpoints.length}`))
+        }
+        wrap.appendChild(parkline)
         if (held) {
           wrap.appendChild(bfEl('div', 'goalcard__checkpoint-held', `held${checkpoint.heldBy ? ' by ' + checkpoint.heldBy : ''} — resume with a proceed choice`))
         }
@@ -33178,7 +34020,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (inputTasks.length) {
           const doors = bfEl('div', 'goalcard__terminal-actions')
           for (const input of inputTasks) {
-            const door = bfEl('button', 'goalcard__link goalcard__link--accent', `▸ review: ${input.title || input.id}`)
+            const door = bfEl('button', 'goalcard__link goalcard__link--accent', `review · ${input.title || input.id}`)
             door.type = 'button'
             door.addEventListener('click', () => openArtifactStage(input.artifactId, input.title || input.id))
             doors.appendChild(door)
@@ -33227,6 +34069,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const noteText = () => String(notes?.value || '').trim()
           if (options.length) {
+            // sheet 3a: the choices sit in one pill row behind a hairline —
+            // filled proceed, outlined send-back, ghost hold
+            const choicesRow = bfEl('div', 'goalcard__choices')
             for (const option of options) {
               const choiceBtn = bfEl('button', 'goalcard__choice', option.label)
               choiceBtn.type = 'button'
@@ -33237,13 +34082,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               // a held goal resumes ONLY through proceed — mirror the server's refusal
               if (held && option.action !== 'proceed') choiceBtn.disabled = true
               choiceBtn.addEventListener('click', () => post(noteText() ? `${option.label} — ${noteText()}` : option.label))
-              wrap.appendChild(choiceBtn)
+              choicesRow.appendChild(choiceBtn)
             }
+            wrap.appendChild(choicesRow)
           } else {
             // free-form checkpoint: the typed text IS the {choice} the next
             // stage reads as grounding (INTAKE answers, do_not_touch notes)
             const actions = bfEl('div', 'goalcard__terminal-actions')
-            const go = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Continue ▸')
+            const go = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Run it')
             go.type = 'button'
             go.addEventListener('click', () => post(noteText()))
             actions.appendChild(go)
@@ -33259,6 +34105,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function goalCardRenderTerminal(card, artifact, plan, state, prevState) {
         const terminal = card.querySelector('[data-goal-terminal]')
         terminal.replaceChildren()
+        // the verified band borrows the disclosure button; any other state
+        // seats it back on the foot so "show working" is never orphaned
+        if (state !== 'complete' && card.__disclosureBtn && !card.__disclosureBtn.closest('.goalcard__foot')) {
+          card.querySelector('.goalcard__foot')?.prepend(card.__disclosureBtn)
+        }
         if (state === 'running') { terminal.hidden = true; return }
         terminal.hidden = false
 
@@ -33269,12 +34120,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const actions = bfEl('div', 'goalcard__terminal-actions')
           const open = bfEl('button', 'goalcard__link goalcard__link--primary', 'open the deliverable')
           open.type = 'button'
-          open.addEventListener('click', () => openArtifactStage(artifact.id, String(artifact?.metadata?.objective || artifact?.metadata?.title || '').trim()))
+          // a process run whose manifest card is mounted in this thread hands
+          // over THERE — scroll + flash the manifest; anything else keeps
+          // opening the goal artifact in the stage
+          open.addEventListener('click', () => {
+            if (focusManifestCardForGoal(artifact.id)) return
+            openArtifactStage(artifact.id, String(artifact?.metadata?.objective || artifact?.metadata?.title || '').trim())
+          })
           actions.appendChild(open)
+          // sheet 3a: "send notes" — the outlined second door arms the
+          // composer on this goal instead of opening a new surface
+          const sendNotes = bfEl('button', 'goalcard__link goalcard__link--accent', 'send notes')
+          sendNotes.type = 'button'
+          sendNotes.addEventListener('click', () => promptScoutForWork('', `notes on "${goalArtifactTitle(artifact)}": `))
+          actions.appendChild(sendNotes)
           terminal.appendChild(actions)
-          // the trust line (design §1.7), rebuilt as a hairline footer: the
-          // gate score reads numeric, the outcome reads quiet caption, the
-          // ASSUMED count reads warn — telemetry, not a warm blob
+          // the trust line (design §1.7 → sheet 3a): one calm provenance band —
+          // the gate score reads numeric, the outcome reads quiet mono, the
+          // ASSUMED count reads warn, and "show working" rides its right edge
           const trust = bfEl('div', 'goalcard__trust')
           const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
           const gateScore = Number(gateTask?.review?.score)
@@ -33282,10 +34145,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (report.gateOutcome) trust.appendChild(bfEl('span', 'goalcard__trust-bit', String(report.gateOutcome)))
           const assumed = Number(report.assumedClaimCount || 0)
           if (assumed > 0) trust.appendChild(bfEl('span', 'goalcard__trust-flag', `${assumed} claim${assumed === 1 ? '' : 's'} marked ASSUMED — verify before sending`))
-          if (trust.childNodes.length) terminal.appendChild(trust)
           // micro-survey (§5): one persistent node per card, so the terminal's
           // re-renders never wipe a half-typed "off" note — wrapped in the
-          // labeled afterword row (empty after an answer removed the chips)
+          // labeled afterword row (empty after an answer removed the chips).
+          // It lands before the provenance band, which closes the card.
           if (!card.__surveyNode) card.__surveyNode = surveyChipsNode(artifact.id)
           if (card.__surveyNode && card.__surveyNode.childNodes.length) {
             const afterword = bfEl('div', 'goalcard__afterword')
@@ -33293,6 +34156,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             afterword.appendChild(card.__surveyNode)
             terminal.appendChild(afterword)
           }
+          // the band always lands last: even without gate telemetry it
+          // carries "show working", which the hidden complete-state foot gave up
+          if (card.__disclosureBtn) trust.appendChild(card.__disclosureBtn)
+          terminal.appendChild(trust)
           if (prevState !== 'complete' && !card.dataset.celebrated) {
             card.dataset.celebrated = '1'
             goalCardCelebrate(card)
@@ -33309,9 +34176,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             goalCardRenderCheckpoint(terminal, card, artifact, plan, pendingCheckpoint)
             return
           }
-          terminal.appendChild(bfEl('div', 'goalcard__result', 'Review before shipping'))
+          // the ship gate wears the same parkline grammar as a checkpoint
+          const parkline = bfEl('div', 'goalcard__parkline')
+          parkline.appendChild(bfEl('span', 'goalcard__parkline-dot', ''))
+          parkline.appendChild(bfEl('span', 'goalcard__parkline-label', 'your call — the run is parked'))
+          terminal.appendChild(parkline)
+          terminal.appendChild(bfEl('div', 'goalcard__checkpoint-question', 'Review before shipping'))
           const reason = plan?.gate?.reason || artifact.metadata?.reviewReason
-          if (reason) terminal.appendChild(bfEl('div', 'goalcard__work-line', reason))
+          if (reason) terminal.appendChild(bfEl('div', 'goalcard__checkpoint-note', reason))
           if (canApproveExternalWrites()) {
             const actions = bfEl('div', 'goalcard__terminal-actions approval__actions')
             const approve = bfEl('button', 'approval__btn approval__btn--approve pressable', 'Approve')
@@ -33328,6 +34200,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
+        // cancelled — a human stopped it; quiet mono, the record keeps
+        // what landed (sheet 2d)
+        if (state === 'cancelled') {
+          const meta = artifact.metadata || {}
+          const by = String(plan?.cancelledBy || meta.cancelledBy || '').trim() || 'you'
+          terminal.appendChild(bfEl('div', 'goalcard__cancelline', `cancelled by ${by}`))
+          terminal.appendChild(bfEl('div', 'goalcard__salvage', 'nothing shipped — the record keeps what landed.'))
+          const recordActions = bfEl('div', 'goalcard__terminal-actions')
+          const openRecord = bfEl('button', 'goalcard__link', 'open the record')
+          openRecord.type = 'button'
+          openRecord.addEventListener('click', () => openArtifactStage(artifact.id, goalArtifactTitle(artifact)))
+          recordActions.appendChild(openRecord)
+          terminal.appendChild(recordActions)
+          return
+        }
+
         // error / needs_attention
         const m = artifact.metadata || {}
         const message = plan?.blocker || m.blocker || 'The goal stopped before finishing.'
@@ -33339,19 +34227,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const gap = String(m.goalGap || '').trim()
         const actions = bfEl('div', 'goalcard__terminal-actions')
         if (deliverableId) {
-          terminal.appendChild(bfEl('div', 'goalcard__trust', gap ? `draft saved · missed: ${gap}` : 'draft saved'))
-          const openDraft = bfEl('button', 'goalcard__link goalcard__link--accent', '▸ open draft')
+          terminal.appendChild(bfEl('div', 'goalcard__salvage', gap ? `draft saved · missed: ${gap}` : 'draft saved'))
+          const openDraft = bfEl('button', 'goalcard__link goalcard__link--accent', 'open draft')
           openDraft.type = 'button'
           openDraft.addEventListener('click', () => openAgentArtifact({ id: deliverableId }))
           actions.appendChild(openDraft)
         }
-        const retry = bfEl('button', 'goalcard__link', 'Retry from here')
+        // sheet 2d failed: one filled primary (the honest next step), the
+        // rest step down to outlined/ghost registers
+        const retry = bfEl('button', 'goalcard__link goalcard__link--primary', 'Retry from here')
         retry.type = 'button'
         retry.addEventListener('click', async () => { await postAuthJSON('/assistant/thread-followup', { artifactId: artifact.id, text: 'retry from where it failed' }); scheduleArtifactRefresh() })
         const restart = bfEl('button', 'goalcard__link', 'Restart')
         restart.type = 'button'
         restart.addEventListener('click', () => runGoalPipeline({ objective: plan?.objective || goalArtifactTitle(artifact), toolTemplate: plan?.toolTemplate || '' }))
-        const ask = bfEl('button', 'goalcard__link', 'Ask Scout')
+        const ask = bfEl('button', 'goalcard__link goalcard__link--ghost', 'Ask Scout')
         ask.type = 'button'
         ask.addEventListener('click', () => promptScoutForWork('', `About the goal "${goalArtifactTitle(artifact)}": `))
         actions.append(retry, restart, ask)
@@ -34829,7 +35719,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog, .scout-chat-daybreak, .scout-choices').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -34841,11 +35731,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      var runlogOpen = null
 	      var runlogMarkerGoalId = ''
 	      var feedPrevMsgKey = ''
+	      var feedPrevMsgDay = ''
 
 	      function resetScoutFeedRenderPass() {
 	        runlogOpen = null
 	        runlogMarkerGoalId = ''
 	        feedPrevMsgKey = ''
+	        feedPrevMsgDay = ''
+	      }
+
+	      // "sunday · jul 5" — the date divider's lowercase voice (sheet 2f)
+	      function scoutChatDayLabel(ts) {
+	        const at = ts ? new Date(ts) : null
+	        if (!at || Number.isNaN(at.valueOf())) return ''
+	        const weekday = at.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+	        const monthDay = at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toLowerCase()
+	        return `${weekday} · ${monthDay}`
 	      }
 
 	      /* §1 liveness: at most ONE lit runlog node per thread — the newest
@@ -34929,10 +35830,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (recordKind !== 'artifact') {
 	          runlogOpen = null
 	        }
+	        // sheet 2f/3a date dividers — a committed message on a new calendar
+	        // day opens "sunday · jul 5" between hairlines before it lands
+	        const dayLabel = scoutChatDayLabel(message?.createdAt)
+	        if (dayLabel && dayLabel !== feedPrevMsgDay) {
+	          feedPrevMsgDay = dayLabel
+	          feedPrevMsgKey = ''
+	          const daybreak = document.createElement('div')
+	          daybreak.className = 'scout-chat-daybreak'
+	          daybreak.setAttribute('role', 'separator')
+	          daybreak.appendChild(bfEl('span', 'scout-chat-daybreak__label', dayLabel))
+	          appendScoutChatNode(daybreak)
+	        }
 	        if (recordKind === 'proposal' && message.proposal) {
 	          runlogMarkerGoalId = ''
 	          feedPrevMsgKey = ''
 	          return scoutProposalCardNode(message)
+	        }
+	        if (recordKind === 'choices' && message.choices) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
+	          return scoutChoicesNode(message)
+	        }
+	        if (recordKind === 'manifest' && message.manifest) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
+	          return scoutManifestCardNode(message)
 	        }
 	        if (recordKind === 'thread' && message.thread) {
 	          feedPrevMsgKey = ''
@@ -34993,6 +35916,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        if (isFollowup) {
 	          node.classList.add('is-followup')
+	          // sheet 3a: the group's attribution line rides the NEWEST bubble —
+	          // lift it off the previous one so a burst reads as one turn
+	          const prev = scoutChatLastEntryNode()
+	          if (prev?.classList?.contains('scout-chat-msg')) {
+	            prev.querySelector('.scout-chat-msg__meta')?.remove()
+	          }
 	        }
 	        return node
 	      }
@@ -35274,6 +36203,254 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
+	      // ---- quick-reply pills (conversational intent layer) ----
+	      // A Kind="choices" message is Scout's ONE clarifying question with
+	      // 2-4 pill options — DATA, like a proposal. Tapping a pill posts the
+	      // selection; the server commits the pill's text as the user's reply
+	      // and, for a tool-armed pill, the DETERMINISTIC proposal card. The
+	      // proposal card's Run button stays the only launch door — a pill can
+	      // NEVER silent-launch.
+	      function scoutChoicesNode(message) {
+	        const choices = message.choices || {}
+	        const group = document.createDocumentFragment()
+	        group.appendChild(scoutChatMessageNode('scout', scoutVoice(String(message.text || choices.question || '')), message.createdAt || new Date().toISOString()))
+	        const row = document.createElement('div')
+	        row.className = 'scout-choices'
+	        row.dataset.messageId = String(message.id || '')
+	        const resolved = String(choices.status || '') !== ''
+	        if (resolved) row.classList.add('is-resolved')
+	        for (const option of (Array.isArray(choices.options) ? choices.options : [])) {
+	          const pill = bfEl('button', 'scout-choices__pill', String(option.label || ''))
+	          pill.type = 'button'
+	          pill.dataset.optionId = String(option.id || '')
+	          if (option.toolId) {
+	            // the "arms a run" marker — this pill leads to a proposal card
+	            pill.appendChild(bfEl('span', 'scout-choices__arm', '▸'))
+	          }
+	          if (resolved) {
+	            pill.disabled = true
+	            if (String(option.id || '') === String(choices.selectedId || '')) {
+	              pill.classList.add('is-selected')
+	            }
+	          } else {
+	            pill.addEventListener('click', () => {
+	              if (row.classList.contains('is-resolved')) return
+	              row.classList.add('is-resolved')
+	              pill.classList.add('is-selected')
+	              row.querySelectorAll('.scout-choices__pill').forEach(el => { el.disabled = true })
+	              showScoutChatThinking('thinking')
+	              postScoutChoiceSelection(message, option)
+	            })
+	          }
+	          row.appendChild(pill)
+	        }
+	        group.appendChild(row)
+	        return group
+	      }
+
+	      // posts one pill tap; the server resolves against the PERSISTED card
+	      // (first tap wins) and returns the updated thread — reply + answer,
+	      // or reply + armed proposal card.
+	      async function postScoutChoiceSelection(message, option) {
+	        const threadId = String(activeScoutThreadId || '')
+	        if (!threadId) return
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(threadId)}/choice`, {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({
+	              messageId: String(message?.id || ''),
+	              optionId: String(option?.id || '')
+	            })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            throw new Error(payload.error || 'choice failed')
+	          }
+	          const finish = () => {
+	            hideScoutChatThinking()
+	            if (payload.thread) {
+	              upsertScoutChatThread(payload.thread)
+	              renderActiveScoutThread()
+	            }
+	          }
+	          withScoutChatThinkingHold(finish)
+	        } catch (error) {
+	          hideScoutChatThinking()
+	          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'choice failed', new Date().toISOString()))
+	        }
+	      }
+
+	      // ---- package manifest card (sheet s05 + §2c) ----
+	      // A Kind="manifest" message is the handover moment: the shipped (or
+	      // held) package with its deliverable rows, provenance, disclosed
+	      // skips, and footer. DATA like a proposal — persisted on the message,
+	      // identical on reload. Actions only OPEN things (stage, download,
+	      // share mint); nothing here launches work.
+	      function scoutManifestCardNode(message) {
+	        const manifest = message.manifest || {}
+	        const held = String(manifest.status || '') === 'held'
+	        const skips = Array.isArray(manifest.skips) ? manifest.skips : []
+	        const deliverables = Array.isArray(manifest.deliverables) ? manifest.deliverables : []
+	        const card = bfEl('div', 'manifest-card')
+	        if (held) card.classList.add('manifest-card--held')
+	        card.dataset.messageId = String(message.id || '')
+	        card.dataset.goalId = String(manifest.goalId || '')
+
+	        // kicker row: "package · shipped" + the right-aligned provenance
+	        const head = bfEl('div', 'manifest-card__head')
+	        const kicker = bfEl('span', 'manifest-card__kicker', 'package · ')
+	        const statusLabel = held ? 'held' : (skips.length ? 'shipped with skips' : 'shipped')
+	        const status = bfEl('span', held ? '' : (skips.length ? 'manifest-card__status--skips' : 'manifest-card__status--shipped'), statusLabel)
+	        kicker.appendChild(status)
+	        head.appendChild(kicker)
+	        if (held && manifest.heldBy) {
+	          head.appendChild(bfEl('span', 'manifest-card__held-pill', `held by ${manifestActorShortName(manifest.heldBy)}`))
+	        }
+	        const provenance = manifestProvenanceLine(manifest.provenance, held)
+	        if (provenance) head.appendChild(bfEl('span', 'manifest-card__provenance', provenance))
+	        card.appendChild(head)
+
+	        if (manifest.title) card.appendChild(bfEl('div', 'manifest-card__title', String(manifest.title)))
+	        if (manifest.subline) card.appendChild(bfEl('div', 'manifest-card__subline', String(manifest.subline)))
+
+	        // deliverable rows: badge · title + facts · pill actions
+	        const rows = bfEl('div', 'manifest-card__rows')
+	        for (const deliverable of deliverables) {
+	          const row = bfEl('div', 'manifest-card__row')
+	          row.appendChild(bfEl('span', 'manifest-card__badge', String(deliverable.badge || 'doc')))
+	          const main = bfEl('span', 'manifest-card__row-main')
+	          main.appendChild(bfEl('span', 'manifest-card__row-title', String(deliverable.title || '')))
+	          if (deliverable.facts) main.appendChild(bfEl('span', 'manifest-card__row-facts', String(deliverable.facts)))
+	          row.appendChild(main)
+	          const actions = bfEl('span', 'manifest-card__row-actions')
+	          const artifactId = String(deliverable.artifactId || '')
+	          const open = bfEl('button', 'manifest-card__pill manifest-card__pill--primary', 'open')
+	          open.type = 'button'
+	          open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || '')))
+	          actions.appendChild(open)
+	          // held quieting: open is the ONLY door — present and pdf recede
+	          if (!held && deliverable.present) {
+	            const present = bfEl('button', 'manifest-card__pill manifest-card__pill--outline', 'present')
+	            present.type = 'button'
+	            present.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), { present: true }))
+	            actions.appendChild(present)
+	          }
+	          // direct download via the session-gated blob route — the ref is
+	          // validated to the 64-hex sha256 shape before any url is built
+	          if (!held && /^[0-9a-f]{64}$/.test(String(deliverable.pdfRef || ''))) {
+	            const pdf = document.createElement('a')
+	            pdf.className = 'manifest-card__pill manifest-card__pill--outline'
+	            pdf.textContent = 'pdf ↓'
+	            pdf.href = artifactBlobUrl({ ref: String(deliverable.pdfRef), name: String(deliverable.pdfName || '') })
+	            pdf.setAttribute('download', String(deliverable.pdfName || ''))
+	            actions.appendChild(pdf)
+	          }
+	          row.appendChild(actions)
+	          rows.appendChild(row)
+	        }
+	        card.appendChild(rows)
+
+	        // amber disclosed-skip bullets — honesty as a design element
+	        if (skips.length) {
+	          const list = bfEl('div', 'manifest-card__skips')
+	          for (const skip of skips) {
+	            const bullet = bfEl('div', 'manifest-card__skip')
+	            bullet.appendChild(bfEl('span', 'manifest-card__skip-dot', ''))
+	            bullet.appendChild(document.createTextNode(String(skip)))
+	            list.appendChild(bullet)
+	          }
+	          card.appendChild(list)
+	        }
+
+	        // footer: attached to · share link · see how it was attacked
+	        // (held: "release requires <who>", share stays dark)
+	        const foot = bfEl('div', 'manifest-card__foot')
+	        if (held) {
+	          foot.appendChild(bfEl('span', 'manifest-card__attached', `release requires ${manifestActorShortName(manifest.heldBy || 'admin')}`))
+	        } else if (manifest.attachedTo) {
+	          const attached = bfEl('span', 'manifest-card__attached', 'attached to ')
+	          attached.appendChild(bfEl('b', '', String(manifest.attachedTo)))
+	          foot.appendChild(attached)
+	        }
+	        if (!held && manifest.shareArtifactId) {
+	          const share = bfEl('button', 'manifest-card__foot-link', 'share link')
+	          share.type = 'button'
+	          share.addEventListener('click', () => manifestMintShareLink(String(manifest.shareArtifactId)))
+	          foot.appendChild(share)
+	        }
+	        if (manifest.findingsArtifactId) {
+	          const attacked = bfEl('button', 'manifest-card__foot-link', 'see how it was attacked')
+	          attacked.type = 'button'
+	          attacked.addEventListener('click', () => openArtifactStage(String(manifest.findingsArtifactId), 'Findings record'))
+	          foot.appendChild(attacked)
+	        }
+	        if (foot.childNodes.length) card.appendChild(foot)
+	        return card
+	      }
+
+	      // "gate 9.5 · 3 assumed · 4 decisions · 2h 25m" — built from what the
+	      // run actually recorded; absent facts simply drop out of the line
+	      function manifestProvenanceLine(provenance, held) {
+	        const p = provenance || {}
+	        const parts = []
+	        const gate = Number(p.gateScore)
+	        if (Number.isFinite(gate) && gate > 0) parts.push(`gate ${gate.toFixed(1)}`)
+	        if (held) {
+	          if (p.wallClock) parts.push(String(p.wallClock))
+	          return parts.join(' · ')
+	        }
+	        parts.push(`${Number(p.assumed) || 0} assumed`)
+	        const decisions = Number(p.decisions) || 0
+	        parts.push(`${decisions} decision${decisions === 1 ? '' : 's'}`)
+	        if (p.wallClock) parts.push(String(p.wallClock))
+	        return parts.join(' · ')
+	      }
+
+	      // "held by aj" — the email-prefix idiom peer bubbles already use
+	      function manifestActorShortName(actor) {
+	        const raw = String(actor || '').trim()
+	        if (!raw) return 'admin'
+	        return raw.split('@')[0].toLowerCase()
+	      }
+
+	      // the footer's share door: mints via the EXISTING share machinery
+	      // (server-side eligibility stays the enforcement point) and copies
+	      // the minted url — same grammar as the intelligence panel's mint
+	      async function manifestMintShareLink(artifactId) {
+	        try {
+	          const response = await fetch('/artifacts/share', {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ artifactId })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload.link) {
+	            throw new Error(payload.error || 'share link mint failed')
+	          }
+	          await copyShareLinkUrl(payload.link)
+	        } catch (error) {
+	          showToast({ text: error.message || 'share link mint failed', kind: 'error' })
+	        }
+	      }
+
+	      // "open the deliverable" routes HERE when the thread holds this
+	      // goal's manifest: scroll to the handover card and flash it once.
+	      // Returns false when no manifest is mounted (caller falls back to
+	      // the artifact stage).
+	      function focusManifestCardForGoal(goalId) {
+	        const id = String(goalId || '').trim()
+	        if (!id || !scoutChatThread) return false
+	        const card = scoutChatThread.querySelector(`.manifest-card[data-goal-id="${CSS.escape(id)}"]`)
+	        if (!card) return false
+	        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+	        card.classList.remove('is-flashed')
+	        void card.offsetWidth
+	        card.classList.add('is-flashed')
+	        return true
+	      }
+	      // ---- end package manifest card ----
+
 	      function markProposalCardResolved(card, status) {
 	        card.classList.add('is-resolved')
 	        card.querySelector('.scout-proposal-card__actions')?.remove()
@@ -35504,47 +36681,61 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      // the sender's short lowercase handle for the attribution line ("aj")
+      function scoutChatSelfHandle() {
+        const raw = String(authedUser?.name || authedUser?.email?.split('@')[0] || 'you').trim()
+        return (raw.split(/\s+/)[0] || 'you').toLowerCase()
+      }
+
       function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
-        // §3 longform: past ~400 chars the bubble becomes a reading card on
-        // the feed measure, and the author is always named above it
+        // sheet §3 letters: past ~400 chars the bubble becomes a letter card
+        // on the feed measure with an identity header + clamp
         const longform = String(text || '').length > 400
         if (longform) {
           item.classList.add('scout-chat-msg--longform')
         }
         const label = authorLabel || (kind === 'user' ? 'you' : kind === 'scout' ? 'scout' : kind === 'peer' ? 'peer' : 'error')
-        // authorship + timestamp survive as a hover tooltip — the design
-        // bubbles carry no meta line
         item.title = `${label} · ${scoutChatTimeLabel(ts)}${viaScout ? ' · via Scout' : ''}`
-
-        // design §7.2 — scout wears the bare flame, peers a 22px initials
-        // disc; your own messages carry no avatar
-        if (kind === 'scout' || kind === 'error' || kind === 'peer') {
-          const avatar = document.createElement('span')
-          avatar.className = 'scout-chat-msg__avatar'
-          avatar.setAttribute('aria-hidden', 'true')
-          if (kind === 'peer') {
-            avatar.textContent = chatPeerInitials(label)
-          } else {
-            avatar.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>'
-          }
-          item.appendChild(avatar)
-        }
 
         const stack = document.createElement('div')
         stack.className = 'scout-chat-msg__stack'
 
-        if ((kind === 'peer' && authorLabel) || viaScout || longform) {
+        if (longform) {
+          // sheet 3a letter identity header — flame badge, mono identity,
+          // timestamp right ("claude · fable 5 · on aj's account · 22:42")
+          const idrow = document.createElement('div')
+          idrow.className = 'scout-chat-msg__idrow'
+          const badge = document.createElement('span')
+          badge.className = 'scout-chat-msg__idbadge'
+          badge.setAttribute('aria-hidden', 'true')
+          if (kind === 'scout' || kind === 'error') {
+            badge.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>'
+          } else {
+            badge.textContent = chatPeerInitials(kind === 'user' ? scoutChatSelfHandle() : label)
+          }
+          const idname = document.createElement('span')
+          idname.className = 'scout-chat-msg__idname'
+          idname.textContent = kind === 'scout' || kind === 'error'
+            ? `claude · fable 5${viaScout ? ` · on ${scoutChatSelfHandle()}'s account` : ''}`
+            : kind === 'user'
+              ? `${scoutChatSelfHandle()} · a letter${viaScout ? ' · via scout' : ''}`
+              : `${label} · a letter`
+          const idtime = document.createElement('span')
+          idtime.className = 'scout-chat-msg__idtime'
+          idtime.textContent = scoutChatTimeLabel(ts)
+          idrow.append(badge, idname, idtime)
+          stack.appendChild(idrow)
+        } else if (kind === 'peer' && authorLabel) {
+          // sheet 3a group header — "Tyler 22:41" above the first bubble
           const author = document.createElement('span')
           author.className = 'scout-chat-msg__author'
-          author.textContent = kind === 'peer' && authorLabel ? authorLabel : label
-          if (viaScout) {
-            const chip = document.createElement('span')
-            chip.className = 'scout-chat-msg__via'
-            chip.textContent = 'via Scout'
-            author.append(' ', chip)
-          }
+          author.textContent = authorLabel
+          const at = document.createElement('span')
+          at.className = 'scout-chat-msg__author-time'
+          at.textContent = scoutChatTimeLabel(ts)
+          author.appendChild(at)
           stack.appendChild(author)
         }
 
@@ -35564,6 +36755,49 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             appendChatMentionTextNodes(body, text)
           }
           stack.appendChild(body)
+          if (longform) {
+            // the wired clamp: four lines, then "read the full letter"
+            body.classList.add('is-clamped')
+            const expand = document.createElement('button')
+            expand.type = 'button'
+            expand.className = 'scout-chat-msg__expand'
+            expand.textContent = 'read the full letter'
+            expand.setAttribute('aria-expanded', 'false')
+            expand.addEventListener('click', () => {
+              const open = body.classList.toggle('is-clamped') === false
+              expand.textContent = open ? 'collapse the letter' : 'read the full letter'
+              expand.setAttribute('aria-expanded', String(open))
+            })
+            stack.appendChild(expand)
+          }
+        }
+
+        // sheet 3a attribution BELOW the bubble — "aj · via scout · 22:39"
+        // for you, "scout · 09:14" for the machine; peers carry the header
+        if (!longform && (kind === 'user' || kind === 'scout' || kind === 'error')) {
+          const meta = document.createElement('span')
+          meta.className = 'scout-chat-msg__meta'
+          const bits = []
+          if (kind === 'user') {
+            bits.push(scoutChatSelfHandle())
+          } else {
+            bits.push('scout')
+          }
+          if (viaScout) bits.push('via scout')
+          bits.push(scoutChatTimeLabel(ts))
+          meta.textContent = bits.join(' · ')
+          if (viaScout) {
+            // the disclosure segment keeps its own span so the provenance
+            // stays addressable (via Scout, posted on the user's behalf)
+            meta.replaceChildren()
+            const head = document.createTextNode(bits[0] + ' · ')
+            const via = document.createElement('span')
+            via.className = 'scout-chat-msg__via'
+            via.textContent = 'via scout'
+            via.title = 'via Scout — posted on the user’s behalf'
+            meta.append(head, via, document.createTextNode(' · ' + bits[bits.length - 1]))
+          }
+          stack.appendChild(meta)
         }
 
         item.appendChild(stack)

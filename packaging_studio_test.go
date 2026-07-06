@@ -440,7 +440,7 @@ func installStudioChildRunner(t *testing.T, outputs map[string]string) *[]captur
 // the goal id, the launched children, and the parks observed in order.
 func driveStudioRunToShipApproval(t *testing.T, app *kanbanBoardApp, packageID string) (string, *[]capturedChild, []string) {
 	t.Helper()
-	return driveStudioRunToShipApprovalWithSetup(t, app, packageID, nil)
+	return driveStudioRunToShipApprovalFull(t, app, packageID, nil, nil)
 }
 
 // driveStudioRunToShipApprovalWithSetup is the same drive with a hook that
@@ -448,6 +448,14 @@ func driveStudioRunToShipApproval(t *testing.T, app *kanbanBoardApp, packageID s
 // wrap createAnthropicMessagesResponse so jury-shaped system prompts answer
 // with jury JSON while every studio route keeps flowing to the routes fake.
 func driveStudioRunToShipApprovalWithSetup(t *testing.T, app *kanbanBoardApp, packageID string, afterResponder func()) (string, *[]capturedChild, []string) {
+	t.Helper()
+	return driveStudioRunToShipApprovalFull(t, app, packageID, afterResponder, nil)
+}
+
+// driveStudioRunToShipApprovalFull additionally stamps a goal origin — the
+// manifest tests launch from a channel so the ship resolution has an origin
+// thread to post the manifest card into.
+func driveStudioRunToShipApprovalFull(t *testing.T, app *kanbanBoardApp, packageID string, afterResponder func(), origin map[string]string) (string, *[]capturedChild, []string) {
 	t.Helper()
 	installFakeResponder(t, goalResponderRoutes{
 		// Every authored persona (red team, identity judges, architects,
@@ -472,6 +480,7 @@ func driveStudioRunToShipApprovalWithSetup(t *testing.T, app *kanbanBoardApp, pa
 		CreatedBy:    "aj@shareability.com",
 		PackageID:    packageID,
 		ToolTemplate: packagingStudioProcessID,
+		Origin:       origin,
 	})
 	if err != nil {
 		t.Fatalf("launchGoalThread(packaging_studio): %v", err)
@@ -1114,4 +1123,247 @@ func seatInPersonas(personas []ProcessPersona, name string) bool {
 		}
 	}
 	return false
+}
+
+// --- The MANIFEST: the handover card in the origin thread ---------------------
+
+// studioManifestMessages filters a channel's committed messages down to the
+// Kind:"manifest" records.
+func studioManifestMessages(t *testing.T, app *kanbanBoardApp, channelID string) []scoutChatMessageRecord {
+	t.Helper()
+	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", channelID)
+	if err != nil {
+		t.Fatalf("scoutChatThreadByID: %v", err)
+	}
+	var manifests []scoutChatMessageRecord
+	for _, message := range saved.Messages {
+		if message.Kind == scoutChatMessageKindManifest {
+			manifests = append(manifests, message)
+		}
+	}
+	return manifests
+}
+
+// A packaging_studio ship approval that PROCEEDS posts the manifest card into
+// the origin thread: the five deliverables in send order with their badges and
+// facts, the run's provenance (four decisions, the gate score, a wall clock),
+// the disclosed skips (sidecar-absent: both pdf exports + the slide jury), the
+// package attachment, the findings pointer — and the deliverables earn their
+// share eligibility, so the card's share door points at the deck. The manifest
+// is DATA persisted ON the message.
+func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	pkg, err := app.createVenturePackage("Station Tenn", "the country culture studio", "aj@shareability.com")
+	if err != nil {
+		t.Fatalf("createVenturePackage: %v", err)
+	}
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+
+	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, pkg.ID, nil, map[string]string{
+		"originKind": agentThreadOriginChannel,
+		"originId":   channel.ID,
+	})
+	// Parked at ship approval: NO manifest yet — the card is the resolution's.
+	if manifests := studioManifestMessages(t, app, channel.ID); len(manifests) != 0 {
+		t.Fatalf("manifest posted before the ship approval resolved: %+v", manifests)
+	}
+
+	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "approve the ship"); err != nil {
+		t.Fatalf("ship approval resume: %v", err)
+	}
+	waitForGoalStage(t, app, parentID, goalStateVerified)
+
+	manifests := studioManifestMessages(t, app, channel.ID)
+	if len(manifests) != 1 {
+		t.Fatalf("channel holds %d manifest messages, want exactly 1", len(manifests))
+	}
+	message := manifests[0]
+	if message.Manifest == nil {
+		t.Fatal("the manifest message carries no persisted manifest data")
+	}
+	manifest := *message.Manifest
+	if manifest.Status != manifestStatusShipped || manifest.GoalID != parentID {
+		t.Fatalf("manifest status/goal=%q/%q, want shipped/%q", manifest.Status, manifest.GoalID, parentID)
+	}
+	if !strings.Contains(message.Text, "manifest filed — five deliverables attached to Station Tenn") {
+		t.Fatalf("manifest message text=%q", message.Text)
+	}
+
+	// The five deliverables, send order, sheet badges: deck paper paper doc doc.
+	filed := studioFiledDeliverables(t, app, parentID)
+	if len(manifest.Deliverables) != 5 {
+		t.Fatalf("manifest carries %d deliverables, want 5: %+v", len(manifest.Deliverables), manifest.Deliverables)
+	}
+	wantBadges := []string{"deck", "paper", "paper", "doc", "doc"}
+	for index, contract := range studioWantContracts {
+		deliverable := manifest.Deliverables[index]
+		if deliverable.ArtifactID != filed[contract].ID {
+			t.Errorf("deliverable %d artifact=%q, want the filed %q (%s)", index, deliverable.ArtifactID, contract, filed[contract].ID)
+		}
+		if deliverable.Badge != wantBadges[index] {
+			t.Errorf("deliverable %d badge=%q, want %q", index, deliverable.Badge, wantBadges[index])
+		}
+		if deliverable.Title == "" {
+			t.Errorf("deliverable %d has no title", index)
+		}
+		if deliverable.Present != (index == 0) {
+			t.Errorf("deliverable %d present=%v — present is deck-only", index, deliverable.Present)
+		}
+		// Sidecar-absent: no pdf ever landed, so no download action anywhere.
+		if deliverable.PdfRef != "" {
+			t.Errorf("deliverable %d carries pdfRef %q with no rendered pdf on file", index, deliverable.PdfRef)
+		}
+	}
+	if manifest.Deliverables[0].Facts != "html · presenter mode" {
+		t.Errorf("deck facts=%q, want \"html · presenter mode\"", manifest.Deliverables[0].Facts)
+	}
+	if manifest.Deliverables[2].Facts != "doc · text-native" {
+		t.Errorf("The Talk facts=%q, want \"doc · text-native\" (no pdf this run)", manifest.Deliverables[2].Facts)
+	}
+	if manifest.FindingsArtifactID != filed[packagingStudioFindingsContract].ID {
+		t.Errorf("findings pointer=%q, want %q", manifest.FindingsArtifactID, filed[packagingStudioFindingsContract].ID)
+	}
+
+	// Provenance: the four human decisions, the gate's real score, a wall clock.
+	if manifest.Provenance.Decisions != 4 {
+		t.Errorf("provenance decisions=%d, want 4", manifest.Provenance.Decisions)
+	}
+	if manifest.Provenance.GateScore <= 0 {
+		t.Errorf("provenance gateScore=%v, want the gate subtask's real score", manifest.Provenance.GateScore)
+	}
+	if manifest.Provenance.WallClock == "" {
+		t.Error("provenance wallClock is empty")
+	}
+	if manifest.AttachedTo != "Station Tenn" || manifest.PackageID != pkg.ID {
+		t.Errorf("attachment=%q/%q, want Station Tenn/%s", manifest.AttachedTo, manifest.PackageID, pkg.ID)
+	}
+
+	// The disclosed skips: both pdf exports (sidecar absent) + the slide jury.
+	pdfSkips, jurySkips := 0, 0
+	for _, skip := range manifest.Skips {
+		if strings.Contains(skip, "pdf export skipped") {
+			pdfSkips++
+		}
+		if strings.Contains(skip, "slide jury skipped — ") {
+			jurySkips++
+		}
+	}
+	if pdfSkips != 2 || jurySkips != 1 {
+		t.Errorf("skips=%v, want 2 pdf-export skips + 1 slide-jury skip", manifest.Skips)
+	}
+
+	// The ship approval IS the human approval of the deliverables: every one
+	// carries the durable stamp, is share-eligible, and the manifest's share
+	// door points at the deck.
+	for _, contract := range studioWantContracts {
+		fresh := mustArtifact(t, app, filed[contract].ID)
+		if artifactStatus(fresh) != artifactStatusApproved {
+			t.Errorf("%q status=%q after the ship approval, want approved", contract, artifactStatus(fresh))
+		}
+		if fresh.Metadata[artifactHumanApprovedAtKey] == "" {
+			t.Errorf("%q missing the human-approval stamp", contract)
+		}
+		if !artifactShareEligible(fresh) {
+			t.Errorf("%q is not share-eligible after the ship approval", contract)
+		}
+	}
+	if manifest.ShareArtifactID != filed[packagingStudioDeckContract].ID {
+		t.Errorf("shareArtifactId=%q, want the deck %q", manifest.ShareArtifactID, filed[packagingStudioDeckContract].ID)
+	}
+	if manifest.Subline != "Five interlocking deliverables, filed to the venture package." {
+		// Skips are disclosed, so the subline names the degradation instead.
+		if manifest.Subline != "five deliverables filed — degraded paths disclosed below." {
+			t.Errorf("subline=%q", manifest.Subline)
+		}
+	}
+}
+
+// A HOLD posts the muted variant: status held with the holder on the record,
+// the share door dark, the deliverables NOT approved — and an explicit proceed
+// afterwards posts the shipped card, share now live.
+func TestPackagingStudioShipManifestHeldVariant(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	parentID, _, _ := driveStudioRunToShipApprovalFull(t, app, "", nil, map[string]string{
+		"originKind": agentThreadOriginChannel,
+		"originId":   channel.ID,
+	})
+
+	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "hold the package"); err != nil {
+		t.Fatalf("hold resume: %v", err)
+	}
+	manifests := studioManifestMessages(t, app, channel.ID)
+	if len(manifests) != 1 {
+		t.Fatalf("channel holds %d manifest messages after the hold, want 1", len(manifests))
+	}
+	held := manifests[0].Manifest
+	if held == nil || held.Status != manifestStatusHeld {
+		t.Fatalf("held manifest=%+v, want status held", held)
+	}
+	if held.HeldBy != "aj@shareability.com" {
+		t.Errorf("heldBy=%q", held.HeldBy)
+	}
+	if held.ShareArtifactID != "" {
+		t.Errorf("a held package's share links stay dark, got shareArtifactId=%q", held.ShareArtifactID)
+	}
+	if held.Subline != "Held before ship — artifacts stay filed, share links stay dark." {
+		t.Errorf("held subline=%q", held.Subline)
+	}
+	if !strings.Contains(manifests[0].Text, "package held — release requires aj@shareability.com") {
+		t.Errorf("held message text=%q", manifests[0].Text)
+	}
+	// Nothing left the office: no deliverable is approved or share-eligible.
+	filed := studioFiledDeliverables(t, app, parentID)
+	for contract, artifact := range filed {
+		fresh := mustArtifact(t, app, artifact.ID)
+		if artifactStatus(fresh) == artifactStatusApproved || artifactShareEligible(fresh) {
+			t.Errorf("%q became shareable under a hold", contract)
+		}
+	}
+
+	// The explicit proceed releases the hold and posts the shipped card.
+	if err := app.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "approve the ship"); err != nil {
+		t.Fatalf("proceed after hold: %v", err)
+	}
+	waitForGoalStage(t, app, parentID, goalStateVerified)
+	manifests = studioManifestMessages(t, app, channel.ID)
+	if len(manifests) != 2 {
+		t.Fatalf("channel holds %d manifest messages after the release, want 2 (held, then shipped)", len(manifests))
+	}
+	shipped := manifests[1].Manifest
+	if shipped == nil || shipped.Status != manifestStatusShipped {
+		t.Fatalf("release manifest=%+v, want status shipped", shipped)
+	}
+	deck := filed[packagingStudioDeckContract]
+	if shipped.ShareArtifactID != deck.ID {
+		t.Errorf("released shareArtifactId=%q, want the deck %q", shipped.ShareArtifactID, deck.ID)
+	}
+}
+
+// The manifest belongs to the packaging_studio ship approval alone: a plan
+// without that process (or a different stage) posts nothing.
+func TestStudioShipManifestOnlyForPackagingStudio(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	parent := newGoalParentForReporter(t, app, map[string]string{
+		"originKind": agentThreadOriginChannel,
+		"originId":   channel.ID,
+	})
+
+	// A free-form goal (no process), and a studio plan resolving a NON-ship
+	// stage: neither posts a manifest.
+	app.recordStudioShipResolution(&goalPlan{}, parent.ID, "ship_approval", manifestStatusShipped, "aj", true)
+	app.recordStudioShipResolution(&goalPlan{ProcessID: packagingStudioProcessID}, parent.ID, "founder_pass", manifestStatusShipped, "aj", true)
+	if manifests := studioManifestMessages(t, app, channel.ID); len(manifests) != 0 {
+		t.Fatalf("non-studio resolutions posted %d manifests, want 0", len(manifests))
+	}
 }

@@ -269,6 +269,13 @@ const (
 	// existing "message"/"thread" message kinds.
 	scoutChatMessageKindProposal = "proposal"
 
+	// scoutChatMessageKindChoices marks a persisted quick-reply question: Scout
+	// asked ONE clarifying question and offered 2-4 pill options (the dv-opts
+	// dialogue design). Like a proposal, the card is DATA — tapping a pill sends
+	// that text as the user's reply; a tool-armed pill only ARMS the proposal
+	// card. NEVER a launch.
+	scoutChatMessageKindChoices = "choices"
+
 	// Weight labels — the card's honest cost line (§2: the card is also the
 	// cost gate while concurrency limits are global).
 	scoutProposalWeightGoalLoop  = "multi-agent goal loop, ~5-15 min"
@@ -280,6 +287,10 @@ const (
 	// store just carries them.
 	signalEventRouterProposalAccepted  = "router_proposal_accepted"
 	signalEventRouterProposalDismissed = "router_proposal_dismissed"
+	// signalEventRouterChoiceSelected records one quick-reply pill tap — the
+	// per-option acceptance signal that tells us which offered routes people
+	// actually take.
+	signalEventRouterChoiceSelected = "router_choice_selected"
 )
 
 // routerModel is the routing-turn dial, distinct from chatModel() and
@@ -313,6 +324,39 @@ type scoutRouterProposal struct {
 	Status string `json:"status,omitempty"`
 }
 
+// scoutChatChoiceOption is one quick-reply pill. Label is what the pill shows;
+// Reply is the text sent as the user's message when tapped (defaults to Label);
+// ToolID, when set, arms that registry tool/process as a deterministic proposal
+// card on the reply — the propose-confirm law's trust surface, never a launch.
+type scoutChatChoiceOption struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Reply  string `json:"reply,omitempty"`
+	ToolID string `json:"toolId,omitempty"`
+}
+
+// scoutChatChoices is the wire/storage shape of one quick-reply question card
+// (Kind "choices"): the one-sentence question plus 2-4 pill options. Query is
+// the user message that produced the question — it becomes the proposal's
+// Tier-0 escape query and the objective fallback. Status flips to "answered"
+// (with SelectedID) on the first tap, so a reloaded thread renders the card
+// inert instead of re-offering spent pills.
+type scoutChatChoices struct {
+	Question   string                  `json:"question"`
+	Options    []scoutChatChoiceOption `json:"options"`
+	Query      string                  `json:"query,omitempty"`
+	Status     string                  `json:"status,omitempty"`
+	SelectedID string                  `json:"selectedId,omitempty"`
+}
+
+// scoutRouterVerdict is one routing turn's outcome beyond Tier 0: exactly one
+// of proposal (Tier 1/2) or choices (the clarifying question) is set. A nil
+// verdict is Tier 0 — answer inline.
+type scoutRouterVerdict struct {
+	proposal *scoutRouterProposal
+	choices  *scoutChatChoices
+}
+
 // scoutRouterSystemPrompt pins the three-tier policy. The trust asymmetry is
 // deliberate and load-bearing: an agent that under-routes is trusted; one that
 // over-launches is muted.
@@ -323,7 +367,14 @@ func scoutRouterSystemPrompt() string {
 		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, and discussion are ALWAYS Tier 0 — 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
 		"Tier 1 — propose_workstream: a bounded 'go do one thing' ask (research / design / grill / workflow) that does not match a registry tool.",
 		"Tier 2 — propose_tool_run: the ask matches a registry tool's contract — the user wants a deliverable someone will read (a brief, a one-pager, a scorecard, a memo).",
-		"A proposal is only ever a suggestion card the user must confirm; you can never launch anything. Propose at most one thing.",
+		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
+		"Intent map — route these confidently:",
+		"- pitch outline work ('work on the pitch outline', 'outline the deck', 'sequence the narrative slide by slide') -> propose_tool_run deck_outline.",
+		"- design identity ('develop a design identity', 'brand direction', 'look and feel', 'visual system') -> propose_tool_run brand_design_brief.",
+		"- a deck built from an existing outline ('build the deck from the outline we have') -> propose_tool_run packaging_studio with the objective naming that outline as the spine; if it is unclear whether they want outline work or the built deck, offer_choices between deck_outline and packaging_studio.",
+		"- full end-to-end packaging ('package this end to end', 'the full packaging run', 'take it from 0 to 100') -> propose_tool_run packaging_studio.",
+		"- ground truth / market digging -> deep_research; what-it-sold-for / pricing -> comps_precedent; landscape / whitespace -> market_map; hostile-room prep ('grill it', 'pressure test it') -> grill_pressure_test; who to attach -> talent_match.",
+		"A proposal or a question card is only ever a suggestion the user must act on; you can never launch anything. Propose at most one thing.",
 		"When in doubt, answer inline. An agent that under-routes is trusted; one that over-launches is muted.",
 	}, "\n")
 }
@@ -367,6 +418,31 @@ func scoutRouterTools() []anthropicTool {
 				"required": []string{"mode", "query"},
 			},
 		},
+		{
+			Name:        "offer_choices",
+			Description: "Ask ONE short clarifying question with 2-4 quick-reply pill options when the ask is work but the route is genuinely ambiguous. An option with a tool_id arms that tool's confirmation card when tapped — nothing launches without the user's explicit confirm.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"question": map[string]any{"type": "string", "description": "one sentence, ending in the question"},
+					"options": map[string]any{
+						"type":     "array",
+						"minItems": 2,
+						"maxItems": 4,
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"label":   map[string]any{"type": "string", "description": "the pill text, under ~6 words"},
+								"reply":   map[string]any{"type": "string", "description": "the full reply sent when tapped; defaults to the label"},
+								"tool_id": map[string]any{"type": "string", "enum": ids, "description": "registry tool/process this option arms; omit for a plain reply"},
+							},
+							"required": []string{"label"},
+						},
+					},
+				},
+				"required": []string{"question", "options"},
+			},
+		},
 	}
 }
 
@@ -390,11 +466,12 @@ func scoutRouterInput(text string, history []scoutChatTurn) string {
 	return builder.String()
 }
 
-// routeScoutChatProposal runs the one routing turn and returns a proposal, or
-// nil for Tier 0 (answer inline). nil is also every degraded path: keyless,
-// router error, undecodable/unknown tool call — the caller falls through to
-// the normal Q&A, so the router can only ever ADD a card, never break chat.
-func (app *kanbanBoardApp) routeScoutChatProposal(ctx context.Context, text string, history []scoutChatTurn) *scoutRouterProposal {
+// routeScoutChatTurn runs the one routing turn and returns a verdict — a
+// proposal card, a quick-reply question card — or nil for Tier 0 (answer
+// inline). nil is also every degraded path: keyless, router error,
+// undecodable/unknown tool call — the caller falls through to the normal Q&A,
+// so the router can only ever ADD a card, never break chat.
+func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, history []scoutChatTurn) *scoutRouterVerdict {
 	apiKey := currentAnthropicAPIKey()
 	if apiKey == "" {
 		return nil // keyless: plain Q&A — never a proposal, never an error
@@ -428,11 +505,112 @@ func (app *kanbanBoardApp) routeScoutChatProposal(ctx context.Context, text stri
 		if block.Type != "tool_use" {
 			continue
 		}
+		if block.Name == "offer_choices" {
+			if choices := scoutChatChoicesFromToolUse(block, text); choices != nil {
+				return &scoutRouterVerdict{choices: choices}
+			}
+			continue
+		}
 		if proposal := scoutRouterProposalFromToolUse(block, text); proposal != nil {
-			return proposal
+			return &scoutRouterVerdict{proposal: proposal}
 		}
 	}
 	return nil
+}
+
+// routerToolByID resolves a proposable id against the same set scoutRouterTools
+// injects into the enum: the 12 registry tools plus non-hidden processes mapped
+// onto the tool shape (processPaletteEntry). Hidden processes stay unproposable
+// even if the model hallucinates their id. Without the process branch, the
+// router could name packaging_studio (it is in the enum via the fifth payload
+// group) and validation would silently drop the proposal.
+func routerToolByID(id string) (packagingTool, bool) {
+	if tool, ok := toolByID(id); ok {
+		return tool, true
+	}
+	if def, ok := processByID(strings.TrimSpace(strings.ToLower(id))); ok && !def.Hidden {
+		return processPaletteEntry(def), true
+	}
+	return packagingTool{}, false
+}
+
+// scoutRouterProposalForToolID builds the deterministic tool-run proposal card
+// for one registry tool or process — shared by the router's propose_tool_run
+// validation and the quick-reply pill arm (a tool-armed pill commits exactly
+// this card; the card's Run button stays the only launch door).
+func scoutRouterProposalForToolID(toolID string, objective string, query string) *scoutRouterProposal {
+	tool, ok := routerToolByID(toolID)
+	if !ok {
+		return nil
+	}
+	objective = firstNonEmptyString(strings.TrimSpace(objective), strings.TrimSpace(query), tool.Name)
+	return &scoutRouterProposal{
+		Kind:        scoutRouterProposalKindToolRun,
+		ToolID:      tool.ID,
+		ToolName:    tool.Name,
+		GroupLabel:  toolGroupLabels[tool.Group],
+		Objective:   objective,
+		Query:       strings.TrimSpace(query),
+		Authority:   tool.Authority,
+		WeightLabel: scoutProposalWeightGoalLoop,
+		Summary:     scoutRouterToolRunSummary(tool, objective),
+	}
+}
+
+// scoutChatChoicesFromToolUse validates one offer_choices call: a non-empty
+// question and 2-4 usable options. An option with an unknown tool_id keeps its
+// label as a plain reply pill (the arm is dropped, the conversation survives);
+// fewer than 2 usable options degrades to nil — an inline answer, never an
+// error.
+func scoutChatChoicesFromToolUse(block anthropicBlock, query string) *scoutChatChoices {
+	args := struct {
+		Question string `json:"question"`
+		Options  []struct {
+			Label  string `json:"label"`
+			Reply  string `json:"reply"`
+			ToolID string `json:"tool_id"`
+		} `json:"options"`
+	}{}
+	if err := json.Unmarshal(block.Input, &args); err != nil {
+		log.Errorf("Scout router offer_choices input undecodable: %v", err)
+		return nil
+	}
+	question := trimForStorage(args.Question, 240)
+	if question == "" {
+		return nil
+	}
+	options := make([]scoutChatChoiceOption, 0, 4)
+	for _, raw := range args.Options {
+		label := trimForStorage(raw.Label, 80)
+		if label == "" {
+			continue
+		}
+		toolID := ""
+		if wanted := strings.TrimSpace(raw.ToolID); wanted != "" {
+			if tool, ok := routerToolByID(wanted); ok {
+				toolID = tool.ID
+			} else {
+				log.Errorf("Scout router offered unknown tool %q on a pill — keeping the plain reply", wanted)
+			}
+		}
+		options = append(options, scoutChatChoiceOption{
+			ID:     fmt.Sprintf("opt-%d", len(options)+1),
+			Label:  label,
+			Reply:  trimForStorage(raw.Reply, 400),
+			ToolID: toolID,
+		})
+		if len(options) == 4 {
+			break
+		}
+	}
+	if len(options) < 2 {
+		return nil
+	}
+	return &scoutChatChoices{
+		Question: question,
+		Options:  options,
+		Query:    strings.TrimSpace(query),
+	}
 }
 
 // scoutRouterProposalFromToolUse validates one routing tool call against the
@@ -451,36 +629,27 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			log.Errorf("Scout router propose_tool_run input undecodable: %v", err)
 			return nil
 		}
-		tool, ok := toolByID(args.ToolID)
+		tool, ok := routerToolByID(args.ToolID)
 		if !ok {
 			log.Errorf("Scout router proposed unknown tool %q", args.ToolID)
 			return nil
 		}
-		objective := firstNonBlank(strings.TrimSpace(args.Objective), strings.TrimSpace(query))
+		proposal := scoutRouterProposalForToolID(tool.ID, args.Objective, query)
+		if proposal == nil {
+			return nil
+		}
+		proposal.PackageID = strings.TrimSpace(args.PackageID)
 		// Only field keys the registry declares survive — the card's inputs
 		// render from the tool's own form definition.
-		var fields map[string]string
 		for _, field := range tool.FormFields {
 			if value := strings.TrimSpace(asString(args.Fields[field.Key])); value != "" {
-				if fields == nil {
-					fields = map[string]string{}
+				if proposal.Fields == nil {
+					proposal.Fields = map[string]string{}
 				}
-				fields[field.Key] = value
+				proposal.Fields[field.Key] = value
 			}
 		}
-		return &scoutRouterProposal{
-			Kind:        scoutRouterProposalKindToolRun,
-			ToolID:      tool.ID,
-			ToolName:    tool.Name,
-			GroupLabel:  toolGroupLabels[tool.Group],
-			Objective:   objective,
-			Query:       strings.TrimSpace(query),
-			PackageID:   strings.TrimSpace(args.PackageID),
-			Fields:      fields,
-			Authority:   tool.Authority,
-			WeightLabel: scoutProposalWeightGoalLoop,
-			Summary:     scoutRouterToolRunSummary(tool, objective),
-		}
+		return proposal
 	case "propose_workstream":
 		args := struct {
 			Mode  string `json:"mode"`
@@ -512,8 +681,12 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 
 // scoutRouterToolRunSummary is the card's one legible sentence: what runs,
 // against what gate, with the kill condition named — the in-context tutorial
-// for the tool.
+// for the tool. Processes carry no single rubric (each stage gates itself), so
+// their sentence names the checkpoint law instead.
 func scoutRouterToolRunSummary(tool packagingTool, objective string) string {
+	if tool.Group == toolGroupProcesses {
+		return "this is the " + tool.Name + " staged process — " + objective + ". it parks at each human checkpoint; nothing ships without your approval."
+	}
 	return "this is a " + tool.Name + " run — " + objective + ". gate: rubric-scored (" + tool.Rubric.Ref + "), kill condition: " + tool.KillCondition()
 }
 

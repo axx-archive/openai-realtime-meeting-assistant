@@ -2162,6 +2162,12 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 	e.drive(ctx, plan, parentID)
+	// The ship moment (sheet s05): a packaging_studio ship approval that
+	// proceeds hands over the goods — post-drive, so the manifest reads the
+	// composed report. A disclosed budget-spent send-back fallback proceeds
+	// WITHOUT the founder's approval (the HTTP door's rule), so its
+	// deliverables never earn share eligibility.
+	e.app.recordStudioShipResolution(plan, parentID, st.ID, manifestStatusShipped, resolvedBy, disclosure == "")
 	return nil
 }
 
@@ -2279,6 +2285,9 @@ func (e *goalEngine) holdProcessCheckpoint(plan *goalPlan, parentID string, held
 		}
 	}
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal is held at a checkpoint ("+compactAssistantLine(choice)+") — resume with a proceed choice.", artifact))
+	// A held packaging_studio ship posts the muted manifest variant (sheet
+	// §2c): artifacts stay filed, actions quieted, share links stay dark.
+	e.app.recordStudioShipResolution(plan, parentID, checkpoint.StageID, manifestStatusHeld, heldBy, false)
 	return nil
 }
 

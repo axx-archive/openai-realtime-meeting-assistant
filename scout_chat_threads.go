@@ -81,6 +81,15 @@ type scoutChatMessageRecord struct {
 	// client renders as the confirmation trust surface, never an action. See
 	// the propose-confirm router in scout_chat.go.
 	Proposal *scoutRouterProposal `json:"proposal,omitempty"`
+	// Choices carries a quick-reply question card (Kind "choices") — Scout's
+	// one clarifying question with 2-4 pill options. Same law as Proposal:
+	// DATA the client renders; a tap sends a reply, never launches.
+	Choices *scoutChatChoices `json:"choices,omitempty"`
+	// Manifest carries the package manifest card (Kind "manifest") — the
+	// shipped/held deliverable handover a packaging_studio ship_approval
+	// posts (goal_manifest.go). Same law again: persisted DATA the client
+	// renders, so reloads show the same card.
+	Manifest *scoutChatManifest `json:"manifest,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -215,6 +224,21 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response, err := kanbanApp.resolveScoutChatProposal(r.Context(), user, threadID, action)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, response)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "choice" && r.Method == http.MethodPost {
+		var action scoutChatChoiceAction
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&action); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read choice selection")
+			return
+		}
+		response, err := kanbanApp.resolveScoutChatChoice(r.Context(), user, threadID, action)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -571,30 +595,51 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	}
 
 	// One routing turn for private threads (the typed twin of voice
-	// initiate_goal): the router may PROPOSE a tool run or a workstream — a
-	// proposal is DATA committed on the reply, NEVER a launch. The user's
-	// explicit confirm posts the identical spec the palette Run posts
-	// (POST /assistant/goal for tool runs, the proposal route for
-	// workstreams). Keyless deploys skip the turn inside
-	// routeScoutChatProposal and keep plain Q&A.
+	// initiate_goal): the router may PROPOSE a tool run or a workstream, or
+	// ASK one clarifying question with quick-reply pills — both are DATA
+	// committed on the reply, NEVER a launch. The user's explicit confirm
+	// posts the identical spec the palette Run posts (POST /assistant/goal
+	// for tool runs, the proposal route for workstreams); a pill tap goes
+	// through the choice route, which at most ARMS a proposal card. Keyless
+	// deploys skip the turn inside routeScoutChatTurn and keep plain Q&A.
 	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
-		if proposal := app.routeScoutChatProposal(ctx, modelQuery, history); proposal != nil {
-			proposalMessage := scoutChatMessageRecord{
-				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:      scoutChatMessageKindProposal,
-				Role:      "scout",
-				Text:      proposal.Summary,
-				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-				Proposal:  proposal,
+		if verdict := app.routeScoutChatTurn(ctx, modelQuery, history); verdict != nil {
+			if proposal := verdict.proposal; proposal != nil {
+				proposalMessage := scoutChatMessageRecord{
+					ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+					Kind:      scoutChatMessageKindProposal,
+					Role:      "scout",
+					Text:      proposal.Summary,
+					CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+					Proposal:  proposal,
+				}
+				saved, err := commitUserMessage(userMessage, proposalMessage)
+				if err != nil {
+					return nil, err
+				}
+				response["answer"] = proposalMessage
+				response["proposal"] = proposal
+				response["thread"] = saved
+				return response, nil
 			}
-			saved, err := commitUserMessage(userMessage, proposalMessage)
-			if err != nil {
-				return nil, err
+			if choices := verdict.choices; choices != nil {
+				choicesMessage := scoutChatMessageRecord{
+					ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+					Kind:      scoutChatMessageKindChoices,
+					Role:      "scout",
+					Text:      choices.Question,
+					CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+					Choices:   choices,
+				}
+				saved, err := commitUserMessage(userMessage, choicesMessage)
+				if err != nil {
+					return nil, err
+				}
+				response["answer"] = choicesMessage
+				response["choices"] = choices
+				response["thread"] = saved
+				return response, nil
 			}
-			response["answer"] = proposalMessage
-			response["proposal"] = proposal
-			response["thread"] = saved
-			return response, nil
 		}
 	}
 
@@ -795,6 +840,165 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	response["answer"] = assistantMessage
 	response["thread"] = saved
 	return response, nil
+}
+
+// scoutChatChoiceAction is the POST /assistant/chat-threads/{id}/choice body:
+// one quick-reply pill tap. Only ids cross the wire — the reply text, the tool
+// arm, everything actionable resolves against the PERSISTED choices record, so
+// a fabricated post cannot make Scout "say" arbitrary text or arm an unoffered
+// tool.
+type scoutChatChoiceAction struct {
+	MessageID string `json:"messageId"`
+	OptionID  string `json:"optionId"`
+}
+
+// resolveScoutChatChoice applies one pill tap. Claim first (the stored record
+// wins, first tap wins), then the signal, then the side effect the option
+// earns: a tool-armed pill commits the user's reply plus the DETERMINISTIC
+// proposal card for that tool — the propose-confirm trust surface, so the
+// card's Run button stays the only launch door — and a plain pill commits the
+// reply and answers it as Tier 0. Nothing here ever launches.
+func (app *kanbanBoardApp) resolveScoutChatChoice(ctx context.Context, user *userAccount, threadID string, action scoutChatChoiceAction) (map[string]any, error) {
+	messageID := strings.TrimSpace(action.MessageID)
+	optionID := strings.TrimSpace(action.OptionID)
+	if messageID == "" || optionID == "" {
+		return nil, fmt.Errorf("choice message id and option id are required")
+	}
+
+	option, choices, err := app.claimScoutChatChoice(threadID, user.Email, messageID, optionID)
+	if err != nil {
+		return nil, err
+	}
+
+	app.recordSignalEvent(user.Name, signalEventRouterChoiceSelected, signalValencePositive, "", "", map[string]string{
+		"toolId":   option.ToolID,
+		"label":    option.Label,
+		"question": choices.Question,
+	})
+
+	reply := firstNonBlank(strings.TrimSpace(option.Reply), strings.TrimSpace(option.Label))
+	now := time.Now().UTC()
+	userMessage := scoutChatMessageRecord{
+		ID:          fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
+		Kind:        "message",
+		Role:        "user",
+		Text:        reply,
+		CreatedAt:   now.Format(time.RFC3339Nano),
+		AuthorName:  scoutChatAuthorName(user),
+		AuthorEmail: normalizeAccountEmail(user.Email),
+	}
+	response := map[string]any{"ok": true, "message": userMessage}
+
+	if option.ToolID != "" {
+		// The pill's reply is usually the best objective (the router wrote it
+		// for exactly this route); the originating ask backs it up, and stays
+		// the Tier-0 escape query on the card.
+		proposal := scoutRouterProposalForToolID(option.ToolID, reply, strings.TrimSpace(choices.Query))
+		if proposal == nil {
+			return nil, fmt.Errorf("that option's tool is no longer available")
+		}
+		proposalMessage := scoutChatMessageRecord{
+			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:      scoutChatMessageKindProposal,
+			Role:      "scout",
+			Text:      proposal.Summary,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Proposal:  proposal,
+		}
+		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, proposalMessage)
+		if err != nil {
+			return nil, err
+		}
+		response["answer"] = proposalMessage
+		response["proposal"] = proposal
+		response["thread"] = saved
+		return response, nil
+	}
+
+	// Plain pill: the reply is a Tier-0 turn — answer it with the thread as
+	// context, exactly like a typed message that routed to no card.
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := app.resolveAssistantQueryContext(ctx, reply, scoutChatHistoryFromThread(thread))
+	if err != nil {
+		// The tap already resolved the card; keep the reply on the record so
+		// the conversation survives, then surface the answer failure.
+		if _, commitErr := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage); commitErr != nil {
+			log.Errorf("Failed to commit choice reply after answer failure: %v", commitErr)
+		}
+		return nil, err
+	}
+	answer := strings.TrimSpace(result.answer)
+	if answer == "" {
+		answer = "no answer yet"
+	}
+	assistantMessage := scoutChatMessageRecord{
+		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+		Kind:      "message",
+		Role:      "scout",
+		Text:      answer,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, userMessage, assistantMessage)
+	if err != nil {
+		return nil, err
+	}
+	response["answer"] = assistantMessage
+	response["thread"] = saved
+	return response, nil
+}
+
+// claimScoutChatChoice atomically resolves one persisted choices card through
+// the same per-thread lock + re-read + save path as message commits: it loads
+// the card by message id, requires it still PENDING (first tap wins; a replay
+// or double-tap rejects), requires the option to be one the card actually
+// offered, stamps answered + the selection, persists, and returns copies of
+// the stored option and card. The caller acts on those records, never on
+// request-body fields.
+func (app *kanbanBoardApp) claimScoutChatChoice(threadID string, viewerEmail string, messageID string, optionID string) (scoutChatChoiceOption, scoutChatChoices, error) {
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatChoiceOption{}, scoutChatChoices{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("chat thread is archived")
+	}
+	for index := range thread.Messages {
+		message := &thread.Messages[index]
+		if message.ID != messageID || message.Choices == nil {
+			continue
+		}
+		if message.Choices.Status != "" {
+			return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("those options were already answered")
+		}
+		var selected *scoutChatChoiceOption
+		for optionIndex := range message.Choices.Options {
+			if message.Choices.Options[optionIndex].ID == optionID {
+				selected = &message.Choices.Options[optionIndex]
+				break
+			}
+		}
+		if selected == nil {
+			return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("choice option not found")
+		}
+		message.Choices.Status = "answered"
+		message.Choices.SelectedID = selected.ID
+		thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return scoutChatChoiceOption{}, scoutChatChoices{}, err
+		}
+		claimedOption := *selected
+		claimedChoices := *message.Choices
+		deliverScoutChatThreadUpdate(thread, *message)
+		return claimedOption, claimedChoices, nil
+	}
+	return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("choice message not found")
 }
 
 // claimScoutChatProposal atomically resolves one persisted proposal card
