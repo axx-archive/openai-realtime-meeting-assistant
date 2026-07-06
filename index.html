@@ -22563,7 +22563,11 @@
         const body = String(entry?.text || '')
         // a markup body has no previewable first line — the style block wins
         const previewable = body && !/^\s*</.test(body) ? compactArtifactPreview(body) : ''
-        return String(entry?.metadata?.title || '').trim()
+        // deck children get their title stamped from the body head server-side,
+        // so a markup-shaped title (css/tags) is junk — prose only
+        const stamped = String(entry?.metadata?.title || '').trim()
+        const proseTitle = stamped && !/[{}<>]/.test(stamped) ? stamped : ''
+        return proseTitle
           || String(entry?.metadata?.threadQuery || entry?.metadata?.query || '').trim()
           || String(fallback || '').trim()
           || previewable || 'artifact'
