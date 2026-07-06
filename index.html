@@ -31118,6 +31118,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         removeRemoteParticipantMediaByName(name)
+        // An ungraceful departure leaves a zombie receiver on our peer
+        // connection: the server drops the sender, the track goes muted but
+        // never fires 'ended', so it reads readyState=live forever. Strip the
+        // departed name from the track-label maps so that zombie cannot keep
+        // the participant's identity — otherwise a rejoin yields two "live"
+        // tracks labeled with the same name and the tile repair passes fight
+        // over the seat, tearing the tile down and rebuilding it every pass.
+        forgetRemoteTrackLabelsForName(name)
         participantMediaStates.delete(name)
         clearSpeakerStateForParticipant(name)
         participantsInRoom = normalizeParticipantList(participantsInRoom.filter(participantName => participantName.toLowerCase() !== name.toLowerCase()))
@@ -31131,6 +31139,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         pruneStaleUnidentifiedRemoteVideoTiles()
         updateParticipantPreviewText()
         updateHearthParticipants()
+      }
+
+      function forgetRemoteTrackLabelsForName(name) {
+        const target = String(name || '').trim().toLowerCase()
+        if (!target || target === 'participant') {
+          return
+        }
+        for (const [key, label] of Array.from(remoteLabelsByTrack.entries())) {
+          if (String(label || '').trim().toLowerCase() === target) {
+            remoteLabelsByTrack.delete(key)
+            unlabeledRemoteVideoSightings.delete(key)
+          }
+        }
+        for (const [key, label] of Array.from(remoteLabelsByStream.entries())) {
+          if (String(label || '').trim().toLowerCase() === target) {
+            remoteLabelsByStream.delete(key)
+          }
+        }
       }
 
       function clearSpeakerStateForParticipant(name) {
@@ -31853,6 +31879,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             // The labeled participant already left the room; recreating their
             // tile would fight pruneRemoteMediaOutsideRoom in a create/prune
             // flicker loop until the server finishes renegotiating.
+            continue
+          }
+          if (track.muted) {
+            // Same zombie-transceiver guard as the unlabeled branch above: a
+            // muted receiver delivers no frames. If a stale label survived the
+            // participant's departure (e.g. the leave event was missed during
+            // our own reconnect), seating this zombie would tear down the
+            // participant's real tile and flicker-loop against it every pass.
             continue
           }
           const stream = new MediaStream([track])
