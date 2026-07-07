@@ -2155,6 +2155,29 @@
         padding: var(--sp-2) 0;
       }
 
+      /* B2 — a lane with no cards collapses to a slim labelled rail so three
+         empties never eat 75% of the board; the populated lanes keep their
+         flex share and grow to fill. Only applied when the board isn't wholly
+         empty (renderBoard gates the class), so the empty-board hero still reads. */
+      .column--empty {
+        flex: 0 0 96px;
+        min-width: 96px;
+      }
+      .column--empty header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+      .column--empty .stack {
+        align-items: center;
+      }
+      .column--empty .empty {
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        padding: 12px 0;
+        white-space: nowrap;
+      }
+
       /* When all four columns are empty, the board surface gets a single
          centered hero line above the columns. */
       .board-hero {
@@ -2180,6 +2203,9 @@
         padding: 14px;
         cursor: pointer;
         box-shadow: none;
+        /* KC5 — clip any overflowing footer content to the rounded edge so a
+           long tag set (KC2) can never spill past the card corner */
+        overflow: hidden;
         transition: transform .2s var(--ease),
                     box-shadow .2s var(--ease),
                     background var(--dur-fast) var(--ease),
@@ -2196,9 +2222,11 @@
       }
       .card:active { transform: scale(var(--press-scale)); }
 
-      /* done cards settle back — faded, still readable */
+      /* KC1 — done cards read at full contrast; the live-soft 'shipped' date
+         pill is the done signal, not a blanket fade that dims the whole lane
+         (which reads as disabled when Done is the only populated column) */
       .column--done .card {
-        opacity: 0.62;
+        opacity: 1;
       }
 
       /* Scout draft — pending, not on the board yet (D4) */
@@ -2372,6 +2400,27 @@
         justify-content: center;
         font: 600 8px var(--font-sans);
         color: var(--text-2);
+      }
+
+      /* KC3 — unassigned owner is an empty dashed ring, not a fake 'U' user */
+      .card-owner-chip.is-unassigned {
+        border-style: dashed;
+        border-color: var(--line-2);
+        background: transparent;
+      }
+
+      /* KC2 — tags ride their own wrapping row under the owner line, so a long
+         tag set never crowds the owner label or spills past the card edge */
+      .card-tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+        margin-top: 8px;
+      }
+
+      .card-tag--more {
+        color: var(--text-3);
       }
 
       /* owner reads as a quiet label, not a boxed badge, per canon */
@@ -4408,7 +4457,7 @@
         letter-spacing: var(--track-text);
       }
 
-      /* kit Dialog close — a quiet circle on surface-3 */
+      /* kit Dialog close — a quiet circle on surface-3, Lucide X centered */
       .card-detail-close {
         min-width: 0;
         width: 30px;
@@ -4419,7 +4468,9 @@
         background: var(--surface-3);
         box-shadow: none;
         color: var(--text-2);
-        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         line-height: 1;
         padding: 0;
       }
@@ -10307,32 +10358,96 @@
         min-width: 0;
       }
 
-      #filesUploadButton {
+      /* kit segmented — grid / list view toggle */
+      .files-seg {
         flex: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        height: 40px;
-        padding: 0 16px;
-        border: 1px solid var(--line-2);
+        display: inline-grid;
+        grid-auto-flow: column;
+        height: 34px;
+        padding: 3px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
         border-radius: var(--r-full);
-        background: var(--surface-2);
-        color: var(--text-1);
-        font: 500 13px var(--font-sans);
-        cursor: pointer;
       }
 
-      #filesUploadButton:hover:not([disabled]) {
-        background: var(--surface-3);
+      .files-seg__btn {
+        border: 0;
+        background: transparent;
+        padding: 0 13px;
+        border-radius: var(--r-full);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .files-seg__btn.is-active {
+        background: var(--surface-1);
+        color: var(--text-1);
+        box-shadow: var(--shadow-1);
+      }
+
+      /* kit Files upload — a full-width dashed dropzone; click or drop
+         (replaces the compact outline pill: FU1/FU2/NC3) */
+      #filesUploadButton {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        margin: 4px 0 18px;
+        padding: 14px 18px;
+        border: 1px dashed var(--line-2);
+        border-radius: var(--r-lg);
+        background: transparent;
+        color: var(--text-2);
+        font: 500 13px var(--font-sans);
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      #filesUploadButton:hover:not([disabled]),
+      #filesUploadButton.is-dragover {
+        background: var(--surface-2);
+        border-color: var(--accent);
       }
 
       #filesUploadButton:active:not([disabled]) {
-        transform: scale(var(--press-scale));
+        transform: scale(0.996);
+      }
+
+      #filesUploadButton .files-upload__icon {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        color: var(--text-2);
+      }
+
+      #filesUploadButton .files-upload__text b {
+        color: var(--text-1);
+        font-weight: 600;
       }
 
       #filesUploadButton[disabled] {
         opacity: 0.55;
         cursor: default;
+      }
+
+      /* empty koan sub-line — a quiet how-to under the koan, not a paragraph */
+      .files-empty__sub {
+        display: block;
+        margin-top: 8px;
+        color: var(--text-3);
+        opacity: 0.72;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       .files-row {
@@ -10342,7 +10457,7 @@
         min-width: 0;
         padding: 12px 14px;
         border: 1px solid var(--line-1);
-        border-radius: 14px;
+        border-radius: var(--r-lg);
         background: var(--surface-2);
       }
 
@@ -10413,8 +10528,8 @@
         text-decoration: underline;
       }
 
-      /* the honest badge: ember dot when the file's text rides model
-         context, quiet dot when only the bytes are stored */
+      /* kit brain badge: 'in the brain' = live-soft green (the file's text
+         rides model context), 'stored' = quiet grey (only bytes are held) */
       .files-badge {
         flex: none;
         display: inline-flex;
@@ -10422,8 +10537,9 @@
         gap: 6px;
         height: 24px;
         padding: 0 10px;
-        border: 1px solid var(--line-1);
+        border: 0;
         border-radius: var(--r-full);
+        background: var(--surface-3);
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -10435,17 +10551,84 @@
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--text-3);
-        opacity: 0.5;
+        background: currentColor;
+        opacity: 0.7;
       }
 
       .files-badge--ingested {
-        color: var(--text-2);
+        background: var(--live-soft);
+        color: var(--live);
       }
 
       .files-badge--ingested::before {
-        background: var(--accent);
         opacity: 1;
+      }
+
+      /* kit Files grid — responsive tiles (segmented grid view) */
+      .files-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 12px;
+      }
+
+      .file-tile {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        padding: 15px;
+        overflow: hidden;
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);
+      }
+
+      .file-tile:hover {
+        background: var(--surface-3);
+        box-shadow: var(--shadow-2);
+      }
+
+      .file-tile__icon {
+        width: 38px;
+        height: 38px;
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        display: grid;
+        place-items: center;
+        color: var(--text-2);
+        margin-bottom: 12px;
+      }
+
+      .file-tile__name {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        color: var(--text-1);
+        font: 500 13.5px/1.35 var(--font-sans);
+        text-decoration: none;
+        text-wrap: pretty;
+      }
+
+      a.file-tile__name:hover {
+        text-decoration: underline;
+      }
+
+      .file-tile__meta {
+        margin: 6px 0 12px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .file-tile__foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
       }
 
       /* canon Mission Intelligence — a flat content canvas (like Memory) for
@@ -14548,7 +14731,7 @@
         height: 36px;
         padding: 0 16px;
         border: none;
-        border-radius: 11px;
+        border-radius: var(--r-md);
         background: var(--accent);
         color: var(--on-accent);
         font: 600 13px var(--font-sans);
@@ -14558,6 +14741,13 @@
         gap: 7px;
         box-shadow: none;
         transition: transform .12s var(--ease);
+      }
+
+      /* NC2 — disabled reads as intentional (signed out), never as a broken
+         grey ghost; the ink fill stays so the primary action is legible */
+      #newCard[disabled] {
+        opacity: 0.45;
+        cursor: default;
       }
 
       #newCard:hover:not([disabled]) {
@@ -20199,17 +20389,23 @@
                 </span>
                 <input id="filesSearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="search every file the office holds" aria-label="search every file the office holds">
               </div>
-              <button id="filesUploadButton" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
-                upload
-              </button>
-              <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
+              <div class="files-seg" role="group" aria-label="file view">
+                <button id="filesViewGrid" class="files-seg__btn is-active" type="button" aria-pressed="true" aria-label="Grid view">grid</button>
+                <button id="filesViewList" class="files-seg__btn" type="button" aria-pressed="false" aria-label="List view">list</button>
+              </div>
             </div>
+            <button id="filesUploadButton" class="files-upload" type="button">
+              <span class="files-upload__icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+              </span>
+              <span class="files-upload__text"><b>drop files or click to upload</b> — decks, PDFs, images, up to 64MB each</span>
+            </button>
+            <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
             <div id="filesStats" class="memory-stats" hidden>
               <span id="filesCount" class="memory-tool__count"></span>
             </div>
             <div id="filesList" class="memory-list" role="log" aria-label="uploaded files">
-              <article class="memory-empty">no files yet — upload decks, PDFs, and images here (up to 64MB each). files shared in chat land here too, and readable ones feed the brain.</article>
+              <article class="memory-empty files-empty">nothing shared yet.<span class="files-empty__sub">drop decks, PDFs, and images here — up to 64MB each. files shared in chat land here too.</span></article>
             </div>
           </div>
         </section>
@@ -20276,7 +20472,7 @@
           <div class="board-toolbar" aria-label="Board tools">
             <span id="boardState" class="board-status">waiting room</span>
             <div class="board-tools">
-              <button id="newCard" class="btn btn--ghost" type="button" disabled>
+              <button id="newCard" class="btn" type="button" disabled>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
                 New card
               </button>
@@ -21136,9 +21332,12 @@
       const filesCount = document.getElementById('filesCount')
       const filesUploadButton = document.getElementById('filesUploadButton')
       const filesUploadInput = document.getElementById('filesUploadInput')
+      const filesViewGridButton = document.getElementById('filesViewGrid')
+      const filesViewListButton = document.getElementById('filesViewList')
       let filesEntries = []
       let filesLoadedAt = 0
       let filesQuery = ''
+      let filesView = 'grid'
       let memoryQuery = ''
       // D15 — day-grouped meeting cards: /assistant/meetings list + which
       // card is open (single-expand accordion; default = most recent)
@@ -44283,6 +44482,91 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
       }
 
+      function fileBrainBadgeNode(file) {
+        const badge = document.createElement('span')
+        const ingested = String(file?.brainStatus || '') === 'ingested'
+        badge.className = ingested ? 'files-badge files-badge--ingested' : 'files-badge'
+        badge.textContent = ingested ? 'in the brain' : 'stored'
+        badge.title = ingested
+          ? 'scout read this file — its contents answer memory questions'
+          : 'bytes are stored; the contents were not readable for the brain'
+        return badge
+      }
+
+      function fileOriginThreadNode(file) {
+        if (!(file?.origin === 'chat' && file?.originThreadId)) {
+          return null
+        }
+        const thread = document.createElement('button')
+        thread.type = 'button'
+        thread.className = 'files-row__thread'
+        thread.textContent = `→ ${String(file?.originThreadTitle || 'chat thread')}`
+        thread.addEventListener('click', () => {
+          selectScoutChatThread(file.originThreadId)
+          setActiveTool('chat')
+        })
+        return thread
+      }
+
+      function fileMetaParts(file) {
+        const parts = []
+        if (file?.uploaderName) {
+          parts.push(String(file.uploaderName).toLowerCase())
+        }
+        parts.push(memoryClock(file?.createdAt))
+        const sizeLabel = scoutChatFileSizeLabel(file?.size)
+        if (sizeLabel) {
+          parts.push(sizeLabel)
+        }
+        return parts.join(' · ')
+      }
+
+      // grid tile (segmented grid view) — icon, clamped name, meta, brain badge
+      function fileTileNode(file) {
+        const tile = document.createElement('article')
+        tile.className = 'file-tile'
+
+        const icon = document.createElement('span')
+        icon.className = 'file-tile__icon'
+        icon.innerHTML = filesRowIconSvg(file?.mime)
+        tile.appendChild(icon)
+
+        const name = String(file?.name || 'file')
+        const downloadUrl = String(file?.downloadUrl || '')
+        if (downloadUrl) {
+          const link = document.createElement('a')
+          link.className = 'file-tile__name'
+          link.href = downloadUrl
+          link.target = '_blank'
+          link.rel = 'noopener'
+          if (!file?.previewable) {
+            link.setAttribute('download', name)
+          }
+          link.textContent = name
+          tile.appendChild(link)
+        } else {
+          const label = document.createElement('span')
+          label.className = 'file-tile__name'
+          label.textContent = name
+          tile.appendChild(label)
+        }
+
+        const meta = document.createElement('div')
+        meta.className = 'file-tile__meta'
+        meta.textContent = fileMetaParts(file)
+        tile.appendChild(meta)
+
+        const foot = document.createElement('div')
+        foot.className = 'file-tile__foot'
+        foot.appendChild(fileBrainBadgeNode(file))
+        const thread = fileOriginThreadNode(file)
+        if (thread) {
+          foot.appendChild(thread)
+        }
+        tile.appendChild(foot)
+        return tile
+      }
+
       function filesRowNode(file) {
         const row = document.createElement('article')
         row.className = 'files-row'
@@ -44371,10 +44655,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         if (!matches.length) {
           const empty = document.createElement('article')
-          empty.className = 'memory-empty'
-          empty.textContent = query
-            ? 'no file matches that — yet.'
-            : 'no files yet — upload decks, PDFs, and images here (up to 64MB each). files shared in chat land here too, and readable ones feed the brain.'
+          empty.className = 'memory-empty files-empty'
+          if (query) {
+            empty.textContent = 'no file matches that — yet.'
+          } else {
+            empty.appendChild(document.createTextNode('nothing shared yet.'))
+            const sub = document.createElement('span')
+            sub.className = 'files-empty__sub'
+            sub.textContent = 'drop decks, PDFs, and images here — up to 64MB each. files shared in chat land here too.'
+            empty.appendChild(sub)
+          }
           filesList.replaceChildren(empty)
           return
         }
@@ -44399,9 +44689,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             label.textContent = group.label
             labelRow.append(dot, label)
             const items = document.createElement('div')
-            items.className = 'memory-group__items'
+            items.className = filesView === 'grid' ? 'files-grid' : 'memory-group__items'
             for (const file of group.files) {
-              items.appendChild(filesRowNode(file))
+              items.appendChild(filesView === 'grid' ? fileTileNode(file) : filesRowNode(file))
             }
             wrap.append(rail, labelRow, items)
             return wrap
@@ -44455,10 +44745,39 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         uploadFilesToDrive(filesUploadInput.files)
         filesUploadInput.value = ''
       })
+      // drag-and-drop onto the dropzone (the click path stays for keyboard/tap)
+      ;['dragenter', 'dragover'].forEach(evt => filesUploadButton?.addEventListener(evt, event => {
+        event.preventDefault()
+        filesUploadButton.classList.add('is-dragover')
+      }))
+      ;['dragleave', 'dragend', 'drop'].forEach(evt => filesUploadButton?.addEventListener(evt, () => {
+        filesUploadButton.classList.remove('is-dragover')
+      }))
+      filesUploadButton?.addEventListener('drop', event => {
+        event.preventDefault()
+        if (event.dataTransfer?.files?.length) {
+          uploadFilesToDrive(event.dataTransfer.files)
+        }
+      })
       filesSearch?.addEventListener('input', () => {
         filesQuery = filesSearch.value || ''
         renderFilesSurface()
       })
+      // segmented grid / list toggle
+      function setFilesView(view) {
+        filesView = view === 'list' ? 'list' : 'grid'
+        if (filesViewGridButton) {
+          filesViewGridButton.classList.toggle('is-active', filesView === 'grid')
+          filesViewGridButton.setAttribute('aria-pressed', filesView === 'grid' ? 'true' : 'false')
+        }
+        if (filesViewListButton) {
+          filesViewListButton.classList.toggle('is-active', filesView === 'list')
+          filesViewListButton.setAttribute('aria-pressed', filesView === 'list' ? 'true' : 'false')
+        }
+        renderFilesSurface()
+      }
+      filesViewGridButton?.addEventListener('click', () => setFilesView('grid'))
+      filesViewListButton?.addEventListener('click', () => setFilesView('list'))
 
       /* day buckets: today / yesterday / last week / older */
       function memoryDayBucket(raw) {
@@ -44531,20 +44850,54 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      /* strip markdown + html tokens so a log value reads as one clean mono
+         line — never a raw **bold**, `code`, [link](url), # heading, or a
+         <tag>/<!doctype> (ME1). Collapses whitespace to a single line. */
+      function memoryLogPlainLine(text) {
+        return String(text || '')
+          .replace(/```[\s\S]*?```/g, ' ')                 // fenced code blocks
+          .replace(/!?\[([^\]\n]*)\]\([^)\s]*\)/g, '$1')    // links / images → label
+          .replace(/<[^>]+>/g, ' ')                          // any html tag / doctype
+          .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }[e] || ' '))
+          .replace(/^[\s>]*#{1,6}\s+/gm, '')                 // headings
+          .replace(/^\s*[-*+]\s+/gm, '')                     // list bullets
+          .replace(/^\s*>\s?/gm, '')                         // blockquote markers
+          .replace(/[*`~]+/g, '')                            // inline emphasis / code (keep _ so snake_case ids survive)
+          .replace(/\s+/g, ' ')
+          .trim()
+      }
+
       /* the archive summary speaks in raw ids and (s) plurals — render the
-         quiet-log voice instead (backend stays untouched) */
+         quiet-log voice instead (backend stays untouched). ME2: artifact /
+         html bodies get a typed preview, never a dumped <!doctype…>. */
       function memoryLogDisplayText(kind, text) {
+        const raw = String(text || '')
         if (kind === 'archive') {
-          const archived = String(text || '').match(/^(?:(.+?) archived|Archived) meeting (\S+) with (\d+) transcript item\(s\), (\d+) board card\(s\), (\d+) participant\(s\)/)
+          const archived = raw.match(/^(?:(.+?) archived|Archived) meeting (\S+) with (\d+) transcript item\(s\), (\d+) board card\(s\), (\d+) participant\(s\)/)
           if (archived) {
             return `notes saved · ${archived[4]} ${Number(archived[4]) === 1 ? 'card' : 'cards'} · ${archived[5]} ${Number(archived[5]) === 1 ? 'participant' : 'participants'}`
           }
         }
-        // one prose line — markdown section markers stay out of the log
-        return String(text || '')
+        const head = raw.trimStart().slice(0, 400).toLowerCase()
+        const looksHtml = head.startsWith('<!doctype') || head.startsWith('<html') || /<(section|div|body|main|article|h[1-6]|table|svg)[\s>]/.test(head)
+        if (kind === 'os_artifact' || looksHtml) {
+          const title = (raw.match(/<title[^>]*>([^<]+)<\/title>/i) || raw.match(/<h1[^>]*>([^<]+)<\/h1>/i))?.[1]
+          if (title) {
+            return memoryLogPlainLine(title)
+          }
+          if (looksHtml) {
+            // slide decks carry <section> pages — name the artifact by shape
+            const slides = (raw.match(/<section\b/gi) || []).length
+            return slides > 1 ? `deck · ${slides} pages` : 'rendered page'
+          }
+          // os_artifact whose body is prose/markdown falls through to stripping
+        }
+        // one clean prose line — skip empty / heading / fence lines
+        const firstLine = raw
           .split('\n')
           .map(line => line.trim())
-          .find(line => line && !line.startsWith('#')) || String(text || '').trim()
+          .find(line => line && !/^#{1,6}\s/.test(line) && !line.startsWith('```'))
+        return memoryLogPlainLine(firstLine || raw) || memoryLogPlainLine(raw)
       }
 
       function memoryLogRowNode(kind, at, text) {
@@ -45136,7 +45489,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         boardEl.replaceChildren(...statuses.map(status => {
           const columnCards = laneCards.filter(card => card.status === status)
           const column = document.createElement('section')
-          column.className = `column ${statusClass(status)}`
+          // B2 — collapse an empty lane to a slim rail, but only when other
+          // lanes hold cards; a wholly-empty board keeps equal columns for the hero
+          const collapseEmpty = columnCards.length === 0 && laneCards.length > 0
+          column.className = `column ${statusClass(status)}${collapseEmpty ? ' column--empty' : ''}`
           column.setAttribute('aria-label', `${status} cards`)
 
           const header = document.createElement('header')
@@ -45456,31 +45812,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return article
         }
 
-        // design footer — owner chip + owner · name, tags right, date pill kept
+        // footer owner line — chip + owner · name, then the toned date pill.
+        // KC2: tags no longer share this row; they wrap on their own row below.
         const badges = document.createElement('div')
         badges.className = 'card-badges'
         const ownerName = cardOwner(card).name
+        const isUnassigned = ownerName === 'Unassigned'
         const ownerChip = document.createElement('span')
-        ownerChip.className = 'card-owner-chip'
+        ownerChip.className = isUnassigned ? 'card-owner-chip is-unassigned' : 'card-owner-chip'
         ownerChip.setAttribute('aria-hidden', 'true')
-        ownerChip.textContent = monogramInitial(ownerName)
+        ownerChip.textContent = isUnassigned ? '' : monogramInitial(ownerName)
         badges.appendChild(ownerChip)
-        badges.appendChild(renderCardBadge(`owner · ${ownerName === 'Unassigned' ? 'unassigned' : ownerName}`))
+        badges.appendChild(renderCardBadge(`owner · ${isUnassigned ? 'unassigned' : ownerName}`))
         const spacer = document.createElement('span')
         spacer.className = 'card-badges__spacer'
         badges.appendChild(spacer)
-        const tags = Array.isArray(card.tags) ? card.tags.filter(Boolean) : []
-        tags.slice(0, 3).forEach(tag => {
-          const chip = document.createElement('span')
-          chip.className = 'card-tag'
-          chip.textContent = tag
-          badges.appendChild(chip)
-        })
         const cardDate = renderCardDate(card)
         if (cardDate) {
           badges.appendChild(cardDate)
         }
         article.appendChild(badges)
+
+        // tags on their own wrapping row, capped with +N so the footer never clips
+        const tags = Array.isArray(card.tags) ? card.tags.filter(Boolean) : []
+        if (tags.length) {
+          const tagRow = document.createElement('div')
+          tagRow.className = 'card-tag-row'
+          const cap = 3
+          tags.slice(0, cap).forEach(tag => {
+            const chip = document.createElement('span')
+            chip.className = 'card-tag'
+            chip.textContent = tag
+            tagRow.appendChild(chip)
+          })
+          if (tags.length > cap) {
+            const more = document.createElement('span')
+            more.className = 'card-tag card-tag--more'
+            more.textContent = `+${tags.length - cap}`
+            tagRow.appendChild(more)
+          }
+          article.appendChild(tagRow)
+        }
 
         return article
       }
@@ -45552,12 +45924,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function showCardEditor(card = null, options = {}) {
-        if (!canEditBoard) {
-          showToast({ text: 'join the room before editing cards', kind: 'error' })
-          return
-        }
         const isNew = !card
         const editMode = isNew || Boolean(options.edit)
+        // CD2 — viewing a card is read-only and works off-room; only creating or
+        // editing needs the room, so gate the write path, not the open
+        if (editMode && !canEditBoard) {
+          showToast({ text: 'join the room to add or edit cards', kind: 'error' })
+          return
+        }
         const draft = card || {
           title: '',
           status: 'Backlog',
@@ -45614,7 +45988,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         closeButton.className = 'card-detail-close'
         closeButton.type = 'button'
         closeButton.setAttribute('aria-label', 'Close card editor')
-        closeButton.textContent = '×'
+        // CD3 — Lucide X, not a typographic glyph, per the icon law
+        closeButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
         closeButton.addEventListener('click', closeCardDetail)
         headerActions.appendChild(closeButton)
 
@@ -46659,7 +47034,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function updateBoardControls() {
-        newCardButton.disabled = !canEditBoard
+        // NC1 — New card is a live primary on the board tool whenever signed in;
+        // the room gate lives in showCardEditor (writes still need the room), so
+        // the button is an honest affordance instead of a permanently dead pill
+        newCardButton.disabled = !authedUser
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
         topbarBoardButton.disabled = !isBoardReady
