@@ -16411,7 +16411,9 @@
         /* tool pages zero the workspace padding at (1-3-1) specificity, which
            silently beat the clearance above and slid the chat composer under
            the fixed bottom rail (56px pill + 16px inset). Restore a safe-area
-           aware bottom inset here so the composer and its chips stay tappable. */
+           aware bottom inset here so the composer and its chips stay tappable
+           (chat was the motivating case — MO-1 — and belongs in this list). */
+        #appShell.is-authed[data-tool="chat"] .workspace,
         #appShell.is-authed[data-tool="memory"] .workspace,
         #appShell.is-authed[data-tool="files"] .workspace,
         #appShell.is-authed[data-tool="artifacts"] .workspace,
@@ -16425,6 +16427,7 @@
            clearance above, but the dock it folds away for is hidden on tool
            pages — keep the same rail + safe-area clearance in-room so the
            composer never slides under the home indicator */
+        #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="files"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
@@ -16452,7 +16455,7 @@
           flex-direction: row;
           align-items: center;
           justify-content: center;
-          gap: 4px;
+          gap: 3px;
           width: max-content;
           max-width: calc(100vw - 24px);
           max-width: calc(100dvw - 24px);
@@ -16487,25 +16490,22 @@
           background: var(--glass-chrome);
         }
 
-        /* intelligence, alerts, theme and account leave the pill: intel is
-           entered from the office card (D14), the bell + avatar live in the
-           header, theme lives in the settings sheet — five icons stay */
-        .tool-rail__slot:has(> [data-tool="artifacts"]),
-        .tool-rail__slot:has(> [data-tool="files"]),
+        /* all seven surfaces ride the dock now — home · room · chat · intel ·
+           board · memory · files (RC-H: intel + files were unreachable on
+           phones). Only true chrome leaves the pill: the bell + avatar live in
+           the header, theme lives in the settings sheet. */
         .tool-rail__bell,
         .tool-rail__theme,
         .tool-rail__account {
           display: none;
         }
 
-        /* intel (and the workstream pages it shares the entry with) keeps the
-           office icon lit — it is an office sub-screen (D14); files rides the
-           same law (reached via Scout / notifications on phones) */
-        #appShell[data-tool="artifacts"] .tool-rail__tool[data-tool="office"],
+        /* the hidden workstream sub-screens (research · design · grill) have no
+           dock icon of their own, so they borrow the office light while open;
+           intel + files now carry their own dock icon and light it directly */
         #appShell[data-tool="research"] .tool-rail__tool[data-tool="office"],
         #appShell[data-tool="design"] .tool-rail__tool[data-tool="office"],
-        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"],
-        #appShell[data-tool="files"] .tool-rail__tool[data-tool="office"] {
+        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"] {
           background: var(--accent);
           color: var(--on-accent);
         }
@@ -16541,8 +16541,8 @@
         .tool-rail__tool {
           justify-content: center;
           gap: 0;
-          width: 46px;
-          height: 46px;
+          width: 44px;
+          height: 44px;
           padding: 0;
           border: none;
           border-radius: var(--r-full);
@@ -17211,16 +17211,35 @@
         }
 
 
+        /* board-card detail opens as a bottom sheet on phones (design mobile
+           §10): bottom-anchored, grab handle, r-2xl top corners, safe-area —
+           not a centered desktop dialog */
         .card-detail-region {
-          align-items: start;
+          align-items: end;
           overflow: auto;
-          padding: max(var(--sp-2), env(safe-area-inset-top)) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
+          padding: 0;
         }
 
         .card-detail {
           width: 100%;
-          max-height: calc(100svh - 16px);
-          border-radius: 16px;
+          max-height: 88svh;
+          border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        /* grab handle — first flex child, centered on the sheet's top edge */
+        .card-detail::before {
+          content: "";
+          flex: none;
+          width: 38px;
+          height: 4px;
+          margin: 8px auto 2px;
+          border-radius: var(--r-full);
+          background: var(--line-2);
+        }
+
+        .card-detail-region.visible .card-detail {
+          animation: bf-sheetin var(--dur-slow) var(--ease-spring);
         }
 
         .card-detail-meta {
@@ -17556,12 +17575,29 @@
         }
 
         .chat-convo-head {
+          height: auto;
+          min-height: 48px;
           padding: 8px 12px;
-          gap: 6px;
+          gap: 4px 8px;
+          flex-wrap: wrap;
+          align-items: center;
         }
 
         .chat-convo-head__back {
           display: flex;
+        }
+
+        /* the title takes the top line's remaining width (ellipsizing only
+           when truly long); the mono scope meta drops to its own second line
+           so "public · everyone in the office" reads in full (MO-3) */
+        .chat-convo-head__title {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+
+        .chat-convo-head__meta {
+          flex: 1 0 100%;
+          order: 5;
         }
 
         .chat-convo-head__input {
@@ -34979,14 +35015,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutChatDefaultPlaceholder() {
 	        // composer copy, design verbatim (§7.2)
 	        const thread = selectedScoutChatThread()
+	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
 	        // card 082: a Feed-the-brain thread coaches the composer — answer,
 	        // attach, or skip — so the guided flow reads as a guided flow
 	        if (String(thread?.intake || '').toLowerCase() === 'brain') {
-	          return 'answer, attach files, or say "skip"'
+	          return isPhone ? 'answer, attach, or skip' : 'answer, attach files, or say "skip"'
 	        }
 	        return chatThreadIsChannel(thread)
-	          ? 'message the thread — @scout to ask'
-	          : 'ask Scout, or tap + to run a task'
+	          ? (isPhone ? 'message the thread…' : 'message the thread — @scout to ask')
+	          : (isPhone ? 'ask Scout, or tap +' : 'ask Scout, or tap + to run a task')
 	      }
 
 	      // card 070: destination guard — a persistent pill naming where the next
