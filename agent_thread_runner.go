@@ -21,8 +21,11 @@ const (
 )
 
 // agentThreadOriginMetadataKeys are the only origin keys a launch call site
-// may stamp; everything else in the origin map is dropped.
-var agentThreadOriginMetadataKeys = []string{"originKind", "originId", "originMeetingId"}
+// may stamp; everything else in the origin map is dropped. routeNote is the
+// card 068 delivery-routing disclosure (best match / #general fallback) the
+// workflow ticker stamps so completion delivery can surface WHY the finished
+// work landed in a given channel.
+var agentThreadOriginMetadataKeys = []string{"originKind", "originId", "originMeetingId", "routeNote"}
 
 type scoutAgentThread struct {
 	ID       string              `json:"id"`
@@ -350,6 +353,12 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 	mode := firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind)
 	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), assistantToolLabel(mode)+" artifact")
 	text := fmt.Sprintf("finished %s — %s", assistantToolLabel(mode), title)
+	// Card 068: a workflow-ticker launch stamps a routeNote disclosing WHY the
+	// work landed in this channel (best match / #general fallback). Surface it on
+	// the completion card so a fuzzy or fallback route is honest, not silent.
+	if note := strings.TrimSpace(artifact.Metadata["routeNote"]); note != "" {
+		text += " · " + note
+	}
 	stampDelivered := func() bool {
 		if _, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, "", map[string]string{
 			"deliveredAt": time.Now().UTC().Format(time.RFC3339Nano),

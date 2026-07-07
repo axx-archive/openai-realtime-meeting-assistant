@@ -710,11 +710,12 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"boardFile":   boardCheck,
 			"realtime":    realtime,
 			"agents": map[string]any{
-				"brain":        readinessAgentSnapshot(meetingBrainAgent()),
-				"board":        readinessAgentSnapshot(meetingBoardAgent()),
-				"missionIntel": readinessAgentSnapshot(missionIntelligenceAgent()),
-				"codexRunner":  readinessCodexRunnerSnapshot(),
-				"renderRunner": readinessRenderRunnerSnapshot(),
+				"brain":          readinessAgentSnapshot(meetingBrainAgent()),
+				"board":          readinessAgentSnapshot(meetingBoardAgent()),
+				"missionIntel":   readinessAgentSnapshot(missionIntelligenceAgent()),
+				"codexRunner":    readinessCodexRunnerSnapshot(),
+				"renderRunner":   readinessRenderRunnerSnapshot(),
+				"workflowTicker": readinessWorkflowTickerSnapshot(),
 			},
 		},
 	})

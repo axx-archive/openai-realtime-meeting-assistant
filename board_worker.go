@@ -297,7 +297,7 @@ func meetingBoardInstructions() string {
 		"Allowed tools are create_ticket, update_ticket, move_ticket, add_tags, add_key_date, propose_codex_task, and do_nothing. Tool arguments must match the existing board tool schemas.",
 		"When an action item clearly maps to an agent deliverable — a research brief, a design brief, a pressure-test, a workflow plan, or a written artifact — also emit propose_codex_task with arguments {\"title\":\"short human title\",\"mode\":\"research|design|grill|workflow|artifacts\",\"query\":\"what the agent should produce\"}.",
 		"When the deliverable matches a board card — including one you create earlier in this same pass — pass its card_id if known, otherwise reuse the card's exact title so the proposal binds to it.",
-		"Proposals are never auto-run: a human reviews and confirms each one, so propose at most two per pass and only when the deliverable is unmistakable.",
+		"Proposals are never auto-run: a human reviews and confirms each one, so propose at most two per pass and only when the deliverable is unmistakable. A separate workflow ticker may later launch proposals a human has already approved, but your proposal itself launches nothing.",
 		"Phrase every proposal query as a read-only deliverable to research, draft, or analyze. Never ask the agent to commit, deploy, push, ssh, run migrations, or modify external systems.",
 		"When no board change is warranted, return {\"summary\":\"No actionable board changes.\",\"operations\":[]}.",
 	}, " ")

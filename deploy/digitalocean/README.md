@@ -98,6 +98,18 @@ docker compose --profile codex exec codex-runner codex --version
 
 Keep this disabled until the runner host is intentionally prepared. Realtime can start `read_only` and `workspace_write` jobs. Commit, push, deploy, SSH, external APIs, email, and production mutations are blocked behind an approval-required artifact until an operator approves or rejects the gate in the Artifacts app.
 
+### Workflow ticker (card 067)
+
+A model-free, ~5-minute status re-scan (`workflow_ticker.go`) that relaunches only human-APPROVED work: a proposal a human confirmed whose launch crashed before stamping a thread, and any `auto_run`-lane proposal carrying a recorded standing approval. It only ever launches one agent thread per proposal (never `/goal` or the packaging studio) and is capped per pass, so token cost is bounded. Finished work is delivered back to the originating public channel, else a best-match channel, else `#general` with a disclosed routing note. Defaults are safe; leave these unset to accept them.
+
+```bash
+BONFIRE_WORKFLOW_TICKER_INTERVAL=5m      # duration; 0/off/false/disabled turns it off
+BONFIRE_WORKFLOW_TICKER_DISABLED=false   # truthy disables the ticker entirely
+BONFIRE_WORKFLOW_TICKER_MAX_PER_PASS=2   # max launches per tick
+```
+
+Its live config and last-pass counters appear under `checks.agents.workflowTicker` in `/readyz`.
+
 To activate the Fable 5 orchestrator (goals, grill reports, packaging deliverables) once a live `ANTHROPIC_API_KEY` is available, follow the Anthropic block in `.env.example` and the step-by-step runbook in `docs/ops3-fable-activation.md` (env lines, restart, and the `/assistant/goal` liveness check). Pin `BONFIRE_CODEX_MODEL=gpt-5.5` at the same time so the sidecar never runs on the CLI's default model.
 
 For a real domain, set `MEETING_HOST` to the domain after creating an A record that points at the Droplet.

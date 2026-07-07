@@ -22,6 +22,27 @@ const (
 	codexProposalActionDismiss = "dismiss"
 )
 
+const (
+	// codexProposalLaneStandard proposals need a fresh human confirm before
+	// launch (the default). codexProposalLaneAutoRun proposals carry a recorded
+	// standing human approval (card 069's laneApprovedBy stamp) that the
+	// workflow ticker (card 067) may launch without a new confirm. This "lane"
+	// metadata is distinct from the approvalLane governance taxonomy
+	// (auto/standard/heavy) that classifies a launch's WEIGHT, not its standing
+	// approval; the auto_run branch stays inert until 069 writes the metadata.
+	codexProposalLaneStandard = "standard"
+	codexProposalLaneAutoRun  = "auto_run"
+)
+
+// proposalLane reads a proposal's launch lane, defaulting to standard (a human
+// confirm is required) for any absent or unrecognized value.
+func proposalLane(entry meetingMemoryEntry) string {
+	if strings.EqualFold(strings.TrimSpace(entry.Metadata["lane"]), codexProposalLaneAutoRun) {
+		return codexProposalLaneAutoRun
+	}
+	return codexProposalLaneStandard
+}
+
 // proposeCodexTask executes the propose_codex_task tool: it records a kind
 // codex_proposal memory entry (UI state — excluded from Scout search context
 // and from the client memory timeline), broadcasts a codex_proposal card to
@@ -77,6 +98,16 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 			metadata["packageId"] = record.ID
 		}
 	}
+	// Origin-channel linkage (card 068 routing): a proposal born in a public
+	// channel carries thread_id so the workflow ticker delivers the finished
+	// work back there. Captured only when it resolves to a still-public,
+	// unarchived channel (the same guard channel delivery enforces); an unknown
+	// or private id just means the ticker falls back to best-match/#general.
+	if threadRef := strings.TrimSpace(asString(args["thread_id"])); threadRef != "" {
+		if _, ok := app.channelForOriginThread(threadRef); ok {
+			metadata["originThreadId"] = threadRef
+		}
+	}
 	entry, appended, err := app.memory.appendCodexProposal(id, text, metadata)
 	if err != nil {
 		return nil, false, err
@@ -125,7 +156,7 @@ func codexProposalPayload(entry meetingMemoryEntry) map[string]any {
 		"proposedBy": entry.Metadata["proposedBy"],
 		"createdAt":  entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId", "approvalLane"} {
+	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId", "approvalLane", "lane", "originThreadId", "laneApprovedBy"} {
 		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
 			payload[key] = value
 		}
@@ -188,105 +219,25 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 		return codexProposalPayload(entry), false, nil
 	}
 
-	resolvedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if action == codexProposalActionConfirm {
-		// Persist the confirmed transition BEFORE launching: if the launch
-		// bookkeeping fails afterwards the proposal is already settled, so a
-		// retry cannot double-launch. If the launch itself fails, revert to
-		// proposed so the human can confirm again.
-		updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
-			"status":           codexProposalStatusConfirmed,
-			"confirmedBy":      strings.TrimSpace(userName),
-			"confirmedByEmail": normalizeAccountEmail(userEmail),
-			"resolvedAt":       resolvedAt,
-		})
-		if err != nil {
-			return nil, false, err
-		}
-
 		// Room-confirmed proposals are the room's work: completion posts the
-		// artifact card back into the origin meeting's chat.
-		thread, err := app.launchAgentThreadWithOrigin(entry.Metadata["mode"], entry.Metadata["query"], userName, map[string]string{
+		// artifact card back into the origin meeting's chat. The shared confirm
+		// bookkeeping (persist-before-launch → launch → stamp → advance → signal
+		// → settle) lives in launchApprovedProposal, which the workflow ticker
+		// (card 067) also drives for already-approved relaunches with a 068
+		// channel origin instead of this room origin.
+		payload, err := app.launchApprovedProposal(entry, userName, userEmail, map[string]string{
 			"originKind":      agentThreadOriginRoom,
 			"originId":        id,
 			"originMeetingId": app.memory.currentMeetingID(),
 		})
 		if err != nil {
-			if _, _, revertErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
-				"status":           codexProposalStatusProposed,
-				"confirmedBy":      "",
-				"confirmedByEmail": "",
-				"resolvedAt":       "",
-			}); revertErr != nil {
-				log.Errorf("Failed to revert codex proposal %s after launch error: %v", id, revertErr)
-			}
 			return nil, false, err
 		}
-
-		// Stamp the thread linkage in a follow-up update. The proposal is
-		// already confirmed, so a failure here only loses the linkage — it can
-		// never re-open the proposal for a second launch.
-		threadStamp := map[string]string{
-			"threadId":         thread.ID,
-			"threadArtifactId": thread.Artifact.ID,
-		}
-		// Board linkage: the propose-time cardId wins; when it is absent, retry
-		// the fuzzy match at confirm time (the board worker may have created
-		// the card in a later pass than the proposal).
-		cardID := strings.TrimSpace(entry.Metadata["cardId"])
-		if cardID == "" {
-			if card, ok := app.matchBoardCard(entry.Metadata["title"], ""); ok {
-				cardID = card.ID
-				threadStamp["cardId"] = cardID
-			}
-		}
-		stamped, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, threadStamp)
-		if stampErr != nil {
-			log.Errorf("Failed to stamp thread linkage on codex proposal %s: %v", id, stampErr)
-		} else {
-			updated = stamped
-		}
-		// Bidirectional stamps + auto-advance. Mirrors the linkage-stamp-
-		// after-commit pattern above: a failure only loses the link, it
-		// never re-opens the settled proposal. The propose-time packageId
-		// rides onto the artifact so the terminal hook can auto-attach the
-		// finished deliverable to its venture package.
-		artifactStamp := map[string]string{}
-		if cardID != "" {
-			artifactStamp["boardCardId"] = cardID
-			artifactStamp["proposalId"] = id
-		}
-		if packageID := strings.TrimSpace(entry.Metadata["packageId"]); packageID != "" {
-			artifactStamp["packageId"] = packageID
-			artifactStamp["proposalId"] = id
-		}
-		if len(artifactStamp) > 0 {
-			if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "", artifactStamp); err != nil {
-				log.Errorf("Failed to stamp board linkage on artifact %s: %v", thread.Artifact.ID, err)
-			}
-		}
-		if cardID != "" {
-			app.advanceLinkedCard(cardID, kanbanStatusInProgress, "confirmed: "+entry.Metadata["title"])
-		}
-
-		// Signal capture (spec §5 item 6): a confirm is a human vote that the
-		// proposed workstream was worth running — a distinct seam from the
-		// approval gate's proposal_approved. Log-and-continue inside.
-		app.recordSignalEvent(userName, signalEventProposalConfirmed, signalValencePositive, thread.Artifact.ID, entry.Metadata["packageId"], map[string]string{
-			"proposalId": id,
-			"title":      entry.Metadata["title"],
-			"mode":       entry.Metadata["mode"],
-		})
-
-		payload := codexProposalPayload(updated)
-		broadcastOfficeKanbanEvent("codex_proposal", payload)
-		// The launched run's artifact rides onto the settled nudge so the bell
-		// entry routes to the resulting workflow status.
-		app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail, updated.Metadata["threadArtifactId"])
-		app.notifyProposalResolution(updated, codexProposalActionConfirm, userName)
 		return payload, true, nil
 	}
 
+	resolvedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
 		"status":           codexProposalStatusDismissed,
 		"dismissedBy":      strings.TrimSpace(userName),
@@ -311,6 +262,118 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 	app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail, "")
 	app.notifyProposalResolution(updated, codexProposalActionDismiss, userName)
 	return payload, false, nil
+}
+
+// launchApprovedProposal runs the confirm bookkeeping for an APPROVED proposal
+// and is the single seam shared by the HTTP confirm (room origin) and the
+// workflow ticker (068 channel origin). The caller MUST hold app.proposalMu so
+// a concurrent confirm and a ticker pass can never double-launch. It persists
+// the confirmed transition BEFORE launching (a post-launch failure can then
+// only lose linkage, never re-open the proposal for a second launch), reverts
+// to proposed if the launch itself fails, then stamps thread/card/artifact
+// linkage, advances the linked card, captures the confirm signal, and settles
+// the notification + fans the resolution. actorName/actorEmail attribute the
+// launch — a human for the confirm, "workflow ticker · standing approval: X"
+// for a ticker lane launch. Returns the settled proposal payload.
+func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, actorName string, actorEmail string, origin map[string]string) (map[string]any, error) {
+	if app == nil || app.memory == nil {
+		return nil, fmt.Errorf("proposals are unavailable")
+	}
+	id := entry.ID
+	resolvedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
+		"status":           codexProposalStatusConfirmed,
+		"confirmedBy":      strings.TrimSpace(actorName),
+		"confirmedByEmail": normalizeAccountEmail(actorEmail),
+		"resolvedAt":       resolvedAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	thread, err := app.launchAgentThreadWithOrigin(entry.Metadata["mode"], entry.Metadata["query"], actorName, origin)
+	if err != nil {
+		if _, _, revertErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
+			"status":           codexProposalStatusProposed,
+			"confirmedBy":      "",
+			"confirmedByEmail": "",
+			"resolvedAt":       "",
+		}); revertErr != nil {
+			log.Errorf("Failed to revert codex proposal %s after launch error: %v", id, revertErr)
+		}
+		return nil, err
+	}
+
+	// Stamp the thread linkage in a follow-up update. The proposal is already
+	// confirmed, so a failure here only loses the linkage — it can never
+	// re-open the proposal for a second launch.
+	threadStamp := map[string]string{
+		"threadId":         thread.ID,
+		"threadArtifactId": thread.Artifact.ID,
+	}
+	// Board linkage: the propose-time cardId wins; when it is absent, retry the
+	// fuzzy match now (the board worker may have created the card in a later
+	// pass than the proposal).
+	cardID := strings.TrimSpace(entry.Metadata["cardId"])
+	if cardID == "" {
+		if card, ok := app.matchBoardCard(entry.Metadata["title"], ""); ok {
+			cardID = card.ID
+			threadStamp["cardId"] = cardID
+		}
+	}
+	stamped, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, threadStamp)
+	if stampErr != nil {
+		log.Errorf("Failed to stamp thread linkage on codex proposal %s: %v", id, stampErr)
+	} else {
+		updated = stamped
+	}
+	// Bidirectional stamps + auto-advance. Mirrors the linkage-stamp-after-commit
+	// pattern above: a failure only loses the link, it never re-opens the settled
+	// proposal. The propose-time packageId rides onto the artifact so the terminal
+	// hook can auto-attach the finished deliverable to its venture package.
+	artifactStamp := map[string]string{}
+	if cardID != "" {
+		artifactStamp["boardCardId"] = cardID
+		artifactStamp["proposalId"] = id
+	}
+	if packageID := strings.TrimSpace(entry.Metadata["packageId"]); packageID != "" {
+		artifactStamp["packageId"] = packageID
+		artifactStamp["proposalId"] = id
+	}
+	if len(artifactStamp) > 0 {
+		if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "", artifactStamp); err != nil {
+			log.Errorf("Failed to stamp board linkage on artifact %s: %v", thread.Artifact.ID, err)
+		}
+	}
+	if cardID != "" {
+		app.advanceLinkedCard(cardID, kanbanStatusInProgress, "confirmed: "+entry.Metadata["title"])
+	}
+
+	// Card 067 delivery: a ticker launch routed to a public channel posts a
+	// "running" launch card carrying this thread's id, so the channel shows the
+	// work immediately and the terminal seam flips that same ref to complete
+	// (deliverArtifactToOrigin then suppresses a duplicate). The HTTP confirm's
+	// room origin skips this — its delivery is the room-chat completion card.
+	if strings.TrimSpace(origin["originKind"]) == agentThreadOriginChannel {
+		app.postChannelLaunchCard(strings.TrimSpace(origin["originId"]), thread, origin["routeNote"])
+	}
+
+	// Signal capture: a confirm is a human vote that the proposed workstream was
+	// worth running — a distinct seam from the approval gate's proposal_approved.
+	// Log-and-continue inside.
+	app.recordSignalEvent(actorName, signalEventProposalConfirmed, signalValencePositive, thread.Artifact.ID, entry.Metadata["packageId"], map[string]string{
+		"proposalId": id,
+		"title":      entry.Metadata["title"],
+		"mode":       entry.Metadata["mode"],
+	})
+
+	payload := codexProposalPayload(updated)
+	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	// The launched run's artifact rides onto the settled nudge so the bell entry
+	// routes to the resulting workflow status.
+	app.settleProposalNotification(id, codexProposalSettledText(updated), actorEmail, updated.Metadata["threadArtifactId"])
+	app.notifyProposalResolution(updated, codexProposalActionConfirm, actorName)
+	return payload, nil
 }
 
 // codexProposalSettledText is the outcome line that replaces the propose-time

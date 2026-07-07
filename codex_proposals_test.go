@@ -106,6 +106,73 @@ func TestProposeCodexTaskToolCreatesProposalAndNotifiesEveryone(t *testing.T) {
 	}
 }
 
+// Card 067/068: propose_codex_task captures an optional thread_id as the
+// originThreadId routing hint (only when it resolves to a live public channel),
+// and the proposal payload surfaces the lane / originThreadId / laneApprovedBy
+// keys the ticker and the proposal deck read.
+func TestProposeCodexTaskCapturesOriginThreadAndLanePayload(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	launches := 0
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "growth", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	// A valid public thread_id is captured as originThreadId.
+	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title":     "Growth levers brief",
+		"mode":      "research",
+		"query":     "Research growth levers and draft a brief.",
+		"thread_id": channel.ID,
+	})
+	if err != nil {
+		t.Fatalf("propose with thread_id: %v", err)
+	}
+	id := asString(result["proposal"].(map[string]any)["id"])
+	entry, _ := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, id)
+	if entry.Metadata["originThreadId"] != channel.ID {
+		t.Fatalf("originThreadId=%q, want the captured channel %q", entry.Metadata["originThreadId"], channel.ID)
+	}
+
+	// An unknown thread_id is silently dropped (no bad linkage).
+	badResult, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title":     "No such channel brief",
+		"mode":      "research",
+		"query":     "Research something and draft a brief.",
+		"thread_id": "scout-chat-does-not-exist",
+	})
+	if err != nil {
+		t.Fatalf("propose with bad thread_id: %v", err)
+	}
+	badID := asString(badResult["proposal"].(map[string]any)["id"])
+	badEntry, _ := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, badID)
+	if _, present := badEntry.Metadata["originThreadId"]; present {
+		t.Fatalf("originThreadId=%q, want no linkage for an unknown thread_id", badEntry.Metadata["originThreadId"])
+	}
+
+	// The payload surfaces the lane governance keys 069 writes.
+	laneEntry, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
+		"lane":           codexProposalLaneAutoRun,
+		"laneApprovedBy": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatalf("stamp lane metadata: %v", err)
+	}
+	payload := codexProposalPayload(laneEntry)
+	if payload["lane"] != codexProposalLaneAutoRun || payload["originThreadId"] != channel.ID || payload["laneApprovedBy"] != "aj@shareability.com" {
+		t.Fatalf("payload=%#v, want lane/originThreadId/laneApprovedBy surfaced", payload)
+	}
+
+	if launches != 0 {
+		t.Fatalf("launches=%d, proposing must never start an agent thread", launches)
+	}
+}
+
 // Contract test alongside TestRealtimeSendNotificationToolContract: the
 // schema, both private allowlists, and both instruction strings must expose
 // propose_codex_task to Scout's voice, and the private voice path must stamp
@@ -667,10 +734,22 @@ func TestIndexCodexProposalWiring(t *testing.T) {
 		"/assistant/proposals/",
 		"proposal-card__confirm",
 		"proposal-card__dismiss",
+		// Card 067: the auto-run lane chip and the honest ticker provenance line.
+		"proposal-card__lane",
+		"auto-run · launches within ~5 min",
+		"auto-launched · standing approval",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing codex proposal anchor %s", want)
 		}
+	}
+
+	proposalNode := functionBody(html, "function codexProposalNode(proposal)")
+	if !strings.Contains(proposalNode, "proposal.lane || '') === 'auto_run'") {
+		t.Fatal("codexProposalNode must render the auto_run lane chip")
+	}
+	if !strings.Contains(proposalNode, "by.startsWith('workflow ticker')") {
+		t.Fatal("codexProposalNode must show the auto-launched provenance for ticker launches")
 	}
 
 	kanbanSwitch := functionBody(html, "function handleKanbanMessage(message)")

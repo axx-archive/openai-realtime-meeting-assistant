@@ -10074,6 +10074,14 @@
         overflow: hidden;
       }
 
+      /* card 067: standing-approval disclosure — a quiet mono caption, not a
+         hue; it reads as status, matched to __status weight */
+      .proposal-card__lane {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
       .proposal-card__actions {
         display: flex;
         gap: 7px;
@@ -36626,6 +36634,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         card.append(head, title, query)
 
+        // Card 067: an auto_run-lane proposal carries a recorded standing
+        // approval, so the workflow ticker launches it within ~5 min without a
+        // fresh tap — disclose that so the Confirm button is not the only story.
+        if (String(proposal.lane || '') === 'auto_run') {
+          const lane = document.createElement('span')
+          lane.className = 'proposal-card__lane'
+          lane.textContent = 'auto-run · launches within ~5 min'
+          card.append(lane)
+        }
+
         if (String(proposal.status || '') === 'proposed') {
           const actions = document.createElement('div')
           actions.className = 'proposal-card__actions'
@@ -36647,10 +36665,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else {
           const status = document.createElement('span')
           status.className = 'proposal-card__status'
-          const by = String(proposal.confirmedBy || proposal.dismissedBy || '').toLowerCase()
-          status.textContent = String(proposal.status || '') === 'confirmed'
-            ? `confirmed${by ? ' by ' + by : ''} · thread launched`
-            : `dismissed${by ? ' by ' + by : ''}`
+          const rawBy = String(proposal.confirmedBy || proposal.dismissedBy || '')
+          const by = rawBy.toLowerCase()
+          if (String(proposal.status || '') === 'confirmed') {
+            // Card 067: a workflow-ticker launch is honest provenance — it ran
+            // off a standing approval, not a person's tap, so it never reads
+            // "confirmed by workflow ticker".
+            status.textContent = by.startsWith('workflow ticker')
+              ? 'auto-launched · standing approval'
+              : `confirmed${by ? ' by ' + by : ''} · thread launched`
+          } else {
+            status.textContent = `dismissed${by ? ' by ' + by : ''}`
+          }
           card.append(status)
         }
         return card

@@ -510,6 +510,10 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startMeetingBoardWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
 	app.startDecisionLedgerWorker(apiKey)
+	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
+	// proposals and any auto_run-lane standing-approved work. Model-free, so it
+	// starts independent of the API key gate above.
+	app.startWorkflowTicker()
 	app.reconcileGoalThreadsAtBoot()
 
 	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
@@ -1680,7 +1684,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Channels\nUse post_to_channel when a user says put/post/share that in #channel or tell the team in a channel; quote their content faithfully, never embellish. Use mention to flag one person by name. create_channel makes a new public team channel, but only from a user's private Scout — tell room requesters to create channels from their private Scout or the chat surface.",
 		"# Meeting recap\nUse meeting_recap when someone asks where are we, recap this meeting, or what did I miss; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell.",
 		"# Grill sessions\nUse start_grill_session when a user says grill us, pressure-test us, or play investor on a topic; you will switch into the named persona and question the room. Use end_grill_session when anyone asks to stop grilling or stand down — a graded report thread is filed automatically.",
-		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
+		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. A separate background workflow ticker may later launch proposals a human has already approved, but proposing itself starts nothing. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
 		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
@@ -2083,6 +2087,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 					"query":      map[string]any{"type": "string", "description": "What the agent should produce once a human confirms the proposal."},
 					"card_id":    map[string]any{"type": "string", "description": "id of the existing board card this task delivers; omit if none."},
 					"package_id": map[string]any{"type": "string", "description": "id or exact name of the venture package this task belongs to; omit if none."},
+					"thread_id":  map[string]any{"type": "string", "description": "id of the public channel this proposal originated in; the finished work is delivered back there. Omit if none."},
 				},
 				"required":             []string{"title", "mode", "query"},
 				"additionalProperties": false,
