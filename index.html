@@ -4681,7 +4681,7 @@
         position: relative;
         z-index: 1;
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
         align-items: center;
         gap: 10px;
         padding: 8px 0;
@@ -4745,6 +4745,32 @@
       }
       .key-date-step.is-today .key-date-step__date {
         color: var(--text-1);
+      }
+
+      /* card 084: per-milestone "add to calendar" (.ics) icon button */
+      .key-date-step__cal {
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-sm);
+        background: var(--surface-3);
+        color: var(--text-3);
+        cursor: pointer;
+        transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .key-date-step__cal:hover {
+        color: var(--text-1);
+        filter: brightness(1.12);
+      }
+      .key-date-step__cal:active {
+        transform: scale(var(--press-scale));
+      }
+      .key-date-step__cal:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
 
       .key-date-editor {
@@ -16767,7 +16793,7 @@
         }
 
         .key-date-step {
-          grid-template-columns: auto minmax(0, 1fr);
+          grid-template-columns: auto minmax(0, 1fr) auto;
           gap: 4px;
           padding: 7px 0;
         }
@@ -16779,6 +16805,12 @@
         .key-date-step__date {
           grid-column: 2;
           justify-self: start;
+        }
+
+        .key-date-step__cal {
+          grid-column: 3;
+          grid-row: 1 / 3;
+          align-self: center;
         }
 
         .card-detail-form {
@@ -45017,12 +45049,58 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const date = document.createElement('span')
           date.className = 'key-date-step__date'
           date.textContent = item.date
-          step.append(dot, label, date)
+          const cal = document.createElement('button')
+          cal.type = 'button'
+          cal.className = 'key-date-step__cal'
+          cal.title = 'add to calendar'
+          cal.setAttribute('aria-label', `add ${item.label || 'key date'} to calendar`)
+          cal.appendChild(makeIconSvg([
+            { tag: 'rect', attrs: { x: '3', y: '5', width: '18', height: '16' } },
+            'M3 9h18', 'M8 3v4', 'M16 3v4', 'M12 13v4', 'M10 15h4'
+          ], { size: 12 }))
+          cal.addEventListener('click', () => downloadKeyDateICS(card, item))
+          step.append(dot, label, date, cal)
           timeline.appendChild(step)
         })
 
         section.append(header, timeline)
         return section
+      }
+
+      // Card 084: download a single key date as an all-day .ics from the
+      // stateless, session-gated /calendar/event.ics endpoint. Free-text dates
+      // that the server can't parse ("after the offsite") answer 400 → a
+      // format-hint toast; everything else lands as a calendar file that
+      // imports into Apple/Google/Outlook.
+      async function downloadKeyDateICS(card, item) {
+        const dateText = String(item?.date || '').trim()
+        if (!dateText) {
+          showToast({ text: 'no date on this milestone yet', kind: 'error' })
+          return
+        }
+        const query = 'title=' + encodeURIComponent(String(card?.title || '').trim()) +
+          '&label=' + encodeURIComponent(String(item?.label || '').trim()) +
+          '&date=' + encodeURIComponent(dateText)
+        try {
+          const response = await fetch('/calendar/event.ics?' + query, { headers: { Accept: 'text/calendar' } })
+          if (!response.ok) {
+            showToast({ text: "couldn't read that date, try a format like May 24", kind: 'error' })
+            return
+          }
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          const slug = (item?.label || card?.title || 'key-date').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'key-date'
+          link.download = `${slug}.ics`
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+          showToast({ text: 'calendar event downloaded', kind: 'done' })
+        } catch {
+          showToast({ text: 'calendar download failed', kind: 'error' })
+        }
       }
 
       function renderKeyDateEditor(card, options = {}) {

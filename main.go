@@ -579,6 +579,7 @@ func main() {
 	http.HandleFunc("/artifacts/share", artifactShareHandler)
 	http.HandleFunc("/a/", shareLinkPublicHandler)
 	http.HandleFunc("/artifacts/export-pdf", artifactExportPDFHandler)
+	http.HandleFunc("/calendar/event.ics", calendarICSHandler)
 	http.HandleFunc("/internal/render/jobs/result", internalRenderRunnerResultHandler)
 	http.HandleFunc("/signals/survey", signalSurveyHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
@@ -2388,6 +2389,7 @@ func nativeRoomClientConfig() map[string]any {
 		"rtcConfiguration": browserRTCConfigurationFromEnv(),
 		"protocolVersion":  nativeClientProtocolV1,
 		"auth":             "cookie",
+		"calendar":         calendarCapabilities(),
 		"websocketPath":    "/websocket",
 		"signalingRole":    "server-offer",
 		"supportedLayers":  []string{string(layerTierLow), string(layerTierMedium), string(layerTierHigh)},

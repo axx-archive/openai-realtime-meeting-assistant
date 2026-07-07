@@ -124,6 +124,16 @@ MEETING_NOTES_SMTP_PASSWORD=...
 MEETING_NOTES_SMTP_FROM=meeting-notes@shareability.com
 ```
 
+The **add to calendar** buttons on a card's key dates (card 084) need no config —
+`GET /calendar/event.ics` serves a downloadable all-day `.ics` for any key date.
+The reserved Google Calendar sync seam stays dark until all three creds are set:
+
+```bash
+GOOGLE_CALENDAR_CLIENT_ID=...
+GOOGLE_CALENDAR_CLIENT_SECRET=...
+GOOGLE_CALENDAR_REDIRECT_URL=https://$MEETING_HOST/calendar/google/callback
+```
+
 ## Launch
 
 From the repo root on the Droplet:
