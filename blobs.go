@@ -386,6 +386,13 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 			}
 		}
 	}
+	// Files-surface direct uploads (kind=file entries, card 095) reference
+	// their bytes via metadata blobRef — the shared drive must survive a sweep.
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if ref := strings.TrimSpace(entry.Metadata["blobRef"]); validBlobRef(ref) {
+			referenced[ref] = struct{}{}
+		}
+	}
 	// Chat-attachment refs (scoutChatFileAttachment.Ref, card 085) are live
 	// references too: a thread's inline images and PDFs must survive a sweep
 	// for as long as the thread record renders them.

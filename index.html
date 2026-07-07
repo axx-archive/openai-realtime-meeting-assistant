@@ -917,6 +917,7 @@
       /* kit TopBar for Chat/Memory passes no actions — only the status pill */
       #appShell[data-tool="chat"] .topbar__copy-link,
       #appShell[data-tool="memory"] .topbar__copy-link,
+      #appShell[data-tool="files"] .topbar__copy-link,
       #appShell[data-tool="artifacts"] .topbar__copy-link {
         display: none;
       }
@@ -5031,7 +5032,8 @@
       #researchTool,
       #designTool,
       #grillTool,
-      #memoryTool {
+      #memoryTool,
+      #filesTool {
         display: none;
         min-width: 0;
         min-height: 0;
@@ -5061,6 +5063,10 @@
       #appShell[data-tool="memory"] .scout-rail,
       #appShell[data-tool="memory"] .board-rail,
       #appShell[data-tool="memory"] .meeting-bar,
+      #appShell[data-tool="files"] .hearth-presentation,
+      #appShell[data-tool="files"] .scout-rail,
+      #appShell[data-tool="files"] .board-rail,
+      #appShell[data-tool="files"] .meeting-bar,
       #appShell[data-tool="artifacts"] .hearth-presentation,
       #appShell[data-tool="artifacts"] .scout-rail,
       #appShell[data-tool="artifacts"] .board-rail,
@@ -5085,6 +5091,7 @@
          (1-3-0) re-show .meeting-bar, regardless of source order. */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .meeting-bar,
       #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .meeting-bar,
+      #appShell.is-in-room[data-tool="files"]:not(.is-board-expanded) .meeting-bar,
       #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .meeting-bar,
       #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .meeting-bar,
       #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .meeting-bar,
@@ -5094,6 +5101,7 @@
 
       #appShell.is-authed[data-tool="chat"] .workspace,
       #appShell.is-authed[data-tool="memory"] .workspace,
+      #appShell.is-authed[data-tool="files"] .workspace,
       #appShell.is-authed[data-tool="artifacts"] .workspace,
       #appShell.is-authed[data-tool="research"] .workspace,
       #appShell.is-authed[data-tool="design"] .workspace,
@@ -5119,6 +5127,7 @@
       @media (min-width: 641px) {
         #appShell.is-authed[data-tool="chat"] .workspace,
         #appShell.is-authed[data-tool="memory"] .workspace,
+        #appShell.is-authed[data-tool="files"] .workspace,
         #appShell.is-authed[data-tool="artifacts"] .workspace,
         #appShell.is-authed[data-tool="research"] .workspace,
         #appShell.is-authed[data-tool="design"] .workspace,
@@ -5138,6 +5147,7 @@
          gutter (padding-left above) survives in-room. */
       #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
+      #appShell.is-in-room[data-tool="files"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
       #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
@@ -5150,6 +5160,10 @@
       }
 
       #appShell.is-authed[data-tool="memory"] #memoryTool {
+        display: grid;
+      }
+
+      #appShell.is-authed[data-tool="files"] #filesTool {
         display: grid;
       }
 
@@ -5174,6 +5188,7 @@
       #appShell.is-authed[data-tool="design"] #designTool,
       #appShell.is-authed[data-tool="grill"] #grillTool,
       #appShell.is-authed[data-tool="memory"] #memoryTool,
+      #appShell.is-authed[data-tool="files"] #filesTool,
       #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
         animation: bf-tabin 0.4s var(--ease);
       }
@@ -5183,12 +5198,14 @@
       #appShell[data-tool="room"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="chat"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="memory"] .topbar__meta > :not(#topbarToolMeta),
+      #appShell[data-tool="files"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="artifacts"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="research"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="design"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="grill"] .topbar__meta > :not(#topbarToolMeta),
       #appShell[data-tool="chat"] .stage-toolbar,
       #appShell[data-tool="memory"] .stage-toolbar,
+      #appShell[data-tool="files"] .stage-toolbar,
       #appShell[data-tool="artifacts"] .stage-toolbar,
       #appShell[data-tool="research"] .stage-toolbar,
       #appShell[data-tool="design"] .stage-toolbar,
@@ -10049,6 +10066,169 @@
         overflow-y: auto;
         overscroll-behavior: contain;
         padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+      }
+
+      /* canon Files — the shared drive canvas (card 095): reuses the Memory
+         tool page frame (search, count, day groups); rows are files with an
+         uploader line, an origin chip, and the feeds-the-brain badge. */
+      #filesTool {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+      }
+
+      .files-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .files-head .memory-tool__search {
+        flex: 1;
+        min-width: 0;
+      }
+
+      #filesUploadButton {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 40px;
+        padding: 0 16px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: 500 13px var(--font-sans);
+        cursor: pointer;
+      }
+
+      #filesUploadButton:hover:not([disabled]) {
+        background: var(--surface-3);
+      }
+
+      #filesUploadButton:active:not([disabled]) {
+        transform: scale(var(--press-scale));
+      }
+
+      #filesUploadButton[disabled] {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .files-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        padding: 12px 14px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: var(--surface-2);
+      }
+
+      .files-row + .files-row {
+        margin-top: 8px;
+      }
+
+      .files-row__icon {
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: var(--surface-3);
+        color: var(--text-3);
+      }
+
+      .files-row__body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .files-row__name {
+        color: var(--text-1);
+        font: 500 13.5px/1.3 var(--font-sans);
+        text-decoration: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      a.files-row__name:hover {
+        text-decoration: underline;
+      }
+
+      .files-row__meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .files-row__thread {
+        flex: none;
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--text-2);
+        font: inherit;
+        letter-spacing: inherit;
+        cursor: pointer;
+      }
+
+      .files-row__thread:hover {
+        color: var(--text-1);
+        text-decoration: underline;
+      }
+
+      /* the honest badge: ember dot when the file's text rides model
+         context, quiet dot when only the bytes are stored */
+      .files-badge {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        white-space: nowrap;
+      }
+
+      .files-badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--text-3);
+        opacity: 0.5;
+      }
+
+      .files-badge--ingested {
+        color: var(--text-2);
+      }
+
+      .files-badge--ingested::before {
+        background: var(--accent);
+        opacity: 1;
       }
 
       /* canon Mission Intelligence — a flat content canvas (like Memory) for
@@ -15226,7 +15406,8 @@
           margin: 8px 16px 12px;
         }
 
-        #memoryTool {
+        #memoryTool,
+        #filesTool {
           padding: 20px 16px 36px;
         }
 
@@ -15568,6 +15749,7 @@
            the fixed bottom rail (56px pill + 16px inset). Restore a safe-area
            aware bottom inset here so the composer and its chips stay tappable. */
         #appShell.is-authed[data-tool="memory"] .workspace,
+        #appShell.is-authed[data-tool="files"] .workspace,
         #appShell.is-authed[data-tool="artifacts"] .workspace,
         #appShell.is-authed[data-tool="research"] .workspace,
         #appShell.is-authed[data-tool="design"] .workspace,
@@ -15580,6 +15762,7 @@
            pages — keep the same rail + safe-area clearance in-room so the
            composer never slides under the home indicator */
         #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
+        #appShell.is-in-room[data-tool="files"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="research"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="design"]:not(.is-board-expanded) .workspace,
@@ -15644,6 +15827,7 @@
            entered from the office card (D14), the bell + avatar live in the
            header, theme lives in the settings sheet — five icons stay */
         .tool-rail__slot:has(> [data-tool="artifacts"]),
+        .tool-rail__slot:has(> [data-tool="files"]),
         .tool-rail__bell,
         .tool-rail__theme,
         .tool-rail__account {
@@ -15651,11 +15835,13 @@
         }
 
         /* intel (and the workstream pages it shares the entry with) keeps the
-           office icon lit — it is an office sub-screen (D14) */
+           office icon lit — it is an office sub-screen (D14); files rides the
+           same law (reached via Scout / notifications on phones) */
         #appShell[data-tool="artifacts"] .tool-rail__tool[data-tool="office"],
         #appShell[data-tool="research"] .tool-rail__tool[data-tool="office"],
         #appShell[data-tool="design"] .tool-rail__tool[data-tool="office"],
-        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"] {
+        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"],
+        #appShell[data-tool="files"] .tool-rail__tool[data-tool="office"] {
           background: var(--accent);
           color: var(--on-accent);
         }
@@ -16767,6 +16953,7 @@
            that eats the touch (the dead-scroll wedge). Relax both — each
            pane's 96px bottom padding already clears the floating tab bar. */
         #memoryTool,
+        #filesTool,
         #artifactsTool,
         #researchTool,
         #designTool,
@@ -16795,7 +16982,8 @@
         }
 
         /* ---- memory (design mobile §9): single-column timeline ---- */
-        #memoryTool {
+        #memoryTool,
+        #filesTool {
           padding: 12px 14px 96px;
         }
 
@@ -18430,6 +18618,7 @@
         #appShell.is-authed[data-tool="design"] #designTool,
         #appShell.is-authed[data-tool="grill"] #grillTool,
         #appShell.is-authed[data-tool="memory"] #memoryTool,
+        #appShell.is-authed[data-tool="files"] #filesTool,
         #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation { animation: none; }
         .notification-panel { animation: none; }
         .proposal-card { animation: none; }
@@ -18511,6 +18700,12 @@
           <button class="tool-rail__tool" type="button" data-tool="memory" aria-label="Memory" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
             <span class="tool-rail__label">memory</span>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="files" aria-label="Files" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+            <span class="tool-rail__label">files</span>
           </button>
         </span>
         <span class="tool-rail__spacer" aria-hidden="true"></span>
@@ -19378,6 +19573,31 @@
               <article class="memory-empty">memory starts when the room speaks.</article>
             </div>
             <p id="memoryFoot" class="memory-foot" hidden>memory starts when the room speaks.</p>
+          </div>
+        </section>
+
+        <!-- Files tool — the shared drive over every uploaded document (card 095) -->
+        <section id="filesTool" class="memory-tool" aria-label="Files">
+          <div class="memory-tool__inner">
+            <div class="files-head">
+              <div class="memory-tool__search">
+                <span class="memory-tool__search-icon" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                </span>
+                <input id="filesSearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="search every file the office holds" aria-label="search every file the office holds">
+              </div>
+              <button id="filesUploadButton" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                upload
+              </button>
+              <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
+            </div>
+            <div id="filesStats" class="memory-stats" hidden>
+              <span id="filesCount" class="memory-tool__count"></span>
+            </div>
+            <div id="filesList" class="memory-list" role="log" aria-label="uploaded files">
+              <article class="memory-empty">no files yet — upload decks, PDFs, and images here (up to 64MB each). files shared in chat land here too, and readable ones feed the brain.</article>
+            </div>
           </div>
         </section>
 
@@ -20265,6 +20485,15 @@
       const memoryStatHours = document.getElementById('memoryStatHours')
       const memoryStatDecisions = document.getElementById('memoryStatDecisions')
       const memoryFoot = document.getElementById('memoryFoot')
+      const filesList = document.getElementById('filesList')
+      const filesSearch = document.getElementById('filesSearch')
+      const filesStats = document.getElementById('filesStats')
+      const filesCount = document.getElementById('filesCount')
+      const filesUploadButton = document.getElementById('filesUploadButton')
+      const filesUploadInput = document.getElementById('filesUploadInput')
+      let filesEntries = []
+      let filesLoadedAt = 0
+      let filesQuery = ''
       let memoryQuery = ''
       // D15 — day-grouped meeting cards: /assistant/meetings list + which
       // card is open (single-expand accordion; default = most recent)
@@ -20459,7 +20688,7 @@
       const grillStageVerdict = document.getElementById('grillStageVerdict')
       const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       const agentToolIds = ['research', 'design', 'grill']
-      const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory']
+      const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files']
       const agentToolForms = Array.from(document.querySelectorAll('[data-agent-tool-form]'))
       const agentTemplateButtons = Array.from(document.querySelectorAll('[data-agent-template]'))
       const researchArtifactSearch = document.getElementById('researchArtifactSearch')
@@ -20558,7 +20787,7 @@
       // "what Scout did" — a reverse-chron record of this voice session's
       // actions, reachable from the island's ⋯ menu. Reset when a session ends.
       let scoutSessionLedger = []
-      const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']
+      const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']
 
       function canUseArtifactLibrary() {
         /* trust boundary = the signed-in team: every account reads, lists,
@@ -23468,6 +23697,8 @@
           // ownership whenever it is connected.
           loadMemorySnapshot()
           loadMeetingsForMemory()
+        } else if (tool === 'files') {
+          loadFilesSurface()
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
           if (tool === 'artifacts') {
             loadMissionIntelligence()
@@ -23532,6 +23763,8 @@
           }
           case 'memory':
             return 'memory starts when the room speaks.'
+          case 'files':
+            return 'shared materials · readable files feed the brain'
           case 'research':
             return `${agentArtifacts('research').length} briefs · saved artifacts`
           case 'design':
@@ -23578,6 +23811,8 @@
               : 'private'
           case 'artifacts':
             return 'the company brain'
+          case 'files':
+            return 'shared materials'
           case 'research':
           case 'design':
           case 'grill':
@@ -23600,7 +23835,8 @@
           design: 'Design',
           grill: 'Grill mode',
           board: 'Board',
-          memory: 'Memory'
+          memory: 'Memory',
+          files: 'Files'
         }
         // the tab name owns the heading; the meeting name lives in the live
         // pill and on the stage chrome
@@ -26631,7 +26867,7 @@
         }
         // D12: the meeting follows you onto every non-room tab, board included
         const tool = appShell.dataset.tool || 'room'
-        return roomMediaActive() && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || tool === 'board' || agentToolIds.includes(tool) || tool === 'memory')
+        return roomMediaActive() && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || tool === 'board' || agentToolIds.includes(tool) || tool === 'memory' || tool === 'files')
       }
 
       function renderPipMeeting() {
@@ -30668,6 +30904,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'memory_board_update':
             addMemoryEntry(message.data)
+            break
+          case 'file':
+            // a teammate's upload (or an ingestion badge flip) lands live;
+            // off-surface tabs just drop the cache so the next open refetches
+            filesLoadedAt = 0
+            if ((appShell.dataset.tool || '') === 'files') {
+              loadFilesSurface(true)
+            }
             break
           case 'memory_answer':
             {
@@ -42525,6 +42769,222 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // the list loads again on the next visit
         }
       }
+
+      /* ---------- Files surface (card 095) ----------
+         GET /assistant/files unions direct drive uploads with the chat
+         attachments the viewer may read; rows carry the session-gated
+         /artifacts/blob?ref= download link and the honest brain badge. */
+      async function loadFilesSurface(force = false) {
+        if (!authedUser) {
+          return
+        }
+        if (!force && filesLoadedAt && Date.now() - filesLoadedAt < 15000) {
+          renderFilesSurface()
+          return
+        }
+        try {
+          const response = await fetch('/assistant/files', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const payload = await response.json()
+          if (Array.isArray(payload?.files)) {
+            filesEntries = payload.files
+            filesLoadedAt = Date.now()
+            renderFilesSurface()
+          }
+        } catch {
+          // the list loads again on the next visit
+        }
+      }
+
+      function filesRowIconSvg(mime) {
+        mime = String(mime || '')
+        if (mime.startsWith('image/')) {
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"></path></svg>'
+        }
+        if (mime === 'application/pdf') {
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M10 13h4"></path><path d="M10 17h4"></path></svg>'
+        }
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>'
+      }
+
+      function filesRowNode(file) {
+        const row = document.createElement('article')
+        row.className = 'files-row'
+
+        const icon = document.createElement('span')
+        icon.className = 'files-row__icon'
+        icon.innerHTML = filesRowIconSvg(file?.mime)
+
+        const body = document.createElement('div')
+        body.className = 'files-row__body'
+        const name = String(file?.name || 'file')
+        const downloadUrl = String(file?.downloadUrl || '')
+        if (downloadUrl) {
+          const link = document.createElement('a')
+          link.className = 'files-row__name'
+          link.href = downloadUrl
+          // inline-safe mimes (pdf + images) preview in a tab; everything
+          // else downloads (the blob route forces attachment disposition)
+          link.target = '_blank'
+          link.rel = 'noopener'
+          if (!file?.previewable) {
+            link.setAttribute('download', name)
+          }
+          link.textContent = name
+          body.appendChild(link)
+        } else {
+          const label = document.createElement('span')
+          label.className = 'files-row__name'
+          label.textContent = name
+          body.appendChild(label)
+        }
+
+        const meta = document.createElement('div')
+        meta.className = 'files-row__meta'
+        const parts = []
+        if (file?.uploaderName) {
+          parts.push(String(file.uploaderName).toLowerCase())
+        }
+        parts.push(memoryClock(file?.createdAt))
+        const sizeLabel = scoutChatFileSizeLabel(file?.size)
+        if (sizeLabel) {
+          parts.push(sizeLabel)
+        }
+        const metaText = document.createElement('span')
+        metaText.textContent = parts.join(' · ')
+        meta.appendChild(metaText)
+        if (file?.origin === 'chat' && file?.originThreadId) {
+          const thread = document.createElement('button')
+          thread.type = 'button'
+          thread.className = 'files-row__thread'
+          thread.textContent = `→ ${String(file?.originThreadTitle || 'chat thread')}`
+          thread.addEventListener('click', () => {
+            selectScoutChatThread(file.originThreadId)
+            setActiveTool('chat')
+          })
+          meta.appendChild(thread)
+        }
+        body.appendChild(meta)
+
+        const badge = document.createElement('span')
+        const ingested = String(file?.brainStatus || '') === 'ingested'
+        badge.className = ingested ? 'files-badge files-badge--ingested' : 'files-badge'
+        badge.textContent = ingested ? 'in the brain' : 'stored'
+        badge.title = ingested
+          ? 'scout read this file — its contents answer memory questions'
+          : 'bytes are stored; the contents were not readable for the brain'
+
+        row.append(icon, body, badge)
+        return row
+      }
+
+      function renderFilesSurface() {
+        if (!filesList) {
+          return
+        }
+        const query = filesQuery.trim().toLowerCase()
+        const matches = filesEntries.filter(file => !query
+          || String(file?.name || '').toLowerCase().includes(query)
+          || String(file?.uploaderName || '').toLowerCase().includes(query)
+          || String(file?.originThreadTitle || '').toLowerCase().includes(query))
+
+        if (filesStats && filesCount) {
+          filesCount.textContent = `${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
+          filesStats.hidden = !filesEntries.length
+        }
+
+        if (!matches.length) {
+          const empty = document.createElement('article')
+          empty.className = 'memory-empty'
+          empty.textContent = query
+            ? 'no file matches that — yet.'
+            : 'no files yet — upload decks, PDFs, and images here (up to 64MB each). files shared in chat land here too, and readable ones feed the brain.'
+          filesList.replaceChildren(empty)
+          return
+        }
+
+        const groups = ['today', 'yesterday', 'last week', 'older'].map(label => ({ label, files: [] }))
+        const groupByLabel = new Map(groups.map(group => [group.label, group]))
+        for (const file of matches) {
+          groupByLabel.get(memoryDayBucket(file?.createdAt)).files.push(file)
+        }
+        const nodes = groups
+          .filter(group => group.files.length)
+          .map(group => {
+            const wrap = document.createElement('section')
+            wrap.className = 'memory-group'
+            const rail = document.createElement('div')
+            rail.className = 'memory-group__rule'
+            const labelRow = document.createElement('div')
+            labelRow.className = 'memory-group__label'
+            const dot = document.createElement('span')
+            dot.className = 'memory-group__dot'
+            const label = document.createElement('span')
+            label.textContent = group.label
+            labelRow.append(dot, label)
+            const items = document.createElement('div')
+            items.className = 'memory-group__items'
+            for (const file of group.files) {
+              items.appendChild(filesRowNode(file))
+            }
+            wrap.append(rail, labelRow, items)
+            return wrap
+          })
+        filesList.replaceChildren(...nodes)
+      }
+
+      async function uploadFilesToDrive(fileList) {
+        const files = Array.from(fileList || [])
+        if (!files.length || !authedUser) {
+          return
+        }
+        if (filesUploadButton) {
+          filesUploadButton.disabled = true
+        }
+        try {
+          for (const file of files) {
+            if (file.size > 64 * 1024 * 1024) {
+              showToast({ text: `${file.name} is over the 64MB cap`, kind: 'error' })
+              continue
+            }
+            const body = new FormData()
+            body.append('file', file, file.name)
+            try {
+              const response = await fetch('/assistant/files/upload', { method: 'POST', body })
+              if (!response.ok) {
+                showToast({ text: `${file.name} failed to upload`, kind: 'error' })
+                continue
+              }
+              const payload = await response.json()
+              showToast({
+                text: payload?.file?.brainStatus === 'ingested'
+                  ? `${file.name} uploaded — in the brain`
+                  : `${file.name} uploaded`,
+                kind: 'done'
+              })
+            } catch {
+              showToast({ text: `${file.name} failed to upload`, kind: 'error' })
+            }
+          }
+        } finally {
+          if (filesUploadButton) {
+            filesUploadButton.disabled = false
+          }
+          loadFilesSurface(true)
+        }
+      }
+
+      filesUploadButton?.addEventListener('click', () => filesUploadInput?.click())
+      filesUploadInput?.addEventListener('change', () => {
+        uploadFilesToDrive(filesUploadInput.files)
+        filesUploadInput.value = ''
+      })
+      filesSearch?.addEventListener('input', () => {
+        filesQuery = filesSearch.value || ''
+        renderFilesSurface()
+      })
 
       /* day buckets: today / yesterday / last week / older */
       function memoryDayBucket(raw) {

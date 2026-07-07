@@ -407,7 +407,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		".tool-rail__avatar[hidden]",
 		"display: none !important;",
 		"const agentToolIds = ['research', 'design', 'grill']",
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
 		`<span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">`,
 		`<span class="tool-rail__slot" hidden>
@@ -2253,7 +2253,7 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 	for _, key := range []string{
 		`<main id="appShell" data-tool="office">`,
 		`data-tool="office"`,
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
 	} {
 		if !strings.Contains(html, key) {
 			t.Fatalf("index.html dropped the load-bearing office data-tool key %q", key)
