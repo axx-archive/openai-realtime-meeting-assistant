@@ -137,6 +137,10 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "narrative maintainer") {
+			calls = append(calls, "narrative")
+			return `{"narratives":[]}`, nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -147,7 +151,7 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
-	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
+	if len(calls) != 5 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" || calls[4] != "narrative" {
 		t.Fatalf("calls=%v, want one brain pass, one decision-ledger pass, one board pass, then one mission pass", calls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
@@ -295,6 +299,10 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "narrative maintainer") {
+			calls = append(calls, "narrative")
+			return `{"narratives":[]}`, nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -308,7 +316,7 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	// fresh in-meeting transcript: the flush picks up from the boot baseline.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
+	if len(calls) != 5 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" || calls[4] != "narrative" {
 		t.Fatalf("calls=%v, want brain, decision-ledger, board, then mission for post-boot input", calls)
 	}
 }

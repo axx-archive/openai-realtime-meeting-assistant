@@ -579,7 +579,13 @@ type anthropicFableRunner struct {
 	effort       string
 	maxTurns     int
 	maxTokens    int
-	responder    anthropicMessagesResponder
+	// progressHighWater is the highest percent this run has reported (the goal
+	// engine's MaxProgress pattern): the per-turn heuristic only climbs, but a
+	// later report_goal_state can legitimately carry a lower number — the bar
+	// must never walk backwards. Job-local: the runner is built per job
+	// (selectAgentRunner).
+	progressHighWater int
+	responder         anthropicMessagesResponder
 }
 
 func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
@@ -887,10 +893,100 @@ func (r *anthropicFableRunner) turnProgress(finalText string, control AgentProgr
 	if progress.ReviewGate == "" {
 		progress.ReviewGate = "pending"
 	}
+	// The note under the bar wants the freshest signal, not the sticky control
+	// note from three turns ago: a report_goal_state note from THIS turn wins,
+	// else the tool the model is calling right now ("consulting memory"), else
+	// the sticky control note, else the latest assistant prose.
+	if note := turnNoteFromBlocks(response); note != "" {
+		progress.Note = note
+	}
 	if progress.Note == "" {
 		progress.Note = compactAssistantLine(finalText)
 	}
+	progress.ProgressPercent = r.monotonicTurnPercent(turn, progress.ProgressPercent)
 	return progress
+}
+
+// monotonicTurnPercent gives every non-terminal turn a rising percent so the
+// bar moves off the 35% launch scaffold instead of freezing until terminal.
+// Typical runs finish in 3-8 turns of the 24-turn cap, so the heuristic climbs
+// 35→90 across eight turns and parks at 92 — the honest 100/72 stays terminal's
+// call. A percent the model reported via report_goal_state wins when it is
+// ahead; the job-local high-water mark keeps the bar monotonic when a later
+// report comes in behind it.
+func (r *anthropicFableRunner) monotonicTurnPercent(turn int, reported int) int {
+	percent := 35 + (55*turn)/8
+	if percent > 92 {
+		percent = 92
+	}
+	if reported > percent {
+		percent = reported
+	}
+	if percent < r.progressHighWater {
+		return r.progressHighWater
+	}
+	r.progressHighWater = percent
+	return percent
+}
+
+// turnNoteFromBlocks derives this turn's operator-voice note from the turn's
+// own blocks: an explicit report_goal_state note beats the tool-derived phrase
+// (the model's line is more specific than "consulting memory"), and with
+// several tool calls in one turn the last one names the freshest action.
+func turnNoteFromBlocks(response anthropicMessagesResponse) string {
+	controlNote := ""
+	toolNote := ""
+	for _, rawBlock := range response.Content {
+		block := decodeAnthropicBlock(rawBlock)
+		if block.Type != "tool_use" {
+			continue
+		}
+		if block.Name == controlToolReportGoalState {
+			if note := asString(decodeToolArgs(block.Input)["note"]); strings.TrimSpace(note) != "" {
+				controlNote = note
+			}
+			continue
+		}
+		if phrase := agentToolProgressPhrase(block.Name); phrase != "" {
+			toolNote = phrase
+		}
+	}
+	return firstNonEmptyString(controlNote, toolNote)
+}
+
+// agentToolProgressPhrases maps orchestrator tool names to the short human
+// phrase the progress card renders under the bar while that tool runs.
+var agentToolProgressPhrases = map[string]string{
+	"answer_memory_question":     "consulting memory",
+	"create_ticket":              "filing a board card",
+	"update_ticket":              "updating a board card",
+	"move_ticket":                "moving a board card",
+	"add_tags":                   "tagging board cards",
+	"add_key_date":               "logging a key date",
+	"remove_key_dates":           "clearing key dates",
+	"create_artifact":            "drafting the report",
+	"update_artifact":            "revising the report",
+	"create_package":             "assembling a package",
+	"attach_to_package":          "attaching work to a package",
+	"advance_package_stage":      "advancing a package stage",
+	"send_notification":          "sending a notification",
+	"company_financial_snapshot": "pulling a financial snapshot",
+	"financial_comps":            "comparing company financials",
+	"fiscal_api_docs":            "checking fiscal data coverage",
+	"fiscal_data_query":          "querying fiscal data",
+}
+
+// agentToolProgressPhrase resolves the note for one tool call. Unknown tools
+// read as their name with the underscores dropped; do_nothing stays silent so
+// the previous note holds instead of announcing idleness.
+func agentToolProgressPhrase(name string) string {
+	if name == "do_nothing" {
+		return ""
+	}
+	if phrase, ok := agentToolProgressPhrases[name]; ok {
+		return phrase
+	}
+	return strings.ReplaceAll(name, "_", " ")
 }
 
 func (r *anthropicFableRunner) terminalProgress(job AgentJob, finalText string, control AgentProgress, turn int, response anthropicMessagesResponse) AgentProgress {

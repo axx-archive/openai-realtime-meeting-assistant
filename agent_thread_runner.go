@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +240,78 @@ func normalizeAgentThreadMode(mode string) string {
 	}
 }
 
+// genericContractHeadings are section headings the mode contracts mandate
+// (research_brief_v2's "Executive Summary", the design/grill sections, the
+// generic workflow loop's "Vision"). They name a SECTION of the artifact,
+// never its subject — a research body opens with its contract heading, which
+// titled a live completed report "Executive Summary".
+var genericContractHeadings = map[string]struct{}{
+	// research_brief_v2 (agentThreadModeContract)
+	"executive summary": {},
+	"thesis":            {},
+	"evidence":          {},
+	"sources":           {},
+	"search tags":       {},
+	"counterarguments":  {},
+	"recommendation":    {},
+	"recommendations":   {},
+	"open questions":    {},
+	"next checks":       {},
+	"worker evidence":   {},
+	// design contract
+	"design intent":             {},
+	"context and research used": {},
+	"core screens":              {},
+	"interaction states":        {},
+	"responsive behavior":       {},
+	"implementation handoff":    {},
+	"risks":                     {},
+	// grill contract
+	"strongest objections": {},
+	"tough questions":      {},
+	"revised ask":          {},
+	"confidence gate":      {},
+	// generic workflow headings (the finalLine contract in systemPrompt)
+	"vision":             {},
+	"goal":               {},
+	"context used":       {},
+	"work decomposition": {},
+	"execution log":      {},
+	"review":             {},
+	"gate":               {},
+	"what worked":        {},
+	"report":             {},
+	"next moves":         {},
+	"verification":       {},
+	// common report furniture no contract needs to mandate
+	"overview":     {},
+	"summary":      {},
+	"key findings": {},
+	"findings":     {},
+	"background":   {},
+	"introduction": {},
+	"conclusion":   {},
+	"methodology":  {},
+	"appendix":     {},
+	"next steps":   {},
+}
+
+func isGenericContractHeading(value string) bool {
+	_, ok := genericContractHeadings[strings.ToLower(strings.TrimSpace(value))]
+	return ok
+}
+
+// agentThreadDisplayTitle derives a completed thread's display title from its
+// body (artifactTitleFromBody), refusing generic contract headings: those fall
+// back to the launch query / stored title the caller passes as fallback.
+func agentThreadDisplayTitle(body string, fallback string) string {
+	derived := artifactTitleFromBody(body, fallback)
+	if isGenericContractHeading(derived) {
+		return strings.TrimSpace(fallback)
+	}
+	return derived
+}
+
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 	ctx, cancel := context.WithTimeout(context.Background(), agentThreadRequestTimeout())
 	defer cancel()
@@ -282,7 +355,7 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		metadata["progressPercent"] = "72"
 		metadata["reviewGate"] = "blocked"
 		metadata["error"] = err.Error()
-	} else if derived := artifactTitleFromBody(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
+	} else if derived := agentThreadDisplayTitle(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
 		// Completed work gets a real display title from the body's first
 		// heading; the launch prompt survives in metadata["threadQuery"].
 		title = derived
@@ -310,6 +383,12 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		})
 		return
 	}
+
+	// Run ledger: one compact, SEARCHABLE run_log memory line per terminal run
+	// — complete and error alike — so recall can answer "what has Scout run
+	// for us?" without replaying artifact bodies. References the artifact id
+	// only; the signal discipline applies (a ledger write never fails the run).
+	app.appendAgentRunLogEntry(thread, artifact, status, output)
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
 	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
@@ -501,6 +580,95 @@ func agentThreadNotificationText(message string, artifact meetingMemoryEntry) st
 	return message
 }
 
+// Run-ledger bounds: the whole line stays compact so run history rides recall
+// context cheaply — the artifact holds the work, the ledger holds the fact.
+const (
+	agentRunLogSummaryLimit = 200
+	agentRunLogTextLimit    = 500
+)
+
+// agentRunLogHeadingPattern matches the research contract's Executive Summary
+// heading (any depth, case-insensitive).
+var agentRunLogHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s*executive summary\b`)
+
+// agentRunLogSummary is the ~200-char tail of a run-ledger line: the error
+// message for failed runs, else the artifact's Executive Summary section when
+// the contract carries one, else the head of the body.
+func agentRunLogSummary(status string, body string, errText string) string {
+	if status == "error" {
+		if errText = strings.TrimSpace(errText); errText != "" {
+			return truncateAgentThreadText(normalizeMemoryText(errText), agentRunLogSummaryLimit)
+		}
+		return ""
+	}
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	for index, line := range lines {
+		if !agentRunLogHeadingPattern.MatchString(strings.TrimSpace(line)) {
+			continue
+		}
+		section := make([]string, 0, 4)
+		for _, sectionLine := range lines[index+1:] {
+			sectionLine = strings.TrimSpace(sectionLine)
+			if strings.HasPrefix(sectionLine, "#") {
+				break
+			}
+			if sectionLine != "" {
+				section = append(section, sectionLine)
+			}
+		}
+		if len(section) > 0 {
+			return truncateAgentThreadText(normalizeMemoryText(strings.Join(section, " ")), agentRunLogSummaryLimit)
+		}
+		break
+	}
+	return truncateAgentThreadText(normalizeMemoryText(body), agentRunLogSummaryLimit)
+}
+
+// agentRunLogDuration reads the run's wall time from the artifact's own
+// startedAt stamp; an unparseable stamp degrades to the artifact's age.
+func agentRunLogDuration(artifact meetingMemoryEntry, now time.Time) string {
+	startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(artifact.Metadata["startedAt"]))
+	if err != nil {
+		startedAt = artifact.CreatedAt
+	}
+	if startedAt.IsZero() || now.Before(startedAt) {
+		return "unknown duration"
+	}
+	return now.Sub(startedAt).Round(time.Second).String()
+}
+
+// appendAgentRunLogEntry writes the terminal run's ledger line. The id derives
+// from the thread id, so the store's dedupe makes a retried terminal write
+// idempotent; errors are logged and swallowed — a ledger miss never fails the
+// run it records.
+func (app *kanbanBoardApp) appendAgentRunLogEntry(thread scoutAgentThread, artifact meetingMemoryEntry, status string, output string) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), strings.TrimSpace(artifact.Metadata["threadQuery"]), compactAssistantLine(thread.Query))
+	requestedBy := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["requestedBy"]), strings.TrimSpace(artifact.Metadata["createdBy"]), "unknown")
+	text := fmt.Sprintf("%s run — %s: %s (requested by %s, %s). Deliverable: %s.",
+		assistantToolLabel(thread.Mode), compactAssistantLine(title), status, requestedBy, agentRunLogDuration(artifact, time.Now().UTC()), artifact.ID)
+	if summary := agentRunLogSummary(status, output, artifact.Metadata["error"]); summary != "" {
+		text += " " + summary
+	}
+	text = truncateAgentThreadText(text, agentRunLogTextLimit)
+
+	metadata := map[string]string{
+		"artifactId":  artifact.ID,
+		"threadId":    thread.ID,
+		"mode":        thread.Mode,
+		"status":      status,
+		"requestedBy": requestedBy,
+	}
+	if _, _, err := app.memory.appendRunLog("run-log-"+thread.ID, text, metadata); err != nil {
+		log.Errorf("Failed to append run log for thread %s: %v", thread.ID, err)
+	}
+}
+
 func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, workerResult agentThreadWorkerResult) {
 	output := strings.TrimSpace(workerResult.Text)
 	if output == "" {
@@ -532,7 +700,7 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	title := ""
 	if status == codexJobStatusComplete && strings.TrimSpace(workerResult.Text) != "" {
 		scaffoldTitle := thread.Artifact.Metadata["title"]
-		if derived := artifactTitleFromBody(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
+		if derived := agentThreadDisplayTitle(output, scaffoldTitle); derived != "" && derived != scaffoldTitle {
 			title = derived
 			metadata["titleSource"] = "derived"
 		}
@@ -604,16 +772,17 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Cont
 	}
 	// onProgress persists each non-terminal turn onto the running artifact so the
 	// progress card advances mid-run; the terminal update is left to the seam in
-	// runAgentThread (folding that write here would race it). The office-socket
-	// broadcast of these updates is Wave 3's job.
+	// runAgentThread (folding that write here would race it).
 	return drainAgentProgress(progress, func(update AgentProgress) {
 		app.persistAgentThreadProgress(thread, update)
 	})
 }
 
 // persistAgentThreadProgress stamps a runner's per-turn progress (currentStage,
-// goalStatus, progressPercent, reviewGate) onto the running thread's artifact.
-// Non-terminal only and additive metadata; the current body is preserved.
+// goalStatus, progressPercent, reviewGate, progressNote) onto the running
+// thread's artifact and broadcasts the refreshed memory snapshot so open
+// clients re-render the advancing bar mid-run. Non-terminal only and additive
+// metadata; the current body is preserved.
 func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, update AgentProgress) {
 	if app == nil || update.Terminal || strings.TrimSpace(thread.Artifact.ID) == "" {
 		return
@@ -624,7 +793,15 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 	}
 	if _, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata); err != nil {
 		log.Errorf("Failed to persist thread %s progress: %v", thread.ID, err)
+		return
 	}
+	// Live progress: mirror the goal engine's persist (goal_engine.go) — the
+	// memory snapshot rides the kanban socket so clients holding the artifact
+	// see the bar move without a reload. updateOSArtifactWithMetadata already
+	// fans out the artifact_progress os_event when the progress signature
+	// changes; the per-turn rising progressPercent makes that fire each turn.
+	// Bounded by the orchestrator's 24-turn cap — no broadcast storm.
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {

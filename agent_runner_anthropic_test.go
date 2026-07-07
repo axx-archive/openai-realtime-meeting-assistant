@@ -1157,3 +1157,98 @@ func blockTypePresent(blocks []json.RawMessage, blockType string) bool {
 	}
 	return false
 }
+
+// A research run's bar used to freeze at the 35% launch scaffold until the
+// terminal write: turnProgress never set ProgressPercent. Every non-terminal
+// turn now climbs a heuristic (typical runs are 3-8 turns of the 24-turn cap),
+// a report_goal_state percent ahead of the heuristic wins, and the job-local
+// high-water mark keeps the bar monotonic when a later report comes in lower.
+func TestAnthropicFableRunnerTurnProgressRisingMonotonic(t *testing.T) {
+	runner := &anthropicFableRunner{model: "test-model", effort: "high"}
+	steps := []struct {
+		turn     int
+		reported int // percent the sticky control carries from report_goal_state
+		want     int
+	}{
+		{turn: 1, reported: 0, want: 41},  // 35 + (55*1)/8
+		{turn: 2, reported: 0, want: 48},  // keeps climbing per turn
+		{turn: 3, reported: 80, want: 80}, // a model report ahead of the heuristic wins
+		{turn: 4, reported: 20, want: 80}, // high-water: a lower report never walks the bar back
+		{turn: 9, reported: 0, want: 92},  // heuristic parks at 92 — 100/72 stays terminal's call
+		{turn: 24, reported: 0, want: 92},
+	}
+	for _, step := range steps {
+		progress := runner.turnProgress("working", AgentProgress{ProgressPercent: step.reported}, step.turn, anthropicMessagesResponse{})
+		if progress.ProgressPercent != step.want {
+			t.Fatalf("turn %d (reported %d): percent=%d, want %d", step.turn, step.reported, progress.ProgressPercent, step.want)
+		}
+		if progress.Terminal {
+			t.Fatalf("turn %d: non-terminal turn marked terminal", step.turn)
+		}
+	}
+}
+
+// Each turn's note names what the orchestrator is doing RIGHT NOW: an explicit
+// report_goal_state note from this turn wins, else the tool being called maps
+// to a short human phrase (unknown tools read as their name), else the sticky
+// control note holds, else the latest assistant prose.
+func TestAnthropicFableRunnerTurnProgressNotes(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		control  AgentProgress
+		text     string
+		response anthropicMessagesResponse
+		want     string
+	}{
+		{
+			name: "memory tool maps to a human phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "answer_memory_question", map[string]any{"question": "what shipped?"}),
+			}},
+			want: "consulting memory",
+		},
+		{
+			name: "fiscal tool maps to a human phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "fiscal_data_query", map[string]any{"query": "revenue"}),
+			}},
+			want: "querying fiscal data",
+		},
+		{
+			name: "report_goal_state note this turn beats the tool phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", controlToolReportGoalState, map[string]any{"note": "reviewing sources"}),
+				mockAnthropicToolUseBlock("toolu_2", "answer_memory_question", map[string]any{}),
+			}},
+			want: "reviewing sources",
+		},
+		{
+			name: "unknown tool falls back to its name",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "future_tool", map[string]any{}),
+			}},
+			want: "future tool",
+		},
+		{
+			name:    "do_nothing stays silent so the sticky note holds",
+			control: AgentProgress{Note: "drafting the report"},
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "do_nothing", map[string]any{}),
+			}},
+			want: "drafting the report",
+		},
+		{
+			name: "no tools falls back to the assistant prose",
+			text: "Working through the evidence now.",
+			want: "Working through the evidence now.",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &anthropicFableRunner{model: "test-model", effort: "high"}
+			progress := runner.turnProgress(tt.text, tt.control, 1, tt.response)
+			if progress.Note != tt.want {
+				t.Fatalf("Note=%q, want %q", progress.Note, tt.want)
+			}
+		})
+	}
+}

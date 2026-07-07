@@ -557,6 +557,8 @@ func main() {
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
 	http.HandleFunc("/assistant/files", assistantFilesHandler)
 	http.HandleFunc("/assistant/files/upload", assistantFileUploadHandler)
+	http.HandleFunc("/assistant/files/folders", assistantFileFoldersHandler)
+	http.HandleFunc("/assistant/files/move", assistantFileMoveHandler)
 	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)

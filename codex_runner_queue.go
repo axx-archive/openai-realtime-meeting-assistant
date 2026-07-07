@@ -784,7 +784,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		// finished body so the prompt stops masquerading as the title.
 		if runnerTitle := strings.TrimSpace(payload.Metadata["title"]); runnerTitle != "" {
 			title = runnerTitle
-		} else if derived := artifactTitleFromBody(text, title); derived != "" && derived != title {
+		} else if derived := agentThreadDisplayTitle(text, title); derived != "" && derived != title {
 			title = derived
 			metadata["titleSource"] = "derived"
 		}
@@ -1034,10 +1034,7 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	case "rerun":
 		// Rerun is the same capability as POST /assistant/threads, which is
 		// open to every signed-in user.
-		mode := normalizeAgentThreadMode(artifact.Kind)
-		if mode == "" {
-			mode = "workflow"
-		}
+		mode := rerunThreadMode(artifact)
 		query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"], compactAssistantLine(artifact.Text))
 		// A rerun inherits the prior artifact's origin ONLY when delivery there
 		// is still safe for THIS user (GATE-FINDINGS G2); everything else drops
@@ -1057,6 +1054,20 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAuthError(w, http.StatusBadRequest, "unknown artifact action")
 	}
+}
+
+// rerunThreadMode resolves which thread mode a rerun relaunches with.
+// metadata["mode"] carries the launch mode ("research", "grill", …);
+// artifact.Kind is always "os_artifact", so reading Kind alone silently
+// dropped every rerun to workflow mode and lost the research contract — the
+// same firstNonEmptyString fallback the follow-up runner already uses
+// (agent_thread_followup.go).
+func rerunThreadMode(artifact meetingMemoryEntry) string {
+	mode := normalizeAgentThreadMode(firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind))
+	if mode == "" {
+		mode = "workflow"
+	}
+	return mode
 }
 
 // rerunOriginForUser decides which origin metadata a rerun may inherit from

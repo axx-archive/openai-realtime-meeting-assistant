@@ -688,3 +688,59 @@ func TestBuildAgentThreadErrorDoesNotPrescribeCodexHandoff(t *testing.T) {
 		t.Fatalf("error body should point at a retry, got:\n%s", body)
 	}
 }
+
+// research_brief_v2 bodies open with contract headings, which titled a live
+// completed report "Executive Summary". A derived title that is a generic
+// contract heading (any mode's contract, case-insensitive) falls back to the
+// launch query / stored title; a real subject heading still wins.
+func TestAgentThreadDisplayTitleRejectsGenericContractHeadings(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		body     string
+		fallback string
+		want     string
+	}{
+		{
+			name:     "research contract heading falls back to the launch query",
+			body:     "# Executive Summary\n\nSamsung is exposed on HBM4 supply.",
+			fallback: "Samsung HBM4 exposure",
+			want:     "Samsung HBM4 exposure",
+		},
+		{
+			name:     "matching is case-insensitive",
+			body:     "## EXECUTIVE SUMMARY\n\nbody",
+			fallback: "the launch query",
+			want:     "the launch query",
+		},
+		{
+			name:     "workflow contract heading falls back",
+			body:     "# Vision\n\nbody",
+			fallback: "package the Aurora IP",
+			want:     "package the Aurora IP",
+		},
+		{
+			name:     "grill contract heading falls back",
+			body:     "## Strongest objections\n\nbody",
+			fallback: "grill the Q3 pitch",
+			want:     "grill the Q3 pitch",
+		},
+		{
+			name:     "real subject heading still wins",
+			body:     "# Samsung HBM4 supply outlook\n\nbody",
+			fallback: "the launch query",
+			want:     "Samsung HBM4 supply outlook",
+		},
+		{
+			name:     "generic derivation with empty fallback keeps the stored title",
+			body:     "# Overview\n\nbody",
+			fallback: "",
+			want:     "",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := agentThreadDisplayTitle(tt.body, tt.fallback); got != tt.want {
+				t.Fatalf("agentThreadDisplayTitle=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}

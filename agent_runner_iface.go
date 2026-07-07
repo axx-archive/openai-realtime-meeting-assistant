@@ -286,6 +286,12 @@ func agentProgressMetadata(progress AgentProgress) map[string]string {
 	if strings.TrimSpace(progress.ReviewGate) != "" {
 		metadata["reviewGate"] = progress.ReviewGate
 	}
+	// The live line the client renders under the progress bar ("consulting
+	// memory", "drafting the report"). Capped for storage: notes derive from
+	// model output and tool names, not a bounded vocabulary.
+	if strings.TrimSpace(progress.Note) != "" {
+		metadata["progressNote"] = trimForStorage(compactAssistantLine(progress.Note), 140)
+	}
 	for key, value := range progress.Metadata {
 		if strings.TrimSpace(value) != "" {
 			metadata[key] = value

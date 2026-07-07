@@ -227,14 +227,15 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 }
 
 // flushAmbientAgentsForArchive synchronously runs one brain pass, then one
-// decision-ledger pass, then one board pass, then one mission-intel pass with
-// a batch minimum of one, so the last minutes of a meeting are summarized,
-// their decisions land in the ledger, the board is updated, and the archived
-// meeting's dominant theme titles the RIGHT record before the archive
-// snapshot is taken (and before rotateMeetingID — a later mission tick would
-// otherwise consume the pre-archive brain write-ups and stamp the old
-// meeting's theme onto the successor record). Skips silently when no API key
-// is configured or nothing new exists.
+// decision-ledger pass, then one board pass, then one mission-intel pass,
+// then one narrative pass with a batch minimum of one, so the last minutes of
+// a meeting are summarized, their decisions land in the ledger, the board is
+// updated, the archived meeting's dominant theme titles the RIGHT record, and
+// the storyline dossiers fold the meeting in before the archive snapshot is
+// taken (and before rotateMeetingID — a later mission tick would otherwise
+// consume the pre-archive brain write-ups and stamp the old meeting's theme
+// onto the successor record). Skips silently when no API key is configured or
+// nothing new exists.
 func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 	if app == nil || app.memory == nil {
 		return
@@ -248,7 +249,7 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), meetingArchiveFlushTimeout)
 	defer cancel()
-	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), decisionLedgerAgent(), meetingBoardAgent(), missionIntelligenceAgent()} {
+	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), decisionLedgerAgent(), meetingBoardAgent(), missionIntelligenceAgent(), narrativeMaintainerAgent()} {
 		// honor both disable forms (interval=0/off/false/disabled and the
 		// _DISABLED env): a turned-off agent must not run at archive time.
 		if boolEnv(agent.disabledEnv) || agent.interval() <= 0 {

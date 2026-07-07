@@ -56,7 +56,25 @@ const (
 	// transcript cursor and, for an expiry deletion, the deleted id + reason so
 	// the FACT of a hard delete survives even though the content does not.
 	meetingMemoryKindSlopPass = "slop_pass"
-	defaultMeetingMemoryPath  = "data/meeting-memory.jsonl"
+	// meetingMemoryKindRunLog is one compact line per terminal agent run
+	// (complete or error): who requested what, how it ended, and which artifact
+	// holds the deliverable — never the deliverable body itself. Deliberately
+	// NOT a UI-state kind (the decision precedent): run history is knowledge
+	// ("did we already research Samsung?"), so store.search must surface it.
+	// Excluded from the client memory timeline via visibleMeetingMemoryEntries
+	// (runs render as thread cards and completion notifications already).
+	meetingMemoryKindRunLog = "run_log"
+	// meetingMemoryKindNarrative is one living storyline dossier — an
+	// opportunity, client, or project narrative the narrative maintainer
+	// (narrative_maintainer.go) keeps current. Deliberately NOT a UI-state
+	// kind: "fill me in on the history of the Samsung opportunity" must ground
+	// on these bodies through store.search. Exactly ONE active entry exists
+	// per storyline slug — an update appends the new version and expires the
+	// predecessor via the relevance lifecycle, so recall only ever sees the
+	// latest. Excluded from the client memory timeline (the intel surface
+	// renders storylines from the mission snapshot instead).
+	meetingMemoryKindNarrative = "narrative"
+	defaultMeetingMemoryPath   = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -533,6 +551,14 @@ func (store *meetingMemoryStore) appendVenturePackage(id string, text string, me
 
 func (store *meetingMemoryStore) appendSlopPass(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindSlopPass, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendRunLog(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindRunLog, id, text, metadata)
+}
+
+func (store *meetingMemoryStore) appendNarrative(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindNarrative, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
@@ -1224,7 +1250,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindNarrative {
 		return normalizeMemoryText(value)
 	}
 

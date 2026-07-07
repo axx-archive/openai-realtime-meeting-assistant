@@ -509,6 +509,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startMeetingBrainWorker(apiKey)
 	app.startMeetingBoardWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
+	app.startNarrativeMaintainerWorker(apiKey)
 	app.startDecisionLedgerWorker(apiKey)
 	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
 	// proposals and any auto_run-lane standing-approved work. Model-free, so it
@@ -1047,7 +1048,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
 		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
 		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud.",
 		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
@@ -2368,6 +2369,25 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "organize_files",
+			"description": "File uploaded files and finished deliverables into a named folder on the Files surface. Fuzzy-matches each given name fragment against the visible file list (case-insensitive substring) and creates the folder first when it does not exist yet. Use for requests like put the Samsung reports in a Samsung folder.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"folderName": map[string]any{"type": "string", "description": "Folder to file the matches under; created when missing unless createIfMissing is false."},
+					"fileNames": map[string]any{
+						"type":        "array",
+						"description": "Display-name fragments to match, one per file or group (\"samsung\" matches \"Samsung TV Plus teardown\").",
+						"items":       map[string]any{"type": "string"},
+					},
+					"createIfMissing": map[string]any{"type": "boolean", "description": "Create the folder when it does not exist yet. Default true."},
+				},
+				"required":             []string{"folderName"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "do_nothing",
 			"description": "Use this when the user is not asking to operate on the Kanban board, is only wrapping up, or says a handoff phrase like That's it from me.",
 			"parameters": map[string]any{
@@ -2605,9 +2625,10 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "end_grill_session":
-		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s)
-		// and end_grill_session files a report thread; run them off the
+	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "end_grill_session", "organize_files":
+		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s),
+		// end_grill_session files a report thread, and organize_files walks
+		// the whole file list plus the folder side-store; run them off the
 		// datachannel event loop like the other slow tools.
 		return true
 	case "company_financial_snapshot", "financial_comps", "fiscal_api_docs", "fiscal_data_query":
@@ -2806,6 +2827,12 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
 		return app.answerMemoryQuestion(args)
+	case "organize_files":
+		// Shared dispatch (room voice + workers) has no single requester: an
+		// empty viewer scopes the file list to team-visible rows only (direct
+		// uploads + public channels); the private voice path passes the real
+		// requester in applyPrivateRealtimeVoiceTool.
+		return app.organizeFilesTool(args, "")
 	case "portfolio_health":
 		// Read-only aggregation over the venture packages; no requester needed,
 		// so the shared dispatch serves both the room and private voice paths.
@@ -3010,6 +3037,9 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"company_financial_snapshot", "financial_comps",
 		// New Realtime-2 parity tools (Wave 6).
 		"read_thread_aloud", "start_chat_as_user", "initiate_goal",
+		// Files organization — requester-scoped, so the private voice sees the
+		// same rows GET /assistant/files serves them.
+		"organize_files",
 		// Private grill (Wave 12) — client-driven session.update swap, private
 		// only. The room grill (start_grill_session/end_grill_session) swaps the
 		// SHARED room persona server-side and stays room-only above; this variant
@@ -3073,6 +3103,11 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	// (private threads and notifications are theirs); the session speaks it.
 	if toolName == "read_thread_aloud" {
 		return app.readThreadAloud(args, requesterEmail)
+	}
+	// organize_files resolves the requester's own file list (their private
+	// thread attachments included) before matching names into a folder.
+	if toolName == "organize_files" {
+		return app.organizeFilesTool(args, requesterEmail)
 	}
 	// start_chat_as_user posts on the user's behalf with a mandatory,
 	// server-stamped disclosure — the requester identity, never a model arg.
@@ -3733,8 +3768,11 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// mission_insight JSON is UI state served via /assistant/mission;
 		// decisions render in the intel canvas ledger (and decision_pass is
 		// pure cursor bookkeeping); package records render in the intel
-		// canvas binder — none of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile {
+		// canvas binder; narrative dossiers render as storylines on the intel
+		// surface and run_log lines as thread cards/notifications — searchable
+		// knowledge (the decision precedent), but none of them are timeline
+		// entries.
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog {
 			continue
 		}
 		visible = append(visible, entry)
@@ -3802,6 +3840,115 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		"answer":  answer,
 		"matches": len(matches),
 		"context": len(contextEntries),
+	}, false, nil
+}
+
+// organizeFilesTool files visible Files-surface rows into a named folder —
+// the Scout seam over the file_folders.go store, the same laws as the HTTP
+// doors. requesterEmail scopes row visibility exactly like GET
+// /assistant/files (an empty requester — the shared room dispatch — sees
+// team-visible rows only). Matching is fuzzy: case-insensitive substring per
+// supplied name fragment; the folder is created on demand unless
+// createIfMissing is explicitly false.
+func (app *kanbanBoardApp) organizeFilesTool(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+	folderName := strings.Join(strings.Fields(asString(args["folderName"])), " ")
+	if folderName == "" {
+		return nil, false, fmt.Errorf("folderName is required")
+	}
+	if app == nil || app.memory == nil {
+		return nil, false, fmt.Errorf("files are unavailable")
+	}
+	createIfMissing := true
+	if raw, ok := args["createIfMissing"].(bool); ok {
+		createIfMissing = raw
+	}
+
+	var folder fileFolderRecord
+	found := false
+	for _, candidate := range listFileFolders() {
+		if strings.EqualFold(candidate.Name, folderName) {
+			folder = candidate
+			found = true
+			break
+		}
+	}
+	created := false
+	if !found {
+		if !createIfMissing {
+			return map[string]any{
+				"ok":     false,
+				"reason": fmt.Sprintf("folder %q does not exist and createIfMissing is false", folderName),
+			}, false, nil
+		}
+		actor := firstNonEmptyString(participantNameForEmail(requesterEmail), scoutParticipantName)
+		newFolder, err := createFileFolder(folderName, actor)
+		if err != nil {
+			return nil, false, fmt.Errorf("create folder %q: %w", folderName, err)
+		}
+		folder = newFolder
+		created = true
+	}
+
+	rows := app.assistantFilesForUser(requesterEmail)
+	requested := asStringSlice(args["fileNames"])
+	moved := make([]string, 0, len(requested))
+	unmatched := make([]string, 0)
+	filed := map[string]struct{}{}
+	for _, fragment := range requested {
+		fragment = strings.TrimSpace(fragment)
+		if fragment == "" {
+			continue
+		}
+		lowered := strings.ToLower(fragment)
+		matchedAny := false
+		for _, row := range rows {
+			if !strings.Contains(strings.ToLower(row.Name), lowered) {
+				continue
+			}
+			matchedAny = true
+			// overlapping fragments ("samsung", "samsung deck") file a row once.
+			if _, dup := filed[row.ID]; dup {
+				continue
+			}
+			if err := moveFileToFolder(row.ID, folder.ID); err != nil {
+				log.Errorf("organize_files failed to move %s into %s: %v", row.ID, folder.ID, err)
+				continue
+			}
+			filed[row.ID] = struct{}{}
+			moved = append(moved, row.Name)
+		}
+		if !matchedAny {
+			unmatched = append(unmatched, fragment)
+		}
+	}
+
+	summaryParts := make([]string, 0, 3)
+	if created {
+		summaryParts = append(summaryParts, fmt.Sprintf("Created folder %q.", folder.Name))
+	}
+	if len(moved) > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("Filed %d file%s into %q: %s.", len(moved), pluralSuffix(len(moved)), folder.Name, strings.Join(moved, ", ")))
+	} else {
+		summaryParts = append(summaryParts, fmt.Sprintf("No files were moved into %q.", folder.Name))
+	}
+	if len(unmatched) > 0 {
+		summaryParts = append(summaryParts, "No match for: "+strings.Join(unmatched, ", ")+".")
+	}
+	summary := strings.Join(summaryParts, " ")
+
+	if created || len(moved) > 0 {
+		// The Files surface refresh event the folder HTTP doors fan out.
+		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
+	}
+
+	return map[string]any{
+		"ok":        true,
+		"folder":    folder.Name,
+		"folderId":  folder.ID,
+		"created":   created,
+		"moved":     moved,
+		"unmatched": unmatched,
+		"summary":   summary,
 	}, false, nil
 }
 

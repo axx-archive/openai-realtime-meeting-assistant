@@ -489,6 +489,7 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 			"themes":          nil,
 			"themesAvailable": false,
 			"decisions":       []map[string]any{},
+			"narratives":      []map[string]any{},
 			"degraded":        degraded,
 		}
 	}
@@ -545,7 +546,12 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		"themes":          themes,
 		"themesAvailable": themes != nil,
 		"decisions":       app.decisionLedgerSnapshot(decisionSnapshotLimit),
-		"degraded":        degraded,
+		// Active storyline dossiers (narrative_maintainer.go), newest first —
+		// identity + one-line summary only, the same no-artifact-text law as
+		// the rest of this all-users payload. Additive: absent narratives read
+		// back as an empty list.
+		"narratives": app.narrativeSnapshotRows(narrativeStorylineContextLimit),
+		"degraded":   degraded,
 	}
 }
 

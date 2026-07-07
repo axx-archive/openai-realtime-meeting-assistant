@@ -129,6 +129,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		// fiscal_api_docs / fiscal_data_query stay orchestrator-only (too heavy).
 		"company_financial_snapshot": true,
 		"financial_comps":            true,
+		// Files organization is requester-scoped (organize_files resolves the
+		// caller's own file view), so private dashboard voice carries it.
+		"organize_files": true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
