@@ -264,6 +264,11 @@ const (
 
 	scoutRouterProposalKindToolRun    = "tool_run"
 	scoutRouterProposalKindWorkstream = "workstream"
+	// scoutRouterProposalKindImage is the single-shot concept-render proposal
+	// (card 096): a direct gpt-image-2 call, NOT a contract-gated goal run, so
+	// its confirm generates one image and files a design artifact rather than
+	// launching the pipeline.
+	scoutRouterProposalKindImage = "image"
 
 	// scoutChatMessageKindProposal marks a persisted proposal card among the
 	// existing "message"/"thread" message kinds.
@@ -276,10 +281,18 @@ const (
 	// card. NEVER a launch.
 	scoutChatMessageKindChoices = "choices"
 
+	// scoutChatMessageKindImage marks a persisted concept-render message (card
+	// 096): the picture rides as DATA (scoutChatImageRef) that renders inline
+	// via the session-gated /artifacts/blob route, beside its filed artifact.
+	scoutChatMessageKindImage = "image"
+
 	// Weight labels — the card's honest cost line (§2: the card is also the
 	// cost gate while concurrency limits are global).
 	scoutProposalWeightGoalLoop  = "multi-agent goal loop, ~5-15 min"
 	scoutProposalWeightQuickPass = "quick single pass"
+	// scoutProposalWeightImageRender is the concept-render card's cost line: one
+	// gpt-image-2 call, back in under a minute.
+	scoutProposalWeightImageRender = "one concept render, under a minute"
 
 	// Router signal events (§2 misfire economics: measure proposal-acceptance
 	// from day one; below ~50%, tighten the trigger). Defined here beside the
@@ -361,7 +374,7 @@ type scoutRouterVerdict struct {
 // deliberate and load-bearing: an agent that under-routes is trusted; one that
 // over-launches is muted.
 func scoutRouterSystemPrompt() string {
-	return strings.Join([]string{
+	lines := []string{
 		"You are the routing brain for Scout's typed chat at Bonfire, a packaging studio.",
 		"Classify the newest message into exactly one of three tiers.",
 		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, and discussion are ALWAYS Tier 0 — 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
@@ -376,10 +389,21 @@ func scoutRouterSystemPrompt() string {
 		"- package_assembly is ONLY 'compile the artifacts we already made into the send-ready binder'; any end-to-end / full-run / from-scratch language is packaging_studio, even when the thread was already discussing an existing package; genuinely torn between the two -> offer_choices ('compile what we have' [package_assembly] / 'the full staged run' [packaging_studio]).",
 		"- economics / business model / unit economics / projections / 'does the deal work' -> propose_tool_run economics_waterfall.",
 		"- ground truth / market digging -> deep_research; what-it-sold-for / pricing -> comps_precedent; landscape / whitespace -> market_map; hostile-room prep ('grill it', 'pressure test it') -> grill_pressure_test; who to attach -> talent_match.",
+	}
+	// The single-image door only appears when generation is actually configured
+	// (a keyless-OpenAI deploy must never be told to propose a render it cannot
+	// produce). The matching propose_image tool is gated the same way.
+	if openAIImageGenerationAvailable() {
+		lines = append(lines,
+			"- make / generate / draw / create an image, picture, poster, logo, or illustration of X -> propose_image with a prompt describing X; this is one direct render, not a research run.",
+		)
+	}
+	lines = append(lines,
 		"When the user corrects a prior proposal or answer by naming a different tool or process ('no, the full Packaging Studio staged run'), the correction IS the work ask — propose that named id confidently; a correction is never Tier 0, re-route it.",
 		"A proposal or a question card is only ever a suggestion the user must act on; you can never launch anything. Propose at most one thing.",
 		"When in doubt, answer inline. An agent that under-routes is trusted; one that over-launches is muted.",
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
 }
 
 // scoutRouterTools builds the routing function schemas with names, promises,
@@ -409,7 +433,7 @@ func scoutRouterTools() []anthropicTool {
 			lines = append(lines, fmt.Sprintf("%s (%s): %s", tool.ID, group.Label, tool.Promise))
 		}
 	}
-	return []anthropicTool{
+	tools := []anthropicTool{
 		{
 			Name:        "propose_tool_run",
 			Description: "Propose ONE registry tool run — a contract-gated multi-agent goal pipeline — for the user to confirm. Nothing launches without their tap. Tools:\n" + strings.Join(lines, "\n"),
@@ -462,6 +486,25 @@ func scoutRouterTools() []anthropicTool {
 			},
 		},
 	}
+	// The concept-render door (card 096): a single gpt-image-2 call, offered
+	// only when OpenAI image generation is configured so a keyless-OpenAI deploy
+	// never proposes a render it cannot produce. Appended LAST so the three
+	// text-route tools keep their pinned enum positions.
+	if openAIImageGenerationAvailable() {
+		tools = append(tools, anthropicTool{
+			Name:        "propose_image",
+			Description: "Propose generating ONE image — a concept render — for the user to confirm. Use when the user asks to make / generate / draw / create a picture, image, poster, logo, or illustration. This is a single direct render, not a contract-gated run; nothing generates without the user's tap.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"prompt": map[string]any{"type": "string", "description": "the image prompt: what to depict, in vivid concrete terms and the user's own subject"},
+					"title":  map[string]any{"type": "string", "description": "a short title for the filed artifact; optional"},
+				},
+				"required": []string{"prompt"},
+			},
+		})
+	}
+	return tools
 }
 
 // scoutRouterInput folds the recent conversation plus the new message into the
@@ -499,6 +542,24 @@ var scoutRouterFullRunPhrases = []string{
 	"0 to 100",
 	"zero to 100",
 	"packaging studio",
+}
+
+// scoutRouterImagePhrases is the reviewed, capped phrase list the deterministic
+// pre-router guard matches to the single-shot concept render (card 096 — the
+// fix for AJ's "image request failed" complaint: the literal ask can never be
+// dragged off-route by the Haiku turn). Capped and code-reviewed like the
+// full-run list: only unambiguous "make a picture/image" imperatives, and a
+// match may only ever PROPOSE the concept-render card, never generate.
+var scoutRouterImagePhrases = []string{
+	"make an image",
+	"make me an image",
+	"generate an image",
+	"create an image",
+	"draw an image",
+	"make a picture",
+	"make me a picture",
+	"generate a picture",
+	"create a picture",
 }
 
 // scoutGuardEligibleMessage returns true when a message is work-shaped enough
@@ -565,6 +626,19 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 		return nil
 	}
 	lower := strings.ToLower(text)
+	// Image asks route to the single-shot concept render BEFORE the model turn,
+	// but only when generation is actually configured (a keyless-OpenAI deploy
+	// can never generate, so it must never offer the card). Propose-only — the
+	// card's Run stays the only door.
+	if openAIImageGenerationAvailable() {
+		for _, phrase := range scoutRouterImagePhrases {
+			if strings.Contains(lower, phrase) {
+				if proposal := scoutRouterImageProposal(text, text); proposal != nil {
+					return &scoutRouterVerdict{proposal: proposal}
+				}
+			}
+		}
+	}
 	// Full-run phrases are checked FIRST so end-to-end language always wins the
 	// flagship, even mid-thread about an existing package (the sim miss:
 	// package_assembly stole the verdict).
@@ -811,8 +885,50 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			WeightLabel: scoutProposalWeightQuickPass,
 			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + objective,
 		}
+	case "propose_image":
+		args := struct {
+			Prompt string `json:"prompt"`
+			Title  string `json:"title"`
+		}{}
+		if err := json.Unmarshal(block.Input, &args); err != nil {
+			log.Errorf("Scout router propose_image input undecodable: %v", err)
+			return nil
+		}
+		return scoutRouterImageProposal(firstNonBlank(strings.TrimSpace(args.Prompt), strings.TrimSpace(query)), query)
 	}
 	return nil
+}
+
+// scoutRouterImageProposal builds the single-shot concept-render proposal card
+// (card 096): the editable prompt is the objective, the originating ask stays
+// the Tier-0 escape query, and the authority is a plain workspace write (a
+// generated image files to the design library, nothing external). Shared by the
+// deterministic guard and the propose_image validation so both arm the same
+// card the confirm resolves.
+func scoutRouterImageProposal(prompt string, query string) *scoutRouterProposal {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		prompt = strings.TrimSpace(query)
+	}
+	if prompt == "" {
+		return nil
+	}
+	return &scoutRouterProposal{
+		Kind:        scoutRouterProposalKindImage,
+		Objective:   prompt,
+		Query:       strings.TrimSpace(query),
+		Authority:   toolAuthorityWorkspaceWrite,
+		WeightLabel: scoutProposalWeightImageRender,
+		Summary:     scoutRouterImageSummary(prompt),
+	}
+}
+
+// scoutRouterImageSummary is the concept-render card's one legible sentence:
+// what runs (one gpt-image-2 render), where it lands (the design library), and
+// the honest cost gate (a single explicit tap).
+func scoutRouterImageSummary(prompt string) string {
+	prompt = strings.TrimRight(strings.TrimSpace(prompt), ".")
+	return "this generates one concept render — " + prompt + ". a single image on the OpenAI images API; nothing else runs, and it files to the design library when it lands."
 }
 
 // scoutRouterToolRunSummary is the card's one legible sentence: what runs,

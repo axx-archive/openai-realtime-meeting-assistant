@@ -7782,6 +7782,58 @@
         opacity: 0.72;
       }
 
+      /* ---------- Concept render (card 096) ----------
+         A generated image lands as a scout bubble + this figure: the picture on
+         the feed measure with a hairline frame and the run-rail radius, and a
+         quiet "open artifact ▸" action beneath it. */
+      .scout-chat-image {
+        align-self: flex-start;
+        margin: 2px 0 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-width: min(420px, 100%);
+      }
+
+      .scout-chat-image__img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg, 12px);
+        background: var(--surface-2);
+      }
+
+      .scout-chat-image__open {
+        align-self: flex-start;
+        padding: 4px 12px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+      }
+
+      .scout-chat-image__open:hover {
+        border-color: var(--text-3);
+        color: var(--text-1);
+      }
+
+      /* Inline image assets on a filed artifact (concept renders, imagery
+         boards) — the picture above its download link, same measure + frame. */
+      .artifact-asset__image {
+        display: block;
+        width: 100%;
+        max-width: 520px;
+        height: auto;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md, 10px);
+        background: var(--surface-2);
+      }
+
       /* ---------- Quick-reply pills (conversational intent layer) ----------
          The dialogue design's quick-reply grammar: Scout's ONE clarifying
          question renders as a normal scout bubble with 2-4 pills beneath —
@@ -24848,8 +24900,9 @@
       }
 
       /* pdf assets get the browser-native viewer (<object type="application/pdf">,
-         spec §4 viewer item 2 — no PDF.js) plus a download link; every other
-         kind is download-only. DOM-built, never innerHTML. */
+         spec §4 viewer item 2 — no PDF.js); image assets (card 096 concept
+         renders, imagery boards) render inline above their download link; every
+         other kind is download-only. DOM-built, never innerHTML. */
       function renderArtifactAssets(container, entry) {
         const assets = artifactAssetEntries(entry)
         if (!assets.length) return
@@ -24858,6 +24911,7 @@
         for (const asset of assets) {
           const row = bfEl('div', 'artifact-asset')
           const isPdf = String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf'
+          const isImage = String(asset.kind || '').toLowerCase() === 'image' || String(asset.mime || '').toLowerCase().startsWith('image/')
           if (isPdf) {
             const viewer = document.createElement('object')
             viewer.type = 'application/pdf'
@@ -24865,6 +24919,13 @@
             viewer.className = 'artifact-asset__pdf'
             viewer.appendChild(bfEl('p', 'artifact-asset__fallback', 'PDF preview unavailable in this browser — use the download link below.'))
             row.appendChild(viewer)
+          } else if (isImage) {
+            const img = document.createElement('img')
+            img.className = 'artifact-asset__image'
+            img.loading = 'lazy'
+            img.alt = String(asset.name || 'image asset')
+            img.src = artifactBlobUrl(asset)
+            row.appendChild(img)
           }
           const link = document.createElement('a')
           link.className = 'artifact-asset__download'
@@ -33504,7 +33565,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const role = String(message?.role || '').toLowerCase()
 	          const recordKind = String(message?.kind || '')
 	          const isScoutReply = role === 'scout' || role === 'error' ||
-	            ['proposal', 'choices', 'manifest', 'thread', 'artifact'].includes(recordKind)
+	            ['proposal', 'choices', 'manifest', 'thread', 'artifact', 'image'].includes(recordKind)
 	          if (isScoutReply && !scoutChatThinking.hidden) {
 	            withScoutChatThinkingHold(() => {
 	              hideScoutChatThinking()
@@ -37257,6 +37318,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          feedPrevMsgKey = ''
 	          return scoutManifestCardNode(message)
 	        }
+	        if (recordKind === 'image' && message.image) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
+	          return scoutChatImageNode(message)
+	        }
 	        if (recordKind === 'thread' && message.thread) {
 	          feedPrevMsgKey = ''
 	          const run = scoutThreadFromChatMessage(message)
@@ -37521,9 +37587,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	        const head = bfEl('div', 'scout-proposal-card__head')
 	        const isWorkstream = String(proposal.kind || '') === 'workstream'
+	        // card 096: an image proposal is a single concept render, not a
+	        // contract-gated tool run — it keeps the editable objective, skips the
+	        // package field, and its Run confirms WITHOUT runGoalPipeline (the
+	        // workstream path; the server generates the picture async).
+	        const isImage = String(proposal.kind || '') === 'image'
 	        const toolName = isWorkstream
 	          ? `${assistantToolLabelText(proposal.mode)} workstream`
-	          : String(proposal.toolName || proposal.toolId || 'tool run')
+	          : isImage
+	            ? 'Concept render'
+	            : String(proposal.toolName || proposal.toolId || 'tool run')
 	        head.appendChild(bfEl('span', 'scout-proposal-card__tool', toolName))
 	        if (proposal.groupLabel) {
 	          head.appendChild(bfEl('span', 'scout-proposal-card__group', String(proposal.groupLabel)))
@@ -37536,8 +37609,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // editable pre-filled inputs — the palette form-card pattern reused:
 	        // form tools render their registry fields, conversational/workstream
 	        // proposals render one editable objective.
-	        const tool = !isWorkstream ? paletteToolById(proposal.toolId) : null
-	        if (!isWorkstream && !tool) loadAssistantTools() // best-effort: the next render gets the registry fields
+	        const tool = (!isWorkstream && !isImage) ? paletteToolById(proposal.toolId) : null
+	        if (!isWorkstream && !isImage && !tool) loadAssistantTools() // best-effort: the next render gets the registry fields
 	        const fieldEls = {}
 	        let objectiveInput = null
 	        if (tool && (tool.formFields || []).length) {
@@ -37568,9 +37641,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          card.appendChild(wrap)
 	        }
 
-	        // target package — tool runs only (workstreams are single passes)
+	        // target package — tool runs only (workstreams and single-shot image
+	        // renders are single passes with no package binder)
 	        let pkgField = null
-	        if (!isWorkstream) {
+	        if (!isWorkstream && !isImage) {
 	          pkgField = paletteBuildPackageField()
 	          if (proposal.packageId) populatePalettePackageOptions(pkgField.select, String(proposal.packageId))
 	          card.appendChild(pkgField.wrap)
@@ -37593,7 +37667,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const run = bfEl('button', 'scout-proposal-card__run', 'Run ▸')
 	        run.type = 'button'
 	        run.addEventListener('click', () => {
-	          if (isWorkstream) {
+	          if (isWorkstream || isImage) {
+	            // both confirm via the proposal route with the edited objective
+	            // and NEVER runGoalPipeline — the server does the single pass
+	            // (workstream launch, or the async concept render for card 096)
 	            const query = String(objectiveInput?.value || proposal.objective || '').trim()
 	            if (!query) { objectiveInput?.focus(); return }
 	            markProposalCardResolved(card, 'accepted')
@@ -37636,6 +37713,41 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        actions.append(run, escape)
 	        card.appendChild(actions)
 	        return card
+	      }
+
+	      // ---- the concept render (card 096) ----
+	      // A Kind="image" message is a generated picture Scout filed after an
+	      // image confirm: a scout caption bubble, the picture itself (served
+	      // inline by the session-gated /artifacts/blob route), and an action
+	      // that opens the filed design artifact. The ref is validated with the
+	      // same 64-hex pattern artifactAssetEntries uses — a malformed ref
+	      // renders the caption alone, never a broken <img>.
+	      function scoutChatImageNode(message) {
+	        const image = message.image || {}
+	        const group = document.createDocumentFragment()
+	        const caption = String(message.text || '').trim() || 'concept render'
+	        group.appendChild(scoutChatMessageNode('scout', scoutVoice(caption), message.createdAt || new Date().toISOString()))
+	        const ref = String(image.ref || '')
+	        if (!/^[0-9a-f]{64}$/.test(ref)) {
+	          return group
+	        }
+	        const figure = document.createElement('figure')
+	        figure.className = 'scout-chat-image'
+	        const img = document.createElement('img')
+	        img.className = 'scout-chat-image__img'
+	        img.loading = 'lazy'
+	        img.alt = String(image.prompt || 'concept render')
+	        img.src = artifactBlobUrl({ ref, name: image.name })
+	        figure.appendChild(img)
+	        const artifactId = String(image.artifactId || '')
+	        if (artifactId) {
+	          const open = bfEl('button', 'scout-chat-image__open', 'open artifact ▸')
+	          open.type = 'button'
+	          open.addEventListener('click', () => openArtifactStage(artifactId, String(image.prompt || 'Concept render')))
+	          figure.appendChild(open)
+	        }
+	        group.appendChild(figure)
+	        return group
 	      }
 
 	      // ---- quick-reply pills (conversational intent layer) ----

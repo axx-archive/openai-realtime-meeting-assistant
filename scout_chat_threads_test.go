@@ -754,6 +754,10 @@ func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
 func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	// card 096: with OpenAI configured the router also offers propose_image, so
+	// the enum pin below expects the fourth tool. The keyless-OpenAI absence is
+	// pinned by TestScoutChatRouterImageToolGatedOnOpenAIKey.
+	t.Setenv("OPENAI_API_KEY", "test-image-key")
 	t.Setenv("BONFIRE_ROUTER_MODEL", "")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -823,8 +827,8 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	if !strings.Contains(routed.System, "under-routes is trusted") || !strings.Contains(routed.System, "over-launches is muted") {
 		t.Fatalf("router system prompt missing the trust asymmetry: %s", routed.System)
 	}
-	if len(routed.Tools) != 3 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" || routed.Tools[2].Name != "offer_choices" {
-		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream + offer_choices", routed.Tools)
+	if len(routed.Tools) != 4 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" || routed.Tools[2].Name != "offer_choices" || routed.Tools[3].Name != "propose_image" {
+		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream + offer_choices + propose_image", routed.Tools)
 	}
 	for _, tool := range packagingTools() {
 		if !strings.Contains(routed.Tools[0].Description, tool.ID) {

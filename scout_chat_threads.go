@@ -111,6 +111,11 @@ type scoutChatMessageRecord struct {
 	// posts (goal_manifest.go). Same law again: persisted DATA the client
 	// renders, so reloads show the same card.
 	Manifest *scoutChatManifest `json:"manifest,omitempty"`
+	// Image carries a generated concept render (Kind "image", card 096): the
+	// content-addressed blob ref plus its filed artifact id, so the picture
+	// renders inline via the session-gated /artifacts/blob route on every
+	// reload. Persisted DATA, the Proposal/Choices/Manifest pattern.
+	Image *scoutChatImageRef `json:"image,omitempty"`
 }
 
 type scoutChatThreadRecord struct {
@@ -876,6 +881,30 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			response["agentThread"] = agentThread
 			response["artifact"] = agentThread.Artifact
 			response["actions"] = agentThread.Actions
+		}
+		// Concept render (card 096): the confirm is the explicit generate. The
+		// image call runs 30-90s, so NEVER inside this HTTP request — commit an
+		// activity line now and hand off to the async runner; the finished
+		// picture lands as a Kind=image message over the owner's live socket
+		// (or the 12s chat poll), and a failure lands as a friendly error bubble.
+		if strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindImage) {
+			if objective == "" {
+				return nil, fmt.Errorf("image prompt is required")
+			}
+			statusMessage := scoutChatMessageRecord{
+				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:      "message",
+				Role:      "scout",
+				Text:      "concept render started — it lands here when it's finished",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, statusMessage)
+			if err != nil {
+				return nil, err
+			}
+			startScoutChatImageAsync(app, threadID, user.Email, objective, user.Name)
+			response["answer"] = statusMessage
+			response["thread"] = saved
 		}
 		return response, nil
 	}
