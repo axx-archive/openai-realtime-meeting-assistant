@@ -119,15 +119,22 @@ type scoutChatMessageRecord struct {
 }
 
 type scoutChatThreadRecord struct {
-	ID         string                   `json:"id"`
-	Title      string                   `json:"title"`
-	Preview    string                   `json:"preview"`
-	OwnerEmail string                   `json:"ownerEmail"`
-	CreatedBy  string                   `json:"createdBy,omitempty"`
-	Visibility string                   `json:"visibility,omitempty"`
-	CreatedAt  string                   `json:"createdAt"`
-	UpdatedAt  string                   `json:"updatedAt"`
-	ArchivedAt string                   `json:"archivedAt,omitempty"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Preview    string `json:"preview"`
+	OwnerEmail string `json:"ownerEmail"`
+	CreatedBy  string `json:"createdBy,omitempty"`
+	Visibility string `json:"visibility,omitempty"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	ArchivedAt string `json:"archivedAt,omitempty"`
+	// Intake + IntakeStep drive the guided "Feed the brain" flow (card 082):
+	// Intake=="brain" routes every message through the deterministic intake
+	// handler instead of the propose-confirm router, and IntakeStep is the
+	// 0-based cursor into brainIntakeSteps. Both are omitempty so every
+	// pre-082 thread on disk round-trips unchanged (absent == not an intake).
+	Intake     string                   `json:"intake,omitempty"`
+	IntakeStep int                      `json:"intakeStep,omitempty"`
 	Messages   []scoutChatMessageRecord `json:"messages,omitempty"`
 }
 
@@ -161,11 +168,22 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		payload := struct {
 			Title      string `json:"title"`
 			Visibility string `json:"visibility"`
+			Intake     string `json:"intake"`
 		}{}
 		if r.Body != nil {
 			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload)
 		}
-		thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title, payload.Visibility)
+		// A brain-intake create seeds the guided "Feed the brain" thread (card
+		// 082) — always private, welcome + privacy disclosure + step 1 seeded —
+		// rather than an empty thread. Any other intake value falls through to a
+		// normal create, so an unknown value can never silently arm the flow.
+		var thread scoutChatThreadRecord
+		var err error
+		if strings.EqualFold(strings.TrimSpace(payload.Intake), brainIntakeKind) {
+			thread, err = kanbanApp.startBrainIntakeThread(user)
+		} else {
+			thread, err = kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title, payload.Visibility)
+		}
 		if err != nil {
 			writeAuthError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -426,6 +444,16 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	response := map[string]any{
 		"ok":      true,
 		"message": userMessage,
+	}
+
+	// Guided "Feed the brain" intake (card 082): a deterministic, scripted
+	// interview runs entirely off brainIntakeSteps — no router, no proposal
+	// cards, no keyword launches, no model call for the turn. File the
+	// contribution as raw brain material, advance the script, reply with the
+	// next prompt. This branch owns the whole turn, so it precedes the
+	// follow-up / tool-template / router paths below.
+	if thread.Intake == brainIntakeKind {
+		return app.handleBrainIntakeMessage(user, thread, userMessage, response)
 	}
 
 	// A follow-up reply re-runs an existing agent-thread artifact in place

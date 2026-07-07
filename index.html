@@ -7703,6 +7703,25 @@
       .scout-starter:active { transform: scale(var(--press-scale)); }
       .scout-starter--all { color: var(--text-3); }
 
+      /* card 082: the "Feed the brain" door under the private empty state */
+      .scout-chat-brain-chip {
+        display: block;
+        margin: 14px auto 0;
+        padding: 8px 16px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+      }
+      .scout-chat-brain-chip:hover {
+        border-color: var(--accent);
+        color: var(--text-1);
+        background: var(--surface-3);
+      }
       /* The 4 composer pills were cut (spec §2 "cut them"): the propose-confirm
          router replaced their quick lane — a deliverable-shaped message earns a
          Tier 1/2 proposal card instead of a prefilled keyword launch. */
@@ -34017,7 +34036,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function scoutChatDefaultPlaceholder() {
 	        // composer copy, design verbatim (§7.2)
-	        return chatThreadIsChannel(selectedScoutChatThread())
+	        const thread = selectedScoutChatThread()
+	        // card 082: a Feed-the-brain thread coaches the composer — answer,
+	        // attach, or skip — so the guided flow reads as a guided flow
+	        if (String(thread?.intake || '').toLowerCase() === 'brain') {
+	          return 'answer, attach files, or say "skip"'
+	        }
+	        return chatThreadIsChannel(thread)
 	          ? 'message the thread — @scout to ask'
 	          : 'ask Scout, or tap + to run a task'
 	      }
@@ -37169,6 +37194,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        renderActiveScoutThread()
 	      }
 
+	      // card 082: open a seeded "Feed the brain" thread — the server returns
+	      // it welcome + privacy disclosure + step 1 already posted, so we just
+	      // land the user in the guided conversation
+	      async function startBrainIntake() {
+	        if (!authedUser) {
+	          appendScoutChatNode(scoutChatMessageNode('error', 'sign in to feed the brain', new Date().toISOString()))
+	          return
+	        }
+	        try {
+	          const result = await postAuthJSON('/assistant/chat-threads', { title: 'Feed the brain', intake: 'brain' })
+	          if (!result.ok) {
+	            throw new Error(result.data?.error || 'could not start the brain intake')
+	          }
+	          const thread = upsertScoutChatThread(result.data.thread)
+	          selectScoutChatThread(thread.id)
+	          setMobileChatView('convo')
+	          if (scoutChatInput && !scoutChatInput.disabled) {
+	            scoutChatInput.focus()
+	          }
+	        } catch (error) {
+	          appendScoutChatNode(scoutChatMessageNode('error', error.message || 'could not start the brain intake', new Date().toISOString()))
+	        }
+	      }
+
 	      async function startNewScoutThread() {
 	        hideScoutChatThinking()
 	        scoutOfficeChatTurns = []
@@ -37606,6 +37655,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? 'a shared workstream — talk it through, or @scout to pull the office in.'
 	            : 'ask Scout about any meeting — only you can see this'
 	          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
+	          // card 082: the deliberate door to the guided "Feed the brain"
+	          // intake, private threads only — a channel is the wrong audience
+	          if (!isChannel && authedUser) {
+	            const brain = document.createElement('button')
+	            brain.type = 'button'
+	            brain.className = 'scout-chat-brain-chip'
+	            brain.textContent = 'Feed the brain'
+	            brain.title = 'teach Scout your history, decks, and clients'
+	            brain.addEventListener('click', startBrainIntake)
+	            empty.insertAdjacentElement('afterend', brain)
+	          }
 	        }
 	        // Discovery: seed tappable run starters under the PRIVATE empty state so
 	        // a blank thread teaches what can be run. Idempotent; never on channels.
