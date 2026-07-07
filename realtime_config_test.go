@@ -125,6 +125,10 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"meeting_recap":       true,
 		"catch_me_up":         true,
 		"do_nothing":          true,
+		// fiscal.ai grounding: only the typed, spoken-ready pair rides voice;
+		// fiscal_api_docs / fiscal_data_query stay orchestrator-only (too heavy).
+		"company_financial_snapshot": true,
+		"financial_comps":            true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)

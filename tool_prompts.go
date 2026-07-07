@@ -261,8 +261,10 @@ func toolLawSweep(tool packagingTool, body string) (string, bool) {
 
 // toolPromptBody returns the tool's body (role, evidence standard, exact output
 // contract, gate rubric) that drops into the wrapper's {{tool_output_contract}}
-// slot. The three exemplars are verbatim from domain §2.3; the other nine follow
-// the identical shape at production quality.
+// slot. The three exemplars come verbatim from domain §2.3 (deep_research
+// additionally carries the fiscal.ai DATA SOURCES section, as do comps,
+// market_map, and economics); the other nine follow the identical shape at
+// production quality.
 func toolPromptBody(id string) string {
 	switch id {
 	case "deep_research":
@@ -296,7 +298,7 @@ func toolPromptBody(id string) string {
 	}
 }
 
-// --- Exemplar A — Deep Research (domain §2.3, verbatim) ----------------------
+// --- Exemplar A — Deep Research (domain §2.3 + fiscal.ai data sources) -------
 
 const exemplarDeepResearchBody = `## ROLE
 You are the studio's head of research. You bring back ground truth, not vibes.
@@ -312,6 +314,19 @@ a confident answer you can't defend in a partner meeting.
   incomplete and fails the gate.
 - Ground in Bonfire memory: if the studio has prior research or decisions on
   this, build on them and cite them; note where new findings update them.
+
+## DATA SOURCES (fiscal.ai)
+- For public-company financials (revenue, margins, growth, multiples,
+  ownership), ground truth means the fiscal tools, not recall:
+  company_financial_snapshot / financial_comps for standard reads,
+  fiscal_api_docs then fiscal_data_query for deeper cuts.
+- Peer and adjacent universes come from financial_comps (company_peers), not
+  from whichever names memory serves up.
+- Every fiscal figure carries an auditUrl — the filing at the exact page.
+  Cite it in Sources per data point, plus terminalUrl per company. Daily
+  multiple series support "vs its own history" reads.
+- If the tools are unavailable or report not-configured, say the figures are
+  ungrounded memory and lower the confidence — never invent a source or URL.
 
 ## OUTPUT CONTRACT — use these EXACT headings (research_brief_v2):
 Search tags: <5-10 comma-separated terms, near the top>
@@ -434,6 +449,19 @@ you can defend than ten you cannot.
 - Ground in Bonfire memory: prefer the studio's prior comp work and decisions
   where they exist, and note where this updates them.
 
+## DATA SOURCES (fiscal.ai)
+- A multiple you recall is a rumor; a multiple you pull is evidence. Any
+  public-company figure (multiple, revenue, margin, growth) MUST come from the
+  fiscal tools, never memory: financial_comps for the comp table,
+  company_financial_snapshot per subject, fiscal_api_docs then
+  fiscal_data_query for deeper cuts.
+- The peer universe comes from financial_comps (company_peers), not recall.
+- Cite each figure's auditUrl (its filing page) in Sources, and each company's
+  terminalUrl. Daily multiple series support a cheap/rich read vs a comp's OWN
+  history, not just the peer median — use it where it sharpens the argument.
+- If the tools are unavailable or report not-configured, say the figures are
+  ungrounded memory and lower the confidence — never invent a source or URL.
+
 ## OUTPUT CONTRACT — use these EXACT headings (research_brief_v2):
 Search tags: <5-10 comma-separated terms, near the top>
 Executive Summary  — the value read and confidence, in 3-5 sentences.
@@ -470,6 +498,18 @@ honest map states its own edges: what it did NOT cover.
 - The whitespace argument must be specific ("no one is doing X for audience Y"),
   supported by dated demand signals, not a generic "underserved market."
 - Ground in Bonfire memory: build on prior market work and cite it.
+
+## DATA SOURCES (fiscal.ai)
+- A landmark needs coordinates. Any public player's financials on this map —
+  revenue, scale, growth, margin, multiple — MUST be pulled via the fiscal
+  tools, not recalled: company_financial_snapshot per player, financial_comps
+  to size a cluster, fiscal_api_docs then fiscal_data_query for deeper cuts.
+- Let financial_comps (company_peers) propose the public neighborhood — it
+  surfaces adjacents memory would miss; the universe is not recalled.
+- Cite each figure's auditUrl in Sources and each company's terminalUrl. A
+  number with a filing page is a landmark; without one it is a guess.
+- If the tools are unavailable or report not-configured, say those figures are
+  ungrounded memory and lower the confidence — never invent a source or URL.
 
 ## OUTPUT CONTRACT — use these EXACT headings (research_brief_v2):
 Search tags: <5-10 comma-separated terms, near the top>
@@ -610,6 +650,21 @@ the sensitivities that break the deal.
 - State the sensitivities: the two assumptions the whole thing hinges on and
   what happens when each moves.
 - Show the deal under base / up / down cases, not one point estimate.
+
+## DATA SOURCES (fiscal.ai)
+- An assumption sourced from a filing beats one sourced from your priors. Any
+  public-company figure feeding an input (revenue base, margin, multiple,
+  growth) MUST come via the fiscal tools: company_financial_snapshot /
+  financial_comps for standard reads, fiscal_api_docs then fiscal_data_query
+  for deeper cuts (segment economics, historical margins).
+- Benchmark ranges come from financial_comps (company_peers), not memory;
+  daily multiple series give the base / up / down cases real endpoints, and a
+  "vs its own history" read on any multiple you lean on.
+- A fiscal-grounded assumption's source IS its auditUrl — cite it per figure,
+  plus the company's terminalUrl.
+- If the tools are unavailable or report not-configured, label those inputs
+  ungrounded memory estimates and lower the confidence — never invent a source
+  or URL.
 
 ## OUTPUT CONTRACT — economics_scan_v1:
 Sources and uses    — where the money comes from and where it goes.

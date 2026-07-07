@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
@@ -1165,7 +1166,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 			},
 		},
 		"instructions": app.sessionInstructions(),
-		"tools":        app.kanbanTools(),
+		"tools":        app.realtimeRoomVoiceTools(),
 		"tool_choice":  app.realtimeToolChoice(),
 	}
 
@@ -1176,6 +1177,30 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 	}
 
 	return session
+}
+
+// realtimeRoomVoiceExcluded lists tools kept OUT of the shared room voice
+// session. fiscal_api_docs and fiscal_data_query return payloads (typed docs,
+// raw sandbox output) too heavy for a spoken turn — they stay orchestrator-only
+// and match the private-voice exclusion (privateRealtimeVoiceToolAllowed).
+var realtimeRoomVoiceExcluded = map[string]bool{
+	"fiscal_api_docs":   true,
+	"fiscal_data_query": true,
+}
+
+// realtimeRoomVoiceTools is kanbanTools() minus the heavy-payload tools that
+// have no place in a voice turn. The full set still reaches the orchestrator
+// tool loop and Scout chat proposals.
+func (app *kanbanBoardApp) realtimeRoomVoiceTools() []map[string]any {
+	all := app.kanbanTools()
+	filtered := make([]map[string]any, 0, len(all))
+	for _, tool := range all {
+		if name, _ := tool["name"].(string); realtimeRoomVoiceExcluded[name] {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
 }
 
 func (app *kanbanBoardApp) realtimeToolChoice() string {
@@ -1986,6 +2011,68 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "company_financial_snapshot",
+			"description": "Grounded fundamentals for one public company: identity, latest annual revenue and net income with filing citation links, and valuation multiples. Read-only, fiscal.ai-backed; requires FISCAL_AI_API_KEY.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"company": map[string]any{"type": "string", "description": "Ticker, EXCHANGE_TICKER key such as NASDAQ_NFLX, or company name."},
+				},
+				"required":             []string{"company"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "financial_comps",
+			"description": "Peer comparables for one public company: the peer universe with the latest valuation multiples per peer, shaped for a markdown table. Read-only, fiscal.ai-backed; requires FISCAL_AI_API_KEY.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"company": map[string]any{"type": "string", "description": "Subject company: ticker, EXCHANGE_TICKER key, or name."},
+					"ratio_ids": map[string]any{
+						"type":        "array",
+						"description": "fiscal.ai ratio ids to compare, such as ratio_ev_to_ebitda; omit for the defaults.",
+						"items":       map[string]any{"type": "string"},
+					},
+					"peer_limit": map[string]any{"type": "integer", "description": "Maximum peers to include; omit for 6, capped at 12."},
+				},
+				"required":             []string{"company"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "fiscal_api_docs",
+			"description": "Typed fiscal.ai API docs for planning a custom fiscal_data_query. Read-only, fiscal.ai-backed; requires FISCAL_AI_API_KEY.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"topic": map[string]any{
+						"type":        "string",
+						"description": "index (the default) is the compact function list; full is the complete typed docs.",
+						"enum":        []string{"index", "full"},
+					},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "fiscal_data_query",
+			"description": "Run custom JS against the fiscal.ai sandbox for financial data the typed tools do not cover. Read-only, fiscal.ai-backed; requires FISCAL_AI_API_KEY.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"code":      map[string]any{"type": "string", "description": "An async arrow function `async () => {...}` calling codemode.<fn>({...}) and emitting results via console.log (the only return channel). Check fiscal_api_docs first."},
+					"max_chars": map[string]any{"type": "integer", "description": "Truncate the returned text to this many characters; default 20000."},
+				},
+				"required":             []string{"code"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "propose_codex_task",
 			"description": "Propose a Codex agent task as a confirmable proposal card. Use when the user asks to have someone or an agent research, design, grill, plan, or write something later; this never launches work itself — a human must confirm the proposal card before the agent thread starts.",
 			"parameters": map[string]any{
@@ -2518,6 +2605,12 @@ func realtimeToolRunsAsync(name string) bool {
 		// and end_grill_session files a report thread; run them off the
 		// datachannel event loop like the other slow tools.
 		return true
+	case "company_financial_snapshot", "financial_comps", "fiscal_api_docs", "fiscal_data_query":
+		// Every fiscal.ai tool makes a live MCP round-trip (up to 120s); it must
+		// run off the datachannel event loop so realtime events keep flowing.
+		// Only the typed pair rides room voice (see realtimeRoomVoiceTools), but
+		// all four are marked slow so no surface can block the loop.
+		return true
 	default:
 		return false
 	}
@@ -2708,6 +2801,16 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// Read-only aggregation over the venture packages; no requester needed,
 		// so the shared dispatch serves both the room and private voice paths.
 		return app.portfolioHealthTool()
+	case "company_financial_snapshot":
+		// Read-only fiscal.ai grounding: no requester, no board mutation, so
+		// the shared dispatch serves every surface.
+		return app.companyFinancialSnapshotTool(args)
+	case "financial_comps":
+		return app.financialCompsTool(args)
+	case "fiscal_api_docs":
+		return app.fiscalAPIDocsTool(args)
+	case "fiscal_data_query":
+		return app.fiscalDataQueryTool(args)
 	case "propose_codex_task":
 		// Creates a confirmable proposal, never launches an agent thread
 		// directly. The shared dispatch (board worker + room voice) has no
@@ -2754,6 +2857,124 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	}
 }
 
+// --- fiscal.ai tool dispatch --------------------------------------------------
+//
+// All four tools are read-only and self-contained: no requester, no board
+// mutation, no ctx on this seam — the fiscal client carries its own 120s
+// timeout, so each dispatch uses context.Background(). Keyless returns a
+// clear payload instead of an error (the initiate_goal posture) so keyless
+// deploys keep working.
+
+const (
+	fiscalDataQueryDefaultMaxChars = 20000
+	// fiscalDataQueryMaxCharsCeiling caps a model-supplied max_chars so a large
+	// value cannot pour up to the 4MB response bound back into the tool-loop
+	// context. ~100K chars is roughly 25K tokens — a generous single-tool cap.
+	fiscalDataQueryMaxCharsCeiling = 100000
+	// fiscalFullDocsMaxChars is a safety bound on the typed docs, set above the
+	// real payload (~66KB) so topic="full" returns the complete docs while still
+	// capping a pathological upstream response.
+	fiscalFullDocsMaxChars = 262144
+)
+
+// fiscalToolNotConfigured is the shared keyless payload for every fiscal tool.
+func fiscalToolNotConfigured() (map[string]any, bool, error) {
+	return map[string]any{
+		"ok":     false,
+		"reason": "FISCAL_AI_API_KEY is not configured — fiscal.ai financial grounding is unavailable here.",
+	}, false, nil
+}
+
+// fiscalTruncate caps tool text with an explicit notice so the model knows
+// the cut happened and at what size. The cut backs up to a rune boundary so a
+// multi-byte character is never split into invalid UTF-8 (json.Marshal would
+// otherwise rewrite the tail to U+FFFD).
+func fiscalTruncate(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit] + fmt.Sprintf("\n[truncated at %d chars]", limit)
+}
+
+func (app *kanbanBoardApp) companyFinancialSnapshotTool(args map[string]any) (map[string]any, bool, error) {
+	if !hasFiscalAPIKey() {
+		return fiscalToolNotConfigured()
+	}
+	company := asString(args["company"])
+	if company == "" {
+		return nil, false, fmt.Errorf("company is required")
+	}
+	snapshot, err := fiscalCompanySnapshot(context.Background(), company)
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "snapshot": snapshot}, false, nil
+}
+
+func (app *kanbanBoardApp) financialCompsTool(args map[string]any) (map[string]any, bool, error) {
+	if !hasFiscalAPIKey() {
+		return fiscalToolNotConfigured()
+	}
+	company := asString(args["company"])
+	if company == "" {
+		return nil, false, fmt.Errorf("company is required")
+	}
+	// nil ratio ids and peer_limit 0 take the client defaults (3 ratios, 6 peers).
+	comps, err := fiscalComps(context.Background(), company, asStringSlice(args["ratio_ids"]), asInt(args["peer_limit"]))
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "comps": comps}, false, nil
+}
+
+func (app *kanbanBoardApp) fiscalAPIDocsTool(args map[string]any) (map[string]any, bool, error) {
+	if !hasFiscalAPIKey() {
+		return fiscalToolNotConfigured()
+	}
+	topic := asString(args["topic"])
+	var docs string
+	var err error
+	switch topic {
+	case "", "index":
+		topic = "index"
+		docs, err = fiscalAPIDocsCompact(context.Background())
+	case "full":
+		docs, err = fiscalAPIDocs(context.Background())
+		docs = fiscalTruncate(docs, fiscalFullDocsMaxChars)
+	default:
+		return nil, false, fmt.Errorf("unsupported topic %q (use index or full)", topic)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "topic": topic, "docs": docs}, false, nil
+}
+
+func (app *kanbanBoardApp) fiscalDataQueryTool(args map[string]any) (map[string]any, bool, error) {
+	if !hasFiscalAPIKey() {
+		return fiscalToolNotConfigured()
+	}
+	code := asString(args["code"])
+	if code == "" {
+		return nil, false, fmt.Errorf("code is required")
+	}
+	maxChars := asInt(args["max_chars"])
+	if maxChars <= 0 {
+		maxChars = fiscalDataQueryDefaultMaxChars
+	}
+	if maxChars > fiscalDataQueryMaxCharsCeiling {
+		maxChars = fiscalDataQueryMaxCharsCeiling
+	}
+	output, err := fiscalExecuteCode(context.Background(), code)
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "output": fiscalTruncate(output, maxChars)}, false, nil
+}
+
 // privateRealtimeVoiceToolAllowed is the single source of truth for what
 // private Scout ("she can do it all") may call. Room-only tools are excluded by
 // construction: set_voice_control / set_recording / archive_meeting mutate the
@@ -2775,6 +2996,9 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"create_package", "attach_to_package", "advance_package_stage", "portfolio_health",
 		"send_notification", "post_to_channel", "create_channel",
 		"meeting_recap", "catch_me_up",
+		// fiscal.ai grounding — only the typed, spoken-ready pair; fiscal_api_docs
+		// and fiscal_data_query return payloads too heavy for a voice turn.
+		"company_financial_snapshot", "financial_comps",
 		// New Realtime-2 parity tools (Wave 6).
 		"read_thread_aloud", "start_chat_as_user", "initiate_goal",
 		// Private grill (Wave 12) — client-driven session.update swap, private

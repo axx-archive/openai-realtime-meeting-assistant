@@ -826,6 +826,13 @@ var orchestratorToolAllowlist = map[string]bool{
 	"advance_package_stage":  true,
 	"send_notification":      true,
 	"do_nothing":             true,
+	// fiscal.ai financial grounding (read-only; keyless degrades to a clear
+	// not-configured payload). The orchestrator gets all four, including the
+	// docs + raw-query pair the voice surfaces exclude.
+	"company_financial_snapshot": true,
+	"financial_comps":            true,
+	"fiscal_api_docs":            true,
+	"fiscal_data_query":          true,
 }
 
 func (r *anthropicFableRunner) tools() []anthropicTool {
