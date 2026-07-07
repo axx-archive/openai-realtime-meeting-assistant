@@ -217,6 +217,15 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 		if err != nil || now.Sub(resolvedAt) < workflowTickerConfirmGrace {
 			return "", "", nil, false
 		}
+		// The empty threadId is only a MISSED LAUNCH (the genuine crash gap) when
+		// launchApprovedProposal never reached its confirm-signal write. If a
+		// proposal_confirmed signal already exists for this proposal, the launch
+		// DID run and only the follow-up threadId stamp write failed non-fatally
+		// — relaunching would double the agent thread and re-settle the
+		// notification, so treat the empty threadId as lost linkage, not a gap.
+		if app.proposalConfirmSignalRecorded(entry.ID) {
+			return "", "", nil, false
+		}
 		actorName = firstNonEmptyString(strings.TrimSpace(entry.Metadata["confirmedBy"]), workflowTickerAgentName)
 		actorEmail = strings.TrimSpace(entry.Metadata["confirmedByEmail"])
 	case entry.Metadata["status"] == codexProposalStatusProposed && proposalLane(entry) == codexProposalLaneAutoRun:
@@ -236,6 +245,34 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 
 	origin := app.routeProposalOrigin(entry, actorName, actorEmail)
 	return actorName, actorEmail, origin, true
+}
+
+// proposalConfirmSignalRecorded reports whether launchApprovedProposal has
+// already run a launch for this proposal, detected by the proposal_confirmed
+// signal it records right after a successful launchAgentThreadWithOrigin. This
+// is the discriminator between the two shapes of a confirmed-but-unstamped
+// proposal: the genuine Case-A crash gap (status persisted as confirmed, then a
+// crash BEFORE the launch ever ran, so no confirm signal exists) versus a
+// non-fatal threadId-stamp failure (the launch DID run and recorded its confirm
+// signal, but the follow-up stamp write failed, leaving threadId empty). Only
+// the former is a missed launch the ticker may recover; the latter must never
+// double-launch. Scanned only inside the already-narrow Case-A branch, so the
+// signal walk stays rare.
+func (app *kanbanBoardApp) proposalConfirmSignalRecorded(proposalID string) bool {
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" || app == nil || app.memory == nil {
+		return false
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
+		record, ok := decodeSignalEntry(entry)
+		if !ok || record.Event != signalEventProposalConfirmed {
+			continue
+		}
+		if strings.TrimSpace(record.Payload["proposalId"]) == proposalID {
+			return true
+		}
+	}
+	return false
 }
 
 // routeProposalOrigin implements the merged 068 delivery rule for a ticker

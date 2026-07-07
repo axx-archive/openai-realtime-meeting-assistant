@@ -103,6 +103,43 @@ func TestWorkflowTickerRelaunchesConfirmedButUnstamped(t *testing.T) {
 	}
 }
 
+// A confirmed-but-unstamped proposal whose launch ALREADY ran (it recorded its
+// proposal_confirmed signal) but whose follow-up threadId stamp write failed
+// non-fatally must NOT be relaunched by the ticker — a second launch would
+// double the agent thread and re-settle the notification. The empty threadId is
+// lost linkage, not the crash gap Case A recovers.
+func TestWorkflowTickerDoesNotRelaunchSettledUnstampedProposal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	launches := stubTickerLaunches(t, nil)
+
+	id := "codex-proposal-settled-unstamped"
+	appendTickerProposal(t, app, id, map[string]string{
+		"status":           codexProposalStatusConfirmed,
+		"confirmedBy":      "Tom",
+		"confirmedByEmail": "tom@shareability.com",
+		"resolvedAt":       time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano),
+		// threadId absent — the stamp write failed non-fatally AFTER a real launch.
+	})
+	// launchApprovedProposal records the confirm signal right after the
+	// successful launch, so this signal is the durable proof the launch ran even
+	// though the later threadId stamp never landed.
+	app.recordSignalEvent("Tom", signalEventProposalConfirmed, signalValencePositive, "agent-thread-artifact-x", "", map[string]string{
+		"proposalId": id,
+		"title":      id,
+		"mode":       "research",
+	})
+
+	if got := app.runWorkflowTickerOnce(time.Now()); got != 0 || *launches != 0 {
+		t.Fatalf("settled-but-unstamped proposal launched=%d stub=%d, want 0 (no double launch)", got, *launches)
+	}
+
+	// The proposal is untouched — still confirmed, still unstamped.
+	entry, _ := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, id)
+	if entry.Metadata["status"] != codexProposalStatusConfirmed {
+		t.Fatalf("status=%q, want it left confirmed (no revert, no relaunch)", entry.Metadata["status"])
+	}
+}
+
 // An auto_run-lane proposal WITH a recorded standing approval launches with an
 // honest "workflow ticker · standing approval" confirmedBy; the same lane
 // WITHOUT laneApprovedBy never launches.
