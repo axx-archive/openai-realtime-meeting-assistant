@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,42 @@ func TestAssistantFileUploadOversizeRejected(t *testing.T) {
 	}
 	if entries := kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0); len(entries) != 0 {
 		t.Fatalf("oversize upload persisted %d entries, want none", len(entries))
+	}
+}
+
+func TestAssistantFileUploadCleansMultipartTempFiles(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Point multipart's spill directory at a private temp dir so we can prove
+	// the handler leaves no leftover parts behind (os.TempDir reads TMPDIR).
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+
+	multipartLeftovers := func() int {
+		matches, err := filepath.Glob(filepath.Join(tmpDir, "multipart-*"))
+		if err != nil {
+			t.Fatalf("glob multipart temp files: %v", err)
+		}
+		return len(matches)
+	}
+	if n := multipartLeftovers(); n != 0 {
+		t.Fatalf("temp dir already has %d multipart-* files before upload", n)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	// 9MB comfortably clears the 8MB in-memory threshold, forcing a temp-file
+	// spill during ParseMultipartForm, while staying under the 64MB blob cap.
+	recorder := postFileUpload(t, cookies, "big-deck.pdf", "application/pdf", make([]byte, 9<<20))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("large upload status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	if n := multipartLeftovers(); n != 0 {
+		t.Fatalf("handler left %d multipart-* temp files behind, want 0", n)
 	}
 }
 

@@ -286,6 +286,14 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read upload form")
 		return
 	}
+	// ParseMultipartForm spills parts over the 8MB in-memory threshold to a
+	// $TMPDIR temp file that is NOT auto-removed on return; RemoveAll frees them
+	// so >8MB uploads don't accumulate and exhaust /tmp on the long-lived VPS.
+	defer func() {
+		if r.MultipartForm != nil {
+			r.MultipartForm.RemoveAll()
+		}
+	}()
 	part, header, err := r.FormFile("file")
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, "upload form needs a file field")
