@@ -62,6 +62,9 @@
         /* ---------- fonts.css ---------- */
         --font-sans: "Google Sans Flex", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
         --font-mono: "Geist Mono", "SF Mono", "Menlo", monospace;
+        /* empty-state koan voice — the system's own sans (never a foreign
+           Georgia fallback); .t-empty-poetry keeps only the italic register */
+        --font-serif: var(--font-sans);
 
         /* ---------- colors.css · base ramps ---------- */
         /* ink — true neutral darks */
@@ -10531,6 +10534,40 @@
         margin-left: auto;
       }
 
+      /* real affordance over the weak ghost (PK-1/2): "new package" reads as an
+         ink-filled primary, "open library" an outlined secondary — both sized
+         to the section-head rhythm rather than the full 40px kit button */
+      #packageNewToggle,
+      #intelLibraryToggle {
+        min-height: 32px;
+        min-width: 0;
+        padding: 0 14px;
+        border-radius: var(--r-full);
+        border: 1px solid transparent;
+        font: var(--type-caption-medium);
+      }
+
+      #packageNewToggle {
+        background: var(--accent);
+        color: var(--on-accent);
+      }
+
+      #packageNewToggle:hover:not([disabled]) {
+        background: var(--accent-hover);
+        color: var(--on-accent);
+      }
+
+      #intelLibraryToggle {
+        background: transparent;
+        color: var(--text-1);
+        border-color: var(--line-2);
+      }
+
+      #intelLibraryToggle:hover:not([disabled]) {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
       /* ingestion pulse hero (design §9.1) — the one boxed card up top */
       .intel-hero {
         gap: 0;
@@ -10587,13 +10624,39 @@
         flex: 1;
         min-width: 0;
         border-radius: 99px 99px 0 0;
-        background: var(--accent);
+        background: var(--surface-3);
         transform-origin: bottom;
       }
 
+      /* the last bar burns ember only while a room is actually feeding the
+         brain — the sanctioned "live pulse" ignition moment */
       .intel-pulse__bar.is-live {
-        background: var(--live);
+        background: var(--ember);
         animation: bf-wave 1.6s ease-in-out infinite;
+      }
+
+      /* sparse windows render as outlined ghosts so the axis still reads a
+         histogram instead of one lonely bar (IP-2) */
+      .intel-pulse__bar.is-ghost {
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-bottom: none;
+      }
+
+      /* empty (no signal) — never a broken zero-height ruler: a quiet dashed
+         baseline + a centered koan (IP-1) */
+      .intel-pulse--empty {
+        align-items: center;
+        justify-content: center;
+        border-bottom: 1.5px dashed var(--line-2);
+      }
+
+      .intel-pulse__koan {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: center;
+        padding: 0 12px;
       }
 
       .intel-pulse-axis {
@@ -10603,6 +10666,19 @@
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
+      }
+
+      /* sparse state swaps the dense 3h ticks for the honest getting-started
+         caption (the ticks read false over a mostly-ghost histogram) */
+      .intel-pulse-axis--caption {
+        justify-content: center;
+      }
+
+      .intel-pulse__caption {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: center;
       }
 
       .intel-hero__rule {
@@ -10630,11 +10706,15 @@
         letter-spacing: var(--track-label);
       }
 
-      /* stat value — mono display figure per design */
+      /* stat value — sans display figure (kit): tight Google Sans Flex, NOT
+         mono, so a plain "0" never renders as the slashed-zero "∅" (ST-1) */
       .intel-tile__value {
         color: var(--text-1);
-        font: 500 30px/1 var(--font-mono);
-        letter-spacing: 0;
+        font: var(--type-display);
+        font-size: 34px;
+        line-height: 1;
+        letter-spacing: var(--track-display);
+        font-variant-numeric: tabular-nums;
       }
 
       .intel-tile__delta {
@@ -10684,8 +10764,8 @@
 
       .intel-learned__row {
         display: flex;
-        gap: 16px;
-        align-items: baseline;
+        gap: 12px;
+        align-items: flex-start;
         padding: 11px 0;
         border-bottom: 1px solid var(--line-1);
         min-width: 0;
@@ -10695,23 +10775,42 @@
         border-bottom: 0;
       }
 
-      .intel-learned__key {
+      /* time col hugs the clock (54px, kit) — no more 128px dead gutter (LT-1) */
+      .intel-learned__time {
         flex: none;
-        /* design says 112px; the app's mono label needs the room */
-        width: 128px;
+        width: 54px;
+        padding-top: 2px;
+        color: var(--text-3);
+        font: var(--type-numeric);
+        letter-spacing: var(--track-label);
+      }
+
+      /* the kind reads as a real mono pill, not stray gray text (LT-2) */
+      .intel-learned__tag {
+        flex: none;
+        align-self: flex-start;
+        margin-top: 1px;
+        padding: 1px 8px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        white-space: nowrap;
       }
 
+      /* 2-line clamp + pretty wrap so a learned item conveys something instead
+         of truncating mid-word (LT-3) */
       .intel-learned__text {
+        flex: 1;
+        min-width: 0;
         color: var(--text-1);
         font: 400 13px/1.45 var(--font-sans);
-        min-width: 0;
+        text-wrap: pretty;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
       .intel-contrib {
@@ -10752,7 +10851,7 @@
         align-items: center;
         justify-content: center;
         color: var(--text-2);
-        font: 600 8.5px/1 var(--font-sans);
+        font: 600 10px/1 var(--font-sans);
       }
 
       .intel-contrib__name {
@@ -10859,13 +10958,17 @@
         font: 400 13px/1.4 var(--font-sans);
       }
 
+      /* 2-line clamp so a synthesized insight survives instead of truncating
+         hard on the first line (TC-3) */
       .intel-theme__summary {
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
+        text-wrap: pretty;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
       .intel-theme__mentions {
@@ -10900,9 +11003,10 @@
         font: 400 13px/1.4 var(--font-sans);
       }
 
-      /* open questions carry the warn meta hue (design §9.4) */
+      /* "open" is a category, not an alert — neutral mono meta, so amber stays
+         reserved for real warnings (TC-1) */
       .intel-item--question .intel-item__meta {
-        color: var(--warn);
+        color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
@@ -10919,6 +11023,12 @@
       .intel-item__meta {
         color: var(--text-3);
         font: var(--type-caption);
+      }
+
+      /* the name stays sans (a person), but the timestamp is mono per the type
+         law (DL-2) */
+      .intel-meta-time {
+        font-family: var(--font-mono);
       }
 
       /* card 069 ratify door: a proposed (default) decision carries one small
@@ -10983,6 +11093,21 @@
         margin-left: 19px;
       }
 
+      /* a quiet chevron on the right cues that the row expands (DL-3); it
+         rotates when the detail is open */
+      .intel-decision__chev {
+        flex: none;
+        align-self: flex-start;
+        margin-top: 1px;
+        margin-left: auto;
+        color: var(--text-3);
+        transition: transform var(--dur-fast) var(--ease);
+      }
+
+      .intel-item--decision.is-open .intel-decision__chev {
+        transform: rotate(180deg);
+      }
+
       .intel-decision__detail {
         display: flex;
         flex-direction: column;
@@ -10997,12 +11122,15 @@
         font: var(--type-caption);
       }
 
+      /* lowercase Geist Mono label — matches every other system label; no
+         lone uppercase in a lowercase-mono system (DL-1) */
       .intel-decision__label {
         flex: none;
         min-width: 66px;
         color: var(--text-3);
-        text-transform: uppercase;
+        font: var(--type-label);
         letter-spacing: var(--track-label);
+        text-transform: none;
         opacity: .7;
       }
 
@@ -17241,7 +17369,9 @@
         /* ---- intelligence (design mobile §8): 2×2 stat tiles, tighter
            canvas; entered from the office card with the header chevron ---- */
         #artifactsTool {
-          padding: 14px 16px 96px;
+          /* clear the fixed bottom rail + the home-indicator safe area so the
+             contribution lens' last rows/heading never sit under the dock (CL-4) */
+          padding: 14px 16px calc(env(safe-area-inset-bottom) + 96px);
         }
 
         .intel-canvas {
@@ -18905,8 +19035,9 @@
       .tray__countdown { font-variant-numeric: tabular-nums; }
 
       /* #6 package stage-advance — a forward move fills the stage pill L→R once
-         and sends a single soft ember sweep across the card. Ember = a machine
-         milestone; this fires rarely, so it earns the flourish (kept a whisper). */
+         and sends a single soft sweep across the card. In-progress pipeline work
+         is NEUTRAL (goalcard doctrine): the sweep stays mono --accent-soft; ember
+         is reserved for the ignition moment, never the in-progress advance (PK-5). */
       .package-row.is-advancing { position: relative; }
       .package-row.is-advancing::after {
         content: '';
@@ -18914,7 +19045,7 @@
         inset: 0;
         pointer-events: none;
         border-radius: inherit;
-        background: linear-gradient(90deg, transparent, var(--agent-soft), transparent);
+        background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
         transform: translateX(-100%);
         animation: pkg-card-sweep 640ms var(--ease-out) 1;
       }
@@ -18927,7 +19058,7 @@
         content: '';
         position: absolute;
         inset: 0;
-        background: var(--agent-soft);
+        background: var(--accent-soft);
         transform: scaleX(0);
         transform-origin: left;
         animation: pkg-stage-fill 300ms var(--ease) forwards;
@@ -42089,8 +42220,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return `${hours12}:${String(minutes).padStart(2, '0')}`
       }
 
-      /* 36 ingestion bars from the real histogram; only the last bar waves,
-         and only while a meeting is actually live (design §9.1, D2) */
+      /* 36 ingestion bars from the real histogram, in three honest states so
+         the pulse never reads broken (design §9.1, D2):
+           empty   → a quiet dashed baseline + a koan, NOT a zero-height ruler
+           sparse  → the few real bars over ghosted windows so the axis reads,
+                     with a "getting started" caption; peak floored so one small
+                     event can't fill the frame
+           healthy → the full window; only the last bar burns ember while live */
       function renderIntelPulseChart(pulse, live) {
         if (!intelPulseChart) {
           return
@@ -42098,21 +42234,55 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const histogram = Array.isArray(pulse?.histogram) && pulse.histogram.length
           ? pulse.histogram.map(count => Math.max(0, Number(count) || 0))
           : new Array(36).fill(0)
-        const peak = Math.max(1, ...histogram)
+        const nonZero = histogram.filter(count => count > 0).length
+        const state = nonZero === 0 ? 'empty' : nonZero <= 3 ? 'sparse' : 'healthy'
+
+        if (state === 'empty') {
+          intelPulseChart.classList.add('intel-pulse--empty')
+          const koan = document.createElement('span')
+          koan.className = 'intel-pulse__koan'
+          koan.textContent = 'no signal yet — the pulse starts when the room speaks.'
+          intelPulseChart.replaceChildren(koan)
+          if (intelPulseAxis) {
+            intelPulseAxis.classList.remove('intel-pulse-axis--caption')
+            intelPulseAxis.replaceChildren()
+          }
+          return
+        }
+        intelPulseChart.classList.remove('intel-pulse--empty')
+
+        // floor the peak so a single low count can't spike to full height (IP-2)
+        const peak = Math.max(4, ...histogram)
+        const sparse = state === 'sparse'
         intelPulseChart.replaceChildren(...histogram.map((count, index) => {
           const bar = document.createElement('span')
           bar.className = 'intel-pulse__bar'
-          const height = count > 0 ? Math.max(10, Math.round((count / peak) * 100)) : 4
+          if (sparse && count === 0) {
+            // ghost the empty windows so the histogram frame still reads
+            bar.classList.add('is-ghost')
+            bar.style.height = '6%'
+            return bar
+          }
+          const height = count > 0 ? Math.max(6, Math.round((count / peak) * 100)) : 4
           bar.style.height = `${height}%`
           if (live && index === histogram.length - 1) {
             bar.classList.add('is-live')
-            bar.style.opacity = '1'
-          } else {
-            bar.style.opacity = String(Math.min(1, 0.18 + height / 160))
           }
           return bar
         }))
+
         if (intelPulseAxis) {
+          if (sparse) {
+            // the dense 3h ticks read false over a mostly-ghost histogram — swap
+            // them for the honest count of active windows so far
+            intelPulseAxis.classList.add('intel-pulse-axis--caption')
+            const caption = document.createElement('span')
+            caption.className = 'intel-pulse__caption'
+            caption.textContent = `just getting started — ${nonZero} active ${nonZero === 1 ? 'window' : 'windows'} so far.`
+            intelPulseAxis.replaceChildren(caption)
+            return
+          }
+          intelPulseAxis.classList.remove('intel-pulse-axis--caption')
           const now = new Date()
           const windowMs = histogram.length * 5 * 60000
           intelPulseAxis.replaceChildren(...[3, 2, 1].map(step => {
@@ -42228,14 +42398,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const rows = items.slice(0, 4).map(item => {
           const row = document.createElement('div')
           row.className = 'intel-learned__row'
-          const key = document.createElement('span')
-          key.className = 'intel-learned__key'
-          key.textContent = `${item.key} · ${intelLearnedClock(item.at)}`
+          // time in a hugging mono col + the kind as a real mono pill, so the
+          // text starts right away instead of after a 128px dead gutter
+          const time = document.createElement('span')
+          time.className = 'intel-learned__time'
+          time.textContent = intelLearnedClock(item.at)
+          const tag = document.createElement('span')
+          tag.className = 'intel-learned__tag'
+          tag.textContent = item.key
           const text = document.createElement('span')
           text.className = 'intel-learned__text'
           text.textContent = item.text
           text.title = item.text
-          row.append(key, text)
+          row.append(time, tag, text)
           return row
         })
         intelLearnedList.replaceChildren(...(rows.length
@@ -42326,16 +42501,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // the full mix survives as a tooltip — the row itself reads bar,
           // share, then lines (delta cell BEFORE the line-count cell, §9.3)
           row.title = `${person.name} · ${intelBreakdownText(person)}`
+          const lineCount = (Number(person.spoken) || 0) + (Number(person.chat) || 0)
           const track = document.createElement('span')
           track.className = 'intel-contrib__track'
           const fill = document.createElement('span')
           fill.className = 'intel-contrib__fill'
-          fill.style.width = `${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100)}%`
+          // guard the percentage-of-nothing case: no conversation lines → an
+          // empty track, so a full bar never contradicts "0 lines" (CL-5)
+          fill.style.width = lineCount === 0
+            ? '0%'
+            : `${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100)}%`
           track.appendChild(fill)
           const delta = document.createElement('span')
           delta.className = 'intel-contrib__delta'
           delta.textContent = `${Math.round(((Number(person.fuel) || 0) / fuelTotal) * 100)}%`
-          const lineCount = (Number(person.spoken) || 0) + (Number(person.chat) || 0)
           const count = document.createElement('span')
           count.className = 'intel-contrib__count'
           count.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`
@@ -42481,14 +42660,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         meta.className = 'intel-item__meta'
         const madeBy = String(decision?.madeBy || '').trim()
         const context = String(decision?.context || '').trim()
-        const parts = []
-        if (proposed) parts.push('proposed · awaiting ratification')
-        if (madeBy) parts.push(madeBy)
-        parts.push(intelRelativeTime(decision?.createdAt))
-        if (context) parts.push(context)
-        meta.textContent = parts.join(' · ')
+        // the name stays sans (a person), the timestamp rides mono (DL-2)
+        const metaBits = []
+        if (proposed) metaBits.push({ text: 'proposed · awaiting ratification' })
+        if (madeBy) metaBits.push({ text: madeBy })
+        metaBits.push({ text: intelRelativeTime(decision?.createdAt), mono: true })
+        if (context) metaBits.push({ text: context })
+        metaBits.forEach((bit, i) => {
+          if (i) meta.append(document.createTextNode(' · '))
+          if (bit.mono) {
+            const span = document.createElement('span')
+            span.className = 'intel-meta-time'
+            span.textContent = bit.text
+            meta.append(span)
+          } else {
+            meta.append(document.createTextNode(bit.text))
+          }
+        })
         body.append(text, meta)
-        item.append(mark, body)
+        // a quiet chevron cues the row expands (DL-3); CSS rotates it when open
+        const chev = document.createElement('span')
+        chev.className = 'intel-decision__chev'
+        chev.setAttribute('aria-hidden', 'true')
+        chev.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>'
+        item.append(mark, body, chev)
         item.addEventListener('click', () => {
           expandedIntelDecisionId = open ? '' : id
           if (typeof rerender === 'function') rerender()
