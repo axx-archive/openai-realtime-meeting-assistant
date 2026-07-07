@@ -20,7 +20,7 @@
     <link rel="manifest" href="/public/manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
     <script>
       /* pre-paint theme: stored choice wins, else system preference. */
       (() => {
@@ -60,7 +60,7 @@
         /* ================= glass & ink tokens (kit verbatim) ================= */
 
         /* ---------- fonts.css ---------- */
-        --font-sans: "Geist", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+        --font-sans: "Google Sans Flex", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
         --font-mono: "Geist Mono", "SF Mono", "Menlo", monospace;
 
         /* ---------- colors.css · base ramps ---------- */
@@ -85,6 +85,15 @@
         --signal-400: #5CE08A;
         --signal-500: #30D158;
         --signal-600: #23A847;
+
+        /* ember — the one warm ignition accent (modern coral, not literal fire).
+           Reserved for igniting work: Run/launch, a running goal node, the live
+           ingestion pulse, deck emphasis. Earned, never ambient — a screen at
+           rest holds no ember. (glass & ink v2) */
+        --ember-300: #FF9E85;
+        --ember-400: #FF8163;
+        --ember-500: #FF6B4A;
+        --ember-600: #F0522F;
 
         /* semantic hues (state only) */
         --red-500: #FF453A;
@@ -116,12 +125,20 @@
 
         --live: var(--signal-500);
         --live-soft: rgba(35, 168, 71, 0.13);
+        --success: var(--signal-500);       /* doctrine: green = live AND landed/shipped/passed */
+        --success-soft: rgba(35, 168, 71, 0.13);
         --danger: var(--red-500);
         --danger-soft: rgba(255, 69, 58, 0.10);
         --warn: var(--amber-500);
         --warn-soft: rgba(255, 159, 10, 0.14);
         --info: var(--blue-500);
         --info-soft: rgba(10, 132, 255, 0.10);
+
+        --ember: var(--ember-500);
+        --ember-hover: var(--ember-400);
+        --ember-press: var(--ember-600);
+        --ember-soft: rgba(255, 107, 74, 0.12);
+        --on-ember: #FFFFFF;
 
         --scrim: rgba(14, 14, 16, 0.35);
         --blur-material: var(--glass-blur); /* legacy alias */
@@ -227,11 +244,12 @@
         --ease-out:  cubic-bezier(0.32, 0.72, 0, 1);
         --pulse-cycle: var(--dur-breathe);
 
-        /* agent-working accent — the ONE warm hue. Green owns live/speaking;
-           ember owns "a machine is doing work." They never co-occur. */
-        --agent: #FF7A2B;               /* ember (heritage brand flame) */
-        --agent-soft: rgba(255,122,43,0.14);
-        --glow-agent: 0 0 0 1.5px var(--agent), 0 4px 20px rgba(255,122,43,0.28);
+        /* agent-working = "igniting work" → the sanctioned ember (glass & ink v2).
+           heritage flame #FF7A2B retired; --agent now aliases the --ember token.
+           earned-vs-ambient placement is refined per surface with the mocks. */
+        --agent: var(--ember);
+        --agent-soft: var(--ember-soft);
+        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 20px rgba(255,107,74,0.28);
       }
 
       [data-theme="dark"] {
@@ -260,9 +278,16 @@
         --on-accent: #0E0E10;
 
         --live-soft: rgba(48, 209, 88, 0.14);
+        --success-soft: rgba(48, 209, 88, 0.14);
         --danger-soft: rgba(255, 69, 58, 0.14);
         --warn-soft: rgba(255, 159, 10, 0.14);
         --info-soft: rgba(10, 132, 255, 0.14);
+
+        --ember: var(--ember-500);
+        --ember-hover: var(--ember-400);
+        --ember-press: var(--ember-600);
+        --ember-soft: rgba(255, 107, 74, 0.16);
+        --on-ember: #1A0A05;
 
         --scrim: rgba(0, 0, 0, 0.60);
 
@@ -278,12 +303,12 @@
         --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.12);
         --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.50);
 
-        /* agent-working accent — the ONE warm hue. Green owns live/speaking;
-           ember owns "a machine is doing work." They never co-occur. Same
-           ember reads on true black; the soft/glow carry a touch more lift. */
-        --agent: #FF7A2B;               /* ember (heritage brand flame) */
-        --agent-soft: rgba(255,122,43,0.18);
-        --glow-agent: 0 0 0 1.5px var(--agent), 0 4px 22px rgba(255,122,43,0.34);
+        /* agent-working = "igniting work" → the sanctioned ember (glass & ink v2).
+           heritage flame #FF7A2B retired; --agent now aliases the --ember token.
+           same ember reads on true black; the soft/glow carry a touch more lift. */
+        --agent: var(--ember);
+        --agent-soft: var(--ember-soft);
+        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 22px rgba(255,107,74,0.34);
       }
 
       @media (prefers-reduced-motion: reduce) {

@@ -16,3 +16,6 @@ apple/ReleaseEvidence.local.json
 apple/PrivacyManifest.decisions.local.json
 xcuserdata/
 *.xcuserstate
+
+# glass & ink reskin reference scaffolding (design-system import; not product code)
+.ds-ref/

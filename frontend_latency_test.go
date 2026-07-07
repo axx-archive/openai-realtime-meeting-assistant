@@ -2242,8 +2242,10 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 		"? 'BonfireOS'",
 		"|| 'BonfireOS'",
 		"'BonfireOS ready'",
-		// the one warm accent, defined once per theme block and its glow
-		"--agent: #FF7A2B;",
+		// the one warm ignition accent (coral ember), migrated from the
+		// heritage flame; --agent now aliases the sanctioned --ember token
+		"--ember-500: #FF6B4A;",
+		"--agent: var(--ember);",
 		"--agent-soft:",
 		"--glow-agent:",
 	} {
@@ -2267,8 +2269,8 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 	if strings.Contains(html, "office: 'Office',") {
 		t.Fatal("toolTitles still maps office -> 'Office'; expected 'BonfireOS'")
 	}
-	// The ember accent is defined in BOTH theme blocks (light :root + dark).
-	if got := strings.Count(html, "--agent: #FF7A2B;"); got < 2 {
-		t.Fatalf("--agent must be defined in both theme blocks, found %d", got)
+	// The ember accent (via the --agent alias) is defined in BOTH theme blocks.
+	if got := strings.Count(html, "--agent: var(--ember);"); got < 2 {
+		t.Fatalf("--agent must alias --ember in both theme blocks, found %d", got)
 	}
 }
