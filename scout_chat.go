@@ -333,10 +333,10 @@ type scoutRouterProposal struct {
 	Objective  string `json:"objective"`
 	// Query is the user message that produced this proposal — the "just
 	// answer instead" escape re-asks it as Tier 0.
-	Query       string            `json:"query,omitempty"`
-	PackageID   string            `json:"packageId,omitempty"`
-	Fields      map[string]string `json:"fields,omitempty"`
-	Authority   string            `json:"authority,omitempty"`
+	Query     string            `json:"query,omitempty"`
+	PackageID string            `json:"packageId,omitempty"`
+	Fields    map[string]string `json:"fields,omitempty"`
+	Authority string            `json:"authority,omitempty"`
 	// Lane is the card's 069 governance lane (approval_lanes.go: auto | standard
 	// | heavy), classified from the same dimensions the ship gates enforce.
 	// Scout-proposed work is system-proposed, so a card is never "auto" — it is
