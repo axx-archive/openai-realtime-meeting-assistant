@@ -596,5 +596,8 @@ func assistantToolsHandler(w http.ResponseWriter, r *http.Request) {
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"groups": buildToolsPayload(),
+		// Card 069: the approval-lane taxonomy rides the same door the palette
+		// and ticker already read, so governance never needs a second fetch.
+		"lanes": approvalLanesPayload(),
 	})
 }

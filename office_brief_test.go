@@ -264,10 +264,15 @@ func TestArtifactActionApprovePreservesGoalResumeAndNotifies(t *testing.T) {
 		t.Fatalf("seed parked goal: %v", err)
 	}
 
-	// Non-admin cannot approve — the gate stays admin-only.
-	forbidden := doArtifactAction(t, "joel@shareability.com", parent.ID, "approve", "")
-	if forbidden.Code != http.StatusForbidden {
-		t.Fatalf("non-admin approve status=%d, want 403", forbidden.Code)
+	// Card 069 heavy lane: a single non-admin approve on the PARKED gate is an
+	// ENDORSEMENT (1/2), never an approval — the goal stays parked.
+	endorsed := doArtifactAction(t, "joel@shareability.com", parent.ID, "approve", "")
+	if endorsed.Code != http.StatusAccepted || !strings.Contains(endorsed.Body.String(), "endorsement recorded (1/2)") {
+		t.Fatalf("non-admin endorse status=%d body=%s, want 202 with 1/2 progress", endorsed.Code, endorsed.Body.String())
+	}
+	stillParked := mustArtifact(t, kanbanApp, parent.ID)
+	if stillParked.Metadata["reviewGate"] != "approval_required" {
+		t.Fatalf("one endorsement un-parked the gate: %v", stillParked.Metadata)
 	}
 
 	// Admin approves: resumeApprovedGoal fires (gate → passed) and Joel is told.

@@ -10463,6 +10463,26 @@
         font: var(--type-caption);
       }
 
+      /* card 069 ratify door: a proposed (default) decision carries one small
+         inline action; hue stays ink, the disabled flip is the only state */
+      .intel-item__ratify {
+        align-self: flex-start;
+        margin-top: 2px;
+        padding: 2px 8px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+
+      .intel-item__ratify:disabled {
+        opacity: .5;
+        cursor: default;
+      }
+
       .intel-col--ledger {
         max-height: 320px;
         overflow-y: auto;
@@ -31053,9 +31073,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // approve/reject caller posts an unchanged body.
         const body = { id, action, reason }
         if (String(choice || '').trim()) body.choice = String(choice).trim()
-        const { ok } = await postAuthJSON('/artifacts/action', body)
+        const { ok, data } = await postAuthJSON('/artifacts/action', body)
         if (!ok) {
           setLog && setLog('could not record that decision.')
+        } else if (data && typeof data.message === 'string' && data.message) {
+          // heavy-lane consensus (card 069): a non-admin approve records an
+          // endorsement — surface the honest n/2 progress instead of silence
+          setLog && setLog(data.message)
         }
         loadBrief()
         refreshBriefBadge()
@@ -40846,12 +40870,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           meta.className = 'intel-item__meta'
           const madeBy = String(decision?.madeBy || '').trim()
           const context = String(decision?.context || '').trim()
+          const proposed = String(decision?.status || '') === 'proposed'
           const parts = []
+          if (proposed) parts.push('proposed · awaiting ratification')
           if (madeBy) parts.push(madeBy)
           parts.push(intelRelativeTime(decision?.createdAt))
           if (context) parts.push(context)
           meta.textContent = parts.join(' · ')
           body.append(text, meta)
+          if (proposed && decision?.id) {
+            // card 069 ratify door: any signed-in member flips a recorded
+            // DEFAULT to an active decision; the office "decision" broadcast
+            // re-renders the row, the local flip is just the honest echo
+            const ratify = document.createElement('button')
+            ratify.type = 'button'
+            ratify.className = 'intel-item__ratify pressable'
+            ratify.textContent = 'ratify'
+            ratify.addEventListener('click', async () => {
+              ratify.disabled = true
+              const { ok } = await postAuthJSON('/assistant/decisions/ratify', { decisionId: decision.id })
+              if (ok) {
+                ratify.textContent = 'ratified'
+              } else {
+                ratify.disabled = false
+              }
+            })
+            body.append(ratify)
+          }
           item.append(mark, body)
           return item
         }))

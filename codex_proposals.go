@@ -59,6 +59,10 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 		"query":      query,
 		"status":     codexProposalStatusProposed,
 		"proposedBy": proposedBy,
+		// Card 069 governance: system-proposed work is never auto-lane — this
+		// card exists to collect its one-member confirm; a deploy-phrase query
+		// classifies heavy from the start.
+		"approvalLane": approvalLaneFor(mode, "", codexJobAuthorityForThread(scoutAgentThread{Mode: mode, Query: query}), true),
 	}
 	// Board linkage captured at propose time: an explicit card_id wins,
 	// otherwise the title fuzzy-matches an existing card. No match just means
@@ -121,7 +125,7 @@ func codexProposalPayload(entry meetingMemoryEntry) map[string]any {
 		"proposedBy": entry.Metadata["proposedBy"],
 		"createdAt":  entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId"} {
+	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId", "approvalLane"} {
 		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
 			payload[key] = value
 		}

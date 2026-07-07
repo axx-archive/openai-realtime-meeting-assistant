@@ -31,8 +31,13 @@ const (
 	// decisionStatusSuperseded is stamped by markDecisionSuperseded (+ metadata
 	// "supersededBy"/"supersededAt") when a newer decision replaces an entry —
 	// superseded rows keep their history but leave every active lane.
+	// decisionStatusProposed (card 069) marks a recorded DEFAULT awaiting team
+	// ratification: visible on the ledger surface, but excluded from every
+	// active lane (Scout query pinning, dedupe window, already-recorded list)
+	// until POST /assistant/decisions/ratify flips it active.
 	decisionStatusActive     = "active"
 	decisionStatusSuperseded = "superseded"
+	decisionStatusProposed   = "proposed"
 	// decisionDedupeJaccard: a new statement whose normalized token set
 	// overlaps an existing active decision at or above this ratio is a
 	// restatement, not a new decision.
@@ -288,6 +293,122 @@ func assistantDecisionSupersedeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// governanceLanesDecisionStatement is card 069's DEFAULT approval-governance
+// decision — the three lanes of approval_lanes.go as one self-contained,
+// present-tense ledger statement (<=200 chars, the extraction contract).
+const governanceLanesDecisionStatement = "Approvals run in three lanes: quick single-pass runs launch instantly; goal loops and Scout-proposed work need one member confirm; external-write work ships only with AJ or two member endorsements."
+
+// seedProposedGovernanceDecision records the card-069 default on the ledger
+// with status=proposed so the team can ratify (or supersede) it. Idempotence
+// scans ALL decision rows regardless of status — a ratified (active) or
+// superseded copy must never re-seed as proposed on the next boot.
+func (app *kanbanBoardApp) seedProposedGovernanceDecision() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	key := decisionDedupeKey(governanceLanesDecisionStatement)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if firstNonEmptyString(entry.Metadata["dedupeKey"], decisionDedupeKey(entry.Text)) == key {
+			return
+		}
+	}
+	metadata := map[string]string{
+		"madeBy":    "Scout",
+		"context":   "card 069 default — awaiting team ratification",
+		"dedupeKey": key,
+		"status":    decisionStatusProposed,
+	}
+	if _, _, err := app.memory.appendDecision(durableTimestampID("decision", time.Now()), governanceLanesDecisionStatement, metadata); err != nil {
+		log.Errorf("Failed to seed the governance-lanes decision: %v", err)
+	}
+}
+
+// markDecisionRatified flips a PROPOSED decision to active with the ratifying
+// member on record. Idempotent: an already-active decision stays exactly as
+// first stamped (changed=false); a superseded decision is history and can
+// never be ratified back into the active lanes.
+func (app *kanbanBoardApp) markDecisionRatified(decisionID string, ratifiedBy string) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	decisionID = strings.TrimSpace(decisionID)
+	if decisionID == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("decision id is required")
+	}
+	entry, found := app.memory.entryByKindAndID(meetingMemoryKindDecision, decisionID)
+	if !found {
+		return meetingMemoryEntry{}, false, fmt.Errorf("decision %s not found", decisionID)
+	}
+	switch firstNonEmptyString(entry.Metadata["status"], decisionStatusActive) {
+	case decisionStatusActive:
+		return entry, false, nil
+	case decisionStatusSuperseded:
+		return meetingMemoryEntry{}, false, fmt.Errorf("decision %s is superseded and cannot be ratified", decisionID)
+	}
+	updated, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, decisionID, entry.Text, map[string]string{
+		"status":     decisionStatusActive,
+		"ratifiedBy": strings.TrimSpace(ratifiedBy),
+		"ratifiedAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	if changed {
+		// Same wire event the extraction pass broadcasts, so the mission ledger
+		// re-ranks the row into the active lane live.
+		broadcastOfficeKanbanEvent("decision", decisionPayload(updated))
+	}
+	return updated, changed, nil
+}
+
+// assistantDecisionRatifyHandler is card 069's ratify door: POST {decisionId}
+// flips a PROPOSED default to an active team decision. Same origin+session
+// gates as assistantDecisionSupersedeHandler; any signed-in member — the
+// default was recorded precisely to collect the team's ratification, the flip
+// is non-destructive, and the ratifier is stamped for the audit trail.
+func assistantDecisionRatifyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	payload := struct {
+		DecisionID string `json:"decisionId"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read ratify request")
+		return
+	}
+
+	entry, changed, err := kanbanApp.markDecisionRatified(payload.DecisionID, user.Name)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeAuthError(w, status, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"changed":  changed,
+		"decision": decisionPayload(entry),
+	})
+}
+
 // decisionLedgerSnapshot shapes the newest decisions for the all-users
 // mission payload: active first, newest first within each status, capped.
 // SAFE for the signed-in-wide gate: statements are model-synthesized meeting
@@ -333,6 +454,12 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 	}
 	if supersededAt := strings.TrimSpace(entry.Metadata["supersededAt"]); supersededAt != "" {
 		payload["supersededAt"] = supersededAt
+	}
+	if ratifiedBy := strings.TrimSpace(entry.Metadata["ratifiedBy"]); ratifiedBy != "" {
+		payload["ratifiedBy"] = ratifiedBy
+	}
+	if ratifiedAt := strings.TrimSpace(entry.Metadata["ratifiedAt"]); ratifiedAt != "" {
+		payload["ratifiedAt"] = ratifiedAt
 	}
 
 	return payload

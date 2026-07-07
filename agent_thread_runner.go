@@ -161,6 +161,21 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 	for key, value := range spec.metadata() {
 		metadata[key] = value
 	}
+	// Card 069 governance stamp: every launch carries its approval lane so the
+	// ticker and auto-select read enforcement, not vibes. A goal child rides
+	// its parent's standard lane (the loop already collected its one-member
+	// approval); otherwise the lane derives from the same dimensions the gates
+	// enforce, with a blank spec authority falling back to the phrase-derived
+	// class the codex sidecar will apply at enqueue.
+	if strings.TrimSpace(spec.ParentGoalID) != "" {
+		metadata["approvalLane"] = approvalLaneStandard
+	} else {
+		laneAuthority := strings.TrimSpace(spec.Authority)
+		if laneAuthority == "" {
+			laneAuthority = codexJobAuthorityForThread(scoutAgentThread{Mode: mode, Query: query})
+		}
+		metadata["approvalLane"] = approvalLaneFor(mode, spec.ToolTemplate, laneAuthority, false)
+	}
 	artifact, _, err := app.createOSArtifactWithMetadata(mode, query, content, createdBy, metadata)
 	if err != nil {
 		return scoutAgentThread{}, err

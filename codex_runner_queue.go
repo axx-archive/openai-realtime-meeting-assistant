@@ -266,6 +266,10 @@ func codexApprovalRequiredResult(thread scoutAgentThread, authority string) agen
 	metadata["progressPercent"] = "68"
 	metadata["reviewGate"] = "approval_required"
 	metadata["codexRunner"] = "approval_required"
+	// Card 069: a run that parks at the external-write gate IS heavy-lane work
+	// regardless of its launch-time stamp — consumers read the artifact's
+	// current stamp, never the launch-time one.
+	metadata["approvalLane"] = approvalLaneHeavy
 	return agentThreadWorkerResult{
 		Text:     buildCodexApprovalRequiredArtifact(thread, authority),
 		Metadata: metadata,
@@ -898,11 +902,38 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "approve":
-		// External-write approval is the ONE artifact capability that stays
-		// admin-gated: it authorizes the Codex worker to touch the world.
+		// External-write approval stays admin-gated, now with the card-069
+		// heavy-lane consensus door: the admin approves alone, and two distinct
+		// non-admin members together carry the same weight. A non-admin approve
+		// on a PARKED artifact records an endorsement (202, n/2); the
+		// endorsement that completes the pair falls through and executes the
+		// exact approve path the admin would. A non-admin approve on anything
+		// not parked stays 403 — approve is not a general-purpose action.
+		endorsedToExecution := false
 		if !isArtifactApprovalAdmin(user) {
-			writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
-			return
+			if !artifactAwaitingApproval(artifact.Metadata) {
+				writeAuthError(w, http.StatusForbidden, "external-write approval is admin-only")
+				return
+			}
+			endorsements, reached, err := kanbanApp.recordApprovalEndorsement(artifactID, user.Email)
+			if err != nil {
+				writeAuthError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if !reached {
+				updated, _ := kanbanApp.osArtifactByID(artifactID)
+				writeAuthJSON(w, http.StatusAccepted, map[string]any{
+					"ok":       true,
+					"artifact": updated,
+					"endorsement": map[string]any{
+						"count":    len(endorsements),
+						"required": approvalConsensusRequired,
+					},
+					"message": fmt.Sprintf("endorsement recorded (%d/%d)", len(endorsements), approvalConsensusRequired),
+				})
+				return
+			}
+			endorsedToExecution = true
 		}
 		// A /goal artifact parked at its ship gate resumes through the goal
 		// engine (commit_push), which ships exactly the command the gate
@@ -913,6 +944,12 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			// resumeProcessCheckpoint's teeth are only real if the choice
 			// survives the HTTP door.
 			if err := kanbanApp.resumeApprovedGoalWithChoice(artifactID, user.Name, payload.Choice); err != nil {
+				if endorsedToExecution {
+					// The consensus was consumed but the execution failed:
+					// un-consume it so a retry by either endorser can complete
+					// the launch (resolveCodexProposal's revert discipline).
+					kanbanApp.clearApprovalConsensusStamp(artifactID)
+				}
 				writeAuthError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -943,6 +980,9 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		updated, actions, err := kanbanApp.approveCodexArtifactExternalWrite(artifact, user.Name)
 		if err != nil {
+			if endorsedToExecution {
+				kanbanApp.clearApprovalConsensusStamp(artifactID)
+			}
 			writeAuthError(w, http.StatusBadRequest, err.Error())
 			return
 		}

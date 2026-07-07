@@ -508,6 +508,10 @@ func main() {
 	// 6h) that runs independent of any meeting, so it starts at boot rather than
 	// at room join. No-ops without OPENAI_API_KEY, like every ambient worker.
 	kanbanApp.startSlopClassifierWorker(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")))
+	// Card 069: the DEFAULT approval-governance decision rides the ledger as
+	// PROPOSED from boot (keyless included — this is a store write, not a
+	// worker) so the team can see and ratify it in Mission Intelligence.
+	kanbanApp.seedProposedGovernanceDecision()
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
 	var err error
@@ -529,6 +533,7 @@ func main() {
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)
 	http.HandleFunc("/assistant/goal/cancel", assistantGoalCancelHandler)
 	http.HandleFunc("/assistant/decisions/supersede", assistantDecisionSupersedeHandler)
+	http.HandleFunc("/assistant/decisions/ratify", assistantDecisionRatifyHandler)
 	http.HandleFunc("/assistant/tools", assistantToolsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)

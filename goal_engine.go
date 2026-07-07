@@ -729,6 +729,12 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 		"published":       "false",
 		"latestThreadRun": goalID,
 	}
+	// Card 069 governance stamp: a /goal loop is standard-lane work (one member
+	// approval — the requester's own tap or a proposal confirm); external_write
+	// authority (a process that declares it) classifies heavy from launch. The
+	// stamp is CURRENT-state: the external-write ship gate re-stamps heavy if
+	// the run parks there later.
+	metadata["approvalLane"] = approvalLaneFor("goal", toolTemplate, authority, false)
 	if createdBy != "" {
 		metadata["requestedBy"] = createdBy
 	}
