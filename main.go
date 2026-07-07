@@ -512,6 +512,11 @@ func main() {
 	// PROPOSED from boot (keyless included — this is a store write, not a
 	// worker) so the team can see and ratify it in Mission Intelligence.
 	kanbanApp.seedProposedGovernanceDecision()
+	// Card 083: the Gmail consent + scope proposal publishes as a fixed-ID
+	// artifact with a broadcast bell nudge on first boot (idempotent across
+	// restarts). No Gmail code ships — the team ratifies via the doc's
+	// Decision sentence, which the decision ledger extracts verbatim.
+	seedGmailConsentProposal(kanbanApp)
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
 	var err error
