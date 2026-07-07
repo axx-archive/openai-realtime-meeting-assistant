@@ -7730,9 +7730,11 @@
       }
 
       /* de-chromed: authority + weight read as one quiet caption line, not two
-         bordered pills competing with the Run button (design polish wave) */
+         bordered pills competing with the Run button (design polish wave). The
+         069 governance lane joins the same quiet caption, not a new pill (card 088). */
       .scout-proposal-card__authority,
-      .scout-proposal-card__weight {
+      .scout-proposal-card__weight,
+      .scout-proposal-card__lane {
         white-space: nowrap;
       }
 
@@ -37926,6 +37928,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
+	      // card 088: the 069 governance lane rendered as an honest approval
+	      // caption. Scout-proposed work is never "auto" (the card IS the confirm),
+	      // so in practice this reads "your approval" on standard work and flags the
+	      // heavier external-write gate when a run declares it.
+	      function scoutProposalLaneLabel(lane) {
+	        switch (String(lane || '').toLowerCase()) {
+	          case 'heavy': return 'external-write · admin approval'
+	          case 'standard': return 'your approval'
+	          case 'auto': return 'launches on your tap'
+	          default: return ''
+	        }
+	      }
+
 	      function buildScoutProposalCardNode(message) {
 	        const proposal = message.proposal || {}
 	        const card = document.createElement('div')
@@ -37940,11 +37955,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // package field, and its Run confirms WITHOUT runGoalPipeline (the
 	        // workstream path; the server generates the picture async).
 	        const isImage = String(proposal.kind || '') === 'image'
+	        // card 088: a goal_run is a free-form multi-step goal (no registry
+	        // tool). It renders like the conversational branch — one editable
+	        // objective + a package field — and its Run posts /assistant/goal with
+	        // NO toolTemplate (a plain goal), the typed twin of voice initiate_goal.
+	        const isGoal = String(proposal.kind || '') === 'goal_run'
 	        const toolName = isWorkstream
 	          ? `${assistantToolLabelText(proposal.mode)} workstream`
 	          : isImage
 	            ? 'Concept render'
-	            : String(proposal.toolName || proposal.toolId || 'tool run')
+	            : isGoal
+	              ? 'Multi-step goal'
+	              : String(proposal.toolName || proposal.toolId || 'tool run')
 	        head.appendChild(bfEl('span', 'scout-proposal-card__tool', toolName))
 	        if (proposal.groupLabel) {
 	          head.appendChild(bfEl('span', 'scout-proposal-card__group', String(proposal.groupLabel)))
@@ -37957,8 +37979,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // editable pre-filled inputs — the palette form-card pattern reused:
 	        // form tools render their registry fields, conversational/workstream
 	        // proposals render one editable objective.
-	        const tool = (!isWorkstream && !isImage) ? paletteToolById(proposal.toolId) : null
-	        if (!isWorkstream && !isImage && !tool) loadAssistantTools() // best-effort: the next render gets the registry fields
+	        const tool = (!isWorkstream && !isImage && !isGoal) ? paletteToolById(proposal.toolId) : null
+	        if (!isWorkstream && !isImage && !isGoal && !tool) loadAssistantTools() // best-effort: the next render gets the registry fields
 	        const fieldEls = {}
 	        let objectiveInput = null
 	        if (tool && (tool.formFields || []).length) {
@@ -38003,6 +38025,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          meta.appendChild(bfEl('span', 'scout-proposal-card__authority', String(proposal.authority).replace(/_/g, ' ')))
 	        }
 	        meta.appendChild(bfEl('span', 'scout-proposal-card__weight', String(proposal.weightLabel || '')))
+	        // card 088: the 069 governance lane as the honest approval caption —
+	        // what this card's confirm actually triggers (one member tap vs an
+	        // external-write admin/consensus gate). Additive; the topline wave may
+	        // restyle this row.
+	        if (proposal.lane) {
+	          meta.appendChild(bfEl('span', 'scout-proposal-card__lane', scoutProposalLaneLabel(proposal.lane)))
+	        }
 	        card.appendChild(meta)
 
 	        const status = String(proposal.status || '')

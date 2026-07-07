@@ -827,8 +827,8 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	if !strings.Contains(routed.System, "under-routes is trusted") || !strings.Contains(routed.System, "over-launches is muted") {
 		t.Fatalf("router system prompt missing the trust asymmetry: %s", routed.System)
 	}
-	if len(routed.Tools) != 4 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" || routed.Tools[2].Name != "offer_choices" || routed.Tools[3].Name != "propose_image" {
-		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream + offer_choices + propose_image", routed.Tools)
+	if len(routed.Tools) != 5 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" || routed.Tools[2].Name != "offer_choices" || routed.Tools[3].Name != "propose_goal" || routed.Tools[4].Name != "propose_image" {
+		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream + offer_choices + propose_goal + propose_image", routed.Tools)
 	}
 	for _, tool := range packagingTools() {
 		if !strings.Contains(routed.Tools[0].Description, tool.ID) {

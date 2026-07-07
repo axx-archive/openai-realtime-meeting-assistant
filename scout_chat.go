@@ -264,6 +264,14 @@ const (
 
 	scoutRouterProposalKindToolRun    = "tool_run"
 	scoutRouterProposalKindWorkstream = "workstream"
+	// scoutRouterProposalKindGoalRun is the free-form multi-step goal proposal
+	// (card 088 propose_goal): a real build/ship OBJECTIVE that spans several
+	// deliverables and matches NO single registry tool. Its confirm rides the
+	// card's Run button through POST /assistant/goal with NO toolTemplate — the
+	// typed twin of voice initiate_goal's free-form branch — so the goal engine
+	// decomposes it into a gated loop. Signal-only on the accept route, exactly
+	// like scoutRouterProposalKindToolRun.
+	scoutRouterProposalKindGoalRun = "goal_run"
 	// scoutRouterProposalKindImage is the single-shot concept-render proposal
 	// (card 096): a direct gpt-image-2 call, NOT a contract-gated goal run, so
 	// its confirm generates one image and files a design artifact rather than
@@ -329,7 +337,15 @@ type scoutRouterProposal struct {
 	PackageID   string            `json:"packageId,omitempty"`
 	Fields      map[string]string `json:"fields,omitempty"`
 	Authority   string            `json:"authority,omitempty"`
-	WeightLabel string            `json:"weightLabel"`
+	// Lane is the card's 069 governance lane (approval_lanes.go: auto | standard
+	// | heavy), classified from the same dimensions the ship gates enforce.
+	// Scout-proposed work is system-proposed, so a card is never "auto" — it is
+	// the one-member confirm the standard lane requires, and external_write work
+	// classifies heavy. Carried as DATA so the honest approval caption renders on
+	// the card and the accept/dismiss signal is measurable per lane (card 088
+	// Slice A — the 067 ticker reads this same field to know what auto-approves).
+	Lane        string `json:"lane,omitempty"`
+	WeightLabel string `json:"weightLabel"`
 	// Summary is the one legible sentence the card leads with.
 	Summary string `json:"summary"`
 	// Status flips to accepted/dismissed once the user acts, so a reloaded
@@ -380,6 +396,7 @@ func scoutRouterSystemPrompt() string {
 		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, and discussion are ALWAYS Tier 0 — 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
 		"Tier 1 — propose_workstream: a bounded 'go do one thing' ask (research / design / grill / workflow) that does not match a registry tool.",
 		"Tier 2 — propose_tool_run: the ask matches a registry tool's contract — the user wants a deliverable someone will read (a brief, a one-pager, a scorecard, a memo).",
+		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
 		"Intent map — route these confidently:",
 		"- pitch outline work ('work on the pitch outline', 'outline the deck', 'sequence the narrative slide by slide') -> propose_tool_run deck_outline.",
@@ -483,6 +500,23 @@ func scoutRouterTools() []anthropicTool {
 					},
 				},
 				"required": []string{"question", "options"},
+			},
+		},
+		{
+			Name:        "propose_goal",
+			Description: "Propose a free-form multi-step GOAL run for the user to confirm — a real build/ship objective that spans several deliverables and matches NO single registry tool (e.g. 'package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated goal loop. This is the typed twin of the voice initiate_goal free-form branch; nothing launches without the user's tap.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"objective":  map[string]any{"type": "string", "description": "the end-to-end goal in the user's own words: what the run should ultimately produce"},
+					"package_id": map[string]any{"type": "string", "description": "target venture package id if the conversation names one; else omit"},
+					"authority_hint": map[string]any{
+						"type":        "string",
+						"description": "read_only for research/analysis goals; workspace_write when the goal produces or edits work. external_write is never available here — it is earned only at the ship gate with human approval.",
+						"enum":        []string{toolAuthorityReadOnly, toolAuthorityWorkspaceWrite},
+					},
+				},
+				"required": []string{"objective"},
 			},
 		},
 	}
@@ -762,9 +796,21 @@ func scoutRouterProposalForToolID(toolID string, objective string, query string)
 		Objective:   objective,
 		Query:       strings.TrimSpace(query),
 		Authority:   tool.Authority,
+		Lane:        scoutProposalLane("goal", tool.ID, tool.Authority),
 		WeightLabel: scoutProposalWeightGoalLoop,
 		Summary:     scoutRouterToolRunSummary(tool, objective),
 	}
+}
+
+// scoutProposalLane classifies a proposal card into its 069 governance lane
+// (approval_lanes.go). Every router proposal is SYSTEM-proposed — Scout wrote
+// it, the card is the trust surface that collects the human confirm — so
+// systemProposed is always true here: approvalLaneFor never returns "auto" for
+// a card (the confirm IS the standard lane's one-member approval), and
+// external_write work classifies heavy. This is the single seam that keeps the
+// card's lane in lockstep with what the ship gates actually enforce.
+func scoutProposalLane(mode string, toolTemplate string, authority string) string {
+	return approvalLaneFor(mode, toolTemplate, authority, true)
 }
 
 // scoutChatChoicesFromToolUse validates one offer_choices call: a non-empty
@@ -882,9 +928,21 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			Mode:        mode,
 			Objective:   objective,
 			Query:       strings.TrimSpace(query),
+			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
 			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + objective,
 		}
+	case "propose_goal":
+		args := struct {
+			Objective     string `json:"objective"`
+			AuthorityHint string `json:"authority_hint"`
+			PackageID     string `json:"package_id"`
+		}{}
+		if err := json.Unmarshal(block.Input, &args); err != nil {
+			log.Errorf("Scout router propose_goal input undecodable: %v", err)
+			return nil
+		}
+		return scoutRouterGoalProposal(firstNonBlank(strings.TrimSpace(args.Objective), strings.TrimSpace(query)), args.AuthorityHint, strings.TrimSpace(args.PackageID), query)
 	case "propose_image":
 		args := struct {
 			Prompt string `json:"prompt"`
@@ -918,9 +976,47 @@ func scoutRouterImageProposal(prompt string, query string) *scoutRouterProposal 
 		Objective:   prompt,
 		Query:       strings.TrimSpace(query),
 		Authority:   toolAuthorityWorkspaceWrite,
+		Lane:        scoutProposalLane("", "", toolAuthorityWorkspaceWrite),
 		WeightLabel: scoutProposalWeightImageRender,
 		Summary:     scoutRouterImageSummary(prompt),
 	}
+}
+
+// scoutRouterGoalProposal builds the free-form multi-step goal proposal card
+// (card 088 propose_goal): the editable objective drives a plain goal-engine
+// run (no toolTemplate), the authority is clamped exactly like voice
+// initiate_goal and assistantGoalHandler — read_only or workspace_write, NEVER
+// external_write (that is earned only at the ship gate with human approval) —
+// and the originating ask stays the Tier-0 escape query. Shared by the
+// propose_goal validation branch; the card's Run posts POST /assistant/goal.
+func scoutRouterGoalProposal(objective string, authorityHint string, packageID string, query string) *scoutRouterProposal {
+	objective = strings.TrimSpace(objective)
+	if objective == "" {
+		return nil
+	}
+	authority := toolAuthorityWorkspaceWrite
+	if strings.EqualFold(strings.TrimSpace(authorityHint), toolAuthorityReadOnly) {
+		authority = toolAuthorityReadOnly
+	}
+	return &scoutRouterProposal{
+		Kind:        scoutRouterProposalKindGoalRun,
+		Objective:   objective,
+		Query:       strings.TrimSpace(query),
+		PackageID:   strings.TrimSpace(packageID),
+		Authority:   authority,
+		Lane:        scoutProposalLane("goal", "", authority),
+		WeightLabel: scoutProposalWeightGoalLoop,
+		Summary:     scoutRouterGoalRunSummary(objective),
+	}
+}
+
+// scoutRouterGoalRunSummary is the free-form goal card's one legible sentence:
+// the multi-step loop it launches (decompose -> run subtasks -> review against
+// the goal -> gate -> report), the human-checkpoint law, and the honest cost
+// gate (one explicit tap).
+func scoutRouterGoalRunSummary(objective string) string {
+	objective = strings.TrimRight(strings.TrimSpace(objective), ".")
+	return "this launches the multi-step goal loop — " + objective + ". Scout decomposes it, runs the subtasks, reviews against the goal, and gates before anything ships; nothing runs until you tap Run."
 }
 
 // scoutRouterImageSummary is the concept-render card's one legible sentence:

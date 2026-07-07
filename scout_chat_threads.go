@@ -832,15 +832,20 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	app.recordSignalEvent(user.Name, signalEvent, valence, "", "", map[string]string{
 		"toolId":    firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode)),
 		"objective": objective,
+		// The governance lane (card 088) rides the signal so proposal acceptance
+		// is measurable per lane from day one — the §2 misfire economics fuel.
+		"lane": strings.TrimSpace(proposal.Lane),
 	})
 
 	response := map[string]any{"ok": true}
 
 	if verb == "accepted" {
 		// Tier 1 only: the workstream confirm launches here — exactly the
-		// explicit single-shot path channels use. Tier 2 (tool_run) launches
-		// via POST /assistant/goal from the card's Run button; this branch
-		// records its signal only.
+		// explicit single-shot path channels use. Tool runs (tool_run) and
+		// free-form goals (goal_run, card 088) launch via POST /assistant/goal
+		// from the card's Run button — a plain goal for goal_run, a
+		// toolTemplate goal for tool_run — so both fall through this switch and
+		// record their signal only; the card's Run stays the single launch door.
 		if strings.EqualFold(strings.TrimSpace(proposal.Kind), scoutRouterProposalKindWorkstream) {
 			mode := strings.ToLower(strings.TrimSpace(proposal.Mode))
 			switch mode {

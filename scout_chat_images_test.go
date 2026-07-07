@@ -18,12 +18,13 @@ import (
 )
 
 // The propose_image door is gated on OpenAI: a keyless-OpenAI deploy must never
-// be offered a render it cannot produce (the three text-route tools stay), and a
-// configured deploy gains it as the fourth tool.
+// be offered a render it cannot produce (the four text-route tools stay —
+// propose_tool_run / propose_workstream / offer_choices / propose_goal), and a
+// configured deploy gains it as the fifth tool.
 func TestScoutChatRouterImageToolGatedOnOpenAIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
-	if tools := scoutRouterTools(); len(tools) != 3 {
-		t.Fatalf("keyless-OpenAI router tools=%d, want 3 (no propose_image)", len(tools))
+	if tools := scoutRouterTools(); len(tools) != 4 {
+		t.Fatalf("keyless-OpenAI router tools=%d, want 4 (no propose_image)", len(tools))
 	} else {
 		for _, tool := range tools {
 			if tool.Name == "propose_image" {
@@ -37,8 +38,8 @@ func TestScoutChatRouterImageToolGatedOnOpenAIKey(t *testing.T) {
 
 	t.Setenv("OPENAI_API_KEY", "test-image-key")
 	tools := scoutRouterTools()
-	if len(tools) != 4 || tools[3].Name != "propose_image" {
-		t.Fatalf("configured router tools=%#v, want propose_image appended fourth", tools)
+	if len(tools) != 5 || tools[4].Name != "propose_image" {
+		t.Fatalf("configured router tools=%#v, want propose_image appended fifth", tools)
 	}
 	if !strings.Contains(scoutRouterSystemPrompt(), "propose_image") {
 		t.Fatal("the configured router system prompt must name propose_image in the intent map")
