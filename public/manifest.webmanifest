@@ -1,11 +1,31 @@
 {
+  "id": "/",
   "name": "Bonfire",
   "short_name": "Bonfire",
+  "description": "Bonfire — your company as intelligence. Meet, decide, and ship together.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5F5F7",
   "theme_color": "#F5F5F7",
   "icons": [
+    {
+      "src": "/public/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/public/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/public/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "/public/app-icon.svg",
       "sizes": "any",

@@ -212,6 +212,13 @@ func pushNotificationRecord(record notificationRecord) {
 	} else {
 		sendOSEventToUser(record.UserEmail, osEvt)
 	}
+	// Card 089: the same record buzzes subscribed phones over Web Push. This
+	// is the single fan-out seam every durable notification (live + deferred
+	// flush) already funnels through, so one hook covers every producer. Run
+	// it off the fan-out path — a per-subscription network call must never
+	// block the websocket sends above. settleProposalNotification rewrites its
+	// nudge without calling here on purpose (no re-buzz on settle).
+	go deliverWebPushForRecord(record)
 }
 
 // flushDeferredNotifications delivers every notification queued with

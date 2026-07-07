@@ -3,6 +3,7 @@ module github.com/openai/openai-realtime-meeting-assistant
 go 1.25.0
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/pion/interceptor v0.1.41

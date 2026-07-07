@@ -6,8 +6,17 @@
     <meta name="theme-color" content="#F5F5F7">
     <meta name="application-name" content="Bonfire">
     <meta name="apple-mobile-web-app-title" content="Bonfire">
+    <!-- iOS home-screen install (card 089): launching standalone is a hard
+         requirement for Web Push on iOS 16.4+ — a Safari tab has no
+         Notification API. mobile-web-app-capable is the standard equivalent. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>BonfireOS</title>
     <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
+    <!-- iOS ignores SVG icons — a PNG apple-touch-icon is required or the
+         home-screen tile becomes a page screenshot. -->
+    <link rel="apple-touch-icon" href="/public/apple-touch-icon.png">
     <link rel="manifest" href="/public/manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18608,6 +18617,17 @@
       .wake-word-setting__text strong { font: var(--type-body-medium); color: var(--text-1); }
       .wake-word-setting__text span { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
 
+      /* Phone push settings (card 089). Reuses the wake-word row for the device
+         master toggle; the per-kind list is a lighter checkbox column. */
+      .push-settings__intro { font: 12.5px var(--font-sans); color: var(--text-2); margin: 0 0 12px; }
+      .push-ios-hint { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-2); margin: 10px 0 0; padding: 10px 12px; border: 1px dashed var(--line-2, var(--line-1)); border-radius: var(--r-md, 10px); }
+      .push-ios-hint strong { color: var(--text-1); }
+      .push-kinds { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+      .push-setting { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid var(--line-1); border-radius: var(--r-md, 10px); cursor: pointer; min-height: var(--hit-min, 44px); }
+      .push-setting input { flex: none; }
+      .push-setting span { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-2); }
+      .push-setting--away { border-style: dashed; }
+
       /* Deal Room admin/requester surface (Wave 14 capstone) — the list of
          share requests + their live state. Rows reuse the tray/approval register
          so a pending Deal Room reads exactly like any other admin approval. */
@@ -20161,6 +20181,7 @@
             <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true">profile</button>
             <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false">account</button>
             <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false">audio &amp; video</button>
+            <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false">notifications</button>
             <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false">deal rooms</button>
             <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false">appearance</button>
           </nav>
@@ -20329,6 +20350,33 @@
                 <p class="av-saved" id="videoLookSaved" hidden>✓ saved for this device</p>
               </div>
             </section>
+            <section data-settings-section="notifications" hidden aria-label="Notifications">
+              <div class="voice-profile__label">phone notifications</div>
+              <p class="push-settings__intro">Get a buzz on your phone when something needs you — chat mentions, task proposals, agent milestones — even with Bonfire closed.</p>
+              <label class="wake-word-setting">
+                <input type="checkbox" id="pushMasterToggle">
+                <span class="wake-word-setting__text">
+                  <strong>push to this device</strong>
+                  <span>turn on notifications for this phone or computer. You'll be asked for permission once.</span>
+                </span>
+              </label>
+              <p class="av-status-warn" id="pushPermissionWarn" role="status" hidden></p>
+              <!-- iOS caveat: a Safari tab has no Notification API and iOS has no
+                   install-prompt API, so the only path is Share → Add to Home
+                   Screen, then launch standalone. Shown when Notification is
+                   unavailable or we're an iOS browser not yet standalone. -->
+              <p class="push-ios-hint" id="pushIosHint" role="status" hidden>On iPhone or iPad: tap the <strong>Share</strong> button and choose <strong>Add to Home Screen</strong>, then open Bonfire from your home screen and enable this here. Push needs iOS 16.4 or later.</p>
+              <div class="push-kinds" id="pushKinds" hidden>
+                <div class="voice-profile__label">what buzzes</div>
+                <label class="push-setting"><input type="checkbox" data-push-kind="chat"><span>chat mentions &amp; channel posts</span></label>
+                <label class="push-setting"><input type="checkbox" data-push-kind="task"><span>task proposals</span></label>
+                <label class="push-setting"><input type="checkbox" data-push-kind="agent"><span>agent &amp; workflow updates</span></label>
+                <label class="push-setting"><input type="checkbox" data-push-kind="alert"><span>alerts</span></label>
+                <label class="push-setting"><input type="checkbox" data-push-kind="info"><span>everything else</span></label>
+                <label class="push-setting push-setting--away"><input type="checkbox" id="pushOnlyWhenAway"><span>only when I'm away — skip if I'm active in Bonfire on another device</span></label>
+                <p class="av-saved" id="pushPrefsSaved" hidden>✓ saved</p>
+              </div>
+            </section>
             <section data-settings-section="dealrooms" hidden aria-label="Deal Rooms">
               <div class="voice-profile__label">deal rooms</div>
               <p class="deal-room__intro">Read-only shareable exports of an assembled package binder. Request one from a package’s binder; a studio admin approves it into a link and can revoke it here.</p>
@@ -20384,6 +20432,9 @@
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
       let resetToken = ''
+      /* card 089 — a Web Push tap opens /?bell=<id>; captured on boot and
+         consumed by routeBellDeepLink() once loadNotifications() has the entry. */
+      let pendingBellNotificationId = ''
       /* office event socket — a second websocket on the same endpoint with an
          `office` hello. It follows auth (not room membership) and carries the
          signed-in-safe broadcast set; the room socket (ws) keeps its single
@@ -21294,6 +21345,26 @@
       settingsNavButtons.forEach(button => {
         button.addEventListener('click', () => setSettingsSection(button.dataset.settingsSection))
       })
+      // Card 089 — phone-push settings wiring.
+      {
+        const pushMaster = document.getElementById('pushMasterToggle')
+        if (pushMaster) {
+          pushMaster.addEventListener('change', () => {
+            if (pushMaster.checked) {
+              enablePushOnThisDevice()
+            } else {
+              disablePushOnThisDevice()
+            }
+          })
+        }
+        const pushOnlyWhenAway = document.getElementById('pushOnlyWhenAway')
+        if (pushOnlyWhenAway) {
+          pushOnlyWhenAway.addEventListener('change', savePushPrefs)
+        }
+        document.querySelectorAll('[data-push-kind]').forEach(input => {
+          input.addEventListener('change', savePushPrefs)
+        })
+      }
       audioNoiseModeInputs.forEach(input => {
         input.addEventListener('change', () => {
           if (!input.checked) {
@@ -21773,6 +21844,11 @@
 
       setConnectionState('idle', 'not connected')
       resetToken = new URLSearchParams(window.location.search).get('reset') || ''
+      // Card 089: capture a push deep-link (/?bell=<id>) before anything strips
+      // the query, and register the service worker that both powers the
+      // home-screen install and routes push taps.
+      pendingBellNotificationId = new URLSearchParams(window.location.search).get('bell') || ''
+      registerBonfireServiceWorker()
       {
         const cachedIdentity = loadCachedIdentity()
         if (cachedIdentity?.email && !loginEmailInput.value) {
@@ -22282,6 +22358,9 @@
         if (name === 'dealrooms') {
           loadDealRooms()
         }
+        if (name === 'notifications') {
+          loadPushConfig()
+        }
       }
 
       function closeSettings(options = {}) {
@@ -22657,7 +22736,7 @@
 	          resetPersistedScoutChatState()
 	          setNotificationPanelOpen(false)
 	        }
-	        loadNotifications()
+	        loadNotifications().then(() => { if (typeof routeBellDeepLink === 'function') routeBellDeepLink() })
 	      }
 
       /* ---------- office event socket ----------
@@ -36134,6 +36213,275 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         for (let index = payload.length - 1; index >= 0; index--) {
           appendNotificationEntry(payload[index], { toast: false })
         }
+      }
+
+      // ---------- Web Push / PWA (card 089) ----------
+      // The service worker (public/sw.js, served no-store from the root so its
+      // scope is "/") powers both the home-screen install and push. It caches
+      // nothing — index.html is intentionally no-store — it exists only to show
+      // push notifications and route their taps.
+      let pushVapidPublicKey = ''
+
+      function pushIsSupported() {
+        return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+      }
+
+      function pushIsStandalone() {
+        return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true
+      }
+
+      function pushIsIOS() {
+        const ua = navigator.userAgent || ''
+        return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      }
+
+      // Push on iOS needs a home-screen install launched standalone (a Safari
+      // tab has no Notification API) and there is NO install-prompt API on iOS —
+      // the only path is Share → Add to Home Screen.
+      function pushNeedsHomeScreenInstall() {
+        return typeof Notification === 'undefined' || (pushIsIOS() && !pushIsStandalone())
+      }
+
+      // Standard URL-safe base64 → Uint8Array for the VAPID applicationServerKey.
+      function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+        const rawData = window.atob(base64)
+        const output = new Uint8Array(rawData.length)
+        for (let i = 0; i < rawData.length; i++) {
+          output[i] = rawData.charCodeAt(i)
+        }
+        return output
+      }
+
+      function registerBonfireServiceWorker() {
+        if (!('serviceWorker' in navigator)) {
+          return
+        }
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(error => {
+          console.warn('Service worker registration failed', error)
+        })
+        navigator.serviceWorker.addEventListener('message', handlePushServiceWorkerMessage)
+      }
+
+      // A push tap in an already-open tab arrives as a postMessage from the SW.
+      function handlePushServiceWorkerMessage(event) {
+        const data = event?.data
+        if (!data || data.type !== 'bell' || !data.id) {
+          return
+        }
+        pendingBellNotificationId = String(data.id)
+        loadNotifications().then(() => routeBellDeepLink())
+      }
+
+      // Consume a captured /?bell=<id> (or SW message) once notifications are
+      // loaded: route to the same thread/proposal/artifact the bell click would,
+      // then strip the param so a refresh doesn't re-route.
+      function routeBellDeepLink() {
+        const id = pendingBellNotificationId
+        if (!id) {
+          return
+        }
+        pendingBellNotificationId = ''
+        const entry = notificationEntries.find(candidate => candidate.id === id)
+        if (entry) {
+          openNotificationEntry(entry)
+        }
+        try {
+          const url = new URL(window.location.href)
+          url.searchParams.delete('bell')
+          window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+        } catch {
+          // best-effort URL cleanup
+        }
+      }
+
+      function syncPushKindInputs(prefs) {
+        const kinds = (prefs && prefs.kinds) || {}
+        document.querySelectorAll('[data-push-kind]').forEach(input => {
+          const kind = input.dataset.pushKind
+          input.checked = kinds[kind] !== false
+        })
+        const away = document.getElementById('pushOnlyWhenAway')
+        if (away) {
+          away.checked = prefs ? prefs.onlyWhenAway !== false : true
+        }
+      }
+
+      function setPushWarn(message) {
+        const warn = document.getElementById('pushPermissionWarn')
+        if (!warn) {
+          return
+        }
+        warn.textContent = message || ''
+        warn.hidden = !message
+      }
+
+      async function loadPushConfig() {
+        const master = document.getElementById('pushMasterToggle')
+        const iosHint = document.getElementById('pushIosHint')
+        const kindsBox = document.getElementById('pushKinds')
+        if (iosHint) {
+          iosHint.hidden = !pushNeedsHomeScreenInstall()
+        }
+        if (!pushIsSupported()) {
+          if (master) {
+            master.checked = false
+            master.disabled = true
+          }
+          if (kindsBox) {
+            kindsBox.hidden = true
+          }
+          if (!pushNeedsHomeScreenInstall()) {
+            setPushWarn('This browser does not support push notifications.')
+          } else {
+            setPushWarn('')
+          }
+          return
+        }
+        if (master) {
+          master.disabled = false
+        }
+        try {
+          const response = await fetch('/assistant/push/config', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const config = await response.json()
+          pushVapidPublicKey = String(config?.vapidPublicKey || '')
+          syncPushKindInputs(config?.prefs)
+          const registration = await navigator.serviceWorker.ready
+          const subscription = await registration.pushManager.getSubscription()
+          const granted = Notification.permission === 'granted'
+          const on = Boolean(subscription) && granted
+          if (master) {
+            master.checked = on
+          }
+          if (kindsBox) {
+            kindsBox.hidden = !on
+          }
+          if (Notification.permission === 'denied') {
+            setPushWarn('Notifications are blocked for this site — turn them on in your browser settings, then try again.')
+          } else {
+            setPushWarn('')
+          }
+        } catch (error) {
+          console.warn('Push config load failed', error)
+        }
+      }
+
+      async function enablePushOnThisDevice() {
+        const master = document.getElementById('pushMasterToggle')
+        const kindsBox = document.getElementById('pushKinds')
+        if (!pushIsSupported()) {
+          if (master) {
+            master.checked = false
+          }
+          const iosHint = document.getElementById('pushIosHint')
+          if (iosHint) {
+            iosHint.hidden = false
+          }
+          return
+        }
+        try {
+          const permission = await Notification.requestPermission()
+          if (permission !== 'granted') {
+            if (master) {
+              master.checked = false
+            }
+            setPushWarn(permission === 'denied'
+              ? 'Notifications are blocked for this site — turn them on in your browser settings, then try again.'
+              : 'Notification permission was not granted.')
+            return
+          }
+          if (!pushVapidPublicKey) {
+            const response = await fetch('/assistant/push/config', { cache: 'no-store' })
+            if (response.ok) {
+              const config = await response.json()
+              pushVapidPublicKey = String(config?.vapidPublicKey || '')
+            }
+          }
+          if (!pushVapidPublicKey) {
+            setPushWarn('Push is unavailable right now — please try again later.')
+            if (master) {
+              master.checked = false
+            }
+            return
+          }
+          const registration = await navigator.serviceWorker.ready
+          let subscription = await registration.pushManager.getSubscription()
+          if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(pushVapidPublicKey)
+            })
+          }
+          const payload = subscription.toJSON()
+          await fetch('/assistant/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: payload.endpoint, keys: payload.keys })
+          })
+          setPushWarn('')
+          if (kindsBox) {
+            kindsBox.hidden = false
+          }
+        } catch (error) {
+          console.warn('Enable push failed', error)
+          if (master) {
+            master.checked = false
+          }
+          setPushWarn('Could not enable push on this device.')
+        }
+      }
+
+      async function disablePushOnThisDevice() {
+        const kindsBox = document.getElementById('pushKinds')
+        if (kindsBox) {
+          kindsBox.hidden = true
+        }
+        setPushWarn('')
+        if (!('serviceWorker' in navigator)) {
+          return
+        }
+        try {
+          const registration = await navigator.serviceWorker.ready
+          const subscription = await registration.pushManager.getSubscription()
+          if (!subscription) {
+            return
+          }
+          const endpoint = subscription.endpoint
+          await subscription.unsubscribe()
+          await fetch('/assistant/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint })
+          })
+        } catch (error) {
+          console.warn('Disable push failed', error)
+        }
+      }
+
+      function savePushPrefs() {
+        const kinds = {}
+        document.querySelectorAll('[data-push-kind]').forEach(input => {
+          kinds[input.dataset.pushKind] = input.checked
+        })
+        const away = document.getElementById('pushOnlyWhenAway')
+        const body = { kinds, onlyWhenAway: away ? away.checked : true }
+        fetch('/assistant/push/prefs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(() => {
+          const saved = document.getElementById('pushPrefsSaved')
+          if (saved) {
+            saved.hidden = false
+            window.setTimeout(() => { saved.hidden = true }, 1600)
+          }
+        }).catch(() => {
+          // prefs re-sync on the next settings open
+        })
       }
 
       async function loadNotifications() {

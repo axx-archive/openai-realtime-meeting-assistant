@@ -520,6 +520,11 @@ func main() {
 		panic(err)
 	}
 
+	// Card 089: mint (or load) the Web Push VAPID keypair at boot so the
+	// public key is ready the moment a client asks to subscribe. Persists to
+	// data/vapid-keys.json, which survives deploys like users.json.
+	loadOrCreateVAPIDKeys()
+
 	// websocket handler
 	http.HandleFunc("/healthz", healthHandler)
 	http.HandleFunc("/readyz", readinessHandler)
@@ -538,6 +543,10 @@ func main() {
 	http.HandleFunc("/assistant/tools", assistantToolsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
+	http.HandleFunc("/assistant/push/config", assistantPushConfigHandler)
+	http.HandleFunc("/assistant/push/subscribe", assistantPushSubscribeHandler)
+	http.HandleFunc("/assistant/push/unsubscribe", assistantPushUnsubscribeHandler)
+	http.HandleFunc("/assistant/push/prefs", assistantPushPrefsHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
 	http.HandleFunc("/assistant/board/drafts/", assistantBoardDraftActionHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
@@ -578,6 +587,12 @@ func main() {
 	http.HandleFunc("/native/config", nativeClientConfigHandler)
 	http.HandleFunc("/ice-test", iceTestHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
+	// The service worker must be served from the ORIGIN ROOT so its scope is
+	// "/" (a worker under /public/ could only control /public/*). This exact
+	// ServeMux pattern beats the "/" catch-all, so shouldServeIndexHTML never
+	// sees it. Served no-store so a redeploy's worker propagates immediately —
+	// the worker itself caches nothing (index.html is intentionally no-store).
+	http.HandleFunc("/sw.js", serviceWorkerHandler)
 
 	// index.html handler. The SPA is served for "/" and browser navigations
 	// only: unknown API-ish paths (e.g. /assistant/*, /brain/state) must 404
@@ -1924,6 +1939,21 @@ func publicAssetHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/manifest+json")
 	}
 	http.StripPrefix("/public/", http.FileServer(http.Dir("public"))).ServeHTTP(w, r)
+}
+
+// serviceWorkerHandler serves public/sw.js from the origin root so the worker's
+// scope is "/". no-store keeps a redeployed worker from being pinned by an
+// HTTP cache; the worker's own body caches nothing, so the app shell stays as
+// no-store as index.html itself.
+func serviceWorkerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, "public/sw.js")
 }
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {

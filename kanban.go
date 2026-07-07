@@ -5728,6 +5728,32 @@ func sendKanbanEventToUser(email string, event string, data any) {
 	}
 }
 
+// userHasLiveKanbanSocket reports whether the account currently holds an
+// office or admitted-participant websocket — i.e. is "present" at the desk.
+// Powers the only-when-away web-push rule (card 089): a phone stays quiet for
+// what an open session already surfaced. Scans the same two pools as
+// sendKanbanEventToUser under the shared read lock.
+func userHasLiveKanbanSocket(email string) bool {
+	email = normalizeAccountEmail(email)
+	if email == "" {
+		return false
+	}
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	for _, state := range officeConnections {
+		if state.websocket != nil && state.sessionEmail == email {
+			return true
+		}
+	}
+	for _, state := range activeParticipantConnections {
+		if state.websocket != nil && state.sessionEmail == email {
+			return true
+		}
+	}
+	return false
+}
+
 func isExpectedKanbanBroadcastClose(err error) bool {
 	if err == nil {
 		return false
