@@ -356,7 +356,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function handleChatThreadEvent(payload)",
 		"function syncChatThreadPolling()",
 		`id="chatChannelThreads"`,
-		`id="chatScopeChannel"`,
 		"addArtifactEntry(result.artifact, { select: false })",
 		"notes sent · ${meetingName} → memory",
 		"method: 'PATCH'",
@@ -2010,7 +2009,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 		"function setLoginStatusPill(state, text)",
 		"color-mix(in srgb, var(--accent) 45%, var(--bg-app))",
 		// hidden must survive the .chat-thread-item display:flex rule so the
-		// default Scout row really disappears under the channel scope
+		// default Scout row really disappears once a real private thread exists
 		".chat-thread-item[hidden]",
 		// the board surface mirrors the stage: occupancy excludes the local
 		// identity outside the room, the ring requires genuine audio, and the
@@ -2038,17 +2037,21 @@ func TestIndexAuditFixWiring(t *testing.T) {
 		}
 	}
 
-	// the segmented scope filters the list: channel view never shows the
-	// private Scout thread, private view never shows channels
+	// card 070: no scope toggle — both audiences render at once into their own
+	// always-visible section; the default Scout row is the private section's
+	// empty state, and the channels-empty note is the channel section's
 	renderBody := functionBody(html, "function renderChatAgentThreads()")
-	if !strings.Contains(renderBody, "const channelScope = newChatThreadVisibility === 'public'") {
-		t.Fatal("renderChatAgentThreads must treat the scope control as a list filter")
+	if !strings.Contains(renderBody, "const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))") ||
+		!strings.Contains(renderBody, "const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))") {
+		t.Fatal("renderChatAgentThreads must always compute both the channels and private lists")
 	}
-	if !strings.Contains(renderBody, "chatDefaultThread.hidden = channelScope || privates.length > 0") {
-		t.Fatal("the default private Scout row must hide in the channel scope")
+	if !strings.Contains(renderBody, "chatDefaultThread.hidden = privates.length > 0") {
+		t.Fatal("the default private Scout row must hide once a real private thread exists")
 	}
-	// the row's pressed highlight tracks the actually-open thread, not the
-	// emptiness of the current scope
+	if !strings.Contains(renderBody, "chatChannelsEmpty.hidden = channels.length > 0") {
+		t.Fatal("the channels-empty note must hide once a real channel exists")
+	}
+	// the row's pressed highlight tracks the actually-open thread
 	if !strings.Contains(renderBody, "chatDefaultThread.setAttribute('aria-pressed', selectedScoutChatThread() ? 'false' : 'true')") {
 		t.Fatal("the default Scout row's aria-pressed must follow the open thread")
 	}
@@ -2196,24 +2199,24 @@ func TestIndexOfficeShellResilienceGuards(t *testing.T) {
 		t.Fatal("run-card follow-up must be gated on the active thread referencing the artifact")
 	}
 
-	// Chat-thread auto-select respects the scope pill (never lands a public
-	// channel under the 'private' filter), and explicit selection keeps the
-	// pill in sync with the opened thread's visibility.
+	// card 070: with both sections always rendered there is no scope pill to
+	// sync — auto-select on archive/reload lands on a fallback thread of the
+	// archived one's audience (channel→channel, private→private), else newest.
 	for _, want := range []string{
-		"function fallbackScoutThreadIdForScope()",
-		"function syncChatScopeToSelectedThread()",
+		"function fallbackScoutThreadIdForScope(reference)",
 		"activeScoutThreadId = fallbackScoutThreadIdForScope()",
+		"activeScoutThreadId = fallbackScoutThreadIdForScope(thread)",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing scope-aware selection marker %q", want)
+			t.Fatalf("index.html missing fallback-selection marker %q", want)
 		}
 	}
 	if strings.Contains(html, "activeScoutThreadId = scoutChatThreads[0]?.id || ''") {
 		t.Fatal("thread fallback selection must go through fallbackScoutThreadIdForScope, not scoutChatThreads[0]")
 	}
-	selectBody := functionBody(html, "function selectScoutChatThread(id)")
-	if !strings.Contains(selectBody, "syncChatScopeToSelectedThread()") {
-		t.Fatal("selecting a thread must sync the scope pill to its visibility")
+	// the retired scope-sync helper must be fully gone
+	if strings.Contains(html, "syncChatScopeToSelectedThread") {
+		t.Fatal("syncChatScopeToSelectedThread must be removed with the scope toggle")
 	}
 }
 

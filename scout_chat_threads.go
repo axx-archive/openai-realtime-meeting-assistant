@@ -18,6 +18,19 @@ const (
 	scoutChatMaxFileTextBytes   = 64 << 10
 )
 
+// Chat has exactly two audiences, and this is doctrine, not a gap (card 070):
+//
+//   - private = the owner + Scout, and NOBODY else. Enforced on every read by
+//     scoutChatThreadsSnapshot and scoutChatThreadByID (a non-owner is denied
+//     unless the thread is public).
+//   - public  = an office channel every signed-in user can read and post to.
+//
+// There are deliberately NO human-to-human 1:1 DMs: the office is the shared
+// surface, so "message a person privately" routes through a public #channel
+// (with an @mention) or through each person's own private Scout. The "dm"
+// alias accepted by startChatAsUser therefore resolves to the REQUESTER'S OWN
+// Scout thread — it never opens a cross-user private channel. Team ratification
+// pending; the code already behaves this way and these constants pin it.
 const (
 	scoutChatVisibilityPrivate = "private"
 	scoutChatVisibilityPublic  = "public"
@@ -1568,6 +1581,10 @@ func (app *kanbanBoardApp) startChatAsUser(args map[string]any, requesterEmail s
 	var err error
 	switch audience {
 	case "thread", "private_thread", "dm":
+		// "dm" is an alias, not a human-to-human direct message: private threads
+		// are owner+Scout only (see the visibility doctrine above), so every
+		// private audience resolves to the REQUESTER'S OWN Scout thread. There is
+		// no path here to a cross-user private channel.
 		thread, err = app.resolveOrCreatePrivateThread(requesterEmail, authorName, asString(args["name"]))
 	default:
 		audience = "channel"

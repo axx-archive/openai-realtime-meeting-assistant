@@ -80,6 +80,56 @@ func TestScoutChatChannelVisibilityAccessControl(t *testing.T) {
 	}
 }
 
+// Card 070 doctrine: private is owner+Scout only, so every private audience of
+// start_chat_as_user (including the "dm" alias) resolves to the REQUESTER'S OWN
+// Scout thread and never opens a cross-user private channel.
+func TestStartChatAsUserPrivateAudienceResolvesOwnThreadNeverCrossUser(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	for _, audience := range []string{"dm", "thread", "private_thread"} {
+		result, changed, err := app.startChatAsUser(map[string]any{
+			"audience": audience,
+			"text":     "note to self via " + audience,
+		}, "aj@shareability.com")
+		if err != nil {
+			t.Fatalf("audience %q: startChatAsUser: %v", audience, err)
+		}
+		if changed {
+			t.Fatalf("audience %q: start_chat_as_user must not report a board change", audience)
+		}
+		if result["audience"] == "channel" {
+			t.Fatalf("audience %q: a private audience must never resolve to a channel", audience)
+		}
+		threadID := asString(result["threadId"])
+		if threadID == "" {
+			t.Fatalf("audience %q: missing threadId in %#v", audience, result)
+		}
+
+		// The owner reads their own private thread; it is private and owned by
+		// the requester — never a channel, never someone else's surface.
+		thread, _, err := app.scoutChatThreadByID("aj@shareability.com", threadID)
+		if err != nil {
+			t.Fatalf("audience %q: owner cannot read own thread: %v", audience, err)
+		}
+		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPrivate {
+			t.Fatalf("audience %q: visibility=%q, want private", audience, thread.Visibility)
+		}
+		if normalizeAccountEmail(thread.OwnerEmail) != "aj@shareability.com" {
+			t.Fatalf("audience %q: owner=%q, want the requester — no cross-user DM", audience, thread.OwnerEmail)
+		}
+
+		// No other signed-in user can see it: there are no human-to-human DMs.
+		if _, _, err := app.scoutChatThreadByID("tim@shareability.com", threadID); err == nil {
+			t.Fatalf("audience %q: private thread leaked to another user", audience)
+		}
+		for _, seen := range app.scoutChatThreadsSnapshot("tim@shareability.com", false, 100) {
+			if seen.ID == threadID {
+				t.Fatalf("audience %q: private thread appeared in another user's snapshot", audience)
+			}
+		}
+	}
+}
+
 func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

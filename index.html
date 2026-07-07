@@ -7102,14 +7102,6 @@
         border-right: 1px solid var(--line-1);
       }
 
-      .chat-threads__head {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 12px 12px 8px;
-        flex: none;
-      }
-
       /* app extra (kept per D1): live filter over the thread rows */
       .chat-threads__search {
         flex: none;
@@ -7191,10 +7183,32 @@
         display: none;
       }
 
-      /* the scope filter already labels each list — the section captions
-         retired with the design sidebar (markup + wiring kept) */
+      /* card 070: both sections are always on screen, so each caption headlines
+         its own list — no scope toggle to lean on anymore */
+      .chat-threads__section-head {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 12px 14px 4px;
+      }
+
       .chat-threads__label {
-        display: none;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* per-section create + sized to sit inline with its caption */
+      .chat-threads__new--inline {
+        width: 26px;
+        height: 26px;
+        border-radius: 9px;
       }
 
       /* scope footer — pinned under the rows (design §7.1, copy verbatim) */
@@ -7206,47 +7220,6 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
-      }
-
-      /* mono segmented public/private — design segStyle; the .chat-threads
-         scope outranks the room's .stage-segmented recipe */
-      .chat-threads .chat-new-scope {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        height: auto;
-        margin: 0;
-        padding: 3px;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-3);
-      }
-
-      .chat-threads .chat-new-scope button {
-        flex: 1;
-        min-width: 0;
-        height: 28px;
-        min-height: 0;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: var(--r-full);
-        background: transparent;
-        color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        cursor: pointer;
-        transition:
-          border-color var(--dur-med) var(--ease),
-          background var(--dur-med) var(--ease),
-          color var(--dur-med) var(--ease),
-          box-shadow var(--dur-med) var(--ease);
-      }
-
-      .chat-threads .chat-new-scope button[aria-pressed="true"] {
-        border-color: var(--line-1);
-        background: var(--surface-1);
-        color: var(--text-1);
-        box-shadow: 0 2px 8px rgba(14, 14, 16, 0.08);
       }
 
       /* inline channel naming — replaces window.prompt. Enter creates,
@@ -8651,6 +8624,38 @@
 
 	      /* follow-up composer target chip — reuses the pending-file chip
 	         grammar; no new hues (glass & ink: hue = state only) */
+	      /* card 070: destination guard — a persistent pill above the composer
+	         naming where the next message lands. Public reads hot (accent tint),
+	         private reads calm. */
+	      .scout-chat-destination {
+	        flex: none;
+	        align-self: flex-start;
+	        display: inline-flex;
+	        align-items: center;
+	        max-width: calc(100% - 32px);
+	        margin: 0 16px 6px;
+	        padding: 4px 11px;
+	        border: 1px solid var(--line-1);
+	        border-radius: var(--r-full);
+	        background: var(--surface-2);
+	        color: var(--text-2);
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	      }
+
+	      .scout-chat-destination[hidden] {
+	        display: none;
+	      }
+
+	      .scout-chat-destination--channel {
+	        border-color: color-mix(in srgb, var(--accent) 55%, var(--line-1));
+	        background: var(--accent-soft);
+	        color: var(--text-1);
+	      }
+
 	      .scout-followup-target {
 	        flex: none;
 	        display: flex;
@@ -16822,24 +16827,6 @@
           border-right: none;
         }
 
-        .chat-threads__head {
-          padding: 10px 14px 6px;
-        }
-
-        .chat-threads .chat-new-scope {
-          flex: 1;
-          background: var(--surface-3);
-          border: 1px solid var(--line-1);
-          border-radius: var(--r-full);
-          padding: 3px;
-        }
-
-        .chat-threads .chat-new-scope button {
-          flex: 1;
-          height: 28px;
-          border-radius: var(--r-full);
-        }
-
         .chat-threads__new {
           width: 34px;
           height: 34px;
@@ -19164,24 +19151,23 @@
         <!-- Chat tool — the private Scout thread, first-class (kit ui_kits/chat) -->
         <section id="chatTool" class="chat-tool" data-chat-view="threads" aria-label="Chat with Scout">
           <aside class="chat-threads" aria-label="Threads">
-            <div class="chat-threads__head">
-              <div class="stage-segmented chat-new-scope" role="group" aria-label="Thread scope">
-                <button id="chatScopeChannel" type="button" aria-pressed="false">public</button>
-                <button id="chatScopePrivate" type="button" aria-pressed="true">private</button>
-              </div>
-              <button id="chatNewThread" class="chat-threads__new" type="button" aria-label="new thread" title="new thread">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"></path>
-                </svg>
-              </button>
-            </div>
+            <!-- card 070: no scope toggle — channels and private threads are two
+                 always-visible labeled sections, each with its own create + -->
             <div class="chat-threads__search">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
                 <path d="m21 21-4.3-4.3"></path>
               </svg>
               <input id="chatThreadSearch" class="chat-threads__search-input" type="search" autocomplete="off" placeholder="search threads…" aria-label="Search threads">
+            </div>
+            <div class="chat-threads__section-head">
+              <span id="chatChannelsLabel" class="chat-threads__label">channels · whole office</span>
+              <button id="chatNewChannel" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new channel" title="new channel">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+              </button>
             </div>
             <form id="chatChannelCreate" class="chat-channel-create" hidden>
               <input id="chatChannelName" class="chat-channel-create__input" type="text" maxlength="80" autocomplete="off" placeholder="channel name…" aria-label="New channel name">
@@ -19192,10 +19178,17 @@
                 </svg>
               </button>
             </form>
-            <span id="chatChannelsLabel" class="chat-threads__label" hidden>channels</span>
             <div id="chatChannelThreads" class="chat-agent-threads" aria-label="Team channels"></div>
             <p id="chatChannelsEmpty" class="chat-channels-empty" hidden>no channels yet — press + to start one</p>
-            <span id="chatPrivateLabel" class="chat-threads__label">threads</span>
+            <div class="chat-threads__section-head">
+              <span id="chatPrivateLabel" class="chat-threads__label">private · you + Scout</span>
+              <button id="chatNewThread" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new thread" title="new thread">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"></path>
+                </svg>
+              </button>
+            </div>
             <button id="chatDefaultThread" class="chat-thread-item" type="button" aria-pressed="true">
               <span class="chat-thread-item__icon" aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -19212,7 +19205,7 @@
               </span>
             </button>
             <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Chat threads"></div>
-            <p id="chatThreadsFoot" class="chat-threads__foot">only you can see these</p>
+            <p id="chatThreadsFoot" class="chat-threads__foot">private threads stay with you and Scout · channels are open to the whole office</p>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
             <div class="chat-convo-head">
@@ -19243,6 +19236,9 @@
                 </span>
               </div>
             </div>
+            <!-- card 070: names where the next message lands — a hot tint for a
+                 public channel, calm for a private-to-you Scout thread -->
+            <div id="scoutChatDestination" class="scout-chat-destination" aria-live="polite" hidden></div>
             <div id="scoutFollowUpTarget" class="scout-followup-target" hidden></div>
             <div id="scoutChatPendingFiles" class="scout-chat-pending-files" hidden></div>
             <div id="scoutMentionPopover" class="scout-mention-popover" hidden>
@@ -20519,12 +20515,14 @@
 	      const scoutDeliverablesPopover = document.getElementById('scoutDeliverablesPopover')
 	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
 	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
+	      const scoutChatDestination = document.getElementById('scoutChatDestination')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
 	      const scoutChatHint = document.getElementById('scoutChatHint')
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
 	      const chatNewThread = document.getElementById('chatNewThread')
+	      const chatNewChannel = document.getElementById('chatNewChannel')
 	      const chatDefaultThread = document.getElementById('chatDefaultThread')
 	      const chatAgentThreads = document.getElementById('chatAgentThreads')
 	      const chatChannelThreads = document.getElementById('chatChannelThreads')
@@ -20533,8 +20531,6 @@
 	      const chatPrivateLabel = document.getElementById('chatPrivateLabel')
 	      const chatChannelCreate = document.getElementById('chatChannelCreate')
 	      const chatChannelName = document.getElementById('chatChannelName')
-	      const chatScopePrivate = document.getElementById('chatScopePrivate')
-	      const chatScopeChannel = document.getElementById('chatScopeChannel')
 	      const chatThreadsFoot = document.getElementById('chatThreadsFoot')
 	      const chatConvoTitle = document.getElementById('chatConvoTitle')
 	      const chatConvoRename = document.getElementById('chatConvoRename')
@@ -20736,7 +20732,6 @@
 	      // forgotten armed template can never silently hijack an unrelated
 	      // later message into a contract-gated agent launch.
 	      let pendingScoutToolTemplate = null
-	      let newChatThreadVisibility = 'private'
 	      let chatThreadPollTimer = 0
 	      let chatThreadsFingerprint = ''
 	      // inline thread-rename state (D7)
@@ -21410,8 +21405,9 @@
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
 	      chatThreadSearch?.addEventListener('input', filterChatThreads)
 	      chatNewThread?.addEventListener('click', startNewScoutThread)
-	      chatScopePrivate?.addEventListener('click', () => setNewChatThreadVisibility('private'))
-	      chatScopeChannel?.addEventListener('click', () => setNewChatThreadVisibility('public'))
+	      // card 070: the channels section owns its own create + (opens the inline
+	      // glass name field); private threads are the new-thread + above
+	      chatNewChannel?.addEventListener('click', () => setChannelCreateOpen(true))
 	      chatChannelCreate?.addEventListener('submit', async event => {
 	        event.preventDefault()
 	        const title = String(chatChannelName?.value || '').trim() || 'team channel'
@@ -23752,8 +23748,8 @@
           case 'room':
             return appShell.classList.contains('is-in-room') ? roomListeningLabel() : 'not connected'
           case 'chat':
-            return chatScopeChannel?.getAttribute('aria-pressed') === 'true'
-              ? 'public threads · everyone sees these'
+            return chatThreadIsChannel(selectedScoutChatThread())
+              ? 'public channel · everyone in the office'
               : 'private · only you and Scout'
           case 'artifacts':
             return 'the company brain, visible'
@@ -23806,7 +23802,7 @@
               ? (roomRecordingEnabled ? 'listening' : 'not listening')
               : 'not connected'
           case 'chat':
-            return chatScopeChannel?.getAttribute('aria-pressed') === 'true'
+            return chatThreadIsChannel(selectedScoutChatThread())
               ? 'public · everyone'
               : 'private'
           case 'artifacts':
@@ -33269,9 +33265,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (options.select !== false && !thread.archivedAt) {
 	          activeScoutThreadId = id
-	          syncChatScopeToSelectedThread()
 	        } else if (thread.archivedAt && activeScoutThreadId === id) {
-	          activeScoutThreadId = fallbackScoutThreadIdForScope()
+	          // land on the newest thread sharing the archived one's audience
+	          activeScoutThreadId = fallbackScoutThreadIdForScope(thread)
 	        }
 	        renderChatAgentThreads()
 	        renderOfficeRecentThreads()
@@ -33760,6 +33756,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return chatThreadIsChannel(selectedScoutChatThread())
 	          ? 'message the thread — @scout to ask'
 	          : 'ask Scout, or tap + to run a task'
+	      }
+
+	      // card 070: destination guard — a persistent pill naming where the next
+	      // send lands. A public channel reads hot ("everyone in the office"); a
+	      // private thread reads calm ("private to you"). The composer's aria-label
+	      // follows so screen readers hear the true audience, not a stale "privately".
+	      function renderScoutChatDestination() {
+	        if (!scoutChatDestination) {
+	          return
+	        }
+	        const thread = selectedScoutChatThread()
+	        const isChannel = chatThreadIsChannel(thread)
+	        scoutChatDestination.classList.toggle('scout-chat-destination--channel', isChannel)
+	        scoutChatDestination.classList.toggle('scout-chat-destination--private', !isChannel)
+	        const title = chatThreadDisplayTitle(thread)
+	        scoutChatDestination.textContent = isChannel
+	          ? `→ #${title} · everyone in the office`
+	          : '→ Scout · private to you'
+	        scoutChatDestination.hidden = false
+	        if (scoutChatInput) {
+	          scoutChatInput.setAttribute('aria-label', isChannel
+	            ? `Message #${title} — everyone in the office`
+	            : 'Message Scout privately')
+	        }
 	      }
 
 	      // composer target chips: while armed, the next send routes through
@@ -36578,29 +36598,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        renderChatAgentThreads()
 	      }
 
-	      function setNewChatThreadVisibility(visibility) {
-	        newChatThreadVisibility = visibility === 'public' ? 'public' : 'private'
-	        chatScopePrivate?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'private'))
-	        chatScopeChannel?.setAttribute('aria-pressed', String(newChatThreadVisibility === 'public'))
-	        if (newChatThreadVisibility === 'private') {
-	          setChannelCreateOpen(false)
-	        }
-	        // switching scope cancels an in-flight rename (design §7.6) and
-	        // resets the phone navigator to the thread list (design mobile §6a)
-	        chatRenameActive = false
-	        setMobileChatView('threads')
-	        // scope footer copy, design verbatim
-	        if (chatThreadsFoot) {
-	          chatThreadsFoot.textContent = newChatThreadVisibility === 'public'
-	            ? 'public threads are open to the whole office'
-	            : 'only you can see these'
-	        }
-	        // the segmented control is a list filter too — re-render the rows
-	        renderChatAgentThreads()
-	        // the header subtitle mirrors the scope (public · private)
-	        syncToolTopbar()
-	      }
-
 	      function setChannelCreateOpen(open) {
 	        if (!chatChannelCreate) {
 	          return
@@ -36629,12 +36626,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatThreadSearch.value = ''
 	        }
 	        if (authedUser) {
-	          if (newChatThreadVisibility === 'public') {
-	            // inline glass input instead of window.prompt — Enter creates,
-	            // Escape cancels; creation continues in the submit handler
-	            setChannelCreateOpen(true)
-	            return
-	          }
+	          // card 070: the new-thread + is private only; channels get created
+	          // from their own section's + (setChannelCreateOpen)
 	          try {
 	            await createScoutChatThreadOnServer('Scout', 'private')
 	            // a fresh thread lands you straight in the conversation (§6c)
@@ -36735,27 +36728,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return ''
 	      }
 
-	      // Fallback selection respects the scope pill: never auto-land a
-	      // channel while the rail is filtered to 'private' (the pane would
-	      // present an all-team surface under private labeling) — no match
-	      // leaves the default private Scout state, whose row stays clickable.
-	      function fallbackScoutThreadIdForScope() {
-	        const wantChannel = newChatThreadVisibility === 'public'
-	        return scoutChatThreads.find(thread => chatThreadIsChannel(thread) === wantChannel)?.id || ''
-	      }
-
-	      // Keep the scope pill truthful: explicitly opening a thread flips the
-	      // rail filter to the side that thread lives on, so the open
-	      // conversation is always visible (and correctly labeled) in the rail.
-	      function syncChatScopeToSelectedThread() {
-	        const selected = selectedScoutChatThread()
-	        if (!selected) {
-	          return
+	      // card 070: after the active thread is archived (or vanishes on reload),
+	      // land on the newest thread sharing the reference thread's audience —
+	      // channel→channel, private→private — else the newest thread overall.
+	      // scoutChatThreads is kept newest-first, so find/[0] pick the newest.
+	      // No reference (a cold load) just takes the newest overall; an empty
+	      // list leaves the default private Scout state, whose row stays clickable.
+	      function fallbackScoutThreadIdForScope(reference) {
+	        if (reference) {
+	          const wantChannel = chatThreadIsChannel(reference)
+	          const sameAudience = scoutChatThreads.find(thread => chatThreadIsChannel(thread) === wantChannel)
+	          if (sameAudience) {
+	            return sameAudience.id
+	          }
 	        }
-	        const wanted = chatThreadIsChannel(selected) ? 'public' : 'private'
-	        if (newChatThreadVisibility !== wanted) {
-	          setNewChatThreadVisibility(wanted)
-	        }
+	        return scoutChatThreads[0]?.id || ''
 	      }
 
 	      function chatThreadRowNode(thread, q) {
@@ -36839,26 +36826,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
-	        // the segmented scope is a list filter: the private view shows only
-	        // private threads, the channel view shows only channels — the private
-	        // Scout thread never appears under channels
-	        const channelScope = newChatThreadVisibility === 'public'
-	        const channels = channelScope ? scoutChatThreads.filter(thread => chatThreadIsChannel(thread)) : []
-	        const privates = channelScope ? [] : scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
+	        // card 070: no scope toggle — both audiences render at once into their
+	        // own always-visible section (channels · whole office / private · you +
+	        // Scout). The per-row search filter (chat-thread-item--hidden) still
+	        // spans both lists.
+	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
+	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
 	        if (chatDefaultThread) {
-	          chatDefaultThread.hidden = channelScope || privates.length > 0
+	          // the default "new thread" row is the private section's empty state:
+	          // it shows only when there is no real private thread to list
+	          chatDefaultThread.hidden = privates.length > 0
 	          // pressed tracks the actually-open thread: the default row is
 	          // selected only while no persisted thread is active
 	          chatDefaultThread.setAttribute('aria-pressed', selectedScoutChatThread() ? 'false' : 'true')
 	        }
-	        if (chatPrivateLabel) {
-	          chatPrivateLabel.hidden = channelScope
-	        }
-	        if (chatChannelsLabel) {
-	          chatChannelsLabel.hidden = !channelScope
-	        }
 	        if (chatChannelsEmpty) {
-	          chatChannelsEmpty.hidden = !channelScope || channels.length > 0
+	          chatChannelsEmpty.hidden = channels.length > 0
 	        }
 	        chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))
 	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
@@ -36896,7 +36879,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        activeScoutThreadId = String(id || '')
 	        // opening a thread cancels an in-flight rename (design §7.6)
 	        chatRenameActive = false
-	        syncChatScopeToSelectedThread()
 	        markChatThreadSeen(selectedScoutChatThread())
 	        hideScoutChatThinking()
 	        renderChatAgentThreads()
@@ -36931,6 +36913,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // threads still feed the company brain; channels are public anyway
 	          scoutChatBrainNote.hidden = isChannel
 	        }
+	        // card 070: keep the composer destination guard in lockstep with the head
+	        renderScoutChatDestination()
 	      }
 
 	      function startChatThreadRename() {
@@ -37128,6 +37112,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatInput) {
 	          scoutChatInput.placeholder = scoutChatDefaultPlaceholder()
 	        }
+	        // card 070: the destination guard tracks the thread the composer sends to
+	        renderScoutChatDestination()
 	        // a follow-up armed on another thread's card must not fire here
 	        if (scoutFollowUpTarget && scoutFollowUpTarget.threadId && scoutFollowUpTarget.threadId !== activeScoutThreadId) {
 	          scoutFollowUpTarget = null
