@@ -133,6 +133,72 @@ func boardDoctrineCardByTitle(board kanbanBoardState, title string) (kanbanCard,
 	return kanbanCard{}, false
 }
 
+func TestBusinessCreateRetainsNonParticipantOwner(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result := app.applyMeetingBoardAnalysis(meetingBoardAnalysis{
+		Summary: "business item owned by a non-participant",
+		Operations: []meetingBoardOperation{
+			{
+				Tool:   "create_ticket",
+				Reason: "the landlord carries the sublease renewal",
+				Arguments: map[string]any{
+					"title": "Countersign the studio sublease",
+					"owner": "the landlord",
+					"notes": "Call and countersign the sublease by Friday.",
+					"tags":  []any{"business", "facilities"},
+				},
+			},
+		},
+	})
+
+	if result.ErrorCount != 0 || result.ChangedCount != 1 {
+		t.Fatalf("errors=%d changed=%d, want 0/1 — a non-participant business owner is still owned", result.ErrorCount, result.ChangedCount)
+	}
+	card, found := boardDoctrineCardByTitle(app.snapshotState(), "Countersign the studio sublease")
+	if !found {
+		t.Fatal("business card with a non-participant owner must land")
+	}
+	// The owner field only holds participants, so createTicket collapses "the
+	// landlord" to Unassigned — but the doctrine's named owner must not vanish.
+	if !strings.Contains(card.Notes, "the landlord") {
+		t.Fatalf("notes=%q, the named non-participant owner must be retained on the card", card.Notes)
+	}
+}
+
+func TestBusinessCreateParticipantOwnerNotFoldedIntoNotes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result := app.applyMeetingBoardAnalysis(meetingBoardAnalysis{
+		Operations: []meetingBoardOperation{
+			{
+				Tool:   "create_ticket",
+				Reason: "a participant carries this business item",
+				Arguments: map[string]any{
+					"title": "Sign the vendor renewal",
+					"owner": "AJ",
+					"notes": "Review terms and sign by Friday.",
+					"tags":  []any{"business"},
+				},
+			},
+		},
+	})
+
+	if result.ChangedCount != 1 {
+		t.Fatalf("changed=%d, want 1", result.ChangedCount)
+	}
+	card, found := boardDoctrineCardByTitle(app.snapshotState(), "Sign the vendor renewal")
+	if !found {
+		t.Fatal("participant-owned business card must land")
+	}
+	if card.Owner != "AJ" {
+		t.Fatalf("owner=%q, want AJ held by the owner field", card.Owner)
+	}
+	if strings.Contains(card.Notes, "Owner:") {
+		t.Fatalf("notes=%q, a participant owner is held by the owner field and must not be folded into notes", card.Notes)
+	}
+}
+
 func TestNonBusinessCreateUnaffectedByDoctrine(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 

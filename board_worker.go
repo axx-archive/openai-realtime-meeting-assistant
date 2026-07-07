@@ -198,6 +198,11 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 				result.Applications = append(result.Applications, application)
 				continue
 			}
+			// The owner field only holds meeting participants, so a business
+			// card's named non-participant owner would collapse to Unassigned
+			// in createTicket; preserve it in the notes so the named-owner
+			// guarantee survives on the card.
+			retainNamedBusinessOwner(args)
 		}
 
 		toolResult, changed, err := app.applyToolCallArgs(toolName, args)
@@ -224,14 +229,7 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 // this deliberately does not require a canonical-participant match. Human
 // creates through createTicket are untouched.
 func validateMeetingBoardCreateDoctrine(args map[string]any) error {
-	business := false
-	for _, tag := range canonicalizeBoardTags(asStringSlice(args["tags"])) {
-		if strings.EqualFold(tag, "business") {
-			business = true
-			break
-		}
-	}
-	if !business {
+	if !boardCreateHasBusinessTag(args) {
 		return nil
 	}
 	if owner := asString(args["owner"]); owner == "" || strings.EqualFold(owner, "Unassigned") {
@@ -241,6 +239,46 @@ func validateMeetingBoardCreateDoctrine(args map[string]any) error {
 		return fmt.Errorf("business cards require notes stating the concrete next step — spell it out before creating it")
 	}
 	return nil
+}
+
+// boardCreateHasBusinessTag reports whether a create_ticket op is tagged
+// business. canonicalizeBoardTags does not lowercase, so match with EqualFold.
+func boardCreateHasBusinessTag(args map[string]any) bool {
+	for _, tag := range canonicalizeBoardTags(asStringSlice(args["tags"])) {
+		if strings.EqualFold(tag, "business") {
+			return true
+		}
+	}
+	return false
+}
+
+// retainNamedBusinessOwner keeps a business card's named non-participant owner
+// visible on the persisted card. The board's owner field only holds meeting
+// participants, so createTicket collapses a non-participant owner — the common
+// business case of a vendor, landlord, or prospective hire — to "Unassigned",
+// which would silently drop the named owner the doctrine gate just required.
+// When that collapse will happen, fold the raw owner into the notes so the
+// named-owner guarantee survives on the card even though its owner chip reads
+// Unassigned. Participant owners (held intact by the owner field) and
+// non-business cards are left untouched.
+func retainNamedBusinessOwner(args map[string]any) {
+	if !boardCreateHasBusinessTag(args) {
+		return
+	}
+	owner := asString(args["owner"])
+	if owner == "" || normalizeCardOwner(owner) != "" {
+		return
+	}
+	notes := asString(args["notes"])
+	if strings.Contains(notes, "Owner: "+owner) {
+		return
+	}
+	ownerNote := "Owner: " + owner + "."
+	if notes == "" {
+		args["notes"] = ownerNote
+		return
+	}
+	args["notes"] = notes + " " + ownerNote
 }
 
 func normalizeMeetingBoardToolName(operation meetingBoardOperation) string {
