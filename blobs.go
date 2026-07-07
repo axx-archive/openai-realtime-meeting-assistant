@@ -386,6 +386,22 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 			}
 		}
 	}
+	// Chat-attachment refs (scoutChatFileAttachment.Ref, card 085) are live
+	// references too: a thread's inline images and PDFs must survive a sweep
+	// for as long as the thread record renders them.
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok {
+			continue
+		}
+		for _, message := range thread.Messages {
+			for _, file := range message.Files {
+				if ref := strings.TrimSpace(file.Ref); validBlobRef(ref) {
+					referenced[ref] = struct{}{}
+				}
+			}
+		}
+	}
 
 	shards, err := os.ReadDir(blobStoreDir())
 	if err != nil {

@@ -48,6 +48,14 @@ type scoutChatFileAttachment struct {
 	Kind string `json:"kind,omitempty"`
 	Size int64  `json:"size,omitempty"`
 	Text string `json:"text,omitempty"`
+	// Ref + Mime (card 085): the content-addressed blob (blobs.go) carrying
+	// the file's real bytes, set by the composer after its upload to
+	// /assistant/attachments. sanitizeScoutChatFiles validates the ref
+	// against the store and stamps Mime from the PINNED sidecar — never the
+	// client's claim — and a ref'd binary never keeps client-supplied Text
+	// (its Text is the server-derived transcription only).
+	Ref  string `json:"ref,omitempty"`
+	Mime string `json:"mime,omitempty"`
 }
 
 type scoutChatThreadRef struct {
@@ -356,6 +364,19 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		return nil, fmt.Errorf("message text or attachment is required")
 	}
 
+	// Binary attachments (card 085): build the image/document blocks once,
+	// then run the bounded derived-text pass BEFORE any commit so file.Text
+	// carries what the model read on every path — history folding, channel
+	// team replies, previews, and launch objectives all inherit it. Both are
+	// best-effort and keyless-safe: only the Anthropic paths can see binary
+	// blocks, so keyless deploys skip the blob reads entirely and keep
+	// today's name-only behavior — the chips still render.
+	var attachmentBlocks []json.RawMessage
+	if currentAnthropicAPIKey() != "" {
+		attachmentBlocks = attachmentContentBlocks(files)
+		files = deriveAttachmentText(ctx, files, attachmentBlocks)
+	}
+
 	now := time.Now().UTC()
 	userMessage := scoutChatMessageRecord{
 		ID:          fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
@@ -421,7 +442,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		// Unattached channel messages posted after the last run become worker
 		// context alongside the explicit reply.
 		teamReplies := scoutChatRepliesSince(thread, completedAt)
-		agentThread, err := app.dispatchArtifactFollowUp(followUpArtifactID, text, user.Name, teamReplies)
+		agentThread, err := app.dispatchArtifactFollowUpWithAttachments(followUpArtifactID, text, user.Name, teamReplies, attachmentBlocks)
 		if err != nil {
 			// The reply is a real team answer even when the run cannot launch
 			// (e.g. a second teammate answering while a follow-up is already in
@@ -681,7 +702,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		}
 	}
 
-	result, err := app.resolveAssistantQueryContext(ctx, modelQuery, history)
+	result, err := app.resolveAssistantQueryContextWithAttachments(ctx, modelQuery, history, attachmentBlocks)
 	if err != nil {
 		errorMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -2023,11 +2044,29 @@ func sanitizeScoutChatFiles(files []scoutChatFileAttachment) []scoutChatFileAtta
 			}
 			text = strings.TrimSpace(text) + "\n[truncated]"
 		}
+		// A blob ref (card 085) must name a stored blob with a model-safe
+		// mime; anything else drops the ref and keeps the name/size chip. A
+		// valid ref takes the store's pinned mime over any client claim, and
+		// strips client Text — a ref'd binary's Text is the server-derived
+		// transcription only, never attacker-supplied "contents".
+		ref := strings.TrimSpace(file.Ref)
+		mime := ""
+		if ref != "" {
+			meta, err := blobStatForRef(ref)
+			if err == nil && attachmentModelSafeMimes[strings.ToLower(strings.TrimSpace(meta.Mime))] {
+				mime = strings.ToLower(strings.TrimSpace(meta.Mime))
+				text = ""
+			} else {
+				ref = ""
+			}
+		}
 		cleaned = append(cleaned, scoutChatFileAttachment{
 			Name: name,
 			Kind: kind,
 			Size: size,
 			Text: text,
+			Ref:  ref,
+			Mime: mime,
 		})
 	}
 	return cleaned

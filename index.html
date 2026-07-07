@@ -8536,6 +8536,33 @@
 	        color: var(--text-3);
 	      }
 
+      /* card 085: ref'd binaries — inline image thumbnails + tappable chips */
+      a.scout-chat-file {
+        text-decoration: none;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .scout-chat-file--link:hover {
+        border-color: var(--line-2, var(--line-1));
+        background: var(--surface-3);
+      }
+
+      .scout-chat-file--image {
+        display: inline-flex;
+        align-self: flex-end;
+        padding: 4px;
+        overflow: hidden;
+      }
+
+      .scout-chat-file__thumb {
+        display: block;
+        max-width: 100%;
+        max-height: 180px;
+        border-radius: 10px;
+        object-fit: contain;
+      }
+
 	      .scout-chat-pending-files {
 	        flex: none;
 	        display: flex;
@@ -33395,6 +33422,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          kind: file?.type || fileKindFromName(file?.name || ''),
 	          size: file?.size || 0
 	        }
+	        // card 085: images and PDFs upload their real bytes to the blob
+	        // store so Scout can actually see them; the ref+mime ride the
+	        // message payload. Any failure degrades to today's name-only chip.
+	        const type = String(file?.type || '').toLowerCase()
+	        if (file && scoutChatFileUploadable(type)) {
+	          // client caps mirror the server: images 8MB, PDFs 25MB
+	          const cap = type === 'application/pdf' ? 25 * 1024 * 1024 : 8 * 1024 * 1024
+	          if (file.size > cap) {
+	            showToast({ text: `${payload.name} is too large — sending the name only`, kind: 'note' })
+	            return payload
+	          }
+	          try {
+	            const res = await fetch('/assistant/attachments', {
+	              method: 'POST',
+	              headers: { 'Content-Type': type },
+	              body: file
+	            })
+	            if (!res.ok) {
+	              throw new Error('upload failed')
+	            }
+	            const data = await res.json()
+	            if (data?.ref) {
+	              payload.ref = data.ref
+	              payload.mime = data.mime || type
+	            }
+	          } catch {
+	            showToast({ text: `${payload.name} upload failed — sending the name only`, kind: 'note' })
+	          }
+	          return payload
+	        }
 	        if (file && scoutChatFileLooksReadable(file) && file.size <= 256 * 1024) {
 	          try {
 	            payload.text = await file.text()
@@ -33403,6 +33460,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	        }
 	        return payload
+	      }
+
+	      function scoutChatFileUploadable(type) {
+	        // mirrors the server's model-safe allowlist (attachments.go)
+	        return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type)
 	      }
 
 	      function scoutChatFileLooksReadable(file) {
@@ -37971,8 +38033,37 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const wrap = document.createElement('div')
         wrap.className = 'scout-chat-files'
         files.forEach(file => {
-          const chip = document.createElement('div')
+          const ref = String(file?.ref || '')
+          const mime = String(file?.mime || '').toLowerCase()
+          const blobHref = ref ? scoutChatBlobUrl(ref, file?.name) : ''
+          // card 085: ref'd images render inline — /artifacts/blob is
+          // session-gated (the same-origin cookie rides the <img> fetch)
+          // and immutable-cached, so re-opens cost one conditional request
+          if (blobHref && mime.startsWith('image/')) {
+            const frame = document.createElement('a')
+            frame.className = 'scout-chat-file scout-chat-file--image'
+            frame.href = blobHref
+            frame.target = '_blank'
+            frame.rel = 'noopener'
+            const img = document.createElement('img')
+            img.className = 'scout-chat-file__thumb'
+            img.src = blobHref
+            img.alt = file.name || 'image attachment'
+            img.loading = 'lazy'
+            frame.appendChild(img)
+            wrap.appendChild(frame)
+            return
+          }
+          // ref'd PDFs open the browser's viewer in a new tab; plain files
+          // keep the inert chip
+          const chip = document.createElement(blobHref ? 'a' : 'div')
           chip.className = 'scout-chat-file'
+          if (blobHref) {
+            chip.classList.add('scout-chat-file--link')
+            chip.href = blobHref
+            chip.target = '_blank'
+            chip.rel = 'noopener'
+          }
 
           const icon = document.createElement('span')
           icon.className = 'scout-chat-file__icon'
@@ -37993,6 +38084,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           wrap.appendChild(chip)
         })
 	        return wrap
+	      }
+
+	      function scoutChatBlobUrl(ref, name) {
+	        return `/artifacts/blob?ref=${encodeURIComponent(ref)}&name=${encodeURIComponent(name || 'file')}`
 	      }
 
 	      function scoutChatFileMeta(file) {

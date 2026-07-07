@@ -528,6 +528,7 @@ func main() {
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
+	http.HandleFunc("/assistant/attachments", assistantAttachmentUploadHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)

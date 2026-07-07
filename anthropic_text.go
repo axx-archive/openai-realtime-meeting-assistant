@@ -42,6 +42,12 @@ type anthropicTextRequest struct {
 	Input        string
 	Effort       string
 	MaxTokens    int
+	// Attachments are pre-built image/document content blocks (card 085,
+	// attachmentContentBlocks) placed BEFORE the text block in the single
+	// user turn — the documented block order for vision/document requests.
+	// The keyless OpenAI fallback paths never see this field, so keyless
+	// deploys keep today's text-only behavior byte-for-byte.
+	Attachments []json.RawMessage
 }
 
 // anthropicTextResponder mirrors openAITextResponder: the injectable seam so
@@ -76,12 +82,18 @@ func createAnthropicTextResponseHTTP(ctx context.Context, apiKey string, request
 		effort = "low"
 	}
 
+	// Attachment blocks (images/PDFs) go ahead of the text block in the one
+	// user turn; a request without attachments assembles exactly as before.
+	content := make([]json.RawMessage, 0, len(request.Attachments)+1)
+	content = append(content, request.Attachments...)
+	content = append(content, anthropicTextBlock(strings.TrimSpace(request.Input)))
+
 	response, err := createAnthropicMessagesResponse(ctx, apiKey, anthropicMessagesRequest{
 		Model:  model,
 		System: strings.TrimSpace(request.Instructions),
 		Messages: []anthropicMessage{{
 			Role:    "user",
-			Content: []json.RawMessage{anthropicTextBlock(strings.TrimSpace(request.Input))},
+			Content: content,
 		}},
 		MaxTokens: maxTokens,
 		Effort:    effort,

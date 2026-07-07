@@ -99,11 +99,25 @@ func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, que
 	return app.resolveAssistantQueryContextForUser(ctx, "", query, history)
 }
 
+// resolveAssistantQueryContextWithAttachments threads the current turn's
+// binary attachment blocks (card 085) into the model call. Requester-less,
+// mirroring resolveAssistantQueryContext — the chat-thread Q&A seam.
+func (app *kanbanBoardApp) resolveAssistantQueryContextWithAttachments(ctx context.Context, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
+	return app.resolveAssistantQueryContextForUserWithAttachments(ctx, "", query, history, attachments)
+}
+
 // resolveAssistantQueryContextForUser is resolveAssistantQueryContext with the
 // requester attributed, so the answer engine can pin that user's living taste
 // profile (and the office house style) into the model input. An empty
 // requester degrades to today's un-pinned behavior byte-for-byte.
 func (app *kanbanBoardApp) resolveAssistantQueryContextForUser(ctx context.Context, requester string, query string, history []scoutChatTurn) (assistantQueryResult, error) {
+	return app.resolveAssistantQueryContextForUserWithAttachments(ctx, requester, query, history, nil)
+}
+
+// resolveAssistantQueryContextForUserWithAttachments is the full-fat resolve:
+// requester attribution plus the current turn's image/document blocks. Every
+// narrower entrypoint delegates here with nil/empty extras.
+func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ctx context.Context, requester string, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
 	query = canonicalizeBoardText(query)
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
@@ -119,8 +133,10 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUser(ctx context.Conte
 
 	// Questions that name a completed artifact (recall/report flavored) rank
 	// the artifact body over board-card metadata: skip the board
-	// short-circuit and let the model answer from memory context.
-	if !app.queryPrefersArtifactContext(query) {
+	// short-circuit and let the model answer from memory context. An
+	// attachment-bearing turn skips it too — "what does this deck say?" must
+	// reach the model that can actually see the deck, never a board template.
+	if len(attachments) == 0 && !app.queryPrefersArtifactContext(query) {
 		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
 			return assistantQueryResult{
 				query:        query,
@@ -133,7 +149,7 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUser(ctx context.Conte
 
 	matches, contextEntries := app.memoryMatchesAndContext(query)
 	board := app.snapshotState()
-	answer, modelErr := app.answerAssistantQueryWithModel(ctx, requester, query, board.Cards, contextEntries, history)
+	answer, modelErr := app.answerAssistantQueryWithModelAttachments(ctx, requester, query, board.Cards, contextEntries, history, attachments)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
@@ -194,6 +210,14 @@ func truncateAssistantClarification(value string) string {
 }
 
 func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, requester string, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn) (string, error) {
+	return app.answerAssistantQueryWithModelAttachments(ctx, requester, query, cards, entries, history, nil)
+}
+
+// answerAssistantQueryWithModelAttachments is answerAssistantQueryWithModel
+// plus the current turn's binary attachment blocks (card 085). Attachments
+// ride the Sonnet path only; the keyless gpt-5.5 fallback ignores them and
+// answers from the text placeholders exactly as before.
+func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.Context, requester string, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, attachments []json.RawMessage) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
 	}
@@ -224,6 +248,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, re
 			Input:        input,
 			Effort:       "low",
 			MaxTokens:    anthropicChatMaxTokens,
+			Attachments:  attachments,
 		})
 	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{

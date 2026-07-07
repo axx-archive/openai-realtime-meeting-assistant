@@ -1061,6 +1061,22 @@ func anthropicImageBlock(mediaType string, data []byte) json.RawMessage {
 	return raw
 }
 
+// anthropicDocumentBlock mirrors anthropicImageBlock for PDFs (card 085):
+// {"type":"document","source":{"type":"base64","media_type":"application/pdf",
+// "data":...}} — the native document block the chat attachments ride, no beta
+// header required. json.Marshal keeps the base64 newline-free here too.
+func anthropicDocumentBlock(mediaType string, data []byte) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "document",
+		"source": map[string]any{
+			"type":       "base64",
+			"media_type": strings.TrimSpace(mediaType),
+			"data":       base64.StdEncoding.EncodeToString(data),
+		},
+	})
+	return raw
+}
+
 func anthropicToolResultBlock(toolUseID string, content string, isError bool) json.RawMessage {
 	block := map[string]any{
 		"type":        "tool_result",

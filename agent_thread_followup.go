@@ -60,6 +60,11 @@ type agentThreadFollowUpRun struct {
 	input       string
 	prevMeta    map[string]string
 	prevStatus  map[string]string
+	// attachments carries the triggering reply's binary content blocks
+	// (card 085) into the Sonnet request — the reply's image/PDF is exactly
+	// the context the re-run was asked to incorporate. The keyless OpenAI
+	// path ignores them (the text placeholders in input still describe them).
+	attachments []json.RawMessage
 }
 
 // startAgentThreadFollowUpAsync is the test seam mirroring
@@ -106,6 +111,14 @@ func agentThreadStatusValue(artifact meetingMemoryEntry) string {
 // profile, a hand-saved note) refuse honestly. teamReplies feed only the
 // agent-thread path — a goal resume carries the explicit note.
 func (app *kanbanBoardApp) dispatchArtifactFollowUp(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord) (scoutAgentThread, error) {
+	return app.dispatchArtifactFollowUpWithAttachments(artifactID, replyText, requestedBy, teamReplies, nil)
+}
+
+// dispatchArtifactFollowUpWithAttachments is dispatchArtifactFollowUp plus the
+// triggering reply's binary attachment blocks (card 085). Attachments ride the
+// agent-thread (scout_thread) route so the worker sees the dropped image/PDF;
+// the goal-resume route carries the text revision note exactly as before.
+func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -121,7 +134,7 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUp(artifactID string, replyText
 		return scoutAgentThread{}, err
 	}
 	if artifact.Metadata["source"] == "scout_thread" {
-		return app.launchAgentThreadFollowUp(artifactID, replyText, requestedBy, teamReplies)
+		return app.launchAgentThreadFollowUpWithAttachments(artifactID, replyText, requestedBy, teamReplies, attachments)
 	}
 	return app.resumeGoalWithFeedback(artifactGoalParentID(artifact), requestedBy, replyText, artifactID)
 }
@@ -160,6 +173,13 @@ func (app *kanbanBoardApp) artifactFollowUpRouteError(artifact meetingMemoryEntr
 // run to the async worker. Any signed-in user may follow up; the run itself
 // is server-side.
 func (app *kanbanBoardApp) launchAgentThreadFollowUp(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord) (scoutAgentThread, error) {
+	return app.launchAgentThreadFollowUpWithAttachments(artifactID, replyText, requestedBy, teamReplies, nil)
+}
+
+// launchAgentThreadFollowUpWithAttachments is launchAgentThreadFollowUp plus
+// the triggering reply's binary attachment blocks (card 085) for the worker
+// request. Existing entrypoints delegate with nil.
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -267,6 +287,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUp(artifactID string, replyTex
 		input:       input,
 		prevMeta:    prevMeta,
 		prevStatus:  prevStatus,
+		attachments: attachments,
 	})
 	return thread, nil
 }
@@ -303,6 +324,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 				Input:        run.input,
 				Effort:       "low",
 				MaxTokens:    anthropicFollowUpMaxTokens,
+				Attachments:  run.attachments,
 			})
 		} else {
 			apiKey := app.currentOpenAIAPIKey()
