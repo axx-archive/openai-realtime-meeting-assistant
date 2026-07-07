@@ -21,12 +21,14 @@ func readIndexForGovernanceLanes(t *testing.T) string {
 }
 
 // A proposed decision announces itself and carries the ratify door — the
-// exact POST shape assistantDecisionRatifyHandler decodes.
+// exact POST shape assistantDecisionRatifyHandler decodes. Card 081 extracted
+// the row builder into the shared intelDecisionNode helper, so the ratify door
+// lives there now.
 func TestIndexDecisionLedgerProposedRatifyDoor(t *testing.T) {
 	html := readIndexForGovernanceLanes(t)
-	body := functionBody(html, "function renderIntelDecisions()")
+	body := functionBody(html, "function intelDecisionNode(decision, rerender)")
 	if body == "" {
-		t.Fatal("could not extract renderIntelDecisions body")
+		t.Fatal("could not extract intelDecisionNode body")
 	}
 	for _, want := range []string{
 		"'proposed · awaiting ratification'",
@@ -35,7 +37,7 @@ func TestIndexDecisionLedgerProposedRatifyDoor(t *testing.T) {
 		"intel-item__ratify",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("renderIntelDecisions body missing %q", want)
+			t.Errorf("intelDecisionNode body missing %q", want)
 		}
 	}
 	// The button has its style — the door must not render as an unstyled stub.

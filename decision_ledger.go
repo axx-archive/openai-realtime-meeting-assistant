@@ -461,6 +461,12 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 	if ratifiedAt := strings.TrimSpace(entry.Metadata["ratifiedAt"]); ratifiedAt != "" {
 		payload["ratifiedAt"] = ratifiedAt
 	}
+	// sourceBrainId (card 081) rides the wire so a ledger row can point back at
+	// the meeting-brain write-up it was extracted from; only present when the
+	// extraction pass stamped it.
+	if sourceBrainID := strings.TrimSpace(entry.Metadata["sourceBrainId"]); sourceBrainID != "" {
+		payload["sourceBrainId"] = sourceBrainID
+	}
 
 	return payload
 }
@@ -527,6 +533,15 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			"sourceBrainId": lastBrain.ID,
 			"dedupeKey":     key,
 			"status":        decisionStatusActive,
+		}
+		// card 081: stamp the decision with the meeting its source brain write-up
+		// covered rather than whatever meeting is current when this pass fires up
+		// to 5 min later (defaultDecisionLedgerInterval). The append-time stamp
+		// (memory.go appendEntryForMeeting) stays the fallback when the brain
+		// carries no meetingId; this also lines the row up with the Memory-tool
+		// meeting card meetingMemoryDetails groups decisions into by this stamp.
+		if meetingID := strings.TrimSpace(lastBrain.Metadata["meetingId"]); meetingID != "" {
+			metadata["meetingId"] = meetingID
 		}
 		id := durableTimestampID("decision", time.Now())
 		entry, appended, err := app.memory.appendDecision(id, statement, metadata)

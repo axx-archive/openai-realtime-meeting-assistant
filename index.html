@@ -2537,6 +2537,19 @@
         box-shadow: 0 8px 24px rgba(14, 14, 16, 0.07);
       }
 
+      /* card 081: the jump landing flash — a decision's "open meeting →" chip
+         scrolls the source card into view and pulses the accent glow (the
+         Memory-tool equivalent of the board's .card.is-fresh). */
+      .memory-card.is-fresh {
+        border-color: transparent;
+        animation: memory-card-flash 1.4s var(--ease) both;
+      }
+
+      @keyframes memory-card-flash {
+        from { box-shadow: var(--glow-accent); }
+        to { box-shadow: 0 8px 24px rgba(14, 14, 16, 0.07); }
+      }
+
       .memory-card__head {
         width: 100%;
         display: flex;
@@ -10736,6 +10749,75 @@
         max-height: 320px;
         overflow-y: auto;
         overscroll-behavior: contain;
+      }
+
+      /* card 081: decision ledger rows are buttons that expand an inline
+         detail. Button reset so the row still reads as a ledger line; hue stays
+         state-only (surface/line affordance, no accent) per canon. */
+      .intel-decision {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .intel-item--decision {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: background var(--dur-fast) var(--ease);
+      }
+
+      .intel-item--decision:hover,
+      .intel-item--decision.is-open {
+        background: var(--surface-2);
+      }
+
+      .intel-item--decision:focus-visible {
+        outline: 1px solid var(--line-2);
+        outline-offset: -1px;
+        background: var(--surface-2);
+      }
+
+      .intel-decision > .intel-item__ratify {
+        margin-left: 19px;
+      }
+
+      .intel-decision__detail {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 4px 0 11px 19px;
+      }
+
+      .intel-decision__row {
+        display: flex;
+        gap: 8px;
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+
+      .intel-decision__label {
+        flex: none;
+        min-width: 66px;
+        color: var(--text-3);
+        text-transform: uppercase;
+        letter-spacing: var(--track-label);
+        opacity: .7;
+      }
+
+      .intel-decision__value {
+        color: var(--text-2);
+        min-width: 0;
+      }
+
+      .intel-decision__detail .memory-link-chip {
+        align-self: flex-start;
+        margin-top: 5px;
       }
 
       /* segmented control — glass pill pair in the intel head; the pressed
@@ -40776,6 +40858,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       let intelData = null
       let intelLoadedAt = 0
       let intelRefreshing = false
+      // card 081: which decision ledger row is expanded to its inline detail.
+      // Module state (never DOM) so a live "decision" office re-render keeps the
+      // open row open; shared by the intel ledger and the package-binder ledger.
+      let expandedIntelDecisionId = ''
 
       function intelPulseTotal() {
         const week = intelData?.pulse?.last7d
@@ -41210,6 +41296,124 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          knowledge but never memory-timeline noise; this section is the one
          place they render. Rows reuse .intel-item; glyph stays ink (hue =
          state only). */
+
+      // intelDecisionNode (card 081): the shared clickable ledger row used by
+      // both the Mission Intelligence ledger and the package binder. The row is
+      // a <button> that toggles an inline .intel-decision__detail (full context,
+      // who + absolute time, the active/superseded chain) and offers an "open
+      // meeting →" jump into the Memory tool. `rerender` re-paints whichever
+      // surface owns the row so the toggle survives module-state re-renders.
+      function intelDecisionNode(decision, rerender) {
+        const id = String(decision?.id || '')
+        const open = id !== '' && id === expandedIntelDecisionId
+        const proposed = String(decision?.status || '') === 'proposed'
+
+        const wrap = document.createElement('div')
+        wrap.className = 'intel-decision'
+
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = 'intel-item intel-item--decision'
+        if (id) item.dataset.decisionId = id
+        if (open) item.classList.add('is-open')
+        item.setAttribute('aria-expanded', open ? 'true' : 'false')
+        const mark = document.createElement('span')
+        mark.className = 'intel-item__glyph'
+        mark.setAttribute('aria-hidden', 'true')
+        mark.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6"><path d="M20 6 9 17l-5-5"></path></svg>'
+        const body = document.createElement('span')
+        body.className = 'intel-item__body'
+        const text = document.createElement('span')
+        text.className = 'intel-item__text'
+        text.textContent = String(decision?.statement || '')
+        const meta = document.createElement('span')
+        meta.className = 'intel-item__meta'
+        const madeBy = String(decision?.madeBy || '').trim()
+        const context = String(decision?.context || '').trim()
+        const parts = []
+        if (proposed) parts.push('proposed · awaiting ratification')
+        if (madeBy) parts.push(madeBy)
+        parts.push(intelRelativeTime(decision?.createdAt))
+        if (context) parts.push(context)
+        meta.textContent = parts.join(' · ')
+        body.append(text, meta)
+        item.append(mark, body)
+        item.addEventListener('click', () => {
+          expandedIntelDecisionId = open ? '' : id
+          if (typeof rerender === 'function') rerender()
+        })
+        wrap.append(item)
+
+        if (proposed && id) {
+          // card 069 ratify door: any signed-in member flips a recorded
+          // DEFAULT to an active decision; the office "decision" broadcast
+          // re-renders the row, the local flip is just the honest echo. It
+          // rides as a sibling of the row button (a button can never nest a
+          // button) rather than inside the body.
+          const ratify = document.createElement('button')
+          ratify.type = 'button'
+          ratify.className = 'intel-item__ratify pressable'
+          ratify.textContent = 'ratify'
+          ratify.addEventListener('click', async () => {
+            ratify.disabled = true
+            const { ok } = await postAuthJSON('/assistant/decisions/ratify', { decisionId: decision.id })
+            if (ok) {
+              ratify.textContent = 'ratified'
+            } else {
+              ratify.disabled = false
+            }
+          })
+          wrap.append(ratify)
+        }
+
+        if (open) {
+          const detail = document.createElement('div')
+          detail.className = 'intel-decision__detail'
+          const addRow = (labelText, valueText) => {
+            const value = String(valueText || '').trim()
+            if (!value) return
+            const row = document.createElement('div')
+            row.className = 'intel-decision__row'
+            const label = document.createElement('span')
+            label.className = 'intel-decision__label'
+            label.textContent = labelText
+            const val = document.createElement('span')
+            val.className = 'intel-decision__value'
+            val.textContent = value
+            row.append(label, val)
+            detail.append(row)
+          }
+          if (context) addRow('context', context)
+          if (madeBy) addRow('decided by', madeBy)
+          const created = decision?.createdAt ? new Date(decision.createdAt) : null
+          if (created && !Number.isNaN(created.valueOf())) {
+            addRow('recorded', created.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))
+          }
+          const status = String(decision?.status || 'active')
+          if (status === 'superseded') {
+            const byId = String(decision?.supersededBy || '')
+            const later = (Array.isArray(intelData?.decisions) ? intelData.decisions : []).find(other => String(other?.id) === byId)
+            addRow('status', later?.statement ? `superseded by: ${String(later.statement)}` : 'superseded')
+          } else if (status === 'proposed') {
+            addRow('status', 'proposed default — awaiting team ratification')
+          } else {
+            addRow('status', 'active decision on record')
+          }
+          const meetingId = String(decision?.meetingId || '').trim()
+          if (meetingId) {
+            const chip = document.createElement('button')
+            chip.type = 'button'
+            chip.className = 'memory-link-chip'
+            chip.textContent = 'open meeting →'
+            chip.addEventListener('click', () => jumpToMemoryMeeting(meetingId))
+            detail.append(chip)
+          }
+          wrap.append(detail)
+        }
+
+        return wrap
+      }
+
       function renderIntelDecisions() {
         if (!intelDecisionsEl) {
           return
@@ -41224,52 +41428,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           intelDecisionsEl.replaceChildren(intelEmptyNode('no decisions on record yet — scout logs them as meetings settle things'))
           return
         }
-        intelDecisionsEl.replaceChildren(...decisions.map(decision => {
-          const item = document.createElement('div')
-          item.className = 'intel-item intel-item--decision'
-          const mark = document.createElement('span')
-          mark.className = 'intel-item__glyph'
-          mark.setAttribute('aria-hidden', 'true')
-          mark.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6"><path d="M20 6 9 17l-5-5"></path></svg>'
-          const body = document.createElement('span')
-          body.className = 'intel-item__body'
-          const text = document.createElement('span')
-          text.className = 'intel-item__text'
-          text.textContent = String(decision?.statement || '')
-          const meta = document.createElement('span')
-          meta.className = 'intel-item__meta'
-          const madeBy = String(decision?.madeBy || '').trim()
-          const context = String(decision?.context || '').trim()
-          const proposed = String(decision?.status || '') === 'proposed'
-          const parts = []
-          if (proposed) parts.push('proposed · awaiting ratification')
-          if (madeBy) parts.push(madeBy)
-          parts.push(intelRelativeTime(decision?.createdAt))
-          if (context) parts.push(context)
-          meta.textContent = parts.join(' · ')
-          body.append(text, meta)
-          if (proposed && decision?.id) {
-            // card 069 ratify door: any signed-in member flips a recorded
-            // DEFAULT to an active decision; the office "decision" broadcast
-            // re-renders the row, the local flip is just the honest echo
-            const ratify = document.createElement('button')
-            ratify.type = 'button'
-            ratify.className = 'intel-item__ratify pressable'
-            ratify.textContent = 'ratify'
-            ratify.addEventListener('click', async () => {
-              ratify.disabled = true
-              const { ok } = await postAuthJSON('/assistant/decisions/ratify', { decisionId: decision.id })
-              if (ok) {
-                ratify.textContent = 'ratified'
-              } else {
-                ratify.disabled = false
-              }
-            })
-            body.append(ratify)
-          }
-          item.append(mark, body)
-          return item
-        }))
+        intelDecisionsEl.replaceChildren(...decisions.map(decision => intelDecisionNode(decision, renderIntelDecisions)))
       }
 
       // 429 cooldown: disable the button with an honest countdown instead of
@@ -41499,28 +41658,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (decisions.length) {
           const ledger = document.createElement('div')
           ledger.className = 'intel-col intel-col--ledger'
+          // card 081: package-attached decisions reuse the shared clickable
+          // ledger row, so they expand to context + an "open meeting" jump too;
+          // the toggle re-paints the binder.
           decisions.forEach(decision => {
-            const item = document.createElement('div')
-            item.className = 'intel-item intel-item--decision'
-            const mark = document.createElement('span')
-            mark.className = 'intel-item__glyph'
-            mark.setAttribute('aria-hidden', 'true')
-            mark.textContent = '✓'
-            const body = document.createElement('span')
-            body.className = 'intel-item__body'
-            const text = document.createElement('span')
-            text.className = 'intel-item__text'
-            text.textContent = String(decision?.statement || '')
-            body.append(text)
-            const madeBy = String(decision?.madeBy || '').trim()
-            if (madeBy) {
-              const meta = document.createElement('span')
-              meta.className = 'intel-item__meta'
-              meta.textContent = madeBy
-              body.append(meta)
-            }
-            item.append(mark, body)
-            ledger.append(item)
+            ledger.append(intelDecisionNode(decision, renderPackages))
           })
           details.append(ledger)
         }
@@ -43092,6 +43234,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }))
       }
 
+      // jumpToMemoryMeeting (card 081): a decision ledger row's "open meeting →"
+      // chip switches to the Memory tool with the source meeting expanded and
+      // flashed. Mirrors jumpToBoardCard; the record can age past the limit=60
+      // fetch (meetingStoreCap), so a miss is an honest toast, not a dead click.
+      async function jumpToMemoryMeeting(meetingId) {
+        meetingId = String(meetingId || '').trim()
+        if (!meetingId) {
+          return
+        }
+        memoryExpandTouched = true
+        expandedMemoryMeetingId = meetingId
+        setActiveTool('memory')
+        await loadMeetingsForMemory(true)
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          const node = document.querySelector(`.memory-card[data-meeting-id="${selectorEscape(meetingId)}"]`)
+          if (!node) {
+            showToast({ text: 'that meeting is no longer in memory', kind: 'note' })
+            return
+          }
+          node.scrollIntoView({ block: 'center' })
+          node.classList.add('is-fresh')
+          window.setTimeout(() => node.classList.remove('is-fresh'), 4000)
+        }))
+      }
+
       function renderMemoryMeetingBody(meeting) {
         const body = document.createElement('div')
         body.className = 'memory-card__body'
@@ -43168,6 +43335,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const expanded = String(meeting?.id || '') === expandedMemoryMeetingId
         const item = document.createElement('article')
         item.className = expanded ? 'memory-card is-expanded' : 'memory-card'
+        // card 081 jump anchor: jumpToMemoryMeeting scrolls + flashes this card
+        item.dataset.meetingId = String(meeting?.id || '')
 
         const head = document.createElement('button')
         head.type = 'button'

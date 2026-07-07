@@ -94,6 +94,37 @@ func TestProduceDecisionLedgerAppendsDecisionsAndAdvancesCursor(t *testing.T) {
 	}
 }
 
+// card 081: an appended decision inherits its meetingId from the source brain
+// write-up it was extracted from, not from whatever meeting is current when the
+// (up to 5-min-behind) ledger pass fires. This keeps the ledger row's jump
+// anchor pointed at the meeting the decision was actually made in.
+func TestProduceDecisionLedgerInheritsMeetingIdFromSourceBrain(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	// The brain carries an explicit meetingId (the meeting it covered).
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Decisions\nThe team locked grill pricing at $500 per month.", map[string]string{"meetingId": "meeting-source"}); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+	// A distinct, later meeting is now the active one — this is what the
+	// append-time stamp would use if the decision did not inherit.
+	currentMeeting := app.memory.ensureMeetingID()
+	if currentMeeting == "" || currentMeeting == "meeting-source" {
+		t.Fatalf("current meeting id=%q, want a distinct non-empty id for the test", currentMeeting)
+	}
+
+	runDecisionLedgerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"decisions":[{"statement":"Grill tier is priced at $500 per month.","madeBy":"AJ","context":"pricing call"}]}`, nil
+	})
+
+	decisions := app.memory.entriesOfKind(meetingMemoryKindDecision, 10)
+	if len(decisions) != 1 {
+		t.Fatalf("decisions=%d, want 1", len(decisions))
+	}
+	if got := decisions[0].Metadata["meetingId"]; got != "meeting-source" {
+		t.Fatalf("decision meetingId=%q, want inherited meeting-source (not the current meeting %q)", got, currentMeeting)
+	}
+}
+
 // A zero-decision window still appends the decision_pass cursor artifact —
 // otherwise unconsumedEntriesAfter re-feeds the same brains forever.
 func TestProduceDecisionLedgerZeroDecisionsStillAdvancesCursor(t *testing.T) {
@@ -521,8 +552,9 @@ func TestMissionSnapshotCarriesDecisions(t *testing.T) {
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	if _, _, err := app.memory.appendDecision("decision-1", "Grill tier is priced at $500 per month.", map[string]string{
-		"status": decisionStatusActive,
-		"madeBy": "AJ",
+		"status":        decisionStatusActive,
+		"madeBy":        "AJ",
+		"sourceBrainId": "brain-9",
 	}); err != nil {
 		t.Fatalf("append decision: %v", err)
 	}
@@ -548,10 +580,13 @@ func TestMissionSnapshotCarriesDecisions(t *testing.T) {
 	// the wire payload shape used by the "decision" office event.
 	entry, _ := app.memory.entryByKindAndID(meetingMemoryKindDecision, "decision-1")
 	payload := decisionPayload(entry)
-	for _, key := range []string{"id", "statement", "madeBy", "context", "meetingId", "status", "createdAt"} {
+	for _, key := range []string{"id", "statement", "madeBy", "context", "meetingId", "status", "createdAt", "sourceBrainId"} {
 		if _, present := payload[key]; !present {
 			t.Fatalf("decisionPayload missing %q: %v", key, payload)
 		}
+	}
+	if payload["sourceBrainId"] != "brain-9" {
+		t.Fatalf("decisionPayload sourceBrainId=%v, want brain-9 riding the wire", payload["sourceBrainId"])
 	}
 }
 
