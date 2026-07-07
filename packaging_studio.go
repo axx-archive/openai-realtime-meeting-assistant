@@ -66,6 +66,8 @@ package main
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -77,11 +79,12 @@ const packagingStudioProcessID = "packaging_studio"
 // The studio's output contracts. The deck is the process deliverable contract
 // (processDeliverableContract picks the LAST writer stage's contract → ship_deck).
 const (
-	packagingStudioDeckContract     = "packaging_deck_v1"
-	packagingStudioWallContract     = "packaging_wall_v1"
-	packagingStudioTalkContract     = "packaging_talk_v1"
-	packagingStudioRigorContract    = "packaging_rigor_v1"
-	packagingStudioFindingsContract = "packaging_findings_v1"
+	packagingStudioDeckContract             = "packaging_deck_v1"
+	packagingStudioImageryDirectionContract = "imagery_direction_v1"
+	packagingStudioWallContract             = "packaging_wall_v1"
+	packagingStudioTalkContract             = "packaging_talk_v1"
+	packagingStudioRigorContract            = "packaging_rigor_v1"
+	packagingStudioFindingsContract         = "packaging_findings_v1"
 )
 
 // studioFounderWordsLaw is the standing instruction spliced into every
@@ -90,6 +93,29 @@ const (
 // the mechanism behind "the founder's words are LAW downstream: quote them in
 // every gate".
 const studioFounderWordsLaw = "The founder's verbatim words from the INTAKE brief (and the goal objective) are LAW: quote them exactly, never paraphrase them, and never contradict them."
+
+// packagingDeckChassisCSS is the INVARIANT deck chassis (stage geometry, the
+// .pg slide model, and — critically — the @page + @media print pagination).
+// ship_deck is required to embed it verbatim so the exported PDF contains EVERY
+// slide, not just the single on-screen frame; the render runner re-injects
+// packagingDeckPrintCSS() as a safety net when an authored deck drops it. This
+// is the single source of truth for the print contract.
+//
+//go:embed packaging_deck_chassis.css
+var packagingDeckChassisCSS string
+
+// packagingDeckPrintCSS is the pagination-only tail of the chassis (from the
+// @page rule to the end). The render sidecar injects just this block into any
+// deck HTML that lacks an @page rule, so a deck still paginates even if the
+// writer dropped the print CSS. Deriving it from the chassis keeps them in
+// lockstep — there is no second copy to drift.
+func packagingDeckPrintCSS() string {
+	// Match the rule "@page{", not the word "@page" in the chassis comment.
+	if idx := strings.Index(packagingDeckChassisCSS, "@page{"); idx >= 0 {
+		return strings.TrimSpace(packagingDeckChassisCSS[idx:])
+	}
+	return strings.TrimSpace(packagingDeckChassisCSS)
+}
 
 // --- Personas ---------------------------------------------------------------
 
@@ -327,13 +353,54 @@ func packagingStudioDefinition() ProcessDefinition {
 				},
 			},
 			{
+				// The ART DIRECTOR. Reads the chosen narrative page-by-page + the
+				// identity visual system and decides the imagery STRATEGY: which
+				// beats earn an image and where absence is stronger. Imagery is
+				// EDITORIAL — zero images is a legitimate output (a deliberately
+				// typographic package). It directs; it does NOT generate (that is
+				// the next compile step) and does NOT embed bytes (ship_compile
+				// inlines them). Output is a machine-readable shot list.
+				ID:        "imagery_direction",
+				Title:     "Imagery direction — where an image earns the beat",
+				Role:      processRoleWriter,
+				Mode:      "artifacts",
+				InputFrom: []string{"identity", "write", "voice", "founder_pass"},
+				PromptBody: strings.Join([]string{
+					"You are the ART DIRECTOR for this packaging deck. You decide WHERE a photographic image earns an emotional beat that drives consensus / talent / capital, and WHERE its absence is stronger. You direct imagery; you do NOT generate it and you do NOT write the deck.",
+					"Read the chosen narrative (WRITE + VOICE) page by page and the IDENTITY visual system. Imagery is EDITORIAL, never decoration: an image must do a job type and numbers cannot. If the story is carried by type and evidence, direct FEWER images or NONE — a deliberately typographic package is a valid, strong output.",
+					"Honor the deck chassis laws VERBATIM: at most ~5 full-bleeds in the whole deck; at most 6 images total; EXACTLY ONE crescendo image at the deck's peak (its treatment note names it, the deck renders it at --heat:.45); ledger / numbers ('bone') pages carry NO imagery; one FIG. per photo plate. The duotone/heat treatment is applied later in the deck CSS, so describe each shot in NATURAL color and real subjects — never a brand-color wash, never invented geography.",
+					"Name each shot's emotional temperature explicitly (drama, joy, awe, resolve, ...). When the PLACE is the claim, name the real place.",
+					"Output EXACTLY ONE fenced ```json block and NOTHING else, of this shape:",
+					"```json\n{\n  \"strategy\": \"one paragraph: where images earn a beat and where absence is stronger\",\n  \"visual_system\": \"the ONE visual-system brief, tied to the identity tokens, that rides every shot\",\n  \"shots\": [\n    { \"fig\": 1, \"slot\": \"bleed|plate\", \"subject\": \"what the image depicts (natural color, honest geography)\", \"composition\": \"framing, eyeline, scale\", \"temperature\": \"the NAMED emotional temperature\", \"treatment\": \"how it ties to the visual system; say if THIS is the one crescendo\", \"aspect\": \"landscape|portrait|square\", \"caption\": \"the FIG. caption line\", \"place\": \"real place by name when the place is the claim, else empty\", \"why\": \"the emotional job this image does\" }\n  ]\n}\n```",
+					"For a typographic package return \"shots\": []. Every shot MUST carry a non-empty subject and temperature or it will be dropped.",
+				}, "\n"),
+				OutputContract: packagingStudioImageryDirectionContract,
+			},
+			{
+				// Authored-Go generation compile (mirrors slide_jury / ship_compile):
+				// reads the director's shot list and fulfills each brief via the
+				// existing gpt-image generator. Per-shot failure (keyless / quota /
+				// timeout) is DISCLOSED and skipped; zero generated images is a
+				// valid, non-fatal outcome. It never blocks the ship.
+				ID:         "imagery_generate",
+				Title:      "Imagery — generate the directed shots",
+				Role:       processRoleCompile,
+				InputFrom:  []string{"imagery_direction"},
+				PromptBody: "Deterministic generation step: read the imagery_direction shot list and generate each directed shot on the one visual system via the OpenAI image API, filing the results as {kind:image} assets. Per-shot failure is disclosed and skipped; keyless or zero shots ships the package typographic. Authored Go — never a model call.",
+				Compile:    compilePackagingStudioImagery,
+			},
+			{
 				ID:        "ship_deck",
 				Title:     "Ship — the self-contained presenter deck",
 				Role:      processRoleWriter,
 				Mode:      "artifacts",
-				InputFrom: []string{"write", "voice", "founder_pass"},
+				InputFrom: []string{"write", "voice", "founder_pass", "imagery_direction", "imagery_generate"},
 				PromptBody: strings.Join([]string{
-					"Produce the deck as ONE self-contained HTML file: all CSS and JS inline, no external references, starting with <!doctype html>.",
+					"Produce the deck as ONE self-contained HTML file: all CSS and JS inline, no external references — the ONLY URLs permitted anywhere are data: URIs (used for any embedded imagery). Start with <!doctype html>.",
+					"Build the deck on the REQUIRED print chassis. Include this exact <style> block verbatim in <head>, lay every slide out as a <section class=\"pg\">…</section> inside a single <div id=\"stage\">…</div>, and give the FIRST slide the extra class \"on\". NEVER remove or weaken the @page or @media print rules — they are what make the exported PDF contain EVERY slide instead of only the first one:",
+					"<style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>",
+					"Layer all brand aesthetics (colors, type, furniture) ON TOP of this chassis; do not fight its geometry (the 1920x1080 #stage, the .pg slide model).",
+					"IMAGERY: place each FIG the imagery_generate record lists as GENERATED at the slide the imagery_direction assigned. Build that slide's photo element as a plate or full-bleed carrying BOTH its type class AND class \"fig-N\" (matching the FIG number), with an empty <div class=\"ph\"></div> inside and the FIG. caption. Do NOT paste any image data or invent src/url values — the image bytes are inlined at compile as a data: URI onto .fig-N .ph. Add a fig-N slot ONLY for FIG numbers the generation record generated; if imagery was skipped or zero, build a deliberately typographic deck with no photo plates.",
 					"Embed presenter mode driven by VOICE's per-page script (the [BEAT] pauses and the spoken lines), so opening the file and pressing present gives the founder the script alongside each page.",
 					"Honor every founder_pass do_not_touch line exactly. Keep client-facing copy free of em dashes. " + studioFounderWordsLaw,
 				}, "\n"),
@@ -415,6 +482,11 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	if deckHTML == "" {
 		return "", nil, fmt.Errorf("ship_deck produced no deck body — nothing to compile")
 	}
+	// Inline the directed imagery as data: URIs at their .fig-N slots BEFORE the
+	// deck is filed and its render enqueued — the render CSP admits only data:
+	// images, so this is the one place the bytes can reach the self-contained
+	// deck. A typographic package (no imagery) passes through untouched.
+	deckHTML, imageryNote := injectStudioDeckImagery(app, plan, deckHTML)
 	deckCopy := stageBody("write")
 	if deckCopy == "" {
 		return "", nil, fmt.Errorf("the write stage left no gated copy — The Wall cannot compile")
@@ -506,7 +578,246 @@ func compilePackagingStudioShip(app *kanbanBoardApp, plan *goalPlan, parentID st
 	} else {
 		lines = append(lines, "", "No venture package on this goal — the artifacts are filed unattached (disclosed).")
 	}
+	if strings.TrimSpace(imageryNote) != "" {
+		lines = append(lines, "", imageryNote)
+	}
 	return strings.Join(lines, "\n"), map[string]string{"shipArtifactIds": strings.Join(filedIDs, ",")}, nil
+}
+
+// --- The IMAGERY seam: direction → generation → placement --------------------
+
+// imageryDirectionShot is one entry the art director emits in its JSON block.
+type imageryDirectionShot struct {
+	Fig         int    `json:"fig"`
+	Slot        string `json:"slot"`
+	Subject     string `json:"subject"`
+	Composition string `json:"composition"`
+	Temperature string `json:"temperature"`
+	Treatment   string `json:"treatment"`
+	Aspect      string `json:"aspect"`
+	Caption     string `json:"caption"`
+	Place       string `json:"place"`
+	Why         string `json:"why"`
+}
+
+type imageryDirectionDoc struct {
+	Strategy     string                 `json:"strategy"`
+	VisualSystem string                 `json:"visual_system"`
+	Shots        []imageryDirectionShot `json:"shots"`
+}
+
+// parseImageryDirection extracts the art director's fenced JSON block and maps
+// it to the generator's shots. A missing/garbled block or an empty shot list is
+// a VALID typographic outcome (zero shots), never an error — imagery is
+// editorial. Shots missing a subject or a named temperature are dropped (the
+// generator requires both); the total is capped at the board ceiling.
+func parseImageryDirection(body string) (visualSystem string, shots []imageryShot) {
+	raw := extractFencedJSON(body)
+	if raw == "" {
+		return "", nil
+	}
+	var doc imageryDirectionDoc
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", nil
+	}
+	visualSystem = strings.TrimSpace(doc.VisualSystem)
+	for _, s := range doc.Shots {
+		subject := strings.TrimSpace(s.Subject)
+		temperature := strings.TrimSpace(s.Temperature)
+		if subject == "" || temperature == "" {
+			continue
+		}
+		description := subject
+		if comp := strings.TrimSpace(s.Composition); comp != "" {
+			description += ". Composition: " + comp
+		}
+		shots = append(shots, imageryShot{
+			Fig:         s.Fig,
+			Title:       firstNonEmptyString(strings.TrimSpace(s.Caption), subject),
+			Description: description,
+			Temperature: temperature,
+			Place:       strings.TrimSpace(s.Place),
+		})
+		if len(shots) >= imageryBoardMaxShots {
+			break
+		}
+	}
+	return visualSystem, shots
+}
+
+// extractFencedJSON returns the first ```json (or ```) fenced block's contents,
+// else the trimmed body when it already looks like a JSON object. Empty when
+// nothing parseable is present.
+func extractFencedJSON(body string) string {
+	lower := strings.ToLower(body)
+	if idx := strings.Index(lower, "```json"); idx >= 0 {
+		rest := body[idx+len("```json"):]
+		if end := strings.Index(rest, "```"); end >= 0 {
+			return strings.TrimSpace(rest[:end])
+		}
+	}
+	if idx := strings.Index(body, "```"); idx >= 0 {
+		rest := body[idx+3:]
+		if end := strings.Index(rest, "```"); end >= 0 {
+			if candidate := strings.TrimSpace(rest[:end]); strings.HasPrefix(candidate, "{") {
+				return candidate
+			}
+		}
+	}
+	if trimmed := strings.TrimSpace(body); strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		return trimmed
+	}
+	return ""
+}
+
+// compilePackagingStudioImagery is the imagery_generate stage's compile: it
+// reads the art director's shot list and fulfills each brief via the existing
+// gpt-image generator. Imagery is EDITORIAL and never blocks the ship — a
+// typographic direction (zero shots), a keyless deploy, or a quota/timeout that
+// fails every shot all DISCLOSE and proceed with fewer/zero images. On success
+// it stamps the fig→blob placements ship_compile inlines into the deck.
+func compilePackagingStudioImagery(app *kanbanBoardApp, plan *goalPlan, parentID string, _ ProcessStage) (string, map[string]string, error) {
+	if app == nil || plan == nil {
+		return "", nil, fmt.Errorf("the imagery stage has no app/plan to read")
+	}
+	direction := ""
+	if st := plan.subtaskByID("imagery_direction"); st != nil {
+		if artifact, ok := app.osArtifactByID(st.ArtifactID); ok {
+			direction = strings.TrimSpace(artifact.Text)
+		}
+	}
+	visualSystem, shots := parseImageryDirection(direction)
+	if len(shots) == 0 {
+		return strings.Join([]string{
+			"Imagery — the package is typographic (no images directed)",
+			"",
+			"The art director directed no imagery: type and evidence carry this package. This is a valid, deliberate outcome.",
+		}, "\n"), map[string]string{"imageryShots": "0"}, nil
+	}
+	if strings.TrimSpace(visualSystem) == "" {
+		visualSystem = "The deck's own visual identity; keep every shot on one coherent system."
+	}
+
+	title := "Imagery"
+	if parent, ok := app.osArtifactByID(parentID); ok {
+		if t := strings.TrimSpace(parent.Metadata["title"]); t != "" {
+			title = t + " — imagery"
+		}
+	}
+	// Each shot self-bounds at the generator's 120s HTTP ceiling; give the stage
+	// generous headroom for the whole board and disclose on any per-shot miss.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(len(shots)+1)*150*time.Second)
+	defer cancel()
+	board, generated, err := app.runImageryBoard(ctx, imageryBoardInput{
+		Title:        title,
+		VisualSystem: visualSystem,
+		Shots:        shots,
+		PackageID:    plan.PackageID,
+		CreatedBy:    plan.CreatedBy,
+	})
+	if err != nil {
+		// Disclosed + non-fatal: keyless / quota / every-shot-failed ships the
+		// package typographic rather than blocking it.
+		return strings.Join([]string{
+			"Imagery — skipped (disclosed); the package ships typographic",
+			"",
+			fmt.Sprintf("%d shot(s) were directed but none were generated: %s", len(shots), compactAssistantLine(err.Error())),
+		}, "\n"), map[string]string{"imageryShots": "skipped"}, nil
+	}
+
+	placements, _ := json.Marshal(generated)
+	lines := []string{
+		"Imagery — the directed shots were generated",
+		"",
+		fmt.Sprintf("- %d of %d directed shot(s) generated on one visual system; filed as {kind:image} assets on %s.", len(generated), len(shots), board.ID),
+		"- Each generated FIG is inlined at its .fig-N slot as a data: URI by ship_compile.",
+	}
+	if len(generated) < len(shots) {
+		lines = append(lines, fmt.Sprintf("- %d directed shot(s) failed generation and were disclosed on the imagery board (the ship proceeds).", len(shots)-len(generated)))
+	}
+	return strings.Join(lines, "\n"), map[string]string{
+		"imageryShots":           fmt.Sprintf("%d", len(generated)),
+		"imageryBoardArtifactId": board.ID,
+		"imageryFigs":            string(placements),
+	}, nil
+}
+
+// injectStudioDeckImagery inlines each generated image as a data: URI onto its
+// .fig-N slot in the deck HTML, returning the augmented HTML and a disclosure
+// note. It reads the imagery_generate stage's stamped fig→blob placements; a
+// typographic package (no placements) passes the deck through unchanged. A blob
+// that cannot be read, or a fig with no matching .fig-N slot the writer built,
+// is disclosed in the note, never fatal.
+func injectStudioDeckImagery(app *kanbanBoardApp, plan *goalPlan, deckHTML string) (string, string) {
+	st := plan.subtaskByID("imagery_generate")
+	if st == nil {
+		return deckHTML, ""
+	}
+	record, ok := app.osArtifactByID(st.ArtifactID)
+	if !ok {
+		return deckHTML, ""
+	}
+	raw := strings.TrimSpace(record.Metadata["imageryFigs"])
+	if raw == "" {
+		return deckHTML, "Imagery: none placed — the package is typographic."
+	}
+	var placements []imageryGeneratedShot
+	if err := json.Unmarshal([]byte(raw), &placements); err != nil || len(placements) == 0 {
+		return deckHTML, "Imagery: none placed — the package is typographic."
+	}
+
+	images := make([]deckImage, 0, len(placements))
+	unreadable := 0
+	for _, p := range placements {
+		dataURI, err := blobDataURI(p.Ref, p.Mime)
+		if err != nil {
+			unreadable++
+			continue
+		}
+		images = append(images, deckImage{Fig: p.Fig, DataURI: dataURI})
+	}
+	return applyDeckImagery(deckHTML, images, len(placements), unreadable)
+}
+
+// deckImage is one resolved image ready to inline: its stable FIG and the
+// base64 data: URI.
+type deckImage struct {
+	Fig     int
+	DataURI string
+}
+
+// applyDeckImagery injects a <style> block mapping each image to its .fig-N .ph
+// slot and returns the augmented deck HTML plus a disclosure note. Pure and
+// testable: an image whose .fig-N slot the writer never built is disclosed as a
+// missing slot; unreadable counts blobs that could not be loaded upstream.
+func applyDeckImagery(deckHTML string, images []deckImage, generated int, unreadable int) (string, string) {
+	var rules []string
+	placed, missingSlot := 0, 0
+	for _, img := range images {
+		figClass := fmt.Sprintf("fig-%d", img.Fig)
+		rules = append(rules, fmt.Sprintf(".%s .ph{background-image:url(%s);background-size:cover;background-position:center}", figClass, img.DataURI))
+		if strings.Contains(deckHTML, figClass) {
+			placed++
+		} else {
+			missingSlot++
+		}
+	}
+	if len(rules) == 0 {
+		if generated > 0 {
+			return deckHTML, fmt.Sprintf("Imagery: %d image(s) generated but none could be inlined (blobs unreadable) — disclosed; the deck ships typographic.", generated)
+		}
+		return deckHTML, "Imagery: none placed — the package is typographic."
+	}
+	style := "<style id=\"bonfire-imagery\">" + strings.Join(rules, "\n") + "</style>"
+	augmented := insertIntoDocumentHead(deckHTML, style)
+	note := fmt.Sprintf("Imagery: %d image(s) inlined as data: URIs at their .fig-N slots.", placed)
+	if missingSlot > 0 {
+		note += fmt.Sprintf(" %d generated image(s) had no matching slot in the deck (disclosed).", missingSlot)
+	}
+	if unreadable > 0 {
+		note += fmt.Sprintf(" %d image blob(s) were unreadable and skipped (disclosed).", unreadable)
+	}
+	return augmented, note
 }
 
 // --- The SLIDE JURY stage -----------------------------------------------------
@@ -751,6 +1062,45 @@ type studioShipInputs struct {
 //
 // "Clients trust a document more when they can see it was attacked" — the
 // findings record is filed as a first-class artifact, not a footnote.
+// studioContractProducingStage maps a ship deliverable's contract to the
+// stage whose output it compiles FROM — the stage a feedback drop on that
+// deliverable must re-run (goal_engine feedbackTargetSubtask). The deck is
+// ship_deck's own body; The Wall is write's gated copy; The Talk is voice's
+// presenter script; the rigor companion leads with the red team's objection
+// ledger. The findings record aggregates the run's verdicts and maps to no
+// single stage — feedback on it falls through to the checkpoint's declared
+// send-back target.
+func studioContractProducingStage(contract string) (string, bool) {
+	switch strings.TrimSpace(contract) {
+	case packagingStudioDeckContract:
+		return "ship_deck", true
+	case packagingStudioWallContract:
+		return "write", true
+	case packagingStudioTalkContract:
+		return "voice", true
+	case packagingStudioRigorContract:
+		return "red_team", true
+	}
+	return "", false
+}
+
+// studioShipDeliverableByContract finds the goal's already-filed ship
+// deliverable for one contract, if any — the re-ship dedupe key. Goal-less
+// studio runs (empty goalID) never dedupe: without a goal there is no re-open
+// path, so every ship is a fresh filing.
+func (app *kanbanBoardApp) studioShipDeliverableByContract(goalID string, contract string) (meetingMemoryEntry, bool) {
+	goalID = strings.TrimSpace(goalID)
+	if goalID == "" {
+		return meetingMemoryEntry{}, false
+	}
+	for _, entry := range app.osArtifactsSnapshot(0) {
+		if entry.Metadata["source"] == "packaging_studio_ship" && entry.Metadata["goalId"] == goalID && entry.Metadata["artifactContract"] == contract {
+			return entry, true
+		}
+	}
+	return meetingMemoryEntry{}, false
+}
+
 func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]studioShipDeliverable, error) {
 	if app == nil || app.memory == nil {
 		return nil, fmt.Errorf("artifact memory is unavailable")
@@ -810,12 +1160,32 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 		if in.PackageID != "" {
 			metadata["packageId"] = in.PackageID
 		}
-		artifact, appended, err := app.createOSArtifactWithMetadata("workflow", spec.title, body, createdBy, metadata)
-		if err != nil {
-			return filed, fmt.Errorf("file ship deliverable %q: %w", spec.contract, err)
-		}
-		if !appended || strings.TrimSpace(artifact.ID) == "" {
-			return filed, fmt.Errorf("ship deliverable %q was not saved", spec.contract)
+		// Wave 6 (deep 1:1 linkage): a re-ship for the SAME goal — a feedback
+		// re-open re-running ship_compile — versions the existing deliverable
+		// in place (updateOSArtifactWithMetadata mints v+1 and archives the
+		// prior body) instead of filing a stranger, so chat refs, drawer rows,
+		// and package links keep pointing at the living artifact.
+		var artifact meetingMemoryEntry
+		if existing, found := app.studioShipDeliverableByContract(in.GoalID, spec.contract); found {
+			// The prior run's render exports are STALE against the revised
+			// body — clear them so the re-enqueued export lands as the only
+			// asset; a pending render reads honest, a superseded PDF does not.
+			metadata[artifactAssetsMetadataKey] = ""
+			var err error
+			artifact, _, err = app.updateOSArtifactWithMetadata(existing.ID, "", body, createdBy, metadata)
+			if err != nil {
+				return filed, fmt.Errorf("re-file ship deliverable %q: %w", spec.contract, err)
+			}
+		} else {
+			var appended bool
+			var err error
+			artifact, appended, err = app.createOSArtifactWithMetadata("workflow", spec.title, body, createdBy, metadata)
+			if err != nil {
+				return filed, fmt.Errorf("file ship deliverable %q: %w", spec.contract, err)
+			}
+			if !appended || strings.TrimSpace(artifact.ID) == "" {
+				return filed, fmt.Errorf("ship deliverable %q was not saved", spec.contract)
+			}
 		}
 		// Attach to the venture package — the bidirectional binder link SHIP
 		// promises. A missing package is disclosed, not fatal: the artifact is

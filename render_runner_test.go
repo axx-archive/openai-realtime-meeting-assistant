@@ -260,6 +260,151 @@ func TestInjectRenderPrintCSPPinsZeroNetworkPolicy(t *testing.T) {
 	}
 }
 
+// injectRenderDeckPrintCSS is the pagination safety net: a .pg deck with no
+// @page rule (the shape that flattened to one page) gets the chassis print
+// block injected into its head; a deck that already declares @page is left
+// untouched, and a second pass is a no-op.
+func TestInjectRenderDeckPrintCSS(t *testing.T) {
+	missing := `<!doctype html><html><head></head><body><div id="stage"><section class="pg on">one</section><section class="pg">two</section></div></body></html>`
+	got := injectRenderDeckPrintCSS(missing)
+	for _, need := range []string{"@page", "@media print", "break-after:page", ".pg"} {
+		if !strings.Contains(got, need) {
+			t.Fatalf("expected print CSS %q injected, got:\n%s", need, got)
+		}
+	}
+	if n := strings.Count(got, "@page"); n != 1 {
+		t.Fatalf("expected exactly one @page after inject, got %d", n)
+	}
+	// The style lands inside the head (right after <head>), not after </body>.
+	if !strings.Contains(got, "<head><style>") {
+		t.Fatalf("print CSS not injected into the document head:\n%s", got)
+	}
+
+	// A deck that already declares @page keeps its own geometry — untouched.
+	authored := `<!doctype html><html><head><style>@page{size:A4}</style></head><body>x</body></html>`
+	if out := injectRenderDeckPrintCSS(authored); out != authored {
+		t.Fatalf("deck with @page must be left untouched, got:\n%s", out)
+	}
+	// Idempotent: injecting a second time adds no second block.
+	if twice := injectRenderDeckPrintCSS(got); twice != got {
+		t.Fatalf("second injection pass must be a no-op, got:\n%s", twice)
+	}
+}
+
+// The deck print path must reach chromium carrying pagination: a .pg deck that
+// dropped its print CSS still gets the chassis block injected before the print,
+// so every slide paginates instead of collapsing to the single on-screen frame.
+// Paper (text-native, no slide model) is never given a slide print stylesheet.
+func TestExecuteRenderExportPDFInjectsDeckPaginationBeforePrint(t *testing.T) {
+	binDir := t.TempDir()
+	chromium := writeStubRenderBinary(t, binDir, "chromium-stub")
+	pdftoppm := writeStubRenderBinary(t, binDir, "pdftoppm-stub")
+
+	// Custom fake: capture the exact HTML handed to chromium via file://.
+	var printedHTML string
+	original := runRenderExecCommand
+	t.Cleanup(func() { runRenderExecCommand = original })
+	runRenderExecCommand = func(_ context.Context, _ string, args []string, _ string) (string, string, error) {
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--print-to-pdf=") {
+				htmlPath := strings.TrimPrefix(args[len(args)-1], "file://")
+				data, err := os.ReadFile(htmlPath)
+				if err != nil {
+					t.Fatalf("read printed html: %v", err)
+				}
+				printedHTML = string(data)
+				if err := os.WriteFile(strings.TrimPrefix(arg, "--print-to-pdf="), []byte("%PDF-1.7 layered\n%%EOF"), 0o644); err != nil {
+					t.Fatalf("fake chromium write: %v", err)
+				}
+				return "", "", nil
+			}
+		}
+		if len(args) > 0 && args[0] == "-jpeg" {
+			prefix := args[len(args)-1]
+			for page := 1; page <= 3; page++ {
+				if err := os.WriteFile(prefix+"-"+string(rune('0'+page))+".jpg", encodeBaselineJPEG(t, 16, 9), 0o644); err != nil {
+					t.Fatalf("fake pdftoppm write: %v", err)
+				}
+			}
+			return "", "", nil
+		}
+		t.Fatalf("unexpected render command %v", args)
+		return "", "", nil
+	}
+
+	cfg := renderExecConfig{ChromiumBin: chromium, PdftoppmBin: pdftoppm, Timeout: defaultRenderExecTimeout, MaxPDFBytes: defaultRenderMaxPDFBytes}
+	deck := `<!doctype html><html><head><title>d</title></head><body><div id="stage"><section class="pg on">one</section><section class="pg">two</section></div></body></html>`
+	if _, err := executeRenderExportPDF(context.Background(), cfg, renderRunnerJob{
+		ID: "render-job-deck-fallback", Type: renderJobTypeExportPDF, ArtifactID: "artifact-deck", Kind: renderJobKindDeck, HTML: deck,
+	}, filepath.Join(t.TempDir(), "out")); err != nil {
+		t.Fatalf("executeRenderExportPDF deck: %v", err)
+	}
+	for _, need := range []string{"@page", "break-after:page", "Content-Security-Policy"} {
+		if !strings.Contains(printedHTML, need) {
+			t.Fatalf("printed deck HTML missing %q — pagination/CSP not injected:\n%s", need, printedHTML)
+		}
+	}
+
+	// Paper: no slide print stylesheet is injected (only the CSP meta).
+	printedHTML = ""
+	paper := `<!doctype html><html><head><title>talk</title></head><body><p>text-native</p></body></html>`
+	if _, err := executeRenderExportPDF(context.Background(), cfg, renderRunnerJob{
+		ID: "render-job-paper", Type: renderJobTypeExportPDF, ArtifactID: "artifact-paper", Kind: renderJobKindPaper, HTML: paper,
+	}, filepath.Join(t.TempDir(), "out")); err != nil {
+		t.Fatalf("executeRenderExportPDF paper: %v", err)
+	}
+	if strings.Contains(printedHTML, "@page") || strings.Contains(printedHTML, "break-after:page") {
+		t.Fatalf("paper print was given a slide pagination stylesheet:\n%s", printedHTML)
+	}
+	if !strings.Contains(printedHTML, "Content-Security-Policy") {
+		t.Fatal("paper print missing the CSP meta")
+	}
+}
+
+// The disclosure guard: a deck that flattens to exactly one page did not
+// paginate and is flagged; a multi-page deck is not, and single-page PAPER is
+// not a deck-pagination defect.
+func TestExecuteRenderExportPDFDisclosesSinglePageDeck(t *testing.T) {
+	binDir := t.TempDir()
+	chromium := writeStubRenderBinary(t, binDir, "chromium-stub")
+	pdftoppm := writeStubRenderBinary(t, binDir, "pdftoppm-stub")
+	cfg := renderExecConfig{ChromiumBin: chromium, PdftoppmBin: pdftoppm, Timeout: defaultRenderExecTimeout, MaxPDFBytes: defaultRenderMaxPDFBytes}
+	deckHTML := `<!doctype html><html><body><div id="stage"><section class="pg on">only</section></div></body></html>`
+
+	fakeRenderExec(t, []byte("%PDF-1.7 layered\n%%EOF"), 1)
+	one, err := executeRenderExportPDF(context.Background(), cfg, renderRunnerJob{
+		ID: "render-job-1page", Type: renderJobTypeExportPDF, ArtifactID: "a", Kind: renderJobKindDeck, HTML: deckHTML,
+	}, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("executeRenderExportPDF one-page: %v", err)
+	}
+	if !one.DeckSinglePage {
+		t.Fatal("DeckSinglePage=false, want a disclosed single-page deck")
+	}
+
+	fakeRenderExec(t, []byte("%PDF-1.7 layered\n%%EOF"), 4)
+	multi, err := executeRenderExportPDF(context.Background(), cfg, renderRunnerJob{
+		ID: "render-job-4page", Type: renderJobTypeExportPDF, ArtifactID: "a", Kind: renderJobKindDeck, HTML: deckHTML,
+	}, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("executeRenderExportPDF multi-page: %v", err)
+	}
+	if multi.DeckSinglePage {
+		t.Fatal("multi-page deck wrongly flagged single-page")
+	}
+
+	fakeRenderExec(t, []byte("%PDF-1.7 paper\n%%EOF"), 1)
+	paper, err := executeRenderExportPDF(context.Background(), cfg, renderRunnerJob{
+		ID: "render-job-paper1", Type: renderJobTypeExportPDF, ArtifactID: "a", Kind: renderJobKindPaper, HTML: `<!doctype html><html><body>x</body></html>`,
+	}, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("executeRenderExportPDF paper: %v", err)
+	}
+	if paper.DeckSinglePage {
+		t.Fatal("single-page paper wrongly flagged as a deck-pagination defect")
+	}
+}
+
 func TestExecuteRenderExportPDFPaperShipsDirectPrintWithoutFlatten(t *testing.T) {
 	binDir := t.TempDir()
 	chromium := writeStubRenderBinary(t, binDir, "chromium-stub")
@@ -458,5 +603,36 @@ func TestReadinessRenderRunnerSnapshotSurfacesAbsence(t *testing.T) {
 	}
 	if _, ok := snapshot["chromiumOK"]; !ok {
 		t.Fatalf("snapshot=%v, want chromiumOK toolchain signal", snapshot)
+	}
+}
+
+// The live Ember run's block, root-caused: a minimal HTML5 deck legitimately
+// opens with <!doctype html> followed directly by <style> — no <html>/<head>
+// wrapper tags. insertIntoDocumentHead's fallback PREPENDED the snippet before
+// the doctype, un-documenting the file: ship_compile's html_deck validation
+// ("must start with <!doctype html") then rejected the compiled deck and the
+// whole ship blocked. The fallback must insert AFTER the doctype declaration.
+func TestInsertIntoDocumentHeadAfterBareDoctype(t *testing.T) {
+	deck := "<!doctype html>\n<style>.pg{width:1920px}</style>\n<section class=\"pg fig-2\">slide</section>"
+	augmented := insertIntoDocumentHead(deck, "<style id=\"bonfire-imagery\">.fig-2 .ph{}</style>")
+	if !strings.HasPrefix(strings.ToLower(augmented), "<!doctype html>") {
+		t.Fatalf("augmented deck no longer starts with the doctype:\n%s", augmented[:80])
+	}
+	if !strings.Contains(augmented, "bonfire-imagery") {
+		t.Fatal("snippet was not inserted")
+	}
+	doctypeEnd := strings.Index(augmented, ">")
+	if snippetAt := strings.Index(augmented, "<style id=\"bonfire-imagery\""); snippetAt < doctypeEnd {
+		t.Fatalf("snippet landed before the doctype closed (at %d, doctype ends %d)", snippetAt, doctypeEnd)
+	}
+	// The uppercase variant is equally legal.
+	upper := insertIntoDocumentHead("<!DOCTYPE HTML><section class=\"pg\">s</section>", "<style id=\"x\"></style>")
+	if !strings.HasPrefix(upper, "<!DOCTYPE HTML>") {
+		t.Fatalf("uppercase doctype deck was un-documented:\n%s", upper[:60])
+	}
+	// A fragment with no doctype at all keeps the plain prepend.
+	frag := insertIntoDocumentHead("<section>s</section>", "<style id=\"y\"></style>")
+	if !strings.HasPrefix(frag, "<style id=\"y\">") {
+		t.Fatalf("fragment fallback changed: %s", frag[:40])
 	}
 }

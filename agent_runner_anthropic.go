@@ -765,6 +765,13 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		modeContract = toolPrompt
 		finalLine = "When the goal is met, write the finished artifact as your final message using the tool's OUTPUT CONTRACT above — its exact headings, nothing generic. Write in a practical operator voice."
 	}
+	// Raw-document contract: the final message IS the file — the generic
+	// Markdown-headings final line is the exact instruction that looped the
+	// live ship_deck child into its law-sweep block.
+	if raw, ok := rawDocumentContractInstructions(job.thread.Artifact.Metadata["outputContract"]); ok {
+		modeContract = raw
+		finalLine = "When the goal is met, your final message is the deliverable FILE ITSELF — nothing before the <!doctype html>, nothing after the closing </html>."
+	}
 	return strings.Join([]string{
 		"You are Scout, the in-process orchestrator for Bonfire OS.",
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",

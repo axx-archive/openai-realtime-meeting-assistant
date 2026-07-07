@@ -207,10 +207,21 @@ func (app *kanbanBoardApp) produceCodexAgentThreadArtifact(ctx context.Context, 
 	metadata["codexFinalBytes"] = strconv.Itoa(len(output))
 
 	return agentThreadWorkerResult{
-		Text:     appendCodexWorkerEvidence(output, cfg),
+		Text:     appendCodexWorkerEvidenceForContract(output, cfg, thread.Artifact.Metadata["outputContract"]),
 		Metadata: metadata,
 		Terminal: true,
 	}, nil
+}
+
+// appendCodexWorkerEvidenceForContract keeps the worker-evidence footer off
+// raw-document deliverables — a markdown section after a deck's closing
+// </html> is trailing junk in the file the render pipeline prints. The
+// evidence survives in the job metadata either way.
+func appendCodexWorkerEvidenceForContract(output string, cfg codexExecConfig, contract string) string {
+	if _, raw := rawDocumentContractInstructions(contract); raw {
+		return output
+	}
+	return appendCodexWorkerEvidence(output, cfg)
 }
 
 func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, now time.Time, authority string) string {
@@ -252,8 +263,17 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 	builder.WriteString("- Do not commit, push, deploy, SSH, send email, call external write APIs, or mutate production systems unless this job has explicit external_write approval for that exact side effect.\n")
 	builder.WriteString("- If an external side effect is needed, stop and put a Gate line that starts with EXTERNAL_WRITE_APPROVAL_REQUIRED: followed by the precise command/action you would run after approval.\n")
 	builder.WriteString("- If credentials, access, approvals, network, or sandbox restrictions block the work, leave the artifact useful and mark the gate as blocked.\n\n")
+	// A raw-document contract replaces the generic mode contract AND the
+	// closing Markdown-artifact demand: the final message IS the file (the
+	// third instruction site of the ship_deck death loop — the runAgentThread
+	// and anthropic-runner sites carry the same override).
+	rawInstructions, rawContract := rawDocumentContractInstructions(thread.Artifact.Metadata["outputContract"])
 	builder.WriteString("Mode-specific artifact contract:\n")
-	builder.WriteString(agentThreadModeContract(thread.Mode))
+	if rawContract {
+		builder.WriteString(rawInstructions)
+	} else {
+		builder.WriteString(agentThreadModeContract(thread.Mode))
+	}
 	builder.WriteString("\n\n")
 	builder.WriteString("Bonfire OS context: ")
 	builder.WriteString(contextLine)
@@ -269,7 +289,11 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 		builder.WriteString(compactAssistantLine(entry.Text))
 		builder.WriteByte('\n')
 	}
-	builder.WriteString("\nReturn a polished Markdown artifact with stable headings for: Vision, Goal, Context used, Work decomposition, Agent assignment, Execution log, Review, Gate, What worked, Report, Next moves, Verification, and Codex worker evidence. Keep the output readable in an artifact viewer, with short paragraphs or bullets under each heading.\n")
+	if rawContract {
+		builder.WriteString("\nYour final message is the deliverable FILE ITSELF: nothing before the <!doctype html>, nothing after the closing </html>. No Markdown headings, no evidence section, no commentary.\n")
+	} else {
+		builder.WriteString("\nReturn a polished Markdown artifact with stable headings for: Vision, Goal, Context used, Work decomposition, Agent assignment, Execution log, Review, Gate, What worked, Report, Next moves, Verification, and Codex worker evidence. Keep the output readable in an artifact viewer, with short paragraphs or bullets under each heading.\n")
+	}
 
 	return builder.String()
 }

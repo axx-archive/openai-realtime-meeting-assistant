@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
@@ -411,5 +412,90 @@ func TestCodexOutputRequiresExternalApprovalMatchesGateMarkerOnly(t *testing.T) 
 				t.Fatalf("codexOutputRequiresExternalApproval()=%v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The codex exec path is the THIRD instruction site (prod children run
+// worker=codex_exec): its prompt demanded "a polished Markdown artifact with
+// stable headings for: Vision, Goal, ..." — at war with a raw-document
+// contract — and appendCodexWorkerEvidence bolts a markdown section AFTER the
+// output, trailing junk after a deck's closing </html>. Both must yield when
+// the child carries a raw-document outputContract.
+func TestCodexPromptHonorsRawDocumentContract(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread := scoutAgentThread{
+		ID:    "agent-thread-artifacts-raw",
+		Mode:  "artifacts",
+		Query: "Ship — the self-contained presenter deck",
+		Artifact: meetingMemoryEntry{
+			ID:       "os-artifact-artifacts-raw",
+			Kind:     "os_artifact",
+			Metadata: map[string]string{"outputContract": "packaging_deck_v1"},
+		},
+	}
+	prompt := app.buildCodexAgentThreadPrompt(thread, time.Now(), toolAuthorityWorkspaceWrite)
+	for _, banned := range []string{"polished Markdown artifact", "Vision, Goal"} {
+		if strings.Contains(prompt, banned) {
+			t.Fatalf("raw-document codex prompt still demands %q", banned)
+		}
+	}
+	if !strings.Contains(prompt, "<!doctype html>") {
+		t.Fatalf("raw-document codex prompt must demand the doctype-first file:\n%s", prompt[len(prompt)-400:])
+	}
+
+	// The generic prompt keeps its shape.
+	plain := thread
+	plain.Artifact.Metadata = map[string]string{}
+	if got := app.buildCodexAgentThreadPrompt(plain, time.Now(), toolAuthorityWorkspaceWrite); !strings.Contains(got, "polished Markdown artifact") {
+		t.Fatal("plain codex prompt lost its generic artifact contract")
+	}
+
+	// Worker evidence never trails a raw document; plain output keeps it.
+	deck := "<!doctype html><html><body><section class=\"pg\">s</section></body></html>"
+	cfg := codexExecConfig{CWD: "/tmp", Sandbox: "workspace-write", ApprovalPolicy: "never"}
+	if got := appendCodexWorkerEvidenceForContract(deck, cfg, "packaging_deck_v1"); got != deck {
+		t.Fatalf("raw deck grew trailing evidence:\n%s", got[len(deck):])
+	}
+	if got := appendCodexWorkerEvidenceForContract("report body", cfg, ""); !strings.Contains(got, "Codex worker evidence") {
+		t.Fatal("plain output lost the worker evidence section")
+	}
+}
+
+// The sidecar queue path (prod's worker=codex_exec runs MODE=sidecar_queue) is
+// a SECOND evidence-append site: the runner's result handler appended the
+// worker-evidence footer to every output, so a raw-HTML deck got a "## Codex
+// worker evidence" block after </html> — which the PDF export rendered as a
+// trailing junk page (caught live on the Ember run). The contract must ride
+// the queued job so the runner keeps the footer off a deck.
+func TestCodexQueuedJobCarriesOutputContract(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", t.TempDir())
+
+	thread := scoutAgentThread{
+		ID:    "agent-thread-artifacts-deck",
+		Mode:  "artifacts",
+		Query: "Ship — the self-contained presenter deck",
+		Artifact: meetingMemoryEntry{
+			ID:       "os-artifact-artifacts-deck",
+			Kind:     "os_artifact",
+			Metadata: map[string]string{"outputContract": "packaging_deck_v1"},
+		},
+	}
+	if _, err := app.enqueueCodexAgentThreadJob(thread, toolAuthorityWorkspaceWrite); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	store := newCodexRunnerJobStore(codexRunnerQueuePath())
+	job, err := store.claimNext("test-runner")
+	if err != nil || job == nil {
+		t.Fatalf("claimNext: job=%v err=%v", job, err)
+	}
+	if job.Metadata["outputContract"] != "packaging_deck_v1" {
+		t.Fatalf("queued job outputContract=%q, want the raw-document contract propagated", job.Metadata["outputContract"])
+	}
+	// The runner's contract-aware append leaves the deck untouched.
+	deck := "<!doctype html><html><body><section class=\"pg\">s</section></body></html>"
+	cfg := codexExecConfig{CWD: "/tmp", Sandbox: "workspace-write", ApprovalPolicy: "never"}
+	if got := appendCodexWorkerEvidenceForContract(deck, cfg, job.Metadata["outputContract"]); got != deck {
+		t.Fatalf("deck grew trailing evidence in the runner path:\n%s", got[len(deck):])
 	}
 }

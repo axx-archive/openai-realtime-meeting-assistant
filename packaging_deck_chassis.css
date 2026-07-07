@@ -1,0 +1,21 @@
+/* Bonfire packaging deck — INVARIANT chassis (stage geometry + slide model +
+   print pagination). The ship_deck writer replaces every aesthetic token and
+   all furniture, but MUST keep this block verbatim: the @page + @media print
+   rules are what make the exported PDF contain EVERY slide instead of only the
+   single on-screen frame. Removing them reintroduces the one-page-deck defect.
+   Each slide is a <section class="pg"> inside a single <div id="stage">; the
+   first slide also carries class "on" so the screen view opens on it. */
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{overflow:hidden}
+#stage{position:fixed;top:50%;left:50%;width:1920px;height:1080px;transform:translate(-50%,-50%) scale(var(--s,1));transform-origin:center}
+.pg{position:absolute;inset:0;display:none;overflow:hidden}
+.pg.on{display:block}
+@page{size:1920px 1080px;margin:0}
+@media print{
+  html,body{height:auto;overflow:visible}
+  #stage{position:static;transform:none;width:1920px;height:auto}
+  .pg{position:relative;inset:auto;display:block;width:1920px;height:1080px;break-after:page;page-break-after:always;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pg:last-of-type{break-after:auto;page-break-after:auto}
+  #prompt,#phint,#railwrap,.navzone{display:none!important}
+}

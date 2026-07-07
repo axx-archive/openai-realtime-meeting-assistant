@@ -230,10 +230,21 @@ const (
 // speaks — never unnamed), and optionally the real place by name when the
 // place is the claim.
 type imageryShot struct {
+	Fig         int    // stable FIG number from the art director (0 = auto-sequential)
 	Title       string // short FIG-caption title
 	Description string // what the shot depicts
 	Temperature string // the NAMED emotional temperature (drama, joy, ...)
 	Place       string // the real place by name, when the place is the claim
+}
+
+// imageryGeneratedShot is one successfully generated shot the board returns to
+// its caller: the stable FIG, the stored blob ref, and its mime. The studio's
+// imagery-generation stage carries these forward so ship_compile can inline each
+// image at its directed .fig-N slot as a data: URI.
+type imageryGeneratedShot struct {
+	Fig  int
+	Ref  string
+	Mime string
 }
 
 // imageryShotPrompt renders one shot's generation prompt under the imagery
@@ -279,32 +290,32 @@ type imageryBoardInput struct {
 // kind=image assets. A failed shot is DISCLOSED in the generation record and
 // the board files without it; zero generated shots is an error, and keyless
 // errors clearly before any request.
-func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardInput) (meetingMemoryEntry, error) {
+func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardInput) (meetingMemoryEntry, []imageryGeneratedShot, error) {
 	if app == nil || app.memory == nil {
-		return meetingMemoryEntry{}, fmt.Errorf("artifact memory is unavailable")
+		return meetingMemoryEntry{}, nil, fmt.Errorf("artifact memory is unavailable")
 	}
 	// Keyless: fail clearly BEFORE any per-shot work, so a keyless deploy never
 	// files a half-board.
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
-		return meetingMemoryEntry{}, fmt.Errorf("OPENAI_API_KEY is not configured — the imagery board cannot generate")
+		return meetingMemoryEntry{}, nil, fmt.Errorf("OPENAI_API_KEY is not configured — the imagery board cannot generate")
 	}
 	visualSystem := strings.TrimSpace(in.VisualSystem)
 	if visualSystem == "" {
-		return meetingMemoryEntry{}, fmt.Errorf("the imagery board needs a visual system brief — one system unifies every shot")
+		return meetingMemoryEntry{}, nil, fmt.Errorf("the imagery board needs a visual system brief — one system unifies every shot")
 	}
 	if len(in.Shots) == 0 {
-		return meetingMemoryEntry{}, fmt.Errorf("the imagery board needs shot descriptions (the contract asks for 4-6)")
+		return meetingMemoryEntry{}, nil, fmt.Errorf("the imagery board needs shot descriptions (the contract asks for 4-6)")
 	}
 	if len(in.Shots) > imageryBoardMaxShots {
-		return meetingMemoryEntry{}, fmt.Errorf("the imagery board caps at %d shots, got %d", imageryBoardMaxShots, len(in.Shots))
+		return meetingMemoryEntry{}, nil, fmt.Errorf("the imagery board caps at %d shots, got %d", imageryBoardMaxShots, len(in.Shots))
 	}
 	for index, shot := range in.Shots {
 		if strings.TrimSpace(shot.Description) == "" {
-			return meetingMemoryEntry{}, fmt.Errorf("shot %d has no description", index+1)
+			return meetingMemoryEntry{}, nil, fmt.Errorf("shot %d has no description", index+1)
 		}
 		if strings.TrimSpace(shot.Temperature) == "" {
 			// The law: the emotional temperature is NAMED per shot, never implied.
-			return meetingMemoryEntry{}, fmt.Errorf("shot %d names no emotional temperature (the imagery law: drama where the product speaks, joy where the culture speaks)", index+1)
+			return meetingMemoryEntry{}, nil, fmt.Errorf("shot %d names no emotional temperature (the imagery law: drama where the product speaks, joy where the culture speaks)", index+1)
 		}
 	}
 
@@ -314,21 +325,30 @@ func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardI
 		prompt string
 		ref    string
 		mime   string
+		fig    int
 	}
 	generated := make([]generatedShot, 0, len(in.Shots))
+	autoFig := 0
 	var failures []string
 	for index, shot := range in.Shots {
 		prompt := imageryShotPrompt(visualSystem, shot)
 		ref, mime, err := createOpenAIImage(ctx, prompt, opts)
 		if err != nil {
 			// Disclosed, never silent: the board files with the gap named.
-			failures = append(failures, fmt.Sprintf("FIG. %d (%s): %s", index+1, firstNonEmptyString(strings.TrimSpace(shot.Title), "untitled"), compactAssistantLine(err.Error())))
+			failures = append(failures, fmt.Sprintf("FIG. %d (%s): %s", firstPositiveInt(shot.Fig, index+1), firstNonEmptyString(strings.TrimSpace(shot.Title), "untitled"), compactAssistantLine(err.Error())))
 			continue
 		}
-		generated = append(generated, generatedShot{shot: shot, prompt: prompt, ref: ref, mime: mime})
+		// A stable FIG identity: the art director's number when given, else the
+		// running sequence — so downstream placement (.fig-N) never guesses.
+		fig := shot.Fig
+		if fig <= 0 {
+			autoFig++
+			fig = autoFig
+		}
+		generated = append(generated, generatedShot{shot: shot, prompt: prompt, ref: ref, mime: mime, fig: fig})
 	}
 	if len(generated) == 0 {
-		return meetingMemoryEntry{}, fmt.Errorf("no shots generated: %s", strings.Join(failures, "; "))
+		return meetingMemoryEntry{}, nil, fmt.Errorf("no shots generated: %s", strings.Join(failures, "; "))
 	}
 
 	// The body emits the imagery_board_v1 contract headings exactly
@@ -341,13 +361,11 @@ func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardI
 		"",
 		"## Shot list",
 	}
-	figNumber := 0
 	for _, item := range generated {
-		figNumber++
 		title := firstNonEmptyString(strings.TrimSpace(item.shot.Title), "untitled shot")
 		lines = append(lines,
 			"",
-			fmt.Sprintf("### FIG. %d — %s (%s)", figNumber, title, imageryConceptRenderLabel),
+			fmt.Sprintf("### FIG. %d — %s (%s)", item.fig, title, imageryConceptRenderLabel),
 			"- Emotional temperature: "+strings.TrimSpace(item.shot.Temperature),
 		)
 		if place := strings.TrimSpace(item.shot.Place); place != "" {
@@ -387,20 +405,22 @@ func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardI
 	title := firstNonEmptyString(strings.TrimSpace(in.Title), "Imagery board")
 	artifact, appended, err := app.createOSArtifactWithMetadata("design", title, strings.Join(lines, "\n"), createdBy, metadata)
 	if err != nil {
-		return meetingMemoryEntry{}, fmt.Errorf("file imagery board: %w", err)
+		return meetingMemoryEntry{}, nil, fmt.Errorf("file imagery board: %w", err)
 	}
 	if !appended || strings.TrimSpace(artifact.ID) == "" {
-		return meetingMemoryEntry{}, fmt.Errorf("imagery board was not saved")
+		return meetingMemoryEntry{}, nil, fmt.Errorf("imagery board was not saved")
 	}
 
 	// Attach every generated image as a kind=image asset. An attach failure is
 	// logged and disclosed by omission from the assets JSON, never fatal — the
 	// body already carries the ref.
-	for index, item := range generated {
+	out := make([]imageryGeneratedShot, 0, len(generated))
+	for _, item := range generated {
+		out = append(out, imageryGeneratedShot{Fig: item.fig, Ref: item.ref, Mime: item.mime})
 		asset := artifactAsset{
 			Ref:  item.ref,
 			Mime: item.mime,
-			Name: fmt.Sprintf("imagery-fig-%02d%s", index+1, imageryAssetExtension(item.mime)),
+			Name: fmt.Sprintf("imagery-fig-%02d%s", item.fig, imageryAssetExtension(item.mime)),
 			Kind: "image",
 		}
 		if updated, err := app.appendArtifactAsset(artifact.ID, asset); err != nil {
@@ -417,7 +437,7 @@ func (app *kanbanBoardApp) runImageryBoard(ctx context.Context, in imageryBoardI
 			log.Errorf("imagery board %s: attach to package %s failed: %v", artifact.ID, packageID, err)
 		}
 	}
-	return artifact, nil
+	return artifact, out, nil
 }
 
 // imageryAssetExtension picks the asset filename extension from the pinned
@@ -431,4 +451,28 @@ func imageryAssetExtension(mime string) string {
 	default:
 		return ".png"
 	}
+}
+
+// firstPositiveInt returns the first argument that is > 0, else the fallback —
+// the stable-FIG helper: the art director's number when given, else a sequence.
+func firstPositiveInt(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+// blobDataURI reads a stored image blob and renders it as a base64 data: URI —
+// the ONLY image form the render CSP (img-src data:) admits into a
+// self-contained deck. mime falls back to PNG when unknown.
+func blobDataURI(ref string, mime string) (string, error) {
+	data, _, err := getBlob(ref)
+	if err != nil {
+		return "", err
+	}
+	mime = strings.TrimSpace(mime)
+	if mime == "" {
+		mime = "image/png"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }

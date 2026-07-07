@@ -206,6 +206,27 @@ func processStageLawSweep(stage ProcessStage, body string) (string, bool) {
 	return "", false
 }
 
+// rawDocumentContractInstructions returns full-replacement worker
+// instructions for contracts whose deliverable IS a raw document — the
+// instruction-layer twin of processStageLawSweep, kept adjacent so what the
+// sweep enforces is exactly what the instructions demand. The generic
+// "one-line Vision, then Markdown sections" workflow instructions are the
+// documented death loop for these stages: the model obeys the system prompt
+// over the stage prompt and the sweep rejects every round.
+func rawDocumentContractInstructions(contract string) (string, bool) {
+	switch strings.TrimSpace(contract) {
+	case "packaging_deck_v1":
+		return strings.Join([]string{
+			"You are the deck writer for Bonfire's packaging studio.",
+			"Your ENTIRE response is the deliverable FILE ITSELF: one complete, self-contained HTML document.",
+			"The FIRST characters of your response must be <!doctype html> and it must end with </html> — no preamble, no markdown, no code fences, no Vision line, no section headings, no commentary before or after the file.",
+			"A plan, outline, or description of the deck is a FAILED deliverable — the law sweep rejects anything that is not the document itself.",
+			"Follow every instruction in the user request (the stage prompt): the required print chassis <style> block verbatim, the .pg slide model inside #stage, presenter mode from the VOICE script, and a .fig-N slot for each generated image.",
+		}, "\n"), true
+	}
+	return "", false
+}
+
 // processMaxSubtasks is the effective subtask ceiling for a process plan: the
 // authored budget when set, else the engine default. This is the ONE place the
 // Budgets.MaxSubtasks override is interpreted.

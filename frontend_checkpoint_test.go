@@ -129,10 +129,13 @@ func TestIndexCheckpointCardNegativeActions(t *testing.T) {
 		"typeof option === 'string'",
 		"{ label: option.trim(), action: 'proceed' }",
 		"String(option?.action || 'proceed').trim() || 'proceed'",
-		// revise options bring the generalized send-back notes input
+		// revise options bring the generalized send-back notes input; the
+		// do_not_touch grammar lives in the placeholder, not the label
 		"const hasRevise = options.some(option => option.action === 'revise')",
 		"if (!options.length || hasRevise) {",
-		"'notes for the send-back (do_not_touch lines are preserved exactly)'",
+		"? 'notes for the send-back'",
+		": 'notes for the next stage'",
+		"notes.placeholder = 'do_not_touch: …'",
 		// the actions read as what they mechanically do
 		"choiceBtn.classList.add('goalcard__choice--revise')",
 		"choiceBtn.classList.add('goalcard__choice--hold')",

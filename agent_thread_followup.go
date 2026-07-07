@@ -92,6 +92,69 @@ func agentThreadStatusValue(artifact meetingMemoryEntry) string {
 	return strings.ToLower(strings.TrimSpace(firstNonEmptyString(artifact.Metadata["threadStatus"], artifact.Metadata["status"])))
 }
 
+// dispatchArtifactFollowUp is the Wave 6 feedback router: every follow-up
+// entry (the chat drop, the headless endpoint) lands here, and the
+// deliverable's own provenance decides which worker takes the feedback.
+// Agent-thread reports (source scout_thread — including goal writer children,
+// which re-run in place exactly as before) go to launchAgentThreadFollowUp
+// unchanged; goal-engine deliverables — the goal card itself, process stage
+// outputs, packaging ship artifacts — resume their goal with the reply as a
+// revision note, re-opening a completed goal when needed. The goal route runs
+// BEFORE launchAgentThreadFollowUp's per-artifact lock and terminal-status
+// check: a goal parked at a checkpoint reads as still-running by agent-thread
+// rules. Deliverables with no goal linkage (an imagery board, a taste
+// profile, a hand-saved note) refuse honestly. teamReplies feed only the
+// agent-thread path — a goal resume carries the explicit note.
+func (app *kanbanBoardApp) dispatchArtifactFollowUp(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord) (scoutAgentThread, error) {
+	if app == nil || app.memory == nil {
+		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
+	}
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return scoutAgentThread{}, fmt.Errorf("artifact id is required")
+	}
+	artifact, ok := app.osArtifactByID(artifactID)
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
+	}
+	if err := app.artifactFollowUpRouteError(artifact); err != nil {
+		return scoutAgentThread{}, err
+	}
+	if artifact.Metadata["source"] == "scout_thread" {
+		return app.launchAgentThreadFollowUp(artifactID, replyText, requestedBy, teamReplies)
+	}
+	return app.resumeGoalWithFeedback(artifactGoalParentID(artifact), requestedBy, replyText, artifactID)
+}
+
+// artifactFollowUpRouteError decides whether a follow-up on this artifact can
+// reach a worker AT ALL — the permanent-provenance check, split from dispatch
+// so Gate A can refuse a drop BEFORE planting the deliverable's card in the
+// thread (a card whose copy promises "feedback re-runs it" must never appear
+// for an artifact no route will ever take). Transient states — a goal mid-
+// drive, a parked checkpoint without a send-back door — stay downstream: the
+// deliverable is droppable, feedback just cannot land right now.
+func (app *kanbanBoardApp) artifactFollowUpRouteError(artifact meetingMemoryEntry) error {
+	if artifact.Metadata["source"] == "scout_thread" {
+		return nil
+	}
+	goalID := artifactGoalParentID(artifact)
+	if goalID == "" {
+		return fmt.Errorf("that deliverable is not linked to a workstream that can take feedback yet")
+	}
+	parent, ok := app.osArtifactByID(goalID)
+	if !ok {
+		return fmt.Errorf("that deliverable's workstream is no longer available")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok {
+		return fmt.Errorf("that deliverable's workstream is no longer available")
+	}
+	if plan.Cancelled {
+		return fmt.Errorf("that deliverable's goal was cancelled — launch a fresh run instead")
+	}
+	return nil
+}
+
 // launchAgentThreadFollowUp validates and marks an existing agent-thread
 // artifact as running a new in-place version, then hands the bounded text
 // run to the async worker. Any signed-in user may follow up; the run itself

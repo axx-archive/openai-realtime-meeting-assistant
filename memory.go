@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -274,23 +275,32 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		var entry meetingMemoryEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			log.Warnf("Skipping malformed memory entry: %v", err)
-			continue
+	// bufio.Reader, not bufio.Scanner: a shipped packaging deck (print chassis +
+	// base64-inlined imagery) is a multi-megabyte artifact filed as ONE JSONL
+	// line, and Scanner both caps a token (bufio.ErrTooLong) and hard-fails the
+	// WHOLE load on the first over-cap line — so one deck disabled all meeting
+	// memory on the next restart. ReadString grows without a fixed ceiling, and
+	// a per-line json error only skips that line (matching the existing
+	// malformed-entry resilience below).
+	reader := bufio.NewReaderSize(file, 1024*1024)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			var entry meetingMemoryEntry
+			if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
+				log.Warnf("Skipping malformed memory entry: %v", err)
+			} else if strings.TrimSpace(entry.ID) != "" && strings.TrimSpace(entry.Text) != "" {
+				store.entries = append(store.entries, entry)
+				store.seen[entry.ID] = struct{}{}
+				store.bootLatestIDs[entry.Kind] = entry.ID
+			}
 		}
-		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Text) == "" {
-			continue
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("read memory file: %w", readErr)
 		}
-		store.entries = append(store.entries, entry)
-		store.seen[entry.ID] = struct{}{}
-		store.bootLatestIDs[entry.Kind] = entry.ID
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read memory file: %w", err)
 	}
 
 	// resume the in-flight meeting after a restart: if the newest entry was not

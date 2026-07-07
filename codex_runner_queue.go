@@ -290,6 +290,10 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJob(thread scoutAgentThread, a
 			"requestedTools": codexRequestedToolsForMode(thread.Mode),
 			"worker":         agentThreadWorkerCodexExec,
 			"workerBoundary": "codex_sidecar_queue",
+			// Carry the raw-document contract so the runner's result handler
+			// keeps the worker-evidence footer OFF a deck (a markdown section
+			// after </html> renders as a trailing junk page in the export).
+			"outputContract": strings.TrimSpace(thread.Artifact.Metadata["outputContract"]),
 		},
 	})
 	if err != nil {
@@ -500,7 +504,7 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 		goalStatus = "approval_required"
 		progress = "82"
 	}
-	text := appendCodexWorkerEvidence(output, cfg)
+	text := appendCodexWorkerEvidenceForContract(output, cfg, job.Metadata["outputContract"])
 	job.Status = status
 	job.CompletedAt = completedAt
 	job.RunnerEvidence = codexRunnerCommandEvidence(result, cfg)

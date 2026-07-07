@@ -151,6 +151,10 @@
         --track-label: 0.06em;
         --type-label-lg: 500 13px/1.3 var(--font-mono);
         --track-label-lg: 0.04em;
+        /* the small caption step — used by run-card group/meta/resolved lines,
+           which otherwise fell back to --type-label-lg and lost their hierarchy */
+        --type-label-sm: 500 11px/1.2 var(--font-mono);
+        --track-label-sm: 0.06em;
         --type-numeric: 500 13px/1.2 var(--font-mono);
         --track-numeric: 0;
         /* feed voice (§5 type scale): conversation bodies sit one step under
@@ -7593,12 +7597,44 @@
         color: var(--text-3);
       }
 
+      /* discovery starters — a quiet row of tappable run shortcuts beneath the
+         private empty state (design polish wave §task-discovery) */
+      .scout-starters {
+        margin: 12px auto 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        max-width: 46ch;
+        padding: 0 24px;
+      }
+
+      .scout-starter {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 14px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .scout-starter:hover { border-color: var(--line-2); color: var(--text-1); }
+      .scout-starter:active { transform: scale(var(--press-scale)); }
+      .scout-starter--all { color: var(--text-3); }
+
       /* The 4 composer pills were cut (spec §2 "cut them"): the propose-confirm
          router replaced their quick lane — a deliverable-shaped message earns a
          Tier 1/2 proposal card instead of a prefilled keyword launch. */
 
       .scout-proposal-card {
-        align-self: stretch;
+        align-self: center;
+        width: min(var(--feed-measure), 100%);
         margin: 4px 0 6px;
         padding: 14px;
         border: 1px solid var(--line-1);
@@ -7644,12 +7680,11 @@
         letter-spacing: var(--track-label);
       }
 
+      /* de-chromed: authority + weight read as one quiet caption line, not two
+         bordered pills competing with the Run button (design polish wave) */
       .scout-proposal-card__authority,
       .scout-proposal-card__weight {
-        padding: 3px 9px;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-1);
+        white-space: nowrap;
       }
 
       .scout-proposal-card__actions {
@@ -7783,6 +7818,7 @@
         border-radius: 16px;
         padding: 17px 20px 14px;
         margin: 2px 0 4px;
+        align-self: center;
         max-width: 680px;
         width: 100%;
       }
@@ -7898,12 +7934,12 @@
       }
 
       .manifest-card__row-title {
-        display: block;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
         font: var(--type-caption-medium);
         color: var(--text-1);
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
       .manifest-card--held .manifest-card__row-title {
@@ -8004,8 +8040,7 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
-        white-space: nowrap;
-        overflow: hidden;
+        flex-wrap: wrap;
       }
 
       .manifest-card__attached b {
@@ -9010,7 +9045,7 @@
          is earned */
       .scout-chat-form {
         display: flex;
-        align-items: flex-end;
+        align-items: center;
         gap: 8px;
         margin: 0 28px;
         padding: 5px 6px;
@@ -9043,6 +9078,15 @@
         letter-spacing: var(--track-text);
         padding: 7px 0;
         outline: 0;
+      }
+
+      /* The composer pill already owns the focus signal (.scout-chat-form
+         :focus-within). Suppress the input's own :focus-visible ring so the
+         textarea does not draw a redundant hairline box inside the pill — the
+         "white border" the founder flagged on mobile. */
+      .scout-chat-input:focus-visible {
+        outline: none;
+        box-shadow: none;
       }
 
 	      .scout-chat-input::placeholder {
@@ -9206,6 +9250,87 @@
         padding-left: 10px;
         color: var(--text-3);
         font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* Deliverables drawer — the drive-style picker that floats above the
+         composer; pick a deliverable and the next message gives it feedback. */
+      .scout-deliverables-popover {
+        position: relative;
+        height: 0;
+        margin: 0 28px;
+        z-index: 31;
+      }
+      .chat-conversation .scout-deliverables-popover {
+        margin: 0 16px;
+      }
+      .scout-deliverables__sheet {
+        position: absolute;
+        bottom: 8px;
+        left: 14px;
+        right: 14px;
+        max-width: 420px;
+        max-height: 300px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        padding: 6px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        box-shadow: var(--shadow-2);
+      }
+      .scout-deliverables__header {
+        padding: 6px 9px 8px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .scout-deliverables__list {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .scout-deliverables__item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 9px;
+        border: 0;
+        background: transparent;
+        border-radius: var(--r-sm);
+        color: var(--text-1);
+        font: var(--type-body);
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+      }
+      .scout-deliverables__item:hover,
+      .scout-deliverables__item:focus-visible {
+        background: var(--surface-2);
+      }
+      .scout-deliverables__badge {
+        flex: none;
+        min-width: 40px;
+        text-align: center;
+        padding: 2px 8px;
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        color: var(--text-3);
+        font: var(--type-label-sm);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .scout-deliverables__title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .scout-deliverables__empty {
+        padding: 10px 9px 12px;
+        color: var(--text-3);
+        font: var(--type-label-lg);
         letter-spacing: var(--track-label);
       }
 
@@ -15633,6 +15758,7 @@
         .field input,
         .scout-ask .assistant-input,
         .scout-chat-input,
+        .palette__field,
         .card-command-form input {
           font-size: 16px;
         }
@@ -18843,6 +18969,7 @@
             <div id="scoutMentionPopover" class="scout-mention-popover" hidden>
               <div id="scoutMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
             </div>
+            <div id="scoutDeliverablesPopover" class="scout-deliverables-popover" hidden></div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -18850,10 +18977,15 @@
                   <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path>
                 </svg>
               </button>
-              <button id="scoutChatToolsBtn" class="scout-chat-tools" type="button" aria-label="Tools" aria-haspopup="dialog" title="Tools (or type /)" disabled>
+              <button id="scoutChatToolsBtn" class="scout-chat-tools" type="button" aria-label="Run a task or tool" aria-haspopup="dialog" title="Run a task or tool (or type /)" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14"></path>
                   <path d="M5 12h14"></path>
+                </svg>
+              </button>
+              <button id="scoutChatDeliverables" class="scout-chat-attach" type="button" aria-label="Attach a deliverable for feedback" aria-haspopup="listbox" title="Attach a deliverable for feedback" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
                 </svg>
               </button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout about any meeting" aria-label="Message Scout privately" disabled></textarea>
@@ -20066,6 +20198,8 @@
 	      const scoutChatForm = document.getElementById('scoutChatForm')
 	      const scoutChatFileInput = document.getElementById('scoutChatFileInput')
 	      const scoutChatAttach = document.getElementById('scoutChatAttach')
+	      const scoutChatDeliverables = document.getElementById('scoutChatDeliverables')
+	      const scoutDeliverablesPopover = document.getElementById('scoutDeliverablesPopover')
 	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
 	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
@@ -21022,6 +21156,15 @@
 	      })
 	      chatConvoRenameInput?.addEventListener('blur', () => finishChatThreadRename(true))
 	      scoutChatAttach?.addEventListener('click', () => scoutChatFileInput?.click())
+	      scoutChatDeliverables?.addEventListener('click', event => { event.stopPropagation(); toggleDeliverablesDrawer() })
+	      document.addEventListener('click', event => {
+	        if (deliverablesDrawerIsOpen() && !scoutDeliverablesPopover.contains(event.target) && !scoutChatDeliverables?.contains(event.target)) {
+	          closeDeliverablesDrawer()
+	        }
+	      })
+	      document.addEventListener('keydown', event => {
+	        if (event.key === 'Escape' && deliverablesDrawerIsOpen()) closeDeliverablesDrawer()
+	      })
 	      scoutChatFileInput?.addEventListener('change', addPendingScoutFiles)
 	      memorySearch?.addEventListener('input', event => {
         memoryQuery = event.target.value || ''
@@ -32742,6 +32885,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // (POST /assistant/goal needs no room join); only sign-in gates it.
 	          scoutChatToolsBtn.disabled = !Boolean(authedUser)
 	        }
+	        if (scoutChatDeliverables) {
+	          scoutChatDeliverables.disabled = !Boolean(authedUser)
+	        }
 	        scoutChatHint.hidden = available
 	        if (!available) {
 	          scoutChatHint.textContent = 'sign in to ask Scout'
@@ -33238,7 +33384,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // composer copy, design verbatim (§7.2)
 	        return chatThreadIsChannel(selectedScoutChatThread())
 	          ? 'message the thread — @scout to ask'
-	          : 'ask Scout about any meeting'
+	          : 'ask Scout, or tap + to run a task'
 	      }
 
 	      // composer target chips: while armed, the next send routes through
@@ -33276,8 +33422,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (scoutFollowUpTarget) {
 	          const query = String(scoutFollowUpTarget.query || '').trim()
+	          // a dropped deliverable carries an explicit label (its title); a
+	          // research node falls back to its mode + query as before.
+	          const targetName = String(scoutFollowUpTarget.label || assistantToolLabelText(scoutFollowUpTarget.mode))
+	          const targetSuffix = scoutFollowUpTarget.label ? '' : (query ? ` · ${query.slice(0, 48)}` : '')
 	          scoutFollowUpTargetEl.appendChild(armedChip(
-	            `follow-up → ${assistantToolLabelText(scoutFollowUpTarget.mode)} v${scoutFollowUpTarget.version}${query ? ` · ${query.slice(0, 48)}` : ''}`,
+	            `follow-up → ${targetName} v${scoutFollowUpTarget.version}${targetSuffix}`,
 	            'Clear follow-up target',
 	            () => {
 	              scoutFollowUpTarget = null
@@ -33300,6 +33450,111 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          scoutChatInput.placeholder = scoutFollowUpTarget
 	            ? 'add answers, corrections, or new info for the next run…'
 	            : 'describe what the tool should work on — send launches it…'
+	        }
+	      }
+
+	      // Wave 6 — one composer action ("give feedback on this deliverable")
+	      // drives the live follow-up seam for ANY deliverable. The next send
+	      // posts followUpArtifactId; the server dispatches by the artifact's own
+	      // source (scout-thread → in-place re-run; goal/process/packaged →
+	      // goal-engine resume with the note as revision grounding).
+	      function armScoutFollowUpTarget(artifactId, opts) {
+	        artifactId = String(artifactId || '')
+	        if (!artifactId) return
+	        opts = opts || {}
+	        const entry = opts.entry || (Array.isArray(artifactEntries)
+	          ? artifactEntries.find(candidate => String(candidate?.id || '') === artifactId)
+	          : null)
+	        const meta = entry?.metadata || {}
+	        const title = String(opts.title || meta.title || meta.threadQuery || meta.objective || '').trim()
+	        scoutFollowUpTarget = {
+	          artifactId,
+	          mode: String(opts.mode || meta.threadMode || meta.mode || ''),
+	          label: String(opts.label || title || 'deliverable').slice(0, 44),
+	          query: title,
+	          version: Number(meta.threadVersion || 1) || 1,
+	          threadId: activeScoutThreadId || ''
+	        }
+	        renderScoutFollowUpTarget()
+	        scoutChatInput?.focus()
+	      }
+
+	      // ---- Deliverables drawer (the drive-style picker) -------------------
+	      // A composer affordance that lists shippable deliverables from the
+	      // artifact library and, on pick, arms the follow-up seam on THAT
+	      // deliverable in the current thread/channel — drop-then-give-feedback.
+	      const shippableDeliverableSources = new Set(['scout_thread', 'goal_thread', 'goal_completion', 'process_stage', 'packaging_studio_ship'])
+
+	      function deliverableDrawerEntries() {
+	        const entries = Array.isArray(artifactEntries) ? artifactEntries : []
+	        return entries.filter(entry => {
+	          const src = String(entry?.metadata?.source || '')
+	          return isGoalArtifact(entry) || artifactAssetEntries(entry).length > 0 || shippableDeliverableSources.has(src)
+	        }).slice(0, 40)
+	      }
+
+	      function deliverableDrawerTitle(entry) {
+	        const meta = entry?.metadata || {}
+	        return (String(meta.title || entry?.title || entry?.name || meta.objective || meta.threadQuery || '').trim()) || 'deliverable'
+	      }
+
+	      function deliverableDrawerBadge(entry) {
+	        const kind = String(entry?.metadata?.kind || entry?.kind || '').toLowerCase()
+	        if (kind.includes('deck')) return 'deck'
+	        if (isGoalArtifact(entry)) return 'goal'
+	        if (artifactAssetEntries(entry).length) return 'file'
+	        return 'doc'
+	      }
+
+	      function deliverablesDrawerIsOpen() {
+	        return Boolean(scoutDeliverablesPopover) && !scoutDeliverablesPopover.hidden
+	      }
+
+	      function closeDeliverablesDrawer() {
+	        if (!scoutDeliverablesPopover) return
+	        scoutDeliverablesPopover.hidden = true
+	        scoutDeliverablesPopover.replaceChildren()
+	      }
+
+	      function openDeliverablesDrawer() {
+	        if (!scoutDeliverablesPopover) return
+	        // best-effort refresh so newly shipped deliverables appear
+	        loadArtifacts().catch(() => {}).finally(renderDeliverablesDrawer)
+	        renderDeliverablesDrawer()
+	        scoutDeliverablesPopover.hidden = false
+	      }
+
+	      function toggleDeliverablesDrawer() {
+	        if (deliverablesDrawerIsOpen()) { closeDeliverablesDrawer(); return }
+	        openDeliverablesDrawer()
+	      }
+
+	      function renderDeliverablesDrawer() {
+	        if (!scoutDeliverablesPopover) return
+	        const sheet = bfEl('div', 'scout-deliverables__sheet')
+	        const list = bfEl('div', 'scout-deliverables__list')
+	        list.setAttribute('role', 'listbox')
+	        list.setAttribute('aria-label', 'Deliverables')
+	        sheet.appendChild(bfEl('div', 'scout-deliverables__header', 'drop a deliverable — your next message gives it feedback'))
+	        sheet.appendChild(list)
+	        scoutDeliverablesPopover.replaceChildren(sheet)
+	        const entries = deliverableDrawerEntries()
+	        if (!entries.length) {
+	          list.appendChild(bfEl('div', 'scout-deliverables__empty', 'no deliverables yet — ship a run and it lands here'))
+	          return
+	        }
+	        for (const entry of entries) {
+	          const id = String(entry?.id || '')
+	          const item = bfEl('button', 'scout-deliverables__item')
+	          item.type = 'button'
+	          item.setAttribute('role', 'option')
+	          item.appendChild(bfEl('span', 'scout-deliverables__badge', deliverableDrawerBadge(entry)))
+	          item.appendChild(bfEl('span', 'scout-deliverables__title', deliverableDrawerTitle(entry)))
+	          item.addEventListener('click', () => {
+	            armScoutFollowUpTarget(id, { entry, title: deliverableDrawerTitle(entry) })
+	            closeDeliverablesDrawer()
+	          })
+	          list.appendChild(item)
 	        }
 	      }
 
@@ -34522,8 +34777,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!options.length || hasRevise) {
             const field = bfEl('div', 'palette__form-field')
             field.appendChild(bfEl('label', 'palette__form-label', hasRevise
-              ? 'notes for the send-back (do_not_touch lines are preserved exactly)'
-              : 'notes for the next stage (do_not_touch, answers, must-keeps)'))
+              ? 'notes for the send-back'
+              : 'notes for the next stage'))
             notes = document.createElement('textarea')
             notes.className = 'palette__field'
             notes.rows = 3
@@ -34604,7 +34859,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // composer on this goal instead of opening a new surface
           const sendNotes = bfEl('button', 'goalcard__link goalcard__link--accent', 'send notes')
           sendNotes.type = 'button'
-          sendNotes.addEventListener('click', () => promptScoutForWork('', `notes on "${goalArtifactTitle(artifact)}": `))
+          sendNotes.addEventListener('click', () => armScoutFollowUpTarget(String(artifact?.id || ''), { entry: artifact, title: goalArtifactTitle(artifact), label: goalArtifactTitle(artifact) }))
           actions.appendChild(sendNotes)
           terminal.appendChild(actions)
           // the trust line (design §1.7 → sheet 3a): one calm provenance band —
@@ -36431,15 +36686,50 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function ensureScoutChatEmptyState() {
-	        if (!scoutChatThread.querySelector('.scout-chat-empty')) {
-	          const empty = document.createElement('p')
+	        const isChannel = chatThreadIsChannel(selectedScoutChatThread())
+	        let empty = scoutChatThread.querySelector('.scout-chat-empty')
+	        if (!empty) {
+	          empty = document.createElement('p')
 	          empty.className = 'scout-chat-empty'
 	          // empty-state copy, design verbatim (§7.2)
-	          empty.textContent = chatThreadIsChannel(selectedScoutChatThread())
+	          empty.textContent = isChannel
 	            ? 'a shared workstream — talk it through, or @scout to pull the office in.'
 	            : 'ask Scout about any meeting — only you can see this'
 	          scoutChatThread.insertBefore(empty, scoutChatThread.firstChild)
 	        }
+	        // Discovery: seed tappable run starters under the PRIVATE empty state so
+	        // a blank thread teaches what can be run. Idempotent; never on channels.
+	        const hasStarters = Boolean(scoutChatThread.querySelector('.scout-starters'))
+	        if (!isChannel && !hasStarters) {
+	          empty.after(buildScoutStarterRow())
+	        } else if (isChannel && hasStarters) {
+	          scoutChatThread.querySelector('.scout-starters').remove()
+	        }
+	      }
+
+	      // Discovery starters — each opens the tool palette (the full catalog)
+	      // pre-filtered to that run; the last chip opens the whole catalog. The
+	      // visible signpost the gesture-gated palette otherwise lacked.
+	      function buildScoutStarterRow() {
+	        const row = bfEl('div', 'scout-starters')
+	        row.setAttribute('aria-label', 'Start a run')
+	        const starters = [
+	          { seed: 'packaging studio', label: 'Package a venture' },
+	          { seed: 'deck outline', label: 'Outline a deck' },
+	          { seed: 'deep research', label: 'Deep research' },
+	          { seed: 'grill', label: 'Grill a pitch' }
+	        ]
+	        for (const s of starters) {
+	          const chip = bfEl('button', 'scout-starter', s.label)
+	          chip.type = 'button'
+	          chip.addEventListener('click', () => openToolPalette('button', s.seed))
+	          row.appendChild(chip)
+	        }
+	        const all = bfEl('button', 'scout-starter scout-starter--all', 'Browse all tasks')
+	        all.type = 'button'
+	        all.addEventListener('click', () => openToolPalette('button', ''))
+	        row.appendChild(all)
+	        return row
 	      }
 
 	      function renderActiveScoutThread() {
@@ -36482,7 +36772,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          updateChatThreadItem(chatThreadDisplayPreview(thread), thread?.updatedAt || '')
 	          return
 	        }
-	        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
+	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        messages.forEach(message => appendScoutChatNode(scoutChatMessageRecordNode(message)))
 	        remountGhostGoalCards()
@@ -37047,6 +37337,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            pdf.href = artifactBlobUrl({ ref: String(deliverable.pdfRef), name: String(deliverable.pdfName || '') })
 	            pdf.setAttribute('download', String(deliverable.pdfName || ''))
 	            actions.appendChild(pdf)
+	          }
+	          // deep 1:1 linkage: give feedback on THIS deliverable — arms the
+	          // follow-up seam so the next message resumes and revises it in place
+	          if (!held && artifactId) {
+	            const feedback = bfEl('button', 'manifest-card__pill manifest-card__pill--outline', 'feedback')
+	            feedback.type = 'button'
+	            feedback.addEventListener('click', () => armScoutFollowUpTarget(artifactId, { title: String(deliverable.title || ''), label: String(deliverable.title || '') }))
+	            actions.appendChild(feedback)
 	          }
 	          row.appendChild(actions)
 	          rows.appendChild(row)
@@ -38000,7 +38298,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function appendScoutChatNode(node) {
         const stick = scoutChatIsNearBottom()
-        scoutChatThread.querySelector('.scout-chat-empty')?.remove()
+        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
         scoutChatThread.insertBefore(node, scoutChatThinking)
         // Cap the rendered thread; drop oldest so long sessions stay light.
         while (scoutChatThread.children.length - 1 > scoutChatMaxNodes) {

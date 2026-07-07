@@ -394,17 +394,34 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	// counts as summoning Scout, so this branch runs regardless of channel
 	// visibility and never needs @scout.
 	if followUpArtifactID = strings.TrimSpace(followUpArtifactID); followUpArtifactID != "" {
-		if !scoutChatThreadHasArtifactRef(thread, followUpArtifactID) {
-			return nil, fmt.Errorf("that report is not in this thread")
+		artifact, ok := app.osArtifactByID(followUpArtifactID)
+		if !ok {
+			return nil, fmt.Errorf("that report is unavailable")
 		}
-		completedAt := ""
-		if artifact, ok := app.osArtifactByID(followUpArtifactID); ok {
-			completedAt = firstNonEmptyString(artifact.Metadata["completedAt"], artifact.Metadata["updatedAt"])
+		// Wave 6 drop (deliverables drawer): a deliverable dropped into a
+		// thread that never referenced it gets its card ADDED — a Kind
+		// "thread" ref committed BEFORE the launch, so the run's status flips
+		// (keyed on Thread.ID) land on it — instead of a rejection. Only
+		// PERMANENTLY un-routable deliverables refuse before the card exists:
+		// its copy promises feedback re-runs the work, and that promise must
+		// hold. The add is deduped inside the per-thread lock (a goal's many
+		// deliverables collapse onto its one live goalcard), and that lock is
+		// released before the dispatch below (the launch takes it again to
+		// flip the card to running). A drop whose launch then fails
+		// transiently leaves the card in place: the drop itself happened.
+		if err := app.artifactFollowUpRouteError(artifact); err != nil {
+			return nil, err
 		}
+		saved, err := app.commitScoutChatThreadArtifactRef(user.Email, threadID, app.scoutChatArtifactRefMessage(artifact))
+		if err != nil {
+			return nil, err
+		}
+		thread = saved
+		completedAt := firstNonEmptyString(artifact.Metadata["completedAt"], artifact.Metadata["updatedAt"])
 		// Unattached channel messages posted after the last run become worker
 		// context alongside the explicit reply.
 		teamReplies := scoutChatRepliesSince(thread, completedAt)
-		agentThread, err := app.launchAgentThreadFollowUp(followUpArtifactID, text, user.Name, teamReplies)
+		agentThread, err := app.dispatchArtifactFollowUp(followUpArtifactID, text, user.Name, teamReplies)
 		if err != nil {
 			// The reply is a real team answer even when the run cannot launch
 			// (e.g. a second teammate answering while a follow-up is already in
@@ -418,16 +435,24 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		}
 		// A plain status message, NOT a new Kind "thread" card: the existing
 		// card flips via updateScoutChatThreadRefs; a second card would
-		// duplicate the artifact key in renderActiveScoutThread.
-		version := firstNonEmptyString(strings.TrimSpace(agentThread.Artifact.Metadata["threadVersion"]), "2")
+		// duplicate the artifact key in renderActiveScoutThread. A goal resume
+		// gets goal-flavored copy — goals carry no threadVersion, and the card
+		// above is the live goalcard, not a versioned report.
+		statusText := ""
+		if agentThread.Mode == "goal" {
+			statusText = "feedback sent — the goal is revising that deliverable; the card above will update"
+		} else {
+			version := firstNonEmptyString(strings.TrimSpace(agentThread.Artifact.Metadata["threadVersion"]), "2")
+			statusText = assistantToolLabel(agentThread.Mode) + " follow-up v" + version + " running — the card above will update"
+		}
 		statusMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 			Kind:      "message",
 			Role:      "scout",
-			Text:      assistantToolLabel(agentThread.Mode) + " follow-up v" + version + " running — the card above will update",
+			Text:      statusText,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		saved, err := commitUserMessage(userMessage, statusMessage)
+		saved, err = commitUserMessage(userMessage, statusMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -1181,6 +1206,81 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 		deliverScoutChatThreadUpdate(thread, message)
 	}
 	return nil
+}
+
+// scoutChatArtifactRefMessage builds the Kind "thread" card a dropped
+// deliverable lands as (Wave 6 Gate A). An agent-thread report keeps its own
+// mode/thread id/artifact id, so the follow-up's running/complete flips
+// (updateScoutChatThreadRefs matches Thread.ID) land on the added card. A
+// goal-engine deliverable maps to its GOAL: Mode "goal", Thread.ID the goal's
+// run id, and — critically — ArtifactID the goal PARENT artifact, exactly the
+// shape of the toolTemplate launch card, because the client mounts the live
+// goalcard off ref.artifactId and a deliverable id there would pin a dead
+// card that never shows the goal's progress. Dedupe keys on the ref's
+// ArtifactID, so dropping two deliverables of one goal lands ONE goalcard.
+func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEntry) scoutChatMessageRecord {
+	refID := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["threadId"]), artifact.ID)
+	refMode := firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind)
+	refQuery := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])
+	refArtifactID := artifact.ID
+	refStatus := firstNonEmptyString(agentThreadStatusValue(artifact), "complete")
+	droppedTitle := firstNonEmptyString(refQuery, "deliverable")
+	if artifact.Metadata["source"] != "scout_thread" {
+		if goalID := artifactGoalParentID(artifact); goalID != "" {
+			refMode = "goal"
+			refID = goalID
+			refArtifactID = goalID
+			if parent, ok := app.osArtifactByID(goalID); ok {
+				refID = firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadId"]), goalID)
+				refQuery = firstNonEmptyString(strings.TrimSpace(parent.Metadata["title"]), refQuery)
+				refStatus = firstNonEmptyString(agentThreadStatusValue(parent), refStatus)
+			}
+		}
+	}
+	return scoutChatMessageRecord{
+		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+		Kind:      "thread",
+		Role:      "scout",
+		Text:      droppedTitle + " — dropped into this thread; feedback below re-runs it",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Thread: &scoutChatThreadRef{
+			ID:         refID,
+			Mode:       refMode,
+			Query:      refQuery,
+			Status:     refStatus,
+			ArtifactID: refArtifactID,
+		},
+	}
+}
+
+// commitScoutChatThreadArtifactRef appends a dropped deliverable's card unless
+// a ref for that artifact already exists — the same lock + re-read + save
+// discipline as commitScoutChatThreadMessages, with the dedupe check INSIDE
+// the lock so two concurrent drops of one deliverable can never double its
+// card (renderActiveScoutThread keys cards by artifact id). Returns the saved
+// thread either way.
+func (app *kanbanBoardApp) commitScoutChatThreadArtifactRef(viewerEmail string, threadID string, message scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	if message.Thread == nil || strings.TrimSpace(message.Thread.ArtifactID) == "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("artifact ref message requires a thread ref")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if scoutChatThreadHasArtifactRef(thread, message.Thread.ArtifactID) {
+		return thread, nil
+	}
+	thread.Messages = append(thread.Messages, message)
+	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, message)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	deliverScoutChatThreadUpdate(thread, message)
+	return thread, nil
 }
 
 // commitScoutChatThreadMessages is the single write path for chat messages.

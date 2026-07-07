@@ -72,6 +72,11 @@ type agentThreadGoalSpec struct {
 	// gives its generation a heavier effort + token budget (agent_runner_iface.go
 	// reads the goalDeliverable flag). Only the /goal engine sets it.
 	Deliverable bool
+	// OutputContract is the process stage's declared contract, stamped so the
+	// worker's instruction layer can honor raw-document contracts (a
+	// packaging_deck_v1 child's response IS the HTML file, not a workflow
+	// report). Only process writer stages set it.
+	OutputContract string
 }
 
 func (spec agentThreadGoalSpec) metadata() map[string]string {
@@ -88,6 +93,7 @@ func (spec agentThreadGoalSpec) metadata() map[string]string {
 		"goalParentId":   spec.ParentGoalID,
 		"goalSubtaskId":  spec.SubtaskID,
 		"assignedRunner": spec.AssignedRunner,
+		"outputContract": spec.OutputContract,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
@@ -647,6 +653,13 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 			"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
 			"Write in a practical operator voice. Keep it useful as a saved artifact, not a chat reply.",
 		}, "\n")
+	}
+	// A raw-document contract REPLACES the generic workflow instructions: the
+	// child's response is the deliverable file itself, and "start with a
+	// one-line Vision, then Markdown sections" is exactly the instruction that
+	// looped the first live ship_deck into its law-sweep block.
+	if raw, ok := rawDocumentContractInstructions(thread.Artifact.Metadata["outputContract"]); ok {
+		return raw
 	}
 	return agentThreadInstructions(thread.Mode)
 }

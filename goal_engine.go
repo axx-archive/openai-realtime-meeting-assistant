@@ -1131,9 +1131,11 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	// A process writer stage carries its authored contract and the bodies of
 	// the stages it declares as inputs — including a resolved checkpoint's
 	// choice — so the child writes FROM the pipeline, not from priors.
+	stageContract := ""
 	if def, ok := e.resolvedProcess(plan); ok {
 		if stage, found := def.stageByID(st.ID); found {
 			if contract := strings.TrimSpace(stage.OutputContract); contract != "" {
+				stageContract = contract
 				query += "\n\nOutput contract: " + contract
 			}
 			if inputs := e.processStageInputs(plan, stage); inputs != "" {
@@ -1148,6 +1150,7 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 		ParentGoalID:   parentID,
 		SubtaskID:      st.ID,
 		AssignedRunner: st.Runner,
+		OutputContract: stageContract,
 	}
 	// The deliverable-producing subtask carries the tool template so the model
 	// that actually WRITES the artifact receives the tool's full A++ prompt
@@ -2179,6 +2182,19 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 // cascade-invalidated so it re-runs against the revised work, and the engine
 // re-drives from execute.
 func (e *goalEngine) reviseProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) error {
+	e.applyProcessCheckpointSendBack(plan, parentID, st, target, resolvedBy, choice)
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+	e.drive(ctx, plan, parentID)
+	return nil
+}
+
+// applyProcessCheckpointSendBack is the send-back MUTATION, persisted but not
+// driven — reviseProcessCheckpoint drives it synchronously (the card door);
+// the Wave 6 feedback door persists here under its lock hold and re-drives
+// async, so a crash or an interleaved resolution can never lose the note.
+// The caller holds the parent lock.
+func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID string, st *goalSubtask, target *goalSubtask, resolvedBy string, choice string) {
 	checkpoint := plan.Checkpoint
 	recordedChoice := firstNonEmptyString(choice, "(sent back without notes)")
 	// The checkpoint spends a round and re-arms — readiness keeps it parked
@@ -2209,10 +2225,6 @@ func (e *goalEngine) reviseProcessCheckpoint(plan *goalPlan, parentID string, st
 	plan.State = goalStateExecute
 	e.persist(plan, parentID, "")
 	e.unparkCheckpointSurface(parentID)
-	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
-	defer cancel()
-	e.drive(ctx, plan, parentID)
-	return nil
 }
 
 // resetGoalDependents cascade-invalidates a checkpoint send-back: every
@@ -2335,6 +2347,16 @@ func checkpointOptionLabels(options []goalCheckpointOption) []string {
 		labels = append(labels, option.Label)
 	}
 	return labels
+}
+
+// checkpointReviseOption finds the checkpoint's send-back door, if it has one.
+func checkpointReviseOption(options []goalCheckpointOption) (goalCheckpointOption, bool) {
+	for _, option := range options {
+		if option.action() == processCheckpointActionRevise {
+			return option, true
+		}
+	}
+	return goalCheckpointOption{}, false
 }
 
 // checkpointProtectLines extracts the do_not_touch lines from a send-back
@@ -3056,6 +3078,242 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
 	engine.drive(ctx, &plan, parentID)
+	return nil
+}
+
+// startGoalFeedbackResumeAsync mirrors startGoalThreadAsync for the Wave 6
+// feedback door: resumeGoalWithFeedback validates (and where possible
+// persists) synchronously so the chat send gets a real error, then the drive —
+// real model calls for inline stages — runs here, off the request goroutine.
+// Tests swap it to capture the closure and drive deterministically.
+var startGoalFeedbackResumeAsync = func(run func()) { go run() }
+
+// resumeGoalWithFeedback is the Wave 6 feedback door (deliverables drawer /
+// goal-card send-notes / manifest feedback pills): a deliverable dropped into
+// chat routes here with the reply as a revision note for whichever seam owns
+// the goal right now. A checkpoint park rides the existing send-back grammar
+// ("<revise label> — <note>"), a blocked goal resets its exhausted stages with
+// the note attached, and a COMPLETED goal re-opens: the producing stage
+// re-arms, dependents (including the resolved ship checkpoint) cascade-reset,
+// and the redo re-parks for a fresh human sign-off. The stage model itself is
+// untouched — this extends resume dispatch only.
+func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy string, note string, deliverableArtifactID string) (scoutAgentThread, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return scoutAgentThread{}, fmt.Errorf("goal id is required")
+	}
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return scoutAgentThread{}, fmt.Errorf("feedback text is required")
+	}
+
+	lock := goalEngineLock(parentID)
+	// TryLock, not Lock: the engine holds this mutex for whole drives —
+	// sequential inline-stage model calls bounded only by the process
+	// wall-clock (20 minutes for the studio). Feedback arrives on the chat
+	// send's HTTP goroutine; blocking it under a mid-drive goal would hang the
+	// send for minutes. Contention means the goal is busy by definition, and
+	// busy is refused honestly everywhere in this function.
+	if !lock.TryLock() {
+		return scoutAgentThread{}, fmt.Errorf("the goal is busy right now — wait for it to park or finish, then send feedback")
+	}
+	defer lock.Unlock()
+
+	parent, ok := app.osArtifactByID(parentID)
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("goal plan not found")
+	}
+	if plan.Cancelled {
+		return scoutAgentThread{}, fmt.Errorf("the goal was cancelled — launch a fresh run instead")
+	}
+
+	engine := newGoalEngine(app)
+	engine.applyProcessBudgets(&plan)
+	resumedByName := firstNonEmptyString(strings.TrimSpace(resumedBy), "admin")
+	// Every branch MUTATES AND PERSISTS synchronously under this lock hold —
+	// the send-back / re-open is durable (and boot-reconciler recoverable)
+	// before the sender is told anything — and only the DRIVE (real model
+	// calls) runs async, as a plain re-drive of persisted state. No branch
+	// leaves a decision to an async closure: that shape raced every
+	// interleaved resolution of the same checkpoint.
+	drive := func() { app.runGoalThread(parentID) }
+
+	switch plan.State {
+	case goalStateApproval:
+		if plan.Checkpoint != nil && plan.Checkpoint.ResolvedAt == "" {
+			// A parked checkpoint owns the feedback: the send-back applies the
+			// exact reviseProcessCheckpoint mechanics — budget on the
+			// checkpoint stage, protect lines, cascade, re-park — with one
+			// upgrade: the target is the DELIVERABLE's producing stage when it
+			// maps (feedback on The Wall re-runs write, not ship_deck), else
+			// the option's declared target.
+			checkpoint := plan.Checkpoint
+			if checkpoint.Held {
+				return scoutAgentThread{}, fmt.Errorf("the goal is held at %q (by %s) — resuming requires an explicit proceed choice", checkpoint.StageID, firstNonEmptyString(checkpoint.HeldBy, "admin"))
+			}
+			option, hasRevise := checkpointReviseOption(checkpoint.Options)
+			if !hasRevise {
+				return scoutAgentThread{}, fmt.Errorf("the goal is parked at an approval checkpoint without a send-back door — decide from its card")
+			}
+			st := plan.subtaskByID(checkpoint.StageID)
+			if st == nil {
+				return scoutAgentThread{}, fmt.Errorf("checkpoint stage %q is missing from the plan", checkpoint.StageID)
+			}
+			if st.Revisions+1 >= goalMaxRevisions {
+				// The LAST send-back round stays reserved for the explicit
+				// checkpoint card: a card revise on a spent budget falls back
+				// to a disclosed PROCEED (the never-stall law), and feedback
+				// drops from any teammate must never be what converts the
+				// admin's own send-back into a ship.
+				return scoutAgentThread{}, fmt.Errorf("the remaining send-back round is reserved for the checkpoint card — decide from the card")
+			}
+			target := engine.feedbackTargetSubtask(&plan, deliverableArtifactID)
+			if target == nil || target.ID == st.ID {
+				if target = plan.subtaskByID(option.Target); target == nil {
+					return scoutAgentThread{}, fmt.Errorf("the send-back target %q is missing from the plan — decide from the checkpoint card", option.Target)
+				}
+			}
+			checkpoint.LastAction = processCheckpointActionRevise
+			engine.applyProcessCheckpointSendBack(&plan, parentID, st, target, resumedByName, option.Label+" — "+note)
+		} else {
+			// An approval gate without a checkpoint: feedback re-arms the
+			// deliverable stage rather than silently approving the ship.
+			if err := engine.reopenGoalForFeedback(&plan, parentID, resumedByName, note, deliverableArtifactID); err != nil {
+				return scoutAgentThread{}, err
+			}
+		}
+	case goalStateBlocked:
+		// The blocked recovery door with the note attached: every blocked
+		// subtask resets with the feedback as its revision reasons (and its
+		// do_not_touch lines protected), mirroring resumeBlockedGoal.
+		reset := 0
+		for index := range plan.Subtasks {
+			st := &plan.Subtasks[index]
+			if st.Status == subtaskBlocked || st.Status == subtaskFailed {
+				st.Status = subtaskReady
+				st.Revisions = 0
+				st.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: "resumed by " + resumedByName + " with feedback: " + note, By: "feedback_resume"}
+				st.Protect = mergeGoalProtectList(st.Protect, checkpointProtectLines(note))
+				reset++
+			}
+		}
+		if reset == 0 {
+			return scoutAgentThread{}, fmt.Errorf("no blocked subtask to resume")
+		}
+		plan.State = goalStateExecute
+		engine.persist(&plan, parentID, "")
+	case goalStateVerified:
+		if err := engine.reopenGoalForFeedback(&plan, parentID, resumedByName, note, deliverableArtifactID); err != nil {
+			return scoutAgentThread{}, err
+		}
+	default:
+		return scoutAgentThread{}, fmt.Errorf("the goal is still running — wait for it to park or finish, then send feedback")
+	}
+
+	updated, ok := app.osArtifactByID(parentID)
+	if !ok {
+		updated = parent
+	}
+	query := compactAssistantLine(firstNonEmptyString(plan.Objective, updated.Metadata["title"]))
+	thread := scoutAgentThread{
+		ID:       firstNonEmptyString(strings.TrimSpace(updated.Metadata["threadId"]), parentID),
+		Mode:     "goal",
+		Query:    query,
+		Status:   "running",
+		Artifact: updated,
+		Actions:  app.osAssistantActions(query, "goal", updated),
+	}
+	// Signal capture (signals.go): feedback on a shipped deliverable is the
+	// same negative valence as a re-run ask. Log-and-continue.
+	app.recordSignalEvent(resumedByName, signalEventArtifactRerun, signalValenceNegative, firstNonEmptyString(strings.TrimSpace(deliverableArtifactID), parentID), updated.Metadata["packageId"], map[string]string{
+		"instruction": truncateAgentThreadText(note, 500),
+	})
+	startGoalFeedbackResumeAsync(drive)
+	return thread, nil
+}
+
+// reopenGoalForFeedback re-arms the stage that produced a deliverable with the
+// feedback note as its revision reasons — the completed-goal re-open (also the
+// no-checkpoint approval park). The target's own retry budget stays untouched
+// (Verdict=revise alone puts it in revision), its do_not_touch lines lock into
+// the protect list, every completed dependent — including a resolved ship
+// checkpoint — cascade-resets so the redo re-parks for a fresh sign-off, and
+// the 100% progress pin is released. The caller holds the parent lock and
+// drives afterwards; the mutation persists here so the re-open is crash-safe.
+func (e *goalEngine) reopenGoalForFeedback(plan *goalPlan, parentID string, resumedBy string, note string, deliverableArtifactID string) error {
+	target := e.feedbackTargetSubtask(plan, deliverableArtifactID)
+	if target == nil {
+		return fmt.Errorf("could not match that deliverable to a stage of the goal")
+	}
+	target.Status = subtaskReady
+	target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: note, By: resumedBy}
+	target.Protect = mergeGoalProtectList(target.Protect, checkpointProtectLines(note))
+	resetGoalDependents(plan, target.ID, "")
+	plan.MaxProgress = 0
+	// The gate/commit seam resets WHOLE: a previously shipped external_write
+	// goal keeps its Gate.CommitChildID, and enqueueCommitPush would fold the
+	// FIRST run's terminal commit child straight back to verified — the redo
+	// would never push the revised work while the record claims it shipped.
+	// A fresh gate re-earns its verdict, a fresh approval enqueues a fresh job.
+	plan.Gate = goalGate{}
+	plan.State = goalStateExecute
+	e.persist(plan, parentID, "")
+	// The card is in flight again (the same flip a checkpoint resume does).
+	e.unparkCheckpointSurface(parentID)
+	return nil
+}
+
+// feedbackTargetSubtask maps a dropped deliverable back to the subtask that
+// produced it: the deliverable's own goalSubtaskId stamp, then the subtask
+// whose ArtifactID matches, then — for packaging ship deliverables, which
+// carry neither stamp because ship_compile files all five — the stage whose
+// output the dropped contract actually compiles FROM (The Wall is write's
+// copy, The Talk is voice's script, the rigor companion is the red team's
+// ledger), then the checkpoint's declared send-back target, then the plan's
+// deliverable sink, then the last non-checkpoint stage. A checkpoint stage is
+// never the target — the redo of a producing stage is what re-parks it.
+func (e *goalEngine) feedbackTargetSubtask(plan *goalPlan, deliverableArtifactID string) *goalSubtask {
+	usable := func(st *goalSubtask) bool {
+		return st != nil && st.Role != processRoleHumanCheckpoint
+	}
+	deliverableArtifactID = strings.TrimSpace(deliverableArtifactID)
+	if deliverableArtifactID != "" && e.app != nil {
+		if deliverable, ok := e.app.osArtifactByID(deliverableArtifactID); ok {
+			if st := plan.subtaskByID(strings.TrimSpace(deliverable.Metadata["goalSubtaskId"])); usable(st) {
+				return st
+			}
+			if stageID, ok := studioContractProducingStage(deliverable.Metadata["artifactContract"]); ok {
+				if st := plan.subtaskByID(stageID); usable(st) {
+					return st
+				}
+			}
+		}
+		for index := range plan.Subtasks {
+			st := &plan.Subtasks[index]
+			if st.ArtifactID == deliverableArtifactID && usable(st) {
+				return st
+			}
+		}
+	}
+	if plan.Checkpoint != nil {
+		if option, ok := checkpointReviseOption(plan.Checkpoint.Options); ok {
+			if st := plan.subtaskByID(option.Target); usable(st) {
+				return st
+			}
+		}
+	}
+	if st := plan.subtaskByID(goalDeliverableSubtaskID(plan)); usable(st) {
+		return st
+	}
+	for index := len(plan.Subtasks) - 1; index >= 0; index-- {
+		if st := &plan.Subtasks[index]; usable(st) {
+			return st
+		}
+	}
 	return nil
 }
 

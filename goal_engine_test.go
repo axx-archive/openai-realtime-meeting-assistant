@@ -3167,3 +3167,203 @@ func TestResumeBlockedGoalResetsAndRedrives(t *testing.T) {
 		t.Fatal("resume of a non-blocked goal must refuse")
 	}
 }
+
+// Wave 6: feedback on a deliverable of a COMPLETED goal re-opens exactly the
+// producing stage — target ready with the note as revision reasons and the
+// do_not_touch lines protected, dependents (including the checkpoint) cascade-
+// reset, the 100% progress pin released — then the redo re-parks at the
+// checkpoint for a fresh human sign-off. Neither existing resume door accepts
+// a verified goal; this is the new seam the deliverables drawer routes to.
+func TestResumeGoalWithFeedbackReopensVerifiedGoal(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "process_reopen_probe")
+
+	var pendingDrive func()
+	previousResume := startGoalFeedbackResumeAsync
+	startGoalFeedbackResumeAsync = func(run func()) { pendingDrive = run }
+	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousResume })
+
+	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the completed-goal re-open door",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_reopen_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	parentID := thread.Artifact.ID
+	kanbanApp.runGoalThread(parentID)
+	waitForGoalStage(t, kanbanApp, parentID, goalStateApproval)
+	if err := kanbanApp.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "ship it"); err != nil {
+		t.Fatalf("ship the probe: %v", err)
+	}
+	plan := waitForGoalStage(t, kanbanApp, parentID, goalStateVerified)
+	w1 := plan.subtaskByID("w1")
+	if w1 == nil || w1.ArtifactID == "" {
+		t.Fatalf("w1=%+v, want a completed writer with its artifact", w1)
+	}
+	deliverableID := w1.ArtifactID
+
+	// A running goal refuses feedback — hand-set execute to prove the guard,
+	// then restore verified.
+	verified, _ := kanbanApp.osArtifactByID(parentID)
+	verifiedPlan, _ := decodeGoalPlan(verified.Metadata["goalPlan"])
+	engine := newGoalEngine(kanbanApp)
+	runningPlan := verifiedPlan
+	runningPlan.State = goalStateExecute
+	engine.persist(&runningPlan, parentID, "")
+	if _, err := kanbanApp.resumeGoalWithFeedback(parentID, "tim@shareability.com", "tweak it", deliverableID); err == nil {
+		t.Fatal("feedback on a running goal must refuse")
+	}
+	engine.persist(&verifiedPlan, parentID, "")
+
+	note := "tighten the close\ndo_not_touch: keep the headline exactly as written"
+	resumed, err := kanbanApp.resumeGoalWithFeedback(parentID, "tim@shareability.com", note, deliverableID)
+	if err != nil {
+		t.Fatalf("resumeGoalWithFeedback: %v", err)
+	}
+	if resumed.Mode != "goal" || resumed.Artifact.ID != parentID || resumed.Status != "running" {
+		t.Fatalf("resumed thread=%+v, want a running goal-mode handle on the parent", resumed)
+	}
+
+	// Persisted BEFORE the drive: the re-open is durable (crash-safe), the
+	// note rides the target's review, the pin is released.
+	reopened, _ := kanbanApp.osArtifactByID(parentID)
+	reopenedPlan, ok := decodeGoalPlan(reopened.Metadata["goalPlan"])
+	if !ok || reopenedPlan.State != goalStateExecute {
+		t.Fatalf("state=%q, want execute_in_order persisted before the drive", reopenedPlan.State)
+	}
+	target := reopenedPlan.subtaskByID("w1")
+	if target == nil || target.Status != subtaskReady || target.Review == nil || !strings.Contains(target.Review.Reasons, "tighten the close") {
+		t.Fatalf("target=%+v, want w1 ready with the feedback note as revision reasons", target)
+	}
+	if !containsString(target.Protect, "do_not_touch: keep the headline exactly as written") {
+		t.Fatalf("target.Protect=%v, want the do_not_touch line locked", target.Protect)
+	}
+	if pass := reopenedPlan.subtaskByID("pass"); pass == nil || pass.Status == subtaskComplete {
+		t.Fatalf("checkpoint stage=%+v, want cascade-reset so it re-parks", reopenedPlan.subtaskByID("pass"))
+	}
+	if reopened.Metadata["goalStatus"] == "verified" || reopened.Metadata["progressPercent"] == "100" {
+		t.Fatalf("card metadata=%q/%q, want the terminal read released", reopened.Metadata["goalStatus"], reopened.Metadata["progressPercent"])
+	}
+
+	// The drive re-runs the writer with the note and re-parks at the checkpoint.
+	if pendingDrive == nil {
+		t.Fatal("re-open never scheduled its drive")
+	}
+	before := len(*launched)
+	pendingDrive()
+	plan = waitForGoalStage(t, kanbanApp, parentID, goalStateApproval)
+	if plan.Checkpoint == nil || plan.Checkpoint.ResolvedAt != "" {
+		t.Fatalf("checkpoint=%+v, want a fresh unresolved park after the redo", plan.Checkpoint)
+	}
+	if len(*launched) <= before {
+		t.Fatalf("re-open did not re-dispatch the writer (launched %d -> %d)", before, len(*launched))
+	}
+	redo := (*launched)[len(*launched)-1]
+	if redo.subtaskID != "w1" || !strings.Contains(redo.query, "tighten the close") || !strings.Contains(redo.query, "do_not_touch: keep the headline exactly as written") {
+		t.Fatalf("redo child=%+v, want w1 carrying the note and the protected line", redo)
+	}
+
+	// The loop closes: a fresh sign-off ships the revision back to verified.
+	if err := kanbanApp.resumeApprovedGoalWithChoice(parentID, "aj@shareability.com", "ship it"); err != nil {
+		t.Fatalf("re-approve after the revision: %v", err)
+	}
+	waitForGoalStage(t, kanbanApp, parentID, goalStateVerified)
+
+	// Cancelled goals stay dead: feedback must not resurrect them.
+	final, _ := kanbanApp.osArtifactByID(parentID)
+	finalPlan, _ := decodeGoalPlan(final.Metadata["goalPlan"])
+	finalPlan.Cancelled = true
+	engine.persist(&finalPlan, parentID, "")
+	if _, err := kanbanApp.resumeGoalWithFeedback(parentID, "tim@shareability.com", "one more pass", deliverableID); err == nil {
+		t.Fatal("feedback on a cancelled goal must refuse")
+	}
+}
+
+// Wave 6 deep 1:1 linkage: feedback on a packaging ship deliverable re-runs
+// the stage whose output that deliverable compiles FROM — The Wall is write's
+// copy, The Talk is voice's script, the rigor companion is the red team's
+// ledger — not blindly the checkpoint's declared ship_deck target. The
+// findings record maps to no single stage and falls through to the checkpoint
+// door.
+func TestFeedbackTargetSubtaskMapsShipContracts(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	engine := newGoalEngine(app)
+
+	plan := goalPlan{Subtasks: []goalSubtask{
+		{ID: "red_team"}, {ID: "write"}, {ID: "voice"}, {ID: "ship_deck"},
+		{ID: "pass", Role: processRoleHumanCheckpoint},
+	}}
+	plan.Checkpoint = &goalProcessCheckpoint{StageID: "pass", Options: []goalCheckpointOption{
+		{Label: "approve the ship"},
+		{Label: "send back — rebuild the deck", Action: processCheckpointActionRevise, Target: "ship_deck"},
+	}}
+
+	for contract, wantStage := range map[string]string{
+		"packaging_wall_v1":  "write",
+		"packaging_talk_v1":  "voice",
+		"packaging_rigor_v1": "red_team",
+		"packaging_deck_v1":  "ship_deck",
+		// Findings aggregate every verdict — no single producing stage; the
+		// checkpoint's declared send-back target catches it.
+		"packaging_findings_v1": "ship_deck",
+	} {
+		artifact, _, err := app.createOSArtifactWithMetadata("workflow", "deliverable "+contract, "body", "AJ", map[string]string{
+			"source":           "packaging_studio_ship",
+			"artifactContract": contract,
+			"goalId":           "os-artifact-workflow-map-probe",
+		})
+		if err != nil {
+			t.Fatalf("seed %s: %v", contract, err)
+		}
+		target := engine.feedbackTargetSubtask(&plan, artifact.ID)
+		if target == nil || target.ID != wantStage {
+			t.Fatalf("contract %s targeted %+v, want stage %q", contract, target, wantStage)
+		}
+	}
+}
+
+// A process WRITER stage's OutputContract rides onto the child it dispatches
+// (metadata "outputContract"), so the worker's instruction layer can honor
+// raw-document contracts — the ship_deck child must KNOW its response is the
+// HTML file itself.
+func TestLaunchSubtaskStampsOutputContractOnChild(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	var dispatched []scoutAgentThread
+	previousAsync := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) {
+		dispatched = append(dispatched, thread)
+	}
+	t.Cleanup(func() { startAgentThreadAsync = previousAsync })
+	registerProcessDefinitionForTest(t, ProcessDefinition{
+		ID: "process_contract_stamp_probe", Version: 1, Title: "Contract stamp probe",
+		Description: "Test-only: one writer with a raw contract.", Authority: toolAuthorityWorkspaceWrite, Hidden: true,
+		Stages: []ProcessStage{
+			{ID: "w1", Title: "Ship the deck", Role: processRoleWriter, OutputContract: "packaging_deck_v1"},
+		},
+	})
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the contract stamp",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_contract_stamp_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	if len(dispatched) == 0 {
+		t.Fatal("writer child was never dispatched")
+	}
+	child := dispatched[0]
+	if child.Artifact.Metadata["outputContract"] != "packaging_deck_v1" {
+		t.Fatalf("child outputContract=%q, want the stage's contract", child.Artifact.Metadata["outputContract"])
+	}
+}

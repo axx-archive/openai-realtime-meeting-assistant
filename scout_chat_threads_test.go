@@ -1506,3 +1506,145 @@ func TestScoutRouterToolRunSummaryTrimsTrailingPeriod(t *testing.T) {
 		}
 	}
 }
+
+// Wave 6 Gate A (deliverables drawer): dropping a deliverable into a thread
+// that has never referenced it ADDS its card (a Kind "thread" ref keyed the
+// way later status flips match) instead of rejecting — this is what makes the
+// drawer work in a brand-new channel. The ref add is deduped inside the thread
+// lock so a second drop of the same deliverable never doubles the card.
+func TestFollowUpDropAddsThreadRefAndLaunches(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "test-key"
+	kanbanApp.mu.Unlock()
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, _ agentThreadFollowUpRun) {}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	artifact := seedCompleteGrillArtifact(t, kanbanApp)
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "fresh drop zone", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+
+	// No card was ever committed for this artifact in this channel — the drop
+	// must add one and then launch the follow-up.
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "tighten the pricing section", nil, artifact.ID)
+	if err != nil {
+		t.Fatalf("drop into fresh channel: %v", err)
+	}
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || agentThread.Artifact.ID != artifact.ID {
+		t.Fatalf("response agentThread=%#v, want the follow-up on the dropped artifact", response["agentThread"])
+	}
+
+	saved, _, err := kanbanApp.scoutChatThreadByID(channel.OwnerEmail, channel.ID)
+	if err != nil {
+		t.Fatalf("reload channel: %v", err)
+	}
+	refs := 0
+	var ref *scoutChatThreadRef
+	for index := range saved.Messages {
+		if saved.Messages[index].Kind == "thread" && saved.Messages[index].Thread != nil {
+			refs++
+			ref = saved.Messages[index].Thread
+		}
+	}
+	if refs != 1 || ref == nil {
+		t.Fatalf("thread refs=%d, want exactly one added deliverable card", refs)
+	}
+	if ref.ArtifactID != artifact.ID {
+		t.Fatalf("ref.ArtifactID=%q, want the dropped artifact %q", ref.ArtifactID, artifact.ID)
+	}
+	// Thread.ID must be the artifact's original threadId — that is the key
+	// updateScoutChatThreadRefs flips on, so the dropped card goes live.
+	if ref.ID != "agent-thread-grill-1" {
+		t.Fatalf("ref.ID=%q, want the artifact's threadId agent-thread-grill-1", ref.ID)
+	}
+	if ref.Mode != "grill" {
+		t.Fatalf("ref.Mode=%q, want the artifact's mode", ref.Mode)
+	}
+	// The launch already flipped the added card to running through the
+	// existing ref machinery — proof the flip key matches.
+	if ref.Status != "running" {
+		t.Fatalf("ref.Status=%q, want running after the launch flip", ref.Status)
+	}
+
+	// A second drop while the follow-up runs: the ref is deduped (no second
+	// card) and the launch itself refuses, with the reply still committed.
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "also fix the close", nil, artifact.ID); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("err=%v, want still-running refusal on the second drop", err)
+	}
+	saved, _, _ = kanbanApp.scoutChatThreadByID(channel.OwnerEmail, channel.ID)
+	refs = 0
+	for index := range saved.Messages {
+		if saved.Messages[index].Kind == "thread" {
+			refs++
+		}
+	}
+	if refs != 1 {
+		t.Fatalf("thread refs=%d after second drop, want the card deduped to one", refs)
+	}
+}
+
+// Wave 6 Gate A ref mapping: a goal-engine deliverable (here a process_stage
+// child) drops as its GOAL's card — Mode "goal", Thread.ID the goal's run id,
+// ArtifactID the goal PARENT artifact — the exact shape of the toolTemplate
+// launch card, because the client mounts the live goalcard off ref.artifactId.
+// An agent-thread report keeps its own identity so follow-up flips land on it.
+func TestScoutChatArtifactRefMessageMapsGoalDeliverables(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	// Goal parents are workflow-mode artifacts with mode overridden to "goal"
+	// via metadata (launchGoalThread's shape).
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Package the Nimbus pitch", "goal body", "AJ", map[string]string{
+		"source":   "goal_thread",
+		"mode":     "goal",
+		"threadId": "agent-thread-goal-77",
+		"goalPlan": `{"goalId":"agent-thread-goal-77","objective":"package it","subtasks":[]}`,
+		"status":   "running",
+	})
+	if err != nil {
+		t.Fatalf("seed goal parent: %v", err)
+	}
+	stage, _, err := app.createOSArtifactWithMetadata("workflow", "Checkpoint: ship it?", "stage body", "AJ", map[string]string{
+		"source":       "process_stage",
+		"goalParentId": parent.ID,
+		"status":       "complete",
+	})
+	if err != nil {
+		t.Fatalf("seed stage deliverable: %v", err)
+	}
+
+	message := app.scoutChatArtifactRefMessage(stage)
+	if message.Thread == nil {
+		t.Fatal("ref message must carry a thread ref")
+	}
+	if message.Thread.Mode != "goal" {
+		t.Fatalf("Mode=%q, want goal so the client mounts the goalcard", message.Thread.Mode)
+	}
+	if message.Thread.ArtifactID != parent.ID {
+		t.Fatalf("ArtifactID=%q, want the goal PARENT %q (the goalcard's data source)", message.Thread.ArtifactID, parent.ID)
+	}
+	if message.Thread.ID != "agent-thread-goal-77" {
+		t.Fatalf("Thread.ID=%q, want the goal's run id", message.Thread.ID)
+	}
+	// The card text still names the DROPPED deliverable — that is the 1:1 story.
+	if !strings.Contains(message.Text, "Checkpoint: ship it?") {
+		t.Fatalf("Text=%q, want the dropped deliverable named", message.Text)
+	}
+
+	report := seedCompleteGrillArtifact(t, app)
+	reportRef := app.scoutChatArtifactRefMessage(report)
+	if reportRef.Thread.ArtifactID != report.ID || reportRef.Thread.Mode != "grill" || reportRef.Thread.ID != "agent-thread-grill-1" {
+		t.Fatalf("agent-thread ref=%+v, want the report's own identity", reportRef.Thread)
+	}
+}

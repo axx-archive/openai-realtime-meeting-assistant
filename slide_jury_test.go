@@ -363,3 +363,23 @@ func TestRunSlideJuryKeylessErrors(t *testing.T) {
 		t.Fatal("keyless jury must error, not silently succeed")
 	}
 }
+
+// The editorial backstop (Wave 5 d): the design-eye seat judges whether a
+// page's imagery EARNS its place, and its verdicts stay ADVISORY revision
+// notes — never an auto-revise.
+func TestSlideJuryDesignEyeJudgesImageryAdvisory(t *testing.T) {
+	var designEye goalPanelPersona
+	for _, p := range slideJuryPersonas() {
+		if p.Name == "design_eye" {
+			designEye = p
+		}
+	}
+	if designEye.Name == "" {
+		t.Fatal("design_eye seat missing from the slide jury")
+	}
+	for _, need := range []string{"image", "EARNS", "ADVISORY"} {
+		if !strings.Contains(designEye.System, need) {
+			t.Errorf("design_eye prompt missing the imagery-earns-its-place cue %q:\n%s", need, designEye.System)
+		}
+	}
+}

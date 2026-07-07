@@ -701,6 +701,25 @@ func artifactProvenance(entry meetingMemoryEntry) osArtifactProvenance {
 	return provenance
 }
 
+// artifactGoalParentID resolves the goal PARENT ARTIFACT id a deliverable
+// belongs to — the exact id the goal-engine resume doors take. The goal
+// artifact is its own parent; children and deliverables carry the parent id
+// under goalParentId (process stages, goal writer children, commit children)
+// or goalId (packaging ship deliverables, slide jury scoreboards). Returns ""
+// when nothing links the artifact to a goal. Deliberately never falls back to
+// plan.GoalID the way artifactProvenance does: that is the run-id STRING
+// ("agent-thread-goal-…"), not an artifact id, and the resume doors would
+// find nothing under it.
+func artifactGoalParentID(entry meetingMemoryEntry) string {
+	if entry.Metadata["source"] == "goal_thread" || entry.Metadata["mode"] == "goal" {
+		return entry.ID
+	}
+	if _, ok := decodeGoalPlan(entry.Metadata["goalPlan"]); ok {
+		return entry.ID
+	}
+	return strings.TrimSpace(firstNonEmptyString(entry.Metadata["goalParentId"], entry.Metadata["goalId"]))
+}
+
 // Interlocks scaffold (packaging OS §4: `interlocks[]` for the
 // no-contradiction pairs). Only the data shape lands in Wave 3 — enforcement
 // is Wave 4's package_assembly compiler.

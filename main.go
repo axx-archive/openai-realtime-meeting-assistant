@@ -1086,6 +1086,13 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		metadata["renderPageImages"] = strconv.Itoa(persisted)
 	}
 	metadata["renderFlattened"] = strconv.FormatBool(payload.Flattened)
+	// Disclosure guard: a deck that flattened to a single page did not paginate
+	// (dropped print CSS, or a genuinely one-slide deck). Stamp it and warn so
+	// it surfaces instead of shipping silently as a valid multi-slide export.
+	if payload.DeckSinglePage {
+		metadata["renderDeckSinglePage"] = "true"
+		log.Warnf("Render callback: deck artifact %s flattened to a single page — the exported PDF did not paginate (missing print CSS or a one-slide deck)", artifactID)
+	}
 	// A completed job is spent: clearing the stamp makes the identity check
 	// above reject any replay of this callback.
 	metadata["renderJobId"] = ""
@@ -1095,10 +1102,11 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 
 	// §5 capture: the export is a deliverable landing, one signal.
 	kanbanApp.recordSignalEvent("render_runner", signalEventPDFExported, signalValenceNeutral, artifactID, existing.Metadata["packageId"], map[string]string{
-		"jobId":     callbackJobID,
-		"kind":      kind,
-		"pageCount": strconv.Itoa(payload.PageCount),
-		"flattened": strconv.FormatBool(payload.Flattened),
+		"jobId":          callbackJobID,
+		"kind":           kind,
+		"pageCount":      strconv.Itoa(payload.PageCount),
+		"flattened":      strconv.FormatBool(payload.Flattened),
+		"deckSinglePage": strconv.FormatBool(payload.DeckSinglePage),
 	})
 	// Let open viewers see the new asset without a reload (the codex
 	// callback's memory fan-out).
@@ -1536,7 +1544,7 @@ func assistantThreadFollowUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thread, err := kanbanApp.launchAgentThreadFollowUp(payload.ArtifactID, payload.Text, user.Name, nil)
+	thread, err := kanbanApp.dispatchArtifactFollowUp(payload.ArtifactID, payload.Text, user.Name, nil)
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return

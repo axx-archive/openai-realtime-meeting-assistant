@@ -385,6 +385,21 @@ func scoutRouterSystemPrompt() string {
 // scoutRouterTools builds the routing function schemas with names, promises,
 // and enums INJECTED from the tool registry, so the registry stays the single
 // taxonomy source (the typed twin of voice initiate_goal).
+// packagingRunPresetIDs is the flat list of launchable run-type ids from the
+// single taxonomy (buildToolsPayload) — registry tools plus non-hidden
+// processes. The voice initiate_goal 'tool' preset enumerates these so voice
+// can pick a real run-type the same way the typed router (scoutRouterTools)
+// does, instead of guessing from a short prose list of examples.
+func packagingRunPresetIDs() []string {
+	ids := make([]string, 0, 16)
+	for _, group := range buildToolsPayload() {
+		for _, tool := range group.Tools {
+			ids = append(ids, tool.ID)
+		}
+	}
+	return ids
+}
+
 func scoutRouterTools() []anthropicTool {
 	ids := make([]string, 0, 12)
 	lines := make([]string, 0, 12)

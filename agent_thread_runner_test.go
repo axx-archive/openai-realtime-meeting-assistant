@@ -543,3 +543,45 @@ func TestDeliverArtifactToOriginChannelDedupe(t *testing.T) {
 		t.Fatalf("channel messages=%d after retry, want still 2", len(thread.Messages))
 	}
 }
+
+// The live Ember run's death loop, root-caused: agentThreadInstructions
+// hard-demands "Markdown sections" and a "one-line Vision" from EVERY child —
+// so a writer stage whose contract is a RAW document (packaging_deck_v1: the
+// deck HTML file itself) had a system prompt at war with its stage prompt,
+// and the model obeyed the system prompt 4 rounds straight into a block. A
+// raw-document output contract must REPLACE the generic instructions.
+func TestRawDocumentContractOverridesGenericInstructions(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousAsync := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousAsync })
+
+	deck, err := app.launchAgentThreadWithSpec("artifacts", "Ship — the self-contained presenter deck", "AJ", nil, agentThreadGoalSpec{
+		OutputContract: "packaging_deck_v1",
+		Deliverable:    true,
+	})
+	if err != nil {
+		t.Fatalf("launch deck child: %v", err)
+	}
+	if deck.Artifact.Metadata["outputContract"] != "packaging_deck_v1" {
+		t.Fatalf("outputContract=%q, want the stage contract stamped on the child", deck.Artifact.Metadata["outputContract"])
+	}
+	instructions := app.agentThreadInstructionsForThread(deck)
+	for _, banned := range []string{"Markdown sections", "one-line Vision", "Work decomposition"} {
+		if strings.Contains(instructions, banned) {
+			t.Fatalf("raw-document child still carries the generic instruction %q:\n%s", banned, instructions)
+		}
+	}
+	if !strings.Contains(instructions, "<!doctype html>") {
+		t.Fatalf("raw-document instructions must demand the doctype-first file:\n%s", instructions)
+	}
+
+	// A plain child keeps the generic workflow instructions byte-identical.
+	plain, err := app.launchAgentThreadWithSpec("artifacts", "meeting notes summary", "AJ", nil, agentThreadGoalSpec{})
+	if err != nil {
+		t.Fatalf("launch plain child: %v", err)
+	}
+	if got := app.agentThreadInstructionsForThread(plain); !strings.Contains(got, "Markdown sections") {
+		t.Fatalf("plain child lost the generic instructions:\n%s", got)
+	}
+}

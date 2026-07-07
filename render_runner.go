@@ -95,6 +95,7 @@ type renderRunnerCallbackPayload struct {
 	PageJPEGPaths  []string          `json:"page_jpeg_paths,omitempty"`
 	PageCount      int               `json:"page_count,omitempty"`
 	Flattened      bool              `json:"flattened,omitempty"`
+	DeckSinglePage bool              `json:"deck_single_page,omitempty"`
 	Error          string            `json:"error,omitempty"`
 	RunnerEvidence string            `json:"runner_evidence,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
@@ -113,6 +114,10 @@ type renderExportPDFResult struct {
 	PageJPEGPaths []string
 	PageCount     int
 	Flattened     bool
+	// DeckSinglePage flags a deck that flattened to exactly one page — a
+	// multi-slide deck rendering one page is the pagination defect, so it is
+	// disclosed on the callback rather than shipped silently as a valid export.
+	DeckSinglePage bool
 }
 
 // renderExecInvocation + the seam variable let tests pin the exact commands
@@ -429,6 +434,7 @@ func processRenderRunnerJob(ctx context.Context, store *renderRunnerJobStore, jo
 		PageJPEGPaths:  result.PageJPEGPaths,
 		PageCount:      result.PageCount,
 		Flattened:      result.Flattened,
+		DeckSinglePage: result.DeckSinglePage,
 		RunnerEvidence: renderRunnerCommandEvidence(cfg, result),
 		Metadata:       job.Metadata,
 	}); err != nil {
@@ -451,6 +457,14 @@ const renderPrintCSP = "default-src 'none'; style-src 'unsafe-inline'; script-sr
 // everything after it, which is the whole untrusted body.
 func injectRenderPrintCSP(html string) string {
 	meta := `<meta http-equiv="Content-Security-Policy" content="` + renderPrintCSP + `">`
+	return insertIntoDocumentHead(html, meta)
+}
+
+// insertIntoDocumentHead places snippet right after the opening <head> (or, when
+// there is none, after <html>, else prepends it) — the HTML parser lands a
+// pre-body node into the document head in every case. Shared by the CSP meta and
+// the deck print-CSS fallback so both use the identical, <header>-safe seam.
+func insertIntoDocumentHead(html string, snippet string) string {
 	lower := strings.ToLower(html)
 	for _, tag := range []string{"<head", "<html"} {
 		start := strings.Index(lower, tag)
@@ -467,9 +481,34 @@ func injectRenderPrintCSP(html string) string {
 			continue
 		}
 		insert := start + end + 1
-		return html[:insert] + meta + html[insert:]
+		return html[:insert] + snippet + html[insert:]
 	}
-	return meta + html
+	// No <head>/<html> tag: a minimal HTML5 deck legitimately opens with
+	// <!doctype html> followed directly by <style>/<section>. Insert AFTER the
+	// doctype — a prefix prepend un-documents the file, and ship_compile's
+	// html_deck validation ("must start with <!doctype html") then rejects the
+	// compiled deck (the live Ember run's block).
+	leading := len(html) - len(strings.TrimLeft(html, " \t\r\n"))
+	if strings.HasPrefix(lower[leading:], "<!doctype") {
+		if end := strings.IndexByte(html[leading:], '>'); end >= 0 {
+			insert := leading + end + 1
+			return html[:insert] + snippet + html[insert:]
+		}
+	}
+	return snippet + html
+}
+
+// injectRenderDeckPrintCSS is the pagination safety net: a deck flattens to one
+// page when chromium has no @page/@media-print rules to paginate off. ship_deck
+// now embeds the chassis, but an authored deck that dropped it (or a legacy
+// deck) still needs to render every slide — so when the HTML declares no @page
+// rule we inject the chassis print block into the head. Idempotent: a deck that
+// already declares @page is left untouched, so the author's own geometry wins.
+func injectRenderDeckPrintCSS(html string) string {
+	if strings.Contains(strings.ToLower(html), "@page") {
+		return html
+	}
+	return insertIntoDocumentHead(html, "<style>\n"+packagingDeckPrintCSS()+"\n</style>")
 }
 
 // resolveRenderBinary locates one toolchain binary, failing with the clear
@@ -510,8 +549,17 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 	}
 	defer os.RemoveAll(workDir)
 
+	// Deck kind delegates pagination to the document's own print CSS; inject the
+	// chassis print block as a fallback when the author dropped it, so chromium
+	// paginates every slide instead of collapsing to the single on-screen frame
+	// (the one-page-deck defect). Paper (text-native) is untouched — it prints
+	// direct with no slide model. The CSP meta is pinned last, in front.
+	printHTML := job.HTML
+	if normalizeRenderJobKind(job.Kind) == renderJobKindDeck {
+		printHTML = injectRenderDeckPrintCSS(printHTML)
+	}
 	htmlPath := filepath.Join(workDir, "artifact.html")
-	if err := os.WriteFile(htmlPath, []byte(injectRenderPrintCSP(job.HTML)), 0o644); err != nil {
+	if err := os.WriteFile(htmlPath, []byte(injectRenderPrintCSP(printHTML)), 0o644); err != nil {
 		return renderExportPDFResult{}, fmt.Errorf("write artifact HTML: %w", err)
 	}
 	layeredPath := filepath.Join(workDir, "layered.pdf")
@@ -612,6 +660,9 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 		PageJPEGPaths: pageRefs,
 		PageCount:     len(pageRefs),
 		Flattened:     flattened,
+		// A flattened deck (never paper) that produced a single page did not
+		// paginate — disclose it downstream.
+		DeckSinglePage: flattened && len(pageRefs) == 1,
 	}, nil
 }
 

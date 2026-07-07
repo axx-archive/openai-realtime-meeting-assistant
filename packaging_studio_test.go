@@ -197,6 +197,159 @@ func TestPackagingStudioStageWiring(t *testing.T) {
 	}
 }
 
+// ship_deck must hand the writer the REQUIRED print chassis so the exported PDF
+// contains every slide, not just the on-screen frame — the fix for the
+// one-page-deck defect. The prompt carries the @page/@media-print contract, the
+// .pg slide model, and permits data: URIs (for embedded imagery).
+func TestPackagingStudioShipDeckCarriesPrintChassis(t *testing.T) {
+	def := packagingStudioDefinition()
+	shipDeck := packagingStudioStage(t, def, "ship_deck")
+	for _, need := range []string{"@page", "@media print", ".pg", "break-after:page", "#stage", "data: URIs"} {
+		if !strings.Contains(shipDeck.PromptBody, need) {
+			t.Errorf("ship_deck prompt missing the print-chassis contract %q:\n%s", need, shipDeck.PromptBody)
+		}
+	}
+}
+
+// The render fallback stylesheet is a verbatim tail of the single chassis source
+// — there is no second copy to drift out of sync.
+func TestPackagingDeckPrintCSSDerivesFromChassis(t *testing.T) {
+	if !strings.Contains(packagingDeckChassisCSS, "@page") {
+		t.Fatal("deck chassis is missing its @page rule")
+	}
+	printCSS := packagingDeckPrintCSS()
+	if printCSS == "" || !strings.Contains(packagingDeckChassisCSS, printCSS) {
+		t.Fatalf("packagingDeckPrintCSS() is not a verbatim tail of the chassis — they have drifted:\n%s", printCSS)
+	}
+	for _, need := range []string{"@page", "@media print", "break-after:page", ".pg"} {
+		if !strings.Contains(printCSS, need) {
+			t.Errorf("derived print CSS missing %q", need)
+		}
+	}
+}
+
+// Imagery is ART-DIRECTED: a writer direction stage + an authored generation
+// compile stage sit AFTER identity + the chosen narrative and BEFORE ship_deck,
+// which reads both. ship_deck stays the last writer (the deck is the
+// deliverable). The director's prompt carries the editorial + chassis laws and
+// permits a zero-image typographic package.
+func TestPackagingStudioImageryStagesArtDirectedAndOrdered(t *testing.T) {
+	def := packagingStudioDefinition()
+
+	direction := packagingStudioStage(t, def, "imagery_direction")
+	if direction.Role != processRoleWriter {
+		t.Fatalf("imagery_direction role=%q, want writer", direction.Role)
+	}
+	gen := packagingStudioStage(t, def, "imagery_generate")
+	if gen.Role != processRoleCompile || gen.Compile == nil {
+		t.Fatalf("imagery_generate must be an authored compile stage (role=%q, hasCompile=%v)", gen.Role, gen.Compile != nil)
+	}
+
+	for _, need := range []string{"identity", "write", "voice", "founder_pass"} {
+		if !containsString(direction.InputFrom, need) {
+			t.Errorf("imagery_direction inputFrom=%v, missing %q", direction.InputFrom, need)
+		}
+	}
+	if !containsString(gen.InputFrom, "imagery_direction") {
+		t.Errorf("imagery_generate inputFrom=%v, must read imagery_direction", gen.InputFrom)
+	}
+	shipDeck := packagingStudioStage(t, def, "ship_deck")
+	for _, need := range []string{"imagery_direction", "imagery_generate"} {
+		if !containsString(shipDeck.InputFrom, need) {
+			t.Errorf("ship_deck inputFrom=%v, missing %q", shipDeck.InputFrom, need)
+		}
+	}
+
+	idx := map[string]int{}
+	for i, s := range def.Stages {
+		idx[s.ID] = i
+	}
+	order := []string{"identity", "founder_pass", "imagery_direction", "imagery_generate", "ship_deck"}
+	for i := 1; i < len(order); i++ {
+		if idx[order[i-1]] >= idx[order[i]] {
+			t.Fatalf("stage order broken: %s(%d) must precede %s(%d)", order[i-1], idx[order[i-1]], order[i], idx[order[i]])
+		}
+	}
+
+	lastWriter := ""
+	for _, s := range def.Stages {
+		if s.Role == processRoleWriter && strings.TrimSpace(s.OutputContract) != "" {
+			lastWriter = s.ID
+		}
+	}
+	if lastWriter != "ship_deck" {
+		t.Fatalf("last writer stage=%q, want ship_deck (the deck must stay the deliverable)", lastWriter)
+	}
+
+	for _, need := range []string{"EDITORIAL", "full-bleed", "crescendo", "typographic", "```json"} {
+		if !strings.Contains(direction.PromptBody, need) {
+			t.Errorf("imagery_direction prompt missing the art-direction/chassis cue %q", need)
+		}
+	}
+}
+
+// The director's JSON maps to generator shots; shots missing a subject or a
+// named temperature are dropped (the generator requires both); a garbled or
+// empty block is a valid ZERO-image typographic outcome, never an error.
+func TestParseImageryDirection(t *testing.T) {
+	body := "Here is the direction.\n\n```json\n" + `{
+  "visual_system": "deep warm blacks, one red accent, 35mm",
+  "shots": [
+    {"fig": 1, "slot": "bleed", "subject": "a rooftop crowd mid-laugh", "composition": "wide, eyeline high", "temperature": "joy", "caption": "FIG. 1 — the room", "why": "opens on shared belief"},
+    {"fig": 2, "slot": "plate", "subject": "", "temperature": "drama"},
+    {"fig": 3, "slot": "plate", "subject": "cranes at dawn", "temperature": ""},
+    {"fig": 4, "slot": "bleed", "subject": "the founder on stage", "composition": "tight", "temperature": "resolve", "place": "the Ryman"}
+  ]
+}` + "\n```\n"
+	vs, shots := parseImageryDirection(body)
+	if vs == "" {
+		t.Fatal("visual system not parsed")
+	}
+	if len(shots) != 2 {
+		t.Fatalf("parsed %d shots, want 2 (subject-less and temperature-less dropped)", len(shots))
+	}
+	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || !strings.Contains(shots[0].Description, "rooftop crowd") {
+		t.Fatalf("shot[0]=%+v unexpected", shots[0])
+	}
+	if shots[1].Fig != 4 || shots[1].Place != "the Ryman" {
+		t.Fatalf("shot[1]=%+v unexpected", shots[1])
+	}
+	if _, s := parseImageryDirection("```json\n{\"visual_system\":\"x\",\"shots\":[]}\n```"); len(s) != 0 {
+		t.Fatalf("empty shots must parse to zero, got %d", len(s))
+	}
+	if _, s := parseImageryDirection("no json here, just prose about the deck"); len(s) != 0 {
+		t.Fatalf("prose-only direction must yield zero shots, got %d", len(s))
+	}
+}
+
+// Placement inlines each image as a data: URI onto its .fig-N slot in the deck
+// head; an image whose slot the writer never built is disclosed as missing; a
+// zero-image package passes the deck through untouched.
+func TestApplyDeckImageryPlacesAndDiscloses(t *testing.T) {
+	deck := `<!doctype html><html><head><title>d</title></head><body><div id="stage"><section class="pg on bleed fig-1"><div class="ph"></div></section><section class="pg"><div class="plate fig-2"><div class="ph"></div></div></section></div></body></html>`
+	images := []deckImage{
+		{Fig: 1, DataURI: "data:image/png;base64,AAAA"},
+		{Fig: 3, DataURI: "data:image/jpeg;base64,BBBB"}, // no fig-3 slot in the deck
+	}
+	out, note := applyDeckImagery(deck, images, 2, 0)
+	if !strings.Contains(out, `<style id="bonfire-imagery">`) {
+		t.Fatalf("imagery style block not injected:\n%s", out)
+	}
+	if !strings.Contains(out, ".fig-1 .ph{background-image:url(data:image/png;base64,AAAA)") {
+		t.Fatalf("fig-1 rule missing:\n%s", out)
+	}
+	if hi, bi := strings.Index(out, `<style id="bonfire-imagery">`), strings.Index(out, "<body>"); hi < 0 || hi > bi {
+		t.Fatal("imagery style must be injected into the document head, before the body")
+	}
+	if !strings.Contains(note, "1 image(s) inlined") || !strings.Contains(note, "no matching slot") {
+		t.Fatalf("note did not disclose placed + missing-slot: %q", note)
+	}
+	out2, note2 := applyDeckImagery(deck, nil, 0, 0)
+	if out2 != deck || !strings.Contains(note2, "typographic") {
+		t.Fatalf("zero-image path must pass the deck through untouched with a typographic note: %q", note2)
+	}
+}
+
 // The IDENTITY stage is always present (the runtime does not skip stages), and
 // its authored prompt carries BOTH branches: develop a competition when INTAKE
 // declares no brand assets, and disclose a skip when assets exist. It reads the
@@ -1365,5 +1518,72 @@ func TestStudioShipManifestOnlyForPackagingStudio(t *testing.T) {
 	app.recordStudioShipResolution(&goalPlan{ProcessID: packagingStudioProcessID}, parent.ID, "founder_pass", manifestStatusShipped, "aj", true)
 	if manifests := studioManifestMessages(t, app, channel.ID); len(manifests) != 0 {
 		t.Fatalf("non-studio resolutions posted %d manifests, want 0", len(manifests))
+	}
+}
+
+// Wave 6 (deep 1:1 linkage): re-filing the ship deliverables for the SAME goal
+// — a feedback-driven re-open re-running ship_compile — versions the five
+// EXISTING artifacts in place instead of filing five strangers, so every chat
+// ref, drawer row, and package link keeps pointing at the living deliverable.
+func TestFileStudioShipDeliverablesVersionsInPlaceOnReShip(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	inputs := studioShipInputs{
+		GoalID:    "os-artifact-workflow-reship-probe",
+		CreatedBy: "AJ",
+		DeckHTML:  "<!doctype html><html><body><section class=\"pg\">v1 deck</section></body></html>",
+		Wall:      "wall v1",
+		Talk:      "talk v1",
+		Rigor:     "rigor v1",
+		Findings:  "findings v1",
+		DeckTitle: "Re-ship probe deck",
+	}
+	first, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("first ship: %v", err)
+	}
+	if len(first) != 5 {
+		t.Fatalf("first ship filed %d deliverables, want 5", len(first))
+	}
+	firstIDs := map[string]string{}
+	for _, deliverable := range first {
+		firstIDs[deliverable.Contract] = deliverable.ArtifactID
+	}
+
+	inputs.DeckHTML = "<!doctype html><html><body><section class=\"pg\">v2 deck — revised close</section></body></html>"
+	inputs.Wall = "wall v2"
+	inputs.Talk = "talk v2"
+	inputs.Rigor = "rigor v2"
+	inputs.Findings = "findings v2"
+	second, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("re-ship: %v", err)
+	}
+	if len(second) != 5 {
+		t.Fatalf("re-ship filed %d deliverables, want 5", len(second))
+	}
+	for _, deliverable := range second {
+		if firstIDs[deliverable.Contract] != deliverable.ArtifactID {
+			t.Fatalf("contract %q re-filed as %q, want the original artifact %q versioned in place", deliverable.Contract, deliverable.ArtifactID, firstIDs[deliverable.Contract])
+		}
+		stored, ok := app.osArtifactByID(deliverable.ArtifactID)
+		if !ok {
+			t.Fatalf("re-shipped artifact %q missing", deliverable.ArtifactID)
+		}
+		if !strings.Contains(stored.Text, "v2") {
+			t.Fatalf("contract %q body=%q, want the revised v2 body", deliverable.Contract, stored.Text)
+		}
+	}
+
+	// A goal-less studio run (no re-open path) still files fresh artifacts.
+	inputs.GoalID = ""
+	third, err := app.fileStudioShipDeliverables(inputs)
+	if err != nil {
+		t.Fatalf("goal-less ship: %v", err)
+	}
+	for _, deliverable := range third {
+		if firstIDs[deliverable.Contract] == deliverable.ArtifactID {
+			t.Fatalf("goal-less ship reused %q — dedupe must key on the goal", deliverable.ArtifactID)
+		}
 	}
 }

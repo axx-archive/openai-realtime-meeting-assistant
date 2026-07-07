@@ -479,3 +479,43 @@ func TestMeetingMemoryUpdatesOSArtifactMetadataAndReloads(t *testing.T) {
 		t.Fatalf("reloaded entries=%#v, want published metadata", entries)
 	}
 }
+
+// A packaging deck (Wave 3 print chassis + Wave 5 base64-inlined imagery) is a
+// multi-megabyte artifact filed as ONE JSONL line. The loader's bufio.Scanner
+// capped tokens at 1MB and hard-FAILED the entire load on a longer line — so
+// one shipped deck disabled ALL meeting memory on the next restart (live prod
+// incident). The loader must read arbitrarily long lines and never let one
+// oversized entry drop the rest.
+func TestMeetingMemoryLoadsMultiMegabyteArtifact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	// A 3MB deck body — larger than the old 1MB scanner cap.
+	bigDeck := "<!doctype html><html><body>" + strings.Repeat("<section class=\"pg\">slide with data:image/png;base64,"+strings.Repeat("A", 4000)+"</section>", 800) + "</body></html>"
+	if len(bigDeck) < 2<<20 {
+		t.Fatalf("test deck is only %d bytes, want >2MB to exceed the old cap", len(bigDeck))
+	}
+	if _, _, err := store.appendOSArtifact("os-artifact-workflow-bigdeck", bigDeck, map[string]string{"source": "packaging_studio_ship", "type": "html_deck"}); err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	}
+	// A normal entry AFTER the big one — proves an oversized line never drops
+	// the tail of the file.
+	if _, _, err := store.appendOSArtifact("os-artifact-workflow-small", "a small follow-up artifact", map[string]string{"source": "scout_thread"}); err != nil {
+		t.Fatalf("appendOSArtifact small: %v", err)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload with a multi-MB artifact must not fail: %v", err)
+	}
+	deck, ok := reloaded.entryByID("os-artifact-workflow-bigdeck")
+	if !ok || len(deck.Text) != len(bigDeck) {
+		t.Fatalf("big deck reloaded ok=%v len=%d, want the full %d-byte body", ok, len(deck.Text), len(bigDeck))
+	}
+	if _, ok := reloaded.entryByID("os-artifact-workflow-small"); !ok {
+		t.Fatal("the entry after the oversized deck was dropped on reload")
+	}
+}

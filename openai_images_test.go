@@ -123,7 +123,7 @@ func TestOpenAIImageKeylessClearErrorNeverACrash(t *testing.T) {
 	}
 
 	before := len(app.osArtifactsSnapshot(0))
-	_, err := app.runImageryBoard(context.Background(), imageryBoardInput{
+	_, _, err := app.runImageryBoard(context.Background(), imageryBoardInput{
 		Title:        "Keyless board",
 		VisualSystem: "deep warm blacks, bone-white highlights",
 		Shots:        []imageryShot{{Title: "Cover", Description: "the team celebrating", Temperature: "joy"}},
@@ -198,7 +198,7 @@ func TestRunImageryBoardFilesArtifactWithConceptRenderAssets(t *testing.T) {
 		{Title: "The harbor", Description: "container cranes at dawn", Temperature: "drama", Place: "the Port of Los Angeles"},
 		{Title: "The room", Description: "a packed screening room", Temperature: "joy"},
 	}
-	artifact, err := app.runImageryBoard(context.Background(), imageryBoardInput{
+	artifact, generated, err := app.runImageryBoard(context.Background(), imageryBoardInput{
 		Title:        "Aurora imagery board",
 		VisualSystem: "deep warm blacks, bone-white highlights, single red accent",
 		Shots:        shots,
@@ -209,6 +209,16 @@ func TestRunImageryBoardFilesArtifactWithConceptRenderAssets(t *testing.T) {
 	}
 	if calls != len(shots) {
 		t.Fatalf("API called %d times, want once per shot (%d)", calls, len(shots))
+	}
+	// The runner returns every generated shot with its stable FIG (auto 1..N
+	// here) and blob ref, so the studio's placement stage can inline them.
+	if len(generated) != len(shots) {
+		t.Fatalf("returned %d generated shots, want %d", len(generated), len(shots))
+	}
+	for i, g := range generated {
+		if g.Fig != i+1 || g.Ref == "" || g.Mime != "image/png" {
+			t.Fatalf("generated[%d]=%+v, want fig %d with a png blob ref", i, g, i+1)
+		}
 	}
 
 	if artifact.Metadata["artifactContract"] != imageryBoardContract {
@@ -254,6 +264,51 @@ func TestRunImageryBoardFilesArtifactWithConceptRenderAssets(t *testing.T) {
 		if _, _, err := getBlob(asset.Ref); err != nil {
 			t.Fatalf("asset blob %s unreadable: %v", asset.Ref, err)
 		}
+	}
+}
+
+// The art director's stable FIG numbers ride through generation: the returned
+// shots, the board's FIG captions, and the asset names all carry the director's
+// number (not a re-sequenced index), so the studio's placement stage can inline
+// each image at the exact .fig-N slot the writer built.
+func TestRunImageryBoardHonorsStableFig(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("OPENAI_API_KEY", "test-image-key")
+	t.Setenv("OPENAI_IMAGE_MODEL", "")
+
+	calls := 0
+	withFakeImagesAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		unique := []byte(fmt.Sprintf("\x89PNG\r\n\x1a\nshot-%d", calls))
+		json.NewEncoder(w).Encode(map[string]any{
+			"data":          []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString(unique)}},
+			"output_format": "png",
+		})
+	})
+
+	artifact, generated, err := app.runImageryBoard(context.Background(), imageryBoardInput{
+		Title:        "Stable-fig board",
+		VisualSystem: "one coherent system",
+		Shots: []imageryShot{
+			{Fig: 3, Title: "A", Description: "x", Temperature: "joy"},
+			{Fig: 7, Title: "B", Description: "y", Temperature: "drama"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runImageryBoard: %v", err)
+	}
+	if len(generated) != 2 || generated[0].Fig != 3 || generated[1].Fig != 7 {
+		t.Fatalf("stable figs not honored in the returned shots: %+v", generated)
+	}
+	if !strings.Contains(artifact.Text, "FIG. 3 —") || !strings.Contains(artifact.Text, "FIG. 7 —") {
+		t.Fatalf("board body did not use the director's stable FIG numbers:\n%s", artifact.Text)
+	}
+	names := ""
+	for _, a := range artifactAssets(artifact) {
+		names += a.Name + " "
+	}
+	if !strings.Contains(names, "imagery-fig-03") || !strings.Contains(names, "imagery-fig-07") {
+		t.Fatalf("asset names did not use the stable fig: %q", names)
 	}
 }
 

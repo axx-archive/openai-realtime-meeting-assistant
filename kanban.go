@@ -2259,7 +2259,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"properties": map[string]any{
 					"objective": map[string]any{"type": "string", "description": "The end-to-end goal, in the user's words."},
 					"package":   map[string]any{"type": "string", "description": "Optional package name or id to file the result under."},
-					"tool":      map[string]any{"type": "string", "description": "Optional packaging-tool preset id to run the goal against (e.g. deep_research, one_pager, grill_pressure_test, package_assembly, investor_update_memo); shapes the output contract and the ship gate. Omit for a free-form goal."},
+					"tool": map[string]any{
+						"type":        "string",
+						"enum":        packagingRunPresetIDs(),
+						"description": "Optional run-type preset id to run the goal against — shapes the output contract and the ship gate. Pick the enum id that best matches the ask; omit for a free-form goal.",
+					},
 					"authority_hint": map[string]any{
 						"type":        "string",
 						"description": "read_only for research/analysis goals; workspace_write when the goal produces or edits work. external_write is never available here — it is earned only at the ship gate with human approval.",

@@ -641,9 +641,10 @@ func TestChannelFollowUpMessageLaunchesWithoutMention(t *testing.T) {
 		t.Fatal("seed user tim@shareability.com missing")
 	}
 
-	// An artifact with no card in this thread is rejected.
-	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "answers inline", nil, "os-artifact-grill-unknown"); err == nil || !strings.Contains(err.Error(), "not in this thread") {
-		t.Fatalf("err=%v, want not-in-this-thread rejection", err)
+	// An artifact id that resolves to nothing is rejected outright — Gate A
+	// only adds cards for real deliverables.
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "answers inline", nil, "os-artifact-grill-unknown"); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("err=%v, want unknown-artifact rejection", err)
 	}
 
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "pricing landed at $99 with two design partners", nil, artifact.ID)
@@ -726,5 +727,130 @@ func TestAssistantThreadFollowUpEndpoint(t *testing.T) {
 	stored, _ := kanbanApp.osArtifactByID(artifact.ID)
 	if stored.Metadata["threadStatus"] != "running" || stored.Metadata["threadVersion"] != "2" {
 		t.Fatalf("metadata=%#v, want running v2 after the endpoint launch", stored.Metadata)
+	}
+}
+
+// Wave 6 Gate B: a follow-up on a GOAL deliverable (here the goal card itself,
+// dropped into a fresh public channel while the goal is parked at its
+// checkpoint) routes to the goal engine as a feedback-driven send-back — the
+// worker re-runs carrying the note — instead of the old hard reject. The
+// added chat ref carries Mode "goal" keyed by the goal's thread id.
+func TestFollowUpOnGoalDeliverableResumesGoalWithFeedback(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	installFakeResponder(t, goalResponderRoutes{})
+	launched := installFakeChildRunner(t)
+	registerReviseProbeForTest(t, "process_feedback_probe")
+
+	// The feedback drive (real model calls in production) runs off the chat
+	// request goroutine; capture it and run it synchronously below.
+	var pendingDrive func()
+	previousResume := startGoalFeedbackResumeAsync
+	startGoalFeedbackResumeAsync = func(run func()) { pendingDrive = run }
+	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousResume })
+
+	thread, err := kanbanApp.launchGoalThread(goalLaunchSpec{
+		Objective:    "Probe the feedback door",
+		CreatedBy:    "aj@shareability.com",
+		ToolTemplate: "process_feedback_probe",
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	kanbanApp.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	parent, _ := kanbanApp.osArtifactByID(thread.Artifact.ID)
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "feedback drop zone", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "tighten the close", nil, parent.ID)
+	if err != nil {
+		t.Fatalf("drop goal deliverable: %v", err)
+	}
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || agentThread.Mode != "goal" || agentThread.Artifact.ID != parent.ID {
+		t.Fatalf("response agentThread=%#v, want a goal-mode resume on the parent", response["agentThread"])
+	}
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || !strings.Contains(answer.Text, "feedback") {
+		t.Fatalf("answer=%#v, want a goal-flavored feedback status line", response["answer"])
+	}
+
+	// Gate A added the goal card to the fresh channel, keyed for goal flips.
+	saved, _, err := kanbanApp.scoutChatThreadByID(channel.OwnerEmail, channel.ID)
+	if err != nil {
+		t.Fatalf("reload channel: %v", err)
+	}
+	var ref *scoutChatThreadRef
+	for index := range saved.Messages {
+		if saved.Messages[index].Kind == "thread" && saved.Messages[index].Thread != nil {
+			ref = saved.Messages[index].Thread
+		}
+	}
+	if ref == nil || ref.ArtifactID != parent.ID {
+		t.Fatalf("ref=%#v, want the goal card added for the dropped deliverable", ref)
+	}
+	if ref.Mode != "goal" {
+		t.Fatalf("ref.Mode=%q, want goal so the client mounts the live goalcard", ref.Mode)
+	}
+	if ref.ID != parent.Metadata["threadId"] {
+		t.Fatalf("ref.ID=%q, want the goal thread id %q", ref.ID, parent.Metadata["threadId"])
+	}
+
+	// The captured drive is the send-back: the writer re-runs with the note.
+	if pendingDrive == nil {
+		t.Fatal("feedback resume never scheduled its drive")
+	}
+	before := len(*launched)
+	pendingDrive()
+	plan := waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	if pass := plan.subtaskByID("pass"); pass == nil || pass.Revisions != 1 {
+		t.Fatalf("checkpoint stage=%+v, want one send-back round spent and re-parked", plan.subtaskByID("pass"))
+	}
+	if len(*launched) <= before {
+		t.Fatalf("feedback did not re-dispatch the writer (launched %d -> %d)", before, len(*launched))
+	}
+	redo := (*launched)[len(*launched)-1]
+	if redo.subtaskID != "w1" || !strings.Contains(redo.query, "tighten the close") {
+		t.Fatalf("redo child=%+v, want w1 re-run carrying the feedback note", redo)
+	}
+}
+
+// Wave 6 Gate B guard-rails: deliverables with no goal linkage (an imagery
+// board, a plain hand-saved artifact) reject with an honest error instead of
+// falling into the agent-thread path's misleading "agent thread reports"
+// message — and the legacy no-source reject stays intact.
+func TestFollowUpDispatchUnlinkedArtifactRejected(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	imagery, _, err := app.createOSArtifactWithMetadata("design", "imagery board", "four hero frames", "AJ", map[string]string{
+		"source":       "imagery_board",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("seed imagery artifact: %v", err)
+	}
+	if _, err := app.dispatchArtifactFollowUp(imagery.ID, "make it warmer", "Tim", nil); err == nil || !strings.Contains(err.Error(), "feedback") {
+		t.Fatalf("err=%v, want an unlinked-deliverable rejection naming feedback", err)
+	}
+
+	plain, _, err := app.createOSArtifactWithMetadata("artifacts", "meeting notes", "notes body", "AJ", map[string]string{
+		"status": "complete",
+	})
+	if err != nil {
+		t.Fatalf("seed plain artifact: %v", err)
+	}
+	if _, err := app.dispatchArtifactFollowUp(plain.ID, "expand these", "Tim", nil); err == nil {
+		t.Fatal("plain no-source artifact must reject, not route")
 	}
 }
