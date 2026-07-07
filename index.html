@@ -18559,7 +18559,13 @@
         font: var(--type-headline);
         letter-spacing: var(--track-headline);
         color: var(--text-1);
-        text-wrap: balance;
+        /* DD-4: a long deliverable name clamps to two lines instead of a
+           single mid-word ellipsis; the h2 carries title= with the full name */
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        text-wrap: pretty;
       }
       .artifact-stage__escape {
         flex: none;
@@ -18640,6 +18646,171 @@
         height: 100%;
         min-height: 0;
         border: 0;
+      }
+
+      /* ---------- §7b the deck hero (DD-1) ----------
+         A shipped goal/packaging deck opens to its COVER, not the run-log. The
+         DeckHero language: a dark deck stage (#05070a — the deck voice, the one
+         sanctioned dark surface here), a big Georgia SERIF headline with one
+         earned --ember emphasis line, provenance chips, and an ember present
+         that swaps the body for the sandboxed deck iframe. The run-log demotes
+         to the quiet "run details" disclosure below. */
+      .artifact-stage__body--deck-hero { overflow-y: auto; }
+      .artifact-stage__hero {
+        /* grows to fill the panel when it stands alone (no gap under the
+           cover), holds its floor when the run-details disclosure joins it and
+           the whole body scrolls */
+        flex: 1 0 auto;
+        min-height: min(58vh, 500px);
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        background: #05070a;
+        color: #fff;
+        overflow: hidden;
+      }
+      .artifact-stage__hero-eyebrow {
+        position: absolute;
+        top: 18px;
+        left: 22px;
+        z-index: 2;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.5);
+      }
+      .artifact-stage__hero-stage {
+        flex: 1;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 56px 40px 40px;
+      }
+      /* the faint comment wall of source voices, behind the headline; the one
+         lit voice earns the ember. Only rendered when real sources exist. */
+      .artifact-stage__hero-wall {
+        position: absolute;
+        inset: 44px 32px auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 20px 34px;
+        font: var(--type-label);
+        letter-spacing: 0.01em;
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.1);
+        pointer-events: none;
+      }
+      .artifact-stage__hero-wall span[data-lit] { color: var(--ember); }
+      .artifact-stage__hero-headings {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        max-width: 720px;
+      }
+      .artifact-stage__hero-headline {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(26px, 3.6vw, 44px);
+        line-height: 1.1;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
+        color: #fff;
+      }
+      .artifact-stage__hero-emphasis {
+        margin: 8px 0 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(26px, 3.6vw, 44px);
+        line-height: 1.1;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
+        color: var(--ember);
+      }
+      .artifact-stage__hero-foot {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 22px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .artifact-stage__hero-meta {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.5);
+      }
+      .artifact-stage__hero-sep { color: rgba(255, 255, 255, 0.28); }
+      .artifact-stage__hero-actions {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .artifact-stage__hero-btn {
+        height: 34px;
+        padding: 0 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: transparent;
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-decoration: none;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__hero-btn:hover { color: #fff; border-color: rgba(255, 255, 255, 0.34); }
+      .artifact-stage__hero-btn:active { transform: scale(var(--press-scale)); }
+      /* present is the one earned ember on this surface — the crown-jewel action */
+      .artifact-stage__hero-btn--primary {
+        padding: 0 18px;
+        border: none;
+        background: var(--ember);
+        color: var(--on-ember);
+        font: var(--type-caption-medium);
+        letter-spacing: normal;
+      }
+      .artifact-stage__hero-btn--primary:hover { color: var(--on-ember); filter: brightness(1.06); }
+      /* the demoted run-log: a quiet disclosure on the panel surface, collapsed
+         by default (DD-3) — the drawer's job is the artifact, not the pipeline */
+      .artifact-stage__run-details {
+        flex: 0 0 auto;
+        background: var(--surface-1);
+        border-top: 1px solid var(--line-1);
+      }
+      .artifact-stage__run-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 13px 22px;
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        transition: color var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__run-summary::-webkit-details-marker { display: none; }
+      .artifact-stage__run-summary::marker { content: ""; }
+      .artifact-stage__run-summary:hover { color: var(--text-1); }
+      .artifact-stage__run-chev {
+        display: inline-flex;
+        transition: transform var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__run-details[open] .artifact-stage__run-chev { transform: rotate(90deg); }
+      .artifact-stage__run-body { padding: 4px 22px 28px; }
+      @media (prefers-reduced-motion: reduce) {
+        .artifact-stage__run-chev, .artifact-stage__hero-btn { transition: none; }
       }
       .artifact-stage__pdf {
         width: 100%;
@@ -24409,6 +24580,213 @@
           || previewable || 'artifact'
       }
 
+      // ---------- §7b the deck hero (DD-1) ----------
+      // A goal/packaging deliverable that HAS a child deck opens to its COVER,
+      // not the run-log: eyebrow "deck", the title as a Georgia serif headline
+      // with one earned --ember emphasis line, provenance chips, and an ember
+      // present that swaps the body for the sandboxed deck iframe. Two sources
+      // feed the context — the manifest card hands one in (options.deck, which
+      // survives keyless: the deck artifact need not be loaded), or a goal
+      // artifact resolves its own child deck. Either way the run-log demotes.
+
+      // split a deliverable title into a serif headline + one --ember emphasis
+      // clause on its first ": " ("Package X: a dashboard that…" reads as a
+      // cover). No clean split → the whole title is the headline, no ember.
+      function splitDeckHeadline(title) {
+        const t = String(title || '').trim()
+        if (!t) return { headline: 'deck', emphasis: '' }
+        const cut = t.indexOf(': ')
+        if (cut > 2 && cut < t.length - 4) {
+          const head = t.slice(0, cut).trim()
+          const emph = t.slice(cut + 2).trim()
+          if (head.length >= 3 && emph.length >= 3 && emph.length <= 90) {
+            return { headline: head, emphasis: emph }
+          }
+        }
+        return { headline: t, emphasis: '' }
+      }
+
+      // provenance chips for the hero foot: "gate 9.0 · 4 decisions · 2h 25m",
+      // built from whatever the run actually recorded (absent facts drop out)
+      function deckHeroMetaChips(ctx) {
+        const chips = []
+        const gate = Number(ctx?.gateScore)
+        if (Number.isFinite(gate) && gate > 0) chips.push(`gate ${gate.toFixed(1)}`)
+        const decisions = Number(ctx?.decisions)
+        if (Number.isFinite(decisions) && decisions > 0) chips.push(`${decisions} decision${decisions === 1 ? '' : 's'}`)
+        if (ctx?.wallClock) chips.push(String(ctx.wallClock))
+        return chips
+      }
+
+      // kicker for a deck hero: kind + state, one source of truth (DD-2). The
+      // gate score lives in the hero chips, so the kicker reads "deck · passed"
+      // and can never contradict the body with a stale "running".
+      function deckHeroKicker(ctx) {
+        const bits = ['deck']
+        const outcome = String(ctx?.gateOutcome || '').trim()
+        if (outcome) bits.push(outcome)
+        return bits.join(' · ')
+      }
+
+      // manifest card → hero context. The deck deliverable's own artifactId is
+      // the child deck; provenance rides from the manifest. Returns null for a
+      // non-deck deliverable (paper/doc open as a plain read, not a cover).
+      function deckHeroContextFromManifest(deliverable, manifest) {
+        const d = deliverable || {}
+        const isDeck = String(d.badge || '') === 'deck' || d.present === true
+        if (!isDeck) return null
+        const title = String(d.title || '').trim()
+        const split = splitDeckHeadline(title)
+        const p = (manifest && manifest.provenance) || {}
+        return {
+          deckArtifactId: String(d.artifactId || ''),
+          title,
+          headline: split.headline,
+          emphasis: split.emphasis,
+          gateScore: Number(p.gateScore) || 0,
+          gateOutcome: String(p.gateOutcome || ''),
+          decisions: Number(p.decisions) || 0,
+          wallClock: String(p.wallClock || ''),
+          pdfRef: String(d.pdfRef || ''),
+          pdfName: String(d.pdfName || ''),
+          shareArtifactId: String((manifest && manifest.shareArtifactId) || ''),
+          runEntryId: String((manifest && manifest.goalId) || ''),
+          wall: [],
+        }
+      }
+
+      // goal artifact → hero context. The child deck is a separate html_deck
+      // stamped metadata.goalId === this goal (packaging_studio); when it's in
+      // the loaded window we lead with it, otherwise there's no deck to surface
+      // and the run-log stays. Provenance from the plan's gate + checkpoints.
+      function deckHeroContextFromGoalArtifact(entry) {
+        if (!entry || !isGoalArtifact(entry)) return null
+        const deck = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+          artifactIsHTMLDeck(candidate) && String(candidate?.metadata?.goalId || '') === String(entry.id || ''))
+        if (!deck) return null
+        const plan = goalPlanFromArtifact(entry)
+        const gateTask = (plan?.subtasks || []).find(task => String(task?.role || '') === 'gate' && Number(task?.review?.score) > 0)
+        const decisions = (plan?.subtasks || []).filter(task => String(task?.role || '') === 'human_checkpoint' && String(task?.status || '') === 'complete').length
+        const title = String(deck?.metadata?.title || '').trim() || goalArtifactTitle(entry)
+        const split = splitDeckHeadline(title)
+        const pdf = artifactAssetEntries(deck).find(asset =>
+          String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
+        return {
+          deckArtifactId: String(deck.id || ''),
+          title,
+          headline: split.headline,
+          emphasis: split.emphasis,
+          gateScore: Number(gateTask?.review?.score) || 0,
+          gateOutcome: String(entry?.metadata?.gateOutcome || plan?.report?.gateOutcome || ''),
+          decisions,
+          wallClock: bfTimeAgo(entry.createdAt),
+          pdfRef: pdf ? String(pdf.ref || '') : '',
+          pdfName: pdf ? String(pdf.name || '') : '',
+          shareArtifactId: '',
+          runEntryId: String(entry.id || ''),
+          wall: [],
+        }
+      }
+
+      // build the deck-hero body: the cover + a demoted "run details"
+      // disclosure. present swaps this whole body for the sandboxed deck iframe
+      // (the deck iframe path already exists — this only decides what leads).
+      function renderArtifactStageDeckHero(body, ctx, hostOptions) {
+        const opts = hostOptions || {}
+        body.classList.add('artifact-stage__body--deck-hero')
+
+        const hero = bfEl('section', 'artifact-stage__hero')
+        hero.appendChild(bfEl('div', 'artifact-stage__hero-eyebrow', 'deck'))
+
+        const stageWrap = bfEl('div', 'artifact-stage__hero-stage')
+        const wall = Array.isArray(ctx.wall) ? ctx.wall : []
+        if (wall.length) {
+          const wallEl = bfEl('div', 'artifact-stage__hero-wall')
+          wallEl.setAttribute('aria-hidden', 'true')
+          wall.forEach((voice, i) => {
+            const span = bfEl('span', null, String(voice))
+            if (i === ctx.litIndex) span.dataset.lit = '1'
+            wallEl.appendChild(span)
+          })
+          stageWrap.appendChild(wallEl)
+        }
+        const headings = bfEl('div', 'artifact-stage__hero-headings')
+        headings.appendChild(bfEl('p', 'artifact-stage__hero-headline', ctx.headline || 'deck'))
+        if (ctx.emphasis) headings.appendChild(bfEl('p', 'artifact-stage__hero-emphasis', ctx.emphasis))
+        stageWrap.appendChild(headings)
+        hero.appendChild(stageWrap)
+
+        const foot = bfEl('div', 'artifact-stage__hero-foot')
+        const meta = bfEl('div', 'artifact-stage__hero-meta')
+        deckHeroMetaChips(ctx).forEach((chip, i) => {
+          if (i > 0) {
+            const sep = bfEl('span', 'artifact-stage__hero-sep', '·')
+            sep.setAttribute('aria-hidden', 'true')
+            meta.appendChild(sep)
+          }
+          meta.appendChild(bfEl('span', null, chip))
+        })
+        foot.appendChild(meta)
+
+        const actions = bfEl('div', 'artifact-stage__hero-actions')
+        if (ctx.shareArtifactId) {
+          const share = bfEl('button', 'artifact-stage__hero-btn')
+          share.type = 'button'
+          share.setAttribute('aria-label', 'Share link')
+          share.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>'
+          share.addEventListener('click', () => manifestMintShareLink(String(ctx.shareArtifactId)))
+          actions.appendChild(share)
+        }
+        if (/^[0-9a-f]{64}$/.test(String(ctx.pdfRef || ''))) {
+          const pdf = document.createElement('a')
+          pdf.className = 'artifact-stage__hero-btn'
+          pdf.textContent = 'pdf ↓'
+          pdf.href = artifactBlobUrl({ ref: String(ctx.pdfRef), name: String(ctx.pdfName || '') })
+          pdf.setAttribute('download', String(ctx.pdfName || ''))
+          actions.appendChild(pdf)
+        }
+        const present = bfEl('button', 'artifact-stage__hero-btn artifact-stage__hero-btn--primary', 'present')
+        present.type = 'button'
+        present.addEventListener('click', presentDeck)
+        actions.appendChild(present)
+        foot.appendChild(actions)
+        hero.appendChild(foot)
+        body.appendChild(hero)
+
+        // the run-log demotes to a quiet disclosure, collapsed by default (DD-3)
+        // — only when a run entry with real prose is actually loaded (keyless
+        // there's nothing to show, and the hero stands alone)
+        const runEntry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+          String(candidate?.id || '') === String(ctx.runEntryId || ''))
+        if (runEntry && String(runEntry.text || '').trim() && String(runEntry.id || '') !== String(ctx.deckArtifactId || '')) {
+          const details = document.createElement('details')
+          details.className = 'artifact-stage__run-details'
+          const summary = document.createElement('summary')
+          summary.className = 'artifact-stage__run-summary'
+          const chev = bfEl('span', 'artifact-stage__run-chev')
+          chev.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
+          summary.append(chev, bfEl('span', null, 'run details'))
+          details.appendChild(summary)
+          const runBody = bfEl('div', 'artifact-stage__run-body')
+          const read = bfEl('div', 'artifact-stage__read')
+          renderArtifactRead(read, runEntry)
+          runBody.appendChild(read)
+          details.appendChild(runBody)
+          body.appendChild(details)
+        }
+
+        function presentDeck() {
+          const deckEntry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate =>
+            String(candidate?.id || '') === String(ctx.deckArtifactId || '')) || { id: String(ctx.deckArtifactId || ''), metadata: {} }
+          body.classList.remove('artifact-stage__body--deck-hero')
+          body.classList.add('artifact-stage__body--deck')
+          body.replaceChildren()
+          renderArtifactDeck(body, deckEntry, { surface: 'stage', presentSlot: opts.headActions, autoPresent: true })
+        }
+
+        if (ctx.autoPresent) presentDeck()
+      }
+
       async function openArtifactStage(artifactId, fallbackTitle, options) {
         const id = String(artifactId || '').trim()
         if (!id) return
@@ -24417,12 +24795,29 @@
           await loadArtifacts()
           entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
         }
-        if (!entry) {
+        // DD-1: resolve the deck-hero context. The manifest card hands one in
+        // (options.deck) so a deck leads with its cover even when the deck
+        // artifact isn't in the loaded window (keyless); otherwise a goal
+        // artifact resolves its own child deck. Either way the run-log demotes.
+        let deckContext = (options && options.deck) || null
+        if (deckContext) {
+          if (!deckContext.deckArtifactId) deckContext.deckArtifactId = id
+        } else if (entry) {
+          deckContext = deckHeroContextFromGoalArtifact(entry)
+        }
+        if (deckContext) deckContext.autoPresent = Boolean(options && options.present)
+        if (!entry && !deckContext) {
           // the stage can't show what the library doesn't hold — fall back
           // to the data room rather than an empty panel
           openAgentArtifact({ id })
           return
         }
+        // a deck handed in by the manifest may name a deck artifact the loaded
+        // window doesn't hold — synthesize the minimal entry the chrome needs
+        if (!entry) entry = { id, metadata: {} }
+        const stageTitle = deckContext
+          ? (String(deckContext.title || '').trim() || artifactStageTitle(entry, fallbackTitle))
+          : artifactStageTitle(entry, fallbackTitle)
         beaconArtifactOpen(id)
         closeArtifactStage()
         artifactStageReturnFocus = document.activeElement
@@ -24431,7 +24826,7 @@
         stage.className = 'artifact-stage'
         stage.setAttribute('role', 'dialog')
         stage.setAttribute('aria-modal', 'true')
-        stage.setAttribute('aria-label', artifactStageTitle(entry, fallbackTitle))
+        stage.setAttribute('aria-label', stageTitle)
 
         const scrim = document.createElement('div')
         scrim.className = 'artifact-stage__scrim'
@@ -24441,17 +24836,22 @@
 
         const head = bfEl('header', 'artifact-stage__head')
         const headings = bfEl('div', 'artifact-stage__headings')
-        headings.appendChild(bfEl('span', 'artifact-stage__kicker', artifactStageKicker(entry)))
+        // DD-2: kind + state from ONE source — the deck hero speaks "deck ·
+        // passed", never a kicker/body contradiction
+        headings.appendChild(bfEl('span', 'artifact-stage__kicker', deckContext ? deckHeroKicker(deckContext) : artifactStageKicker(entry)))
         const title = document.createElement('h2')
         title.className = 'artifact-stage__title'
-        title.textContent = artifactStageTitle(entry, fallbackTitle)
+        title.textContent = stageTitle
+        title.title = stageTitle
         headings.appendChild(title)
         const escape = bfEl('button', 'artifact-stage__escape', 'open in intelligence')
         escape.type = 'button'
         escape.addEventListener('click', () => { closeArtifactStage(); openAgentArtifact(entry) })
-        const close = bfEl('button', 'artifact-stage__close', '✕')
+        // DD-5: close is a Lucide x stroke icon, not a text glyph
+        const close = bfEl('button', 'artifact-stage__close')
         close.type = 'button'
         close.setAttribute('aria-label', 'Close')
+        close.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
         close.addEventListener('click', () => closeArtifactStage())
         const headActions = bfEl('div', 'artifact-stage__actions')
         head.append(headings, headActions, escape, close)
@@ -24459,7 +24859,11 @@
         const body = bfEl('div', 'artifact-stage__body')
         const pdfAssets = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
-        if (artifactIsHTMLDeck(entry)) {
+        if (deckContext) {
+          // DD-1: lead with the deck cover; present swaps in the sandboxed deck
+          // iframe below, and the run-log demotes to a "run details" disclosure
+          renderArtifactStageDeckHero(body, deckContext, { headActions })
+        } else if (artifactIsHTMLDeck(entry)) {
           // full-fidelity deck: sandboxed iframe via the short-lived render
           // token; Present fullscreens the SAME sandboxed frame (never a
           // top-level open of the render URL — the iframe sandbox IS the
@@ -38493,9 +38897,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          row.appendChild(main)
 	          const actions = bfEl('span', 'manifest-card__row-actions')
 	          const artifactId = String(deliverable.artifactId || '')
+	          // a deck deliverable leads with its cover hero (DD-1); the context
+	          // rides in so the hero stands even before the deck artifact loads
+	          const deckHero = deckHeroContextFromManifest(deliverable, manifest)
 	          const open = bfEl('button', 'manifest-card__pill manifest-card__pill--primary', 'open')
 	          open.type = 'button'
-	          open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || '')))
+	          open.addEventListener('click', () => openArtifactStage(artifactId, String(deliverable.title || ''), deckHero ? { deck: deckHeroContextFromManifest(deliverable, manifest) } : undefined))
 	          actions.appendChild(open)
 	          // held quieting: open is the ONLY door — present and pdf recede
 	          if (!held && deliverable.present) {
