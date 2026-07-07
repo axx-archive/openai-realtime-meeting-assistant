@@ -37,11 +37,20 @@ const (
 	// 64MB ceiling and Anthropic's 32MB request cap after base64 expansion.
 	attachmentUploadMaxBytes = 25 << 20
 
-	// One PDF per message, ≤20MB decoded: a document block base64-expands
-	// ~1.33x, so a single 20MB PDF plus the image budget stays under the
-	// API's 32MB request ceiling instead of 413ing opaquely.
+	// One PDF per message, ≤20MB decoded. This is the per-category ceiling;
+	// the COMBINED image+PDF payload is separately bounded by
+	// attachmentMaxRequestBytes so the two budgets can never sum past the
+	// API's request cap.
 	attachmentMaxPDFBlocks = 1
 	attachmentMaxPDFBytes  = 20 << 20
+
+	// attachmentMaxRequestBytes caps the combined decoded payload of every
+	// image and document block in one message. base64 expands the whole body
+	// ~1.33x, so 22MB decoded → ~29MB on the wire, leaving headroom under
+	// Anthropic's 32MB request ceiling for the JSON envelope and text prompt.
+	// Without this guard the independent 20MB image and 20MB PDF budgets could
+	// sum to ~40MB decoded (~53MB base64) and the request would 413 opaquely.
+	attachmentMaxRequestBytes = 22 << 20
 
 	// The derived-text pass is bounded and best-effort: one sub-25s Sonnet
 	// call whose failure never blocks the message commit.
@@ -159,8 +168,10 @@ func blobStatForRef(ref string) (blobMeta, error) {
 // application/pdf refs become document blocks. getBlob re-verifies each
 // digest, so a corrupted blob degrades to no block — never wrong bytes. The
 // wave-5 budgets are enforced here (≤12 images / ~20MB decoded, plus the
-// 1-PDF/20MB document budget); an over-budget or unreadable file silently
-// keeps its text placeholder instead of failing the send.
+// 1-PDF/20MB document budget) alongside a combined ≤22MB decoded cap across
+// both categories so the two budgets can't sum past the API's request
+// ceiling; an over-budget or unreadable file silently keeps its text
+// placeholder instead of failing the send.
 func attachmentContentBlocks(files []scoutChatFileAttachment) []json.RawMessage {
 	var blocks []json.RawMessage
 	images, pdfs := 0, 0
@@ -177,6 +188,12 @@ func attachmentContentBlocks(files []scoutChatFileAttachment) []json.RawMessage 
 		}
 		mime := strings.ToLower(strings.TrimSpace(meta.Mime))
 		if !attachmentModelSafeMimes[mime] {
+			continue
+		}
+		// Combined guard: base64 expands the sum of all blocks, not each
+		// category in isolation, so admitting this file must not push the
+		// total decoded payload past the shared request budget.
+		if imageBytes+pdfBytes+len(data) > attachmentMaxRequestBytes {
 			continue
 		}
 		if mime == "application/pdf" {

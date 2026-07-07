@@ -200,6 +200,42 @@ func TestAttachmentContentBlocksShapesAndBudgets(t *testing.T) {
 	}
 }
 
+// The COMBINED image+PDF payload is bounded so a message that fills both
+// per-category budgets can't blow past Anthropic's 32MB request cap after
+// base64 expansion. A 20MB PDF plus a smaller image sum over the combined
+// ceiling, so only the PDF's block ships even though each file is within its
+// own category budget.
+func TestAttachmentContentBlocksCombinedRequestBudget(t *testing.T) {
+	setupIsolatedBlobStore(t)
+
+	// A PDF at the per-category cap.
+	pdfBytes := make([]byte, attachmentMaxPDFBytes)
+	pdfBytes[0], pdfBytes[1] = '%', 'P'
+	pdfRef, err := putBlob(pdfBytes, "application/pdf")
+	if err != nil {
+		t.Fatalf("putBlob pdf: %v", err)
+	}
+	// An image that fits the image category on its own (well under 20MB) but
+	// pushes the running total past attachmentMaxRequestBytes.
+	imageBytes := make([]byte, attachmentMaxRequestBytes-attachmentMaxPDFBytes+(1<<20))
+	imageBytes[0] = 0x89
+	imageRef, err := putBlob(imageBytes, "image/png")
+	if err != nil {
+		t.Fatalf("putBlob png: %v", err)
+	}
+
+	blocks := attachmentContentBlocks([]scoutChatFileAttachment{
+		{Name: "deck.pdf", Ref: pdfRef},
+		{Name: "shot.png", Ref: imageRef},
+	})
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%d, want only the PDF block once the combined budget is spent", len(blocks))
+	}
+	if got := decodeAnthropicSourceBlock(t, blocks[0]); got.Type != "document" {
+		t.Fatalf("kept block type=%s, want the document block admitted before the combined cap tripped", got.Type)
+	}
+}
+
 func TestAnthropicDocumentBlockWireShape(t *testing.T) {
 	data := []byte("%PDF-1.7 tiny")
 	block := decodeAnthropicSourceBlock(t, anthropicDocumentBlock(" application/pdf ", data))
