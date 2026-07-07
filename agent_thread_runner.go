@@ -27,6 +27,21 @@ const (
 // work landed in a given channel.
 var agentThreadOriginMetadataKeys = []string{"originKind", "originId", "originMeetingId", "routeNote"}
 
+// broadcastNavigationActions decides whether a room-wide assistant_event may
+// carry navigation actions (open_tool: chat, etc). A channel-origin launch is
+// background, fire-and-forget work in a public thread — approving a Scout
+// proposal must not yank the approver OR anyone else in the room to the chat
+// tab. So channel-origin broadcasts drop their navigation actions; the room
+// learns via the live thread card + the completion notification instead. Room
+// and tool origins keep today's behavior (the initiator's own navigation still
+// rides its direct HTTP/tool response, a separate channel from this broadcast).
+func broadcastNavigationActions(originKind string, actions []osAssistantAction) []osAssistantAction {
+	if strings.TrimSpace(originKind) == agentThreadOriginChannel {
+		return nil
+	}
+	return actions
+}
+
 type scoutAgentThread struct {
 	ID       string              `json:"id"`
 	Mode     string              `json:"mode"`
@@ -198,11 +213,16 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 	}
 
 	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	// A channel-origin launch drops navigation actions BOTH at the top level and
+	// inside the nested thread, so no client — present or future — can read a
+	// navigation action off this room-wide broadcast and yank the tab.
+	broadcastThread := thread
+	broadcastThread.Actions = broadcastNavigationActions(metadata["originKind"], actions)
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" thread launched", map[string]any{
 		"tool":       "launch_agent_thread",
-		"thread":     thread,
+		"thread":     broadcastThread,
 		"artifact":   artifact,
-		"actions":    actions,
+		"actions":    broadcastThread.Actions,
 		"voiceState": "listening",
 	})
 
@@ -292,12 +312,13 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 	}
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
+	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
 	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
-		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
+		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
 		"artifact":   artifact,
-		"actions":    actions,
+		"actions":    broadcastActions,
 		"voiceState": "listening",
 	})
 	// Terminal status must reach requesters who launched from chat: the ref
@@ -411,6 +432,11 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 			// notification, which the terminal seam always sends.
 			return
 		}
+		// Alert the whole team the work is done BEFORE the duplicate-card guard —
+		// launchApprovedProposal already posted the live launch card for this
+		// thread, so scoutChatThreadHasAgentRef is true on the common path and the
+		// dedup return below would otherwise swallow the completion notification.
+		app.broadcastChannelCompletion(artifact, thread)
 		if agentThreadID != "" && scoutChatThreadHasAgentRef(thread, agentThreadID) {
 			// The in-channel launch card already exists and
 			// updateScoutChatThreadRefs flips it to complete — no duplicate.
@@ -438,6 +464,23 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 		if _, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message); err != nil {
 			log.Errorf("Failed to deliver artifact %s to channel %s: %v", artifact.ID, thread.ID, err)
 		}
+	}
+}
+
+// broadcastChannelCompletion fires the company-wide "the report is ready" bell
+// for a channel-delivered thread. userEmail "" makes it a broadcast to every
+// signed-in user (pushNotificationRecord fans an empty-recipient record to all),
+// so approving a proposal never MOVES anyone — the whole team is simply told the
+// work finished and where to read it. It is called BEFORE the duplicate-card
+// dedup guard so it fires on every completion, including the common case where
+// launchApprovedProposal already posted the live launch card into the channel
+// (which trips scoutChatThreadHasAgentRef and would otherwise skip the whole
+// delivery block, swallowing the alert).
+func (app *kanbanBoardApp) broadcastChannelCompletion(artifact meetingMemoryEntry, channel scoutChatThreadRecord) {
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), strings.TrimSpace(artifact.Metadata["threadQuery"]), "the report")
+	notifyText := fmt.Sprintf("Scout finished %q — ready in #%s", compactAssistantLine(title), channel.Title)
+	if _, err := app.createNotification("", notificationKindChat, notifyText, "chat", artifact.ID, channel.ID, false); err != nil {
+		log.Errorf("Failed to broadcast channel completion notification for artifact %s: %v", artifact.ID, err)
 	}
 }
 
@@ -507,12 +550,13 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	}
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
+	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
 	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
-		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: actions},
+		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
 		"artifact":   artifact,
-		"actions":    actions,
+		"actions":    broadcastActions,
 		"voiceState": "listening",
 	})
 	// Keep chat-side thread cards in step with queued/approval states too.

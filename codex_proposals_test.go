@@ -799,7 +799,11 @@ func TestIndexCodexProposalWiring(t *testing.T) {
 // Room-confirmed proposals are the room's work: the launched artifact carries
 // the proposal id and the live meeting id so completion can deliver the
 // finished card back into the origin meeting's chat.
-func TestCodexProposalConfirmStampsRoomOrigin(t *testing.T) {
+// Approving a proposal routes the work into a background PUBLIC channel (created
+// from the topic when none exists), NOT the room — so approving never yanks the
+// room to the chat tab. The channel origin is also what suppresses the launch
+// broadcast's navigation action (see TestChannelOriginLaunchDropsBroadcastNavigation).
+func TestCodexProposalConfirmRoutesToPublicChannel(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	var launched scoutAgentThread
@@ -807,7 +811,6 @@ func TestCodexProposalConfirmStampsRoomOrigin(t *testing.T) {
 	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched = thread }
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-	meetingID := app.memory.ensureMeetingID()
 	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
 		"title": "Coyote pricing",
 		"mode":  "research",
@@ -823,13 +826,56 @@ func TestCodexProposalConfirmStampsRoomOrigin(t *testing.T) {
 	}
 
 	metadata := launched.Artifact.Metadata
-	if metadata["originKind"] != agentThreadOriginRoom {
-		t.Fatalf("originKind=%q, want %q", metadata["originKind"], agentThreadOriginRoom)
+	if metadata["originKind"] != agentThreadOriginChannel {
+		t.Fatalf("originKind=%q, want %q (approve routes to a background channel, not the room)", metadata["originKind"], agentThreadOriginChannel)
 	}
-	if metadata["originId"] != proposalID {
-		t.Fatalf("originId=%q, want the proposal id %q", metadata["originId"], proposalID)
+	channelID := metadata["originId"]
+	if strings.TrimSpace(channelID) == "" {
+		t.Fatal("originId is empty; want the id of the routed public channel")
 	}
-	if metadata["originMeetingId"] != meetingID {
-		t.Fatalf("originMeetingId=%q, want the live meeting %q", metadata["originMeetingId"], meetingID)
+	// The routed channel exists and is a public, unarchived thread named for the topic.
+	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindScoutChat, channelID)
+	if !ok {
+		t.Fatalf("routed channel %q not found in memory", channelID)
+	}
+	channel, ok := decodeScoutChatThreadEntry(entry)
+	if !ok || scoutChatThreadVisibility(channel) != scoutChatVisibilityPublic || channel.ArchivedAt != "" {
+		t.Fatalf("routed origin is not an open public channel: %+v", channel)
+	}
+	if !strings.Contains(strings.ToLower(channel.Title), "coyote") {
+		t.Fatalf("channel title=%q, want it named from the proposal topic", channel.Title)
+	}
+}
+
+// Reuse over duplicate: a proposal whose topic closely matches an existing open
+// public channel lands in THAT channel rather than minting a near-duplicate.
+func TestCodexProposalConfirmReusesMatchingChannel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	previousRunner := startAgentThreadAsync
+	var launched scoutAgentThread
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched = thread }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	existing, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Samsung TV Plus", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title": "Samsung TV Plus research",
+		"mode":  "research",
+		"query": "Research Samsung TV Plus audience and viewership.",
+	})
+	if err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+	proposalID := asString(result["proposal"].(map[string]any)["id"])
+	if _, _, err := app.resolveCodexProposal(proposalID, "confirm", "Tom", "tom@shareability.com"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	if got := launched.Artifact.Metadata["originId"]; got != existing.ID {
+		t.Fatalf("originId=%q, want the existing #%s channel %q (fuzzy reuse, not a duplicate)", got, existing.Title, existing.ID)
 	}
 }

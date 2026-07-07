@@ -158,6 +158,27 @@ func TestAnthropicToolResultContentCapsHugeError(t *testing.T) {
 	}
 }
 
+// The voice tool loop (OpenAI Realtime function_call_output) shares the same
+// body-echoing tools; a large result must be capped there too, on a tighter
+// budget than the text orchestrator.
+func TestCapVoiceToolResultContentCapsHugeResult(t *testing.T) {
+	huge := strings.Repeat("A", 3_000_000)
+	got := capVoiceToolResultContent(huge)
+	if len(got) > voiceToolResultBudgetChars+256 {
+		t.Fatalf("voice result len=%d, want <= budget %d (+marker)", len(got), voiceToolResultBudgetChars)
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Fatal("capped voice result missing a truncation marker")
+	}
+	if voiceToolResultBudgetChars >= orchestratorToolResultBudgetChars {
+		t.Fatalf("voice budget %d should be tighter than orchestrator budget %d", voiceToolResultBudgetChars, orchestratorToolResultBudgetChars)
+	}
+	small := `{"ok":true,"ticketId":"card-9"}`
+	if capVoiceToolResultContent(small) != small {
+		t.Fatalf("small voice result should pass through untouched, got %q", capVoiceToolResultContent(small))
+	}
+}
+
 // The cap must leave normal-sized results untouched: the model still needs ids,
 // statuses, and confirmations as verbatim, parseable JSON.
 func TestAnthropicToolResultContentPreservesSmallResult(t *testing.T) {

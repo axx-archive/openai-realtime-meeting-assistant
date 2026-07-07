@@ -587,6 +587,85 @@ func TestRawDocumentContractOverridesGenericInstructions(t *testing.T) {
 	}
 }
 
+// The founder's "alert us when done": a channel-origin completion must fire a
+// COMPANY-WIDE broadcast notification (UserEmail "") — and it must fire even in
+// the common case where launchApprovedProposal already posted the live launch
+// card, which trips the duplicate-card dedup guard. Before the fix the alert
+// sat inside that guarded block and never fired for the primary path.
+func TestDeliverArtifactToChannelBroadcastsCompletionDespiteExistingLaunchCard(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Samsung", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("createScoutChatThread: %v", err)
+	}
+	// Seed the launch card so the dedup guard WILL trip — the case that used to
+	// swallow the notification.
+	if _, err := app.commitScoutChatThreadMessages(channel.OwnerEmail, channel.ID, scoutChatMessageRecord{
+		ID:        "scout-chat-message-launch",
+		Kind:      "thread",
+		Role:      "scout",
+		Text:      "research thread launched",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Thread:    &scoutChatThreadRef{ID: "agent-thread-research-77", Mode: "research", Query: "samsung tv", Status: "running"},
+	}); err != nil {
+		t.Fatalf("seed launch card: %v", err)
+	}
+
+	artifact, _, err := app.createOSArtifactWithMetadata("research", "samsung tv", "# Samsung TV audience\n\nEvidence.", "AJ", map[string]string{
+		"title":        "Samsung TV audience report",
+		"threadStatus": "complete",
+		"status":       "complete",
+		"originKind":   agentThreadOriginChannel,
+		"originId":     channel.ID,
+	})
+	if err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+
+	before := len(app.notifications)
+	app.deliverArtifactToOrigin(artifact, "agent-thread-research-77") // dedup guard trips (launch card exists)
+
+	var broadcast *notificationRecord
+	for i := before; i < len(app.notifications); i++ {
+		rec := app.notifications[i]
+		if rec.UserEmail == "" && strings.Contains(rec.Text, "Samsung TV audience report") {
+			broadcast = &app.notifications[i]
+			break
+		}
+	}
+	if broadcast == nil {
+		t.Fatalf("no company-wide completion notification fired (records added: %d); the alert must survive the dedup guard", len(app.notifications)-before)
+	}
+	if broadcast.ArtifactID != artifact.ID || broadcast.ThreadID != channel.ID {
+		t.Fatalf("notification links wrong: artifact=%q thread=%q, want %q / %q", broadcast.ArtifactID, broadcast.ThreadID, artifact.ID, channel.ID)
+	}
+	if !strings.Contains(broadcast.Text, "#Samsung") {
+		t.Fatalf("notification text=%q, want it to name the channel", broadcast.Text)
+	}
+}
+
+// A channel-origin launch (what approving a proposal now produces) must NOT
+// carry navigation actions in its room-wide broadcast — otherwise every client
+// in the room gets yanked to the chat tab. Room/tool origins keep their actions
+// (the initiator's own navigation rides a separate direct response).
+func TestBroadcastNavigationActionsDropsChannelOriginNav(t *testing.T) {
+	actions := []osAssistantAction{{Type: "open_tool", Tool: "chat", ArtifactID: "os-artifact-1"}}
+
+	if got := broadcastNavigationActions(agentThreadOriginChannel, actions); got != nil {
+		t.Fatalf("channel origin should drop broadcast navigation actions, got %+v", got)
+	}
+	if got := broadcastNavigationActions(agentThreadOriginRoom, actions); len(got) != 1 {
+		t.Fatalf("room origin should keep its actions, got %+v", got)
+	}
+	if got := broadcastNavigationActions(agentThreadOriginTool, actions); len(got) != 1 {
+		t.Fatalf("tool origin should keep its actions, got %+v", got)
+	}
+	if got := broadcastNavigationActions("", actions); len(got) != 1 {
+		t.Fatalf("empty origin should keep its actions (today's default), got %+v", got)
+	}
+}
+
 // buildAgentThreadError must not tell the room to "run the Codex handoff" as the
 // remedy for a worker error: research/design threads run on the in-process Fable
 // orchestrator, and that misleading line made a live meeting believe a failed

@@ -2644,7 +2644,11 @@ func (app *kanbanBoardApp) finishToolCall(outputItem kanbanRealtimeOutputItem, a
 		"item": map[string]any{
 			"type":    "function_call_output",
 			"call_id": outputItem.CallID,
-			"output":  mustMarshalJSON(result),
+			// Same defense as the text orchestrator: a body-echoing tool result
+			// (a full artifact/package body) must not bloat the Realtime session
+			// context. Capped tighter here — the voice window is smaller and audio
+			// tokens accrue fast.
+			"output": capVoiceToolResultContent(mustMarshalJSON(result)),
 		},
 	}); err != nil {
 		log.Errorf("Failed to send Kanban function output: %v", err)

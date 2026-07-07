@@ -1133,6 +1133,12 @@ func anthropicToolResultContent(result map[string]any, err error) (string, bool)
 	return capToolResultContent(string(raw)), false
 }
 
+// voiceToolResultBudgetChars is the tighter cap for the OpenAI Realtime voice
+// tool loop. Its context window is smaller than the orchestrator's and audio
+// tokens accrue fast, so a body-echoing tool result gets a shorter leash there
+// than on the text orchestrator.
+const voiceToolResultBudgetChars = 8000
+
 // capToolResultContent bounds a serialized tool result before it is appended to
 // the orchestrator's message history. The tool-result path is the last line of
 // defense: even after a tool's own output is budgeted, a future body-echoing
@@ -1140,15 +1146,28 @@ func anthropicToolResultContent(result map[string]any, err error) (string, bool)
 // turn. Rune-safe; replaces the overflow with a marker naming the elided size so
 // the model knows the payload was budgeted, not that the tool itself truncated.
 func capToolResultContent(content string) string {
-	if len(content) <= orchestratorToolResultBudgetChars {
+	return capContentToBudget(content, orchestratorToolResultBudgetChars)
+}
+
+// capVoiceToolResultContent is capToolResultContent's twin for the Realtime
+// voice tool loop (function_call_output), with the tighter voice budget.
+func capVoiceToolResultContent(content string) string {
+	return capContentToBudget(content, voiceToolResultBudgetChars)
+}
+
+// capContentToBudget is the shared rune-safe cap: it keeps at most budget runes
+// and appends a marker naming the elided size so the model knows the payload was
+// budgeted, not that the tool itself truncated.
+func capContentToBudget(content string, budget int) string {
+	if len(content) <= budget {
 		return content // byte length bounds rune count; fast path, no allocation
 	}
 	runes := []rune(content)
-	if len(runes) <= orchestratorToolResultBudgetChars {
+	if len(runes) <= budget {
 		return content
 	}
-	elided := len(runes) - orchestratorToolResultBudgetChars
-	kept := strings.TrimSpace(string(runes[:orchestratorToolResultBudgetChars]))
+	elided := len(runes) - budget
+	kept := strings.TrimSpace(string(runes[:budget]))
 	return fmt.Sprintf("%s\n…[truncated tool result: %d chars elided to protect the model context; read the artifact or package by id for the full body]", kept, elided)
 }
 

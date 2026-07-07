@@ -220,17 +220,46 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 	}
 
 	if action == codexProposalActionConfirm {
-		// Room-confirmed proposals are the room's work: completion posts the
-		// artifact card back into the origin meeting's chat. The shared confirm
-		// bookkeeping (persist-before-launch → launch → stamp → advance → signal
-		// → settle) lives in launchApprovedProposal, which the workflow ticker
-		// (card 067) also drives for already-approved relaunches with a 068
-		// channel origin instead of this room origin.
-		payload, err := app.launchApprovedProposal(entry, userName, userEmail, map[string]string{
+		// Approving a proposal must NOT yank the room to the chat tab. The work
+		// runs in the background in a PUBLIC channel about the topic — reusing an
+		// existing close-match channel (an existing #samsung) or creating one —
+		// and completion broadcasts a notification to everyone rather than moving
+		// anyone. The channel origin is what suppresses the launch's navigation
+		// action (deliverArtifactToOrigin + the launch broadcast both branch on
+		// it). If channel resolution fails we fall back to the room origin so the
+		// approval still launches and delivers — never blocked on routing.
+		//
+		// The shared confirm bookkeeping (persist-before-launch → launch → stamp →
+		// advance → signal → settle) lives in launchApprovedProposal, which the
+		// workflow ticker (card 067/068) also drives with a channel origin.
+		// Route the work into a background PUBLIC channel so approving never yanks
+		// the room to chat. Reuse the workflow ticker's SAFE matcher
+		// (bestMatchPublicChannel — token-set Jaccard with a decisive margin, no
+		// substring shortcut, so a proposal can't be hijacked into #general), and
+		// when there is no confident match, start a NEW channel named from the
+		// topic (the founder's "start a new public thread related to the topic").
+		// Only if no owner email can mint a channel do we fall back to the room
+		// origin so approval still launches. channelDeliveryOrigin +
+		// postChannelLaunchCard (inside launchApprovedProposal) post the live card;
+		// deliverArtifactToOrigin then broadcasts completion to everyone.
+		origin := map[string]string{
 			"originKind":      agentThreadOriginRoom,
 			"originId":        id,
 			"originMeetingId": app.memory.currentMeetingID(),
-		})
+		}
+		topic := firstNonEmptyString(strings.TrimSpace(entry.Metadata["title"]), strings.TrimSpace(entry.Metadata["query"]))
+		if channel, note, ok := app.bestMatchPublicChannel(topic, ""); ok {
+			origin = channelDeliveryOrigin(channel, note)
+		} else if ownerEmail := normalizeAccountEmail(userEmail); ownerEmail != "" {
+			if name := trimForStorage(normalizeChannelName(topic), 72); name != "" {
+				if channel, err := app.resolveOrCreatePublicChannel(ownerEmail, userName, name); err == nil {
+					origin = channelDeliveryOrigin(channel, "new channel: #"+channel.Title)
+				} else {
+					log.Errorf("Proposal %s channel creation failed, room origin fallback: %v", id, err)
+				}
+			}
+		}
+		payload, err := app.launchApprovedProposal(entry, userName, userEmail, origin)
 		if err != nil {
 			return nil, false, err
 		}
