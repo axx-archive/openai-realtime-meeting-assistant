@@ -188,6 +188,16 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 			// D4: worker-created cards land as pending Scout drafts a human
 			// accepts or dismisses — never as instant board cards.
 			args["draft"] = true
+			// Board doctrine v2: business cards are captured, never cut
+			// silently — the worker must supply a named owner and a concrete
+			// next step, or the create is rejected into the per-operation
+			// error rail of the board-update artifact.
+			if err := validateMeetingBoardCreateDoctrine(args); err != nil {
+				application.Error = err.Error()
+				result.ErrorCount++
+				result.Applications = append(result.Applications, application)
+				continue
+			}
 		}
 
 		toolResult, changed, err := app.applyToolCallArgs(toolName, args)
@@ -204,6 +214,33 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 	}
 
 	return result
+}
+
+// validateMeetingBoardCreateDoctrine enforces the business-card rules of
+// board doctrine v2 at the worker's create seam: a business card requires a
+// named owner and notes stating the concrete next step, so accepting or
+// dismissing the draft IS the debate. Owner is a presence check only — a
+// business card owned by a non-participant name still counts as owned, so
+// this deliberately does not require a canonical-participant match. Human
+// creates through createTicket are untouched.
+func validateMeetingBoardCreateDoctrine(args map[string]any) error {
+	business := false
+	for _, tag := range canonicalizeBoardTags(asStringSlice(args["tags"])) {
+		if strings.EqualFold(tag, "business") {
+			business = true
+			break
+		}
+	}
+	if !business {
+		return nil
+	}
+	if owner := asString(args["owner"]); owner == "" || strings.EqualFold(owner, "Unassigned") {
+		return fmt.Errorf("business cards require a named owner — name who carries this before creating it")
+	}
+	if cleanBoardNotes(asString(args["notes"])) == "" {
+		return fmt.Errorf("business cards require notes stating the concrete next step — spell it out before creating it")
+	}
+	return nil
 }
 
 func normalizeMeetingBoardToolName(operation meetingBoardOperation) string {
@@ -250,7 +287,10 @@ func meetingBoardInstructions() string {
 		"Prefer updating an existing card when the work is already represented. Scan the whole board snapshot first, including pending drafts: facets of one conversation belong on one card, never on sibling cards.",
 		"Create at most three new cards per pass. When the discussion suggests more, keep the clearest commitments and let the rest ride in the summaries until the room commits.",
 		"Write notes as a work spec in at most three sentences: what to do, why, and what done looks like. Name a person only for ownership or a commitment. When updating a card, rewrite the notes into the current best spec — never append a running chronology of who said what.",
-		"Tag every card you create with exactly one category tag — product, process, or business — plus topical tags.",
+		"Tag every card you create with exactly one category tag — build, fix, workflow, or business — plus topical tags.",
+		"The board exists for work that gets BUILT, FIXED, or run as a WORKFLOW (research, decks, design).",
+		"Business cards are never cut silently: they require a named owner and notes stating the concrete next step, and they always stay drafts for human accept/dismiss — that review is the debate.",
+		"Workflow cards must name their deliverable — the exact artifact title — in the notes so a finished agent thread binds to the card and advances it.",
 		"Never delete cards from asynchronous summaries. Ignore broad discussion, uncertain audio, greetings, filler, and facts that do not affect the board.",
 		"Preserve exact proper nouns, participant names, project titles, and dates. Use owner Unassigned unless a responsible participant is clear.",
 		"Return strict JSON only, with shape: {\"summary\":\"short audit summary\",\"operations\":[{\"tool\":\"update_ticket\",\"reason\":\"why this is grounded\",\"arguments\":{...}}]}.",

@@ -2223,6 +2223,43 @@
       .card-draft__accept[disabled],
       .card-draft__dismiss[disabled] { opacity: 0.6; cursor: default; }
 
+      /* Business track (board doctrine v2) — business cards leave the eng
+         lanes for a collapsed rail under the columns; muted uppercase summary
+         echoes the flat column headers */
+      .business-track {
+        margin: var(--sp-3) 4px 0;
+        border-top: 1px solid var(--line-1);
+        padding-top: var(--sp-2);
+      }
+
+      .business-track > summary {
+        cursor: pointer;
+        list-style: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+      .business-track > summary::-webkit-details-marker { display: none; }
+      .business-track > summary::before { content: '▸'; }
+      .business-track[open] > summary::before { content: '▾'; }
+      .business-track > summary:hover { color: var(--text-2); }
+
+      .business-track__stack {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        padding: var(--sp-2) 2px 6px;
+      }
+
+      .business-track__stack .card {
+        flex: 0 0 240px;
+      }
+
       .card-heading {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -19392,6 +19429,10 @@
             scout keeps this board · swipe for columns
           </p>
           <section id="board" class="board" aria-label="Kanban board"></section>
+          <details id="businessTrack" class="business-track" hidden>
+            <summary id="businessTrackSummary">Business track</summary>
+            <div id="businessTrackStack" class="business-track__stack"></div>
+          </details>
           <div id="boardDock" class="board-dock-wrap" aria-label="Expanded board controls">
             <div class="board-dock">
               <div id="boardVideoStrip" class="board-video-strip" aria-label="Room video strip"></div>
@@ -20565,6 +20606,10 @@
       // in-flight draft accept/dismiss requests (D4) — declared with the
       // board state so early renderBoard() calls never hit the TDZ
       const boardDraftPendingActions = new Set()
+      // Business track rail (board doctrine v2) — renderBoard rebuilds the
+      // DOM on every board event, so the details' open state lives here or
+      // the rail snaps shut while someone is reading it
+      let businessTrackOpen = false
       let commentPreviewTimer
       let roomStartedAt = 0
       let roomClockTimer = 0
@@ -43028,8 +43073,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderBoard(changes = { moved: new Set(), completed: new Set(), fresh: new Set(), toasts: [], commentPreviews: [] }) {
+        // board doctrine v2: business cards leave the eng lanes for the
+        // collapsed Business track rail so the four lanes stay clean
+        const laneCards = cards.filter(card => !isBusinessCard(card))
+        const businessCards = cards.filter(card => isBusinessCard(card))
         boardEl.replaceChildren(...statuses.map(status => {
-          const columnCards = cards.filter(card => card.status === status)
+          const columnCards = laneCards.filter(card => card.status === status)
           const column = document.createElement('section')
           column.className = `column ${statusClass(status)}`
           column.setAttribute('aria-label', `${status} cards`)
@@ -43061,9 +43110,47 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           column.append(header, stack)
           return column
         }))
+        renderBusinessTrack(businessCards, changes)
         updateBoardEmptyState()
         renderBoardPreview(changes)
         updateOfficeHome()
+      }
+
+      // Business track (board doctrine v2) — business-tagged cards render in
+      // a collapsed rail under the lanes; drafts keep their accept/dismiss
+      // buttons there because that review is the debate.
+      function renderBusinessTrack(businessCards, changes = { moved: new Set() }) {
+        const track = document.getElementById('businessTrack')
+        if (!track) {
+          return
+        }
+        const summary = document.getElementById('businessTrackSummary')
+        const stack = document.getElementById('businessTrackStack')
+        if (!track.dataset.wired) {
+          track.dataset.wired = 'true'
+          track.addEventListener('toggle', () => {
+            businessTrackOpen = track.open
+          })
+        }
+        if (businessCards.length === 0) {
+          track.hidden = true
+          track.open = false
+          if (stack) stack.replaceChildren()
+          return
+        }
+        track.hidden = false
+        track.open = businessTrackOpen
+        if (summary) {
+          summary.textContent = `Business track · ${businessCards.length}`
+        }
+        if (stack) {
+          stack.replaceChildren(...businessCards.map(card => renderCard(
+            card,
+            changes.moved?.has(card.id),
+            changes.completed?.has(card.id),
+            changes.fresh?.has(card.id)
+          )))
+        }
       }
 
       function renderBoardPreview(changes = { moved: new Set() }) {
@@ -43120,20 +43207,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         // rail shows In Progress + Blocked columns (multi-card); when nothing
         // is active yet, peek at the top of the backlog instead so the rail
-        // stays alive while the meeting spins up
+        // stays alive while the meeting spins up. Business cards ride the
+        // Business track, not the lanes, so the rail mirrors the clean lanes.
+        const railCards = cards.filter(card => !isBusinessCard(card))
         const railStatuses = ['In Progress', 'Blocked']
-        const railHasCards = railStatuses.some(status => cards.some(card => card.status === status))
+        const railHasCards = railStatuses.some(status => railCards.some(card => card.status === status))
         let sections
         if (railHasCards) {
           sections = railStatuses.map(status => ({
             label: status.toLowerCase(),
             statusCls: statusClass(status),
             dot: status === 'In Progress' ? 'var(--accent)' : 'var(--warn)',
-            cards: cards.filter(card => card.status === status),
+            cards: railCards.filter(card => card.status === status),
             total: null,
           }))
         } else {
-          const backlog = cards.filter(card => card.status === 'Backlog')
+          const backlog = railCards.filter(card => card.status === 'Backlog')
           if (backlog.length === 0) {
             const empty = document.createElement('p')
             empty.className = 'board-preview__empty'
@@ -43354,6 +43443,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return {
           name: card?.owner || 'Unassigned'
         }
+      }
+
+      // board doctrine v2 — business-tagged cards route to the Business track
+      function isBusinessCard(card) {
+        return (card?.tags || []).some(tag => String(tag).toLowerCase() === 'business')
       }
 
       function renderIdenticon(seed) {
