@@ -89,7 +89,14 @@ func installFakeChildRunner(t *testing.T) *[]capturedChild {
 	launched := &[]capturedChild{}
 
 	original := startAgentThreadAsync
-	t.Cleanup(func() { startAgentThreadAsync = original })
+	var wg sync.WaitGroup
+	// The fake child folds back on its own goroutine (production's async path).
+	// Drain every in-flight child before restoring the hook so no goroutine
+	// outlives the test and races the next test's kanbanApp global swap.
+	t.Cleanup(func() {
+		wg.Wait()
+		startAgentThreadAsync = original
+	})
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		mu.Lock()
@@ -106,7 +113,13 @@ func installFakeChildRunner(t *testing.T) *[]capturedChild {
 		if parent == "" {
 			return
 		}
+		// Add on the dispatching goroutine (before the spawn) so every child is
+		// counted before the cleanup's Wait() runs; re-dispatched revisions Add
+		// while an earlier fold is still running, so the counter never hits zero
+		// mid-run.
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", "subtask output: "+thread.Query, "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",
@@ -907,7 +920,13 @@ func installAwaitableChildRunner(t *testing.T, body string) *sync.WaitGroup {
 	t.Helper()
 	var folds sync.WaitGroup
 	original := startAgentThreadAsync
-	t.Cleanup(func() { startAgentThreadAsync = original })
+	// Drain any child still folding before restoring the hook, so a test that
+	// forgets to Wait() on the returned group cannot leak a goroutine into the
+	// next test's kanbanApp global swap.
+	t.Cleanup(func() {
+		folds.Wait()
+		startAgentThreadAsync = original
+	})
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
