@@ -814,12 +814,15 @@
       .voice-island.is-wake .bf-wave-bar {
         animation: bf-breathe var(--dur-breathe) var(--ease) 1;
       }
-      /* hot-ember handshake — recognition flares the mark for 1.6s */
-      .topbar__mark.is-hot-ember {
-        color: var(--live);
-      }
+      /* recognition handshake — the mark acknowledges with a MONOCHROME breath
+         (scale + opacity), never a hue. Presence/live still reads green via
+         .is-listening; the flare itself stays ink. */
       .topbar__mark.is-hot-ember svg {
-        filter: drop-shadow(0 0 6px rgba(48, 209, 88, 0.45));
+        animation: mark-recognize 1.6s var(--ease) 1;
+      }
+      @keyframes mark-recognize {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        45% { transform: scale(1.14); opacity: 0.82; }
       }
 
       .topbar__heading {
@@ -1090,6 +1093,8 @@
         z-index: 1000;
       }
 
+      /* floating glass chrome — same material as the notification window so
+         the two rail popovers read as one system (AM-1) */
       .account-menu {
         position: absolute;
         top: auto;
@@ -1101,10 +1106,12 @@
         gap: var(--sp-3);
         width: min(340px, calc(100vw - 28px));
         padding: var(--sp-3);
-        border: 1px solid var(--line-2);
-        border-radius: var(--r-xl);
-        background: var(--surface-1);
-        box-shadow: var(--shadow-3);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        background: var(--glass-chrome);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
         color: var(--text-1);
       }
 
@@ -1706,7 +1713,7 @@
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
         border: 1px solid var(--glass-border);
-        border-radius: 24px;
+        border-radius: var(--r-2xl);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         padding: 24px;
       }
@@ -1840,8 +1847,8 @@
       }
       .login-signin[disabled] {
         /* reduced-strength PRIMARY, not a gray slab — the accent surface
-           fades while the label keeps its on-accent ink */
-        background: color-mix(in srgb, var(--accent) 45%, var(--bg-app));
+           holds most of its ink so it still reads as the primary door */
+        background: color-mix(in srgb, var(--accent) 60%, var(--bg-app));
         color: var(--on-accent);
         cursor: not-allowed;
       }
@@ -3200,7 +3207,7 @@
       .controls .btn--recording.is-paused:hover:not([disabled]) {
         border-color: transparent;
         background: rgba(255, 69, 58, 0.25);
-        color: #FF6B61;
+        color: var(--danger);
       }
 
       .btn--recording.is-paused .record-dot,
@@ -3234,8 +3241,8 @@
       }
 
       /* design dock buttons: enabled = white 12% on dark glass; off-state
-         mic/cam = red 25% wash with #FF6B61 glyph; attention (share/board
-         active) inverts to solid white. All literals — theme-invariant. */
+         mic/cam = a NEUTRAL recessed toggle (Leave is the only red); attention
+         (share/board active) inverts to solid white. Literals, theme-invariant. */
       .controls .btn--ghost,
       .controls .btn--primary {
         border-color: transparent;
@@ -3261,13 +3268,15 @@
       .controls .btn--primary:active:not([disabled]) {
         transform: scale(0.95);
       }
+      /* mic/cam OFF is a NEUTRAL inactive toggle, not a warm red — the crossed
+         glyph carries the "off" meaning. Leave is the only red on the dock. */
       .controls .btn--ghost.is-muted,
       .controls .btn--ghost.is-off,
       .controls .btn--ghost.is-muted:hover:not([disabled]),
       .controls .btn--ghost.is-off:hover:not([disabled]) {
         border-color: transparent;
-        background: rgba(255, 69, 58, 0.25);
-        color: #FF6B61;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.55);
       }
       .controls .btn--ghost.is-voice-focus {
         border-color: transparent;
@@ -3876,6 +3885,7 @@
       }
 
       .btn.settings-close {
+        position: relative;
         width: 30px;
         height: 30px;
         min-width: 0;
@@ -3885,6 +3895,12 @@
         border-radius: var(--r-full);
         background: var(--surface-3);
         color: var(--text-2);
+      }
+      /* keep the 30px disc but honor the 44px minimum tap target (S-1) */
+      .btn.settings-close::after {
+        content: "";
+        position: absolute;
+        inset: -7px;
       }
 
       /* section-navigated window: nav rail left, scrolling body right */
@@ -5087,6 +5103,16 @@
         min-height: calc(100svh - var(--shell-topbar-height, 0px) - var(--sp-6));
       }
 
+      /* L1 — give the gate a tonal ambient to refract. The workspace paints
+         these washes behind the centered glass card, so the login card's
+         backdrop-filter has something to bend (otherwise it reads flat over
+         near-white paper in light). Scoped to the logged-out gate only. */
+      #appShell:not(.is-authed) .workspace {
+        background:
+          radial-gradient(760px 520px at 26% 16%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
+          radial-gradient(680px 560px at 78% 90%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 62%);
+      }
+
       #appShell.is-authed:not(.is-in-room) .workspace {
         align-items: stretch;
         align-content: stretch;
@@ -5127,8 +5153,10 @@
       }
 
       /* kit Room — keep the stage mounted to host the canon "not connected"
-         empty state in the authed pre-join window (room tool, not yet live) */
-      #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
+         empty state in the pre-join window (room tool, not yet live). Not
+         gated on auth: the keyless / pre-connection room must paint the black
+         stage + honest not-connected CTA, never a blank white void (R-1). */
+      #appShell[data-tool="room"]:not(.is-in-room) .hearth-presentation {
         display: grid;
       }
 
@@ -5502,12 +5530,17 @@
         justify-content: center;
         gap: 5px;
         height: 64px;
-        color: var(--accent);
+        /* rest = a calm muted-ink waveform; the ember breath is EARNED, lit
+           only while actually listening (breathe-only-while-listening law) */
+        color: var(--text-2);
       }
+
+      .office-launch.is-listening .office-launch__bars { color: var(--ember); }
 
       .office-launch__bars .bf-wave-bar {
         border-radius: 99px;
         transform-origin: bottom;
+        opacity: 0.5;
         transition: opacity 0.3s var(--ease);
       }
 
@@ -13608,7 +13641,9 @@
         box-shadow: none;
       }
 
-      /* the stage — true black in both themes; video is the imagery */
+      /* the stage — true black in both themes; video is the imagery. The
+         black is painted here (not just on .room-empty) so the pre-join /
+         keyless stage is never bare white paper behind the tiles (R-1). */
       .hearth-stage {
         position: relative;
         min-height: min(74vh, 820px);
@@ -13617,6 +13652,7 @@
         grid-template-rows: minmax(0, 1fr);
         place-items: stretch;
         overflow: hidden;
+        background: var(--bg-stage);
         /* tiles sit directly on the light canvas — the workspace padding is
            the only inset, per the reference grid */
         padding: 0;
@@ -13653,13 +13689,14 @@
         border-radius: 0;
       }
 
-      /* shown in the authed pre-connection window for the room tool, before
-         .is-in-room flips. uses only existing shell state — no new signal. */
-      #appShell.is-authed[data-tool="room"]:not(.is-in-room) #hearthStage .room-empty {
+      /* shown in the pre-connection window for the room tool, before
+         .is-in-room flips — regardless of auth, so the keyless/pre-auth room
+         shows the honest not-connected state instead of a white void (R-1). */
+      #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .room-empty {
         display: flex;
       }
 
-      #appShell.is-authed[data-tool="room"]:not(.is-in-room) #hearthStage .hearth-center {
+      #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .hearth-center {
         visibility: hidden;
       }
 
@@ -13669,23 +13706,21 @@
         color: rgba(255, 255, 255, 0.45);
       }
 
-      /* design: white Join button on the black stage */
+      /* the one primary on the black stage — a white pill. The fill/ink are
+         theme-invariant literals because the stage is always true-black in
+         both themes (same rule the control dock declares for its literals). */
       .room-empty__join {
         height: 46px;
         min-height: 46px;
         padding: 0 26px;
         border: 0;
-        border-radius: 14px;
+        border-radius: var(--r-full);
         background: #fff;
         color: #0E0E10;
         font: 600 14px var(--font-sans);
         letter-spacing: 0;
         cursor: pointer;
         transition: transform 0.12s var(--ease), background 0.12s var(--ease);
-      }
-
-      .room-empty__join:hover {
-        transform: scale(1.04);
       }
 
       .room-empty__join:active {
@@ -15454,9 +15489,12 @@
         transition: transform 0.15s var(--ease);
       }
 
+      .office-intel-card:hover { border-color: var(--line-2, var(--line-1)); }
       .office-intel-card:active {
         transform: scale(0.98);
       }
+      /* match the brief/portfolio cards — a monochrome leading glyph */
+      .office-intel-card > svg:first-child { color: var(--text-2); flex: none; }
 
       .office-intel-card__text {
         display: flex;
@@ -15518,7 +15556,9 @@
       }
       .office-home-card:hover { border-color: var(--line-2, var(--line-1)); }
       .office-home-card:active { transform: scale(0.98); }
-      .office-home-card > svg:first-child { color: var(--agent); flex: none; }
+      /* leading icon is MONOCHROME (kit surface-3 tile glyph); ember is
+         reserved for the count badge below — never the icon */
+      .office-home-card > svg:first-child { color: var(--text-2); flex: none; }
       .office-home-card__text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
       .office-home-card__title { font: 600 13.5px var(--font-sans); letter-spacing: -0.01em; }
       .office-home-card__sub { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
@@ -15528,8 +15568,8 @@
         height: 20px;
         padding: 0 6px;
         border-radius: 999px;
-        background: var(--agent);
-        color: #fff;
+        background: var(--ember);
+        color: var(--on-ember);
         font: 600 11px var(--font-sans);
         font-variant-numeric: tabular-nums;
         display: inline-flex;
@@ -15558,7 +15598,7 @@
         max-height: 100%;
         display: flex;
         flex-direction: column;
-        border-radius: 20px;
+        border-radius: var(--r-2xl);
         border: 1px solid var(--line-1);
         background: var(--surface-1, var(--surface-2));
         box-shadow: var(--shadow-3);
@@ -15574,7 +15614,7 @@
         border-bottom: 1px solid var(--line-1);
       }
       .bsheet__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-      .bsheet__eyebrow { font: var(--type-label); letter-spacing: var(--track-label); color: var(--agent); text-transform: uppercase; }
+      .bsheet__eyebrow { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); text-transform: none; }
       .bsheet__title { margin: 0; font: 600 18px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); }
       .bsheet__close {
         flex: none;
@@ -15600,7 +15640,7 @@
         gap: 8px;
         margin-bottom: 8px;
       }
-      .brief__section-title { font: 600 12px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+      .brief__section-title { font: var(--type-label); letter-spacing: var(--track-label); text-transform: lowercase; color: var(--text-3); }
       .brief__section-count { font: 600 12px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text-3); }
       .brief__empty { font: var(--type-body, 13px var(--font-sans)); color: var(--text-3); padding: 4px 0; }
       .brief__row {
@@ -15617,8 +15657,20 @@
       .brief__row-title { font: 500 13.5px var(--font-sans); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
       .brief__row-meta { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
 
-      /* an approval waiting card — amber while it waits on the admin */
-      .approval { border-left: 3px solid var(--warn); }
+      /* an approval waiting card — a warn dot marks the waiting state (no
+         left-border accent cards: state = pill or dot) */
+      .approval { position: relative; padding-left: 24px; }
+      .approval::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        margin-top: -3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--warn);
+      }
       .approval__state { font: 600 12px var(--font-sans); color: var(--warn); }
       .approval__actions { display: flex; gap: 8px; flex: none; }
       .approval__btn {
@@ -15660,23 +15712,34 @@
 
       /* portfolio rows — stage + readiness dial + freshness + gaps */
       .portfolio__row { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; border: 1px solid var(--line-1); background: var(--surface-2); margin-bottom: 10px; }
-      .portfolio__row.is-stale { border-left: 3px solid var(--warn); }
+      /* stale row — a warn dot, not a left-border accent bar */
+      .portfolio__row.is-stale { position: relative; padding-left: 24px; }
+      .portfolio__row.is-stale::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        top: 18px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--warn);
+      }
       .portfolio__top { display: flex; align-items: center; gap: 12px; }
       .portfolio__name { font: 600 15px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); flex: 1; min-width: 0; }
-      .portfolio__stage { font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--text-3); }
+      .portfolio__stage { font: var(--type-label); letter-spacing: var(--track-label); text-transform: lowercase; color: var(--text-3); }
       .portfolio__dial { display: flex; align-items: baseline; gap: 4px; flex: none; }
       .portfolio__score { font: 700 18px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text-1); }
       .portfolio__score-max { font: 12px var(--font-sans); color: var(--text-3); }
       .portfolio__delta { font: 600 12px var(--font-sans); font-variant-numeric: tabular-nums; }
-      .portfolio__delta--up { color: var(--signal); }
+      .portfolio__delta--up { color: var(--live); }
       .portfolio__delta--down { color: var(--warn); }
       .portfolio__metertrack { height: 6px; border-radius: 999px; background: var(--surface-3, rgba(127,127,127,0.16)); overflow: hidden; }
-      .portfolio__meterfill { height: 100%; border-radius: 999px; background: var(--agent); }
+      .portfolio__meterfill { height: 100%; border-radius: 999px; background: var(--accent); }
       .portfolio__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
       .portfolio__meta b { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-2); }
       .portfolio__nudge { font: 12.5px var(--font-sans); color: var(--warn); }
       .portfolio__gaps { display: flex; gap: 6px; flex-wrap: wrap; }
-      .portfolio__gap { font: 600 11px var(--font-sans); letter-spacing: 0.02em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-1); color: var(--text-3); }
+      .portfolio__gap { font: var(--type-label); letter-spacing: var(--track-label); text-transform: lowercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-1); color: var(--text-3); }
 
       /* phone: sheets become full-height, option/action rows go full-width */
       @media (max-width: 640px) {
@@ -16975,11 +17038,16 @@
           transform: scale(0.94);
         }
 
+        /* mic/cam OFF — neutral inactive toggle (Leave is the only red) */
         #appShell.is-in-room #muteMic.is-muted,
-        #appShell.is-in-room #toggleCamera.is-off,
+        #appShell.is-in-room #toggleCamera.is-off {
+          background: rgba(255, 255, 255, 0.06);
+          color: rgba(255, 255, 255, 0.55);
+        }
+        /* recording paused — danger */
         #appShell.is-in-room #recordMeeting.is-paused {
           background: rgba(255, 69, 58, 0.25);
-          color: #FF6B61;
+          color: var(--danger);
         }
 
         #muteMic .mute-label,
@@ -17378,7 +17446,8 @@
           height: 48px;
           gap: 4px;
           align-items: flex-end;
-          color: var(--accent);
+          /* rest = muted ink; the listening rule lights it ember (specificity) */
+          color: var(--text-2);
         }
 
         .office-launch__bars .bf-wave-bar {
@@ -19313,6 +19382,7 @@
         .mount-stagger { opacity: 1; transform: none; animation: none !important; }
         .topbar__mark.is-listening,
         .topbar__mark.is-wake svg,
+        .topbar__mark.is-hot-ember svg,
         .voice-island.is-wake .bf-wave-bar,
         .pill--listening,
         .login-rise,
@@ -19896,7 +19966,7 @@
                  (data-office-tool="room" -> joinRoom()). -->
             <div id="roomNotConnected" class="room-empty" aria-label="Not connected">
               <div id="roomEmptyName" class="room-empty__title">the room is quiet.</div>
-              <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>Join the room</button>
+              <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>join the room</button>
               <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
             </div>
             <div class="hearth-center">
@@ -20865,10 +20935,10 @@
                   </label>
                   <div class="account-menu__upload">
                     <input id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-                    <button id="profileAvatarButton" class="btn btn--ghost" type="button">Upload avatar</button>
+                    <button id="profileAvatarButton" class="btn btn--ghost" type="button">upload avatar</button>
                     <button id="profileAvatarClear" class="btn btn--text" type="button">clear</button>
                   </div>
-                  <button id="profileSaveButton" class="btn btn--primary" type="submit">Save profile</button>
+                  <button id="profileSaveButton" class="btn btn--primary" type="submit">save profile</button>
                   <p id="profileStatus" class="account-menu__status" aria-live="polite"></p>
                 </form>
               </div>
@@ -20886,12 +20956,12 @@
                     <span>new password</span>
                     <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="at least 8 characters">
                   </label>
-                  <button class="btn btn--ghost" type="submit">Change password</button>
+                  <button class="btn btn--ghost" type="submit">change password</button>
                 </form>
                 <div class="voice-profile__label">passkeys</div>
                 <ul id="passkeyList" class="account-settings__passkeys"></ul>
                 <div class="voice-profile__actions">
-                  <button id="addPasskeyButton" class="btn btn--ghost" type="button">Add a passkey on this device</button>
+                  <button id="addPasskeyButton" class="btn btn--ghost" type="button">add a passkey on this device</button>
                   <button id="accountSignOut" class="btn btn--text" type="button">sign out</button>
                 </div>
                 <p id="accountStatus" class="access-hint" aria-live="polite"></p>
@@ -21074,7 +21144,7 @@
           </div>
         </div>
         <footer class="settings-actions">
-          <button id="settingsDone" class="btn btn--primary" type="button">Done</button>
+          <button id="settingsDone" class="btn btn--primary" type="button">done</button>
         </footer>
       </section>
     </div>
@@ -22438,6 +22508,14 @@
         if (!accountMenu.hidden && !topbarAccount.contains(event.target) && !accountMenu.contains(event.target)) {
           setAccountMenuOpen(false)
         }
+        // notification panel light-dismiss — exclude the panel + both bells so
+        // a bell click still toggles via its own handler (PV-2)
+        if (!notificationPanel.hidden
+            && !notificationPanel.contains(event.target)
+            && !notificationBell.contains(event.target)
+            && !(topbarBellButton && topbarBellButton.contains(event.target))) {
+          setNotificationPanelOpen(false)
+        }
       })
       navigator.mediaDevices?.addEventListener?.('devicechange', () => {
         refreshAudioInputDevices()
@@ -23644,6 +23722,10 @@
           topbarAccount.appendChild(accountMenu)
         }
         if (next) {
+          // one popover at a time — opening the account menu closes the bell
+          // and the board-dock menu (PV-1)
+          setNotificationPanelOpen(false)
+          closeBoardDockMenu()
           syncAccountChrome()
           window.setTimeout(() => accountMenuSettings.focus(), 0)
         }
@@ -37513,6 +37595,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         notificationPanel.hidden = !open
         notificationBell.setAttribute('aria-expanded', String(Boolean(open)))
         if (open) {
+          // one popover at a time — opening the bell closes the account menu
+          // and the board-dock menu (PV-1)
+          setAccountMenuOpen(false)
+          closeBoardDockMenu()
           // Opening the bell acknowledges the backlog: refresh the list, then
           // clear the unread badge.
           loadNotifications().then(() => markAllNotificationsRead())

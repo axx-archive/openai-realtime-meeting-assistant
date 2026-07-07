@@ -2006,7 +2006,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 		// login: status pill earns its slot; disabled stays a faded primary
 		`id="loginStatusPill"`,
 		"function setLoginStatusPill(state, text)",
-		"color-mix(in srgb, var(--accent) 45%, var(--bg-app))",
+		"color-mix(in srgb, var(--accent) 60%, var(--bg-app))",
 		// hidden must survive the .chat-thread-item display:flex rule so the
 		// default Scout row really disappears once a real private thread exists
 		".chat-thread-item[hidden]",
