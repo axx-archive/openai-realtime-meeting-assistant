@@ -729,7 +729,6 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"display: none;",
 		".tool-rail:hover,",
 		".tool-rail:focus-within",
-		"box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);",
 		"overflow: visible;",
 		"left: calc(100% + 14px);",
 		"max-width: none;",
@@ -2241,7 +2240,7 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 		"office: 'BonfireOS',",
 		"? 'BonfireOS'",
 		"|| 'BonfireOS'",
-		"'BonfireOS ready'",
+		"'ready'",
 		// the one warm ignition accent (coral ember), migrated from the
 		// heritage flame; --agent now aliases the sanctioned --ember token
 		"--ember-500: #FF6B4A;",

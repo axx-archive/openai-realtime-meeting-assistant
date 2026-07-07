@@ -480,6 +480,7 @@
          width change, no layout shift. Hover/focus reveals after a beat. */
       .tool-rail__label {
         position: absolute;
+        z-index: 300;
         left: calc(100% + 14px);
         top: 50%;
         translate: -4px -50%;
@@ -524,17 +525,22 @@
       .tool-rail__tool:hover {
         transform: scale(1.08);
       }
+      /* inactive tools warm toward ink on hover; active/disabled keep their own color */
+      .tool-rail__tool:not([aria-pressed="true"]):not([disabled]):hover {
+        color: var(--text-1);
+      }
       .tool-rail__tool:active {
         transform: scale(var(--press-scale));
       }
+      /* active tool = a quiet surface well (kit ToolRail: surface-3 + line-1 + ink) */
       .tool-rail__tool[aria-pressed="true"] {
-        background: var(--accent);
-        border-color: transparent;
-        color: var(--on-accent);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+        background: var(--surface-3);
+        border-color: var(--line-1);
+        color: var(--text-1);
+        box-shadow: none;
       }
-      /* "you are here" — a 2px ember hairline inset on the active tool's left
-         edge; reads at a glance and is the only ember in the chrome (ux §3.2).
+      /* "you are here" — a 2px ink hairline inset on the active tool's left
+         edge; reads at a glance and is monochrome (color = state, not chrome).
          Scoped to nav tools ([data-tool]); the theme toggle also carries
          aria-pressed (dark active) and must NOT wear the you-are-here mark. */
       .tool-rail__tool[data-tool][aria-pressed="true"]::after {
@@ -546,7 +552,7 @@
         width: 2px;
         height: 16px;
         border-radius: var(--r-full);
-        background: var(--agent);
+        background: var(--accent);
         pointer-events: none;
       }
       .tool-rail__tool[disabled] {
@@ -6264,11 +6270,11 @@
         padding: 0 10px;
         border: 1px solid var(--line-1);
         border-radius: var(--r-full);
-        color: var(--agent);
+        color: var(--text-2);
         font: 600 12px/1 var(--font-sans);
-        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
       }
-      .voice-ledger__undo:hover { border-color: var(--agent); }
+      .voice-ledger__undo:hover { border-color: var(--line-2); color: var(--text-1); }
       .voice-ledger__undo:active { transform: scale(var(--press-scale)); }
 
       .voice-island__main {
@@ -9837,21 +9843,21 @@
         display: none;
       }
 
-      /* bell warmth — a waiting alert rests with a whisper of ember (earned
-         attention, not a red-dot scream); a newly arriving alert gets exactly
-         one warm breath, never a loop. The mobile header badge mirrors it. */
+      /* the unread badge is ink (unread = monochrome, never ember at rest); a
+         bg-app ring cuts it cleanly off the bell glyph, and a newly arriving
+         alert gets exactly one ink breath, never a loop. Mobile header mirrors it. */
       .notification-bell__unread,
       .topbar__bell-badge {
-        box-shadow: 0 0 0 1.5px var(--agent-soft);
+        box-shadow: 0 0 0 1.5px var(--bg-app);
       }
       .notification-bell__unread.is-arriving,
       .topbar__bell-badge.is-arriving {
         animation: bell-unread-pulse var(--pulse-cycle) var(--ease) 1;
       }
       @keyframes bell-unread-pulse {
-        0%   { box-shadow: 0 0 0 1.5px var(--agent-soft); }
-        35%  { box-shadow: var(--glow-agent); }
-        100% { box-shadow: 0 0 0 1.5px var(--agent-soft); }
+        0%   { box-shadow: 0 0 0 1.5px var(--bg-app); }
+        35%  { box-shadow: var(--glow-accent); }
+        100% { box-shadow: 0 0 0 1.5px var(--bg-app); }
       }
 
       /* chrome glass, applied once on the window; the list items inside stay
@@ -16133,6 +16139,11 @@
           border-color: transparent;
           color: var(--on-accent);
           box-shadow: none;
+        }
+        /* the horizontal dock lets the filled accent circle carry active; the
+           vertical you-are-here hairline reads awkwardly on its left flank */
+        .tool-rail__tool[data-tool][aria-pressed="true"]::after {
+          display: none;
         }
 
         .tool-rail__live {
@@ -23235,9 +23246,9 @@
 	          if (canUseArtifactLibrary()) {
 	            loadArtifacts()
 	          }
-          setConnectionState('idle', 'BonfireOS ready')
+          setConnectionState('idle', 'ready')
           setLoginStatusPill('')
-          setLog('BonfireOS ready')
+          setLog('ready')
           return true
         } catch (error) {
           accessState.textContent = 'locked'
@@ -23302,9 +23313,9 @@
 	          if (canUseArtifactLibrary()) {
 	            loadArtifacts()
 	          }
-          setConnectionState('idle', 'BonfireOS ready')
+          setConnectionState('idle', 'ready')
           setLoginStatusPill('')
-          setLog('BonfireOS ready')
+          setLog('ready')
         } catch (error) {
           /* NotAllowedError is the user dismissing the prompt — not an error */
           if (error?.name === 'NotAllowedError') {
@@ -24174,7 +24185,7 @@
           statusTextEl.textContent = 'memory ready'
         } else if (toolPage && authedUser) {
           statusPillEl.className = 'pill pill--idle'
-          statusTextEl.textContent = 'BonfireOS ready'
+          statusTextEl.textContent = 'ready'
         } else {
           statusPillEl.className = `pill pill--${lastConnectionState}`
           statusTextEl.textContent = lastConnectionLabel
