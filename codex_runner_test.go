@@ -304,6 +304,55 @@ func TestApproveCodexArtifactExternalWriteQueuesApprovedJob(t *testing.T) {
 	}
 }
 
+// A second approve executed against a STALE artifact copy — the exact shape of
+// the admin-tap + consensus-completion race, where both requests fetched the
+// artifact at handler entry while it still read approval_required — must NOT
+// enqueue a second external_write job. The winner flips the persisted
+// reviewGate to approved; approveCodexArtifactExternalWrite re-reads that
+// current state under approvalExecuteMu, so the loser fails the not-waiting
+// guard instead of double-committing/pushing/deploying.
+func TestApproveCodexArtifactExternalWriteRefusesStaleDoubleApprove(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Deploy it", "approval needed", "tester", map[string]string{
+		"title":        "Deploy it",
+		"threadId":     "agent-thread-double-approve",
+		"threadQuery":  "commit, push, SSH to the VPS, and deploy this now",
+		"threadStatus": codexJobStatusApprovalRequired,
+		"reviewGate":   "approval_required",
+	})
+	if err != nil {
+		t.Fatalf("createOSArtifactWithMetadata: %v", err)
+	}
+
+	// Both racers captured this parked copy at handler entry. The first wins and
+	// ships.
+	if _, _, err := app.approveCodexArtifactExternalWrite(artifact, "AJ"); err != nil {
+		t.Fatalf("first approve: %v", err)
+	}
+	// The second replays the SAME stale copy (its in-memory reviewGate still
+	// reads approval_required) — it must be refused, never re-enqueued.
+	if _, _, err := app.approveCodexArtifactExternalWrite(artifact, "Joel"); err == nil {
+		t.Fatal("second approve on a stale copy succeeded, want not-waiting error (double deploy)")
+	}
+
+	entries, err := os.ReadDir(queueDir)
+	if err != nil {
+		t.Fatalf("read queue dir: %v", err)
+	}
+	jobs := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			jobs++
+		}
+	}
+	if jobs != 1 {
+		t.Fatalf("queued %d external_write jobs, want exactly 1", jobs)
+	}
+}
+
 func TestRunCodexExecCommandContextBuildsNoninteractiveCommand(t *testing.T) {
 	dir := t.TempDir()
 	recordArgs := filepath.Join(dir, "args.txt")

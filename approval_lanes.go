@@ -108,6 +108,16 @@ func approvalLanesPayload() []map[string]any {
 // resolveCodexProposal).
 var approvalEndorsementMu sync.Mutex
 
+// approvalExecuteMu serializes the heavy-lane approve EXECUTION
+// (approveCodexArtifactExternalWrite) so the read-of-gate / enqueue /
+// flip-to-approved is one atomic step. The admin approve path skips the
+// endorsement lock entirely, so without this a racing admin tap and the
+// endorsement that completes the 2-member consensus both pass the stale
+// reviewGate==approval_required guard and enqueue the SAME external_write job
+// twice — a double commit/push/deploy. This also closes the pre-existing
+// two-concurrent-admin-approves window.
+var approvalExecuteMu sync.Mutex
+
 func decodeApprovalEndorsements(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

@@ -1114,6 +1114,19 @@ func (app *kanbanBoardApp) rerunOriginForUser(artifact meetingMemoryEntry, userE
 }
 
 func (app *kanbanBoardApp) approveCodexArtifactExternalWrite(artifact meetingMemoryEntry, approvedBy string) (meetingMemoryEntry, []osAssistantAction, error) {
+	// Serialize the approve EXECUTION and re-read the artifact's CURRENT state:
+	// the caller's copy was fetched at handler entry, before any concurrent
+	// approve (a racing admin tap, or the endorsement that completes the
+	// 2-member consensus) flipped the gate. Guarding on that stale copy lets
+	// both approves pass reviewGate==approval_required and enqueue the SAME
+	// external_write job twice. Under the lock exactly one caller observes the
+	// parked gate and flips it to approved; the loser re-reads reviewGate=approved
+	// and returns the not-waiting error below.
+	approvalExecuteMu.Lock()
+	defer approvalExecuteMu.Unlock()
+	if current, exists := app.osArtifactByID(artifact.ID); exists {
+		artifact = current
+	}
 	if artifact.Metadata["reviewGate"] != "approval_required" && artifact.Metadata["threadStatus"] != codexJobStatusApprovalRequired {
 		return meetingMemoryEntry{}, nil, fmt.Errorf("artifact is not waiting for external-write approval")
 	}
