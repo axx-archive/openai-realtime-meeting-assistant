@@ -132,9 +132,9 @@ func TestVideoLookGovernorSignalsAudioSide(t *testing.T) {
 func TestVideoLookPickerPersistsThroughV8Record(t *testing.T) {
 	html := readIndexForLooks(t)
 
-	// The look enum is extended on the v8 video sub-record.
-	if !strings.Contains(html, "['none', 'bonfire-warm', 'studio', 'mono', 'lowlight'].includes(source.look)") {
-		t.Errorf("normalizeVideoSettings must accept the four looks + none")
+	// The look enum is extended on the v8 video sub-record (card 079 adds 'blur').
+	if !strings.Contains(html, "['none', 'bonfire-warm', 'studio', 'mono', 'lowlight', 'blur'].includes(source.look)") {
+		t.Errorf("normalizeVideoSettings must accept the grading looks + blur + none")
 	}
 
 	// Selecting a chip writes through the v8 video record and saves it.

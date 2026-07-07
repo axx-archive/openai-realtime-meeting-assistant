@@ -19,6 +19,11 @@ uniform vec2  uTexel;        // 1.0 / resolution — neighbour step for 3x3 taps
 uniform float uIntensity;    // 0..1 master mix toward identity
 uniform float uBypass;       // 1.0 => cheap single-tap passthrough (governor relief)
 
+uniform sampler2D uMask;     // person-confidence mask (R), unit 1 — segmented "blur" look
+uniform float uHasMask;      // 1.0 => background blur active (a mask is bound)
+uniform float uBlurRadius;   // background blur radius in texel units
+uniform float uMaskFeather;  // person/background boundary feather half-width
+
 uniform float uBrightness;   // additive, default 0
 uniform float uContrast;     // multiplier about 0.5, default 1
 uniform float uSaturation;   // default 1
@@ -54,6 +59,37 @@ void main() {
   if (uBypass > 0.5 || uIntensity <= 0.001) {
     fragColor = vec4(base, 1.0);
     return;
+  }
+
+  // Keep the untouched frame: the master-intensity mix (and the governor's ease-off) must
+  // always land on the RAW camera, never on the blurred/graded result.
+  vec3 raw = base;
+
+  // --- Background blur (segmented "blur" look) --------------------------------------
+  // Defocus only where the person-confidence mask is LOW. A 12-tap Poisson-disk single
+  // pass (LINEAR-filtered taps) is acceptable bokeh at the 1280 cap — no FBO / 2nd pass.
+  // Runs before the grading chain so any grading applies evenly to subject + background;
+  // uHasMask is 0 for every grading look, so this is a no-op there.
+  if (uHasMask > 0.5 && uBlurRadius > 0.001) {
+    float person = texture(uMask, vUv).r;
+    float bg = 1.0 - smoothstep(0.5 - uMaskFeather, 0.5 + uMaskFeather, person);
+    if (bg > 0.003) {
+      vec2 rad = uTexel * uBlurRadius;
+      vec3 acc = base;
+      acc += texture(uTex, vUv + rad * vec2(-0.326, -0.406)).rgb;
+      acc += texture(uTex, vUv + rad * vec2(-0.840, -0.074)).rgb;
+      acc += texture(uTex, vUv + rad * vec2(-0.696,  0.457)).rgb;
+      acc += texture(uTex, vUv + rad * vec2(-0.203,  0.621)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.962, -0.195)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.473, -0.480)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.519,  0.767)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.185, -0.893)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.507,  0.064)).rgb;
+      acc += texture(uTex, vUv + rad * vec2( 0.896,  0.412)).rgb;
+      acc += texture(uTex, vUv + rad * vec2(-0.322, -0.933)).rgb;
+      acc += texture(uTex, vUv + rad * vec2(-0.792, -0.598)).rgb;
+      base = mix(base, acc / 13.0, bg);
+    }
   }
 
   vec3 col = base;
@@ -152,6 +188,7 @@ void main() {
 
   col = clamp(col, 0.0, 1.0);
 
-  // Master intensity: scale the entire look toward the untouched frame.
-  fragColor = vec4(mix(base, col, clamp(uIntensity, 0.0, 1.0)), 1.0);
+  // Master intensity: scale the entire look toward the untouched frame (the RAW sample,
+  // so the governor's ease-off and the "strength" slider always land on real camera).
+  fragColor = vec4(mix(raw, col, clamp(uIntensity, 0.0, 1.0)), 1.0);
 }

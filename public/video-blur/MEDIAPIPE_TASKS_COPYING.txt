@@ -1,0 +1,39 @@
+MediaPipe Tasks Vision — vendored binaries (background-blur "look", card 079)
+============================================================================
+
+The files in this directory are unmodified redistributions of Google's
+MediaPipe project and its published selfie-segmentation model. They are
+vendored (rather than loaded from a CDN at runtime) so the app has no
+third-party runtime dependency and the ~9 MB wasm can be cached hard by our
+own asset handler. Lazy-loaded only when a user selects the "blur" look.
+
+Vendored files and their upstream sources
+-----------------------------------------
+  vision_bundle.mjs            @mediapipe/tasks-vision@0.10.14 (npm)
+  vision_wasm_internal.js      @mediapipe/tasks-vision@0.10.14/wasm/ (npm)
+  vision_wasm_internal.wasm    @mediapipe/tasks-vision@0.10.14/wasm/ (npm)
+  selfie_segmenter.tflite      https://storage.googleapis.com/mediapipe-models/
+                                 image_segmenter/selfie_segmenter/float16/latest/
+
+Re-derive / verify the exact bytes with:  node scripts/vendor-video-blur.mjs --check
+
+License
+-------
+MediaPipe is licensed under the Apache License, Version 2.0.
+
+  Copyright 2019-2024 The MediaPipe Authors.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use these files except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+The selfie_segmenter model card and terms are published by Google at
+https://developers.google.com/mediapipe/solutions/vision/image_segmenter .

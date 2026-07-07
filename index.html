@@ -20390,6 +20390,7 @@
                   <button type="button" class="video-look-chip pressable" data-look="studio" aria-pressed="false">crisp</button>
                   <button type="button" class="video-look-chip pressable" data-look="mono" aria-pressed="false">mono</button>
                   <button type="button" class="video-look-chip pressable" data-look="lowlight" aria-pressed="false">low-light</button>
+                  <button type="button" class="video-look-chip pressable" data-look="blur" aria-pressed="false">blur bg</button>
                 </div>
                 <label class="video-look__slider">
                   <span>brightness</span>
@@ -21969,7 +21970,7 @@
 
       function normalizeVideoSettings(video) {
         const source = video && typeof video === 'object' ? video : {}
-        const look = ['none', 'bonfire-warm', 'studio', 'mono', 'lowlight'].includes(source.look)
+        const look = ['none', 'bonfire-warm', 'studio', 'mono', 'lowlight', 'blur'].includes(source.look)
           ? source.look
           : defaultVideoSettings.look
         return {
@@ -29378,10 +29379,27 @@
           return
         }
 
-        if (localVideoLookPipeline) {
+        // A look↔look change is a pure uniform swap, but blur↔look is NOT: blur needs a
+        // segmenter that a running non-blur pipeline never initialized (and vice versa).
+        // Route those crossings through a pipeline rebuild — otherwise the chip would
+        // claim "Active" while the far end got no blur (or stale blur).
+        const lookMod = await loadVideoLookModule().catch(() => null)
+        const crossesSegmentBoundary = Boolean(localVideoLookPipeline && lookMod
+          && lookMod.isSegmentedLook(localVideoLookPipeline.look) !== lookMod.isSegmentedLook(look))
+        if (localVideoLookPipeline && !crossesSegmentBoundary) {
           localVideoLookPipeline.setLook(look, intensity, videoLookAdjust) // uniform swap, no track churn
           renderVideoLookSettings()
           return
+        }
+        if (localVideoLookPipeline && crossesSegmentBoundary) {
+          // Return the sender to the raw camera BEFORE tearing down, so a failed rebuild
+          // (e.g. blur unsupported on this browser) degrades to the live camera, never a
+          // frozen processed tile. The rebuild then happens on `raw` below.
+          const priorRaw = localVideoLookRawTrack
+          teardownVideoLookPipeline()
+          if (priorRaw && liveTrack(priorRaw) && priorRaw !== localVideoTrack()) {
+            await swapOutboundVideoTrack(priorRaw, { stopPrevious: true })
+          }
         }
 
         try {
@@ -29540,6 +29558,11 @@
         // honest CSS-filter approximation on the preview element only.
         if (mod && tier !== 'none' && look !== 'none') {
           try {
+            if (previewLookPipeline
+              && mod.isSegmentedLook(previewLookPipeline.look) !== mod.isSegmentedLook(look)) {
+              // blur↔look in the preview also needs a segmenter init/teardown, not a swap.
+              stopPreviewPipelineOnly()
+            }
             if (previewLookPipeline) {
               previewLookPipeline.setLook(look, intensity, videoLookAdjust)
             } else {
@@ -29647,6 +29670,7 @@
           case 'studio': return { uBrightness: 0.006, uTemperature: 0 }
           case 'mono': return { uBrightness: 0, uTemperature: 0 }
           case 'lowlight': return { uBrightness: 0.02, uTemperature: 0 }
+          case 'blur': return { uBrightness: 0, uTemperature: 0 }
           default: return { uBrightness: 0, uTemperature: 0 }
         }
       }
@@ -29689,7 +29713,9 @@
         if (dot) dot.dataset.state = state === 'paused' ? 'fallback' : (state === 'preview-only' ? 'unavailable' : state)
         if (label) label.textContent = text
         if (videoLookBatteryNote) {
-          videoLookBatteryNote.hidden = !(isIOSDevice && look !== 'none')
+          // Blur runs per-frame ML segmentation, so warn about battery on EVERY device,
+          // not just iOS (where all looks carry the note).
+          videoLookBatteryNote.hidden = !((isIOSDevice && look !== 'none') || look === 'blur')
         }
       }
 

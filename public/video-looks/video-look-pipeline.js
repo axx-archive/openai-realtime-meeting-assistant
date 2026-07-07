@@ -63,7 +63,24 @@ export const VIDEO_LOOK_PRESETS = {
   lowlight: {
     ...IDENTITY,
     uGamma: 0.78, uLowLightGain: 0.7, uTargetLuma: 0.55, uDenoise: 0.5, uSaturation: 1.04
+  },
+  // Background blur — person-segmentation defocus of the BACKGROUND only. Unlike the
+  // grading looks this needs an ML person-confidence mask per frame (blur-segmenter.js),
+  // so it is a "segmented look": insertable tier only, and the thermal governor sheds its
+  // segmentation cost first. uBlurRadius/uMaskFeather are extra (non-IDENTITY) uniforms.
+  blur: {
+    ...IDENTITY,
+    uBlurRadius: 14, uMaskFeather: 0.1
   }
+}
+
+// Looks that require per-frame person segmentation (not a pure uniform swap): the caller
+// must init/teardown a segmenter across a transition into or out of these, and they can
+// only run on the insertable tier this wave.
+export const SEGMENTED_LOOKS = new Set(['blur'])
+
+export function isSegmentedLook(look) {
+  return SEGMENTED_LOOKS.has(look)
 }
 
 export function isKnownLook(look) {
@@ -117,6 +134,10 @@ async function loadFragmentSource() {
 
 const MAX_DIMENSION = 1280 // hard cap: never upscale in-shader, never exceed capture res
 const CONSECUTIVE_ERROR_LIMIT = 6
+// Run person segmentation every Nth frame (<=15 mask fps at 30 fps video) and reuse the
+// mask in between — segmentation is the expensive part of blur, so this is the first
+// thing the governor sheds.
+const MASK_INTERVAL_FRAMES = 2
 
 export class VideoLookPipeline {
   constructor(options = {}) {
@@ -163,6 +184,15 @@ export class VideoLookPipeline {
     this._governorStage = 0 // 0 normal · 1 intensity shed · 2 look paused · 3 audio shed
     this._battery = null
     this._consecutiveErrors = 0
+
+    // Segmented-look (blur) state: the person-segmentation wrapper, its mask texture
+    // (unit 1), a "have we ever uploaded a mask" flag, and the frame counter + interval
+    // that drive the mask cadence (halved by the governor under load).
+    this._segmenter = null
+    this._maskTexture = null
+    this._hasMask = false
+    this._frameCount = 0
+    this._maskInterval = MASK_INTERVAL_FRAMES
     // One-shot terminal guard: once stop()/_fail() settles the pipeline, no later
     // teardown race (a post-cancel reader read resolving done, a closing writer
     // rejecting) can fire a second — and possibly false — terminal status.
@@ -198,6 +228,19 @@ export class VideoLookPipeline {
     }
     this._sourceTrack = sourceTrack
     this.setLook(look, intensity)
+
+    // Segmented looks (background blur) need a person-segmentation mask on the SAME frames
+    // the shader composits. Only the insertable tier can feed the segmenter deterministically
+    // this wave; anything else throws so the caller falls back to the raw camera with an
+    // honest status (never a fake whole-frame blur). The heavy MediaPipe wasm is fetched
+    // lazily, only here, only when blur is actually selected.
+    if (isSegmentedLook(this.look)) {
+      if (this.tier !== 'insertable') {
+        throw new Error('blur requires insertable streams')
+      }
+      const { createBlurSegmenter } = await import('./blur-segmenter.js')
+      this._segmenter = await createBlurSegmenter()
+    }
 
     const fragSrc = await loadFragmentSource()
     this._initGL(fragSrc)
@@ -311,12 +354,29 @@ export class VideoLookPipeline {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
+    // Second texture (unit 1): the person-confidence mask for segmented looks. LINEAR so
+    // the 256² mask upsamples smoothly to the frame; seeded 1×1=255 (subject everywhere →
+    // no blur) so it is a valid sampler and never blurs the whole frame before the first
+    // real mask arrives.
+    this._maskTexture = gl.createTexture()
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, this._maskTexture)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([255]))
+    gl.activeTexture(gl.TEXTURE0)
+
     // Cache every uniform location once.
-    const names = ['uTex', 'uTexel', 'uIntensity', 'uBypass', ...Object.keys(IDENTITY), 'uTime']
+    const names = ['uTex', 'uTexel', 'uIntensity', 'uBypass',
+      'uMask', 'uHasMask', 'uBlurRadius', 'uMaskFeather', ...Object.keys(IDENTITY), 'uTime']
     for (const name of names) {
       this._uniformLocations[name] = gl.getUniformLocation(program, name)
     }
     gl.uniform1i(this._uniformLocations.uTex, 0)
+    gl.uniform1i(this._uniformLocations.uMask, 1)
   }
 
   _compile(type, src) {
@@ -348,6 +408,7 @@ export class VideoLookPipeline {
       this._canvas.height = h
     }
     gl.viewport(0, 0, w, h)
+    gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this._texture)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source)
 
@@ -357,10 +418,47 @@ export class VideoLookPipeline {
     gl.uniform1f(loc.uBypass, bypass)
     gl.uniform2f(loc.uTexel, 1 / w, 1 / h)
     gl.uniform1f(loc.uTime, (performance.now() / 1000) % 1000)
+    // Segmented-look (blur) uniforms — no-ops for the grading looks (uHasMask stays 0).
+    gl.uniform1f(loc.uHasMask, this._segmenter && this._hasMask ? 1 : 0)
+    gl.uniform1f(loc.uBlurRadius, this._uniforms.uBlurRadius || 0)
+    gl.uniform1f(loc.uMaskFeather, this._uniforms.uMaskFeather || 0.1)
     for (const key of Object.keys(IDENTITY)) {
       gl.uniform1f(loc[key], this._uniforms[key])
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
+  }
+
+  // Refresh the person-confidence mask at the governor-controlled cadence, reusing the
+  // previous mask between updates (segmentation is the expensive part of blur). A
+  // transient segmentation error keeps the last mask rather than dropping the frame —
+  // never a black tile; a fully dead segmenter simply leaves uHasMask 0 (raw background).
+  _updateMask(frame) {
+    this._frameCount++
+    const due = (this._frameCount % this._maskInterval) === 0
+    if (!due && this._hasMask) {
+      return
+    }
+    try {
+      const mask = this._segmenter.segment(frame)
+      if (mask && mask.data && mask.width && mask.height) {
+        this._uploadMask(mask)
+        this._hasMask = true
+      }
+    } catch (_) {
+      // Keep the last mask; persistent failure just leaves the background unblurred.
+    }
+  }
+
+  _uploadMask(mask) {
+    const gl = this._gl
+    if (!gl || !this._maskTexture) {
+      return
+    }
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, this._maskTexture)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, mask.width, mask.height, 0, gl.RED, gl.UNSIGNED_BYTE, mask.data)
+    gl.activeTexture(gl.TEXTURE0)
   }
 
   // --- Tier 1: insertable streams ------------------------------------------
@@ -411,6 +509,9 @@ export class VideoLookPipeline {
           this._consecutiveErrors = 0
           this._recordFrameTime(performance.now() - t0)
           continue
+        }
+        if (this._segmenter) {
+          this._updateMask(frame)
         }
         this._draw(frame, frame.displayWidth, frame.displayHeight)
         const out = new VideoFrame(this._canvas, {
@@ -533,7 +634,16 @@ export class VideoLookPipeline {
     }
     this._governorStage++
     if (this._governorStage === 1) {
-      this._effectiveIntensity = 0 // ease the look off; cheap identity path in-shader
+      if (isSegmentedLook(this.look)) {
+        // Blur's cost is segmentation, not grading. Shed THAT first: halve the mask
+        // cadence and shrink the blur radius before snapping the whole look to identity —
+        // keeping the encoder off the CPU-starvation cliff the 2026-07-06 remote-tile
+        // flicker incident traced to per-frame contention.
+        this._maskInterval = Math.min(8, this._maskInterval * 2)
+        this._uniforms.uBlurRadius = (this._uniforms.uBlurRadius || 0) * 0.5
+      } else {
+        this._effectiveIntensity = 0 // ease the look off; cheap identity path in-shader
+      }
       this._emit('paused-battery')
     } else if (this._governorStage === 2) {
       this._emit('paused-battery') // frames now pass straight through (uBypass)
@@ -549,6 +659,12 @@ export class VideoLookPipeline {
     }
     this._governorStage = 0
     this._coolFrames = 0
+    this._maskInterval = MASK_INTERVAL_FRAMES
+    if (isSegmentedLook(this.look)) {
+      // Restore the preset blur radius the stage-1 shed halved (blur has no slider
+      // overrides, so the preset is the source of truth).
+      this._uniforms.uBlurRadius = (VIDEO_LOOK_PRESETS[this.look] || {}).uBlurRadius || 0
+    }
     this._effectiveIntensity = this.look === 'none' ? 0 : this.intensity
     this._emit(this.tier === 'none' ? 'preview-only' : 'active')
   }
@@ -571,6 +687,12 @@ export class VideoLookPipeline {
       cancelAnimationFrame(this._raf)
       this._raf = 0
     }
+    if (this._segmenter) {
+      try { this._segmenter.close() } catch (_) {}
+      this._segmenter = null
+    }
+    this._hasMask = false
+    this._frameCount = 0
     try { this._reader?.cancel() } catch (_) {}
     try { this._writer?.close() } catch (_) {}
     this._reader = null
@@ -597,6 +719,7 @@ export class VideoLookPipeline {
     this._canvas = null
     this._program = null
     this._texture = null
+    this._maskTexture = null
     this._outputTrack = null
   }
 
@@ -631,6 +754,11 @@ export function cssFilterForLook(look, intensity = 1) {
       return `grayscale(${lerp(0, 1)}) contrast(${lerp(1, 1.15)})`
     case 'lowlight':
       return `brightness(${lerp(1, 1.35)}) contrast(${lerp(1, 0.94)}) saturate(${lerp(1, 1.04)})`
+    case 'blur':
+      // No honest CSS approximation: a CSS blur() defocuses the WHOLE frame including the
+      // subject, not just the background. Where the real (segmented) pipeline can't run,
+      // the preview shows the raw camera — this 'none' — matching the honest status.
+      return 'none'
     case 'none':
     default:
       return 'none'

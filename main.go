@@ -1938,7 +1938,14 @@ func publicAssetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Cache-Control", "no-store")
+	if strings.HasPrefix(r.URL.Path, "/public/video-blur/") {
+		// Version-pinned, immutable ML segmentation assets (~9 MB wasm + model). Cache
+		// them hard so a blur user fetches the payload once, not per visit — everything
+		// else stays no-store.
+		w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if strings.HasSuffix(r.URL.Path, ".webmanifest") {
 		// Go's mime table has no .webmanifest entry; with nosniff set the
