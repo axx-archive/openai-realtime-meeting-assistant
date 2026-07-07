@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -583,5 +584,28 @@ func TestRawDocumentContractOverridesGenericInstructions(t *testing.T) {
 	}
 	if got := app.agentThreadInstructionsForThread(plain); !strings.Contains(got, "Markdown sections") {
 		t.Fatalf("plain child lost the generic instructions:\n%s", got)
+	}
+}
+
+// buildAgentThreadError must not tell the room to "run the Codex handoff" as the
+// remedy for a worker error: research/design threads run on the in-process Fable
+// orchestrator, and that misleading line made a live meeting believe a failed
+// research report was a Codex problem. It must surface the real error and point
+// at a retry, not an external Codex worker.
+func TestBuildAgentThreadErrorDoesNotPrescribeCodexHandoff(t *testing.T) {
+	thread := scoutAgentThread{
+		ID:    "agent-thread-research-1",
+		Mode:  "research",
+		Query: "run a research report on Samsung TV audience",
+	}
+	body := buildAgentThreadError(thread, errors.New("api request failed (400 Bad Request)"))
+	if !strings.Contains(body, "400 Bad Request") {
+		t.Fatalf("error body should surface the real worker error, got:\n%s", body)
+	}
+	if strings.Contains(body, "run the Codex/MCP handoff") || strings.Contains(body, "reconnect the worker or run the Codex") {
+		t.Fatalf("error body must not prescribe a Codex handoff as the remedy:\n%s", body)
+	}
+	if !strings.Contains(strings.ToLower(body), "retry the run") {
+		t.Fatalf("error body should point at a retry, got:\n%s", body)
 	}
 }

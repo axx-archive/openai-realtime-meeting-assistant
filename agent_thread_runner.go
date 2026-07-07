@@ -654,10 +654,10 @@ func buildAgentThreadError(thread scoutAgentThread, err error) string {
 		"Thread mode: " + assistantToolLabel(thread.Mode),
 		"",
 		"Execution log",
-		"- Scout created the artifact and attempted the server-side worker.",
+		"- Scout created the artifact and ran the agent orchestrator.",
 		"- Worker error: " + strings.TrimSpace(err.Error()),
 		"",
-		"Next action: reconnect the worker or run the Codex/MCP handoff from this artifact.",
+		"Next action: retry the run — the agent orchestrator hit an error, not a missing worker. If it recurs, check the worker logs. This thread does not require reconnecting an external Codex worker.",
 	}
 	return strings.Join(appendGoalWorkflow(lines, thread.Mode, thread.Query, err.Error(), agentThreadDeliverable(thread.Mode), "worker error recorded on artifact"), "\n")
 }

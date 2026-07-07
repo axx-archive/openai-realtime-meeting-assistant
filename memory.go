@@ -1139,10 +1139,28 @@ func buildMemoryAnswer(query string, matches []meetingMemoryMatch) string {
 	parts := make([]string, 0, len(matches)+1)
 	parts = append(parts, fmt.Sprintf("I found %d relevant memory item(s) for %q:", len(matches), query))
 	for _, match := range matches {
-		parts = append(parts, fmt.Sprintf("- %s", match.Entry.Text))
+		parts = append(parts, "- "+memoryAnswerExcerpt(match.Entry))
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// memoryAnswerExcerpt renders one recall match as a compact, single-line
+// excerpt. A recall answer summarizes memory; it must NEVER inline a full
+// artifact body. Full-text search once surfaced a stale 2.6MB packaging deck
+// (HTML + base64 imagery) for a "Samsung TV audience" query; dumping its body
+// verbatim here produced a 2.65M-char answer that, fed back as an
+// answer_memory_question tool result, pushed the Fable research orchestrator to
+// ~2.55M tokens > the 1M model-context ceiling (400, every Samsung run). Titling
+// the excerpt keeps the recall useful without the body.
+func memoryAnswerExcerpt(entry meetingMemoryEntry) string {
+	excerpt := compactAssistantLine(entry.Text)
+	// The title is model-supplied and unbounded; cap it too so the excerpt's size
+	// guarantee holds regardless of which field carries the bulk.
+	if title := strings.TrimSpace(entry.Metadata["title"]); title != "" {
+		return compactAssistantLine(title) + " — " + excerpt
+	}
+	return excerpt
 }
 
 func normalizeTranscriptSpeaker(speaker string) string {

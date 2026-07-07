@@ -1108,9 +1108,20 @@ func decodeToolArgs(input json.RawMessage) map[string]any {
 	return args
 }
 
+// orchestratorToolResultBudgetChars caps how much of a single tool result enters
+// the orchestrator's message history. Tool results are appended verbatim as
+// tool_result blocks; an uncapped result that echoes a large artifact/package
+// body blew the model context ceiling on the next turn. Generous enough that
+// every normal result (ids, statuses, short bodies, a full board snapshot)
+// passes through untouched.
+const orchestratorToolResultBudgetChars = 24000
+
 func anthropicToolResultContent(result map[string]any, err error) (string, bool) {
 	if err != nil {
-		return err.Error(), true
+		// Error strings are appended to the message history exactly like success
+		// results, so they get the same budget — a future tool that wraps the
+		// offending input into its error must not be able to overflow the context.
+		return capToolResultContent(err.Error()), true
 	}
 	if len(result) == 0 {
 		return "ok", false
@@ -1119,7 +1130,26 @@ func anthropicToolResultContent(result map[string]any, err error) (string, bool)
 	if marshalErr != nil {
 		return "ok", false
 	}
-	return string(raw), false
+	return capToolResultContent(string(raw)), false
+}
+
+// capToolResultContent bounds a serialized tool result before it is appended to
+// the orchestrator's message history. The tool-result path is the last line of
+// defense: even after a tool's own output is budgeted, a future body-echoing
+// tool must never be able to overflow the model context ceiling on the next
+// turn. Rune-safe; replaces the overflow with a marker naming the elided size so
+// the model knows the payload was budgeted, not that the tool itself truncated.
+func capToolResultContent(content string) string {
+	if len(content) <= orchestratorToolResultBudgetChars {
+		return content // byte length bounds rune count; fast path, no allocation
+	}
+	runes := []rune(content)
+	if len(runes) <= orchestratorToolResultBudgetChars {
+		return content
+	}
+	elided := len(runes) - orchestratorToolResultBudgetChars
+	kept := strings.TrimSpace(string(runes[:orchestratorToolResultBudgetChars]))
+	return fmt.Sprintf("%s\n…[truncated tool result: %d chars elided to protect the model context; read the artifact or package by id for the full body]", kept, elided)
 }
 
 func mergeGoalStateProgress(current AgentProgress, input json.RawMessage) AgentProgress {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,69 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(terminal.Text, "Aurora plan") || !strings.Contains(terminal.Text, "Orchestrator evidence") {
 		t.Fatalf("terminal text missing body/evidence: %q", terminal.Text)
+	}
+}
+
+// A body-echoing tool result (answer_memory_question surfacing an artifact, or a
+// package tool returning a record that embeds a packaging-studio html_deck with
+// base64 imagery) must never enter the orchestrator's message history whole. In
+// prod a single 2.6MB deck artifact pushed the next turn's request to ~2.55M
+// tokens > the 1M ceiling, 400ing every Samsung research run. The tool-result
+// path had no size budget, even though the memory context lanes did (via
+// truncateArtifactForContext).
+func TestAnthropicToolResultContentCapsHugeResult(t *testing.T) {
+	huge := strings.Repeat("A", 3_000_000) // ~3MB, mimics an inlined base64 deck body
+	result := map[string]any{
+		"ok":       true,
+		"artifact": map[string]any{"id": "os-artifact-deck-1", "title": "Ember deck", "body": huge},
+	}
+	content, isErr := anthropicToolResultContent(result, nil)
+	if isErr {
+		t.Fatalf("isError=true, want false for a successful tool call")
+	}
+	if len(content) > orchestratorToolResultBudgetChars+256 {
+		t.Fatalf("tool result content len=%d, want <= budget %d (+marker slack); a huge result overflows the model context", len(content), orchestratorToolResultBudgetChars)
+	}
+	if !strings.Contains(content, "truncated") {
+		tail := content
+		if len(content) > 160 {
+			tail = content[len(content)-160:]
+		}
+		t.Fatalf("capped tool result missing a truncation marker; tail=%q", tail)
+	}
+}
+
+// An error result is appended to the message history exactly like a success
+// result, so it gets the same budget: a tool that wraps the offending oversized
+// input into its error message must not overflow the context either.
+func TestAnthropicToolResultContentCapsHugeError(t *testing.T) {
+	hugeErr := errors.New(strings.Repeat("E", 2_000_000))
+	content, isErr := anthropicToolResultContent(nil, hugeErr)
+	if !isErr {
+		t.Fatalf("isError=false, want true for an error result")
+	}
+	if len(content) > orchestratorToolResultBudgetChars+256 {
+		t.Fatalf("error content len=%d, want <= budget %d; a huge error must be capped too", len(content), orchestratorToolResultBudgetChars)
+	}
+}
+
+// The cap must leave normal-sized results untouched: the model still needs ids,
+// statuses, and confirmations as verbatim, parseable JSON.
+func TestAnthropicToolResultContentPreservesSmallResult(t *testing.T) {
+	result := map[string]any{"ok": true, "ticketId": "card-42", "status": "backlog"}
+	content, isErr := anthropicToolResultContent(result, nil)
+	if isErr {
+		t.Fatalf("isError=true, want false")
+	}
+	var round map[string]any
+	if err := json.Unmarshal([]byte(content), &round); err != nil {
+		t.Fatalf("small result should stay valid JSON, got %q (err %v)", content, err)
+	}
+	if round["ticketId"] != "card-42" || round["status"] != "backlog" {
+		t.Fatalf("small result altered: %v", round)
+	}
+	if strings.Contains(content, "truncated") {
+		t.Fatalf("small result should not be truncated: %q", content)
 	}
 }
 

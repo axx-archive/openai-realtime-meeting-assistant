@@ -519,3 +519,31 @@ func TestMeetingMemoryLoadsMultiMegabyteArtifact(t *testing.T) {
 		t.Fatal("the entry after the oversized deck was dropped on reload")
 	}
 }
+
+// buildMemoryAnswer is the keyless/error fallback for answer_memory_question.
+// Full-text search can surface a large artifact (e.g. a packaging deck) for a
+// loosely related query; inlining that body verbatim once produced a 2.65M-char
+// answer that overflowed the Fable orchestrator's context ceiling (400). The
+// fallback must stay compact and still name the item.
+func TestBuildMemoryAnswerCapsHugeMatchBody(t *testing.T) {
+	huge := strings.Repeat("A", 2_600_000) // ~2.6MB, mimics an inlined base64 deck body
+	matches := []meetingMemoryMatch{
+		{Entry: meetingMemoryEntry{
+			ID:   "os-artifact-deck-1",
+			Kind: "os_artifact",
+			Text: huge,
+			// A pathological title must not smuggle the bulk back in either.
+			Metadata: map[string]string{"title": "Package Ember Analytics" + strings.Repeat("!", 2_000_000)},
+		}},
+	}
+	answer := buildMemoryAnswer("samsung tv audience viewership", matches)
+	if len(answer) > 5000 {
+		t.Fatalf("buildMemoryAnswer len=%d, want compact; a full artifact body or title must never be inlined into a recall answer", len(answer))
+	}
+	if !strings.Contains(answer, "Package Ember Analytics") {
+		t.Fatalf("recall answer should still name the item by title: %q", answer)
+	}
+	if strings.Contains(answer, strings.Repeat("A", 1000)) {
+		t.Fatal("recall answer still contains a large raw body run")
+	}
+}

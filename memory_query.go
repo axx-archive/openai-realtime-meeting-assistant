@@ -1053,7 +1053,7 @@ func goalWorkflowSection(mode string, query string, contextAnswer string, delive
 		"10. Verify goal as completed: mark complete only when the original objective and acceptance checks are satisfied.",
 		"Deliverable: " + deliverable + ".",
 		"Context: " + contextLine + ".",
-		"Codex handoff: no external Codex job has started; this artifact is ready for a server-side Codex SDK or MCP worker.",
+		"Codex handoff: the in-process orchestrator handles the reasoning and writing; only external shell, repo, browser, or deploy steps hand off to the connected Codex/MCP execution worker.",
 	}
 }
 
