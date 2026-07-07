@@ -8,6 +8,12 @@ package main
 // designs rely on: the record closes exactly when the memory meeting id
 // rotates.
 //
+// Session-end rule (decided 2026-07-06, card 078): a room session ends after
+// the room has been EMPTY for 30 minutes (meetingIdleEndGrace, env
+// MEETING_IDLE_END_GRACE). The idle end closes the record, rotates the memory
+// meeting id, and silently auto-archives a non-empty meeting (no email); the
+// next join always starts a fresh meeting context.
+//
 // Persistence is a sidecar JSON store (data/meetings.json, notifications.json
 // pattern) — records mutate continuously (endedAt, auto-title, participants
 // union), so they must never live in the append-only meeting-memory.jsonl.
@@ -84,14 +90,15 @@ func meetingsPath() string {
 }
 
 // meetingIdleEndGrace is how long an empty room stays "in the meeting" before
-// the record closes and the memory meeting id rotates.
+// the record closes and the memory meeting id rotates. The 30-minute default
+// IS the session-end rule: empty for 30 minutes = the session is over.
 func meetingIdleEndGrace() time.Duration {
 	if raw := strings.TrimSpace(os.Getenv("MEETING_IDLE_END_GRACE")); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			return parsed
 		}
 	}
-	return 10 * time.Minute
+	return 30 * time.Minute
 }
 
 func loadMeetingStore(path string) (*meetingStore, error) {
@@ -300,6 +307,34 @@ func (store *meetingStore) endMeetingLocked(id string, endedAt time.Time, reason
 		store.records[index].EndedAt = endedAt.UTC().Format(time.RFC3339Nano)
 		store.records[index].EndedReason = reason
 		store.records[index].ArchiveID = strings.TrimSpace(archiveID)
+		store.persistLocked()
+		return cloneMeetingRecord(store.records[index]), true
+	}
+	return meetingRecord{}, false
+}
+
+// stampArchiveID lands an archive id on an ENDED record that has none yet —
+// the idle auto-archive seam: endMeetingForIdle closes the record first and
+// the archive file is written after, so the stamp is a separate step. Open
+// records are refused (archiveMeeting stamps those atomically with the
+// close), and a stamped record never restamps, so a duplicate idle fire can
+// never point the record at a second archive.
+func (store *meetingStore) stampArchiveID(id string, archiveID string) (meetingRecord, bool) {
+	archiveID = strings.TrimSpace(archiveID)
+	if store == nil || strings.TrimSpace(id) == "" || archiveID == "" {
+		return meetingRecord{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.records) - 1; index >= 0; index-- {
+		if store.records[index].ID != id {
+			continue
+		}
+		if store.records[index].EndedAt == "" || store.records[index].ArchiveID != "" {
+			return cloneMeetingRecord(store.records[index]), false
+		}
+		store.records[index].ArchiveID = archiveID
 		store.persistLocked()
 		return cloneMeetingRecord(store.records[index]), true
 	}
@@ -547,6 +582,11 @@ func (app *kanbanBoardApp) endMeetingForIdle(generation uint64) {
 		app.memory.rotateMeetingIDIfCurrent(closed.ID)
 	}
 	app.broadcastMeetingRecord(closed)
+	// The session is over for good (empty past the grace): silently archive
+	// what the meeting captured so the next join starts a fresh context with
+	// the prior one preserved. Synchronous is fine — this already runs on the
+	// grace timer's goroutine, and a contentless meeting is skipped inside.
+	app.autoArchiveIdleMeeting(closed)
 }
 
 // reconcileMeetingRecordsAtBoot runs once from newKanbanBoardApp: a stale open

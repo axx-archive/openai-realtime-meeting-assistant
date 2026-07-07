@@ -44636,12 +44636,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (meetingRecord?.title) {
           return String(meetingRecord.title).toLowerCase()
         }
-        const themes = intelData?.themes?.insight?.themes || latestMissionInsight?.insight?.themes
+        const insightPayload = (intelData?.themes?.insight?.themes ? intelData.themes : null) || latestMissionInsight
+        const themes = insightPayload?.insight?.themes
         const dominant = Array.isArray(themes) && themes.length
           ? String(themes.reduce((best, theme) =>
               (Number(theme?.mentions) || 0) > (Number(best?.mentions) || 0) ? theme : best, themes[0])?.label || '').trim()
           : ''
-        if (dominant) {
+        // Freshness gate (room-reset rule, card 078): an insight synthesized
+        // BEFORE the live record started belongs to the PRIOR session — a
+        // fresh untitled meeting never wears the previous meeting's theme.
+        const startedAtMs = meetingRecord?.active ? Date.parse(meetingRecord.startedAt || '') : NaN
+        const insightAtMs = Date.parse(insightPayload?.createdAt || '')
+        const insightFresh = !Number.isFinite(startedAtMs) || (Number.isFinite(insightAtMs) && insightAtMs >= startedAtMs)
+        if (dominant && insightFresh) {
           return dominant.toLowerCase()
         }
         return `meeting · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`

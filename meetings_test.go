@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,37 @@ func fireIdleEndNow(app *kanbanBoardApp) {
 	generation := app.meetings.idleGeneration
 	app.meetings.mu.Unlock()
 	app.endMeetingForIdle(generation)
+}
+
+// meetingArchiveFilesOnDisk lists archive JSON files under the isolated data
+// dir (the MEETING_MEMORY_PATH sibling "archives" directory).
+func meetingArchiveFilesOnDisk(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(meetingMemoryPath()), "archives"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read archives dir: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+// The session-end rule (card 078): a room session ends after the room has
+// been empty for 30 minutes. The default IS the rule; the env override stays.
+func TestMeetingIdleEndGraceDefaultsToThirtyMinutes(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "")
+	if got := meetingIdleEndGrace(); got != 30*time.Minute {
+		t.Fatalf("meetingIdleEndGrace()=%v, want 30m (the empty-room session-end rule)", got)
+	}
+	t.Setenv("MEETING_IDLE_END_GRACE", "45m")
+	if got := meetingIdleEndGrace(); got != 45*time.Minute {
+		t.Fatalf("meetingIdleEndGrace()=%v with override, want 45m", got)
+	}
 }
 
 func TestMeetingAdmissionOpensRecordAlignedWithMemoryID(t *testing.T) {
@@ -113,6 +145,134 @@ func TestIdleEndClosesRecordAndRotatesMemoryID(t *testing.T) {
 	}
 }
 
+// Card 078: the idle end silently auto-archives a meeting that captured
+// content — real archive file, email skipped, ArchiveID stamped on the closed
+// record, and the memory entries pinned to the ENDED meeting id.
+func TestIdleEndAutoArchivesMeetingWithContent(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	open, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "We decided to launch Boot Barn next week."); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+
+	app.forgetParticipant("AJ")
+	fireIdleEndNow(app)
+
+	records := app.meetings.recent(1)
+	if len(records) != 1 || records[0].ID != open.ID {
+		t.Fatalf("records=%#v, want the closed record %q", records, open.ID)
+	}
+	closed := records[0]
+	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
+		t.Fatalf("record=%#v, want an idle-ended record", closed)
+	}
+	if closed.ArchiveID == "" {
+		t.Fatal("idle end did not stamp an ArchiveID (auto-archive missing)")
+	}
+
+	// the archive file is durable and silent: email skipped, the embedded
+	// record is the idle-closed meeting.
+	archivePath, err := meetingArchivePath(closed.ArchiveID)
+	if err != nil {
+		t.Fatalf("meetingArchivePath: %v", err)
+	}
+	raw, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read idle auto-archive: %v", err)
+	}
+	var archive meetingArchive
+	if err := json.Unmarshal(raw, &archive); err != nil {
+		t.Fatalf("decode idle auto-archive: %v", err)
+	}
+	if archive.MeetingID != open.ID {
+		t.Fatalf("archive meetingId=%q, want %q", archive.MeetingID, open.ID)
+	}
+	if !archive.Email.Skipped || archive.Email.Sent || archive.Email.Attempted {
+		t.Fatalf("archive email=%#v, want silently skipped (idle auto-archive never emails)", archive.Email)
+	}
+	if archive.Meeting == nil || archive.Meeting.ID != open.ID || archive.Meeting.EndedReason != meetingEndedReasonIdle || archive.Meeting.ArchiveID != closed.ArchiveID {
+		t.Fatalf("embedded record=%#v, want the idle-closed meeting with the archive id", archive.Meeting)
+	}
+	if len(archive.Memory) == 0 {
+		t.Fatal("archive memory snapshot is empty, want the meeting transcript")
+	}
+
+	// the archive + artifact memory entries pin the ENDED meeting id — never
+	// the successor the rotation would lazily mint.
+	var archiveEntry, artifactEntry *meetingMemoryEntry
+	for _, entry := range app.memory.snapshot(0) {
+		entry := entry
+		switch entry.Kind {
+		case meetingMemoryKindArchive:
+			archiveEntry = &entry
+		case meetingMemoryKindOSArtifact:
+			artifactEntry = &entry
+		}
+	}
+	if archiveEntry == nil {
+		t.Fatal("no archive memory entry appended")
+	}
+	if archiveEntry.Metadata["meetingId"] != open.ID {
+		t.Fatalf("archive entry meetingId=%q, want the ended meeting %q", archiveEntry.Metadata["meetingId"], open.ID)
+	}
+	if !strings.Contains(archiveEntry.Text, "Archived meeting "+closed.ArchiveID+" with") {
+		t.Fatalf("archive summary %q does not match the Memory tool's archive-row format", archiveEntry.Text)
+	}
+	if artifactEntry == nil {
+		t.Fatal("no os_artifact memory entry appended")
+	}
+	if artifactEntry.Metadata["meetingId"] != open.ID || artifactEntry.Metadata["archiveId"] != closed.ArchiveID {
+		t.Fatalf("artifact entry metadata=%#v, want meetingId %q and archiveId %q", artifactEntry.Metadata, open.ID, closed.ArchiveID)
+	}
+
+	// the next join starts a fresh context, untouched by the archive appends.
+	app.noteMeetingAdmission("Tim")
+	fresh, ok := app.meetings.activeRecord()
+	if !ok || fresh.ID == open.ID {
+		t.Fatalf("fresh record=%#v, want a new meeting id after the idle reset", fresh)
+	}
+}
+
+// Card 078: a contentless session leaves no artifact — no archive file, no
+// ArchiveID, no archive/os_artifact memory entries.
+func TestIdleEndSkipsArchiveForEmptyMeeting(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	open, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+
+	app.forgetParticipant("AJ")
+	fireIdleEndNow(app)
+
+	records := app.meetings.recent(1)
+	if len(records) != 1 || records[0].ID != open.ID || records[0].EndedReason != meetingEndedReasonIdle {
+		t.Fatalf("records=%#v, want the idle-closed record %q", records, open.ID)
+	}
+	if records[0].ArchiveID != "" {
+		t.Fatalf("ArchiveID=%q, want empty — a contentless session leaves no artifact", records[0].ArchiveID)
+	}
+	if paths := meetingArchiveFilesOnDisk(t); len(paths) != 0 {
+		t.Fatalf("archive files=%v, want none for an empty meeting", paths)
+	}
+	for _, entry := range app.memory.snapshot(0) {
+		if entry.Kind == meetingMemoryKindArchive || entry.Kind == meetingMemoryKindOSArtifact {
+			t.Fatalf("empty meeting appended a %s entry: %#v", entry.Kind, entry)
+		}
+	}
+}
+
 // BLOCKER regression: an idle-ended meeting's id must never be resumed after
 // a restart. Pre-fix, newMeetingMemoryStore resumed the ended id (the last
 // JSONL entry is not an archive), boot reconciliation returned early because
@@ -181,6 +341,10 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
+	// give the meeting content so a stray auto-archive would be detectable.
+	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
 	app.forgetParticipant("AJ")
 	app.noteMeetingOccupancy() // arms the timer
 	app.meetings.mu.Lock()
@@ -202,12 +366,28 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 	if got := app.memory.currentMeetingID(); got != open.ID {
 		t.Fatalf("memory id=%q, want %q un-rotated", got, open.ID)
 	}
+	// the invalidated fire short-circuits before the auto-archive: no stray
+	// archive file lands and the open record carries no ArchiveID.
+	if record.ArchiveID != "" {
+		t.Fatalf("ArchiveID=%q after the invalidated fire, want empty", record.ArchiveID)
+	}
+	if paths := meetingArchiveFilesOnDisk(t); len(paths) != 0 {
+		t.Fatalf("archive files=%v after the invalidated fire, want none", paths)
+	}
 
 	// a genuinely empty room still idle-ends with the live generation.
 	app.noteMeetingOccupancy()
 	fireIdleEndNow(app)
 	if record, stillOpen := app.meetings.activeRecord(); stillOpen {
 		t.Fatalf("record=%#v, want the fresh-generation idle end to close it", record)
+	}
+	// ... and the genuine close auto-archives the captured content.
+	closed := app.meetings.recent(1)
+	if len(closed) != 1 || closed[0].ArchiveID == "" {
+		t.Fatalf("records=%#v, want the genuine idle end to stamp an ArchiveID", closed)
+	}
+	if paths := meetingArchiveFilesOnDisk(t); len(paths) != 1 {
+		t.Fatalf("archive files=%v after the genuine fire, want exactly one", paths)
 	}
 }
 

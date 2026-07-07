@@ -4886,6 +4886,100 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	}, nil
 }
 
+// autoArchiveIdleMeeting writes the durable archive for a meeting the idle
+// timer just closed — the session-end rule (card 078): empty for the grace
+// window means the session is over, and a non-empty session is preserved
+// silently. It runs AFTER endMeetingForIdle stamped EndedAt and rotated the
+// memory meeting id, so it never re-ends the record or re-rotates; the
+// archive entries pin the ENDED meeting id explicitly so the append can never
+// lazily mint (and stamp) a successor id. Differences from archiveMeeting,
+// all deliberate: no email (silent), no successor record (the room is empty),
+// no deferred-notification flush (endMeetingForIdle already flushed with
+// "meeting_end"), and no ambient-agent flush (post-rotation model output
+// would key to the successor id).
+func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
+	if app == nil || app.memory == nil || app.meetings == nil || strings.TrimSpace(closed.ID) == "" {
+		return
+	}
+	memory := app.memorySnapshotForMeeting(closed.ID, 2000)
+	if len(memory) == 0 {
+		// a contentless session leaves no artifact.
+		return
+	}
+	archivedAt := time.Now().UTC()
+	archiveID := durableTimestampID("meeting", archivedAt)
+	board := app.snapshotState()
+	participants := append([]string(nil), closed.Participants...)
+	notes := buildMeetingNotes(archiveID, archivedAt, "", board, memory, participants)
+	email := meetingEmailStatus{
+		Recipients: participantEmails(participants),
+		Skipped:    true,
+		Reason:     "Idle auto-archive does not email notes.",
+	}
+	embedded := cloneMeetingRecord(closed)
+	embedded.ArchiveID = archiveID
+	archive := meetingArchive{
+		ID:           archiveID,
+		MeetingID:    closed.ID,
+		ArchivedAt:   archivedAt,
+		Board:        board,
+		Memory:       memory,
+		Participants: participants,
+		Notes:        notes,
+		Email:        email,
+		Meeting:      &embedded,
+	}
+
+	archivePath, err := meetingArchivePath(archiveID)
+	if err != nil {
+		log.Errorf("Failed to resolve idle auto-archive path: %v", err)
+		return
+	}
+	if err := writeMeetingArchive(archivePath, archive); err != nil {
+		log.Errorf("Failed to write idle auto-archive: %v", err)
+		return
+	}
+
+	// the archive is durable: stamp it onto the already-closed record
+	// (refused when a racing fire already stamped one).
+	if record, changed := app.meetings.stampArchiveID(closed.ID, archiveID); changed {
+		app.broadcastMeetingRecord(record)
+	}
+
+	// same summary shape as archiveMeeting so the Memory tool's quiet-log
+	// matcher keeps recognizing archive rows.
+	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), %d participant(s), and %d project status item(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants), len(notes.ProjectStatuses))
+	summary += " Meeting notes were generated but not emailed: " + email.Reason
+
+	if _, _, err := app.memory.appendArchive(archiveID, summary, map[string]string{
+		"archiveId":   archiveID,
+		"downloadUrl": meetingArchiveDownloadURL(archiveID),
+		"archivedBy":  "",
+		"meetingId":   closed.ID,
+	}); err != nil {
+		log.Errorf("Failed to remember idle auto-archive: %v", err)
+		return
+	}
+	if _, _, err := app.memory.appendOSArtifact(archiveID+"-artifact", buildMeetingArchiveArtifactText(archive, summary), map[string]string{
+		"mode":        "meeting",
+		"title":       meetingArchiveArtifactTitle(archive),
+		"archiveId":   archiveID,
+		"downloadUrl": meetingArchiveDownloadURL(archiveID),
+		"createdBy":   "",
+		"meetingId":   closed.ID,
+		"status":      "published",
+		"published":   "true",
+		"publishedAt": archivedAt.Format(time.RFC3339Nano),
+		"publishedBy": "",
+	}); err != nil {
+		log.Errorf("Failed to remember idle auto-archive artifact: %v", err)
+		return
+	}
+	// silent by design: refresh memory-fed surfaces, no meeting_archived
+	// toast and no assistant announcement.
+	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+}
+
 func meetingArchiveArtifactTitle(archive meetingArchive) string {
 	title := ""
 	// the meeting record's server-derived title is the meeting's real name;
