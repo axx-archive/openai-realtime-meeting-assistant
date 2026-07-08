@@ -3748,7 +3748,13 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 func (app *kanbanBoardApp) memorySnapshotForClients(limit int) []meetingMemoryEntry {
 	entries := app.memorySnapshot(limit)
 	for index := range entries {
-		entries[index] = decorateArchiveDownloadURLForClient(entries[index])
+		// bodies are already prompt-capped at the snapshot boundary
+		// (stripOversizeBody in visibleEntriesLocked); re-apply as
+		// belt-and-suspenders because this payload is broadcast to every
+		// client on each memory event AND rides buildOSAssistantModeAnswer
+		// prompts. The artifact stage never reads bodies from this lane —
+		// it loads full bodies via /artifacts (osArtifactsSnapshot).
+		entries[index] = decorateArchiveDownloadURLForClient(stripOversizeBody(entries[index]))
 	}
 
 	return entries

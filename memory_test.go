@@ -2,9 +2,11 @@ package main
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestMeetingMemoryPersistsAndSearchesTranscripts(t *testing.T) {
@@ -545,5 +547,211 @@ func TestBuildMemoryAnswerCapsHugeMatchBody(t *testing.T) {
 	}
 	if strings.Contains(answer, strings.Repeat("A", 1000)) {
 		t.Fatal("recall answer still contains a large raw body run")
+	}
+}
+
+// --- Track-2 Wave 0: store-layer prompt-body cap (stripOversizeBody) ---
+//
+// Root-cause regression for the observed 2,505,990 > 1,000,000 token 400: a
+// 2.6MB base64-image os_artifact rode visibleEntriesLocked into snapshot-fed
+// prompts whole. The cap stubs that class at the store boundary while leaving
+// real transcripts, the summary layer, and record-JSON kinds untouched; the
+// full body stays in the store for the artifact-open path (entriesOfKind).
+
+func TestStripOversizeBodyStubsBase64Artifact(t *testing.T) {
+	body := `<html><img src="data:image/png;base64,` + strings.Repeat("iVBORw0KGgoAAAANSUhEUg", 100_000) + `"></html>`
+	entry := meetingMemoryEntry{
+		ID:       "artifact-huge-1",
+		Kind:     meetingMemoryKindOSArtifact,
+		Text:     body,
+		Metadata: map[string]string{"title": "Packaging deck", "status": "complete"},
+	}
+
+	capped := stripOversizeBody(entry)
+	if strings.Contains(capped.Text, "base64,i") || len(capped.Text) > 256 {
+		t.Fatalf("base64 body not stubbed: len=%d", len(capped.Text))
+	}
+	if !strings.Contains(capped.Text, "artifact id=artifact-huge-1") || !strings.Contains(capped.Text, "bytes omitted") {
+		t.Fatalf("stub must name the id for drill-down: %q", capped.Text)
+	}
+	if capped.ID != entry.ID || capped.Kind != entry.Kind {
+		t.Fatalf("stub changed identity: id=%q kind=%q", capped.ID, capped.Kind)
+	}
+	if capped.Metadata["title"] != "Packaging deck" || capped.Metadata["status"] != "complete" {
+		t.Fatalf("stub dropped metadata: %v", capped.Metadata)
+	}
+	if capped.Metadata[promptBodyOmittedMetadataKey] != strconv.Itoa(len(body)) {
+		t.Fatalf("omission stamp=%q, want original byte size %d", capped.Metadata[promptBodyOmittedMetadataKey], len(body))
+	}
+	// the input entry (and its shared metadata map) must never be mutated —
+	// visibleEntriesLocked hands stripOversizeBody entries that still share
+	// maps with the store.
+	if entry.Text != body {
+		t.Fatal("stripOversizeBody mutated the input entry text")
+	}
+	if _, stamped := entry.Metadata[promptBodyOmittedMetadataKey]; stamped {
+		t.Fatal("stripOversizeBody mutated the input entry metadata map")
+	}
+}
+
+func TestStripOversizeBodyExemptsSummariesRecordsAndKeepsTranscripts(t *testing.T) {
+	// a real-size transcript (max observed ~7.2KB) passes untouched.
+	transcript := strings.Repeat("Alice said the launch date moves to Friday. ", 160)
+	if got := stripOversizeBody(meetingMemoryEntry{ID: "t-1", Kind: meetingMemoryKindTranscript, Text: transcript}); got.Text != transcript {
+		t.Fatalf("transcript under the cap was modified: len=%d", len(got.Text))
+	}
+
+	// the summary layer is exempt BY KIND, not by size: a 20KB brain (or a
+	// future Wave-1 digest) must survive whole so recall keeps its rollups.
+	long := strings.Repeat("## Summary\nA long, load-bearing write-up line.\n", 500)
+	for _, kind := range []string{meetingMemoryKindBrain, "meeting_digest", "day_digest", "company_digest"} {
+		if got := stripOversizeBody(meetingMemoryEntry{ID: "s-1", Kind: kind, Text: long}); got.Text != long {
+			t.Fatalf("summary kind %q was capped", kind)
+		}
+	}
+
+	// UI-state record kinds carry decoded-verbatim JSON (thread lists, the
+	// blob sweep, channel linkage all read them through snapshot(0)) —
+	// stubbing them would corrupt records.
+	threadJSON := `{"id":"chat-1","ownerEmail":"a@b.c","messages":[{"text":"` + strings.Repeat("x", 50_000) + `"}]}`
+	if got := stripOversizeBody(meetingMemoryEntry{ID: "chat-1", Kind: meetingMemoryKindScoutChat, Text: threadJSON}); got.Text != threadJSON {
+		t.Fatal("scout_chat_thread record JSON was capped; snapshot readers would fail to decode it")
+	}
+}
+
+func TestStripOversizeBodyTruncatesOversizeProseRuneSafe(t *testing.T) {
+	prose := strings.Repeat("é ", 8_000) // 24KB of multi-byte text, no base64
+	capped := stripOversizeBody(meetingMemoryEntry{ID: "big-1", Kind: meetingMemoryKindTranscript, Text: prose})
+	if len(capped.Text) > maxPromptBodyBytes+128 {
+		t.Fatalf("truncated body len=%d, want <= cap+marker", len(capped.Text))
+	}
+	if !strings.HasPrefix(capped.Text, "é") {
+		t.Fatalf("truncation must keep a recallable prefix, got %q…", capped.Text[:16])
+	}
+	if !strings.Contains(capped.Text, "full entry id=big-1") {
+		t.Fatalf("truncation marker must name the id: %q", capped.Text[len(capped.Text)-96:])
+	}
+	if !utf8.ValidString(capped.Text) {
+		t.Fatal("truncation split a multi-byte rune")
+	}
+}
+
+func TestSnapshotLanesNoOversizeBodiesEscape(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	transcriptEntry, _, err := store.appendTranscript("event-1", "item-1", "Alice said the billing review blocks the launch.")
+	if err != nil {
+		t.Fatalf("appendTranscript: %v", err)
+	}
+	meetingID := transcriptEntry.Metadata["meetingId"]
+	base64Chunk := "U0FNU1VOR1RWQVVESUVOQ0U" // distinctive marker to prove absence
+	body := `<html><img src="data:image/png;base64,` + strings.Repeat(base64Chunk, 120_000) + `"/></html>` // ~2.7MB
+	if _, appended, err := store.appendOSArtifact("artifact-huge", body, map[string]string{"title": "Samsung deck", "status": "complete"}); err != nil || !appended {
+		t.Fatalf("appendOSArtifact appended=%v err=%v", appended, err)
+	}
+
+	assertCapped := func(lane string, entries []meetingMemoryEntry) {
+		t.Helper()
+		if len(entries) == 0 {
+			t.Fatalf("%s returned no entries", lane)
+		}
+		total := 0
+		sawArtifact := false
+		for _, entry := range entries {
+			total += len(entry.Text)
+			if strings.Contains(entry.Text, base64Chunk) {
+				t.Fatalf("%s leaked the base64 body via entry %s", lane, entry.ID)
+			}
+			if entry.ID == "artifact-huge" {
+				sawArtifact = true
+				if !strings.Contains(entry.Text, "bytes omitted") {
+					t.Fatalf("%s artifact body not stubbed: %q", lane, entry.Text[:min(len(entry.Text), 120)])
+				}
+			}
+		}
+		if !sawArtifact {
+			t.Fatalf("%s dropped the artifact entry instead of stubbing it", lane)
+		}
+		if total > 64*1024 {
+			t.Fatalf("%s summed body bytes=%d, want a sane prompt bound", lane, total)
+		}
+	}
+
+	assertCapped("store.snapshot", store.snapshot(250))
+	assertCapped("store.snapshotForMeeting", store.snapshotForMeeting(meetingID, 0))
+	app := &kanbanBoardApp{memory: store}
+	assertCapped("memorySnapshotForClients", app.memorySnapshotForClients(20))
+	// the archive embed lane (archiveMeeting/autoArchiveIdleMeeting both build
+	// from memorySnapshotForMeeting(id, 2000)).
+	assertCapped("memorySnapshotForMeeting(archive embed)", app.memorySnapshotForMeeting(meetingID, 2000))
+
+	// the store itself is never rewritten — full body stays durable for the
+	// artifact-open path and keyword search.
+	full := store.entriesOfKind(meetingMemoryKindOSArtifact, 0)
+	if len(full) != 1 || len(full[0].Text) < 2_000_000 {
+		t.Fatalf("stored artifact body was not preserved: n=%d", len(full))
+	}
+}
+
+// The artifact library/render/share/export path must BYPASS the cap or
+// artifacts visually break: osArtifactsSnapshot (feeding /artifacts and every
+// osArtifactByID consumer) reads full bodies via entriesOfKind while still
+// hiding quarantined/expired artifacts like the snapshot lane did.
+func TestOSArtifactsSnapshotKeepsFullBodiesForArtifactOpen(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	body := `<html><img src="data:image/png;base64,` + strings.Repeat("QUJDREVGRw", 260_000) + `"/></html>`
+	if _, _, err := store.appendOSArtifact("artifact-huge", body, map[string]string{"title": "Deck", "status": "complete"}); err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	}
+	if _, _, err := store.appendOSArtifact("artifact-hidden", "quarantined body", map[string]string{relevanceMetadataKey: relevanceQuarantined}); err != nil {
+		t.Fatalf("append quarantined artifact: %v", err)
+	}
+
+	app := &kanbanBoardApp{memory: store}
+	artifacts := app.osArtifactsSnapshot(0)
+	if len(artifacts) != 1 {
+		t.Fatalf("osArtifactsSnapshot n=%d, want 1 (quarantined hidden)", len(artifacts))
+	}
+	if artifacts[0].ID != "artifact-huge" || artifacts[0].Text != body {
+		t.Fatalf("artifact open path lost the full body: id=%q len=%d want=%d", artifacts[0].ID, len(artifacts[0].Text), len(body))
+	}
+	if got, found := app.osArtifactByID("artifact-huge"); !found || got.Text != body {
+		t.Fatalf("osArtifactByID lost the full body: found=%v len=%d", found, len(got.Text))
+	}
+}
+
+// End-to-end regression for the 2,505,990-token 400: with the 2.6MB artifact
+// in the store AND matched by the query, the built model input stays bounded
+// and carries zero base64.
+func TestMemoryQuestionInputBoundedWithOversizeArtifact(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, _, err := store.appendTranscript("event-1", "item-1", "Alice said the Samsung TV audience skews older."); err != nil {
+		t.Fatalf("appendTranscript: %v", err)
+	}
+	base64Chunk := "U0FNU1VOR1RWQVVESUVOQ0U"
+	body := `Samsung TV audience deck <img src="data:image/png;base64,` + strings.Repeat(base64Chunk, 120_000) + `"/>`
+	if _, _, err := store.appendOSArtifact("artifact-huge", body, map[string]string{"title": "Samsung TV audience deck", "threadStatus": "complete", "status": "complete"}); err != nil {
+		t.Fatalf("appendOSArtifact: %v", err)
+	}
+
+	query := "what did we learn about the Samsung TV audience?"
+	entries := store.contextEntriesForQuery(query, 60, time.Now())
+	if len(entries) == 0 {
+		t.Fatal("contextEntriesForQuery returned nothing")
+	}
+	input := buildMemoryQuestionInput(query, entries, time.Now())
+	if strings.Contains(input, base64Chunk) {
+		t.Fatal("model input still contains the base64 body")
+	}
+	if len(input) > 200_000 {
+		t.Fatalf("model input bytes=%d, want well under the token ceiling", len(input))
 	}
 }

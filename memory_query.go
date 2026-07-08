@@ -454,12 +454,21 @@ func (app *kanbanBoardApp) osArtifactsSnapshot(limit int) []meetingMemoryEntry {
 		return nil
 	}
 
-	entries := app.memory.snapshot(0)
+	// entriesOfKind, NOT snapshot(0): snapshot bodies are prompt-capped by
+	// stripOversizeBody (memory.go), and this is the one lane that must keep
+	// FULL artifact bodies — it feeds /artifacts (list + ?id=), the render/
+	// share/export handlers, and every osArtifactByID consumer, so a capped
+	// body here would visually break artifact open. The recall guard is
+	// re-applied by hand because entriesOfKind reads raw store entries
+	// (quarantined/expired artifacts stay hidden exactly as the snapshot lane
+	// hid them).
+	entries := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)
 	artifacts := make([]meetingMemoryEntry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Kind == meetingMemoryKindOSArtifact {
-			artifacts = append(artifacts, decorateArchiveDownloadURLForClient(entry))
+		if memoryEntryHiddenFromRecall(entry) {
+			continue
 		}
+		artifacts = append(artifacts, decorateArchiveDownloadURLForClient(entry))
 	}
 	if limit > 0 && len(artifacts) > limit {
 		artifacts = artifacts[len(artifacts)-limit:]
@@ -1861,6 +1870,11 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		if memoryEntryHiddenFromRecall(entry) {
 			return
 		}
+		// prompt-body cap, re-applied here because two lanes bypass the
+		// capped snapshot: search() matches (which scan full bodies by
+		// design so keyword recall keeps working) and the artifact lane's
+		// entriesOfKind read below. Belt-and-suspenders for the rest.
+		entry = stripOversizeBody(entry)
 		// artifacts are budgeted no matter which lane found them: whole
 		// multi-KB bodies never enter model context, and running/queued/
 		// error scaffolds are boilerplate noise in every lane

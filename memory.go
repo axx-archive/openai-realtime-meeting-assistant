@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -865,6 +866,78 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 	return cloneMemoryEntries(tailMemoryEntries(store.visibleEntriesLocked(), limit))
 }
 
+// maxPromptBodyBytes is the store-layer cap on how many bytes of one entry's
+// Text may ride a visible snapshot into a prompt-feeding lane (Track-2 Wave 0
+// root-cause token fix). 8KB clears every real transcript (max observed ~7.2KB)
+// while catching the multi-MB base64 os_artifact class that blew a model call
+// past the 1M-token ceiling (observed 2,505,990 > 1,000,000 400). This is the
+// SOURCE cap; memoryAnswerExcerpt (answer side) and
+// orchestratorToolResultBudgetChars (tool-result conduit) remain layered on top.
+const maxPromptBodyBytes = 8192
+
+// promptBodyOmittedMetadataKey marks a snapshot COPY whose Text was stubbed or
+// truncated by stripOversizeBody; the value is the original byte length. It is
+// stamped on serve-time copies only — never persisted to the JSONL — so tests
+// and clients can tell a capped body from a naturally short one. Distinct from
+// main's artifact-list "bodyTrimmed" excerpt marker.
+const promptBodyOmittedMetadataKey = "promptBodyOmitted"
+
+// isPromptBodyCapExemptKind reports kinds whose Text must never be stubbed by
+// the prompt-body cap:
+//   - brain write-ups (and the Wave-1 digest tiers meeting_digest/day_digest/
+//     company_digest, exempted by name ahead of their consts) are model-written
+//     summaries already bounded by their producers' MaxOutputTokens — the
+//     summary layer must survive whole so future long roll-ups aren't stubbed;
+//   - UI-state record kinds (isUIStateMemoryKind: scout chat threads, packages,
+//     deal rooms, …) carry decoded-verbatim JSON that feature code reads through
+//     snapshot(0) (thread lists, channel linkage, the blob-sweep reference scan)
+//     — stubbing them would corrupt records, and they are already excluded from
+//     every prompt lane by the isUIStateMemoryKind guard in
+//     contextEntriesForQuery/search and from the client timeline by
+//     visibleMeetingMemoryEntries.
+func isPromptBodyCapExemptKind(kind string) bool {
+	switch kind {
+	case meetingMemoryKindBrain, "meeting_digest", "day_digest", "company_digest":
+		return true
+	}
+	return isUIStateMemoryKind(kind)
+}
+
+// stripOversizeBody returns entry with its Text bounded for prompt/snapshot
+// use: exempt kinds and bodies at or under maxPromptBodyBytes pass through
+// unchanged; a body carrying a base64 payload is replaced whole with a stub
+// (a base64 prefix is pure token noise — the full body stays in the store and
+// is reachable by id via entriesOfKind/osArtifactByID); any other oversize
+// body keeps a rune-safe prefix plus an omission marker naming the id so
+// drill-down still works. The input entry is never mutated — Text is replaced
+// on the value copy and Metadata is cloned before the omission stamp.
+func stripOversizeBody(entry meetingMemoryEntry) meetingMemoryEntry {
+	if isPromptBodyCapExemptKind(entry.Kind) {
+		return entry
+	}
+	size := len(entry.Text)
+	if size <= maxPromptBodyBytes {
+		return entry
+	}
+	metadata := make(map[string]string, len(entry.Metadata)+1)
+	for key, value := range entry.Metadata {
+		metadata[key] = value
+	}
+	metadata[promptBodyOmittedMetadataKey] = strconv.Itoa(size)
+	entry.Metadata = metadata
+	if strings.Contains(entry.Text, ";base64,") {
+		entry.Text = fmt.Sprintf("[artifact id=%s — %d bytes omitted]", entry.ID, size)
+		return entry
+	}
+	cut := maxPromptBodyBytes
+	for cut > 0 && !utf8.RuneStart(entry.Text[cut]) {
+		cut--
+	}
+	entry.Text = strings.TrimSpace(entry.Text[:cut]) +
+		fmt.Sprintf("\n[truncated — full entry id=%s — %d bytes omitted]", entry.ID, size)
+	return entry
+}
+
 // visibleEntriesLocked returns store.entries minus the entries that must never
 // reach the client memory timeline or the snapshot-fed model-context lanes:
 // quarantined/expired material (forgotten), slop_pass cursor/audit stubs
@@ -876,13 +949,21 @@ func (store *meetingMemoryStore) snapshot(limit int) []meetingMemoryEntry {
 // quarantine tray, the classifier, expiry) read store.entries via
 // entriesByRelevance/entriesOfKind, not snapshot — future signal distillers
 // read the same way.
+//
+// Bodies are prompt-capped here (stripOversizeBody), so EVERY snapshot lane —
+// snapshot, snapshotForMeeting, memorySnapshotForClients, the archive embeds,
+// grill/recap/mission context builders — inherits the cap. Callers that need
+// FULL bodies (the artifact library/render/share/PDF path, thread records,
+// the blob sweep) read via entriesOfKind, the same convention quarantine
+// readers already follow; search() keeps matching against full bodies because
+// it scans store.entries directly.
 func (store *meetingMemoryStore) visibleEntriesLocked() []meetingMemoryEntry {
 	visible := make([]meetingMemoryEntry, 0, len(store.entries))
 	for _, entry := range store.entries {
 		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(entry) {
 			continue
 		}
-		visible = append(visible, entry)
+		visible = append(visible, stripOversizeBody(entry))
 	}
 	return visible
 }
