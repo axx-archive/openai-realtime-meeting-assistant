@@ -13673,9 +13673,10 @@
 
       /* design Room · quiet — dark stage, three quiet lines. Hidden unless
          the stage is mounted but no live connection is up; reuses the live
-         join flow. */
+         join flow. Visibility is debounced (see the show rule below) so
+         connect/reconnect churn can never flash the join pill on/off. */
       .room-empty {
-        display: none;
+        display: flex;
         position: absolute;
         inset: 0;
         z-index: 6;
@@ -13687,13 +13688,26 @@
         text-align: center;
         background: var(--bg-stage);
         border-radius: 0;
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+        /* hide: quick fade — a transient not-in-room→in-room flap dips the
+           surface instead of yanking it out from under a click */
+        transition: opacity 140ms var(--ease), visibility 0s linear 140ms;
       }
 
       /* shown in the pre-connection window for the room tool, before
          .is-in-room flips — regardless of auth, so the keyless/pre-auth room
-         shows the honest not-connected state instead of a white void (R-1). */
+         shows the honest not-connected state instead of a white void (R-1).
+         The 320ms show delay is hysteresis: an is-in-room flap or reconnect
+         blip shorter than the delay never paints the join affordance, so it
+         only appears when the pre-join state actually holds — and then it
+         stays put and clickable. */
       #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .room-empty {
-        display: flex;
+        visibility: visible;
+        opacity: 1;
+        pointer-events: auto;
+        transition: opacity 180ms var(--ease) 320ms, visibility 0s linear 320ms;
       }
 
       #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .hearth-center {
@@ -13725,6 +13739,16 @@
 
       .room-empty__join:active {
         transform: scale(0.97);
+      }
+
+      /* mid-entry the pill stays put but reads busy — it never vanishes and
+         reappears while the join is in flight, and it cannot re-fire joinRoom
+         (a second socket would get the first session replaced → churn) */
+      .room-empty__join[disabled] {
+        opacity: 0.55;
+        cursor: default;
+        pointer-events: none;
+        transform: none;
       }
 
       .room-empty__meta {
@@ -14736,6 +14760,37 @@
         padding: 0;
         min-height: 320px;
         align-content: start;
+      }
+
+      /* Full-page board: four equal lanes. The B2 empty-lane collapse
+         (.column--empty, flex 0 0 96px) is a dock/preview affordance — on
+         the wide surface it let empty Backlog / In Progress shrink to a
+         ~96px rail while Done spanned the rest, so the board read lopsided.
+         Equal flex plus the real 200px min restores stable geometry; the
+         tablet 2×2 wrap and the phone snap-carousel keep winning below via
+         later-source rules of equal specificity in their media queries. */
+      .board-expanded-surface .column,
+      .board-expanded-surface .column--empty {
+        flex: 1 1 0;
+        min-width: 200px;
+      }
+
+      /* undo the slim-rail typography that only makes sense at 96px:
+         header back to a baseline row, empty note back to horizontal */
+      .board-expanded-surface .column--empty header {
+        flex-direction: row;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .board-expanded-surface .column--empty .stack {
+        align-items: stretch;
+      }
+
+      .board-expanded-surface .column--empty .empty {
+        writing-mode: horizontal-tb;
+        white-space: normal;
+        padding: var(--sp-2) 0;
       }
 
       /* in-room the floating dock overlays the columns — the lists scroll
@@ -21569,6 +21624,7 @@
       const officeRoomJoin = document.getElementById('officeRoomJoin')
       const roomEmptyName = document.getElementById('roomEmptyName')
       const roomEmptyMeta = document.getElementById('roomEmptyMeta')
+      const roomEmptyJoinButton = document.getElementById('roomEmptyJoin')
       const officeAgenda = document.getElementById('officeAgenda')
       const officeRecentThreads = document.getElementById('officeRecentThreads')
       const officeAgentSummary = document.getElementById('officeAgentSummary')
@@ -21623,6 +21679,7 @@
       let ws
       let localStream
       let roomEntryInProgress = false
+      let roomEntryStartedAt = 0
       let screenShareStream
       let isReplacingLocalAudio = false
       let isMicMuted = false
@@ -21873,6 +21930,14 @@
       let voiceTrainingSamples = []
       let voiceTrainingPrivacyMute = false
       let mediaQualityMonitorTimer = 0
+      // framesDecoded-based freeze watch — a receiver track can freeze while
+      // staying 'live' and unmuted (no mute/ended ever fires), so tile health
+      // cannot rely on track events alone. Keyed by MediaStreamTrack id.
+      let remoteVideoFreezeTimer = 0
+      const remoteVideoFreezeStates = new Map()
+      const frozenRemoteVideoTrackIds = new Set()
+      const remoteVideoFreezeStallMs = 2000
+      const remoteVideoFreezeRepairIntervalMs = 6000
       let roomStateRefreshTimer = 0
       let roomAudioUnlockRetryTimer = 0
       let lastRoomAudioUnlockNoticeAt = 0
@@ -28750,13 +28815,45 @@
         }
       }
 
+      // The pre-join affordance (stage join pill) mirrors the entry flag so a
+      // mid-flight join reads busy instead of the pill flashing/vanishing.
+      function syncRoomEntryAffordance() {
+        appShell.classList.toggle('is-room-entering', roomEntryInProgress)
+        if (roomEmptyJoinButton) {
+          roomEmptyJoinButton.disabled = roomEntryInProgress
+          roomEmptyJoinButton.textContent = roomEntryInProgress ? 'connecting…' : 'join the room'
+        }
+      }
+
+      // Central seam for clearing the entry flag: every completion/failure
+      // path restores the join affordance with it.
+      function setRoomEntryInProgress(value) {
+        roomEntryInProgress = Boolean(value)
+        roomEntryStartedAt = roomEntryInProgress ? Date.now() : 0
+        syncRoomEntryAffordance()
+      }
+
       async function joinRoom(options = {}) {
         if (options?.preventDefault) {
           options = {}
         }
+        // Re-entrancy guard: a second tap while an entry is mid-flight (or the
+        // user is already in the room) would open a second signaling socket and
+        // get the first session replaced — a classic source of is-in-room churn
+        // that yanked the join affordance around. A wedged entry may be retried
+        // after 15s so a stuck connect can never brick joining.
+        if (appShell.classList.contains('is-in-room')) {
+          return
+        }
+        if (roomEntryInProgress && Date.now() - roomEntryStartedAt < 15000) {
+          setLog('joining the room…')
+          return
+        }
         const voiceOnly = Boolean(options.voiceOnly)
         stopPrivateRealtimeVoiceForRoom()
         roomEntryInProgress = true
+        roomEntryStartedAt = Date.now()
+        syncRoomEntryAffordance()
         syncOSAssistantAvailability()
         if (voiceOnly) {
           setRealtimeVoiceMode('room')
@@ -28766,7 +28863,7 @@
         }
         if (!validateAccess()) {
           setLog('choose your name and enter your password')
-          roomEntryInProgress = false
+          setRoomEntryInProgress(false)
           syncOSAssistantAvailability()
           if (voiceOnly) {
             setRealtimeVoiceMode('idle')
@@ -28808,7 +28905,7 @@
             accessState.textContent = 'locked'
             accessHint.textContent = error.message || 'sign-in failed.'
             setLog(error.message || 'sign-in failed')
-            roomEntryInProgress = false
+            setRoomEntryInProgress(false)
             syncOSAssistantAvailability()
             if (voiceOnly) {
               setRealtimeVoiceMode('idle')
@@ -29420,6 +29517,7 @@
           window.clearInterval(mediaQualityMonitorTimer)
           mediaQualityMonitorTimer = 0
         }
+        stopRemoteVideoFreezeWatch()
         previousMediaQualityStats = null
         mediaQualityConstrained = false
         mediaQualityLagSamples = 0
@@ -29471,6 +29569,7 @@
         if (!sessionPeer?.getStats) {
           return
         }
+        startRemoteVideoFreezeWatch(sessionPeer)
         mediaQualityMonitorTimer = window.setInterval(async () => {
           if (pc !== sessionPeer || sessionPeer.connectionState === 'closed') {
             stopMediaQualityMonitor()
@@ -29511,6 +29610,9 @@
           inboundVideoPacketsReceived: 0,
           inboundVideoDrops: 0,
           inboundVideoDecoded: 0,
+          inboundVideoFreezeCount: 0,
+          inboundVideoTotalFreezesDuration: 0,
+          frozenVideoTracks: 0,
           outboundRtt: 0,
           candidatePair: {}
         }
@@ -29528,6 +29630,8 @@
             snapshot.inboundVideoPacketsReceived += Number(stat.packetsReceived) || 0
             snapshot.inboundVideoDrops += Number(stat.framesDropped) || 0
             snapshot.inboundVideoDecoded += Number(stat.framesDecoded) || 0
+            snapshot.inboundVideoFreezeCount += Number(stat.freezeCount) || 0
+            snapshot.inboundVideoTotalFreezesDuration += Number(stat.totalFreezesDuration) || 0
           } else if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
             snapshot.outboundAudioBytesSent += Number(stat.bytesSent) || 0
             snapshot.outboundAudioPacketsSent += Number(stat.packetsSent) || 0
@@ -29544,6 +29648,7 @@
           snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(selectedCandidatePair.currentRoundTripTime) || 0)
         }
         snapshot.candidatePair = summarizeCandidatePair(selectedCandidatePair, report)
+        snapshot.frozenVideoTracks = frozenRemoteVideoTrackIds.size
         return snapshot
       }
 
@@ -29857,6 +29962,7 @@
           inboundVideoPacketsReceived: snapshot.inboundVideoPacketsReceived - previous.inboundVideoPacketsReceived,
           inboundVideoDecoded: snapshot.inboundVideoDecoded - previous.inboundVideoDecoded,
           inboundVideoDrops: snapshot.inboundVideoDrops - previous.inboundVideoDrops,
+          inboundVideoFreezeCount: snapshot.inboundVideoFreezeCount - previous.inboundVideoFreezeCount,
           elapsedMs: snapshot.at - previous.at
         }
       }
@@ -33346,7 +33452,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function remoteTileHasRenderedVideo(tile) {
         const video = tile?.querySelector?.('video')
-        return Boolean(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)
+        if (!(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)) {
+          return false
+        }
+        // The element keeps painting the last decoded frame when a live
+        // receiver track freezes (framesDecoded stagnant while RTP still
+        // arrives), so element readiness alone lies. The freeze watch marks
+        // those tracks; a tile showing one is stalled, not rendered — which
+        // makes refreshStalledRemoteVideoTiles rebuild it and the health
+        // snapshot report it in stalledVideoNames instead of "healthy".
+        const shownTracks = video.srcObject?.getVideoTracks?.() || []
+        return !shownTracks.some(track => frozenRemoteVideoTrackIds.has(track.id))
       }
 
       function requestParticipantTrackRefresh(reason = '') {
@@ -33601,6 +33717,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const videoTrack = video?.srcObject?.getVideoTracks?.().find(liveTrack) || remoteVideoTracksByParticipant.get(participantName)
           if (!liveTrack(videoTrack)) {
             continue
+          }
+          // A frozen-marked track only gets rebuilt on the freeze watch's
+          // per-track cadence. Without this the shared 4s media-quality and 8s
+          // room-state repair passes — which key off remoteTileHasRenderedVideo,
+          // false for any frozen tile — would dispose+recreate the tile every
+          // tick (the 2026-07-06 flicker loop). Sharing one lastRepairAt clock
+          // keeps a persistent freeze (e.g. a CPU-starved sender no PLI can fix)
+          // a STABLE stalled tile with bounded ~6s repair attempts.
+          const freezeState = remoteVideoFreezeStates.get(videoTrack.id)
+          if (freezeState && frozenRemoteVideoTrackIds.has(videoTrack.id)) {
+            if (now - freezeState.lastRepairAt < remoteVideoFreezeRepairIntervalMs) {
+              continue
+            }
+            freezeState.lastRepairAt = now
           }
           const keys = remoteKeysForTile(tile)
           const stream = remoteVideoStreamForTrack(video?.srcObject || new MediaStream([videoTrack]), videoTrack)
@@ -34219,7 +34349,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
-          roomEntryInProgress = false
+          setRoomEntryInProgress(false)
           if (!reconnectingSignal) {
             // room-chat unread accumulated outside the room (via the office
             // socket) clears on a fresh join; a signaling reconnect keeps the
@@ -34248,7 +34378,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           accessHint.textContent = message
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
-          roomEntryInProgress = false
+          setRoomEntryInProgress(false)
           syncOSAssistantAvailability()
           if (roomRealtimeVoiceActive() || voiceOnly) {
             setRealtimeVoiceMode('idle')
@@ -42219,6 +42349,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           renderScreenStage()
         }
         applyParticipantMediaStateToTile(tile, participantName)
+        // A rebuild from refreshStalledRemoteVideoTiles reuses the same still-
+        // frozen track; cover it with the stalled avatar at creation so there
+        // is no black/last-frame flash between the rebuild and the next 1s
+        // freeze poll that would otherwise re-apply the class.
+        if (track && frozenRemoteVideoTrackIds.has(track.id)) {
+          tile.classList.add('is-video-stalled')
+        }
         pruneDeadRemoteVideoTiles()
         pruneStaleUnidentifiedRemoteVideoTiles()
         updateHearthParticipants()
@@ -42375,6 +42512,170 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (track.muted) {
           onMute()
         }
+      }
+
+      /* ---------- remote video freeze watch (layer 2) ----------
+         The mute-event watcher above only sees tracks the browser marks
+         muted. A receiver track can freeze while staying 'live' and unmuted
+         (starved sender encoder, lost keyframe, simulcast switch): no
+         mute/ended ever fires, the element keeps painting the last frame,
+         and the tile counted as healthy forever. Poll each video receiver's
+         inbound-rtp stats every second: when framesDecoded stops advancing
+         for remoteVideoFreezeStallMs while RTP bytes still arrive, the feed
+         is frozen — mark the tile stalled (avatar cover) and drive the
+         standard repair path. Rebuilding the tile reattaches the same live
+         track to a fresh element, whose decoder needs a sync point, so the
+         browser emits a PLI (which the server now honors) and the track
+         refresh covers server-side rebinds. */
+      function stopRemoteVideoFreezeWatch() {
+        if (remoteVideoFreezeTimer) {
+          window.clearInterval(remoteVideoFreezeTimer)
+          remoteVideoFreezeTimer = 0
+        }
+        remoteVideoFreezeStates.clear()
+        frozenRemoteVideoTrackIds.clear()
+      }
+
+      function startRemoteVideoFreezeWatch(sessionPeer) {
+        stopRemoteVideoFreezeWatch()
+        if (!sessionPeer?.getReceivers) {
+          return
+        }
+        remoteVideoFreezeTimer = window.setInterval(() => {
+          pollRemoteVideoFreezeStats(sessionPeer).catch(error => {
+            console.warn('Could not read remote video freeze stats', error)
+          })
+        }, 1000)
+      }
+
+      async function pollRemoteVideoFreezeStats(sessionPeer) {
+        if (pc !== sessionPeer || sessionPeer.connectionState === 'closed') {
+          stopRemoteVideoFreezeWatch()
+          return
+        }
+        const seenTrackIds = new Set()
+        for (const receiver of sessionPeer.getReceivers()) {
+          const track = receiver?.track
+          if (!track || track.kind !== 'video' || track.readyState !== 'live' || !receiver.getStats) {
+            continue
+          }
+          seenTrackIds.add(track.id)
+          let report
+          try {
+            report = await receiver.getStats()
+          } catch {
+            continue
+          }
+          let inbound = null
+          report.forEach(stat => {
+            if (stat.type === 'inbound-rtp') {
+              inbound = stat
+            }
+          })
+          if (inbound) {
+            noteRemoteVideoFreezeSample(track, inbound, performance.now())
+          }
+        }
+        for (const trackId of Array.from(remoteVideoFreezeStates.keys())) {
+          if (!seenTrackIds.has(trackId)) {
+            remoteVideoFreezeStates.delete(trackId)
+            frozenRemoteVideoTrackIds.delete(trackId)
+          }
+        }
+      }
+
+      function noteRemoteVideoFreezeSample(track, inbound, now) {
+        const framesDecoded = Number(inbound.framesDecoded) || 0
+        const bytesReceived = Number(inbound.bytesReceived) || 0
+        const state = remoteVideoFreezeStates.get(track.id)
+        if (!state) {
+          remoteVideoFreezeStates.set(track.id, {
+            framesDecoded,
+            bytesReceived,
+            lastAdvanceAt: now,
+            lastRepairAt: 0,
+            freezeCount: Number(inbound.freezeCount) || 0,
+            totalFreezesDuration: Number(inbound.totalFreezesDuration) || 0
+          })
+          return
+        }
+        const framesAdvanced = framesDecoded > state.framesDecoded
+        const bytesAdvanced = bytesReceived > state.bytesReceived
+        state.framesDecoded = framesDecoded
+        state.bytesReceived = bytesReceived
+        state.freezeCount = Number(inbound.freezeCount) || 0
+        state.totalFreezesDuration = Number(inbound.totalFreezesDuration) || 0
+        if (framesAdvanced) {
+          state.lastAdvanceAt = now
+          state.lastRepairAt = 0
+          if (frozenRemoteVideoTrackIds.delete(track.id)) {
+            const tile = remoteTileShowingTrack(track)
+            if (tile && !track.muted) {
+              tile.classList.remove('is-video-stalled')
+            }
+            logRoomRecovery('remote_video_freeze_recovered', {
+              participant: tile ? remoteTileName(tile) : ''
+            })
+          }
+          return
+        }
+        // A track that goes muted (peer dropped / slept / mid-renegotiation)
+        // stops advancing bytes too and belongs to the mute watcher, not the
+        // freeze watch. Unmark it so a frozen-then-muted track can't stay in
+        // the freeze set forever — that would keep remoteTileHasRenderedVideo
+        // false and drive its now mute-covered tile into the rebuild loop.
+        if (track.muted) {
+          if (frozenRemoteVideoTrackIds.delete(track.id)) {
+            state.lastRepairAt = 0
+          }
+          return
+        }
+        // No new frames this tick. Only bytes-still-arriving counts as a
+        // freeze: a camera-off / sender pause stops the bytes too, and a
+        // never-decoded fresh track stays with the existing 3.5s-grace repair
+        // passes instead of fighting them.
+        if (!bytesAdvanced || framesDecoded === 0) {
+          return
+        }
+        const frozenMs = now - state.lastAdvanceAt
+        if (frozenMs < remoteVideoFreezeStallMs) {
+          return
+        }
+        frozenRemoteVideoTrackIds.add(track.id)
+        const tile = remoteTileShowingTrack(track)
+        if (tile) {
+          tile.classList.add('is-video-stalled')
+        }
+        // Drive the repair (and its telemetry) on the per-track cadence only.
+        // refreshStalledRemoteVideoTiles honors this same lastRepairAt clock,
+        // so no repair path can dispose+recreate this tile faster than
+        // remoteVideoFreezeRepairIntervalMs. Stamp after the rebuild attempt so
+        // the log/track-refresh stay throttled even when the tile is still
+        // inside its 3.5s creation grace and refresh no-ops.
+        if (now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
+          logRoomRecovery('remote_video_frozen', {
+            participant: tile ? remoteTileName(tile) : '',
+            frozenMs: Math.round(frozenMs),
+            freezeCount: state.freezeCount,
+            totalFreezesDuration: state.totalFreezesDuration
+          })
+          refreshStalledRemoteVideoTiles('frozen remote video')
+          requestParticipantTrackRefresh('frozen remote video')
+          state.lastRepairAt = now
+        }
+      }
+
+      function remoteTileShowingTrack(track) {
+        if (!track) {
+          return null
+        }
+        for (const tile of remoteTiles()) {
+          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          if (shownTracks.includes(track)) {
+            return tile
+          }
+        }
+        return null
       }
 
       function setTrackContentHint(track, hint) {
@@ -46967,7 +47268,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function leaveRoom() {
-        roomEntryInProgress = false
+        setRoomEntryInProgress(false)
         if (isLeavingRoom) {
           return
         }
