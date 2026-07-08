@@ -25929,6 +25929,13 @@
         head.append(headings, headActions, escape, close)
 
         const body = bfEl('div', 'artifact-stage__body')
+        // Lazy body load: the /artifacts list ships only an excerpt, so fetch
+        // this artifact's full body before rendering the markdown reader. Decks
+        // render via the server-side render token (they never read entry.text
+        // here), so they skip the fetch — a trimmed deck body is fine.
+        if (!deckContext && !artifactIsHTMLDeck(entry)) {
+          await ensureArtifactBody(entry)
+        }
         // founder ask 2026-07-07: every markdown deliverable offers a branded
         // PDF from the stage header — a direct download when the asset already
         // exists, otherwise POST /artifacts/export-pdf with an optimistic
@@ -26507,6 +26514,23 @@
       function renderArtifactRead(container, entry, options = {}) {
         if (!container) {
           return
+        }
+        // Central lazy-body guard for every renderArtifactRead caller (stage,
+        // detail pane, deck-hero run log, design surface, report cards): the
+        // /artifacts list ships only an excerpt, so when this entry is trimmed,
+        // fetch the full body and re-render this same pane once it lands. The
+        // excerpt paints now (progressive); ensureArtifactBody clears the marker
+        // so the re-render reads the full body and does not loop. Guarded on the
+        // container still being mounted so a closed pane doesn't repaint.
+        if (entry && entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+          ensureArtifactBody(entry).then(() => {
+            // re-render ONLY when the fetch succeeded (marker cleared) — on a
+            // persistent fetch failure the marker stays and a re-render would
+            // re-trigger the fetch forever; degrade to the excerpt instead
+            if (container.isConnected && (!entry.metadata || entry.metadata.bodyTrimmed !== 'true')) {
+              renderArtifactRead(container, entry, options)
+            }
+          })
         }
         container.replaceChildren()
         // the report class is per-render state — a pane that re-renders onto a
@@ -27206,6 +27230,7 @@
       }
 
       async function copyArtifactMarkdown(entry) {
+        await ensureArtifactBody(entry)
         const md = artifactMarkdown(entry)
         if (!md.trim()) {
           return
@@ -27218,10 +27243,11 @@
         }
       }
 
-      function researchDownloadArtifact(entry) {
+      async function researchDownloadArtifact(entry) {
         if (!entry) {
           return
         }
+        await ensureArtifactBody(entry)
         const title = artifactDisplayTitle(entry)
         const md = artifactMarkdown(entry)
         try {
@@ -27358,12 +27384,21 @@
           scheduleArtifactRefresh()
           return
         }
-        if (status === 'complete' || status === 'published') {
-          stage.replaceChildren(researchCompleteStage(entry))
-          return
-        }
-        if (status === 'error') {
-          stage.replaceChildren(researchCompleteStage(entry, { error: true }))
+        if (status === 'complete' || status === 'published' || status === 'error') {
+          // Full-body view: the /artifacts list only holds an excerpt, so pull
+          // the whole brief and re-render once it lands. The excerpt paints
+          // immediately (progressive load); ensureArtifactBody clears the
+          // bodyTrimmed marker, so the re-render reads the full body and the
+          // guard makes the re-entry a no-op — no loop.
+          if (entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(entry).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (activeResearchArtifact() === entry && (!entry.metadata || entry.metadata.bodyTrimmed !== 'true')) {
+                renderResearchTool()
+              }
+            })
+          }
+          stage.replaceChildren(researchCompleteStage(entry, { error: status === 'error' }))
           return
         }
         // draft / pending / launching → planning
@@ -27734,6 +27769,16 @@
           return
         }
         if (output && !output.dataset.generated) {
+          // the latest artifact's raw body — a full read, so pull the whole
+          // body (list ships an excerpt) and re-render once it lands
+          if (artifacts[0].metadata && artifacts[0].metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(artifacts[0]).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (!artifacts[0].metadata || artifacts[0].metadata.bodyTrimmed !== 'true') {
+                renderAgentWorkspace(mode)
+              }
+            })
+          }
           output.textContent = artifacts[0].text || ''
         }
         list.replaceChildren(...artifacts.slice(0, 4).map(renderAgentArtifactLink))
@@ -37512,6 +37557,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // inline brief: the first input's body, when the library has it —
           // the judge scores and steals are readable without leaving the card
           const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === inputTasks[0].artifactId)
+          // The list ships only an excerpt; this inline draft is a full read, so
+          // pull the whole body and re-render the card once it lands (one-shot —
+          // ensureArtifactBody clears the marker). The excerpt shows meanwhile.
+          if (entry && entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(entry).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (!entry.metadata || entry.metadata.bodyTrimmed !== 'true') {
+                goalCardScheduleSync()
+              }
+            })
+          }
           const briefText = String(entry?.text || '').trim()
           if (briefText) {
             // the single highest-stakes read in the product — render the draft
@@ -44863,6 +44919,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       })
 
+      // The /artifacts list ships a light excerpt per artifact (a single deck
+      // can be megabytes); ensureArtifactBody fetches THIS artifact's full body
+      // on demand — only when a deliverable is actually opened, downloaded, or
+      // copied — via the ?id= single-artifact endpoint. It mutates the cached
+      // entry in place so a second open never refetches, is idempotent (a
+      // non-trimmed entry returns immediately), and degrades to the excerpt if
+      // the fetch fails. Callers that render the FULL body must await this.
+      const artifactBodyFetches = new Map()
+      async function ensureArtifactBody(entry) {
+        if (!entry || !entry.id || !entry.metadata || entry.metadata.bodyTrimmed !== 'true') {
+          return entry
+        }
+        const id = String(entry.id)
+        if (!artifactBodyFetches.has(id)) {
+          artifactBodyFetches.set(id, (async () => {
+            try {
+              const response = await fetch('/artifacts?id=' + encodeURIComponent(id), { cache: 'no-store' })
+              if (!response.ok) {
+                return
+              }
+              const payload = await response.json()
+              const full = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+              if (full && typeof full.text === 'string') {
+                entry.text = full.text
+                if (entry.metadata) {
+                  delete entry.metadata.bodyTrimmed
+                }
+              }
+            } catch {
+              // leave the excerpt in place; a full-body view degrades to a
+              // preview rather than an empty pane
+            } finally {
+              artifactBodyFetches.delete(id)
+            }
+          })())
+        }
+        await artifactBodyFetches.get(id)
+        return entry
+      }
+
       async function loadArtifacts() {
         if (!canUseArtifactLibrary()) {
           artifactEntries = []
@@ -45173,6 +45269,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderArtifactDetail() {
         const artifact = selectedArtifact()
+        // The detail pane loads the body into an EDITABLE field — never let it
+        // hold a list excerpt, or an edit-and-save would overwrite the full body
+        // with the truncated one. Pull the full body then re-render; the read
+        // pane and textarea below fill in once it lands (the marker clears, so
+        // this is a one-shot, no loop). saveSelectedArtifact also refuses while
+        // trimmed as a belt-and-suspenders guard against saving mid-load.
+        if (artifact && artifact.metadata && artifact.metadata.bodyTrimmed === 'true') {
+          ensureArtifactBody(artifact).then(() => {
+            // re-render only on success (marker cleared) — avoids a fetch-fail loop
+            if (selectedArtifact() === artifact && (!artifact.metadata || artifact.metadata.bodyTrimmed !== 'true')) {
+              renderArtifactDetail()
+            }
+          })
+        }
         const disabled = !artifact
         const published = artifactPublished(artifact)
         const statusValue = artifactStatusValue(artifact)
@@ -45456,6 +45566,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         event.preventDefault()
         const artifact = selectedArtifact()
         if (!artifact) {
+          return
+        }
+        // Never PATCH while the body is still the list excerpt — saving the
+        // textarea value would truncate the stored artifact. Load the full body
+        // and abort this save; the detail pane re-renders with the real body so
+        // the user edits and saves against complete text.
+        if (artifact.metadata && artifact.metadata.bodyTrimmed === 'true') {
+          await ensureArtifactBody(artifact)
+          renderArtifactDetail()
+          setArtifactDetailStatus('loaded full body — review and save again')
           return
         }
         artifactSaveButton.disabled = true

@@ -1790,6 +1790,41 @@ func isArtifactApprovalAdmin(user *userAccount) bool {
 	return user != nil && normalizeAccountEmail(user.Email) == artifactLibraryAdminEmail
 }
 
+// artifactListExcerptRunes bounds the body carried in an /artifacts LIST
+// response. Full bodies turn the list into a multi-megabyte payload that stalls
+// first paint and only grows as users accumulate months of artifacts (measured
+// live: 100 artifacts = 5.1 MB, one packaging deck alone 2.6 MB of base64
+// imagery). The list ships this excerpt — enough for card teasers and for
+// deck-sniffing the leading "<!doctype" — and the client fetches the full body
+// on demand via GET /artifacts?id=<id> only when a deliverable is opened.
+const artifactListExcerptRunes = 1500
+
+// artifactListView returns lightweight COPIES of the given artifacts for a list
+// response: any entry whose body exceeds the excerpt is trimmed to the leading
+// runes and flagged bodyTrimmed. It never mutates the stored entries or their
+// metadata maps (the memory store owns them; search/context/recall still need
+// full bodies), so the metadata map is deep-copied before the flag is added.
+func artifactListView(entries []meetingMemoryEntry) []meetingMemoryEntry {
+	out := make([]meetingMemoryEntry, len(entries))
+	for i, entry := range entries {
+		runes := []rune(entry.Text)
+		if len(runes) <= artifactListExcerptRunes {
+			out[i] = entry
+			continue
+		}
+		trimmed := entry
+		trimmed.Text = string(runes[:artifactListExcerptRunes])
+		meta := make(map[string]string, len(entry.Metadata)+1)
+		for key, value := range entry.Metadata {
+			meta[key] = value
+		}
+		meta["bodyTrimmed"] = "true"
+		trimmed.Metadata = meta
+		out[i] = trimmed
+	}
+	return out
+}
+
 func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1889,8 +1924,8 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	if beforeID == "" && limitParam == "" {
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":                 true,
-			"artifacts":          kanbanApp.osArtifactsSnapshot(100),
-			"publishedArtifacts": kanbanApp.publishedOSArtifactsSnapshot(10),
+			"artifacts":          artifactListView(kanbanApp.osArtifactsSnapshot(100)),
+			"publishedArtifacts": artifactListView(kanbanApp.publishedOSArtifactsSnapshot(10)),
 		})
 		return
 	}
@@ -1931,8 +1966,8 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 
 	payload := map[string]any{
 		"ok":                 true,
-		"artifacts":          window,
-		"publishedArtifacts": kanbanApp.publishedOSArtifactsSnapshot(10),
+		"artifacts":          artifactListView(window),
+		"publishedArtifacts": artifactListView(kanbanApp.publishedOSArtifactsSnapshot(10)),
 		"hasMore":            start > 0,
 	}
 	if start > 0 && len(window) > 0 {
