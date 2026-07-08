@@ -137,6 +137,18 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "meeting digest compiler") {
+			calls = append(calls, "digest")
+			return cannedMeetingDigestJSON(), nil
+		}
+		if strings.Contains(request.Instructions, "company digest narrator") {
+			calls = append(calls, "company")
+			return "The Zebra packaging pilot is decided.", nil
+		}
+		if strings.Contains(request.Instructions, "entity-ledger adjudicator") || strings.Contains(request.Instructions, "end-of-day reflection") {
+			t.Errorf("unexpected model call at archive flush: %s", request.Instructions)
+			return "", nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -147,8 +159,10 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
-	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
-		t.Fatalf("calls=%v, want one brain pass, one decision-ledger pass, one board pass, then one mission pass", calls)
+	// the close chain in dependency order; the day fold and the entity-ledger
+	// consolidation are deterministic (no model call).
+	if strings.Join(calls, ",") != "brain,ledger,board,mission,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, meeting-digest, then company", calls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
 		t.Fatalf("downloadUrl=%q, want embedded room key", result.DownloadURL)
@@ -295,6 +309,22 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "meeting digest compiler") {
+			calls = append(calls, "digest")
+			return cannedMeetingDigestJSON(), nil
+		}
+		if strings.Contains(request.Instructions, "entity-ledger adjudicator") {
+			t.Error("flush must not spend an adjudication call on all-new facts")
+			return "", nil
+		}
+		if strings.Contains(request.Instructions, "end-of-day reflection") {
+			t.Error("flush must not reflect without completed-day material")
+			return "", nil
+		}
+		if strings.Contains(request.Instructions, "company digest narrator") {
+			calls = append(calls, "company")
+			return "The Zebra packaging pilot is decided and the pricing sheet is underway.", nil
+		}
 		calls = append(calls, "brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
@@ -305,11 +335,23 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 		t.Fatalf("calls=%v, want none when only pre-boot history exists", calls)
 	}
 
-	// fresh in-meeting transcript: the flush picks up from the boot baseline.
+	// fresh in-meeting transcript: the flush picks up from the boot baseline
+	// and runs the whole close chain in dependency order. The day fold and the
+	// entity-ledger consolidation are deterministic (no model call); the
+	// company narrative rides the ledger events the consolidation just landed.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if len(calls) != 4 || calls[0] != "brain" || calls[1] != "ledger" || calls[2] != "board" || calls[3] != "mission" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, board, then mission for post-boot input", calls)
+	if strings.Join(calls, ",") != "brain,ledger,board,mission,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, meeting-digest, then company for post-boot input", calls)
+	}
+	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
+		t.Fatal("archive flush did not fold a day digest")
+	}
+	if entries := app.memory.entriesOfKind(meetingMemoryKindLedgerEvent, 0); len(entries) == 0 {
+		t.Fatal("archive flush did not consolidate ledger events")
+	}
+	if _, ok := app.memory.latestCompanyDigest(); !ok {
+		t.Fatal("archive flush did not refresh the company digest")
 	}
 }
 

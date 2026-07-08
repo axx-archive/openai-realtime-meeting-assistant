@@ -821,6 +821,9 @@ var orchestratorToolAllowlist = map[string]bool{
 	"create_artifact":        true,
 	"update_artifact":        true,
 	"answer_memory_question": true,
+	// Cross-meeting recall (Track-2 Wave 6): read-only, bounded output.
+	"cross_meeting_briefing": true,
+	"get_meeting_detail":     true,
 	"create_package":         true,
 	"attach_to_package":      true,
 	"advance_package_stage":  true,

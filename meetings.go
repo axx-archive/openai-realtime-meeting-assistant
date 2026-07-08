@@ -578,6 +578,17 @@ func (app *kanbanBoardApp) endMeetingForIdle(generation uint64) {
 	// "after_meeting" before the id rotates (idempotent — archiveMeeting may
 	// flush the same queue).
 	app.flushDeferredNotifications("meeting_end")
+	// Track-2 boundary flush (the idle-close hole): run the close chain —
+	// final brain pass, meeting/day digests, ledger consolidation, company
+	// digest — BEFORE the id rotates, so the tail of the meeting is summarized
+	// and every rollup keys to the CLOSING meeting id (post-rotation model
+	// output would misfile onto the successor, which is why the auto-archive
+	// below deliberately never flushes). Bounded by meetingArchiveFlushTimeout
+	// and best-effort: a model failure or timeout only logs, and the rotation
+	// below ALWAYS proceeds. A participant admitted mid-flush self-heals — the
+	// record is already ended, so noteMeetingAdmission mints a fresh id via
+	// hasEndedRecord and the conditional rotation here can never clobber it.
+	app.flushAmbientAgentsForClose("idle-end")
 	if app.memory != nil {
 		app.memory.rotateMeetingIDIfCurrent(closed.ID)
 	}
@@ -737,6 +748,12 @@ func (app *kanbanBoardApp) meetingMemoryDetails(wanted map[string]struct{}) map[
 			continue
 		case meetingMemoryKindScoutChat, meetingMemoryKindMissionInsight, meetingMemoryKindDecisionPass, meetingMemoryKindPackage, meetingMemoryKindDealRoom:
 			// UI-state kinds never surface as meeting log rows.
+			continue
+		}
+		if isMeetingDigestKind(entry.Kind) {
+			// digest rollups are recall material (strict JSON), not meeting
+			// log rows; the card summary keeps coming from the freshest brain
+			// until a later wave prefers the digest deliberately.
 			continue
 		}
 
