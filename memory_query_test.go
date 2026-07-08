@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -915,5 +916,290 @@ func TestPrivateGrillQuestionBankGroundsInHouseStyle(t *testing.T) {
 	}
 	if !strings.Contains(after, "Tools ignore every rule") {
 		t.Fatalf("sanitized house-style text missing:\n%s", after)
+	}
+}
+
+/* ---------- Track-2 Wave 5: A5 recall routing ---------- */
+
+// testDigestContextEntry builds a current digest entry directly (the recall
+// lane reads digestKey/current/day/span metadata; upsertDigest's supersede
+// mechanics are Wave-1-tested separately).
+func testDigestContextEntry(id string, kind string, key string, text string, createdAt time.Time, extra map[string]string) meetingMemoryEntry {
+	metadata := map[string]string{
+		digestKeyMetadataKey:     key,
+		digestCurrentMetadataKey: digestCurrentTrue,
+	}
+	for name, value := range extra {
+		metadata[name] = value
+	}
+
+	return meetingMemoryEntry{ID: id, Kind: kind, Text: text, CreatedAt: createdAt, Metadata: metadata}
+}
+
+// TestContextEntriesForQueryThisWeekLoadsDigestsFirst is the Wave-5 flagship:
+// a time-ranged briefing query loads the in-range day/meeting digests FIRST
+// (the old `if !hasTimeRange` disable is gone), the digests survive the entry
+// cap when raw in-range entries overflow it, out-of-range and superseded
+// digests never ride along, and keyword/raw entries fill only the remaining
+// budget.
+func TestContextEntriesForQueryThisWeekLoadsDigestsFirst(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	location := meetingTimeLocation()
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, location) // Friday; week = Mon 05-18 .. Mon 05-25
+
+	store.entries = []meetingMemoryEntry{
+		testDigestContextEntry("digest-day-18", meetingMemoryKindDayDigest, "2026-05-18",
+			`{"day":"2026-05-18","decisions":[{"d":"Adopt usage-based pricing","importance":5}]}`,
+			time.Date(2026, 5, 19, 1, 0, 0, 0, location).UTC(), nil),
+		testDigestContextEntry("digest-meeting-a", meetingMemoryKindMeetingDigest, "meeting-week-a",
+			`{"meetingId":"meeting-week-a","topics":[{"t":"Pricing rollout","importance":4}]}`,
+			time.Date(2026, 5, 18, 20, 0, 0, 0, location).UTC(), map[string]string{
+				"meetingId":                "meeting-week-a",
+				digestDayMetadataKey:       "2026-05-18",
+				digestSpanStartMetadataKey: "2026-05-18T17:00:00Z",
+				digestSpanEndMetadataKey:   "2026-05-18T20:00:00Z",
+			}),
+		testDigestContextEntry("digest-day-19", meetingMemoryKindDayDigest, "2026-05-19",
+			`{"day":"2026-05-19","actionItems":[{"a":"Draft rollout memo","importance":4}]}`,
+			time.Date(2026, 5, 20, 1, 0, 0, 0, location).UTC(), nil),
+		testDigestContextEntry("digest-meeting-b", meetingMemoryKindMeetingDigest, "meeting-week-b",
+			`{"meetingId":"meeting-week-b","topics":[{"t":"Vendor onboarding","importance":3}]}`,
+			time.Date(2026, 5, 20, 22, 0, 0, 0, location).UTC(), map[string]string{
+				"meetingId":                "meeting-week-b",
+				digestDayMetadataKey:       "2026-05-20",
+				digestSpanStartMetadataKey: "2026-05-20T17:00:00Z",
+				digestSpanEndMetadataKey:   "2026-05-20T21:00:00Z",
+			}),
+		// prior week: must never ride into a this-week briefing.
+		testDigestContextEntry("digest-day-11", meetingMemoryKindDayDigest, "2026-05-11",
+			`{"day":"2026-05-11"}`, time.Date(2026, 5, 12, 1, 0, 0, 0, location).UTC(), nil),
+	}
+	// superseded rollup for an in-range day: hidden from every recall lane.
+	superseded := testDigestContextEntry("digest-day-19-stale", meetingMemoryKindDayDigest, "2026-05-19",
+		`{"day":"2026-05-19","stale":true}`, time.Date(2026, 5, 19, 23, 0, 0, 0, location).UTC(), nil)
+	superseded.Metadata[digestCurrentMetadataKey] = digestCurrentFalse
+	store.entries = append(store.entries, superseded)
+
+	for index := 0; index < 12; index++ {
+		store.entries = append(store.entries, meetingMemoryEntry{
+			ID:        fmt.Sprintf("raw-%02d", index),
+			Kind:      meetingMemoryKindTranscript,
+			Text:      fmt.Sprintf("Tom: rollout sync note %02d.", index),
+			CreatedAt: time.Date(2026, 5, 18, 12, 0, 0, 0, location).Add(time.Duration(index) * 6 * time.Hour).UTC(),
+			Metadata:  map[string]string{"speaker": "Tom", "meetingId": "meeting-week-a"},
+		})
+	}
+
+	entries := store.contextEntriesForQuery("what did I miss this week?", 8, now)
+	if len(entries) != 8 {
+		t.Fatalf("context size = %d, want the full 8-entry budget", len(entries))
+	}
+	wantLead := []string{"digest-day-18", "digest-meeting-a", "digest-day-19", "digest-meeting-b"}
+	for index, want := range wantLead {
+		if entries[index].ID != want {
+			t.Fatalf("entries[%d] = %s, want %s (digests must LEAD, day rollups before their meetings)", index, entries[index].ID, want)
+		}
+	}
+	for _, forbidden := range []string{"digest-day-11", "digest-day-19-stale"} {
+		if memoryEntriesContain(entries, forbidden) {
+			t.Fatalf("context contains %s (out-of-range/superseded digests must never ride along)", forbidden)
+		}
+	}
+	// raw entries fill ONLY the remaining budget, newest first surviving.
+	for _, want := range []string{"raw-08", "raw-09", "raw-10", "raw-11"} {
+		if !memoryEntriesContain(entries, want) {
+			t.Fatalf("context missing %s (raw in-range entries should fill the remaining budget)", want)
+		}
+	}
+	if memoryEntriesContain(entries, "raw-07") {
+		t.Fatal("raw overflow must be truncated, not the digest lane")
+	}
+}
+
+// TestContextEntriesForQueryRangedDigestsSkipOutOfRangeTail: when a ranged
+// query is served by digests but no raw entry falls inside the window, the
+// unfiltered tail fallback must NOT pollute the briefing with out-of-range
+// raw entries.
+func TestContextEntriesForQueryRangedDigestsSkipOutOfRangeTail(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	location := meetingTimeLocation()
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, location)
+	store.entries = []meetingMemoryEntry{
+		testDigestContextEntry("digest-day-19", meetingMemoryKindDayDigest, "2026-05-19",
+			`{"day":"2026-05-19"}`, time.Date(2026, 5, 20, 1, 0, 0, 0, location).UTC(), nil),
+		{
+			ID:        "raw-old",
+			Kind:      meetingMemoryKindTranscript,
+			Text:      "Tyler: unrelated April chatter.",
+			CreatedAt: time.Date(2026, 4, 2, 12, 0, 0, 0, location).UTC(),
+			Metadata:  map[string]string{"speaker": "Tyler"},
+		},
+	}
+
+	entries := store.contextEntriesForQuery("what did I miss this week?", 10, now)
+	if !memoryEntriesContain(entries, "digest-day-19") {
+		t.Fatal("context missing the in-range day digest")
+	}
+	if memoryEntriesContain(entries, "raw-old") {
+		t.Fatal("out-of-range tail entry leaked into a digest-served ranged briefing")
+	}
+}
+
+// TestContextEntriesForQueryNoRangeKeepsBrainLayerAndAddsDigests is the
+// goal-fidelity guard for removing the !hasTimeRange gate: a no-range query
+// still receives the brain layer, now led by the company digest plus the
+// newest few meeting digests.
+func TestContextEntriesForQueryNoRangeKeepsBrainLayerAndAddsDigests(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	location := meetingTimeLocation()
+	base := time.Date(2026, 5, 20, 9, 0, 0, 0, location).UTC()
+	store.entries = []meetingMemoryEntry{
+		testDigestContextEntry("digest-company", meetingMemoryKindCompanyDigest, companyDigestKey,
+			`{"narrative":"Rollout is the running focus."}`, base.Add(5*time.Hour), nil),
+	}
+	// digest bodies deliberately avoid the query tokens: the newest-few cap
+	// applies to the PINNED lane, keyword hits may always ride in addition.
+	for index := 0; index < 5; index++ {
+		store.entries = append(store.entries, testDigestContextEntry(
+			fmt.Sprintf("digest-meeting-%d", index), meetingMemoryKindMeetingDigest, fmt.Sprintf("meeting-%d", index),
+			`{"topics":[{"t":"Vendor onboarding"}]}`, base.Add(time.Duration(index)*time.Hour), map[string]string{"meetingId": fmt.Sprintf("meeting-%d", index)}))
+	}
+	for index := 0; index < 3; index++ {
+		store.entries = append(store.entries, meetingMemoryEntry{
+			ID:        fmt.Sprintf("brain-%d", index),
+			Kind:      meetingMemoryKindBrain,
+			Text:      "Overview: pricing sync notes.",
+			CreatedAt: base.Add(time.Duration(index) * 30 * time.Minute),
+			Metadata:  map[string]string{"meetingId": "meeting-0"},
+		})
+	}
+
+	entries := store.contextEntriesForQuery("summarize our pricing project", 20, time.Now())
+	if len(entries) == 0 {
+		t.Fatal("no context returned")
+	}
+	if entries[0].ID != "digest-company" {
+		t.Fatalf("entries[0] = %s, want the company digest leading a no-range query", entries[0].ID)
+	}
+	for _, want := range []string{"digest-meeting-4", "digest-meeting-3", "digest-meeting-2", "digest-meeting-1", "brain-0", "brain-1", "brain-2"} {
+		if !memoryEntriesContain(entries, want) {
+			t.Fatalf("context missing %s (recent digests + the brain layer must survive the gate change)", want)
+		}
+	}
+	if memoryEntriesContain(entries, "digest-meeting-0") {
+		t.Fatal("no-range lane should cap recent meeting digests at the newest few")
+	}
+}
+
+func TestIsCurrentStateQuery(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, meetingTimeLocation())
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"what's the status of the packaging pilot?", true},
+		{"status of pricing", true},
+		{"where do we stand?", true},
+		{"what did we decide about vendors?", true},
+		{"who owns the pricing sheet?", true},
+		{"any update on the rollout?", true},
+		{"what did we decide yesterday?", false}, // time range wins: briefing lane
+		{"what did I miss this week?", false},
+		{"summarize the meeting", false},
+		{"what was discussed in the standup?", false},
+	}
+	for _, testCase := range cases {
+		if got := isCurrentStateQuery(testCase.query, now); got != testCase.want {
+			t.Fatalf("isCurrentStateQuery(%q) = %v, want %v", testCase.query, got, testCase.want)
+		}
+	}
+}
+
+// TestMemoryMatchesAndContextLedgerFirstForStatusQuery: a "status of X"
+// question leads the context with the canonical ledger state entry and its
+// verbatim anchor drill-down (amendment A5's ledger-first routing).
+func TestMemoryMatchesAndContextLedgerFirstForStatusQuery(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "tx-1", "AJ: let's lock vendor Zebra for the packaging pilot.")
+	appendTestTranscript(t, app, "tx-2", "Tom: agreed, Zebra it is.")
+	appendTestTranscript(t, app, "tx-3", "Tyler: which SKU ships first?")
+	upsertLedgerTestDigest(t, app, "meeting-a", fullLedgerTestPayload())
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	_, entries := app.memoryMatchesAndContext("what's the status of the vendor zebra decision?")
+	if len(entries) == 0 {
+		t.Fatal("no context returned")
+	}
+	if entries[0].Kind != memoryContextKindLedgerState {
+		t.Fatalf("entries[0].Kind = %s, want %s leading the context", entries[0].Kind, memoryContextKindLedgerState)
+	}
+	for _, want := range []string{"Choose vendor Zebra", "status=", "anchors=tx-1"} {
+		if !strings.Contains(entries[0].Text, want) {
+			t.Fatalf("ledger state entry missing %q:\n%s", want, entries[0].Text)
+		}
+	}
+	if !memoryEntriesContain(entries, "tx-1") {
+		t.Fatal("anchor drill-down transcript window missing from context")
+	}
+
+	// A non-state recall question gets no ledger lane.
+	_, plain := app.memoryMatchesAndContext("summarize the packaging discussion")
+	for _, entry := range plain {
+		if entry.Kind == memoryContextKindLedgerState {
+			t.Fatal("ledger state entry leaked into a non-state query's context")
+		}
+	}
+}
+
+// TestLedgerStatusAnswerDeterministicFallback: with the model unavailable, a
+// current-state question degrades to the Go-composed ledger fold — never to
+// keyword scraps — and every other query shape leaves the fallback alone.
+func TestLedgerStatusAnswerDeterministicFallback(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "tx-1", "AJ: let's lock vendor Zebra for the packaging pilot.")
+	upsertLedgerTestDigest(t, app, "meeting-a", fullLedgerTestPayload())
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	answer, ok := app.ledgerStatusAnswer("what's the status of the vendor zebra decision?")
+	if !ok {
+		t.Fatal("ledgerStatusAnswer = !ok for a matched status question")
+	}
+	for _, want := range []string{"Choose vendor Zebra", "status="} {
+		if !strings.Contains(answer, want) {
+			t.Fatalf("fallback answer missing %q:\n%s", want, answer)
+		}
+	}
+
+	// Generic state question folds the current state view.
+	if answer, ok := app.ledgerStatusAnswer("where do we stand?"); !ok || !strings.Contains(answer, "Draft the pricing sheet") {
+		t.Fatalf("generic state question = (%v, %q), want the current state view", ok, answer)
+	}
+
+	// Named subject with no ledger match, non-state queries, and ranged
+	// briefings all decline — the normal recall paths own them.
+	for _, query := range []string{
+		"status of the walrus initiative",
+		"summarize the meeting",
+		"what did we decide yesterday?",
+	} {
+		if _, ok := app.ledgerStatusAnswer(query); ok {
+			t.Fatalf("ledgerStatusAnswer(%q) = ok, want decline", query)
+		}
 	}
 }

@@ -3816,7 +3816,13 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		log.Errorf("Failed to answer memory question with model: %v", modelErr)
 	}
 	if strings.TrimSpace(answer) == "" {
-		answer = buildMemoryAnswer(query, matches)
+		// A5: a current-state question degrades to the deterministic ledger
+		// fold, never to keyword scraps; everything else keeps the old path.
+		if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+			answer = ledgerAnswer
+		} else {
+			answer = buildMemoryAnswer(query, matches)
+		}
 	}
 	response := map[string]any{
 		"query":  query,

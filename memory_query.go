@@ -154,7 +154,13 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
 	if strings.TrimSpace(answer) == "" {
-		answer = buildMemoryAnswer(query, matches)
+		// A5: a current-state question degrades to the deterministic ledger
+		// fold, never to keyword scraps; everything else keeps the old path.
+		if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+			answer = ledgerAnswer
+		} else {
+			answer = buildMemoryAnswer(query, matches)
+		}
 	}
 
 	return assistantQueryResult{
@@ -1466,7 +1472,309 @@ func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemor
 		return nil, nil
 	}
 
-	return app.memory.search(query, 8), app.memory.contextEntriesForQuery(query, defaultMemoryQuestionContextLimit, time.Now())
+	now := time.Now()
+	matches := app.memory.search(query, 8)
+	// A5 recall routing: a current-state question ("status of X", "what's
+	// decided on Y") answers LEDGER-first — the canonical fold leads the
+	// context (status/owner/validity computed in Go, never by the model)
+	// with verbatim anchor drill-down, and the store lanes fill the rest.
+	lane := app.ledgerContextLane(query, now)
+	budget := defaultMemoryQuestionContextLimit - len(lane)
+	if budget < 0 {
+		budget = 0
+	}
+	contextEntries := app.memory.contextEntriesForQuery(query, budget, now)
+	if len(lane) == 0 {
+		return matches, contextEntries
+	}
+
+	laneIDs := make(map[string]struct{}, len(lane))
+	for _, entry := range lane {
+		laneIDs[entry.ID] = struct{}{}
+	}
+	merged := make([]meetingMemoryEntry, 0, len(lane)+len(contextEntries))
+	merged = append(merged, lane...)
+	for _, entry := range contextEntries {
+		if _, ok := laneIDs[entry.ID]; ok {
+			continue
+		}
+		merged = append(merged, entry)
+	}
+
+	return matches, merged
+}
+
+/* ---------- A5 current-state recall routing (Track-2 Wave 5) ----------
+   "Status of X" questions answer LEDGER-first: the entity ledger's folded
+   state is the canonical registry of decisions / action items / topics /
+   open questions, so the lookup is O(fold) in Go with drill-down anchors —
+   date-range detection, matching, and freshness all computed from
+   timestamps here, never delegated to the LLM. */
+
+const (
+	// memoryContextKindLedgerState labels the synthetic, prompt-only context
+	// entry carrying the canonical ledger records for a current-state query.
+	// It is NEVER persisted — it exists only inside one model input — which
+	// is why it is deliberately not registered as a meetingMemoryKind const.
+	memoryContextKindLedgerState = "ledger_state"
+	// ledgerContextMaxRecords bounds how many canonical records ride into
+	// context for one status question.
+	ledgerContextMaxRecords = 6
+	// ledgerContextAnchorEntries caps the verbatim drill-down lane; radius 1
+	// returns the anchored exchange plus one neighbor either side.
+	ledgerContextAnchorEntries = 6
+	ledgerContextAnchorRadius  = 1
+)
+
+// currentStateQueryMarkers are the Go-side detector for current-state
+// questions. Phrase-shaped (not bare tokens) so ordinary recall questions
+// ("what was discussed", "summarize the meeting") never match.
+var currentStateQueryMarkers = []string{
+	"status of", "status on", "status for",
+	"what's the status", "what is the status", "whats the status", "current status",
+	"current state of", "state of play",
+	"where are we on", "where are we with", "where do we stand", "where we stand", "where things stand",
+	"what's decided", "what is decided", "whats decided", "what was decided",
+	"what did we decide", "did we decide", "have we decided", "what have we decided",
+	"any decision on", "is it decided",
+	"what's the latest on", "what is the latest on", "whats the latest on", "latest on",
+	"any update on", "any updates on",
+	"who owns", "who's responsible", "whos responsible", "who is responsible",
+	"what's blocking", "what is blocking", "whats blocking", "still open", "still blocked",
+	"open questions on", "open question on",
+}
+
+// currentStateSubjectStopTokens are the question-scaffolding tokens stripped
+// (post decisionDedupeKey normalization, so all ≥3 chars and lowercase) to
+// isolate the SUBJECT of a status question before the ledger lookup —
+// "what's the status of the fiscal integration" → "fiscal integration".
+var currentStateSubjectStopTokens = map[string]struct{}{
+	"what": {}, "whats": {}, "the": {}, "status": {}, "current": {}, "currently": {},
+	"state": {}, "latest": {}, "update": {}, "updates": {}, "news": {},
+	"decided": {}, "decide": {}, "decision": {}, "decisions": {},
+	"where": {}, "stand": {}, "standing": {}, "things": {}, "thing": {},
+	"are": {}, "were": {}, "did": {}, "does": {}, "have": {}, "has": {}, "had": {},
+	"who": {}, "whos": {}, "owns": {}, "own": {}, "owner": {}, "responsible": {},
+	"blocking": {}, "blocked": {}, "open": {}, "still": {}, "question": {}, "questions": {},
+	"for": {}, "with": {}, "about": {}, "regarding": {}, "our": {}, "you": {}, "know": {},
+	"tell": {}, "give": {}, "and": {}, "that": {}, "this": {}, "there": {}, "any": {},
+	"done": {}, "closed": {}, "resolved": {}, "happening": {}, "going": {}, "right": {},
+	"now": {}, "play": {}, "today": {}, "please": {}, "scout": {},
+}
+
+// isCurrentStateQuery reports a "status of X"-shaped question. A query with
+// an explicit time range is a briefing, not a state lookup — the digest lane
+// (digestContextLane) serves it, so the range detector wins here.
+func isCurrentStateQuery(query string, now time.Time) bool {
+	if strings.TrimSpace(query) == "" {
+		return false
+	}
+	if _, _, hasTimeRange := relativeQueryTimeRange(query, now); hasTimeRange {
+		return false
+	}
+	normalized := strings.ToLower(query)
+	for _, marker := range currentStateQueryMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// currentStateQuerySubject extracts the subject tokens of a status question
+// (normalized through the same decisionDedupeKey pipeline the ledger's title
+// keys use, then stripped of question scaffolding). Empty means a generic
+// state question ("where do we stand?") — answered from the full state view.
+func currentStateQuerySubject(query string) []string {
+	tokens := strings.Fields(decisionDedupeKey(query))
+	subject := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if _, ok := currentStateSubjectStopTokens[token]; ok {
+			continue
+		}
+		subject = append(subject, token)
+	}
+
+	return subject
+}
+
+// ledgerRecordsForStateQuery resolves a current-state question to canonical
+// ledger records: subject-matched lookup when the question names a thing
+// (searchLedgerRecords ranks current records above closed history, then
+// match strength, then importance), or the importance-ranked current state
+// view when the question is generic. A named subject with no ledger match
+// returns nothing — the normal recall lanes handle it, never a state dump.
+func (app *kanbanBoardApp) ledgerRecordsForStateQuery(query string) []ledgerRecord {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	if subject := currentStateQuerySubject(query); len(subject) > 0 {
+		return app.searchLedgerRecords(strings.Join(subject, " "), ledgerContextMaxRecords)
+	}
+
+	view := app.ledgerCurrentStateView(ledgerContextMaxRecords)
+	records := make([]ledgerRecord, 0, ledgerContextMaxRecords)
+	for _, section := range [][]ledgerRecord{view.Decisions, view.ActionItems, view.OpenQuestions, view.Topics} {
+		records = append(records, section...)
+	}
+	sortLedgerRecords(records)
+	if len(records) > ledgerContextMaxRecords {
+		records = records[:ledgerContextMaxRecords]
+	}
+
+	return records
+}
+
+// formatLedgerRecordLine renders one canonical record deterministically —
+// status, owner, importance, validity window, provenance — so both the model
+// context and the model-outage fallback answer speak from the same fold.
+func formatLedgerRecordLine(record ledgerRecord) string {
+	var builder strings.Builder
+	builder.WriteString("- [")
+	builder.WriteString(record.Entity)
+	builder.WriteString("] ")
+	builder.WriteString(record.Title)
+	builder.WriteString(" — status=")
+	builder.WriteString(record.Status)
+	if owner := strings.TrimSpace(record.Owner); owner != "" {
+		builder.WriteString(" owner=")
+		builder.WriteString(owner)
+	}
+	if record.Importance > 0 {
+		builder.WriteString(fmt.Sprintf(" importance=%d", record.Importance))
+	}
+	if since := strings.TrimSpace(record.ValidFrom); since != "" {
+		builder.WriteString(" since=")
+		builder.WriteString(since)
+	}
+	if !record.current() {
+		builder.WriteString(" closed=")
+		builder.WriteString(strings.TrimSpace(record.ValidTo))
+		if superseded := strings.TrimSpace(record.SupersededBy); superseded != "" {
+			builder.WriteString(" supersededBy=")
+			builder.WriteString(superseded)
+		}
+	}
+	if len(record.Anchors) > 0 {
+		anchors := record.Anchors
+		if len(anchors) > 4 {
+			anchors = anchors[:4]
+		}
+		builder.WriteString(" anchors=")
+		builder.WriteString(strings.Join(anchors, ","))
+	}
+	if len(record.MeetingIDs) > 0 {
+		meetings := record.MeetingIDs
+		if len(meetings) > 3 {
+			meetings = meetings[:3]
+		}
+		builder.WriteString(" meetings=")
+		builder.WriteString(strings.Join(meetings, ","))
+	}
+
+	return builder.String()
+}
+
+// ledgerStateContextEntry packs the matched records into ONE synthetic,
+// prompt-only context entry that leads the model input for a status query.
+func ledgerStateContextEntry(records []ledgerRecord, now time.Time) meetingMemoryEntry {
+	var builder strings.Builder
+	builder.WriteString("Canonical entity-ledger state (folded in Go from the consolidation log; authoritative for status, ownership, and validity — closed records are history, not current):\n")
+	for _, record := range records {
+		builder.WriteString(formatLedgerRecordLine(record))
+		builder.WriteByte('\n')
+	}
+
+	return meetingMemoryEntry{
+		ID:        "ledger-state",
+		Kind:      memoryContextKindLedgerState,
+		Text:      strings.TrimRight(builder.String(), "\n"),
+		CreatedAt: now,
+		Metadata:  map[string]string{"source": "entity_ledger"},
+	}
+}
+
+// ledgerAnchorContextEntries resolves the top records' anchors to their
+// verbatim transcript windows (transcriptWindowAround excludes hidden lines
+// and rides the prompt-body cap) — the drill-down grounding for the ledger's
+// state claims. Bounded: top 2 records, 2 anchors each, capped entries.
+func (app *kanbanBoardApp) ledgerAnchorContextEntries(records []ledgerRecord) []meetingMemoryEntry {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, ledgerContextAnchorEntries)
+	windows := make([]meetingMemoryEntry, 0, ledgerContextAnchorEntries)
+	recordCap := 2
+	for index, record := range records {
+		if index >= recordCap || len(windows) >= ledgerContextAnchorEntries {
+			break
+		}
+		anchors := record.Anchors
+		if len(anchors) > 2 {
+			anchors = anchors[:2]
+		}
+		for _, anchor := range anchors {
+			for _, entry := range app.memory.transcriptWindowAround(anchor, ledgerContextAnchorRadius) {
+				if _, ok := seen[entry.ID]; ok {
+					continue
+				}
+				if len(windows) >= ledgerContextAnchorEntries {
+					break
+				}
+				seen[entry.ID] = struct{}{}
+				windows = append(windows, entry)
+			}
+		}
+	}
+
+	return windows
+}
+
+// ledgerContextLane builds the leading context block for a current-state
+// query: one canonical state entry plus its verbatim anchor windows. Empty
+// for every other query shape.
+func (app *kanbanBoardApp) ledgerContextLane(query string, now time.Time) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || !isCurrentStateQuery(query, now) {
+		return nil
+	}
+	records := app.ledgerRecordsForStateQuery(query)
+	if len(records) == 0 {
+		return nil
+	}
+
+	lane := make([]meetingMemoryEntry, 0, 1+ledgerContextAnchorEntries)
+	lane = append(lane, ledgerStateContextEntry(records, now))
+	lane = append(lane, app.ledgerAnchorContextEntries(records)...)
+
+	return lane
+}
+
+// ledgerStatusAnswer is the deterministic model-outage fallback for a
+// current-state question: the canonical fold rendered directly (A5's
+// O(lookup) promise holds even with no model), replacing the old collapse to
+// eight keyword hits for exactly the queries the ledger can answer.
+func (app *kanbanBoardApp) ledgerStatusAnswer(query string) (string, bool) {
+	if app == nil || app.memory == nil {
+		return "", false
+	}
+	if !isCurrentStateQuery(query, time.Now()) {
+		return "", false
+	}
+	records := app.ledgerRecordsForStateQuery(query)
+	if len(records) == 0 {
+		return "", false
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Current ledger state:\n")
+	for _, record := range records {
+		builder.WriteString(formatLedgerRecordLine(record))
+		builder.WriteByte('\n')
+	}
+	builder.WriteString("(Composed from the entity ledger; anchors point at the verbatim transcript exchanges.)")
+
+	return builder.String(), true
 }
 
 func (app *kanbanBoardApp) answerCurrentBoardQuestion(query string) (string, int, bool) {
@@ -1701,6 +2009,9 @@ func memoryQuestionInstructions() string {
 	return strings.Join([]string{
 		"You are Scout, the Bonfire meeting assistant.",
 		"Answer the user's recall question using only the supplied memory context.",
+		"meeting_digest, day_digest, and company_digest entries are structured JSON rollups — the organized summary layer.",
+		"For briefing questions (what did I miss, what happened over a range) lead with the digests' highest-importance facts: decisions and blockers first, then action items, open questions, and topics; each fact's importance (1-5, 5 highest) and at timestamp are already computed — organize by them, and group multi-day answers day by day.",
+		"ledger_state entries are the canonical current-state registry: for status questions answer from those records — their status/owner/validity fields are authoritative over anything the raw transcript implies — and cite their anchors for the verbatim exchange.",
 		"Use the brain write-ups for synthesis and the transcript entries as source-of-truth references.",
 		"Preserve speaker attribution. When useful, name who said what and include dates or transcript IDs.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
@@ -1849,6 +2160,66 @@ func (app *kanbanBoardApp) queryPrefersArtifactContext(query string) bool {
 	return false
 }
 
+// digestContextMaxEntries bounds the pinned digest lane inside one recall
+// context: a week of recall is ~7 day digests plus a handful of meeting
+// digests, so 24 covers every range relativeQueryTimeRange can produce while
+// still leaving budget for raw entries at the default 60-entry limit.
+const digestContextMaxEntries = 24
+
+// noRangeMeetingDigestContextEntries is how many of the newest per-meeting
+// digests ride into a no-range query's context alongside the company digest
+// (the "recent meeting_digests" tier of the A5 selector).
+const noRangeMeetingDigestContextEntries = 4
+
+// digestContextLane selects the digest tier for a recall query (Track-2
+// Wave 5, amendment A5) — computed in Go from timestamps, never delegated to
+// the model: a time-ranged query loads the day/meeting digests covering
+// [rangeStart, rangeEnd] (oldest-first with day rollups leading, the
+// digestsInRange order, so a briefing reads day by day); a no-range query
+// loads the company digest (ledger state + narrative) plus the newest few
+// meeting digests. The lane is PINNED by the caller: it leads the returned
+// context and survives the entry cap, so a briefing always keeps its
+// organized, importance-ranked summary layer even when raw in-range entries
+// overflow the budget. Superseded digests never appear (the read helpers
+// filter them), and digest bodies are producer-bounded (~4KB), so the whole
+// lane stays far under the model token budget.
+func (store *meetingMemoryStore) digestContextLane(hasTimeRange bool, rangeStart time.Time, rangeEnd time.Time, limit int) []meetingMemoryEntry {
+	if store == nil || limit <= 0 {
+		return nil
+	}
+	if limit > digestContextMaxEntries {
+		limit = digestContextMaxEntries
+	}
+
+	var lane []meetingMemoryEntry
+	if hasTimeRange {
+		lane = store.digestsInRange(rangeStart, rangeEnd)
+	} else {
+		if company, ok := store.latestCompanyDigest(); ok {
+			lane = append(lane, company)
+		}
+		recent := make([]meetingMemoryEntry, 0, 8)
+		for _, digest := range store.latestDigestPerMeeting() {
+			recent = append(recent, digest)
+		}
+		sort.SliceStable(recent, func(i, j int) bool {
+			if !recent[i].CreatedAt.Equal(recent[j].CreatedAt) {
+				return recent[i].CreatedAt.After(recent[j].CreatedAt)
+			}
+			return recent[i].ID < recent[j].ID
+		})
+		if len(recent) > noRangeMeetingDigestContextEntries {
+			recent = recent[:noRangeMeetingDigestContextEntries]
+		}
+		lane = append(lane, recent...)
+	}
+	if len(lane) > limit {
+		lane = lane[:limit]
+	}
+
+	return lane
+}
+
 func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int, now time.Time) []meetingMemoryEntry {
 	if store == nil || limit <= 0 {
 		return nil
@@ -1894,6 +2265,21 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 			return true
 		}
 		return (entry.CreatedAt.Equal(rangeStart) || entry.CreatedAt.After(rangeStart)) && entry.CreatedAt.Before(rangeEnd)
+	}
+
+	// Tier selector (Track-2 Wave 5, amendment A5): the digest layer loads
+	// FIRST — for a time-ranged query ("what did I miss this week") the day
+	// and meeting digests covering the range, otherwise the company digest
+	// plus recent meeting digests. The lane is pinned: it leads the context
+	// and is exempt from the raw-entry cap below, so keyword-matched raw
+	// entries only ever FILL the remaining budget — the briefing's organized
+	// summary layer is never truncated away by a flood of newer transcript.
+	// (This replaces the old `if !hasTimeRange` disable that starved exactly
+	// the time-ranged briefing queries of any summary layer.)
+	pinnedDigests := store.digestContextLane(hasTimeRange, rangeStart, rangeEnd, limit)
+	pinnedIDs := make(map[string]struct{}, len(pinnedDigests))
+	for _, digest := range pinnedDigests {
+		pinnedIDs[digest.ID] = struct{}{}
 	}
 
 	for _, match := range store.search(query, limit) {
@@ -1946,6 +2332,10 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		}
 	}
 
+	// The last-8-brains lane stays for no-range queries (goal-fidelity guard
+	// for the gate change above): digests organize, brains carry the recent
+	// synthesis detail. Time-ranged queries get in-range brains through the
+	// snapshot lane instead, so the range filter is never bypassed.
 	if !hasTimeRange {
 		recentBrainEntries := 0
 		for index := len(entries) - 1; index >= 0 && recentBrainEntries < 8; index-- {
@@ -1956,25 +2346,36 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		}
 	}
 
-	if len(selected) == 0 {
+	// Tail fallback: never return an empty context — except that a ranged
+	// query already served by digests must not pull an out-of-range raw tail
+	// in on top (the tail is unfiltered by the requested window).
+	if len(selected) == 0 && (!hasTimeRange || len(pinnedDigests) == 0) {
 		recent := tailMemoryEntries(entries, min(limit, 20))
 		for _, entry := range recent {
 			add(entry)
 		}
 	}
 
+	rawBudget := limit - len(pinnedDigests)
 	contextEntries := make([]meetingMemoryEntry, 0, len(selected))
-	for _, entry := range selected {
+	for id, entry := range selected {
+		if _, pinned := pinnedIDs[id]; pinned {
+			// digests can also surface via search/snapshot lanes; the pinned
+			// copy leads, so drop the duplicate from the raw pool.
+			continue
+		}
 		contextEntries = append(contextEntries, entry)
 	}
 	sort.SliceStable(contextEntries, func(i, j int) bool {
 		return contextEntries[i].CreatedAt.Before(contextEntries[j].CreatedAt)
 	})
-	if len(contextEntries) > limit {
-		contextEntries = contextEntries[len(contextEntries)-limit:]
+	if len(contextEntries) > rawBudget {
+		contextEntries = contextEntries[len(contextEntries)-rawBudget:]
 	}
 
-	return contextEntries
+	// Digests lead (importance-ranked rollups, day by day for a range), raw
+	// entries follow chronologically to fill the remaining budget.
+	return append(pinnedDigests, contextEntries...)
 }
 
 func participantsMentionedInQuery(query string) []string {
