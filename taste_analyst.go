@@ -481,7 +481,7 @@ func (store *meetingMemoryStore) stampSignalsDistilled(ids []string, profileID s
 	if len(priors) == 0 {
 		return nil
 	}
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		for _, prior := range priors {
 			store.entries[prior.index] = prior.entry
 		}
