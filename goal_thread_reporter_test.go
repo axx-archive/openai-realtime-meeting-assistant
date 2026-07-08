@@ -9,6 +9,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // newGoalParentForReporter files a goal-shaped parent artifact with the given
@@ -211,19 +212,33 @@ func TestProcessGoalNarratesStagesAndParksCallToActionInOriginThread(t *testing.
 	app.runGoalThread(thread.Artifact.ID)
 	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
 
-	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", channel.ID)
-	if err != nil {
-		t.Fatalf("scoutChatThreadByID: %v", err)
-	}
+	// The stage narration and the park post asynchronously around the
+	// approval transition waitForGoalStage observed, so poll briefly for
+	// BOTH messages before asserting their content (mirrors waitForGoalStage;
+	// under -race the reporter goroutine can land after the state flips).
+	var saved scoutChatThreadRecord
 	var stageMsg, parkMsg *scoutChatMessageRecord
-	for index := range saved.Messages {
-		message := &saved.Messages[index]
-		switch message.Kind {
-		case "artifact":
-			stageMsg = message
-		case "thread":
-			parkMsg = message
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var err error
+		saved, _, err = app.scoutChatThreadByID("aj@shareability.com", channel.ID)
+		if err != nil {
+			t.Fatalf("scoutChatThreadByID: %v", err)
 		}
+		stageMsg, parkMsg = nil, nil
+		for index := range saved.Messages {
+			message := &saved.Messages[index]
+			switch message.Kind {
+			case "artifact":
+				stageMsg = message
+			case "thread":
+				parkMsg = message
+			}
+		}
+		if (stageMsg != nil && parkMsg != nil) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	// The writer stage narrated as it folded (gate + checkpoint stayed quiet).
 	if stageMsg == nil {
