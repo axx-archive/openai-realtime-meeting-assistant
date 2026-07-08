@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -994,5 +995,144 @@ func TestMissionPulseCarriesHistogramAndRealCounters(t *testing.T) {
 	}
 	if week, _ := pulse["meetingsThisWeek"].(int); week != 1 {
 		t.Fatalf("meetingsThisWeek=%v, want 1", pulse["meetingsThisWeek"])
+	}
+}
+
+/* ---------- Track-2 Wave 4: the idle-close boundary flush ---------- */
+
+// The idle-close hole: before this wave, endMeetingForIdle rotated the id
+// without any final rollup, so idle-closed meetings never got a digest and
+// "what did I miss" silently skipped them. Now the close chain runs BEFORE the
+// rotation, so the tail brain, the meeting digest, the day fold, the ledger
+// consolidation, and the company digest all key to the CLOSING meeting id —
+// and the auto-archive that follows embeds them.
+func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	originalResponder := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		switch {
+		case strings.Contains(request.Instructions, "decision ledger"):
+			return `{"decisions":[]}`, nil
+		case strings.Contains(request.Instructions, "board intelligence"):
+			return `{"summary":"No actionable board changes.","operations":[]}`, nil
+		case strings.Contains(request.Instructions, "mission intelligence"):
+			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
+		case strings.Contains(request.Instructions, "meeting digest compiler"):
+			return cannedMeetingDigestJSON(), nil
+		case strings.Contains(request.Instructions, "entity-ledger adjudicator"):
+			t.Error("idle flush must not spend an adjudication call on all-new facts")
+			return "", nil
+		case strings.Contains(request.Instructions, "end-of-day reflection"):
+			return "", nil
+		case strings.Contains(request.Instructions, "company digest narrator"):
+			return "The Zebra packaging pilot is decided; the pricing sheet is underway.", nil
+		default: // meeting brain
+			return "## Overview\nVendor Zebra chosen for the packaging pilot.\n## Transcript reference\ntx-idle-1", nil
+		}
+	}
+
+	app.noteMeetingAdmission("AJ")
+	appendTestTranscript(t, app, "tx-idle-1", "We choose vendor Zebra for the packaging pilot.")
+	closedID := app.memory.currentMeetingID()
+	if closedID == "" {
+		t.Fatal("expected an active meeting id before the idle end")
+	}
+
+	fireIdleEndNow(app)
+
+	var closed meetingRecord
+	for _, record := range app.meetings.recent(0) {
+		if record.ID == closedID {
+			closed = record
+		}
+	}
+	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
+		t.Fatalf("record=%+v, want ended for idle", closed)
+	}
+
+	// the flush ran BEFORE rotation: every rollup keys to the CLOSED meeting.
+	brains := app.memory.entriesOfKind(meetingMemoryKindBrain, 0)
+	if len(brains) != 1 || strings.TrimSpace(brains[0].Metadata["meetingId"]) != closedID {
+		t.Fatalf("brains=%d meetingId=%q, want one final brain keyed to %s", len(brains), brains[0].Metadata["meetingId"], closedID)
+	}
+	digest, ok := app.memory.latestDigestPerMeeting()[closedID]
+	if !ok {
+		t.Fatalf("no meeting_digest for the idle-closed meeting %s", closedID)
+	}
+	if got := strings.TrimSpace(digest.Metadata["meetingId"]); got != closedID {
+		t.Fatalf("digest meetingId=%q, want the closing id %s (pre-rotation flush)", got, closedID)
+	}
+	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
+		t.Fatal("idle flush did not fold a day digest")
+	}
+	decisions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision)
+	if len(decisions) == 0 {
+		t.Fatal("idle flush did not consolidate the digest facts into the ledger")
+	}
+	company, ok := app.memory.latestCompanyDigest()
+	if !ok {
+		t.Fatal("idle flush did not refresh the company digest")
+	}
+	if payload, parsed := parseCompanyDigest(company.Text); !parsed || payload.Narrative == "" || len(payload.State.Decisions) == 0 {
+		t.Fatalf("company digest = %s, want state + narrative", company.Text)
+	}
+
+	// liveness: the id rotated and the silent auto-archive still landed,
+	// pinned to the closed meeting.
+	if got := app.memory.currentMeetingID(); got != "" {
+		t.Fatalf("meeting id %q not rotated after the flush", got)
+	}
+	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
+	if len(archives) != 1 || strings.TrimSpace(archives[0].Metadata["meetingId"]) != closedID {
+		t.Fatalf("archives=%d, want one idle auto-archive pinned to %s", len(archives), closedID)
+	}
+}
+
+// Model failure at the idle boundary is best-effort: no rollup lands, but the
+// rotation and the silent auto-archive ALWAYS proceed — liveness never
+// depends on the model.
+func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	originalResponder := createOpenAITextResponse
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		return "", fmt.Errorf("model down")
+	}
+
+	app.noteMeetingAdmission("AJ")
+	appendTestTranscript(t, app, "tx-idle-2", "We choose vendor Zebra for the packaging pilot.")
+	closedID := app.memory.currentMeetingID()
+
+	fireIdleEndNow(app)
+
+	var closed meetingRecord
+	for _, record := range app.meetings.recent(0) {
+		if record.ID == closedID {
+			closed = record
+		}
+	}
+	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
+		t.Fatalf("record=%+v, want ended for idle despite the model failure", closed)
+	}
+	if got := app.memory.currentMeetingID(); got != "" {
+		t.Fatalf("meeting id %q not rotated after a failed flush", got)
+	}
+	if digests := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(digests) != 0 {
+		t.Fatalf("digests=%d, want none persisted from a failed flush", len(digests))
+	}
+	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
+	if len(archives) != 1 || strings.TrimSpace(archives[0].Metadata["meetingId"]) != closedID {
+		t.Fatalf("archives=%d, want the silent auto-archive despite the model failure", len(archives))
 	}
 }

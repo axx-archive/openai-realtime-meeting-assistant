@@ -24,9 +24,14 @@ import (
 	"time"
 )
 
-// meetingArchiveFlushTimeout covers three sequential model calls at archive
-// time (brain → decision ledger → board).
-const meetingArchiveFlushTimeout = 3 * time.Minute
+// meetingArchiveFlushTimeout bounds the WHOLE close-time flush chain (up to
+// eight sequential agent passes: brain → decision ledger → board → mission
+// intel → meeting digest → day digest → entity ledger → company digest). It is
+// a ceiling, not a target — agents with nothing unconsumed skip without a
+// model call, and an expired context only fails the remaining passes (their
+// tickers retry later); the caller always proceeds afterwards (archive
+// snapshot / idle rotation), so liveness never depends on the model.
+const meetingArchiveFlushTimeout = 4 * time.Minute
 
 type ambientAgentConfig struct {
 	name              string
@@ -226,16 +231,46 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 	app.agentBaselineIDs[name] = baselineID
 }
 
-// flushAmbientAgentsForArchive synchronously runs one brain pass, then one
-// decision-ledger pass, then one board pass, then one mission-intel pass with
-// a batch minimum of one, so the last minutes of a meeting are summarized,
-// their decisions land in the ledger, the board is updated, and the archived
-// meeting's dominant theme titles the RIGHT record before the archive
-// snapshot is taken (and before rotateMeetingID — a later mission tick would
-// otherwise consume the pre-archive brain write-ups and stamp the old
-// meeting's theme onto the successor record). Skips silently when no API key
-// is configured or nothing new exists.
+// closeFlushChain is the ordered agent chain a CLOSING meeting flushes, in
+// dependency order so each stage consumes what the previous one just landed:
+// the original archive four (brain summarizes the final transcript window,
+// the decision ledger and board consume it, mission intel titles the RIGHT
+// record before rotation), then the Track-2 rollup tiers — meeting digest
+// (consumes the fresh brains: the closing meeting's cumulative T2 digest),
+// day digest (folds the fresh meeting digests into the local-day T3 slices),
+// entity ledger (consolidates the digest's facts plus new decision rows into
+// the canonical registry), and company digest (refreshes T4 from the fresh
+// ledger deltas). Every stage is cursor-gated and upsert-idempotent, so a
+// double flush (archive racing idle, or a flush racing the ticker) is safe.
+func closeFlushChain() []ambientAgentConfig {
+	return []ambientAgentConfig{
+		meetingBrainAgent(),
+		decisionLedgerAgent(),
+		meetingBoardAgent(),
+		missionIntelligenceAgent(),
+		meetingDigestAgent(),
+		dayDigestAgent(),
+		entityLedgerAgent(),
+		companyDigestAgent(),
+	}
+}
+
+// flushAmbientAgentsForArchive synchronously runs the close flush chain with a
+// batch minimum of one before the archive snapshot is taken (and before
+// rotateMeetingID — a later ambient tick would otherwise consume the
+// pre-archive write-ups and stamp the old meeting's output onto the successor
+// id). Skips silently when no API key is configured or nothing new exists.
 func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
+	app.flushAmbientAgentsForClose("archive")
+}
+
+// flushAmbientAgentsForClose is the shared boundary flush for BOTH meeting
+// close seams — explicit archive and idle end (the Track-2 idle-close hole:
+// that path previously wrote no final rollup at all, so idle-closed meetings
+// never got a digest and "what did I miss" silently skipped them). Bounded by
+// meetingArchiveFlushTimeout and best-effort throughout: every failure only
+// logs, the caller always proceeds.
+func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
 	if app == nil || app.memory == nil {
 		return
 	}
@@ -248,15 +283,15 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), meetingArchiveFlushTimeout)
 	defer cancel()
-	for _, agent := range []ambientAgentConfig{meetingBrainAgent(), decisionLedgerAgent(), meetingBoardAgent(), missionIntelligenceAgent()} {
+	for _, agent := range closeFlushChain() {
 		// honor both disable forms (interval=0/off/false/disabled and the
-		// _DISABLED env): a turned-off agent must not run at archive time.
+		// _DISABLED env): a turned-off agent must not run at close time.
 		if boolEnv(agent.disabledEnv) || agent.interval() <= 0 {
 			continue
 		}
 		app.ensureAmbientAgentBaseline(agent)
 		if _, err := app.runAmbientAgentOnce(agent, ctx, apiKey, nil, 1); err != nil {
-			log.Errorf("%s archive flush failed: %v", agent.name, err)
+			log.Errorf("%s %s flush failed: %v", agent.name, seam, err)
 		}
 	}
 }

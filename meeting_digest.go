@@ -26,7 +26,7 @@ package main
 //     most once per local day.
 //
 // companyDigestWorker is deliberately NOT built here: amendment A2 makes T4 a
-// ledger state view + thin narrative, which lands with the ledger (Wave 4).
+// ledger state view + thin narrative — see company_digest.go (Wave 4).
 // Backfill ships OFF by default (MEETING_DIGEST_BACKFILL / DAY_DIGEST_BACKFILL
 // falsy → startAmbientAgent baselines at the newest pre-boot input), so a
 // first deploy never token-spikes over weeks of stored brains.

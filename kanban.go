@@ -524,6 +524,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// events folded into a rebuildable read-model). Backfill OFF by default
 	// (ENTITY_LEDGER_BACKFILL).
 	app.startEntityLedgerWorker(apiKey)
+	// Track-2 Wave 4 (amendment A2): T4 company digest = the ledger's CURRENT
+	// state view (deterministic Go projection) + a THIN narrative refreshed
+	// from ledger deltas — never a recursive re-summary of day digests
+	// (company_digest.go). Wakes only when the ledger changed (inputKind =
+	// ledger_event). Backfill OFF by default (COMPANY_DIGEST_BACKFILL).
+	app.startCompanyDigestWorker(apiKey)
 	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
 	// proposals and any auto_run-lane standing-approved work. Model-free, so it
 	// starts independent of the API key gate above.
@@ -4934,8 +4940,10 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 // lazily mint (and stamp) a successor id. Differences from archiveMeeting,
 // all deliberate: no email (silent), no successor record (the room is empty),
 // no deferred-notification flush (endMeetingForIdle already flushed with
-// "meeting_end"), and no ambient-agent flush (post-rotation model output
-// would key to the successor id).
+// "meeting_end"), and no ambient-agent flush here — post-rotation model output
+// would key to the successor id; endMeetingForIdle already ran the close
+// chain (flushAmbientAgentsForClose) BEFORE rotating, so the snapshot below
+// embeds the final brain pass and the meeting's digest.
 func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 	if app == nil || app.memory == nil || app.meetings == nil || strings.TrimSpace(closed.ID) == "" {
 		return
