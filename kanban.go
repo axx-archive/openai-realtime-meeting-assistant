@@ -510,6 +510,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startMeetingBoardWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
 	app.startDecisionLedgerWorker(apiKey)
+	// Track-2 digest tiers (meeting_digest.go): brains → per-meeting digests →
+	// per-day rollups, plus the end-of-day reflection riding the day tick.
+	// Backfill is OFF by default (MEETING_DIGEST_BACKFILL/DAY_DIGEST_BACKFILL)
+	// so a first deploy never token-spikes over weeks of stored brains.
+	app.startMeetingDigestWorker(apiKey)
+	app.startDayDigestWorker(apiKey)
 	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
 	// proposals and any auto_run-lane standing-approved work. Model-free, so it
 	// starts independent of the API key gate above.
@@ -3733,8 +3739,12 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// mission_insight JSON is UI state served via /assistant/mission;
 		// decisions render in the intel canvas ledger (and decision_pass is
 		// pure cursor bookkeeping); package records render in the intel
-		// canvas binder — none of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile {
+		// canvas binder — none of them are timeline entries. Digest rollups
+		// (strict JSON), reflections, and day_digest_pass cursor stubs stay
+		// recall/bookkeeping material with no timeline rendering either: the
+		// briefing surfaces read digests through the range helpers, not this
+		// feed.
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || isMeetingDigestKind(entry.Kind) {
 			continue
 		}
 		visible = append(visible, entry)

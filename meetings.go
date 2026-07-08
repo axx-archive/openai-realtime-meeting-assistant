@@ -739,6 +739,12 @@ func (app *kanbanBoardApp) meetingMemoryDetails(wanted map[string]struct{}) map[
 			// UI-state kinds never surface as meeting log rows.
 			continue
 		}
+		if isMeetingDigestKind(entry.Kind) {
+			// digest rollups are recall material (strict JSON), not meeting
+			// log rows; the card summary keeps coming from the freshest brain
+			// until a later wave prefers the digest deliberately.
+			continue
+		}
 
 		// The remaining kinds are the visible-timeline family: they count
 		// toward the entry total and feed the log rows.

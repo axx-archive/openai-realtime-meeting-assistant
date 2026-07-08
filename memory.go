@@ -74,7 +74,26 @@ const (
 	//   company_digest — the latest-only running fold across recent days
 	//   (digestKey = companyDigestKey).
 	meetingMemoryKindCompanyDigest = "company_digest"
-	defaultMeetingMemoryPath       = "data/meeting-memory.jsonl"
+	// meetingMemoryKindDayDigestPass is the day-digest agent's per-pass cursor
+	// artifact (Track-2 Wave 2, mirrors decision_pass): the durable
+	// throughMeetingDigestId cursor must advance even on a pass that rebuilt
+	// nothing, or a window of superseded/unparseable inputs would re-feed
+	// every tick and, once it exceeded the batch cap, starve newer digests
+	// forever. Pure bookkeeping: UI state, never knowledge. Written through
+	// appendAmbientEntry, so it carries NO meetingId and never mints one.
+	meetingMemoryKindDayDigestPass = "day_digest_pass"
+	// meetingMemoryKindReflection is the end-of-day synthesis entry (Track-2
+	// amendment A3) riding the day-digest tick: recurring blockers, consensus
+	// forming/diverging, decisions circled without closure, ownership drift —
+	// synthesis ACROSS recent digests + decision-ledger deltas, not another
+	// aggregation tier. Deliberately recall-eligible knowledge prose (NOT UI
+	// state — it grounds Scout search and query context like kind=decision),
+	// append-only, at most one per local calendar day, anchored to its
+	// supporting digests via metadata. Written through appendAmbientEntry: a
+	// reflection describes a PAST day, so it must neither join the live
+	// meeting's snapshotForMeeting nor lazily mint a meeting id at idle.
+	meetingMemoryKindReflection = "reflection"
+	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -332,15 +351,16 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 
 	// resume the in-flight meeting after a restart: if the newest entry was not
-	// an archive, the meeting it belongs to is still open. Digest rollups are
-	// skipped: they are ambient cross-meeting bookkeeping — a meeting_digest
-	// may describe a PAST meeting (its meetingId stamp = the digested meeting,
-	// not the live one) and day/company digests carry no meetingId at all —
-	// so a digest as the newest line must neither clear nor redirect the
-	// in-flight meeting id.
+	// an archive, the meeting it belongs to is still open. Digest rollups,
+	// reflections, and day-digest pass artifacts are skipped: they are ambient
+	// cross-meeting bookkeeping — a meeting_digest may describe a PAST meeting
+	// (its meetingId stamp = the digested meeting, not the live one) and the
+	// day/company digests, reflections, and pass artifacts carry no meetingId
+	// at all — so one of them as the newest line must neither clear nor
+	// redirect the in-flight meeting id.
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		last := store.entries[index]
-		if isMeetingDigestKind(last.Kind) {
+		if isMeetingDigestKind(last.Kind) || last.Kind == meetingMemoryKindReflection || last.Kind == meetingMemoryKindDayDigestPass {
 			continue
 		}
 		if last.Kind != meetingMemoryKindArchive {
@@ -920,10 +940,10 @@ const promptBodyOmittedMetadataKey = "promptBodyOmitted"
 
 // isPromptBodyCapExemptKind reports kinds whose Text must never be stubbed by
 // the prompt-body cap:
-//   - brain write-ups and the digest tiers (meeting_digest/day_digest/
-//     company_digest) are model-written summaries already bounded by their
-//     producers' MaxOutputTokens — the summary layer must survive whole so
-//     future long roll-ups aren't stubbed;
+//   - brain write-ups, the digest tiers (meeting_digest/day_digest/
+//     company_digest), and end-of-day reflections are model-written summaries
+//     already bounded by their producers' MaxOutputTokens — the summary layer
+//     must survive whole so future long roll-ups aren't stubbed;
 //   - UI-state record kinds (isUIStateMemoryKind: scout chat threads, packages,
 //     deal rooms, …) carry decoded-verbatim JSON that feature code reads through
 //     snapshot(0) (thread lists, channel linkage, the blob-sweep reference scan)
@@ -932,7 +952,7 @@ const promptBodyOmittedMetadataKey = "promptBodyOmitted"
 //     contextEntriesForQuery/search and from the client timeline by
 //     visibleMeetingMemoryEntries.
 func isPromptBodyCapExemptKind(kind string) bool {
-	if kind == meetingMemoryKindBrain || isMeetingDigestKind(kind) {
+	if kind == meetingMemoryKindBrain || kind == meetingMemoryKindReflection || isMeetingDigestKind(kind) {
 		return true
 	}
 	return isUIStateMemoryKind(kind)
@@ -1311,6 +1331,81 @@ func (store *meetingMemoryStore) appendEntryLineLocked(entry meetingMemoryEntry)
 	return nil
 }
 
+// appendAmbientEntry appends a cross-meeting ambient entry WITHOUT the
+// meetingId stamp appendEntryForMeeting applies: reflections and day-digest
+// pass artifacts describe PAST days, so they must neither adopt the live
+// meeting id (leaking into an unrelated snapshotForMeeting) nor lazily mint a
+// fresh one at idle (the upsertDigest precedent). Same seen-map dedupe and
+// RAM-matches-file rollback contract as the other append paths.
+func (store *meetingMemoryStore) appendAmbientEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	kind = strings.TrimSpace(kind)
+	text = normalizeMemoryEntryText(kind, text)
+	if kind == "" || text == "" {
+		return meetingMemoryEntry{}, false, nil
+	}
+	if strings.TrimSpace(id) == "" {
+		id = fmt.Sprintf("%s-%d", kind, time.Now().UnixNano())
+	}
+
+	stamped := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		stamped[key] = strings.TrimSpace(value)
+	}
+	entry := meetingMemoryEntry{
+		ID:        strings.TrimSpace(id),
+		Kind:      kind,
+		Text:      text,
+		CreatedAt: time.Now().UTC(),
+		Metadata:  stamped,
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if _, ok := store.seen[entry.ID]; ok {
+		return entry, false, nil
+	}
+	if err := store.appendEntryLineLocked(entry); err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	store.entries = append(store.entries, entry)
+	store.seen[entry.ID] = struct{}{}
+
+	return cloneMemoryEntry(entry), true, nil
+}
+
+// hasReflectionForDay reports whether an end-of-day reflection was already
+// written for the local calendar day (dayBucket key) — the at-most-one-per-day
+// guard the day-digest tick checks before spending a reflection model call.
+func (store *meetingMemoryStore) hasReflectionForDay(day string) bool {
+	day = strings.TrimSpace(day)
+	if store == nil || day == "" {
+		return false
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindReflection {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata[digestDayMetadataKey]) == day {
+			return true
+		}
+	}
+
+	return false
+}
+
 // latestDigestPerMeeting returns the current meeting_digest per meetingId
 // (digestKey), cloned. Exactly one current digest per key is the upsertDigest
 // invariant; newest-CreatedAt wins here as belt-and-suspenders for the crash
@@ -1589,7 +1684,7 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -1763,10 +1858,11 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && !isMeetingDigestKind(kind) {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindReflection && !isMeetingDigestKind(kind) {
 		// digest kinds take the structure-preserving branch below: their
 		// bodies are strict JSON (like mission_insight) and the whitespace
-		// collapse would mutate content inside JSON string values.
+		// collapse would mutate content inside JSON string values; reflection
+		// bodies are sectioned markdown (like brain write-ups).
 		return normalizeMemoryText(value)
 	}
 
