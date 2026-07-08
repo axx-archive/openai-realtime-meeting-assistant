@@ -943,6 +943,14 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		lines = append(lines, "This is a research run: you have LIVE web_search and web_fetch server tools. Prefer fetching current data over recalling it — search anything time-sensitive or externally verifiable, then fetch the primary/official source and cite its URL under Sources. Only sources you actually fetched this run earn grade A; any claim you could not verify against live web this loop is grade D and you must flag it.")
 	}
 	lines = append(lines, finalLine)
+	// Terminal-output law (Fable long-horizon early-stopping guard): across a
+	// multi-turn run — especially a web-search-heavy research run — the model
+	// can drift into ending with a "done / shipped above" confirmation instead
+	// of the report itself. But the run persists ONLY the text of your final
+	// message; there is no "above". If the last message is a status line, the
+	// deliverable is lost. This is the single most important rule for a research
+	// run, so it is stated last.
+	lines = append(lines, "CRITICAL — your FINAL message IS the deliverable and the ONLY place it is saved: there is no report 'above' and nothing else is persisted. Do NOT end with a confirmation, a status update, or a claim that the report is shipped/done/attached. Your last message must be the COMPLETE artifact text itself, every section populated from your actual tool results. If you are about to write a short 'goal complete' note, write the full report instead.")
 	return strings.Join(lines, "\n")
 }
 
