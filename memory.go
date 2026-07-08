@@ -690,7 +690,7 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	entry.Text = text
 
 	store.entries[index] = entry
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		store.entries[index] = previousEntry
 		return meetingMemoryEntry{}, false, err
 	}
@@ -750,7 +750,7 @@ func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpd
 	}
 
 	store.entries[index] = entry
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		store.entries[index] = previousEntry
 		return meetingMemoryEntry{}, false, err
 	}
@@ -809,7 +809,7 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 	entry.Text = text
 
 	store.entries[index] = entry
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		store.entries[index] = previousEntry
 		return meetingMemoryEntry{}, false, err
 	}
@@ -888,7 +888,7 @@ func (store *meetingMemoryStore) appendEntryForMeeting(kind string, id string, t
 	return entry, true, nil
 }
 
-func (store *meetingMemoryStore) rewriteLocked() error {
+func (store *meetingMemoryStore) rewriteLocked(syncToDisk bool) error {
 	dir := filepath.Dir(store.path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create memory directory: %w", err)
@@ -917,12 +917,17 @@ func (store *meetingMemoryStore) rewriteLocked() error {
 		_ = file.Close()
 		return fmt.Errorf("chmod memory temp file: %w", err)
 	}
-	// Flush to disk before the rename: upsertDigest makes full-file rewrites
-	// routine, and a crash after rename with unflushed data could truncate
-	// the entire memory file.
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("sync memory temp file: %w", err)
+	// Flush to disk before the rename when asked: digest upserts make
+	// full-file rewrites routine (~every few minutes), and a crash after
+	// rename with unflushed data could truncate the entire memory file.
+	// Per-message rewrites skip the fsync — it multiplies suite latency
+	// (the -race pass times out) and async reporters outrun assertions;
+	// their crash window is unchanged from the pre-digest design.
+	if syncToDisk {
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("sync memory temp file: %w", err)
+		}
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close memory temp file: %w", err)
@@ -1332,7 +1337,7 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 	if len(superseded) == 0 {
 		err = store.appendEntryLineLocked(entry)
 	} else {
-		err = store.rewriteLocked()
+		err = store.rewriteLocked(true)
 	}
 	if err != nil {
 		// roll back the in-RAM mutation so RAM matches the file.
@@ -1706,7 +1711,7 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 
 	removed := cloneMemoryEntry(store.entries[index])
 	store.entries = append(store.entries[:index], store.entries[index+1:]...)
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		// restore the in-memory slice so a failed rewrite is not silently lossy.
 		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
 		return meetingMemoryEntry{}, false, err

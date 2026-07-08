@@ -568,7 +568,7 @@ func (store *meetingMemoryStore) deleteEntriesByID(ids []string) (int, error) {
 		return 0, nil
 	}
 	store.entries = next
-	if err := store.rewriteLocked(); err != nil {
+	if err := store.rewriteLocked(false); err != nil {
 		store.entries = previous
 		return 0, err
 	}
