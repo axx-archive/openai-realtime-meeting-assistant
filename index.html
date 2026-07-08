@@ -13,6 +13,10 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>BonfireOS</title>
+    <!-- Build stamp: the server rewrites this token at serve time. A tab that
+         keeps its JS across a deploy compares it to the version pushed over the
+         websocket and refreshes itself once when they diverge. -->
+    <meta name="bonfire-build" content="__BONFIRE_BUILD_VERSION__">
     <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
     <!-- iOS ignores SVG icons — a PNG apple-touch-icon is required or the
          home-screen tile becomes a page screenshot. -->
@@ -3620,6 +3624,48 @@
       .toast--done .toast__bar { color: var(--live); }
       .toast--note .toast__bar { color: var(--info); }
       .toast--error .toast__bar { color: var(--danger); }
+
+      /* Deploy-refresh banner: shown only while a call is live so we never yank
+         someone out mid-meeting. It sits above the toast lane and reloads the
+         moment the user leaves the room (or when they tap Refresh now). */
+      .update-banner {
+        position: fixed;
+        left: 50%;
+        bottom: calc(78px + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 1120;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        max-width: min(560px, calc(100vw - 32px));
+        padding: 9px 10px 9px 18px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-full);
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        animation: bf-popin 0.4s var(--ease-spring);
+      }
+      .update-banner__text { min-width: 0; overflow-wrap: anywhere; }
+      .update-banner__action {
+        flex: none;
+        padding: 6px 14px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--accent);
+        color: var(--on-accent);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label-lg);
+        cursor: pointer;
+      }
+      .update-banner__action:hover { background: var(--accent-hover); }
+      @media (prefers-reduced-motion: reduce) {
+        .update-banner { animation: none; }
+      }
 
       /* Calm multi-device handoff chip (rtc §5.4): both devices stay in the
          room, so this is informational — never the alarming eviction banner. */
@@ -33289,8 +33335,136 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      /* ── deploy-refresh: build-version skew guard ─────────────────────────
+         index.html is served no-store and only re-read on a full page load, so
+         a tab that keeps its JS across a server deploy is running the OLD
+         frontend against a NEW protocol — that mismatch is what makes joins
+         flake after a deploy, and a full reload (not a logout) is the real fix.
+         The server bakes its build id into the served HTML and pushes the live
+         id over every websocket admission. When those diverge this tab refreshes
+         once, deferring until the user is safely out of any live call. The
+         session cookie survives, so no one has to sign in again. */
+      const buildVersionGuard = {
+        booted: (() => {
+          const raw = (document.querySelector('meta[name="bonfire-build"]')?.content || '').trim()
+          // An un-substituted placeholder (raw file served without the Go server,
+          // e.g. a test harness) counts as "unknown": we then adopt the first id
+          // the server reports as our baseline instead of reloading blindly.
+          return raw && !raw.includes('__BONFIRE_BUILD_VERSION__') ? raw : ''
+        })(),
+        pending: '',
+        scheduled: false,
+        banner: null
+      }
+      const reloadedForVersionKey = 'bonfire.reloadedForVersion.v1'
+
+      function noteServerVersion(version) {
+        version = String(version == null ? '' : version).trim()
+        if (!version) {
+          return
+        }
+        if (!buildVersionGuard.booted) {
+          // First contact with no baked id: adopt it so a LATER deploy still trips.
+          buildVersionGuard.booted = version
+          return
+        }
+        if (version === buildVersionGuard.booted) {
+          return
+        }
+        onServerBuildChanged(version)
+      }
+
+      // "Engaged" = live media, a join in flight, or the in-room view is up. Any
+      // of these means an abrupt reload would drop a call, so we defer.
+      function isRoomEngaged() {
+        return Boolean(
+          roomMediaActive() ||
+          (typeof roomEntryInProgress !== 'undefined' && roomEntryInProgress) ||
+          appShell?.classList?.contains('is-in-room')
+        )
+      }
+
+      function onServerBuildChanged(version) {
+        // Reload at most once per new build, and remember it across the reload so
+        // a still-propagating deploy (the reload lands on the old build again)
+        // can never spin into a loop.
+        let already = ''
+        try { already = window.sessionStorage?.getItem(reloadedForVersionKey) || '' } catch { already = '' }
+        if (already === version) {
+          return
+        }
+        if (isRoomEngaged()) {
+          // Never yank someone out of a live call (or mid-join) — arm the reload
+          // for when they leave and surface a calm, dismissable banner meanwhile.
+          buildVersionGuard.pending = version
+          showUpdateBanner()
+          return
+        }
+        scheduleBuildReload(version)
+      }
+
+      function scheduleBuildReload(version) {
+        if (buildVersionGuard.scheduled) {
+          return
+        }
+        buildVersionGuard.scheduled = true
+        try { window.sessionStorage?.setItem(reloadedForVersionKey, version) } catch { /* private mode */ }
+        showToast({ text: 'Bonfire updated — refreshing…', kind: 'note' })
+        window.setTimeout(() => {
+          try { window.location.reload() } catch { /* navigation blocked */ }
+        }, 2200)
+      }
+
+      // Called from leaveRoom(): a deploy that landed mid-call reloads the moment
+      // the user is safely out of the room.
+      function flushPendingBuildReload() {
+        if (!buildVersionGuard.pending) {
+          return
+        }
+        const version = buildVersionGuard.pending
+        buildVersionGuard.pending = ''
+        hideUpdateBanner()
+        scheduleBuildReload(version)
+      }
+
+      function showUpdateBanner() {
+        if (buildVersionGuard.banner) {
+          return
+        }
+        const banner = document.createElement('div')
+        banner.className = 'update-banner'
+        banner.setAttribute('role', 'status')
+        banner.setAttribute('aria-live', 'polite')
+        const text = document.createElement('span')
+        text.className = 'update-banner__text'
+        text.textContent = 'Bonfire updated — refresh when you leave the call.'
+        const action = document.createElement('button')
+        action.type = 'button'
+        action.className = 'update-banner__action'
+        action.textContent = 'Refresh now'
+        action.addEventListener('click', () => {
+          const version = buildVersionGuard.pending || buildVersionGuard.booted
+          buildVersionGuard.pending = ''
+          hideUpdateBanner()
+          scheduleBuildReload(version)
+        })
+        banner.append(text, action)
+        document.body.appendChild(banner)
+        buildVersionGuard.banner = banner
+      }
+
+      function hideUpdateBanner() {
+        if (buildVersionGuard.banner) {
+          buildVersionGuard.banner.remove()
+          buildVersionGuard.banner = null
+        }
+      }
+
       function handleKanbanMessage(message) {
         switch (message.event) {
+          case 'server_version':
+            noteServerVersion(message.data)
+            break
           case 'office_granted':
             // the payload snapshots (board/memory/meeting/backlogs) arrive as
             // their own events right after; chat threads have no replay event,
@@ -49170,6 +49344,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         validateAccess()
         loadParticipantPreview()
         isLeavingRoom = false
+        // A deploy that landed mid-call armed a reload; now that the user is out
+        // of the room, apply it (fresh HTML + protocol, session preserved).
+        flushPendingBuildReload()
       }
 
       function setConnectionState(state, label) {

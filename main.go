@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -45,6 +48,12 @@ var (
 	// blocks memory-amplification from oversized frames.
 	maxWebsocketMessageBytes int64 = 256 << 10 // 256 KiB
 	indexHTML                []byte
+
+	// serverBuildVersion identifies the running build. It is baked into the
+	// served index.html and pushed over every websocket admission so a tab
+	// holding old JS across a deploy can detect the skew on reconnect and
+	// refresh itself (see deploy-refresh flow). Computed once at boot.
+	serverBuildVersion string
 
 	// lock for peerConnections and trackLocals
 	listLock        sync.RWMutex
@@ -525,6 +534,14 @@ func main() {
 		panic(err)
 	}
 
+	// Stamp the running build into the served HTML. The version is computed from
+	// the raw file (with the placeholder still in it) plus the binary's identity,
+	// so it changes on every deploy that ships a new binary or a new index.html
+	// but NOT on a plain restart of the same image — a crash-restart therefore
+	// never nags open tabs to reload, while a real deploy always does.
+	serverBuildVersion = computeBuildVersion(indexHTML)
+	indexHTML = bytes.ReplaceAll(indexHTML, []byte(buildVersionPlaceholder), []byte(serverBuildVersion))
+
 	// Card 089: mint (or load) the Web Push VAPID keypair at boot so the
 	// public key is ready the moment a client asks to subscribe. Persists to
 	// data/vapid-keys.json, which survives deploys like users.json.
@@ -664,6 +681,31 @@ func broadcastServerShutdown(retryAfterMs int) {
 	})
 }
 
+// buildVersionPlaceholder is the token the served index.html carries in a
+// <meta> tag; it is rewritten to serverBuildVersion at boot. Kept in sync with
+// the same literal in index.html.
+const buildVersionPlaceholder = "__BONFIRE_BUILD_VERSION__"
+
+// computeBuildVersion derives a stable id for the running build. An explicit
+// BONFIRE_BUILD_VERSION wins (e.g. a git sha injected at image build time);
+// otherwise it hashes the server binary's size+modtime together with the
+// frontend bytes. Both change on a real deploy (rebuild → new binary, or an
+// edited index.html) yet stay constant across a plain process restart, so the
+// client-side skew guard only fires when the code actually changed.
+func computeBuildVersion(indexBytes []byte) string {
+	if v := strings.TrimSpace(os.Getenv("BONFIRE_BUILD_VERSION")); v != "" {
+		return v
+	}
+	h := sha256.New()
+	if exe, err := os.Executable(); err == nil {
+		if info, statErr := os.Stat(exe); statErr == nil {
+			fmt.Fprintf(h, "exe:%d:%d\n", info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	h.Write(indexBytes)
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -673,6 +715,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
 		"ok":      true,
 		"service": "meetingassist",
+		"version": serverBuildVersion,
 		"time":    time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
@@ -3498,6 +3541,16 @@ func logSelectedCandidatePair(peerConnection *webrtc.PeerConnection, participant
 }
 
 // Handle incoming websockets.
+// sendServerBuildVersion pushes the running build id to a freshly admitted
+// socket. A stale tab — old JS whose websocket reconnected across a deploy —
+// compares it to the version baked into its HTML and refreshes once when they
+// diverge, so joins never flake on version skew. Best-effort.
+func sendServerBuildVersion(c *threadSafeWriter) {
+	if err := sendKanbanEvent(c, "server_version", serverBuildVersion); err != nil {
+		log.Errorf("Failed to send server build version: %v", err)
+	}
+}
+
 func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// Accounts gate the room: resolve the session cookie before upgrading so
 	// an unauthenticated socket never allocates a PeerConnection or chat
@@ -3919,6 +3972,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "status", "Connected to conference room"); err != nil {
 				log.Errorf("Failed to send Kanban status: %v", err)
 			}
+			sendServerBuildVersion(c)
 			if assistantStatus := kanbanApp.assistantStatusSnapshot(); assistantStatus != nil {
 				if err := sendKanbanEvent(c, "assistant_event", assistantStatus); err != nil {
 					log.Errorf("Failed to send assistant status: %v", err)
@@ -3993,6 +4047,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "codex_proposals", kanbanApp.codexProposalsSnapshot(codexProposalHistoryLimit)); err != nil {
 				log.Errorf("Failed to send codex proposals: %v", err)
 			}
+			sendServerBuildVersion(c)
 		case "office_ping":
 			// Client-side liveness probe: the office tab pings so it can tell
 			// a healthy-but-quiet socket from a dead one (and re-dial before
