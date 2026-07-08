@@ -849,11 +849,16 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
-	// Both kinds print an HTML document (deck: flatten law; paper: text-native
-	// direct print) — a markdown body has nothing for chromium to lay out.
-	if !artifactIsHTMLDocument(artifact) {
-		writeAuthError(w, http.StatusBadRequest, "PDF export needs an HTML artifact body (an html_deck or paper-kit document)")
-		return
+	// Decks and paper-kit documents print their own HTML (deck: flatten law;
+	// paper: text-native direct print). A markdown body — the research-report
+	// contract — has nothing for chromium to lay out, so the server converts
+	// it into the branded BonfireOS print document
+	// (renderResearchReportPrintHTML) and ships it down the text-native paper
+	// path.
+	printHTML := artifact.Text
+	markdownReport := !artifactIsHTMLDocument(artifact)
+	if markdownReport {
+		printHTML = renderResearchReportPrintHTML(artifact)
 	}
 	if !renderSidecarAvailable() {
 		writeAuthError(w, http.StatusServiceUnavailable, "render sidecar not available — start the render-runner container (or run with -render-runner) to export PDFs")
@@ -863,13 +868,17 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	// The flatten law is server-owned: the client may request an export, not
 	// choose the print path (a deck exported as "paper" would ship the layered
 	// print). Kind derives from the artifact's own declaration; a stated kind
-	// that disagrees is rejected rather than silently rewritten.
+	// that disagrees is rejected rather than silently rewritten. A markdown
+	// report is text-native by construction — always paper, never a flatten.
 	kind := serverRenderKindForArtifact(artifact)
+	if markdownReport {
+		kind = renderJobKindPaper
+	}
 	if requested := strings.TrimSpace(payload.Kind); requested != "" && normalizeRenderJobKind(requested) != kind {
-		writeAuthError(w, http.StatusBadRequest, "export kind is derived from the artifact (paper is only for paper-kit documents) — omit kind or match it")
+		writeAuthError(w, http.StatusBadRequest, "export kind is derived from the artifact (paper is only for paper-kit documents and markdown reports) — omit kind or match it")
 		return
 	}
-	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, artifact.Text, artifact.Metadata["title"])
+	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, printHTML, artifact.Metadata["title"])
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3672,6 +3681,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if err := sendKanbanEvent(c, "codex_proposals", kanbanApp.codexProposalsSnapshot(codexProposalHistoryLimit)); err != nil {
 				log.Errorf("Failed to send codex proposals: %v", err)
+			}
+		case "office_ping":
+			// Client-side liveness probe: the office tab pings so it can tell
+			// a healthy-but-quiet socket from a dead one (and re-dial before
+			// live chat_thread delivery silently stops) without forcing a
+			// page refresh — which would drop a live video room seat. Answer
+			// on the same socket, top-level like the signaling events; no
+			// state changes, no auth beyond the session that opened the
+			// socket.
+			if err := c.WriteJSON(&websocketMessage{Event: "office_pong"}); err != nil {
+				log.Errorf("Failed to send office pong: %v", err)
 			}
 		case "media_ready":
 			if !participantAccepted {

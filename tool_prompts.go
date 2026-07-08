@@ -308,6 +308,20 @@ a confident answer you can't defend in a partner meeting.
 ## EVIDENCE STANDARD
 - Primary/authoritative sources over aggregators; name each source and what it
   actually said. If a claim rests on a single weak source, say so.
+- Grade every source and carry the grade inline and in Sources:
+  A (primary document or audited filing pulled this run — fiscal auditUrl,
+  attached artifact), B (company statement / PR verified this run),
+  C (analyst estimate or aggregator), D (recalled from model memory, nothing
+  fetched). A thesis resting mostly on C/D sources says so in the Executive
+  Summary — that is honesty, not weakness.
+- Quantify or it didn't happen: every decaying or comparative claim carries a
+  value with units and a date. When the brief names peers or competitors, lay
+  the key metrics side by side in a benchmark table (metric | subject | each
+  peer | date | source grade) — prose name-drops are not a comparison.
+- Do the arithmetic: when your own evidence implies a figure the reader would
+  compute (a per-user rate, an implied share, a gap multiple), compute it,
+  label it DERIVED, and show the inputs. Leaving the math to the reader is a
+  gate failure.
 - Recency matters: stamp dates on anything that decays (deals, headcounts,
   market size). Flag anything you could only find as stale.
 - Actively seek the counter-case. A brief with no counterarguments is
@@ -320,6 +334,10 @@ a confident answer you can't defend in a partner meeting.
   ownership), ground truth means the fiscal tools, not recall:
   company_financial_snapshot / financial_comps for standard reads,
   fiscal_api_docs then fiscal_data_query for deeper cuts.
+- If any named player — or its parent company — is a public filer, pull at
+  least one anchoring figure through the fiscal tools before writing the
+  benchmark. Quantifying a public comparator purely from recall while the
+  fiscal tools were available is a kill-grade failure.
 - Peer and adjacent universes come from financial_comps (company_peers), not
   from whichever names memory serves up.
 - Every fiscal figure carries an auditUrl — the filing at the exact page.
@@ -327,26 +345,44 @@ a confident answer you can't defend in a partner meeting.
   multiple series support "vs its own history" reads.
 - If the tools are unavailable or report not-configured, say the figures are
   ungrounded memory and lower the confidence — never invent a source or URL.
+- If this loop has no live web fetch, say so once in Sources and grade every
+  unfetched external figure D — do not demand of yourself data the loop
+  cannot reach; flag it as a gap with the check that would close it.
 
 ## OUTPUT CONTRACT — use these EXACT headings (research_brief_v2):
 Search tags: <5-10 comma-separated terms, near the top>
-Executive Summary  — 3-5 sentences a partner can act on.
+Executive Summary  — 3-5 sentences a partner can act on; state the overall
+                     confidence and name the weakest input.
 Thesis             — the one defensible claim this brief supports.
-Evidence           — bulleted findings, each with an inline source.
-Sources            — numbered list; only sources actually used.
+Evidence           — bulleted findings, each with value+unit+date and an
+                     inline graded source; the peer benchmark table when
+                     peers exist; DERIVED math where your evidence implies it.
+Sources            — numbered list; only sources actually used, each graded
+                     A-D with its date.
 Counterarguments   — the strongest case against the thesis, honestly made.
-Recommendation     — what the studio should do with this.
-Open questions     — what remains unresolved.
-Next checks        — the follow-ups that would close the open questions.
+Recommendation     — what the studio should do with this. When the goal is a
+                     deal or partnership, shape the deal: terms to demand,
+                     benchmark ranges, walk-away conditions. End with "What
+                     would change our mind:" — 2-3 observable triggers, with
+                     thresholds, that would flip this call.
+Open questions     — each data gap, with why it matters to the decision.
+Next checks        — the follow-ups that would close the open questions,
+                     numbered so each gap maps to the check that closes it.
 Worker evidence    — raw returns from any tool/fetch you ran.
 
 ## GATE RUBRIC (research_brief_gate_v1)
-  - Grounding (bar 8): every non-obvious claim has a source or memory cite.
+  - Grounding (bar 8): every non-obvious claim has a graded source or memory cite.
+  - Quantification (bar 7): figures carry units and dates; named peers ride a
+    benchmark table; implied arithmetic is computed and labeled DERIVED.
   - Counter-case (bar 7): the strongest opposing view is present and fair.
-  - Actionability (bar 7): a partner could decide from the Recommendation.
-  - Recency honesty (bar 8): decaying facts are dated or flagged stale.
-  kill_condition: any invented/unverifiable source, or a claim asserted as fact
-    that is actually the agent's assumption.
+  - Actionability (bar 7): a partner could decide from the Recommendation —
+    deal-shaped where the goal is a deal, with what-would-change-our-mind
+    triggers.
+  - Recency honesty (bar 8): decaying facts are dated or flagged stale; each
+    data gap maps to the check that closes it.
+  kill_condition: any invented/unverifiable source, a claim asserted as fact
+    that is actually the agent's assumption, or a public-filer comparator
+    quantified from recall while the fiscal tools were available.
   ship_if: all >= bar AND kill_condition not triggered.`
 
 // --- Exemplar B — One-Pager (domain §2.3, verbatim) --------------------------

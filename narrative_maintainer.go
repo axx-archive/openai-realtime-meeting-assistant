@@ -24,6 +24,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -74,6 +75,20 @@ func narrativeMaintainerAgent() ambientAgentConfig {
 
 func (app *kanbanBoardApp) startNarrativeMaintainerWorker(apiKey string) {
 	app.startAmbientAgent(narrativeMaintainerAgent(), apiKey)
+}
+
+// narrativeMaintainerEffort is the maintainer's thinking depth on both model
+// paths (the Sonnet call and the keyless-OpenAI fallback). Default medium —
+// the doctrine floor (agent_runner_anthropic.go): a summarization-maintenance
+// seat needs no orchestrator-grade depth, but no surface ever runs below
+// medium. A configured dial below the floor clamps UP with a logged warning,
+// the orchestratorEffort/deliverableEffort idiom.
+func narrativeMaintainerEffort() string {
+	effort, clamped := flooredEffort(os.Getenv("NARRATIVE_MAINTAINER_EFFORT"), doctrineEffortFloor)
+	if clamped {
+		log.Warnf("NARRATIVE_MAINTAINER_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
+	}
+	return effort
 }
 
 // narrativeUpdatePayload is one storyline update in the maintainer's strict
@@ -258,6 +273,7 @@ func (app *kanbanBoardApp) buildNarrativeMaintainerInput(inputs []meetingMemoryE
 func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	input := app.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
 	model := meetingBrainModel()
+	effort := narrativeMaintainerEffort()
 	var text string
 	var err error
 	// Sonnet fronts the maintainer whenever an Anthropic key is present (the
@@ -269,7 +285,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			Model:        model,
 			Instructions: narrativeMaintainerInstructions(),
 			Input:        input,
-			Effort:       "low",
+			Effort:       effort,
 			MaxTokens:    4000,
 		})
 	} else {
@@ -277,7 +293,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			Model:           model,
 			Instructions:    narrativeMaintainerInstructions(),
 			Input:           input,
-			ReasoningEffort: "low",
+			ReasoningEffort: effort,
 			Verbosity:       "low",
 			MaxOutputTokens: 4000,
 		})
@@ -346,8 +362,9 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		// A legitimate "nothing storyline-worthy" pass appends no artifact, so
 		// the chassis cursor would stall and re-feed the same brains every
 		// tick. Advance it by stamping the consumed-through id onto the newest
-		// existing narrative entry; a cold-start no-op (no narrative yet) just
-		// retries the cheap window next pass.
+		// existing narrative entry — or, on cold start (no narrative yet), onto
+		// a hidden cursor-carrier entry, so an all-empty workspace never
+		// re-reads the same brain window forever.
 		app.stampNarrativeCursor(lastBrain.ID)
 		return meetingMemoryEntry{}, nil
 	}
@@ -355,14 +372,30 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	return latest, nil
 }
 
-// stampNarrativeCursor advances the maintainer's consumed-through cursor on
-// the newest narrative entry after a pass that appended nothing.
+// stampNarrativeCursor advances the maintainer's consumed-through cursor
+// after a pass that appended nothing. With an existing narrative entry the
+// stamp lands on the newest one; on cold start (no narrative yet) it appends
+// a hidden cursor-carrier entry instead — expired from birth and slugless, so
+// recall, the mission snapshot, and the dossier context never see it. This is
+// the chassis idiom of persisting the cursor independent of content
+// production (mission intelligence appends its artifact even on a thin
+// window); without it, a workspace whose every pass legitimately returns
+// {"narratives":[]} would re-read the same brain window forever.
 func (app *kanbanBoardApp) stampNarrativeCursor(throughBrainID string) {
 	if app == nil || app.memory == nil || strings.TrimSpace(throughBrainID) == "" {
 		return
 	}
 	latestID := app.memory.latestEntryIDOfKind(meetingMemoryKindNarrative)
 	if latestID == "" {
+		now := time.Now()
+		if _, _, err := app.memory.appendNarrative(durableTimestampID("narrative-cursor", now), "Narrative maintainer cursor stamp — no storylines yet.", map[string]string{
+			narrativeCursorKey:   throughBrainID,
+			"source":             "narrative_maintainer",
+			relevanceMetadataKey: relevanceExpired,
+			"generatedAt":        now.UTC().Format(time.RFC3339),
+		}); err != nil {
+			log.Errorf("%s failed to persist cold-start cursor: %v", narrativeMaintainerAgentName, err)
+		}
 		return
 	}
 	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindNarrative, latestID)

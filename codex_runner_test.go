@@ -223,6 +223,101 @@ func TestInternalCodexRunnerCallbackUpdatesArtifact(t *testing.T) {
 	}
 }
 
+// Queued jobs terminate through the runner callback, never runAgentThread, so
+// the callback seam has to write the run-ledger line itself — otherwise "what
+// has Scout run for us?" recall silently misses every codex-executed run. The
+// ledger id derives from the thread id, so a retried callback must not write a
+// second line, and a failed callback records the ledger's "error" vocabulary.
+func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	defer func() { kanbanApp = previousApp }()
+	t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
+
+	postCallback := func(payload codexRunnerCallbackPayload) {
+		t.Helper()
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal callback: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/internal/codex/jobs/result", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer runner-secret")
+		recorder := httptest.NewRecorder()
+		internalCodexRunnerResultHandler(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("callback status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	runLogsForThread := func(threadID string) []meetingMemoryEntry {
+		matched := make([]meetingMemoryEntry, 0, 1)
+		for _, entry := range app.memory.entriesOfKind(meetingMemoryKindRunLog, 20) {
+			if entry.ID == "run-log-"+threadID {
+				matched = append(matched, entry)
+			}
+		}
+		return matched
+	}
+
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Build it", "queued", "tester", map[string]string{
+		"title":        "Build it",
+		"threadId":     "agent-thread-runlog-test",
+		"threadQuery":  "build the thing",
+		"mode":         "workflow",
+		"threadStatus": codexJobStatusQueued,
+	})
+	if err != nil {
+		t.Fatalf("createOSArtifactWithMetadata: %v", err)
+	}
+	completePayload := codexRunnerCallbackPayload{
+		JobID:      "codex-job-runlog",
+		ArtifactID: artifact.ID,
+		Status:     codexJobStatusComplete,
+		Text:       "Vision: finished\n\n## Codex worker evidence\n- Worker: codex exec",
+	}
+	postCallback(completePayload)
+	logs := runLogsForThread("agent-thread-runlog-test")
+	if len(logs) != 1 {
+		t.Fatalf("run logs=%d, want 1 ledger line for the completed callback", len(logs))
+	}
+	if logs[0].Metadata["status"] != "complete" || logs[0].Metadata["artifactId"] != artifact.ID {
+		t.Fatalf("run log metadata=%v, want complete + artifact id", logs[0].Metadata)
+	}
+
+	// A retried identical callback dedupes on the ledger id.
+	postCallback(completePayload)
+	if logs := runLogsForThread("agent-thread-runlog-test"); len(logs) != 1 {
+		t.Fatalf("run logs=%d after retry, want 1", len(logs))
+	}
+
+	failedArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Break it", "queued", "tester", map[string]string{
+		"title":        "Break it",
+		"threadId":     "agent-thread-runlog-failed",
+		"threadQuery":  "break the thing",
+		"mode":         "workflow",
+		"threadStatus": codexJobStatusQueued,
+	})
+	if err != nil {
+		t.Fatalf("createOSArtifactWithMetadata: %v", err)
+	}
+	postCallback(codexRunnerCallbackPayload{
+		JobID:      "codex-job-runlog-failed",
+		ArtifactID: failedArtifact.ID,
+		Status:     codexJobStatusFailed,
+		Error:      "workspace exploded",
+	})
+	logs = runLogsForThread("agent-thread-runlog-failed")
+	if len(logs) != 1 {
+		t.Fatalf("run logs=%d, want 1 ledger line for the failed callback", len(logs))
+	}
+	if logs[0].Metadata["status"] != "error" {
+		t.Fatalf("run log status=%q, want error", logs[0].Metadata["status"])
+	}
+	if !strings.Contains(logs[0].Text, "workspace exploded") {
+		t.Fatalf("run log text=%q, want the error summary", logs[0].Text)
+	}
+}
+
 func TestInternalCodexRunnerCallbackRejectsStaleJobID(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp

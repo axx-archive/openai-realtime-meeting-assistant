@@ -28,9 +28,11 @@ const (
 
 // chatModel is the conversational-surface model, distinct from the
 // orchestrator's (orchestratorModel) and the ambient workers'
-// (meetingBrainModel) dials.
+// (meetingBrainModel) dials. Chat is a worker seat under the routing doctrine
+// (agent_runner_anthropic.go: Sonnet/Opus tier only, never Haiku), so the env
+// dial rides the same guard as the orchestrator/review/fallback dials.
 func chatModel() string {
-	return getenvDefault("BONFIRE_CHAT_MODEL", defaultChatModel)
+	return doctrineModelOrDefault("BONFIRE_CHAT_MODEL", defaultChatModel)
 }
 
 // anthropicTextRequest mirrors openAITextRequest: one instruction block, one
@@ -73,14 +75,12 @@ func createAnthropicTextResponseHTTP(ctx context.Context, apiKey string, request
 	if maxTokens <= 0 {
 		maxTokens = anthropicChatMaxTokens
 	}
-	// Same validation posture as orchestratorEffort: junk falls back to low —
-	// chat is the latency-sensitive surface, not the intelligence ceiling.
-	effort := strings.ToLower(strings.TrimSpace(request.Effort))
-	switch effort {
-	case "low", "medium", "high", "xhigh", "max":
-	default:
-		effort = "low"
-	}
+	// Doctrine floor (agent_runner_anthropic.go): no Anthropic surface runs
+	// below medium — callers still passing the pre-doctrine "low" clamp UP
+	// here, and junk/empty falls back to the floor rather than below it.
+	// Silent (no per-request warning): the clamped values are hardcoded caller
+	// constants, not operator misconfiguration, and chat runs on every turn.
+	effort, _ := flooredEffort(request.Effort, doctrineEffortFloor)
 
 	// Attachment blocks (images/PDFs) go ahead of the text block in the one
 	// user turn; a request without attachments assembles exactly as before.

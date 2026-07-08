@@ -99,9 +99,11 @@ const defaultReviewModel = "claude-opus-4-8"
 
 // reviewModel resolves the reviewer/gate model — the review-side twin of the
 // per-subtask runner override above: env-with-default, resolved once at engine
-// construction and routed per call (goal_engine.callReviewModel).
+// construction and routed per call (goal_engine.callReviewModel). The judging
+// seat is a worker seat under the routing doctrine (Sonnet/Opus tier only,
+// never Haiku), so the dial rides the doctrine guard.
 func reviewModel() string {
-	return getenvDefault("BONFIRE_REVIEW_MODEL", defaultReviewModel)
+	return doctrineModelOrDefault("BONFIRE_REVIEW_MODEL", defaultReviewModel)
 }
 
 // newAgentJob derives an AgentJob from a launched thread. It reads the additive

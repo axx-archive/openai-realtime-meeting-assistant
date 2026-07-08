@@ -161,6 +161,124 @@ func TestNarrativeMaintainerCreatesUpdatesAndExpiresDossiers(t *testing.T) {
 	}
 }
 
+// The maintainer's effort rides the doctrine floor (agent_runner_anthropic.go):
+// default medium — the summarization-maintenance level — low/minimal clamp UP,
+// above-floor values pass through, junk falls back to the floor. No hardcoded
+// "low" survives anywhere on this seat.
+func TestNarrativeMaintainerEffortFloor(t *testing.T) {
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "")
+	if got := narrativeMaintainerEffort(); got != doctrineEffortFloor {
+		t.Fatalf("narrativeMaintainerEffort() default=%q, want the %s doctrine floor", got, doctrineEffortFloor)
+	}
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "low")
+	if got := narrativeMaintainerEffort(); got != "medium" {
+		t.Fatalf("narrativeMaintainerEffort() with low=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "minimal")
+	if got := narrativeMaintainerEffort(); got != "medium" {
+		t.Fatalf("narrativeMaintainerEffort() with minimal=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "High")
+	if got := narrativeMaintainerEffort(); got != "high" {
+		t.Fatalf("narrativeMaintainerEffort() with high=%q, want high (above the floor passes through)", got)
+	}
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "galactic")
+	if got := narrativeMaintainerEffort(); got != doctrineEffortFloor {
+		t.Fatalf("narrativeMaintainerEffort() with junk=%q, want the %s floor fallback", got, doctrineEffortFloor)
+	}
+}
+
+// The keyed-Anthropic pass sends the floored effort on the wire — never the
+// pre-doctrine hardcoded "low" the review caught.
+func TestNarrativeMaintainerAnthropicEffortNeverLow(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "")
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung pitch.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	gotEffort := ""
+	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		gotEffort = request.Effort
+		return `{"narratives":[]}`, nil
+	})
+	runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("keyed-Anthropic pass must not ride the OpenAI responder")
+		return "", nil
+	})
+	if gotEffort != doctrineEffortFloor {
+		t.Fatalf("Anthropic effort=%q, want the %s doctrine floor (never low)", gotEffort, doctrineEffortFloor)
+	}
+}
+
+// Cold start + an all-empty workspace: a pass that legitimately returns
+// {"narratives":[]} before ANY dossier exists must still advance the cursor —
+// via a hidden cursor-carrier entry — so the same brain window is never
+// re-fed forever. The carrier is invisible to every narrative read surface.
+func TestNarrativeMaintainerColdStartEmptyPassAdvancesCursor(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("NARRATIVE_MAINTAINER_EFFORT", "")
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nStand-up chatter, nothing storyline-worthy.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	passes := 0
+	empty := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		passes++
+		if request.ReasoningEffort != doctrineEffortFloor {
+			t.Fatalf("keyless effort=%q, want the %s doctrine floor (never low)", request.ReasoningEffort, doctrineEffortFloor)
+		}
+		return `{"narratives":[]}`, nil
+	}
+	if entry := runNarrativeMaintainerOnceForTest(t, app, empty); strings.TrimSpace(entry.ID) != "" {
+		t.Fatalf("cold-start empty pass appended %q, want no dossier", entry.ID)
+	}
+	if passes != 1 {
+		t.Fatalf("model passes=%d, want exactly one", passes)
+	}
+
+	// The cursor advanced even with zero dossiers: a second pass with no new
+	// brains finds nothing unconsumed and never calls the model.
+	if entry := runNarrativeMaintainerOnceForTest(t, app, empty); strings.TrimSpace(entry.ID) != "" {
+		t.Fatalf("second empty pass appended %q, want nothing", entry.ID)
+	}
+	if passes != 1 {
+		t.Fatalf("model passes after cursor stamp=%d, want still one (the window must not be re-fed)", passes)
+	}
+
+	// The carrier never surfaces: not an active dossier, never recall material.
+	if actives := app.activeNarrativeEntries(narrativeStorylineContextLimit); len(actives) != 0 {
+		t.Fatalf("cursor carrier leaked into active dossiers: %v", actives)
+	}
+	for _, match := range app.memory.search("narrative maintainer cursor", 8) {
+		if match.Entry.Kind == meetingMemoryKindNarrative {
+			t.Fatal("cursor carrier must never be a recall candidate")
+		}
+	}
+
+	// New brains after the stamp ARE fed — starting after the consumed window —
+	// and a real dossier takes over as the cursor holder.
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-2", "## Overview\nSamsung pitch delivered.", nil); err != nil || !appended {
+		t.Fatalf("append brain-2: appended=%v err=%v", appended, err)
+	}
+	var window string
+	entry := runNarrativeMaintainerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		window = request.Input
+		return `{"narratives":[{"slug":"samsung","title":"Samsung","status":"Pitched","body":"## Storyline\nSamsung."}]}`, nil
+	})
+	if strings.Contains(window, "brain-1 |") || !strings.Contains(window, "brain-2") {
+		t.Fatalf("post-stamp window should start after brain-1:\n%s", window)
+	}
+	if entry.Metadata[narrativeCursorKey] != "brain-2" {
+		t.Fatalf("dossier cursor=%q, want brain-2", entry.Metadata[narrativeCursorKey])
+	}
+	if actives := app.activeNarrativeEntries(narrativeStorylineContextLimit); len(actives) != 1 || actives[0].ID != entry.ID {
+		t.Fatalf("active dossiers=%v, want exactly the samsung dossier", actives)
+	}
+}
+
 func TestNarrativeMaintainerSkipsUnparseableOutput(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	app := newIsolatedKanbanBoardApp(t)

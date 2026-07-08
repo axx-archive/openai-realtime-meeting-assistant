@@ -168,7 +168,8 @@ func TestPalettePackagePickerWired(t *testing.T) {
 
 // F1's salvage metadata must be surfaced on the goalcard: the live stage line
 // names an in-flight revision, and a needs_attention terminal card opens the
-// saved draft with an honest gap one-liner.
+// saved draft with an honest gap one-liner — in the right-side artifact stage
+// over the thread, never a tool yank to the Intelligence tab.
 func TestGoalcardSurfacesSalvageMetadata(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
@@ -188,10 +189,13 @@ func TestGoalcardSurfacesSalvageMetadata(t *testing.T) {
 	if terminal == "" {
 		t.Fatal("index.html missing goalCardRenderTerminal")
 	}
-	for _, want := range []string{"m.deliverableArtifactId", "m.goalGap", "open draft", "openAgentArtifact({ id: deliverableId })"} {
+	for _, want := range []string{"m.deliverableArtifactId", "m.goalGap", "open draft", "openArtifactStage(deliverableId, goalArtifactTitle(artifact))"} {
 		if !strings.Contains(terminal, want) {
 			t.Errorf("goalCardRenderTerminal missing salvage affordance %q", want)
 		}
+	}
+	if strings.Contains(terminal, "openAgentArtifact({ id: deliverableId })") {
+		t.Error("the salvage draft must open in the artifact stage, not yank the active tool to Intelligence")
 	}
 }
 

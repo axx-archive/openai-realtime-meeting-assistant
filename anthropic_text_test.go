@@ -70,8 +70,10 @@ func TestCreateAnthropicTextResponseWrapsMessagesSeam(t *testing.T) {
 	if got.Model != "claude-sonnet-5" {
 		t.Fatalf("model=%q, want the claude-sonnet-5 chat default", got.Model)
 	}
-	if got.MaxTokens != 800 || got.Effort != "low" {
-		t.Fatalf("budget=%d/%q, want 800/low", got.MaxTokens, got.Effort)
+	// The caller asked for effort low; the doctrine floor (never below medium)
+	// clamps it UP on the wire.
+	if got.MaxTokens != 800 || got.Effort != "medium" {
+		t.Fatalf("budget=%d/%q, want 800/medium (doctrine floor over the caller's low)", got.MaxTokens, got.Effort)
 	}
 	// Sonnet 5 runs ADAPTIVE thinking when the field is omitted, and
 	// max_tokens caps thinking + text combined — the chat path must disable
@@ -97,18 +99,27 @@ func TestCreateAnthropicTextResponseWrapsMessagesSeam(t *testing.T) {
 	}
 }
 
-// BONFIRE_CHAT_MODEL swaps the chat model; an explicit request.Model wins over
-// the env dial; junk effort and a zero budget fall back to low/800 so a
-// mis-set caller can never send an invalid Sonnet request.
+// BONFIRE_CHAT_MODEL swaps the chat model within the doctrine (a Haiku id is
+// refused in favor of the Sonnet default — never-Haiku routing doctrine); an
+// explicit request.Model wins over the env dial; junk effort and a zero
+// budget fall back to medium/800 so a mis-set caller can never send an
+// invalid Sonnet request or dip below the effort floor.
 func TestCreateAnthropicTextResponseModelAndBudgetDials(t *testing.T) {
 	t.Setenv("BONFIRE_CHAT_MODEL", "")
 	if got := chatModel(); got != "claude-sonnet-5" {
 		t.Fatalf("chatModel()=%q, want claude-sonnet-5", got)
 	}
-	t.Setenv("BONFIRE_CHAT_MODEL", "claude-haiku-4-5")
-	if got := chatModel(); got != "claude-haiku-4-5" {
-		t.Fatalf("chatModel() env override=%q, want claude-haiku-4-5", got)
+	t.Setenv("BONFIRE_CHAT_MODEL", "claude-opus-4-8")
+	if got := chatModel(); got != "claude-opus-4-8" {
+		t.Fatalf("chatModel() env override=%q, want claude-opus-4-8", got)
 	}
+	// Never-Haiku guard: a haiku id on the dial is refused, the doctrine
+	// default stands.
+	t.Setenv("BONFIRE_CHAT_MODEL", "claude-haiku-4-5")
+	if got := chatModel(); got != "claude-sonnet-5" {
+		t.Fatalf("chatModel() haiku override=%q, want the claude-sonnet-5 doctrine default", got)
+	}
+	t.Setenv("BONFIRE_CHAT_MODEL", "")
 
 	var got anthropicMessagesRequest
 	swapAnthropicMessagesResponder(t, func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
@@ -129,8 +140,8 @@ func TestCreateAnthropicTextResponseModelAndBudgetDials(t *testing.T) {
 	if got.Model != "claude-opus-4-8" {
 		t.Fatalf("model=%q, want the explicit request model over the env dial", got.Model)
 	}
-	if got.MaxTokens != anthropicChatMaxTokens || got.Effort != "low" {
-		t.Fatalf("fallback budget=%d/%q, want %d/low", got.MaxTokens, got.Effort, anthropicChatMaxTokens)
+	if got.MaxTokens != anthropicChatMaxTokens || got.Effort != "medium" {
+		t.Fatalf("fallback budget=%d/%q, want %d/medium (the doctrine floor)", got.MaxTokens, got.Effort, anthropicChatMaxTokens)
 	}
 }
 

@@ -137,12 +137,13 @@ func packagingTools() []packagingTool {
 			Rubric: toolRubric{
 				Ref: "research_brief_gate_v1",
 				Dimensions: []toolRubricDimension{
-					{Name: "Grounding", Measures: "every non-obvious claim has a source or memory cite", Bar: 8},
+					{Name: "Grounding", Measures: "every non-obvious claim has a graded (A-D) source or memory cite", Bar: 8},
+					{Name: "Quantification", Measures: "figures carry units and dates; named peers ride a benchmark table; implied arithmetic is computed and labeled DERIVED", Bar: 7},
 					{Name: "Counter-case", Measures: "the strongest opposing view is present and fair", Bar: 7},
-					{Name: "Actionability", Measures: "a partner could decide from the Recommendation", Bar: 7},
-					{Name: "Recency honesty", Measures: "decaying facts are dated or flagged stale", Bar: 8},
+					{Name: "Actionability", Measures: "a partner could decide from the Recommendation — deal-shaped where the goal is a deal, with what-would-change-our-mind triggers", Bar: 7},
+					{Name: "Recency honesty", Measures: "decaying facts are dated or flagged stale; each data gap maps to the check that closes it", Bar: 8},
 				},
-				KillCondition: "any invented/unverifiable source, or a claim asserted as fact that is actually the agent's assumption.",
+				KillCondition: "any invented/unverifiable source, a claim asserted as fact that is actually the agent's assumption, or a public-filer comparator quantified from recall while the fiscal tools were available.",
 			},
 		},
 		{

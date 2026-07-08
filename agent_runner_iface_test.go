@@ -200,6 +200,12 @@ func TestReviewModelDefaultAndOverride(t *testing.T) {
 	if got := reviewModel(); got != "claude-sonnet-5" {
 		t.Fatalf("reviewModel()=%q, want the env override", got)
 	}
+	// The judging seat is a worker seat under the routing doctrine: a haiku id
+	// on the dial is refused and the Opus default stands (never Haiku).
+	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-haiku-4-5")
+	if got := reviewModel(); got != defaultReviewModel {
+		t.Fatalf("reviewModel() with haiku=%q, want the %s doctrine default", got, defaultReviewModel)
+	}
 }
 
 // The per-turn note rides the artifact as metadata["progressNote"] (the client

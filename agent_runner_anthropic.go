@@ -16,13 +16,70 @@ import (
 	"time"
 )
 
+// --- Model + effort routing doctrine (founder directive, 2026-07-07) ----------
+//
+// Fable 5 (claude-fable-5) is the orchestrator: it plans, fans out, and
+// verifies. Worker seats — review/gate, chat, follow-ups, refusal fallback —
+// are Sonnet/Opus tier ONLY (claude-sonnet-5 / claude-opus-4-8); Haiku is
+// never an acceptable model for any reasoning seat, and the env dials below
+// refuse a haiku id rather than honoring it (doctrineModelOrDefault).
+//
+// Effort floor: no Anthropic surface runs below "medium" — the founder saw
+// orchestratorEffort=low stamped on his research runs and low-depth reasoning
+// on founder-facing work is a doctrine violation, not a cost win. The
+// orchestrator DEFAULTS to "high" (Anthropic's own guidance for long-horizon
+// agentic work); a configured value below medium clamps UP to medium with a
+// logged warning (flooredEffort). Within these floors, the Fable
+// orchestrator's own judgment governs how hard it works a given turn.
+//
+// Sanctioned future seam (designed, NOT built): the orchestrator delegating
+// scoped subtasks to Sonnet 5 workers — Anthropic's published multi-agent
+// pattern (Fable plans and fans out, Sonnet workers execute well-scoped
+// subtasks, escalate hard calls back up). When that fan-out lands it routes
+// through the same doctrineModelOrDefault guard, so the never-Haiku and
+// effort-floor rules bind worker seats automatically.
 const (
 	anthropicMessagesURL       = "https://api.anthropic.com/v1/messages"
 	anthropicAPIVersion        = "2023-06-01"
 	defaultOrchestratorModel   = "claude-fable-5"
 	defaultFallbackModel       = "claude-opus-4-8"
 	controlToolReportGoalState = "report_goal_state"
+
+	// doctrineEffortFloor is the minimum thinking depth any Anthropic surface
+	// may run at. Configured dials below it clamp UP, never down.
+	doctrineEffortFloor = "medium"
 )
+
+// flooredEffort validates one effort value against the API enum and applies
+// the doctrine floor: medium/high/xhigh/max pass through, anything below
+// medium clamps up to the floor (reported via the bool so env-dial callers
+// can log the misconfiguration), and unknown/empty values take fallback.
+func flooredEffort(value string, fallback string) (string, bool) {
+	switch effort := strings.ToLower(strings.TrimSpace(value)); effort {
+	case "medium", "high", "xhigh", "max":
+		return effort, false
+	case "low", "minimal":
+		return doctrineEffortFloor, true
+	default:
+		return fallback, false
+	}
+}
+
+// doctrineModelOrDefault resolves one env model dial under the routing
+// doctrine above: empty keeps the doctrine default, and a configured id
+// containing "haiku" is refused (logged) in favor of the default — Haiku is
+// below the Sonnet/Opus worker tier and never takes a reasoning seat.
+func doctrineModelOrDefault(envName string, fallback string) string {
+	model := strings.TrimSpace(os.Getenv(envName))
+	if model == "" {
+		return fallback
+	}
+	if strings.Contains(strings.ToLower(model), "haiku") {
+		log.Warnf("%s=%q is below the Sonnet/Opus worker tier (routing doctrine: never Haiku); using %s", envName, model, fallback)
+		return fallback
+	}
+	return model
+}
 
 var errAgentWorkerNotConfigured = errors.New("agent worker is not configured")
 
@@ -45,7 +102,7 @@ func currentAnthropicAPIKey() string {
 }
 
 func orchestratorModel() string {
-	return getenvDefault("BONFIRE_ORCHESTRATOR_MODEL", defaultOrchestratorModel)
+	return doctrineModelOrDefault("BONFIRE_ORCHESTRATOR_MODEL", defaultOrchestratorModel)
 }
 
 // orchestratorFallbackModel is the refusal-fallback target. Fable 5's safety
@@ -54,27 +111,34 @@ func orchestratorModel() string {
 // mid-pipeline, so the loop retries the same request once on this model before
 // taking the needs_attention branch (packaging-os-analysis §1).
 func orchestratorFallbackModel() string {
-	return getenvDefault("BONFIRE_FALLBACK_MODEL", defaultFallbackModel)
+	return doctrineModelOrDefault("BONFIRE_FALLBACK_MODEL", defaultFallbackModel)
 }
 
 func orchestratorMaxTurns() int {
 	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TURNS", 24)
 }
 
+// orchestratorMaxTokens default 16384: the 4096 ceiling was tuned for the
+// effort-low era. Fable 5's always-on thinking counts against max_tokens
+// (thinking + text COMBINED), and at the doctrine default of effort high a
+// planning turn's thinking alone can exhaust 4K — manufacturing max_tokens
+// stops the runner honestly reports as incomplete/needs_attention. The wire
+// layer always streams (createAnthropicMessagesResponseHTTP), so a larger
+// ceiling has no HTTP-timeout cost and an unused ceiling costs nothing.
 func orchestratorMaxTokens() int {
-	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", 4096)
+	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", 16384)
 }
 
-// orchestratorEffort controls thinking depth / token spend on Fable 5. Default
-// low keeps the control loop snappy; Fable 5 at low still clears prior-model
-// ceilings. Any of low|medium|high|xhigh|max is accepted.
+// orchestratorEffort controls thinking depth / token spend on Fable 5.
+// Default HIGH per the routing doctrine above (the effort-low default shipped
+// shallow reasoning on founder-facing research runs); a configured value
+// below medium clamps UP to the doctrine floor with a logged warning.
 func orchestratorEffort() string {
-	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_ORCHESTRATOR_EFFORT"))); effort {
-	case "low", "medium", "high", "xhigh", "max":
-		return effort
-	default:
-		return "low"
+	effort, clamped := flooredEffort(os.Getenv("BONFIRE_ORCHESTRATOR_EFFORT"), "high")
+	if clamped {
+		log.Warnf("BONFIRE_ORCHESTRATOR_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
 	}
+	return effort
 }
 
 // orchestratorTimeout bounds one orchestrator run. Default 15m: deliverable
@@ -101,15 +165,15 @@ func deliverableMaxTokens() int {
 
 // deliverableEffort is the thinking depth for the deliverable subtask. Default
 // high — the deliverable IS the product; paying Fable-5 rates for medium depth
-// was the worst of both worlds (packaging-os-analysis §1). Any of
-// low|medium|high|xhigh|max is accepted; anything else falls back to high.
+// was the worst of both worlds (packaging-os-analysis §1). The doctrine floor
+// applies here too: a configured value below medium clamps UP with a warning;
+// anything unrecognized falls back to high.
 func deliverableEffort() string {
-	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"))); effort {
-	case "low", "medium", "high", "xhigh", "max":
-		return effort
-	default:
-		return "high"
+	effort, clamped := flooredEffort(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"), "high")
+	if clamped {
+		log.Warnf("BONFIRE_DELIVERABLE_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
 	}
+	return effort
 }
 
 // --- Anthropic Messages API wire types ---------------------------------------

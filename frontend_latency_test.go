@@ -1631,8 +1631,10 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 
 // Frontend wiring guard for the office event socket: it opens on auth (not
 // room join), sends the `office` hello, feeds kanban events directly (no
-// signaling chain), reconnects with backoff, closes on sign-out, and demotes
-// the HTTP snapshot reads and the 12s chat poll to fallback-only while live.
+// signaling chain), reconnects with backoff, closes on sign-out, heartbeats
+// so a half-open socket cannot read OPEN forever, and demotes the HTTP
+// snapshot reads to fallback-only while live (the chat poll, by contrast,
+// always reconciles — see the poll assertions below).
 func TestIndexOfficeSocketWiring(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
@@ -1655,9 +1657,20 @@ func TestIndexOfficeSocketWiring(t *testing.T) {
 		// the socket follows auth: every authedUser flip funnels through
 		// renderLoginMode
 		"// the office event socket follows auth, not room membership: every",
-		// poll supersession: HTTP snapshots and the 12s chat poll are
-		// fallback-only while the office socket is live
+		// poll supersession: HTTP board/memory snapshots stay fallback-only
+		// while the office socket is live
 		"if (!authedUser || ws?.readyState === WebSocket.OPEN || officeSocketLive()) {",
+		// heartbeat: ping every 30s, stamp every inbound frame, force-close
+		// a nominally OPEN socket after 75s of silence so the backoff
+		// reconnect + office_granted catch-up fire
+		"function ensureOfficeHeartbeat()",
+		"function stopOfficeHeartbeat()",
+		"JSON.stringify({ event: 'office_ping' })",
+		"lastOfficeFrameAt = Date.now()",
+		"Date.now() - lastOfficeFrameAt > 75000",
+		// a channel notification deep-linking to a thread doubles as a
+		// debounced chat reconcile signal
+		"function nudgeChatThreadsFromNotification()",
 		// room-chat unread accumulated outside the room clears on a fresh join
 		"clearRoomChatUnread()",
 		// meeting_archived rides the union fan-out — dedupe by download URL
@@ -1668,10 +1681,16 @@ func TestIndexOfficeSocketWiring(t *testing.T) {
 		}
 	}
 
-	// The 12s chat poll survives as the fallback, gated on socket absence.
+	// Poll = true reconciliation: a half-open office socket reads OPEN
+	// forever, so the chat poll must never defer to readyState — it runs
+	// whenever authed, 15s with the chat tool in front and 45s everywhere
+	// else. The fingerprint dedup in loadScoutChatThreads keeps it cheap.
 	pollBody := functionBody(html, "function syncChatThreadPolling()")
-	if !strings.Contains(pollBody, "officeSocketLive()") || !strings.Contains(pollBody, "12000") {
-		t.Fatal("the 12s chat thread poll must stay as the fallback, skipping fetches while the office socket is live")
+	if strings.Contains(pollBody, "officeSocketLive()") {
+		t.Fatal("the chat thread poll must reconcile even while the office socket looks live — half-open sockets read OPEN forever")
+	}
+	if !strings.Contains(pollBody, "15000") || !strings.Contains(pollBody, "45000") {
+		t.Fatal("the chat thread poll must run at 15s on the chat tool and 45s everywhere else while authed")
 	}
 
 	// ensureOfficeSocket never rides the room socket state: it must not
@@ -1720,7 +1739,8 @@ func TestIndexMeetingRecordWiring(t *testing.T) {
 // the artifact library (only external-write approval stays admin-gated),
 // display titles derive from the artifact body when the stored title is still
 // the launch prompt, and close-the-loop room-chat deliveries render an
-// artifact chip that opens the report.
+// artifact chip that opens the report in the right-side artifact stage over
+// the room — never a tool yank to the Intelligence tab.
 func TestIndexArtifactModelWiring(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
@@ -1739,11 +1759,13 @@ func TestIndexArtifactModelWiring(t *testing.T) {
 		"title.textContent = artifactDisplayTitle(entry)",
 		// the artifact editor keeps editing the raw stored title
 		"artifactTitleInput.value = artifact?.metadata?.title || ''",
-		// close-the-loop delivery chip on room-chat bubbles
+		// close-the-loop delivery chip on room-chat bubbles: the chip opens
+		// the report in the artifact stage (the reroute is LIVE code, not a
+		// comment); the stage header keeps "open in intelligence" as the
+		// explicit data-room escape
 		"room-chat-artifact-chip",
 		"const artifactId = String(message?.artifactId || '').trim()",
-		"{ type: 'open_tool', tool: 'artifacts', artifactId },",
-		"{ type: 'select_artifact', artifactId }",
+		"chip.addEventListener('click', () => openArtifactStage(artifactId, entry ? artifactDisplayTitle(entry) : 'report'))",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing artifact model marker %q", want)
@@ -1762,10 +1784,13 @@ func TestIndexArtifactModelWiring(t *testing.T) {
 	}
 
 	// Admin-only dashboard copy is dead: artifacts belong to the whole team.
+	// The retired chip dispatch (an open_tool yank to the Intelligence tab)
+	// must not come back — in live code OR as a marker-satisfying comment.
 	for _, stale := range []string{
 		"'admin only'",
 		"Scout has the company brain",
 		"title.textContent = entry.metadata?.title || artifactModeLabel(entry)",
+		"{ type: 'open_tool', tool: 'artifacts', artifactId },",
 	} {
 		if strings.Contains(html, stale) {
 			t.Fatalf("index.html still contains pre-relaxation artifact marker %q", stale)

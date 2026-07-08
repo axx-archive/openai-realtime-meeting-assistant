@@ -13,8 +13,9 @@ package main
 //     print) → pdftoppm -jpeg -r 144 → pure-Go JPEG→PDF reassembly
 //     (jpeg_pdf.go). THE FLATTEN LAW IS NON-NEGOTIABLE: the layered print
 //     never ships; the flattened raster PDF is the deliverable.
-//   - paper ("The Talk" / "The Wall"): text-native, no blends — chromium
-//     print-to-pdf DIRECT, no flatten.
+//   - paper ("The Talk" / "The Wall", and server-rendered markdown research
+//     reports via renderResearchReportPrintHTML): text-native, no blends —
+//     chromium print-to-pdf DIRECT, no flatten.
 // Both kinds also persist the per-page JPEGs (free from pdftoppm) to the
 // shared volume and reference them in the callback — Wave 5's vision slide
 // juries consume exactly these images.
@@ -299,9 +300,11 @@ func newRenderRunnerJobID() string {
 
 // enqueueRenderExportPDFJob is the clearly-named stage-B seam: the trigger
 // route (main.go — deliberately not touched here) calls this with the
-// artifact's HTML body to queue an export_pdf job for the render-runner
-// sidecar. It returns the queued job so the caller can stamp runnerJobId
-// metadata on the artifact, exactly like enqueueCodexAgentThreadJob does.
+// artifact's print HTML — the deck/paper body itself, or the branded print
+// document a markdown research report converts to — to queue an export_pdf
+// job for the render-runner sidecar. It returns the queued job so the caller
+// can stamp runnerJobId metadata on the artifact, exactly like
+// enqueueCodexAgentThreadJob does.
 func enqueueRenderExportPDFJob(artifactID string, kind string, html string, title string) (renderRunnerJob, error) {
 	artifactID = strings.TrimSpace(artifactID)
 	if artifactID == "" {

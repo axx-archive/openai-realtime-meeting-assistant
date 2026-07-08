@@ -669,6 +669,32 @@ func (app *kanbanBoardApp) appendAgentRunLogEntry(thread scoutAgentThread, artif
 	}
 }
 
+// appendAgentRunLogEntryForArtifact is the run ledger's codex-queue seam:
+// terminal results that land through the runner callback
+// (internalCodexRunnerResultHandler) never pass runAgentThread, so the
+// scoutAgentThread value is reconstructed from the artifact's own metadata —
+// the same threadId/mode/threadQuery recovery the approve path uses
+// (approveCodexArtifactExternalWrite). A missing thread id skips the write:
+// without one the ledger id could not dedupe a retried callback.
+func (app *kanbanBoardApp) appendAgentRunLogEntryForArtifact(artifact meetingMemoryEntry, status string, output string) {
+	threadID := strings.TrimSpace(firstNonEmptyString(artifact.Metadata["latestThreadRun"], artifact.Metadata["threadId"]))
+	if threadID == "" {
+		return
+	}
+	mode := normalizeAgentThreadMode(firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind))
+	if mode == "" {
+		mode = "workflow"
+	}
+	thread := scoutAgentThread{
+		ID:       threadID,
+		Mode:     mode,
+		Query:    firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"], compactAssistantLine(artifact.Text)),
+		Status:   status,
+		Artifact: artifact,
+	}
+	app.appendAgentRunLogEntry(thread, artifact, status, output)
+}
+
 func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, workerResult agentThreadWorkerResult) {
 	output := strings.TrimSpace(workerResult.Text)
 	if output == "" {
@@ -952,7 +978,7 @@ func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memo
 func agentThreadDeliverable(mode string) string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
-		return "research brief with thesis, source trail, evidence table, counterarguments, recommendation, and next checks"
+		return "research brief with thesis, graded source trail, quantified evidence table (units, dates, peer benchmarks, derived math), counterarguments, decision-trigger recommendation, and next checks"
 	case "design":
 		return "design brief with intent, context links, screens, interaction states, responsive plan, handoff notes, and build risks"
 	case "grill":
@@ -967,7 +993,7 @@ func agentThreadDeliverable(mode string) string {
 func agentThreadModeContract(mode string) string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
-		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. Cite only sources or tool evidence actually used."
+		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. Cite only sources or tool evidence actually used. Give every decaying or comparative figure a value with units and a date, grade each source A (primary/audited, pulled this run) through D (recall, nothing fetched), and when peers are named lay the key metrics side by side in a benchmark table and compute the arithmetic the reader would compute (label it DERIVED). End the Recommendation with 2-3 what-would-change-our-mind triggers with thresholds, and number Next checks so each open question maps to the check that closes it."
 	case "design":
 		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
 	case "grill":

@@ -385,17 +385,22 @@ func TestAnthropicFableRunnerHonorsPerJobBudget(t *testing.T) {
 	}
 	collectProgress(out2)
 	if got.MaxTokens != 4096 || got.Effort != "low" {
-		t.Fatalf("planning request budget=%d/%q, want runner default 4096/low", got.MaxTokens, got.Effort)
+		t.Fatalf("planning request budget=%d/%q, want the runner's configured 4096/low", got.MaxTokens, got.Effort)
 	}
 }
 
 // The raised Fable dials ship together: deliverables default to effort high
-// with a 32K output ceiling, and the orchestrator timeout default is 15m so
-// slow-but-good high-effort runs are not manufactured into failures.
+// with a 32K output ceiling, the orchestrator defaults to effort high with a
+// 16K ceiling (thinking + text share max_tokens on Fable 5, so the effort-low
+// era's 4096 would manufacture max_tokens stops at high), and the
+// orchestrator timeout default is 15m so slow-but-good high-effort runs are
+// not manufactured into failures.
 func TestFableDialDefaults(t *testing.T) {
 	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "")
 	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "")
 	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "")
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "")
+	t.Setenv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", "")
 
 	if got := deliverableMaxTokens(); got != 32768 {
 		t.Fatalf("deliverableMaxTokens()=%d, want 32768", got)
@@ -403,8 +408,63 @@ func TestFableDialDefaults(t *testing.T) {
 	if got := deliverableEffort(); got != "high" {
 		t.Fatalf("deliverableEffort()=%q, want high", got)
 	}
+	if got := orchestratorEffort(); got != "high" {
+		t.Fatalf("orchestratorEffort()=%q, want the doctrine default high", got)
+	}
+	if got := orchestratorMaxTokens(); got != 16384 {
+		t.Fatalf("orchestratorMaxTokens()=%d, want 16384", got)
+	}
 	if got := orchestratorTimeout(); got != 15*time.Minute {
 		t.Fatalf("orchestratorTimeout()=%s, want 15m", got)
+	}
+}
+
+// The doctrine effort floor: no dial may run below medium. A configured low
+// (or minimal) clamps UP to medium; medium and above pass through; junk falls
+// back to the dial's own default (high on both orchestrator dials).
+func TestEffortDoctrineFloorClampsLowUpToMedium(t *testing.T) {
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "low")
+	if got := orchestratorEffort(); got != "medium" {
+		t.Fatalf("orchestratorEffort() with low=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "minimal")
+	if got := orchestratorEffort(); got != "medium" {
+		t.Fatalf("orchestratorEffort() with minimal=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "XHigh")
+	if got := orchestratorEffort(); got != "xhigh" {
+		t.Fatalf("orchestratorEffort() with xhigh=%q, want xhigh (above the floor passes through)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "galactic")
+	if got := orchestratorEffort(); got != "high" {
+		t.Fatalf("orchestratorEffort() with junk=%q, want the high default", got)
+	}
+
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "low")
+	if got := deliverableEffort(); got != "medium" {
+		t.Fatalf("deliverableEffort() with low=%q, want medium (doctrine floor)", got)
+	}
+}
+
+// The never-Haiku guard on the orchestrator-side model dials: a haiku id is
+// refused in favor of the doctrine default; Sonnet/Opus overrides pass.
+func TestOrchestratorModelDialsRefuseHaiku(t *testing.T) {
+	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "claude-haiku-4-5")
+	if got := orchestratorModel(); got != defaultOrchestratorModel {
+		t.Fatalf("orchestratorModel() with haiku=%q, want the %s doctrine default", got, defaultOrchestratorModel)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "claude-opus-4-8")
+	if got := orchestratorModel(); got != "claude-opus-4-8" {
+		t.Fatalf("orchestratorModel() opus override=%q, want claude-opus-4-8", got)
+	}
+
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "claude-haiku-4-5")
+	if got := orchestratorFallbackModel(); got != defaultFallbackModel {
+		t.Fatalf("orchestratorFallbackModel() with haiku=%q, want the %s doctrine default", got, defaultFallbackModel)
+	}
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "claude-sonnet-5")
+	if got := orchestratorFallbackModel(); got != "claude-sonnet-5" {
+		t.Fatalf("orchestratorFallbackModel() sonnet override=%q, want claude-sonnet-5", got)
 	}
 }
 

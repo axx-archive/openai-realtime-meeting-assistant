@@ -119,10 +119,9 @@ func TestOfficeSocketReceivesBroadcastAndTargetedNotifications(t *testing.T) {
 }
 
 // TestOfficeSocketReceivesOfficeAndUnionFanoutButNotRoomBroadcasts pins the
-// routing contract: office-only events (chat_thread) and union events
-// (memory) reach an office socket, while the room fan-out
-// (broadcastKanbanEvent — signaling companions, participant_track,
-// memory_transcript) never does.
+// routing contract: union events (chat_thread, memory) reach an office
+// socket, while the room fan-out (broadcastKanbanEvent — signaling
+// companions, participant_track, memory_transcript) never does.
 func TestOfficeSocketReceivesOfficeAndUnionFanoutButNotRoomBroadcasts(t *testing.T) {
 	server := newIsolatedWebsocketServer(t)
 	conn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
@@ -134,10 +133,10 @@ func TestOfficeSocketReceivesOfficeAndUnionFanoutButNotRoomBroadcasts(t *testing
 	broadcastKanbanEvent("participant_track", map[string]any{"name": "AJ", "kind": "video"})
 	broadcastKanbanEvent("memory_transcript", map[string]any{"id": "transcript-1", "text": "room only line"})
 
-	// …then a chat_thread over the office fan-out and a memory snapshot over
-	// the union fan-out. Ordered delivery on one socket means anything the
-	// room fan-out leaked would arrive before these markers.
-	broadcastOfficeKanbanEvent("chat_thread", map[string]any{"id": "thread-1", "title": "channel", "visibility": "public"})
+	// …then a chat_thread and a memory snapshot over the union fan-out.
+	// Ordered delivery on one socket means anything the room fan-out leaked
+	// would arrive before these markers.
+	broadcastSignedInKanbanEvent("chat_thread", map[string]any{"id": "thread-1", "title": "channel", "visibility": "public"})
 	broadcastSignedInKanbanEvent("memory", []map[string]any{{"id": "memory-1", "kind": "brain"}})
 
 	sawEvents := []string{}
@@ -288,12 +287,151 @@ func TestPrivateChatThreadUpdatesReachOwnerOfficeSocketOnly(t *testing.T) {
 
 	// Bound the negative check with a public marker: aj's next chat_thread
 	// event must be the marker, never tim's private thread.
-	broadcastOfficeKanbanEvent("chat_thread", map[string]any{"id": "marker-thread", "visibility": "public"})
+	broadcastSignedInKanbanEvent("chat_thread", map[string]any{"id": "marker-thread", "visibility": "public"})
 	ajRaw := waitForKanbanEvent(t, ajConn, "chat_thread", 5*time.Second)
 	if strings.Contains(string(ajRaw), thread.ID) {
 		t.Fatalf("private thread update leaked to a non-owner office socket: %s", ajRaw)
 	}
 	if !strings.Contains(string(ajRaw), "marker-thread") {
 		t.Fatalf("aj office socket missed the public marker: %s", ajRaw)
+	}
+}
+
+// joinIsolatedRoomOnlySocket admits the connection into the room and the
+// media broadcast pool WITHOUT an office hello — the exact shape of a tab
+// sitting in a live video call. It polls the pool registry so a broadcast
+// fired right after this returns cannot race the join, and asserts the
+// socket really is office-less (the property under test).
+func joinIsolatedRoomOnlySocket(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+
+	writeNativeWebsocketEvent(t, conn, "participant", map[string]any{})
+	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
+	writeNativeWebsocketEvent(t, conn, "media_ready", map[string]any{})
+	joinDeadline := time.Now().Add(5 * time.Second)
+	for {
+		listLock.RLock()
+		joined := len(peerConnections)
+		officeCount := len(officeConnections)
+		listLock.RUnlock()
+		if joined == 1 {
+			if officeCount != 0 {
+				t.Fatalf("room-only socket must not hold an office registration, got %d", officeCount)
+			}
+			return
+		}
+		if time.Now().After(joinDeadline) {
+			t.Fatal("media_ready never entered the broadcast pool")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestPublicChannelPostReachesRoomOnlySignedInSocket pins the live-delivery
+// guarantee behind the union fan-out: a signed-in tab holding only a room
+// socket (no office hello) still sees a public-channel post live. Pre-fix,
+// public chat_thread events were office-only, so a user in a live video room
+// needed a browser refresh — which drops the room seat — to see new channel
+// messages.
+func TestPublicChannelPostReachesRoomOnlySignedInSocket(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	conn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
+	joinIsolatedRoomOnlySocket(t, conn)
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "general", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create public channel: %v", err)
+	}
+	message := scoutChatMessageRecord{
+		ID:        "msg-room-live-1",
+		Kind:      "text",
+		Role:      "user",
+		Text:      "pilot recap is up",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, message); err != nil {
+		t.Fatalf("commit public channel message: %v", err)
+	}
+
+	raw := waitForKanbanEvent(t, conn, "chat_thread", 5*time.Second)
+	if !strings.Contains(string(raw), thread.ID) || !strings.Contains(string(raw), "pilot recap is up") {
+		t.Fatalf("room-only socket missed the public channel post: %s", raw)
+	}
+}
+
+// TestPrivateThreadPostDoesNotReachOtherUsersRoomSocket proves widening the
+// public fan-out to the signed-in union did not widen privacy: a private
+// thread commit stays owner-targeted and never rides the union to another
+// user's room socket.
+func TestPrivateThreadPostDoesNotReachOtherUsersRoomSocket(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	conn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
+	joinIsolatedRoomOnlySocket(t, conn)
+
+	private, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	secret := scoutChatMessageRecord{
+		ID:        "msg-private-1",
+		Kind:      "text",
+		Role:      "user",
+		Text:      "tim-only private line",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", private.ID, secret); err != nil {
+		t.Fatalf("commit private message: %v", err)
+	}
+
+	// Bound the negative check with a marker through the REAL public path:
+	// ordered delivery means a leaked private post would arrive before it.
+	public, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "general", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create public channel: %v", err)
+	}
+	marker := scoutChatMessageRecord{
+		ID:        "msg-public-marker-1",
+		Kind:      "text",
+		Role:      "user",
+		Text:      "public marker line",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", public.ID, marker); err != nil {
+		t.Fatalf("commit public marker: %v", err)
+	}
+
+	raw := waitForKanbanEvent(t, conn, "chat_thread", 5*time.Second)
+	if strings.Contains(string(raw), private.ID) || strings.Contains(string(raw), "tim-only private line") {
+		t.Fatalf("private thread post leaked to another user's room socket: %s", raw)
+	}
+	if !strings.Contains(string(raw), public.ID) {
+		t.Fatalf("room socket missed the public marker: %s", raw)
+	}
+}
+
+// TestOfficePingAnsweredWithPongOnSameSocket pins the office liveness probe:
+// office_ping is answered with a top-level office_pong on the same socket,
+// and an unknown event before it keeps today's ignore behavior (the read
+// loop logs and lives on — the pong still arrives).
+func TestOfficePingAnsweredWithPongOnSameSocket(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
+	sendOfficeHello(t, conn)
+
+	writeNativeWebsocketEvent(t, conn, "definitely_not_a_real_event", map[string]any{})
+	writeNativeWebsocketEvent(t, conn, "office_ping", map[string]any{})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket waiting for office_pong: %v", err)
+		}
+		if message.Event == "office_pong" {
+			return
+		}
 	}
 }

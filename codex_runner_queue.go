@@ -806,6 +806,20 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Run ledger for the queued-runner lane too: codex-sidecar runs and
+	// approved external-write jobs terminate through this callback instead of
+	// the synchronous seam in runAgentThread, so the run_log line has to land
+	// here or "what has Scout run for us?" recall silently misses them. The
+	// ledger id derives from the thread id, so a retried callback dedupes in
+	// the store; failed maps to the ledger's complete/error vocabulary (the
+	// error summary reads the artifact's freshly stamped error metadata).
+	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
+	case codexJobStatusComplete:
+		kanbanApp.appendAgentRunLogEntryForArtifact(artifact, "complete", text)
+	case codexJobStatusFailed:
+		kanbanApp.appendAgentRunLogEntryForArtifact(artifact, "error", text)
+	}
+
 	// Durable milestone: queued Codex jobs land through this callback instead
 	// of the synchronous runner paths (agent_thread_runner.go), so the creator
 	// notification has to happen here too. Gate on `changed` so a retried
