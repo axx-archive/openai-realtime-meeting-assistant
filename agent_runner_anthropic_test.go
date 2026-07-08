@@ -1192,6 +1192,219 @@ func TestBuildAnthropicMessagesPayloadCacheBreakpointNeverOnImages(t *testing.T)
 	}
 }
 
+// Research mode attaches Anthropic's SERVER web tools (web_search / web_fetch)
+// with the right server type + name and no input_schema; report_goal_state
+// stays the last (cache-breakpoint) tool. Non-research modes get no server
+// tools — the read-only-loop path is byte-for-byte unchanged there.
+func TestAnthropicFableRunnerResearchModeAttachesServerWebTools(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	runner := newAnthropicFableRunner(app)
+
+	research := runner.tools("research")
+	var search, fetch *anthropicTool
+	for i := range research {
+		switch research[i].Name {
+		case "web_search":
+			search = &research[i]
+		case "web_fetch":
+			fetch = &research[i]
+		}
+	}
+	if search == nil || fetch == nil {
+		t.Fatalf("research tools missing server web tools: %v", toolNames(research))
+	}
+	if search.Type != "web_search_20260209" {
+		t.Fatalf("web_search type=%q, want web_search_20260209", search.Type)
+	}
+	if fetch.Type != "web_fetch_20260209" {
+		t.Fatalf("web_fetch type=%q, want web_fetch_20260209", fetch.Type)
+	}
+	if search.InputSchema != nil || fetch.InputSchema != nil {
+		t.Fatal("server tools must carry no input_schema")
+	}
+	if search.MaxUses <= 0 || fetch.MaxUses <= 0 {
+		t.Fatalf("server tools missing max_uses: search=%d fetch=%d", search.MaxUses, fetch.MaxUses)
+	}
+	if fetch.Citations == nil || !fetch.Citations.Enabled {
+		t.Fatal("web_fetch must enable citations")
+	}
+	// report_goal_state stays the LAST tool so it remains the cache breakpoint.
+	if last := research[len(research)-1]; last.Name != controlToolReportGoalState {
+		t.Fatalf("last research tool=%q, want %s", last.Name, controlToolReportGoalState)
+	}
+
+	// Non-research modes get NO server tools.
+	for _, mode := range []string{"workflow", "design", "grill", "artifacts"} {
+		got := runner.tools(mode)
+		if toolNamesContain(got, "web_search") || toolNamesContain(got, "web_fetch") {
+			t.Fatalf("%s mode leaked server web tools: %v", mode, toolNames(got))
+		}
+	}
+}
+
+// The wire proof of the omitempty change: a server tool serializes WITH "type"
+// and WITHOUT "input_schema", while a client tool (non-nil schema) still
+// serializes its input_schema unchanged — so making InputSchema omitempty is
+// safe for every existing tool.
+func TestAnthropicServerToolSerialization(t *testing.T) {
+	raw, err := json.Marshal(webSearchServerTool())
+	if err != nil {
+		t.Fatalf("marshal web_search: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"web_search_20260209"`) {
+		t.Fatalf("web_search missing type: %s", raw)
+	}
+	if strings.Contains(string(raw), "input_schema") {
+		t.Fatalf("server tool must not carry input_schema: %s", raw)
+	}
+
+	rawFetch, err := json.Marshal(webFetchServerTool())
+	if err != nil {
+		t.Fatalf("marshal web_fetch: %v", err)
+	}
+	if !strings.Contains(string(rawFetch), `"citations":{"enabled":true}`) {
+		t.Fatalf("web_fetch missing citations: %s", rawFetch)
+	}
+	if strings.Contains(string(rawFetch), "input_schema") {
+		t.Fatalf("server tool must not carry input_schema: %s", rawFetch)
+	}
+
+	// A client tool with a non-nil schema still serializes input_schema (the
+	// omitempty change leaves every existing client tool's bytes unchanged), and
+	// gains no TOP-LEVEL type field.
+	rawClient, _ := json.Marshal(anthropicTool{Name: "create_ticket", InputSchema: map[string]any{"type": "object"}})
+	var clientFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawClient, &clientFields); err != nil {
+		t.Fatalf("decode client tool: %v", err)
+	}
+	if _, ok := clientFields["input_schema"]; !ok {
+		t.Fatalf("client tool dropped input_schema: %s", rawClient)
+	}
+	if _, ok := clientFields["type"]; ok {
+		t.Fatalf("client tool must not grow a top-level type field: %s", rawClient)
+	}
+}
+
+// A server-tool pause_turn must CONTINUE the run, not die as needs_attention:
+// the runner echoes the paused assistant turn verbatim (server_tool_use
+// included), adds NO synthetic user turn, and the run reaches a clean verified
+// terminal. This is the critical bug fix — web_search emits pause_turn and the
+// old default branch killed the run mid-search.
+func TestAnthropicFableRunnerPauseTurnContinues(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	serverToolUse, _ := json.Marshal(map[string]any{
+		"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search",
+		"input": map[string]any{"query": "latest figures"},
+	})
+
+	var requests []anthropicMessagesRequest
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		requests = append(requests, request)
+		if len(requests) == 1 {
+			return anthropicMessagesResponse{
+				StopReason: "pause_turn",
+				Content: []json.RawMessage{
+					mockAnthropicTextBlock("Searching the web for current data."),
+					json.RawMessage(serverToolUse),
+				},
+			}, nil
+		}
+		return anthropicMessagesResponse{
+			StopReason: "end_turn",
+			Content:    []json.RawMessage{mockAnthropicTextBlock("# Report\n\nBased on current data.")},
+		}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "research", Query: "current data"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	if len(requests) != 2 {
+		t.Fatalf("responder called %d times, want 2 (pause + resume)", len(requests))
+	}
+	// The resume echoes the paused assistant turn VERBATIM and adds NO user
+	// turn: messages = [initial user, echoed assistant].
+	if len(requests[1].Messages) != 2 {
+		t.Fatalf("resume request has %d messages, want user + echoed assistant (no synthetic user turn)", len(requests[1].Messages))
+	}
+	if role := requests[1].Messages[1].Role; role != "assistant" {
+		t.Fatalf("resume request last message role=%q, want assistant", role)
+	}
+	if !blockTypePresent(requests[1].Messages[1].Content, "server_tool_use") {
+		t.Fatal("resume request dropped the server_tool_use block")
+	}
+
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err != nil {
+		t.Fatalf("pause→resume terminal = %+v, want clean terminal", last)
+	}
+	if last.GoalStatus != "verified" || last.ReviewGate != "passed" {
+		t.Fatalf("pause→resume status wrong: %+v", last)
+	}
+	// A non-terminal pause progress reflects the live web activity.
+	sawLiveNote := false
+	for _, progress := range progresses {
+		if !progress.Terminal && strings.Contains(strings.ToLower(progress.Note), "live web search") {
+			sawLiveNote = true
+		}
+	}
+	if !sawLiveNote {
+		t.Fatalf("no pause progress reflected live web activity; progresses=%+v", progresses)
+	}
+}
+
+// The pause budget bounds a runaway server-tool loop: a responder that ALWAYS
+// returns pause_turn terminates (needs_attention) after maxPauses continuations
+// rather than hanging, and it never consumes the far larger maxTurns budget.
+func TestAnthropicFableRunnerPauseBudgetBoundsRunaway(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	serverToolUse, _ := json.Marshal(map[string]any{
+		"type": "server_tool_use", "id": "srvtoolu_x", "name": "web_search", "input": map[string]any{},
+	})
+	calls := 0
+	responder := func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		calls++
+		return anthropicMessagesResponse{
+			StopReason: "pause_turn",
+			Content:    []json.RawMessage{json.RawMessage(serverToolUse)},
+		}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.maxTurns = 100 // large: the pause budget, not maxTurns, must stop the loop
+	runner.maxPauses = 4
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "research", Query: "loop forever"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	// maxPauses continuations, then one more call whose pause finds the budget
+	// spent and terminates — bounded, never the 100-turn ceiling.
+	if calls != runner.maxPauses+1 {
+		t.Fatalf("responder called %d times, want maxPauses+1=%d (pause budget bounds the loop)", calls, runner.maxPauses+1)
+	}
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err == nil {
+		t.Fatalf("runaway pause must terminate with an error: %+v", last)
+	}
+	if last.GoalStatus != "needs_attention" {
+		t.Fatalf("runaway pause goalStatus=%q, want needs_attention", last.GoalStatus)
+	}
+}
+
 func toolNames(tools []anthropicTool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {

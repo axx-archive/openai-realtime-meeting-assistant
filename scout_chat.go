@@ -239,7 +239,7 @@ func scoutChatThreadModeForChannelText(text string) string {
 
 // --- the propose-confirm router (packaging OS §2, Wave 2 item 8) -------------
 //
-// Typed Scout's routing brain: one Haiku function-calling turn per private
+// Typed Scout's routing brain: one Sonnet-5 function-calling turn per private
 // thread message decides whether the ask is answerable inline (Tier 0, the
 // heavily-biased default), worth PROPOSING as a quick single-shot workstream
 // (Tier 1), or worth PROPOSING as a contract-gated goal pipeline run (Tier 2).
@@ -254,10 +254,11 @@ func scoutChatThreadModeForChannelText(text string) string {
 // proposal, never an error. A failed router turn degrades the same way.
 
 const (
-	// defaultRouterModel: routing is classification-shaped — strict tool use,
-	// enum over the registry — so it rides Haiku, not the chat model (§1 role
-	// matrix: "the enabling primitive for §2").
-	defaultRouterModel = "claude-haiku-4-5"
+	// defaultRouterModel: routing is still classification-shaped — strict tool
+	// use, enum over the registry — but per the resolved doctrine it rides the
+	// Sonnet worker tier, not Haiku (the exception is closed; agent_runner_
+	// anthropic.go: never-Haiku guard). routerModel() runs it through that guard.
+	defaultRouterModel = "claude-sonnet-5"
 	// scoutRouterMaxTokens bounds the routing turn: a proposal is one small
 	// tool call, an inline verdict is no call at all.
 	scoutRouterMaxTokens = 700
@@ -315,9 +316,19 @@ const (
 )
 
 // routerModel is the routing-turn dial, distinct from chatModel() and
-// orchestratorModel().
+// orchestratorModel(). It rides the same never-Haiku guard as every other
+// Anthropic seat, so a configured haiku id is refused down to the Sonnet
+// default rather than honored.
 func routerModel() string {
-	return getenvDefault("BONFIRE_ROUTER_MODEL", defaultRouterModel)
+	return doctrineModelOrDefault("BONFIRE_ROUTER_MODEL", defaultRouterModel)
+}
+
+// routerEffort is the routing-turn thinking-depth dial. Sonnet 5 accepts
+// output_config.effort (the retired Haiku router rejected it), so the router
+// runs at the doctrine floor — a configured value below medium clamps up.
+func routerEffort() string {
+	effort, _ := flooredEffort(getenvDefault("BONFIRE_ROUTER_EFFORT", doctrineEffortFloor), doctrineEffortFloor)
+	return effort
 }
 
 // scoutRouterProposal is the wire/storage shape of one proposal card: enough
@@ -564,7 +575,7 @@ func scoutRouterInput(text string, history []scoutChatTurn) string {
 // scoutRouterFullRunPhrases is the reviewed, capped phrase list the
 // deterministic pre-router guard matches to the flagship end-to-end run
 // (packaging_studio) — the literal words that named the full run in the
-// 2026-07-05 sim and still lost to thread-context gravity inside the Haiku turn.
+// 2026-07-05 sim and still lost to thread-context gravity inside the Sonnet-5 turn.
 // Capped and code-reviewed on purpose (the analysis doc's keyword-sniffing
 // tripwire): "package" ALONE never appears here — only unambiguous full-run
 // phrases — and a match may only ever PROPOSE a card, never launch.
@@ -581,7 +592,7 @@ var scoutRouterFullRunPhrases = []string{
 // scoutRouterImagePhrases is the reviewed, capped phrase list the deterministic
 // pre-router guard matches to the single-shot concept render (card 096 — the
 // fix for AJ's "image request failed" complaint: the literal ask can never be
-// dragged off-route by the Haiku turn). Capped and code-reviewed like the
+// dragged off-route by the Sonnet-5 turn). Capped and code-reviewed like the
 // full-run list: only unambiguous "make a picture/image" imperatives, and a
 // match may only ever PROPOSE the concept-render card, never generate.
 var scoutRouterImagePhrases = []string{
@@ -647,7 +658,7 @@ func scoutGuardEligibleMessage(text string) bool {
 	return true
 }
 
-// deterministicRouterGuard commits a proposal card BEFORE the Haiku turn when a
+// deterministicRouterGuard commits a proposal card BEFORE the Sonnet-5 router turn when a
 // work-shaped, non-negated message contains either a reviewed full-run phrase
 // (-> the flagship packaging_studio) or an exact registry tool/process name
 // (-> that capability). This is the flagship's second guarantee (item 3): the
@@ -732,13 +743,9 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 		}},
 		Tools:     scoutRouterTools(),
 		MaxTokens: scoutRouterMaxTokens,
-		// No Effort on the routing turn: the default router model is
-		// claude-haiku-4-5, and the API rejects output_config.effort on Haiku
-		// 4.5 (supported on Sonnet 4.6+/Opus 4.5+ tiers only) — sending it
-		// 400s EVERY routing turn and silently degrades all proposals to
-		// inline answers. Empty Effort makes buildAnthropicMessagesPayload
-		// omit output_config entirely.
-		Effort: "",
+		// The router runs Sonnet 5 at the doctrine floor (routerEffort): Sonnet 5
+		// accepts output_config.effort, unlike the retired Haiku router.
+		Effort: routerEffort(),
 	})
 	if err != nil {
 		log.Errorf("Scout router turn failed (degrading to inline answer): %v", err)

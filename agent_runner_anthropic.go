@@ -118,6 +118,24 @@ func orchestratorMaxTurns() int {
 	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TURNS", 24)
 }
 
+// orchestratorMaxPauses bounds how many times the server-tool loop may
+// stop_reason:"pause_turn" within one run. A pause is NOT a tool turn (the
+// server paused its own web_search/web_fetch loop mid-turn), so it must not
+// consume the maxTurns budget — a search-heavy research run would otherwise be
+// starved of real tool turns. This separate budget is the only thing that
+// stops an infinite pause loop from hanging the run.
+func orchestratorMaxPauses() int {
+	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_PAUSES", 24)
+}
+
+// serverToolMaxUses caps how many times ONE server tool (web_search or
+// web_fetch) may run inside a single assistant turn. Env-tunable per tool with
+// a sane default so a runaway loop can't burn the org's search quota, and a
+// legitimately deep research turn still has room.
+func serverToolMaxUses(envName string) int {
+	return positiveIntEnv(envName, 8)
+}
+
 // orchestratorMaxTokens default 16384: the 4096 ceiling was tuned for the
 // effort-low era. Fable 5's always-on thinking counts against max_tokens
 // (thinking + text COMBINED), and at the doctrine default of effort high a
@@ -186,11 +204,29 @@ type anthropicCacheControl struct {
 
 var ephemeralCacheControl = &anthropicCacheControl{Type: "ephemeral"}
 
+// anthropicTool carries both client tools (Name + InputSchema, executed
+// in-process) and Anthropic SERVER tools (Type + Name, executed on Anthropic's
+// side — web_search / web_fetch). A server tool has no input_schema, so
+// InputSchema is omitempty; every client tool sets a non-nil schema, so their
+// serialized bytes are unchanged. Type is empty on a client tool (omitted).
+// The server-tool params (max_uses, domain allow/block lists, citations) are
+// all optional and marshal only when set.
 type anthropicTool struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	InputSchema  map[string]any         `json:"input_schema"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Type           string                  `json:"type,omitempty"`
+	Name           string                  `json:"name"`
+	Description    string                  `json:"description,omitempty"`
+	InputSchema    map[string]any          `json:"input_schema,omitempty"`
+	MaxUses        int                     `json:"max_uses,omitempty"`
+	AllowedDomains []string                `json:"allowed_domains,omitempty"`
+	BlockedDomains []string                `json:"blocked_domains,omitempty"`
+	Citations      *anthropicToolCitations `json:"citations,omitempty"`
+	CacheControl   *anthropicCacheControl  `json:"cache_control,omitempty"`
+}
+
+// anthropicToolCitations toggles inline source citations on a server tool
+// (web_fetch): {"enabled": true} makes fetched content carry cited URLs.
+type anthropicToolCitations struct {
+	Enabled bool `json:"enabled"`
 }
 
 // anthropicMessage.Content is raw so assistant turns (including Fable 5 thinking
@@ -280,6 +316,13 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 	httpRequest.Header.Set("anthropic-version", anthropicAPIVersion)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
+	// The server web tools (web_search_20260209 / web_fetch_20260209) need NO
+	// anthropic-beta header on Fable 5. But if a live run ever 400s citing a
+	// beta requirement, an operator can set BONFIRE_ANTHROPIC_BETA to add the
+	// header with no code change.
+	if beta := strings.TrimSpace(os.Getenv("BONFIRE_ANTHROPIC_BETA")); beta != "" {
+		httpRequest.Header.Set("anthropic-beta", beta)
+	}
 
 	response, err := (&http.Client{}).Do(httpRequest)
 	if err != nil {
@@ -536,9 +579,11 @@ func (block *anthropicStreamBlock) finalize() (json.RawMessage, error) {
 		if block.signature.Len() > 0 {
 			block.fields["signature"], _ = json.Marshal(block.signature.String())
 		}
-	case "tool_use":
+	case "tool_use", "server_tool_use":
 		// An argument-less tool call streams no input_json_delta; keep the
-		// start block's empty-object input in that case.
+		// start block's empty-object input in that case. server_tool_use
+		// (web_search / web_fetch) streams its query the same way and must
+		// round-trip with its input intact so the paused turn resumes.
 		if input := strings.TrimSpace(block.inputJSON.String()); input != "" {
 			if !json.Valid([]byte(input)) {
 				return nil, fmt.Errorf("Anthropic stream tool_use input is not valid JSON")
@@ -643,6 +688,11 @@ type anthropicFableRunner struct {
 	effort       string
 	maxTurns     int
 	maxTokens    int
+	// maxPauses bounds server-tool pause_turn continuations per run — separate
+	// from maxTurns so a search-heavy research turn is not starved of real tool
+	// turns, while an infinite pause loop still can't hang. Job-local: the
+	// runner is built per job (selectAgentRunner).
+	maxPauses int
 	// progressHighWater is the highest percent this run has reported (the goal
 	// engine's MaxProgress pattern): the per-turn heuristic only climbs, but a
 	// later report_goal_state can legitimately carry a lower number — the bar
@@ -661,6 +711,7 @@ func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
 		effort:        orchestratorEffort(),
 		maxTurns:      orchestratorMaxTurns(),
 		maxTokens:     orchestratorMaxTokens(),
+		maxPauses:     orchestratorMaxPauses(),
 		responder:     createAnthropicMessagesResponse,
 	}
 }
@@ -697,7 +748,7 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		}
 
 		system := r.systemPrompt(job)
-		tools := r.tools()
+		tools := r.tools(job.Mode)
 		messages := []anthropicMessage{{
 			Role:    "user",
 			Content: []json.RawMessage{anthropicTextBlock(r.userPrompt(job))},
@@ -709,6 +760,12 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		// report_goal_state — e.g. an approval_required gate — must survive into
 		// the terminal progress rather than being reset to the verified default.
 		control := AgentProgress{}
+		// pausesRemaining bounds server-tool pause_turn continuations. It is
+		// separate from the turn counter on purpose: a pause is the server
+		// resuming its own web_search/web_fetch loop, not a new tool turn, so it
+		// must not spend the maxTurns budget (turn is decremented back on a
+		// pause) — but this budget still caps an infinite pause loop.
+		pausesRemaining := r.maxPauses
 		for turn := 1; turn <= r.maxTurns; turn++ {
 			request := anthropicMessagesRequest{
 				Model:     r.model,
@@ -805,14 +862,42 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 				// then answer every tool_use with a tool_result in one user turn.
 				messages = append(messages, anthropicMessage{Role: "assistant", Content: response.Content})
 				messages = append(messages, anthropicMessage{Role: "user", Content: toolResults})
+			case "pause_turn":
+				// The server paused its own web_search/web_fetch tool loop
+				// mid-turn (default: after 10 server iterations). This is NOT a
+				// truncated turn — it must continue, not die as needs_attention
+				// the way the default branch below would. Echo the assistant turn
+				// VERBATIM (the trailing server_tool_use is what the API detects
+				// to resume) and add NO user turn — a synthetic "Continue." would
+				// break the resume. The pause budget bounds a runaway loop.
+				if pausesRemaining <= 0 {
+					out <- r.incompleteProgress(job, finalText, control, turn, response)
+					return
+				}
+				pausesRemaining--
+				progress := r.turnProgress(finalText, control, turn, response)
+				progress.Note = firstNonEmptyString(serverToolPauseNote(response), "running a live web search")
+				out <- progress
+				messages = append(messages, anthropicMessage{Role: "assistant", Content: response.Content})
+				// A pure server pause carries no client tool_use, so toolResults is
+				// normally empty. Guard the rare mixed turn (a client tool_use
+				// resolved alongside the server pause): those tool_use blocks are in
+				// the echoed assistant turn and MUST be answered, or the resume
+				// request 400s on an unanswered tool_use id.
+				if len(toolResults) > 0 {
+					messages = append(messages, anthropicMessage{Role: "user", Content: toolResults})
+				}
+				// A pause is not a tool turn: cancel this iteration's turn++ so a
+				// search-heavy run keeps its full maxTurns budget for real work.
+				turn--
 			case "end_turn":
 				out <- r.terminalProgress(job, finalText, control, turn, response)
 				return
 			default:
-				// max_tokens / stop_sequence / pause_turn / unknown: the turn was
-				// cut off, not completed. It must NOT earn the verified/passed
-				// defaults — that would violate the orchestrator's own
-				// gate-before-shipping rule and ship a truncated artifact silently.
+				// max_tokens / stop_sequence / unknown: the turn was cut off, not
+				// completed. It must NOT earn the verified/passed defaults — that
+				// would violate the orchestrator's own gate-before-shipping rule
+				// and ship a truncated artifact silently.
 				out <- r.incompleteProgress(job, finalText, control, turn, response)
 				return
 			}
@@ -842,15 +927,23 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		modeContract = raw
 		finalLine = "When the goal is met, your final message is the deliverable FILE ITSELF — nothing before the <!doctype html>, nothing after the closing </html>."
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"You are Scout, the in-process orchestrator for Bonfire OS.",
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",
 		"Authority: this job is " + authority + ". read_only may inspect and report; workspace_write may change the board, memory, packages, and notifications; external_write (commit, push, deploy, SSH, email, external APIs, production mutations) is never granted in this loop — if the goal needs it, stop and report that an approval gate is required. Never claim you performed shell, browser, SSH, repository, or external work; that is a handoff to the execution runner.",
 		modeContract,
-		finalLine,
-	}, "\n")
+	}
+	// Research mode carries the live server web tools (attached in tools()); tell
+	// Scout to prefer fetching current data over recalling it. The "no live web
+	// this loop → grade D + flag" honesty clause stays valid for non-research
+	// modes and for any claim Scout could not fetch this run.
+	if normalizeAgentThreadMode(job.Mode) == "research" {
+		lines = append(lines, "This is a research run: you have LIVE web_search and web_fetch server tools. Prefer fetching current data over recalling it — search anything time-sensitive or externally verifiable, then fetch the primary/official source and cite its URL under Sources. Only sources you actually fetched this run earn grade A; any claim you could not verify against live web this loop is grade D and you must flag it.")
+	}
+	lines = append(lines, finalLine)
+	return strings.Join(lines, "\n")
 }
 
 func (r *anthropicFableRunner) userPrompt(job AgentJob) string {
@@ -905,7 +998,7 @@ var orchestratorToolAllowlist = map[string]bool{
 	"fiscal_data_query":          true,
 }
 
-func (r *anthropicFableRunner) tools() []anthropicTool {
+func (r *anthropicFableRunner) tools(mode string) []anthropicTool {
 	var tools []anthropicTool
 	for _, tool := range r.app.kanbanTools() {
 		name := asString(tool["name"])
@@ -922,7 +1015,39 @@ func (r *anthropicFableRunner) tools() []anthropicTool {
 			InputSchema: schema,
 		})
 	}
+	// Research mode gets Anthropic's SERVER web tools so the loop can pull
+	// current, externally-verifiable data instead of recalling it — the single
+	// biggest research-quality unlock (a read-only loop can't produce current
+	// data). Only research mode: other modes stay byte-for-byte unchanged.
+	// Inserted BEFORE report_goal_state so the control tool stays the last
+	// (cache-breakpoint) tool the payload builder stamps.
+	if normalizeAgentThreadMode(mode) == "research" {
+		tools = append(tools, webSearchServerTool(), webFetchServerTool())
+	}
 	return append(tools, reportGoalStateTool())
+}
+
+// webSearchServerTool is Anthropic's server-side web_search (no beta header on
+// Fable 5). It carries a Type + Name but no input_schema — the server owns the
+// schema. max_uses caps searches per assistant turn.
+func webSearchServerTool() anthropicTool {
+	return anthropicTool{
+		Type:    "web_search_20260209",
+		Name:    "web_search",
+		MaxUses: serverToolMaxUses("BONFIRE_WEB_SEARCH_MAX_USES"),
+	}
+}
+
+// webFetchServerTool is Anthropic's server-side web_fetch with citations on, so
+// a fetched primary source carries its cited URL back into the report's Sources
+// (the research contract reserves grade A for fetched-this-run sources).
+func webFetchServerTool() anthropicTool {
+	return anthropicTool{
+		Type:      "web_fetch_20260209",
+		Name:      "web_fetch",
+		MaxUses:   serverToolMaxUses("BONFIRE_WEB_FETCH_MAX_USES"),
+		Citations: &anthropicToolCitations{Enabled: true},
+	}
 }
 
 func reportGoalStateTool() anthropicTool {
@@ -1016,6 +1141,30 @@ func turnNoteFromBlocks(response anthropicMessagesResponse) string {
 		}
 	}
 	return firstNonEmptyString(controlNote, toolNote)
+}
+
+// serverToolPauseNote names the live web activity behind a pause_turn so the
+// progress card reads "running a live web search" / "fetching a live source"
+// rather than the sticky prose. Server tools arrive as server_tool_use blocks
+// (not the tool_use blocks turnNoteFromBlocks reads), so the pause path derives
+// its own note; the last server tool in the turn names the freshest action.
+func serverToolPauseNote(response anthropicMessagesResponse) string {
+	note := ""
+	for _, rawBlock := range response.Content {
+		block := decodeAnthropicBlock(rawBlock)
+		if block.Type != "server_tool_use" {
+			continue
+		}
+		switch block.Name {
+		case "web_search":
+			note = "running a live web search"
+		case "web_fetch":
+			note = "fetching a live source"
+		default:
+			note = "running a live web tool"
+		}
+	}
+	return note
 }
 
 // agentToolProgressPhrases maps orchestrator tool names to the short human

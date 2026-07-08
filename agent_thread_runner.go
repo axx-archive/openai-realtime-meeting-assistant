@@ -993,7 +993,13 @@ func agentThreadDeliverable(mode string) string {
 func agentThreadModeContract(mode string) string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
-		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. Cite only sources or tool evidence actually used. Give every decaying or comparative figure a value with units and a date, grade each source A (primary/audited, pulled this run) through D (recall, nothing fetched), and when peers are named lay the key metrics side by side in a benchmark table and compute the arithmetic the reader would compute (label it DERIVED). End the Recommendation with 2-3 what-would-change-our-mind triggers with thresholds, and number Next checks so each open question maps to the check that closes it."
+		// Tool-agnostic on purpose: this contract is shared by the Anthropic
+		// orchestrator (which attaches live web_search/web_fetch and adds its own
+		// explicit LIVE-web instruction), the legacy text writer, and the Codex
+		// sidecar — the latter two have no web tools, so the source-grading
+		// language talks about verification, not a specific tool that may not be
+		// present.
+		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. When live source-fetching tools are available, use them for any time-sensitive or externally-verifiable claim, fetch the primary/official source, and cite every fetched URL under Sources. Cite only sources or tool evidence actually used. Give every decaying or comparative figure a value with units and a date, grade each source A (primary/official, verified against a source fetched this run) through D (recall only, nothing verified) — reserve grade A for sources actually fetched and verified this run, and flag any claim you could not verify this run as grade D. When peers are named lay the key metrics side by side in a benchmark table and compute the arithmetic the reader would compute (label it DERIVED). End the Recommendation with 2-3 what-would-change-our-mind triggers with thresholds, and number Next checks so each open question maps to the check that closes it."
 	case "design":
 		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
 	case "grill":

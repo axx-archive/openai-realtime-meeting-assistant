@@ -37,7 +37,7 @@ Bonfire already built the right spine — one tool registry, one goal pipeline, 
 | Voice (room + private) | gpt-realtime-2 | as-is (reasoning high, marin) | Only real speech-to-speech option; contract pinned in realtime_config_test.go |
 | Transcription (both lanes) | gpt-4o-transcribe / gpt-realtime-whisper | as-is | Working |
 | Text chat (Scout threads, follow-ups) | **claude-sonnet-5** | effort low-medium, adaptive thinking | Near-Opus quality at $3/$15 (intro $2/$10 through 2026-08-31); the taste surface; vendor-coherent with the orchestrator — one caching regime, one tool-schema dialect, chat hands context to /goal without a vendor seam |
-| Routing / intent | **claude-haiku-4-5** | strict tool use, enum over registry | $1/$5, classification-shaped; the enabling primitive for §2 |
+| Routing / intent | **claude-sonnet-5** | strict tool use, enum over registry, effort medium | Classification-shaped, but rides the Sonnet worker tier per the resolved doctrine (never Haiku); the enabling primitive for §2 |
 | Orchestration (decompose, gate, verify) | **claude-fable-5** | effort medium→high, timeout ≥15m, streaming | Long-horizon agentic is Fable's design center; these stages ARE the quality bar |
 | Deliverable workers (packaging artifacts, grill reports, deep research) | **claude-fable-5** | effort **high**, max_tokens 32-64K streamed, refusal fallback → opus-4-8 | This is the product; don't starve it at effort medium / 8192 tokens |
 | Per-subtask review + coordination | claude-opus-4-8 (or sonnet-5) | effort high, **full artifact body** | Half Fable's price; reviews need the whole artifact, not the Fable ceiling |
@@ -57,7 +57,7 @@ Cost reality: at 6 users, a full packaging goal at Fable-high is single-digit do
 
 ### Contradiction resolved: what model runs the router?
 
-The routing analysis proposed running the new chat router "on the existing meetingBrainModel (gpt-5.5) seam"; the model analysis proposed Haiku 4.5. **Decision: Haiku 4.5, shipped in the same wave chat moves to Sonnet 5.** Once the conversational surface is Anthropic, keeping the router on OpenAI reintroduces the exact vendor seam the migration removes — two tool-schema dialects on one code path. Haiku is cheaper than gpt-5.5, faster, and its strict tool use is purpose-built for enum-over-registry classification. If sequencing forces the router to ship before the chat migration, launch it on the gpt-5.5 seam and swap the model constant when Sonnet lands — the propose-confirm architecture is identical either way.
+The routing analysis proposed running the new chat router "on the existing meetingBrainModel (gpt-5.5) seam"; the model analysis proposed Haiku 4.5, and it first shipped on Haiku. **Resolved: the router now runs claude-sonnet-5 at the doctrine floor (effort medium) — the Haiku exception is closed per founder directive.** Once the conversational surface went Anthropic, keeping the router on OpenAI would have reintroduced the exact vendor seam the migration removes — two tool-schema dialects on one code path — so it stayed vendor-coherent. The final step drops Haiku itself: routing rides the same Sonnet worker tier and never-Haiku guard as every other Anthropic seat (routerModel → doctrineModelOrDefault, routerEffort → flooredEffort), so a configured haiku id is refused down to the Sonnet default. Sonnet 5 accepts output_config.effort, which Haiku rejected — the "no effort on the routing turn" workaround is retired. The propose-confirm architecture is identical either way.
 
 ---
 
