@@ -10484,6 +10484,7 @@
       }
 
       .files-row {
+        position: relative; /* anchors the move-to menu */
         display: flex;
         align-items: center;
         gap: 12px;
@@ -10605,6 +10606,7 @@
       }
 
       .file-tile {
+        position: relative; /* anchors the move-to menu */
         display: block;
         width: 100%;
         text-align: left;
@@ -10612,7 +10614,7 @@
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg);
         padding: 15px;
-        overflow: hidden;
+        overflow: visible; /* the move-to menu escapes the tile edge */
         transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);
       }
 
@@ -10662,6 +10664,239 @@
         align-items: center;
         gap: 8px;
         min-width: 0;
+      }
+
+      /* kit folder chips — the Drive-ish filing rail above the day groups.
+         A chip is three things at once: a filter (click), a drop target for
+         row drags (dragover earns the accent ring), and — when active — the
+         rename/delete door behind its kebab. "New folder" is the dashed
+         ghost that swaps to an inline input. */
+      .files-folders {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 16px;
+      }
+
+      .files-folder-chip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .files-folder-chip:hover {
+        border-color: var(--line-2);
+      }
+
+      .files-folder-chip.is-active {
+        background: var(--surface-3);
+        border-color: var(--line-2);
+      }
+
+      .files-folder-chip.is-dragover {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .files-folder-chip__pick {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 100%;
+        min-width: 0;
+        padding: 0 12px;
+        border: 0;
+        border-radius: inherit;
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+
+      .files-folder-chip.is-active .files-folder-chip__pick {
+        color: var(--text-1);
+      }
+
+      .files-folder-chip__pick span:first-child {
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .files-folder-chip__count {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-3);
+      }
+
+      /* the New-folder ghost + its inline input twin */
+      .files-folder-chip--new {
+        border-style: dashed;
+        background: transparent;
+      }
+
+      .files-folder-chip__input {
+        width: 130px;
+        height: 100%;
+        padding: 0 12px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        outline: none;
+      }
+
+      .files-folder-chip__kebab {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        margin-right: 3px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-3);
+        cursor: pointer;
+      }
+
+      .files-folder-chip__kebab:hover {
+        background: var(--surface-1);
+        color: var(--text-1);
+      }
+
+      /* chip + row menus share one surface: the mention-popover material */
+      .files-folder-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 40;
+        min-width: 150px;
+        max-width: 220px;
+        display: flex;
+        flex-direction: column;
+        padding: 5px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        box-shadow: var(--shadow-2);
+      }
+
+      .files-row .files-folder-menu,
+      .file-tile .files-folder-menu {
+        top: auto;
+        left: auto;
+        right: 10px;
+        margin-top: 4px;
+      }
+
+      .files-folder-menu__label {
+        padding: 4px 9px 2px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .files-folder-menu__item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 9px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: left;
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .files-folder-menu__item:hover {
+        background: var(--surface-2);
+      }
+
+      .files-folder-menu__item--danger {
+        color: var(--danger);
+      }
+
+      .files-folder-menu__item[disabled] {
+        color: var(--text-3);
+        cursor: default;
+      }
+
+      /* row / tile drag affordances + the per-row move kebab */
+      .files-row.is-dragging,
+      .file-tile.is-dragging {
+        opacity: 0.55;
+      }
+
+      .files-row[draggable="true"] .files-row__icon,
+      .file-tile[draggable="true"] .file-tile__icon {
+        cursor: grab;
+      }
+
+      .files-row__kebab {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-3);
+        cursor: pointer;
+      }
+
+      .files-row__kebab:hover {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .files-row__kebab-wrap {
+        flex: none;
+        display: inline-flex;
+      }
+
+      .file-tile .files-row__kebab-wrap {
+        margin-left: auto;
+      }
+
+      .file-tile .files-row__kebab:hover {
+        background: var(--surface-1);
+      }
+
+      /* deliverable names open the artifact stage — a button in link clothes */
+      button.files-row__name,
+      button.file-tile__name {
+        padding: 0;
+        border: 0;
+        background: none;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      button.files-row__name:hover,
+      button.file-tile__name:hover {
+        text-decoration: underline;
       }
 
       /* canon Mission Intelligence — a flat content canvas (like Memory) for
@@ -11244,6 +11479,50 @@
       /* the name stays sans (a person), but the timestamp is mono per the type
          law (DL-2) */
       .intel-meta-time {
+        font-family: var(--font-mono);
+      }
+
+      /* storylines — the narrative maintainer's dossiers as compact cards:
+         title (headline), one-line summary (caption), updated-at in mono */
+      .intel-storylines {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 12px;
+      }
+
+      .intel-storyline {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+        padding: 12px 14px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        text-align: left;
+      }
+
+      /* only a storyline that carries an artifact id renders as a door */
+      button.intel-storyline {
+        cursor: pointer;
+      }
+
+      .intel-storyline__title {
+        color: var(--text-1);
+        font: var(--type-headline);
+      }
+
+      .intel-storyline__summary {
+        color: var(--text-3);
+        font: var(--type-caption);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .intel-storyline__updated {
+        color: var(--text-3);
+        font: var(--type-caption);
         font-family: var(--font-mono);
       }
 
@@ -12982,12 +13261,30 @@
         animation: bf-flamebreathe 1200ms var(--ease) infinite;
       }
 
+      .research-overall__stage {
+        color: var(--text-2);
+        font: var(--type-caption);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .research-overall__pct {
         margin-left: auto;
         color: var(--text-1);
         font: var(--type-label-lg);
+        font-family: var(--font-mono);
         letter-spacing: var(--track-label);
         font-variant-numeric: tabular-nums;
+      }
+
+      /* the runner's per-turn note, under the bar — quiet provenance, one line */
+      .research-overall__note {
+        color: var(--text-3);
+        font: var(--type-caption);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .research-bar {
@@ -12997,10 +13294,11 @@
         overflow: hidden;
       }
 
+      /* earned ember: live run progress is real work happening */
       .research-bar__fill {
         height: 100%;
         border-radius: inherit;
-        background: var(--accent);
+        background: var(--ember);
         transition: width var(--dur-med) var(--ease);
       }
 
@@ -13068,6 +13366,11 @@
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .research-agent__pct {
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
       }
 
@@ -16466,7 +16769,9 @@
         /* tool pages zero the workspace padding at (1-3-1) specificity, which
            silently beat the clearance above and slid the chat composer under
            the fixed bottom rail (56px pill + 16px inset). Restore a safe-area
-           aware bottom inset here so the composer and its chips stay tappable. */
+           aware bottom inset here so the composer and its chips stay tappable
+           (chat was the motivating case — MO-1 — and belongs in this list). */
+        #appShell.is-authed[data-tool="chat"] .workspace,
         #appShell.is-authed[data-tool="memory"] .workspace,
         #appShell.is-authed[data-tool="files"] .workspace,
         #appShell.is-authed[data-tool="artifacts"] .workspace,
@@ -16480,6 +16785,7 @@
            clearance above, but the dock it folds away for is hidden on tool
            pages — keep the same rail + safe-area clearance in-room so the
            composer never slides under the home indicator */
+        #appShell.is-in-room[data-tool="chat"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="memory"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="files"]:not(.is-board-expanded) .workspace,
         #appShell.is-in-room[data-tool="artifacts"]:not(.is-board-expanded) .workspace,
@@ -16507,7 +16813,7 @@
           flex-direction: row;
           align-items: center;
           justify-content: center;
-          gap: 4px;
+          gap: 3px;
           width: max-content;
           max-width: calc(100vw - 24px);
           max-width: calc(100dvw - 24px);
@@ -16542,25 +16848,22 @@
           background: var(--glass-chrome);
         }
 
-        /* intelligence, alerts, theme and account leave the pill: intel is
-           entered from the office card (D14), the bell + avatar live in the
-           header, theme lives in the settings sheet — five icons stay */
-        .tool-rail__slot:has(> [data-tool="artifacts"]),
-        .tool-rail__slot:has(> [data-tool="files"]),
+        /* all seven surfaces ride the dock now — home · room · chat · intel ·
+           board · memory · files (RC-H: intel + files were unreachable on
+           phones). Only true chrome leaves the pill: the bell + avatar live in
+           the header, theme lives in the settings sheet. */
         .tool-rail__bell,
         .tool-rail__theme,
         .tool-rail__account {
           display: none;
         }
 
-        /* intel (and the workstream pages it shares the entry with) keeps the
-           office icon lit — it is an office sub-screen (D14); files rides the
-           same law (reached via Scout / notifications on phones) */
-        #appShell[data-tool="artifacts"] .tool-rail__tool[data-tool="office"],
+        /* the hidden workstream sub-screens (research · design · grill) have no
+           dock icon of their own, so they borrow the office light while open;
+           intel + files now carry their own dock icon and light it directly */
         #appShell[data-tool="research"] .tool-rail__tool[data-tool="office"],
         #appShell[data-tool="design"] .tool-rail__tool[data-tool="office"],
-        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"],
-        #appShell[data-tool="files"] .tool-rail__tool[data-tool="office"] {
+        #appShell[data-tool="grill"] .tool-rail__tool[data-tool="office"] {
           background: var(--accent);
           color: var(--on-accent);
         }
@@ -16596,8 +16899,8 @@
         .tool-rail__tool {
           justify-content: center;
           gap: 0;
-          width: 46px;
-          height: 46px;
+          width: 44px;
+          height: 44px;
           padding: 0;
           border: none;
           border-radius: var(--r-full);
@@ -17266,16 +17569,35 @@
         }
 
 
+        /* board-card detail opens as a bottom sheet on phones (design mobile
+           §10): bottom-anchored, grab handle, r-2xl top corners, safe-area —
+           not a centered desktop dialog */
         .card-detail-region {
-          align-items: start;
+          align-items: end;
           overflow: auto;
-          padding: max(var(--sp-2), env(safe-area-inset-top)) max(var(--sp-2), env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(var(--sp-2), env(safe-area-inset-left));
+          padding: 0;
         }
 
         .card-detail {
           width: 100%;
-          max-height: calc(100svh - 16px);
-          border-radius: 16px;
+          max-height: 88svh;
+          border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        /* grab handle — first flex child, centered on the sheet's top edge */
+        .card-detail::before {
+          content: "";
+          flex: none;
+          width: 38px;
+          height: 4px;
+          margin: 8px auto 2px;
+          border-radius: var(--r-full);
+          background: var(--line-2);
+        }
+
+        .card-detail-region.visible .card-detail {
+          animation: bf-sheetin var(--dur-slow) var(--ease-spring);
         }
 
         .card-detail-meta {
@@ -17611,12 +17933,29 @@
         }
 
         .chat-convo-head {
+          height: auto;
+          min-height: 48px;
           padding: 8px 12px;
-          gap: 6px;
+          gap: 4px 8px;
+          flex-wrap: wrap;
+          align-items: center;
         }
 
         .chat-convo-head__back {
           display: flex;
+        }
+
+        /* the title takes the top line's remaining width (ellipsizing only
+           when truly long); the mono scope meta drops to its own second line
+           so "public · everyone in the office" reads in full (MO-3) */
+        .chat-convo-head__title {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+
+        .chat-convo-head__meta {
+          flex: 1 0 100%;
+          order: 5;
         }
 
         .chat-convo-head__input {
@@ -19267,6 +19606,245 @@
         .artifact-stage__panel { width: 100%; }
       }
 
+      /* the stage-header PDF affordance — the escape's quiet register; the
+         rendering state reads as work-in-flight, never a dead button */
+      .artifact-stage__pdf-btn {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption);
+        padding: 6px 12px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .artifact-stage__pdf-btn:hover { color: var(--text-1); border-color: var(--line-2); }
+      .artifact-stage__pdf-btn[data-state="rendering"] {
+        color: var(--text-3);
+        cursor: progress;
+      }
+
+      /* ---------- the research report reader (founder pass 2026-07-07) ----------
+         A research deliverable reads as a designed brief: kicker/display hero
+         with mono meta chips, a gate-verdict strip (green tint only when it
+         ships), search-tag chips, ember-ticked --type-title-2 section heads on
+         a 68ch longform measure, an amber-ruled Counterarguments, numbered
+         chip-style sources, and the worker evidence demoted to a "run
+         evidence" disclosure. Scoped to .artifact-read--report so data-room
+         tiles and every other artifact keep their base treatment; tokens only,
+         so both themes hold. */
+      .artifact-read--report .artifact-report {
+        width: 100%;
+        max-width: 68ch;
+        margin: 0 auto;
+        min-width: 0;
+      }
+      .artifact-report__hero {
+        display: grid;
+        gap: 10px;
+        padding-bottom: var(--sp-5);
+        margin-bottom: var(--sp-5);
+        border-bottom: 1px solid var(--line-1);
+      }
+      .artifact-report__kicker {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        color: var(--text-3);
+      }
+      .artifact-report__title {
+        margin: 0;
+        font: var(--type-display);
+        letter-spacing: var(--track-display);
+        color: var(--text-1);
+        text-wrap: balance;
+        overflow-wrap: anywhere;
+      }
+      .artifact-report__meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .artifact-report__meta span {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-2);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        padding: 4px 10px;
+      }
+      .artifact-report__verdict {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 0 0 var(--sp-5);
+        padding: 10px 14px;
+        border-radius: var(--r-md);
+        border: 1px solid var(--line-1);
+        background: var(--surface-3);
+      }
+      .artifact-report__verdict-label {
+        flex: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        color: var(--text-3);
+      }
+      .artifact-report__verdict-value {
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        overflow-wrap: anywhere;
+      }
+      /* signal green is earned: only a gate that actually shipped tints */
+      .artifact-report__verdict--pass {
+        background: var(--success-soft);
+        border-color: transparent;
+      }
+      .artifact-report__verdict--pass .artifact-report__verdict-label { color: var(--success); }
+      .artifact-report__tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0 0 var(--sp-6);
+      }
+      .artifact-report__tag {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-2);
+        background: var(--surface-3);
+        border-radius: var(--r-full);
+        padding: 4px 10px;
+      }
+      .artifact-report__section { margin: 0 0 var(--sp-6); min-width: 0; }
+      .artifact-report__h {
+        margin: 0 0 10px;
+        font: var(--type-title-2);
+        letter-spacing: var(--track-title-2);
+        color: var(--text-1);
+        text-wrap: balance;
+      }
+      /* the 2px ember tick — the one earned warm mark on the page */
+      .artifact-report__h::before {
+        content: "";
+        display: block;
+        width: 28px;
+        height: 2px;
+        margin-bottom: 8px;
+        background: var(--ember);
+        border-radius: 1px;
+      }
+      .artifact-report__body {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+      .artifact-report__body p,
+      .artifact-report__body li {
+        margin: 0;
+        font: var(--type-body-longform);
+        letter-spacing: var(--track-text);
+        color: var(--text-2);
+        overflow-wrap: anywhere;
+        text-wrap: pretty;
+      }
+      .artifact-report__abstract { margin: 0 0 var(--sp-6); }
+      .artifact-report__abstract p { color: var(--text-1); }
+      /* counterarguments carry a subtle amber left rule — flagged, not alarmed */
+      .artifact-report__section--counter {
+        border-left: 2px solid var(--warn);
+        padding-left: 14px;
+      }
+      .artifact-report__section--counter .artifact-report__h::before { background: var(--warn); }
+      /* blockquotes step up to the ink inset rule inside the report */
+      .artifact-read--report .artifact-read__quote {
+        border-left: 2px solid var(--accent);
+        color: var(--text-1);
+        font: var(--type-body-longform);
+      }
+      /* tables: mono uppercase label headers over hairline rows, numerics
+         tabular; the wrapper already owns the x-scroll */
+      .artifact-read--report .artifact-read__table-wrap { border: 0; border-radius: 0; }
+      .artifact-read--report .artifact-read__table {
+        font: var(--type-caption);
+        font-variant-numeric: tabular-nums;
+      }
+      .artifact-read--report .artifact-read__table th {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        color: var(--text-3);
+        background: none;
+        border-bottom: 1px solid var(--line-2);
+      }
+      .artifact-read--report .artifact-read__table td { border-bottom: 1px solid var(--line-1); }
+      /* the run receipts demote to a quiet disclosure at the foot */
+      .artifact-report__evidence {
+        margin: 0 0 var(--sp-6);
+        border-top: 1px solid var(--line-1);
+      }
+      .artifact-report__evidence summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+        padding: 12px 0;
+        font: var(--type-caption);
+        color: var(--text-3);
+        transition: color var(--dur-fast) var(--ease);
+      }
+      .artifact-report__evidence summary::-webkit-details-marker { display: none; }
+      .artifact-report__evidence summary::marker { content: ""; }
+      .artifact-report__evidence summary:hover,
+      .artifact-report__evidence[open] summary { color: var(--text-1); }
+      /* numbered chip-style source anchors */
+      .artifact-report__sources { display: grid; gap: 6px; min-width: 0; }
+      .artifact-report__source {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md);
+        padding: 8px 12px;
+        text-decoration: none;
+        transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .artifact-report__source:hover { border-color: var(--line-2); background: var(--surface-3); }
+      .artifact-report__source-num {
+        flex: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-3);
+      }
+      .artifact-report__source-name {
+        flex: none;
+        max-width: 45%;
+        font: var(--type-caption-medium);
+        color: var(--text-1);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .artifact-report__source-url {
+        min-width: 0;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* the display hero holds its own inside narrow panes */
+      @media (max-width: 640px) {
+        .artifact-report__title { font: var(--type-title-1); letter-spacing: var(--track-title-1); }
+      }
+
       /* --- composer + Tools trigger --- */
       .scout-chat-tools {
         flex: none;
@@ -20266,6 +20844,17 @@
               </div>
             </section>
 
+            <!-- storylines: the narrative maintainer's active dossiers —
+                 identity + one-line summary only (the body stays in memory);
+                 the whole section stays hidden while there are none -->
+            <section id="intelStorylinesSection" class="intel-section" aria-label="Storylines" hidden>
+              <div class="intel-section__head">
+                <span class="intel-section__label">storylines</span>
+                <span id="intelStorylinesStamp" class="intel-section__hint"></span>
+              </div>
+              <div id="intelStorylines" class="intel-storylines"></div>
+            </section>
+
             <section class="intel-section" aria-label="Decision ledger">
               <div class="intel-section__head">
                 <span class="intel-section__label">decision ledger</span>
@@ -20526,6 +21115,9 @@
               <span class="files-upload__text"><b>drop files or click to upload</b> — decks, PDFs, images, up to 64MB each</span>
             </button>
             <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
+            <!-- folder chips — filter, drop target, and (active) rename/delete
+                 door; JS renders the row from GET /assistant/files folders -->
+            <div id="filesFolders" class="files-folders" role="group" aria-label="file folders" hidden></div>
             <div id="filesStats" class="memory-stats" hidden>
               <span id="filesCount" class="memory-tool__count"></span>
             </div>
@@ -21227,6 +21819,10 @@
       let officeWs = null
       let officeWsReconnectTimer = 0
       let officeWsAttempts = 0
+      // office-socket heartbeat: one interval across reconnects, stamped by
+      // every inbound frame — a half-open socket reads OPEN forever otherwise
+      let officeHeartbeatTimer = 0
+      let lastOfficeFrameAt = 0
       /* meeting_archived rides the union fan-out (room + office sockets), so
          a tab holding both dedupes by the archive download URL */
       let lastMeetingArchivedUrl = ''
@@ -21430,6 +22026,9 @@
       const intelThemesEl = document.getElementById('intelThemes')
       const intelQuestionsEl = document.getElementById('intelQuestions')
       const intelAlignmentsEl = document.getElementById('intelAlignments')
+      const intelStorylinesSection = document.getElementById('intelStorylinesSection')
+      const intelStorylinesStamp = document.getElementById('intelStorylinesStamp')
+      const intelStorylinesEl = document.getElementById('intelStorylines')
       const intelDecisionsStamp = document.getElementById('intelDecisionsStamp')
       const intelDecisionsEl = document.getElementById('intelDecisions')
       const intelLibraryToggle = document.getElementById('intelLibraryToggle')
@@ -21459,10 +22058,20 @@
       const filesUploadInput = document.getElementById('filesUploadInput')
       const filesViewGridButton = document.getElementById('filesViewGrid')
       const filesViewListButton = document.getElementById('filesViewList')
+      const filesFoldersRow = document.getElementById('filesFolders')
       let filesEntries = []
+      let filesFolders = []
       let filesLoadedAt = 0
       let filesQuery = ''
       let filesView = 'grid'
+      // folder chip state: the active filter ('' = All files), which chip is
+      // mid-rename, whether the New-folder input is open, and whose kebab /
+      // move-to menu is showing (folder id / file id)
+      let filesActiveFolderId = ''
+      let filesFolderRenamingId = ''
+      let filesFolderCreating = false
+      let filesFolderMenuFor = ''
+      let filesRowMenuFor = ''
       let memoryQuery = ''
       // D15 — day-grouped meeting cards: /assistant/meetings list + which
       // card is open (single-expand accordion; default = most recent)
@@ -21708,6 +22317,9 @@
 	      // later message into a contract-gated agent launch.
 	      let pendingScoutToolTemplate = null
 	      let chatThreadPollTimer = 0
+	      // current poll cadence in ms — the interval is rebuilt whenever the
+	      // wanted cadence changes (15s on the chat tool, 45s elsewhere)
+	      let chatThreadPollMs = 0
 	      let chatThreadsFingerprint = ''
 	      // inline thread-rename state (D7)
 	      let chatRenameActive = false
@@ -23461,6 +24073,9 @@
           closeOfficeSocket()
         }
         syncLoginPresencePolling()
+        // the chat reconciliation poll follows auth the same way: sign-in
+        // starts it (45s cadence until the chat tool opens), sign-out stops it
+        syncChatThreadPolling()
       }
 
       /* login-gate presence hint (D8) — the signed-out /participants payload
@@ -23575,12 +24190,19 @@
             return
           }
           officeWsAttempts = 0
+          // seed the liveness stamp so a reconnect is not immediately judged
+          // silent by a stamp left over from the previous socket's life
+          lastOfficeFrameAt = Date.now()
           socket.send(JSON.stringify({ event: 'office', data: '{}' }))
+          ensureOfficeHeartbeat()
         }
         socket.onmessage = event => {
           if (officeWs !== socket) {
             return
           }
+          // every inbound frame — kanban envelope, office_pong, anything —
+          // proves the pipe is alive; the heartbeat judges silence from here
+          lastOfficeFrameAt = Date.now()
           let message
           try {
             message = JSON.parse(event.data)
@@ -23628,7 +24250,45 @@
         }, delay)
       }
 
+      /* office-socket heartbeat — nothing ever wrote after the `office`
+         hello, so a half-open socket (NAT rebind, sleeping laptop, proxy
+         idle-kill) reads OPEN forever while receiving nothing. Ping every
+         30s (the server answers office_pong) and judge silence from
+         lastOfficeFrameAt, which every inbound frame stamps: 75s quiet on a
+         nominally OPEN socket means half-open, so force close() and let the
+         onclose backoff + office_granted catch-up repair whatever was
+         missed. One interval across reconnects; sign-out stops it. */
+      function ensureOfficeHeartbeat() {
+        if (officeHeartbeatTimer) {
+          return
+        }
+        officeHeartbeatTimer = window.setInterval(() => {
+          if (!officeSocketLive()) {
+            return
+          }
+          if (lastOfficeFrameAt && Date.now() - lastOfficeFrameAt > 75000) {
+            // two missed pong rounds: the socket is lying about OPEN
+            try { officeWs.close() } catch { /* already closing */ }
+            return
+          }
+          try {
+            officeWs.send(JSON.stringify({ event: 'office_ping' }))
+          } catch {
+            // a failed write means the socket is dying — onclose reconnects
+          }
+        }, 30000)
+      }
+
+      function stopOfficeHeartbeat() {
+        if (officeHeartbeatTimer) {
+          window.clearInterval(officeHeartbeatTimer)
+          officeHeartbeatTimer = 0
+        }
+        lastOfficeFrameAt = 0
+      }
+
       function closeOfficeSocket() {
+        stopOfficeHeartbeat()
         if (officeWsReconnectTimer) {
           window.clearTimeout(officeWsReconnectTimer)
           officeWsReconnectTimer = 0
@@ -25334,6 +25994,34 @@
         head.append(headings, headActions, escape, close)
 
         const body = bfEl('div', 'artifact-stage__body')
+        // Lazy body load: the /artifacts list ships only an excerpt, so fetch
+        // this artifact's full body before rendering the markdown reader. Decks
+        // render via the server-side render token (they never read entry.text
+        // here), so they skip the fetch — a trimmed deck body is fine.
+        if (!deckContext && !artifactIsHTMLDeck(entry)) {
+          await ensureArtifactBody(entry)
+        }
+        // founder ask 2026-07-07: every markdown deliverable offers a branded
+        // PDF from the stage header — a direct download when the asset already
+        // exists, otherwise POST /artifacts/export-pdf with an optimistic
+        // "Rendering PDF…" state. Decks keep their own flatten-law export.
+        // Status-gated (review 2026-07-07): only a terminal good run —
+        // complete|published via artifactStatusValue, the same
+        // threadStatus/status reader every library row uses — offers the PDF;
+        // a queued/running/error scaffold never does.
+        const stagePdfStatus = artifactStatusValue(entry)
+        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry.text || '').trim()
+            && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
+          const pdfControl = artifactPdfControl(entry, {
+            onLanded: (fresh) => {
+              // the assets block lives inside the read pane — re-render it so
+              // the new PDF shows without reopening the stage
+              const readPane = panel.querySelector('.artifact-stage__read')
+              if (readPane) renderArtifactRead(readPane, fresh)
+            }
+          })
+          if (pdfControl) headActions.appendChild(pdfControl)
+        }
         const pdfAssets = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
         if (deckContext) {
@@ -25892,7 +26580,27 @@
         if (!container) {
           return
         }
+        // Central lazy-body guard for every renderArtifactRead caller (stage,
+        // detail pane, deck-hero run log, design surface, report cards): the
+        // /artifacts list ships only an excerpt, so when this entry is trimmed,
+        // fetch the full body and re-render this same pane once it lands. The
+        // excerpt paints now (progressive); ensureArtifactBody clears the marker
+        // so the re-render reads the full body and does not loop. Guarded on the
+        // container still being mounted so a closed pane doesn't repaint.
+        if (entry && entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+          ensureArtifactBody(entry).then(() => {
+            // re-render ONLY when the fetch succeeded (marker cleared) — on a
+            // persistent fetch failure the marker stays and a re-render would
+            // re-trigger the fetch forever; degrade to the excerpt instead
+            if (container.isConnected && (!entry.metadata || entry.metadata.bodyTrimmed !== 'true')) {
+              renderArtifactRead(container, entry, options)
+            }
+          })
+        }
         container.replaceChildren()
+        // the report class is per-render state — a pane that re-renders onto a
+        // non-research artifact must drop the designed-report scope with it
+        container.classList.remove('artifact-read--report')
         if (!entry) {
           const empty = document.createElement('div')
           empty.className = 'artifact-read__empty'
@@ -25907,6 +26615,16 @@
         // whose token mint fails lands back here too (forceSafe).
         if (!options.forceSafe && artifactIsHTMLDeck(entry)) {
           renderArtifactDeck(container, entry, options)
+          renderArtifactAssets(container, entry)
+          return
+        }
+
+        // research deliverables read as a designed brief (founder pass
+        // 2026-07-07): hero, verdict strip, tag chips, ember-ticked section
+        // heads on a longform measure — same injection-safe builders, a
+        // different frame. Everything else keeps the data-room grid below.
+        if (artifactIsResearchReport(entry)) {
+          renderResearchReportRead(container, entry)
           renderArtifactAssets(container, entry)
           return
         }
@@ -26001,6 +26719,199 @@
         renderArtifactAssets(container, entry)
       }
 
+      /* ---------- the research report reader (founder pass 2026-07-07) ----------
+         A finished research brief is the product — it must read like a
+         designed report, not a wall of markdown. Detection is honest: the
+         thread's own mode stamp, or the report contract's headings living in
+         the body. HTML decks never land here (the deck branch runs first). */
+      function artifactIsResearchReport(entry) {
+        if (!entry || artifactIsHTMLDeck(entry)) {
+          return false
+        }
+        const mode = String(entry?.metadata?.mode || entry?.metadata?.threadMode || '').trim().toLowerCase()
+        if (mode === 'research') {
+          return true
+        }
+        const names = new Set(artifactSections(entry).sections.map(section => normalizedSectionName(section.h)))
+        return names.has('executive summary') && (names.has('thesis') || names.has('evidence') || names.has('recommendation'))
+      }
+
+      // "**Gate result:** shipped — …" rides the body preamble; pull it out so
+      // it can render as a verdict strip instead of leaking bold syntax.
+      function extractGateVerdict(objective) {
+        const lines = String(objective || '').split('\n')
+        const index = lines.findIndex(line => /^\s*(?:\*\*)?gate result:?(?:\*\*)?/i.test(line.trim()))
+        if (index === -1) {
+          return { verdict: '', rest: String(objective || '').trim() }
+        }
+        const verdict = lines.splice(index, 1)[0]
+          // tolerate a parenthetical rubric name between the label and the colon
+          // ("**Gate result (research_brief_gate_v1):** …") and either bold style
+          .replace(/^\s*\*{0,2}\s*gate result\b[^:*]*:?\s*\*{0,2}\s*/i, '')
+          .replace(/^[:\s]+/, '') // the "**Gate result**: …" variant leaves its colon behind
+          // the model often bold-wraps the entire gate line; the strip carries
+          // its own emphasis, so drop stray ** markers rather than leak them
+          .replace(/\*\*/g, '')
+          .trim()
+        return { verdict, rest: lines.join('\n').trim() }
+      }
+
+      // the verdict reads shipped/green only when the gate actually said so
+      function gateVerdictShips(verdict) {
+        return /\b(pass|passed|ship|shipped|approved|green|complete)\b/i.test(String(verdict || ''))
+      }
+
+      function artifactReportDateLabel(entry) {
+        const stamp = new Date(entry?.createdAt || entry?.metadata?.createdAt || '')
+        if (Number.isNaN(stamp.getTime())) {
+          return artifactTimeLabel(entry)
+        }
+        return stamp.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).toLowerCase()
+      }
+
+      // section names that demote to the "run evidence" disclosure — the
+      // pipeline's receipts, never the lead of the report
+      const ARTIFACT_REPORT_EVIDENCE_SECTIONS = new Set(['worker evidence', 'codex worker evidence', 'execution log'])
+
+      function renderResearchReportRead(container, entry) {
+        container.classList.add('artifact-read--report')
+        const parsed = artifactSections(entry)
+        const report = bfEl('article', 'artifact-report')
+
+        // hero: kicker · display title · mono meta chips
+        const hero = bfEl('header', 'artifact-report__hero')
+        hero.appendChild(bfEl('span', 'artifact-report__kicker', 'research brief'))
+        const title = bfEl('h3', 'artifact-report__title', artifactDisplayTitle(entry))
+        hero.appendChild(title)
+        const meta = bfEl('div', 'artifact-report__meta')
+        const requestedBy = String(entry?.metadata?.requestedBy || entry?.metadata?.createdBy || '').trim()
+        for (const chip of [
+          artifactReportDateLabel(entry),
+          requestedBy ? `for ${accountHandle(requestedBy)}` : '',
+          artifactWorkerLabel(entry),
+          artifactStatusLabel(entry)
+        ]) {
+          if (!chip) continue
+          meta.appendChild(bfEl('span', null, chip))
+        }
+        hero.appendChild(meta)
+        report.appendChild(hero)
+
+        // "Gate result" preamble → verdict strip (green tint only when it ships)
+        const { verdict, rest } = extractGateVerdict(parsed.objective)
+        if (verdict) {
+          const strip = bfEl('div', 'artifact-report__verdict')
+          if (gateVerdictShips(verdict)) strip.classList.add('artifact-report__verdict--pass')
+          strip.appendChild(bfEl('span', 'artifact-report__verdict-label', 'gate result'))
+          const value = bfEl('span', 'artifact-report__verdict-value')
+          appendArtifactInlineNodes(value, verdict)
+          strip.appendChild(value)
+          report.appendChild(strip)
+        }
+        if (rest) {
+          const abstract = bfEl('div', 'artifact-report__body artifact-report__abstract')
+          appendArtifactBodyNodes(abstract, rest)
+          report.appendChild(abstract)
+        }
+
+        // sections in the author's order; search tags become chips, the run
+        // receipts collect into one demoted disclosure, sources go numbered.
+        // Empty-body sections are noise in a finished report (the "# Title"
+        // echo included) — the hero already carries the title.
+        const evidence = []
+        let sourcesRendered = false
+        for (const section of parsed.sections) {
+          const name = normalizedSectionName(section.h)
+          if (!String(section.body || '').trim()) continue
+          if (name === 'search tags') {
+            const tags = artifactReportTagChips(section.body)
+            if (tags) report.appendChild(tags)
+            continue
+          }
+          if (ARTIFACT_REPORT_EVIDENCE_SECTIONS.has(name)) {
+            evidence.push(section)
+            continue
+          }
+          if (name === 'sources' || name === 'source notes') {
+            const sources = artifactSources({ text: section.body })
+            if (sources.length) {
+              report.appendChild(artifactReportSectionShell(section.h, artifactReportSourcesNode(sources)))
+              sourcesRendered = true
+              continue
+            }
+          }
+          const body = bfEl('div', 'artifact-report__body')
+          appendArtifactBodyNodes(body, section.body)
+          const shell = artifactReportSectionShell(section.h, body)
+          if (name === 'counterarguments') shell.classList.add('artifact-report__section--counter')
+          report.appendChild(shell)
+        }
+
+        // a report without an explicit Sources section still cites — surface
+        // whatever links the worker actually wrote, numbered, at the foot
+        if (!sourcesRendered) {
+          const sources = artifactSources(entry)
+          if (sources.length) {
+            report.appendChild(artifactReportSectionShell('Sources', artifactReportSourcesNode(sources)))
+          }
+        }
+
+        if (evidence.length) {
+          const details = document.createElement('details')
+          details.className = 'artifact-report__evidence'
+          const summary = document.createElement('summary')
+          summary.textContent = 'run evidence'
+          details.appendChild(summary)
+          for (const section of evidence) {
+            const body = bfEl('div', 'artifact-report__body')
+            appendArtifactBodyNodes(body, section.body)
+            details.appendChild(artifactReportSectionShell(section.h, body))
+          }
+          report.appendChild(details)
+        }
+
+        container.appendChild(report)
+      }
+
+      function artifactReportSectionShell(heading, bodyNode) {
+        const section = bfEl('section', 'artifact-report__section')
+        const h = bfEl('h4', 'artifact-report__h', String(heading || 'section').trim() || 'section')
+        section.append(h, bodyNode)
+        return section
+      }
+
+      // "Search tags: a, b, c" → a chip row (model text lands via textContent)
+      function artifactReportTagChips(body) {
+        const tags = String(body || '')
+          .split(/[,\n]/)
+          .map(tag => tag.trim().replace(/^[-*]\s*/, ''))
+          .filter(Boolean)
+          .slice(0, 24)
+        if (!tags.length) return null
+        const row = bfEl('div', 'artifact-report__tags')
+        for (const tag of tags) {
+          row.appendChild(bfEl('span', 'artifact-report__tag', tag))
+        }
+        return row
+      }
+
+      // numbered chip-style source anchors — new tab, never an opener handle
+      function artifactReportSourcesNode(sources) {
+        const list = bfEl('div', 'artifact-report__sources')
+        sources.forEach((source, index) => {
+          const link = document.createElement('a')
+          link.className = 'artifact-report__source'
+          link.href = source.url
+          link.target = '_blank'
+          link.rel = 'noreferrer noopener'
+          link.appendChild(bfEl('span', 'artifact-report__source-num', String(index + 1)))
+          link.appendChild(bfEl('span', 'artifact-report__source-name', source.name))
+          link.appendChild(bfEl('span', 'artifact-report__source-url', source.url))
+          list.appendChild(link)
+        })
+        return list
+      }
+
       /* Content-addressed assets (blob store, spec §4 item 13/14b): the
          artifact's `assets` metadata is a JSON array of {ref, mime, name,
          kind}. Refs are validated client-side to the 64-hex sha256 shape the
@@ -26019,6 +26930,97 @@
 
       function artifactBlobUrl(asset) {
         return `/artifacts/blob?ref=${encodeURIComponent(asset.ref)}&name=${encodeURIComponent(String(asset.name || ''))}`
+      }
+
+      // newest pdf asset on the artifact, or null — the same sniff the stage's
+      // pdf-embed branch and the deck hero use
+      function artifactNewestPdfAsset(entry) {
+        const pdfs = artifactAssetEntries(entry).filter(asset =>
+          String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
+        return pdfs.length ? pdfs[pdfs.length - 1] : null
+      }
+
+      /* ---------- Download PDF (founder ask 2026-07-07) ----------
+         POST /artifacts/export-pdf {artifactId}: the server derives the print
+         path itself (markdown reports ride the branded paper renderer,
+         report_print.go) and the finished PDF lands as a {kind: pdf} asset
+         via the render-runner callback + the signed-in memory fan-out. The
+         control is optimistic — "Rendering PDF…" while the sidecar works, a
+         direct download link the moment the asset exists. */
+      function artifactPdfControl(entry, options = {}) {
+        const artifactId = String(entry?.id || '').trim()
+        if (!artifactId) return null
+        const compact = Boolean(options.compact)
+        const className = String(options.className || 'artifact-stage__pdf-btn')
+        const downloadLabel = compact ? 'PDF' : 'Download PDF'
+
+        const pdfDownloadLink = (asset) => {
+          const link = document.createElement('a')
+          link.className = className
+          link.textContent = downloadLabel
+          link.title = 'Download PDF'
+          link.href = artifactBlobUrl(asset)
+          link.setAttribute('download', String(asset.name || 'report.pdf'))
+          return link
+        }
+
+        const existing = artifactNewestPdfAsset(entry)
+        if (existing) {
+          return pdfDownloadLink(existing)
+        }
+
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = className
+        button.textContent = downloadLabel
+        button.title = 'Render a branded PDF of this report'
+        button.addEventListener('click', async () => {
+          button.disabled = true
+          button.dataset.state = 'rendering'
+          button.textContent = compact ? 'Rendering…' : 'Rendering PDF…'
+          try {
+            const response = await fetch('/artifacts/export-pdf', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId })
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              throw new Error(payload.error || 'PDF export failed')
+            }
+            const landed = await waitForArtifactPdfAsset(artifactId)
+            if (!landed) {
+              throw new Error('the PDF is still rendering — it lands on this report as an asset when done')
+            }
+            button.replaceWith(pdfDownloadLink(landed.pdf))
+            showToast({ text: 'PDF ready — download is live on the report', kind: 'done' })
+            if (typeof options.onLanded === 'function') options.onLanded(landed.entry)
+          } catch (error) {
+            button.disabled = false
+            delete button.dataset.state
+            button.textContent = downloadLabel
+            showToast({ text: error.message || 'PDF export failed', kind: 'error' })
+          }
+        })
+        return button
+      }
+
+      // ride the artifact library refresh until the render callback lands the
+      // pdf asset (or stamps renderStatus failed); ~2 minutes, then give up
+      // quietly — the asset still lands via the normal refresh path later.
+      async function waitForArtifactPdfAsset(artifactId, tries = 40) {
+        for (let attempt = 0; attempt < tries; attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, 3000))
+          if (typeof loadArtifacts === 'function') await loadArtifacts()
+          const fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
+          if (!fresh) continue
+          const pdf = artifactNewestPdfAsset(fresh)
+          if (pdf) return { entry: fresh, pdf }
+          if (String(fresh?.metadata?.renderStatus || '').trim().toLowerCase() === 'failed') {
+            throw new Error(String(fresh?.metadata?.renderError || '').trim() || 'PDF render failed')
+          }
+        }
+        return null
       }
 
       /* pdf assets get the browser-native viewer (<object type="application/pdf">,
@@ -26293,6 +27295,7 @@
       }
 
       async function copyArtifactMarkdown(entry) {
+        await ensureArtifactBody(entry)
         const md = artifactMarkdown(entry)
         if (!md.trim()) {
           return
@@ -26305,10 +27308,11 @@
         }
       }
 
-      function researchDownloadArtifact(entry) {
+      async function researchDownloadArtifact(entry) {
         if (!entry) {
           return
         }
+        await ensureArtifactBody(entry)
         const title = artifactDisplayTitle(entry)
         const md = artifactMarkdown(entry)
         try {
@@ -26433,16 +27437,33 @@
         if (status === 'queued' || status === 'running') {
           // The launch path stamps running immediately; treat a freshly-created run
           // (no completedAt, scout_thread source) the same — it is still the work.
-          stage.replaceChildren(researchRunningStage(entry))
+          // Same run already on stage → refresh the live bits in place so the
+          // ember fill ANIMATES its width transition instead of rebuilding at
+          // the new width, and nothing under the reader's eye is thrashed.
+          const current = stage.querySelector('.research-run')
+          if (current && current.dataset.artifactId === String(entry.id || '') && current.dataset.runStatus === status) {
+            updateResearchRunningStage(current, entry)
+          } else {
+            stage.replaceChildren(researchRunningStage(entry))
+          }
           scheduleArtifactRefresh()
           return
         }
-        if (status === 'complete' || status === 'published') {
-          stage.replaceChildren(researchCompleteStage(entry))
-          return
-        }
-        if (status === 'error') {
-          stage.replaceChildren(researchCompleteStage(entry, { error: true }))
+        if (status === 'complete' || status === 'published' || status === 'error') {
+          // Full-body view: the /artifacts list only holds an excerpt, so pull
+          // the whole brief and re-render once it lands. The excerpt paints
+          // immediately (progressive load); ensureArtifactBody clears the
+          // bodyTrimmed marker, so the re-render reads the full body and the
+          // guard makes the re-entry a no-op — no loop.
+          if (entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(entry).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (activeResearchArtifact() === entry && (!entry.metadata || entry.metadata.bodyTrimmed !== 'true')) {
+                renderResearchTool()
+              }
+            })
+          }
+          stage.replaceChildren(researchCompleteStage(entry, { error: status === 'error' }))
           return
         }
         // draft / pending / launching → planning
@@ -26484,6 +27505,15 @@
         return wrap
       }
 
+      // human stage word from the runner's currentStage stamp — the shared
+      // goal-workflow vocabulary when it maps, a de-slugged fallback when a
+      // runner speaks a stage the map doesn't know. Absent stamp shows nothing.
+      function researchStageLabel(entry) {
+        const rawStage = String(entry?.metadata?.currentStage || '').trim()
+        if (!rawStage) return ''
+        return goalStageLabel[rawStage] || rawStage.replace(/_/g, ' ')
+      }
+
       function researchRunningStage(entry) {
         const goal = entry?.metadata?.query || entry?.metadata?.title || 'research run'
         const sources = researchArtifactSources(entry)
@@ -26497,6 +27527,10 @@
 
         const wrap = document.createElement('div')
         wrap.className = 'research-run bf-view'
+        // the in-place refresh path keys on these — same run, same status →
+        // update the live bits instead of rebuilding the card
+        wrap.dataset.artifactId = String(entry?.id || '')
+        wrap.dataset.runStatus = status
 
         const heading = document.createElement('h3')
         heading.className = 'research-run__goal'
@@ -26516,13 +27550,24 @@
         const overall = document.createElement('div')
         overall.className = 'research-overall'
         const sourceLabel = sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''
+        const stageLabel = researchStageLabel(entry)
         overall.innerHTML = `
           <div class="research-overall__row">
             <span class="research-overall__dot" aria-hidden="true"></span>
-            <span>${working} of ${count} ${working ? 'working' : 'ready'}${escapeHtml(sourceLabel)}</span>
-            <span class="research-overall__pct">${pct}%</span>
+            <span class="research-overall__label">${working} of ${count} ${working ? 'working' : 'ready'}${escapeHtml(sourceLabel)}</span>
+            ${stageLabel ? `<span class="research-overall__stage">${escapeHtml(stageLabel)}</span>` : ''}
+            <span class="research-overall__pct">${Math.round(pct)}%</span>
           </div>
           <div class="research-bar"><span class="research-bar__fill" style="width:${pct}%"></span></div>`
+        // the per-turn note rides under the bar — model-derived text lands via
+        // textContent only, never markup
+        const note = String(entry?.metadata?.progressNote || '').trim()
+        if (note) {
+          const noteEl = document.createElement('p')
+          noteEl.className = 'research-overall__note'
+          noteEl.textContent = note
+          overall.appendChild(noteEl)
+        }
         wrap.appendChild(overall)
 
         const agents = document.createElement('div')
@@ -26538,6 +27583,46 @@
         return wrap
       }
 
+      // in-place refresh of the running card's live bits (bar width, percent,
+      // stage word, per-turn note, source count) — the card is NOT rebuilt,
+      // so the ember fill animates its width transition and nothing flickers
+      // between orchestrator turns. Model-derived text lands via textContent.
+      function updateResearchRunningStage(wrap, entry) {
+        const pct = artifactProgressPercent(entry, 35)
+        wrap.querySelectorAll('.research-bar__fill').forEach(fill => { fill.style.width = `${pct}%` })
+        wrap.querySelectorAll('.research-overall__pct, .research-agent__pct').forEach(el => { el.textContent = `${Math.round(pct)}%` })
+        const label = wrap.querySelector('.research-overall__label')
+        if (label) {
+          const sources = researchArtifactSources(entry)
+          const sourceLabel = sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''
+          label.textContent = `1 of 1 working${sourceLabel}`
+        }
+        const stageLabel = researchStageLabel(entry)
+        let stageEl = wrap.querySelector('.research-overall__stage')
+        if (stageLabel) {
+          if (!stageEl) {
+            stageEl = document.createElement('span')
+            stageEl.className = 'research-overall__stage'
+            wrap.querySelector('.research-overall__pct')?.before(stageEl)
+          }
+          stageEl.textContent = stageLabel
+        } else if (stageEl) {
+          stageEl.remove()
+        }
+        const note = String(entry?.metadata?.progressNote || '').trim()
+        let noteEl = wrap.querySelector('.research-overall__note')
+        if (note) {
+          if (!noteEl) {
+            noteEl = document.createElement('p')
+            noteEl.className = 'research-overall__note'
+            wrap.querySelector('.research-overall')?.appendChild(noteEl)
+          }
+          noteEl.textContent = note
+        } else if (noteEl) {
+          noteEl.remove()
+        }
+      }
+
       function researchAgentCard(agent) {
         const card = document.createElement('div')
         card.className = 'research-agent'
@@ -26551,7 +27636,7 @@
           </div>
           <p class="research-agent__task">${escapeHtml(agent.task)}</p>
           <div class="research-bar"><span class="research-bar__fill" style="width:${agent.pct}%"></span></div>
-          <div class="research-agent__meta"><span>progress</span><span>${agent.pct}%</span></div>`
+          <div class="research-agent__meta"><span>progress</span><span class="research-agent__pct">${Math.round(agent.pct)}%</span></div>`
         return card
       }
 
@@ -26589,11 +27674,11 @@
         const open = document.createElement('button')
         open.type = 'button'
         open.className = 'btn btn--ghost'
-        open.textContent = 'Open artifact'
-        open.addEventListener('click', () => {
-          selectArtifact(entry.id)
-          openOfficeTool('artifacts')
-        })
+        open.textContent = 'Read report'
+        // rerouted (founder, live test 2026-07-07): the report opens in the
+        // right-side stage, never a yank to the Intelligence tab — "open in
+        // intelligence" in the stage header stays the explicit escape
+        open.addEventListener('click', () => openArtifactStage(entry.id, artifactDisplayTitle(entry)))
         const download = document.createElement('button')
         download.type = 'button'
         download.className = 'btn btn--secondary'
@@ -26604,7 +27689,13 @@
         ask.className = 'btn btn--primary'
         ask.textContent = 'Ask Scout'
         ask.addEventListener('click', () => openOSAssistant('research'))
-        actions.append(open, download, ask)
+        // the compact PDF pill rides next to "Read report" — direct download
+        // when the asset exists, the export trigger otherwise. Status-gated
+        // like the stage header (review 2026-07-07): this card also renders
+        // for an errored run ("needs attention"), which never offers PDF.
+        const pdf = error ? null : artifactPdfControl(entry, { compact: true, className: 'btn btn--ghost research-complete__pdf' })
+        if (pdf) actions.append(open, pdf, download, ask)
+        else actions.append(open, download, ask)
         // No artifact delete endpoint exists on the backend, so Delete is hidden
         // rather than rendering a dead control.
 
@@ -26743,6 +27834,16 @@
           return
         }
         if (output && !output.dataset.generated) {
+          // the latest artifact's raw body — a full read, so pull the whole
+          // body (list ships an excerpt) and re-render once it lands
+          if (artifacts[0].metadata && artifacts[0].metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(artifacts[0]).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (!artifacts[0].metadata || artifacts[0].metadata.bodyTrimmed !== 'true') {
+                renderAgentWorkspace(mode)
+              }
+            })
+          }
           output.textContent = artifacts[0].text || ''
         }
         list.replaceChildren(...artifacts.slice(0, 4).map(renderAgentArtifactLink))
@@ -27799,7 +28900,9 @@
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'agent-artifact-link'
-        button.addEventListener('click', () => openAgentArtifact(entry))
+        // rerouted (founder, live test 2026-07-07): a deliverable link opens
+        // the artifact stage in place — never a tool switch
+        button.addEventListener('click', () => openArtifactStage(entry.id, artifactDisplayTitle(entry)))
 
         const title = document.createElement('span')
         title.className = 'agent-artifact-link__title'
@@ -32310,6 +33413,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               }
             }
             break
+          case 'narrative':
+            // the narrative maintainer advanced a storyline dossier: drop the
+            // 15s mission cache so the next open refetches, and refresh the
+            // visible intel canvas on a debounce (a maintainer pass can land
+            // several storylines back to back — one fetch, not one per event)
+            intelLoadedAt = 0
+            scheduleMissionNarrativeRefresh()
+            break
           case 'package':
             // office-channel fan-out from package mutations: upsert the wire
             // payload into the binder cache (newest-updated first)
@@ -32442,6 +33553,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }, osEventsRefetchDebounceMs)
       }
 
+      // rich consumer for storyline updates: the 'narrative' signal is an
+      // invalidation, never the state itself — re-read GET /assistant/mission
+      // on a trailing debounce, and ONLY while the intel canvas is in front
+      // (off-surface the dropped intelLoadedAt cache covers the next open).
+      let missionNarrativeRefreshTimer = null
+
+      function scheduleMissionNarrativeRefresh() {
+        if (missionNarrativeRefreshTimer) {
+          clearTimeout(missionNarrativeRefreshTimer)
+        }
+        missionNarrativeRefreshTimer = setTimeout(() => {
+          missionNarrativeRefreshTimer = null
+          if ((appShell.dataset.tool || '') === 'artifacts') {
+            loadMissionIntelligence(true)
+          }
+        }, osEventsRefetchDebounceMs)
+      }
+
+      // rich consumer: artifact_progress is an invalidation signal — the
+      // rising progressPercent / progressNote / currentStage metadata is
+      // re-read via loadArtifacts, whose render path already repaints every
+      // surface holding the running card (research stage, scout-thread
+      // research cards, library rows, agent workspaces). Trailing debounce:
+      // a burst of orchestrator turns collapses to ONE fetch ~1.5s after the
+      // last event — one timer, re-armed, never stacked. While the artifact
+      // stage dialog is up the fetch re-arms instead of firing, so a reader
+      // mid-document is never thrashed beneath.
+      const artifactProgressRefreshMs = 1500
+      let artifactProgressRefreshTimer = null
+
+      function scheduleArtifactProgressRefresh(ref) {
+        if (!canUseArtifactLibrary()) {
+          return
+        }
+        if (artifactProgressRefreshTimer) {
+          clearTimeout(artifactProgressRefreshTimer)
+        }
+        artifactProgressRefreshTimer = setTimeout(() => {
+          artifactProgressRefreshTimer = null
+          if (artifactStageNode) {
+            scheduleArtifactProgressRefresh(ref)
+            return
+          }
+          loadArtifacts(true)
+        }, artifactProgressRefreshMs)
+      }
+
       function osEventsDispatchHandlers(event) {
         for (const handler of osEventHandlers) {
           try {
@@ -32477,7 +33635,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             osEventsRefetchBoard()
             break
           case 'artifact_progress':
-            // light: progress is a documented signal only in this wave.
+            // rich: each orchestrator turn stamps rising progress onto the
+            // artifact — re-read by ref, debounced, and repaint the surfaces
+            // showing the running card.
+            scheduleArtifactProgressRefresh(event.ref)
             break
           case 'package_advanced':
             // rich: re-read the package rail by ref.
@@ -32498,6 +33659,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'quarantine_change':
             // Wave 7 stub — no producer yet; routed for the extension point.
+            break
+          case 'narrative':
+            // a storyline dossier advanced (os_event mirror of the office
+            // 'narrative' event): same debounced mission re-read.
+            intelLoadedAt = 0
+            scheduleMissionNarrativeRefresh()
             break
           case 'deal_room':
             // a Deal Room request/approve/revoke landed for this viewer (admin
@@ -34714,22 +35881,42 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
-	      // Channel activity while the chat tool is open: chat_thread events on
-	      // the office socket are the live path; the 12s poll is fallback-only,
-	      // skipping its fetch whenever that socket is up.
+	      // Poll = true reconciliation: chat_thread events on the office/room
+	      // sockets are the live path, but a half-open socket reads OPEN
+	      // forever, so the poll never defers to readyState — it always runs
+	      // while authed, 15s with the chat tool in front and 45s everywhere
+	      // else (rooms included). The fingerprint dedup in
+	      // loadScoutChatThreads keeps an unchanged pass to one cheap GET.
+	      // Rewired on tool change (applyToolState) and every auth flip
+	      // (renderLoginMode).
 	      function syncChatThreadPolling() {
-	        const shouldPoll = Boolean(authedUser) && appShell.dataset.tool === 'chat'
-	        if (shouldPoll && !chatThreadPollTimer) {
-	          chatThreadPollTimer = window.setInterval(() => {
-	            if (officeSocketLive()) {
-	              return
-	            }
-	            loadScoutChatThreads({ onlyIfChanged: true })
-	          }, 12000)
-	        } else if (!shouldPoll && chatThreadPollTimer) {
+	        const wantedMs = !authedUser ? 0 : appShell.dataset.tool === 'chat' ? 15000 : 45000
+	        if (chatThreadPollTimer && chatThreadPollMs !== wantedMs) {
 	          window.clearInterval(chatThreadPollTimer)
 	          chatThreadPollTimer = 0
 	        }
+	        chatThreadPollMs = wantedMs
+	        if (wantedMs && !chatThreadPollTimer) {
+	          chatThreadPollTimer = window.setInterval(() => {
+	            loadScoutChatThreads({ onlyIfChanged: true })
+	          }, wantedMs)
+	        }
+	      }
+
+	      // A bell notification that deep-links to a chat thread doubles as an
+	      // independent recovery signal riding the union fan-out: if the
+	      // chat_thread frame itself was lost to a blinked socket, this
+	      // debounced reconcile pulls the thread anyway. 3s coalesces a burst
+	      // of channel-post nudges into one fetch.
+	      let chatThreadNotificationNudgeTimer = 0
+	      function nudgeChatThreadsFromNotification() {
+	        if (chatThreadNotificationNudgeTimer) {
+	          window.clearTimeout(chatThreadNotificationNudgeTimer)
+	        }
+	        chatThreadNotificationNudgeTimer = window.setTimeout(() => {
+	          chatThreadNotificationNudgeTimer = 0
+	          loadScoutChatThreads({ onlyIfChanged: true })
+	        }, 3000)
 	      }
 
 	      function handleChatThreadEvent(payload) {
@@ -35109,14 +36296,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutChatDefaultPlaceholder() {
 	        // composer copy, design verbatim (§7.2)
 	        const thread = selectedScoutChatThread()
+	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
 	        // card 082: a Feed-the-brain thread coaches the composer — answer,
 	        // attach, or skip — so the guided flow reads as a guided flow
 	        if (String(thread?.intake || '').toLowerCase() === 'brain') {
-	          return 'answer, attach files, or say "skip"'
+	          return isPhone ? 'answer, attach, or skip' : 'answer, attach files, or say "skip"'
 	        }
 	        return chatThreadIsChannel(thread)
-	          ? 'message the thread — @scout to ask'
-	          : 'ask Scout, or tap + to run a task'
+	          ? (isPhone ? 'message the thread…' : 'message the thread — @scout to ask')
+	          : (isPhone ? 'ask Scout, or tap +' : 'ask Scout, or tap + to run a task')
 	      }
 
 	      // card 070: destination guard — a persistent pill naming where the next
@@ -36163,7 +37351,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const menuPop = card.querySelector('.goalcard__menu-pop')
         menuBtn?.addEventListener('click', (event) => { event.stopPropagation(); menuPop.hidden = !menuPop.hidden; goalCancelDisarm(card) })
         document.addEventListener('click', () => { if (menuPop) menuPop.hidden = true })
-        card.querySelector('[data-goal-open]')?.addEventListener('click', () => { const entry = card.__goalArtifact; if (entry) openAgentArtifact(entry) })
+        // rerouted (review 2026-07-07): the "Open as full artifact" menu door
+        // opens the goal artifact in the right-side stage — never a yank to
+        // the Intelligence tab; the stage header keeps the explicit escape
+        card.querySelector('[data-goal-open]')?.addEventListener('click', () => { const entry = card.__goalArtifact; if (entry) openArtifactStage(entry.id, goalArtifactTitle(entry)) })
         // cancel (spec §2 misfire economics, Wave 2 item 8c): the first tap
         // arms the confirm step ("stop this run?"), the second tap posts — a
         // wrong launch costs one tap, not six subtasks.
@@ -36496,6 +37687,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // inline brief: the first input's body, when the library has it —
           // the judge scores and steals are readable without leaving the card
           const entry = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => candidate.id === inputTasks[0].artifactId)
+          // The list ships only an excerpt; this inline draft is a full read, so
+          // pull the whole body and re-render the card once it lands (one-shot —
+          // ensureArtifactBody clears the marker). The excerpt shows meanwhile.
+          if (entry && entry.metadata && entry.metadata.bodyTrimmed === 'true') {
+            ensureArtifactBody(entry).then(() => {
+              // re-render only on success (marker cleared) — avoids a fetch-fail loop
+              if (!entry.metadata || entry.metadata.bodyTrimmed !== 'true') {
+                goalCardScheduleSync()
+              }
+            })
+          }
           const briefText = String(entry?.text || '').trim()
           if (briefText) {
             // the single highest-stakes read in the product — render the draft
@@ -36713,7 +37915,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           terminal.appendChild(bfEl('div', 'goalcard__salvage', gap ? `draft saved · missed: ${gap}` : 'draft saved'))
           const openDraft = bfEl('button', 'goalcard__link goalcard__link--accent', 'open draft')
           openDraft.type = 'button'
-          openDraft.addEventListener('click', () => openAgentArtifact({ id: deliverableId }))
+          // rerouted (review 2026-07-07): the salvage draft opens in the
+          // right-side stage over the thread — never a yank to the
+          // Intelligence tab; "open in intelligence" in the stage header
+          // stays the explicit escape
+          openDraft.addEventListener('click', () => openArtifactStage(deliverableId, goalArtifactTitle(artifact)))
           actions.appendChild(openDraft)
         }
         // sheet 2d failed: one filled primary (the honest next step), the
@@ -36896,7 +38102,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const open = bfEl('button', 'returncard__open', '▸ open artifact')
         open.type = 'button'
-        open.addEventListener('click', () => openAgentArtifact(artifact))
+        // rerouted (founder, live test 2026-07-07): the return card lives in
+        // the chat thread, so its deliverable opens in the stage over it
+        open.addEventListener('click', () => openArtifactStage(artifact.id, goalArtifactTitle(artifact)))
         card.appendChild(open)
         const survey = surveyChipsNode(artifact?.id)
         if (survey) card.appendChild(survey)
@@ -37339,6 +38547,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function handleNotificationEvent(payload) {
         if (!notificationAddressedToMe(payload)) {
           return
+        }
+        if (payload?.threadId) {
+          // a channel-post nudge deep-links to a chat thread — reconcile the
+          // thread list in case the chat_thread frame itself never arrived
+          nudgeChatThreadsFromNotification()
         }
         appendNotificationEntry(payload, { toast: true })
       }
@@ -38129,10 +39342,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           chipTitle.className = 'room-chat-artifact-chip__title'
           chipTitle.textContent = entry ? artifactDisplayTitle(entry) : 'view report'
           chip.append(label, chipTitle)
-          chip.addEventListener('click', () => handleOSAssistantActions([
-            { type: 'open_tool', tool: 'artifacts', artifactId },
-            { type: 'select_artifact', artifactId }
-          ]))
+          // rerouted (founder, live test 2026-07-07): the chip opens the
+          // report over the room in the artifact stage — never a yank to the
+          // Intel tab. TestIndexArtifactModelWiring pins this exact live line
+          // (and pins the retired open_tool dispatch as stale).
+          chip.addEventListener('click', () => openArtifactStage(artifactId, entry ? artifactDisplayTitle(entry) : 'report'))
           item.appendChild(chip)
         }
         return item
@@ -40211,27 +41425,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         card.querySelector('.scout-chat-research__title').textContent = title
         const artifactButton = card.querySelector('[data-research-artifact]')
+        // rerouted (founder, live test 2026-07-07): the report opens in the
+        // right-side artifact stage over the thread — the designed reader with
+        // the PDF affordance — instead of expanding inline. The in-card
+        // report node stays for the live-sync path but never shows.
         artifactButton?.addEventListener('click', () => {
           const entry = card.__scoutArtifact
-          const report = card.querySelector('[data-research-report]')
-          if (!entry || !report) {
+          if (!entry?.id) {
             return
           }
-          const open = report.hidden
-          report.hidden = !open
-          card.classList.toggle('is-report-open', open)
-          if (open) {
-            renderArtifactRead(report, entry)
-            artifactButton.textContent = 'hide report'
-          } else {
-            artifactButton.textContent = artifactStatusValue(entry) === 'complete' || artifactStatusValue(entry) === 'published' ? 'view report' : 'watch report'
-          }
+          openArtifactStage(entry.id, artifactDisplayTitle(entry))
         })
         card.querySelector('[data-research-download]')?.addEventListener('click', () => researchDownloadArtifact(card.__scoutArtifact))
         card.querySelector('[data-research-copy]')?.addEventListener('click', () => copyArtifactMarkdown(card.__scoutArtifact))
+        // rerouted: the library door duplicated the stage's own "open in
+        // intelligence" escape — route it through the stage too (it stays
+        // hidden below; no card click switches the active tool)
         card.querySelector('[data-research-library]')?.addEventListener('click', () => {
-          if (card.__scoutArtifact) {
-            openAgentArtifact(card.__scoutArtifact)
+          const entry = card.__scoutArtifact
+          if (entry?.id) {
+            openArtifactStage(entry.id, artifactDisplayTitle(entry))
           }
         })
         card.querySelector('[data-research-followup]')?.addEventListener('click', () => {
@@ -40344,7 +41557,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           copyButton.hidden = !hasMarkdown
         }
         if (libraryButton) {
-          libraryButton.hidden = !hasMarkdown || !canUseArtifactLibrary()
+          // the stage header's "open in intelligence" is THE explicit escape
+          // now — the in-card library door stays in the markup (wiring
+          // contract) but never shows, so no card click switches the tool
+          libraryButton.hidden = true
         }
         const followupButton = card.querySelector('[data-research-followup]')
         if (followupButton) {
@@ -43020,6 +44236,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderIntelLearned()
         renderIntelContributions()
         renderIntelThemes()
+        renderIntelStorylines()
         renderIntelDecisions()
         if (intelMetaLine) {
           intelMetaLine.textContent = `${intelPulseTotal()} ingested this week · the company brain, visible`
@@ -43206,6 +44423,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         intelAlignmentsEl.replaceChildren(...(alignments.length
           ? alignments.map(alignment => intelListItem('✓', String(alignment), 'intel-item--alignment'))
           : [intelEmptyNode('no consensus signals yet')]))
+      }
+
+      /* Storylines — the narrative maintainer's active dossiers off the
+         mission snapshot's narratives array ({slug,title,updatedAt,summary} —
+         identity + summary only, the body never crosses this boundary). One
+         compact card each; a card is a door into the artifact stage ONLY when
+         the payload names an artifactId — the snapshot rows carry none today,
+         so they render as static records (never an invented id). Zero
+         narratives → the whole section stays hidden, no orphan header. */
+      function renderIntelStorylines() {
+        if (!intelStorylinesSection || !intelStorylinesEl) {
+          return
+        }
+        const narratives = Array.isArray(intelData?.narratives) ? intelData.narratives : []
+        if (!narratives.length) {
+          intelStorylinesSection.hidden = true
+          intelStorylinesEl.replaceChildren()
+          if (intelStorylinesStamp) intelStorylinesStamp.textContent = ''
+          return
+        }
+        intelStorylinesSection.hidden = false
+        if (intelStorylinesStamp) {
+          intelStorylinesStamp.textContent = `${narratives.length} active storyline${narratives.length === 1 ? '' : 's'}`
+        }
+        intelStorylinesEl.replaceChildren(...narratives.map(narrative => {
+          const title = String(narrative?.title || narrative?.slug || '').trim() || 'storyline'
+          const artifactId = String(narrative?.artifactId || '').trim()
+          const card = document.createElement(artifactId ? 'button' : 'div')
+          card.className = 'intel-storyline'
+          const titleEl = document.createElement('span')
+          titleEl.className = 'intel-storyline__title'
+          titleEl.textContent = title
+          const summary = document.createElement('span')
+          summary.className = 'intel-storyline__summary'
+          summary.textContent = String(narrative?.summary || '')
+          const updated = document.createElement('span')
+          updated.className = 'intel-storyline__updated'
+          updated.textContent = intelRelativeTime(narrative?.updatedAt)
+          card.append(titleEl, summary, updated)
+          if (artifactId) {
+            card.type = 'button'
+            card.addEventListener('click', () => openArtifactStage(artifactId, title))
+          }
+          return card
+        }))
       }
 
       /* Decision ledger — kind "decision" entries are Scout-grounding
@@ -43958,6 +45220,51 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       })
 
+      // The /artifacts list ships a light excerpt per artifact (a single deck
+      // can be megabytes); ensureArtifactBody fetches THIS artifact's full body
+      // on demand — only when a deliverable is actually opened, downloaded, or
+      // copied — via the ?id= single-artifact endpoint. It mutates the cached
+      // entry in place so a second open never refetches, is idempotent (a
+      // non-trimmed entry returns immediately), and degrades to the excerpt if
+      // the fetch fails. Callers that render the FULL body must await this.
+      const artifactBodyFetches = new Map()
+      async function ensureArtifactBody(entry) {
+        if (!entry || !entry.id || !entry.metadata || entry.metadata.bodyTrimmed !== 'true') {
+          return entry
+        }
+        const id = String(entry.id)
+        if (!artifactBodyFetches.has(id)) {
+          artifactBodyFetches.set(id, (async () => {
+            try {
+              const response = await fetch('/artifacts?id=' + encodeURIComponent(id), { cache: 'no-store' })
+              if (!response.ok) {
+                return
+              }
+              const payload = await response.json()
+              const full = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+              if (full && typeof full.text === 'string') {
+                entry.text = full.text
+                // restore the full metadata too — the list caps heavy free-text
+                // fields (query/objective/threadQuery), and the ?id= entry carries
+                // them in full and without the bodyTrimmed marker
+                if (full.metadata && typeof full.metadata === 'object') {
+                  entry.metadata = full.metadata
+                } else if (entry.metadata) {
+                  delete entry.metadata.bodyTrimmed
+                }
+              }
+            } catch {
+              // leave the excerpt in place; a full-body view degrades to a
+              // preview rather than an empty pane
+            } finally {
+              artifactBodyFetches.delete(id)
+            }
+          })())
+        }
+        await artifactBodyFetches.get(id)
+        return entry
+      }
+
       async function loadArtifacts() {
         if (!canUseArtifactLibrary()) {
           artifactEntries = []
@@ -44268,6 +45575,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderArtifactDetail() {
         const artifact = selectedArtifact()
+        // The detail pane loads the body into an EDITABLE field — never let it
+        // hold a list excerpt, or an edit-and-save would overwrite the full body
+        // with the truncated one. Pull the full body then re-render; the read
+        // pane and textarea below fill in once it lands (the marker clears, so
+        // this is a one-shot, no loop). saveSelectedArtifact also refuses while
+        // trimmed as a belt-and-suspenders guard against saving mid-load.
+        if (artifact && artifact.metadata && artifact.metadata.bodyTrimmed === 'true') {
+          ensureArtifactBody(artifact).then(() => {
+            // re-render only on success (marker cleared) — avoids a fetch-fail loop
+            if (selectedArtifact() === artifact && (!artifact.metadata || artifact.metadata.bodyTrimmed !== 'true')) {
+              renderArtifactDetail()
+            }
+          })
+        }
         const disabled = !artifact
         const published = artifactPublished(artifact)
         const statusValue = artifactStatusValue(artifact)
@@ -44551,6 +45872,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         event.preventDefault()
         const artifact = selectedArtifact()
         if (!artifact) {
+          return
+        }
+        // Never PATCH while the body is still the list excerpt — saving the
+        // textarea value would truncate the stored artifact. Load the full body
+        // and abort this save; the detail pane re-renders with the real body so
+        // the user edits and saves against complete text.
+        if (artifact.metadata && artifact.metadata.bodyTrimmed === 'true') {
+          await ensureArtifactBody(artifact)
+          renderArtifactDetail()
+          setArtifactDetailStatus('loaded full body — review and save again')
           return
         }
         artifactSaveButton.disabled = true
@@ -44850,6 +46181,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const payload = await response.json()
           if (Array.isArray(payload?.files)) {
             filesEntries = payload.files
+            filesFolders = Array.isArray(payload?.folders) ? payload.folders : []
+            // a folder deleted elsewhere (teammate, Scout) drops the filter
+            // back to All files instead of stranding an empty view
+            if (filesActiveFolderId && !filesFolders.some(folder => String(folder?.id || '') === filesActiveFolderId)) {
+              filesActiveFolderId = ''
+            }
             filesLoadedAt = Date.now()
             renderFilesSurface()
           }
@@ -44858,8 +46195,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function filesRowIconSvg(mime) {
-        mime = String(mime || '')
+      function filesRowIconSvg(file) {
+        // deliverables read as documents, not downloads: Lucide file-text for
+        // markdown reports, Lucide presentation for html decks
+        if (file?.origin === 'deliverable') {
+          if (String(file?.mime || '') === 'text/html') {
+            return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h20"></path><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"></path><path d="m7 21 5-5 5 5"></path></svg>'
+          }
+          return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path><path d="M10 9H8"></path></svg>'
+        }
+        const mime = String(file?.mime || '')
         if (mime.startsWith('image/')) {
           return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"></path></svg>'
         }
@@ -44897,6 +46242,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function fileMetaParts(file) {
         const parts = []
+        // origin caption — a deliverable is Scout's work product, not an upload
+        if (file?.origin === 'deliverable') {
+          parts.push('scout deliverable')
+        }
         if (file?.uploaderName) {
           parts.push(String(file.uploaderName).toLowerCase())
         }
@@ -44908,24 +46257,423 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return parts.join(' · ')
       }
 
+      /* ---------- Files folders + drag-and-drop ----------
+         The custom drag mime keeps an internal row drag distinct from an
+         OS-file drop: chips accept it, the upload dropzone ignores it. */
+      const FILES_DND_MIME = 'application/x-bonfire-file-id'
+
+      function filesDragHasRow(event) {
+        return Array.from(event.dataTransfer?.types || []).includes(FILES_DND_MIME)
+      }
+
+      // rows and tiles drag by id; the name link opts out of native link
+      // dragging so the row's payload is the only thing in flight
+      function wireFileDragSource(node, file) {
+        const fileId = String(file?.id || '')
+        if (!fileId) {
+          return
+        }
+        node.draggable = true
+        node.addEventListener('dragstart', event => {
+          if (!event.dataTransfer) {
+            return
+          }
+          event.dataTransfer.setData(FILES_DND_MIME, fileId)
+          event.dataTransfer.effectAllowed = 'move'
+          node.classList.add('is-dragging')
+        })
+        node.addEventListener('dragend', () => node.classList.remove('is-dragging'))
+      }
+
+      // optimistic move: stamp the local row and re-render (counts derive
+      // from filesEntries), then let POST + the ws 'file' fan-out reconcile
+      async function moveFileToFolderClient(fileId, folderId) {
+        fileId = String(fileId || '')
+        if (!fileId) {
+          return
+        }
+        folderId = String(folderId || '')
+        const row = filesEntries.find(candidate => String(candidate?.id || '') === fileId)
+        if (row && String(row.folderId || '') === folderId) {
+          return
+        }
+        if (row) {
+          row.folderId = folderId
+        }
+        filesRowMenuFor = ''
+        renderFilesSurface()
+        try {
+          const response = await fetch('/assistant/files/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, folderId })
+          })
+          if (!response.ok) {
+            throw new Error('move failed')
+          }
+        } catch {
+          showToast({ text: 'move failed — refreshing the list', kind: 'error' })
+          loadFilesSurface(true)
+        }
+      }
+
+      async function createFilesFolder(name) {
+        try {
+          const response = await fetch('/assistant/files/folders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not create the folder', kind: 'error' })
+            return
+          }
+          if (payload?.folder?.id) {
+            filesActiveFolderId = String(payload.folder.id)
+          }
+          loadFilesSurface(true)
+        } catch {
+          showToast({ text: 'could not create the folder', kind: 'error' })
+        }
+      }
+
+      async function renameFilesFolder(id, name) {
+        try {
+          const response = await fetch('/assistant/files/folders', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, name })
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not rename the folder', kind: 'error' })
+            return
+          }
+          loadFilesSurface(true)
+        } catch {
+          showToast({ text: 'could not rename the folder', kind: 'error' })
+        }
+      }
+
+      async function deleteFilesFolder(id) {
+        try {
+          const response = await fetch(`/assistant/files/folders?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not delete the folder', kind: 'error' })
+            return
+          }
+          if (filesActiveFolderId === id) {
+            filesActiveFolderId = ''
+          }
+          loadFilesSurface(true)
+        } catch {
+          showToast({ text: 'could not delete the folder', kind: 'error' })
+        }
+      }
+
+      // chips accept row drags — highlight on dragover, file on drop
+      function wireFolderDropTarget(chip, folderId) {
+        ;['dragenter', 'dragover'].forEach(evt => chip.addEventListener(evt, event => {
+          if (!filesDragHasRow(event)) {
+            return
+          }
+          event.preventDefault()
+          if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move'
+          }
+          chip.classList.add('is-dragover')
+        }))
+        ;['dragleave', 'dragend'].forEach(evt => chip.addEventListener(evt, () => {
+          chip.classList.remove('is-dragover')
+        }))
+        chip.addEventListener('drop', event => {
+          chip.classList.remove('is-dragover')
+          if (!filesDragHasRow(event)) {
+            return
+          }
+          event.preventDefault()
+          moveFileToFolderClient(event.dataTransfer?.getData(FILES_DND_MIME), folderId)
+        })
+      }
+
+      function filesFolderInputChip(options) {
+        const chip = document.createElement('div')
+        chip.className = 'files-folder-chip files-folder-chip--new'
+        const input = document.createElement('input')
+        input.className = 'files-folder-chip__input'
+        input.type = 'text'
+        input.maxLength = 60
+        input.placeholder = options.placeholder
+        input.value = options.value || ''
+        input.setAttribute('aria-label', options.placeholder)
+        let settled = false
+        const settle = commit => {
+          if (settled) {
+            return
+          }
+          settled = true
+          const value = input.value.trim()
+          options.close()
+          renderFilesSurface()
+          if (commit && value) {
+            options.commit(value)
+          }
+        }
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            settle(true)
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            settle(false)
+          }
+        })
+        input.addEventListener('blur', () => settle(false))
+        chip.appendChild(input)
+        chip.focusTarget = input
+        return chip
+      }
+
+      function filesFolderChipNode(folder, count) {
+        const id = String(folder?.id || '')
+        const active = filesActiveFolderId === id
+        const chip = document.createElement('div')
+        chip.className = 'files-folder-chip'
+        chip.classList.toggle('is-active', active)
+
+        const pick = document.createElement('button')
+        pick.type = 'button'
+        pick.className = 'files-folder-chip__pick'
+        pick.setAttribute('aria-pressed', active ? 'true' : 'false')
+        const label = document.createElement('span')
+        label.textContent = String(folder?.name || (id ? 'folder' : 'All files'))
+        const countEl = document.createElement('span')
+        countEl.className = 'files-folder-chip__count'
+        countEl.textContent = String(count)
+        pick.append(label, countEl)
+        pick.addEventListener('click', () => {
+          filesActiveFolderId = id
+          filesFolderMenuFor = ''
+          filesRowMenuFor = ''
+          renderFilesSurface()
+        })
+        chip.appendChild(pick)
+
+        // the kebab only rides the ACTIVE folder chip — All files has no
+        // rename/delete story
+        if (active && id) {
+          const kebab = document.createElement('button')
+          kebab.type = 'button'
+          kebab.className = 'files-folder-chip__kebab'
+          kebab.setAttribute('aria-label', 'folder options')
+          kebab.setAttribute('aria-haspopup', 'menu')
+          kebab.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
+          kebab.addEventListener('click', event => {
+            event.stopPropagation()
+            filesFolderMenuFor = filesFolderMenuFor === id ? '' : id
+            filesRowMenuFor = ''
+            renderFilesSurface()
+          })
+          chip.appendChild(kebab)
+          if (filesFolderMenuFor === id) {
+            const menu = document.createElement('div')
+            menu.className = 'files-folder-menu'
+            menu.setAttribute('role', 'menu')
+            const rename = document.createElement('button')
+            rename.type = 'button'
+            rename.className = 'files-folder-menu__item'
+            rename.textContent = 'Rename'
+            rename.addEventListener('click', () => {
+              filesFolderMenuFor = ''
+              filesFolderRenamingId = id
+              renderFilesSurface()
+            })
+            const remove = document.createElement('button')
+            remove.type = 'button'
+            remove.className = 'files-folder-menu__item files-folder-menu__item--danger'
+            remove.textContent = 'Delete folder'
+            remove.addEventListener('click', () => {
+              filesFolderMenuFor = ''
+              const name = String(folder?.name || 'this folder')
+              if (window.confirm(`Delete “${name}”? Its files go back to All files.`)) {
+                deleteFilesFolder(id)
+              } else {
+                renderFilesSurface()
+              }
+            })
+            menu.append(rename, remove)
+            chip.appendChild(menu)
+          }
+        }
+        wireFolderDropTarget(chip, id)
+        return chip
+      }
+
+      function renderFilesFolders() {
+        if (!filesFoldersRow) {
+          return
+        }
+        filesFoldersRow.hidden = false
+        // counts derive from the visible rows so optimistic moves read true
+        const countByFolder = new Map()
+        for (const file of filesEntries) {
+          const folderId = String(file?.folderId || '')
+          countByFolder.set(folderId, (countByFolder.get(folderId) || 0) + 1)
+        }
+        const chips = []
+        let focusTarget = null
+        chips.push(filesFolderChipNode({ id: '', name: 'All files' }, filesEntries.length))
+        for (const folder of filesFolders) {
+          const id = String(folder?.id || '')
+          if (filesFolderRenamingId === id) {
+            const editor = filesFolderInputChip({
+              placeholder: 'folder name',
+              value: String(folder?.name || ''),
+              close: () => { filesFolderRenamingId = '' },
+              commit: value => renameFilesFolder(id, value)
+            })
+            focusTarget = editor.focusTarget
+            chips.push(editor)
+            continue
+          }
+          chips.push(filesFolderChipNode(folder, countByFolder.get(id) || 0))
+        }
+        if (filesFolderCreating) {
+          const editor = filesFolderInputChip({
+            placeholder: 'new folder name',
+            close: () => { filesFolderCreating = false },
+            commit: value => createFilesFolder(value)
+          })
+          focusTarget = editor.focusTarget
+          chips.push(editor)
+        } else {
+          const ghost = document.createElement('div')
+          ghost.className = 'files-folder-chip files-folder-chip--new'
+          const pick = document.createElement('button')
+          pick.type = 'button'
+          pick.className = 'files-folder-chip__pick'
+          const label = document.createElement('span')
+          label.textContent = '+ New folder'
+          pick.appendChild(label)
+          pick.addEventListener('click', () => {
+            filesFolderCreating = true
+            filesFolderMenuFor = ''
+            filesRowMenuFor = ''
+            renderFilesSurface()
+          })
+          ghost.appendChild(pick)
+          chips.push(ghost)
+        }
+        filesFoldersRow.replaceChildren(...chips)
+        if (focusTarget) {
+          focusTarget.focus()
+          focusTarget.select?.()
+        }
+      }
+
+      // per-row fallback for keyboards and touch: kebab → Move to… menu
+      function fileMoveKebabNode(file) {
+        const fileId = String(file?.id || '')
+        if (!fileId) {
+          return null
+        }
+        const wrap = document.createElement('span')
+        wrap.className = 'files-row__kebab-wrap'
+        const kebab = document.createElement('button')
+        kebab.type = 'button'
+        kebab.className = 'files-row__kebab'
+        kebab.setAttribute('aria-label', 'move to folder')
+        kebab.setAttribute('aria-haspopup', 'menu')
+        kebab.title = 'Move to…'
+        kebab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
+        kebab.addEventListener('click', event => {
+          event.stopPropagation()
+          filesRowMenuFor = filesRowMenuFor === fileId ? '' : fileId
+          filesFolderMenuFor = ''
+          renderFilesSurface()
+        })
+        wrap.appendChild(kebab)
+        if (filesRowMenuFor === fileId) {
+          const menu = document.createElement('div')
+          menu.className = 'files-folder-menu'
+          menu.setAttribute('role', 'menu')
+          const label = document.createElement('span')
+          label.className = 'files-folder-menu__label'
+          label.textContent = 'move to'
+          menu.appendChild(label)
+          const currentFolderId = String(file?.folderId || '')
+          const targets = [{ id: '', name: 'All files' }, ...filesFolders]
+          let offered = 0
+          for (const target of targets) {
+            const targetId = String(target?.id || '')
+            if (targetId === currentFolderId) {
+              continue
+            }
+            const item = document.createElement('button')
+            item.type = 'button'
+            item.className = 'files-folder-menu__item'
+            item.textContent = String(target?.name || 'folder')
+            item.addEventListener('click', () => moveFileToFolderClient(fileId, targetId))
+            menu.appendChild(item)
+            offered++
+          }
+          if (!offered) {
+            const none = document.createElement('button')
+            none.type = 'button'
+            none.className = 'files-folder-menu__item'
+            none.disabled = true
+            none.textContent = 'no folders yet'
+            menu.appendChild(none)
+          }
+          wrap.appendChild(menu)
+        }
+        return wrap
+      }
+
+      // one document-level closer for both menu families
+      document.addEventListener('pointerdown', event => {
+        if (!filesFolderMenuFor && !filesRowMenuFor) {
+          return
+        }
+        if (event.target instanceof Element
+          && event.target.closest('.files-folder-menu, .files-folder-chip__kebab, .files-row__kebab')) {
+          return
+        }
+        filesFolderMenuFor = ''
+        filesRowMenuFor = ''
+        renderFilesSurface()
+      })
+
       // grid tile (segmented grid view) — icon, clamped name, meta, brain badge
       function fileTileNode(file) {
         const tile = document.createElement('article')
         tile.className = 'file-tile'
+        wireFileDragSource(tile, file)
 
         const icon = document.createElement('span')
         icon.className = 'file-tile__icon'
-        icon.innerHTML = filesRowIconSvg(file?.mime)
+        icon.innerHTML = filesRowIconSvg(file)
         tile.appendChild(icon)
 
         const name = String(file?.name || 'file')
         const downloadUrl = String(file?.downloadUrl || '')
-        if (downloadUrl) {
+        if (file?.origin === 'deliverable' && file?.artifactId) {
+          // a deliverable opens in the artifact stage — never a download
+          const open = document.createElement('button')
+          open.type = 'button'
+          open.className = 'file-tile__name'
+          open.textContent = name
+          open.addEventListener('click', () => openArtifactStage(file.artifactId, name))
+          tile.appendChild(open)
+        } else if (downloadUrl) {
           const link = document.createElement('a')
           link.className = 'file-tile__name'
           link.href = downloadUrl
           link.target = '_blank'
           link.rel = 'noopener'
+          link.draggable = false
           if (!file?.previewable) {
             link.setAttribute('download', name)
           }
@@ -44950,6 +46698,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (thread) {
           foot.appendChild(thread)
         }
+        const kebab = fileMoveKebabNode(file)
+        if (kebab) {
+          foot.appendChild(kebab)
+        }
         tile.appendChild(foot)
         return tile
       }
@@ -44957,16 +46709,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function filesRowNode(file) {
         const row = document.createElement('article')
         row.className = 'files-row'
+        wireFileDragSource(row, file)
 
         const icon = document.createElement('span')
         icon.className = 'files-row__icon'
-        icon.innerHTML = filesRowIconSvg(file?.mime)
+        icon.innerHTML = filesRowIconSvg(file)
 
         const body = document.createElement('div')
         body.className = 'files-row__body'
         const name = String(file?.name || 'file')
         const downloadUrl = String(file?.downloadUrl || '')
-        if (downloadUrl) {
+        if (file?.origin === 'deliverable' && file?.artifactId) {
+          // a deliverable opens in the artifact stage — never a download
+          const open = document.createElement('button')
+          open.type = 'button'
+          open.className = 'files-row__name'
+          open.textContent = name
+          open.addEventListener('click', () => openArtifactStage(file.artifactId, name))
+          body.appendChild(open)
+        } else if (downloadUrl) {
           const link = document.createElement('a')
           link.className = 'files-row__name'
           link.href = downloadUrl
@@ -44974,6 +46735,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // else downloads (the blob route forces attachment disposition)
           link.target = '_blank'
           link.rel = 'noopener'
+          link.draggable = false
           if (!file?.previewable) {
             link.setAttribute('download', name)
           }
@@ -44988,17 +46750,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const meta = document.createElement('div')
         meta.className = 'files-row__meta'
-        const parts = []
-        if (file?.uploaderName) {
-          parts.push(String(file.uploaderName).toLowerCase())
-        }
-        parts.push(memoryClock(file?.createdAt))
-        const sizeLabel = scoutChatFileSizeLabel(file?.size)
-        if (sizeLabel) {
-          parts.push(sizeLabel)
-        }
         const metaText = document.createElement('span')
-        metaText.textContent = parts.join(' · ')
+        metaText.textContent = fileMetaParts(file)
         meta.appendChild(metaText)
         if (file?.origin === 'chat' && file?.originThreadId) {
           const thread = document.createElement('button')
@@ -45022,6 +46775,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : 'bytes are stored; the contents were not readable for the brain'
 
         row.append(icon, body, badge)
+        const kebab = fileMoveKebabNode(file)
+        if (kebab) {
+          row.appendChild(kebab)
+        }
         return row
       }
 
@@ -45029,14 +46786,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!filesList) {
           return
         }
+        renderFilesFolders()
+        // the folder chip filters first; search and day buckets work inside it
+        const scoped = filesActiveFolderId
+          ? filesEntries.filter(file => String(file?.folderId || '') === filesActiveFolderId)
+          : filesEntries
         const query = filesQuery.trim().toLowerCase()
-        const matches = filesEntries.filter(file => !query
+        const matches = scoped.filter(file => !query
           || String(file?.name || '').toLowerCase().includes(query)
           || String(file?.uploaderName || '').toLowerCase().includes(query)
           || String(file?.originThreadTitle || '').toLowerCase().includes(query))
 
         if (filesStats && filesCount) {
-          filesCount.textContent = `${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
+          filesCount.textContent = filesActiveFolderId
+            ? `${scoped.length} of ${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
+            : `${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
           filesStats.hidden = !filesEntries.length
         }
 
@@ -45045,6 +46809,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           empty.className = 'memory-empty files-empty'
           if (query) {
             empty.textContent = 'no file matches that — yet.'
+          } else if (filesActiveFolderId) {
+            empty.textContent = 'nothing filed here yet — drag files in or ask Scout to organize.'
           } else {
             empty.appendChild(document.createTextNode('nothing shared yet.'))
             const sub = document.createElement('span')
@@ -45132,8 +46898,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         uploadFilesToDrive(filesUploadInput.files)
         filesUploadInput.value = ''
       })
-      // drag-and-drop onto the dropzone (the click path stays for keyboard/tap)
+      // drag-and-drop onto the dropzone (the click path stays for keyboard/tap);
+      // an internal row drag carries FILES_DND_MIME and belongs to the folder
+      // chips — the OS-file dropzone refuses it so a move never fakes an upload
       ;['dragenter', 'dragover'].forEach(evt => filesUploadButton?.addEventListener(evt, event => {
+        if (filesDragHasRow(event)) {
+          return
+        }
         event.preventDefault()
         filesUploadButton.classList.add('is-dragover')
       }))
@@ -47622,10 +49393,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           item.type = 'button'
           item.className = 'bf-card-hover'
           item.style.cssText = 'text-align:left; background:var(--surface-2); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:12px; transition:background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);'
-          item.addEventListener('click', () => {
-            selectArtifact(entry.id)
-            openOfficeTool('artifacts')
-          })
+          // rerouted (founder, live test 2026-07-07): published work opens in
+          // the artifact stage over the home — the Intel tool card stays the
+          // data-room door
+          item.addEventListener('click', () => openArtifactStage(entry.id, artifactDisplayTitle(entry)))
 
           const top = document.createElement('span')
           top.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;'

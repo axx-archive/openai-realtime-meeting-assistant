@@ -812,17 +812,16 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 		t.Fatalf("append routed message: %v", err)
 	}
 
-	// The routing turn: Haiku default, registry-injected schemas, muted-agent
+	// The routing turn: Sonnet-5 default, registry-injected schemas, muted-agent
 	// system prompt.
-	if routed.Model != "claude-haiku-4-5" {
-		t.Fatalf("router model=%q, want the Haiku default", routed.Model)
+	if routed.Model != "claude-sonnet-5" {
+		t.Fatalf("router model=%q, want the Sonnet-5 default", routed.Model)
 	}
-	// No effort dial on the routing turn: claude-haiku-4-5 rejects
-	// output_config.effort with a 400, which would silently degrade EVERY
-	// proposal to an inline answer. Empty Effort keeps output_config off the
-	// wire (see TestBuildAnthropicMessagesPayloadOmitsOutputConfigWithoutEffort).
-	if routed.Effort != "" {
-		t.Fatalf("router effort=%q, want empty — Haiku 4.5 rejects output_config.effort", routed.Effort)
+	// The router runs at the doctrine floor: Sonnet 5 accepts
+	// output_config.effort (the retired Haiku router rejected it), so the
+	// routing turn carries effort=medium via routerEffort/flooredEffort.
+	if routed.Effort != "medium" {
+		t.Fatalf("router effort=%q, want medium (the doctrine floor)", routed.Effort)
 	}
 	if !strings.Contains(routed.System, "under-routes is trusted") || !strings.Contains(routed.System, "over-launches is muted") {
 		t.Fatalf("router system prompt missing the trust asymmetry: %s", routed.System)
@@ -876,6 +875,37 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	saved := response["thread"].(scoutChatThreadRecord)
 	if len(saved.Messages) != 2 || saved.Messages[1].Proposal == nil {
 		t.Fatalf("persisted messages=%#v, want user turn + proposal card", saved.Messages)
+	}
+}
+
+// The router dials join the never-Haiku guard + effort floor: a configured
+// haiku id is refused down to the Sonnet default (mirrors
+// TestOrchestratorModelDialsRefuseHaiku), and a sub-floor effort clamps up to
+// medium. The Haiku exception is closed — the router is a worker seat now.
+func TestRouterModelDialsRefuseHaiku(t *testing.T) {
+	t.Setenv("BONFIRE_ROUTER_MODEL", "claude-haiku-4-5")
+	if got := routerModel(); got != defaultRouterModel {
+		t.Fatalf("routerModel() with haiku=%q, want the %s doctrine default", got, defaultRouterModel)
+	}
+	if defaultRouterModel != "claude-sonnet-5" {
+		t.Fatalf("defaultRouterModel=%q, want claude-sonnet-5", defaultRouterModel)
+	}
+	t.Setenv("BONFIRE_ROUTER_MODEL", "claude-opus-4-8")
+	if got := routerModel(); got != "claude-opus-4-8" {
+		t.Fatalf("routerModel() opus override=%q, want claude-opus-4-8", got)
+	}
+
+	t.Setenv("BONFIRE_ROUTER_EFFORT", "")
+	if got := routerEffort(); got != "medium" {
+		t.Fatalf("routerEffort() default=%q, want medium (the doctrine floor)", got)
+	}
+	t.Setenv("BONFIRE_ROUTER_EFFORT", "low")
+	if got := routerEffort(); got != "medium" {
+		t.Fatalf("routerEffort() with low=%q, want medium — sub-floor clamps up", got)
+	}
+	t.Setenv("BONFIRE_ROUTER_EFFORT", "high")
+	if got := routerEffort(); got != "high" {
+		t.Fatalf("routerEffort() high override=%q, want high", got)
 	}
 }
 

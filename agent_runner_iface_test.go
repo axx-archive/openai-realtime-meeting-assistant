@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -198,5 +199,37 @@ func TestReviewModelDefaultAndOverride(t *testing.T) {
 	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-sonnet-5")
 	if got := reviewModel(); got != "claude-sonnet-5" {
 		t.Fatalf("reviewModel()=%q, want the env override", got)
+	}
+	// The judging seat is a worker seat under the routing doctrine: a haiku id
+	// on the dial is refused and the Opus default stands (never Haiku).
+	t.Setenv("BONFIRE_REVIEW_MODEL", "claude-haiku-4-5")
+	if got := reviewModel(); got != defaultReviewModel {
+		t.Fatalf("reviewModel() with haiku=%q, want the %s doctrine default", got, defaultReviewModel)
+	}
+}
+
+// The per-turn note rides the artifact as metadata["progressNote"] (the client
+// renders it under the bar), capped for storage because notes derive from model
+// output and tool names, not a bounded vocabulary. An empty note adds no key —
+// the metadata write stays additive.
+func TestAgentProgressMetadataWritesCappedProgressNote(t *testing.T) {
+	long := strings.Repeat("evidence sweep ", 20)
+	metadata := agentProgressMetadata(AgentProgress{ProgressPercent: 48, Note: long})
+	if metadata["progressPercent"] != "48" {
+		t.Fatalf("progressPercent=%q, want 48", metadata["progressPercent"])
+	}
+	note := metadata["progressNote"]
+	if note == "" {
+		t.Fatal("progressNote missing")
+	}
+	if want := trimForStorage(compactAssistantLine(long), 140); note != want {
+		t.Fatalf("progressNote=%q, want the storage cap %q", note, want)
+	}
+	// trimForStorage keeps limit-1 runes plus its "..." marker.
+	if got := len([]rune(note)); got > 142 {
+		t.Fatalf("progressNote is %d runes, want <= 142", got)
+	}
+	if _, ok := agentProgressMetadata(AgentProgress{ProgressPercent: 10})["progressNote"]; ok {
+		t.Fatal("empty note must not add a progressNote key")
 	}
 }

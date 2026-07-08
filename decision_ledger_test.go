@@ -291,7 +291,7 @@ func TestDecisionsGroundScoutButStayOffNoiseSurfaces(t *testing.T) {
 	}
 
 	// query input grounding: the pinned Decisions-on-record section.
-	input := buildAssistantQueryInput("what did we decide about zanzibar?", nil, nil, app.activeDecisionEntries(decisionContextLimit), nil, time.Now(), false)
+	input := buildAssistantQueryInput("what did we decide about zanzibar?", nil, nil, app.activeDecisionEntries(decisionContextLimit), nil, nil, time.Now(), false)
 	if !strings.Contains(input, "# Decisions on record") || !strings.Contains(input, "Zanzibar pricing is locked at $99.") || !strings.Contains(input, "madeBy AJ") {
 		t.Fatalf("query input missing the decisions section: %s", input)
 	}
@@ -364,7 +364,7 @@ func TestMarkDecisionSupersededDropsFromActiveLanes(t *testing.T) {
 	if len(entries) != 1 || entries[0].ID != "decision-new" {
 		t.Fatalf("active entries=%v, want only decision-new", entries)
 	}
-	input := buildAssistantQueryInput("what did we decide on grill pricing?", nil, nil, app.activeDecisionEntries(decisionContextLimit), nil, time.Now(), false)
+	input := buildAssistantQueryInput("what did we decide on grill pricing?", nil, nil, app.activeDecisionEntries(decisionContextLimit), nil, nil, time.Now(), false)
 	if !strings.Contains(input, "$750 per month") || strings.Contains(input, "$500 per month") {
 		t.Fatalf("query input must pin the superseding decision and drop the superseded one: %s", input)
 	}

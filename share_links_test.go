@@ -334,14 +334,18 @@ func TestArtifactExportPDFSidecarAbsentThenPresent(t *testing.T) {
 		t.Fatal("sidecar-absent export must not enqueue a job")
 	}
 
-	// A markdown artifact is a 400 even with the sidecar live — chromium has
-	// nothing to lay out.
+	// A markdown artifact exports too: the server converts the body into the
+	// branded BonfireOS print document (renderResearchReportPrintHTML —
+	// report_print_test.go pins the document itself) and routes it down the
+	// text-native paper path.
 	if err := writeRenderRunnerHeartbeat("test-runner"); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
 	markdown := seedShareArtifact(t, "draft", "# not a deck", nil)
-	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/export-pdf", fmt.Sprintf(`{"artifactId":%q}`, markdown.ID), member); recorder.Code != http.StatusBadRequest {
-		t.Fatalf("markdown export status=%d, want 400", recorder.Code)
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/export-pdf", fmt.Sprintf(`{"artifactId":%q}`, markdown.ID), member); recorder.Code != http.StatusAccepted {
+		t.Fatalf("markdown export status=%d body=%s, want 202 (branded paper print)", recorder.Code, recorder.Body.String())
+	} else if entry, _ := kanbanApp.osArtifactByID(markdown.ID); entry.Metadata["renderKind"] != renderJobKindPaper {
+		t.Fatalf("markdown artifact enqueued as %q, want paper (text-native path)", entry.Metadata["renderKind"])
 	}
 
 	// The flatten law is server-owned: a deck exported as "paper" would ship

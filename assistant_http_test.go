@@ -539,6 +539,174 @@ func TestArtifactsHandlerListsSavedArtifactsForSignedInUser(t *testing.T) {
 	}
 }
 
+// The /artifacts LIST ships only an excerpt of each body so the payload stays
+// small as artifacts accumulate; the full body is fetched per-artifact via
+// ?id=. The stored entries must never be mutated by the list view.
+func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	bigBody := "# Big Report\n\n" + strings.Repeat("Samsung TV Plus reach and engagement. ", 400)
+	if len([]rune(bigBody)) <= artifactListExcerptRunes {
+		t.Fatalf("test body must exceed the excerpt (%d runes)", artifactListExcerptRunes)
+	}
+	big, _, err := kanbanApp.createOSArtifact("research", "big brief", bigBody, "AJ")
+	if err != nil {
+		t.Fatalf("createOSArtifact big: %v", err)
+	}
+	// createOSArtifact may normalize the body (e.g. trailing whitespace), so the
+	// stored text is the source of truth for "full body", not the raw input.
+	storedBig, ok := kanbanApp.osArtifactByID(big.ID)
+	if !ok {
+		t.Fatalf("stored big artifact missing right after create")
+	}
+	fullBody := storedBig.Text
+	smallBody := "# Small\n\nJust a line."
+	if _, _, err := kanbanApp.createOSArtifact("research", "small brief", smallBody, "AJ"); err != nil {
+		t.Fatalf("createOSArtifact small: %v", err)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	// LIST: big body trimmed to the excerpt + flagged; small body untouched.
+	listReq := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
+	for _, cookie := range cookies {
+		listReq.AddCookie(cookie)
+	}
+	listRec := httptest.NewRecorder()
+	artifactsHandler(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s, want 200", listRec.Code, listRec.Body.String())
+	}
+	var listPayload struct {
+		Artifacts []meetingMemoryEntry `json:"artifacts"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	var sawBig, sawSmall bool
+	for _, entry := range listPayload.Artifacts {
+		switch entry.ID {
+		case big.ID:
+			sawBig = true
+			if entry.Metadata["bodyTrimmed"] != "true" {
+				t.Fatalf("big artifact not flagged bodyTrimmed: %#v", entry.Metadata)
+			}
+			if len([]rune(entry.Text)) != artifactListExcerptRunes {
+				t.Fatalf("big excerpt = %d runes, want %d", len([]rune(entry.Text)), artifactListExcerptRunes)
+			}
+			if !strings.HasPrefix(entry.Text, "# Big Report") {
+				t.Fatalf("excerpt lost its leading prefix: %q", entry.Text[:20])
+			}
+		case "":
+			// skip
+		default:
+			if entry.Metadata["title"] == "small brief" {
+				sawSmall = true
+				if entry.Metadata["bodyTrimmed"] == "true" {
+					t.Fatalf("small artifact should not be trimmed")
+				}
+				if entry.Text != smallBody {
+					t.Fatalf("small body altered: %q", entry.Text)
+				}
+			}
+		}
+	}
+	if !sawBig || !sawSmall {
+		t.Fatalf("list missing artifacts (big=%v small=%v)", sawBig, sawSmall)
+	}
+
+	// ?id= returns the FULL untrimmed body.
+	idReq := httptest.NewRequest(http.MethodGet, "/artifacts?id="+big.ID, nil)
+	for _, cookie := range cookies {
+		idReq.AddCookie(cookie)
+	}
+	idRec := httptest.NewRecorder()
+	artifactsHandler(idRec, idReq)
+	if idRec.Code != http.StatusOK {
+		t.Fatalf("id status=%d body=%s, want 200", idRec.Code, idRec.Body.String())
+	}
+	var idPayload struct {
+		Artifacts []meetingMemoryEntry `json:"artifacts"`
+	}
+	if err := json.Unmarshal(idRec.Body.Bytes(), &idPayload); err != nil {
+		t.Fatalf("decode id: %v", err)
+	}
+	if len(idPayload.Artifacts) != 1 {
+		t.Fatalf("id artifacts=%d, want 1", len(idPayload.Artifacts))
+	}
+	if idPayload.Artifacts[0].Text != fullBody {
+		t.Fatalf("?id= body length=%d, want full %d", len(idPayload.Artifacts[0].Text), len(bigBody))
+	}
+	if idPayload.Artifacts[0].Metadata["bodyTrimmed"] == "true" {
+		t.Fatalf("?id= must not flag bodyTrimmed")
+	}
+
+	// The stored entry is unmutated: still full body, no trim flag.
+	stored, ok := kanbanApp.osArtifactByID(big.ID)
+	if !ok {
+		t.Fatalf("stored artifact missing")
+	}
+	if stored.Text != fullBody {
+		t.Fatalf("stored body was mutated by the list view (len=%d, want %d)", len(stored.Text), len(bigBody))
+	}
+	if stored.Metadata["bodyTrimmed"] == "true" {
+		t.Fatalf("list view leaked bodyTrimmed into stored metadata")
+	}
+}
+
+// artifactListView caps the near-duplicate free-text metadata (query/objective/
+// threadQuery) that dominate a list payload, preserves structured metadata that
+// drives rendering (goalPlan), flags anything trimmed, and never mutates the
+// stored entries.
+func TestArtifactListViewCapsHeavyMetadataPreservesGoalPlan(t *testing.T) {
+	bigObjective := strings.Repeat("o", artifactListMetaFieldCap+500)
+	bigPlan := strings.Repeat("g", 5000)
+	big := meetingMemoryEntry{
+		ID:   "big",
+		Kind: "os_artifact",
+		Text: strings.Repeat("x", artifactListExcerptRunes+500),
+		Metadata: map[string]string{
+			"title":     "Big",
+			"objective": bigObjective,
+			"query":     bigObjective,
+			"goalPlan":  bigPlan,
+		},
+	}
+	small := meetingMemoryEntry{ID: "small", Text: "short", Metadata: map[string]string{"title": "Small"}}
+
+	view := artifactListView([]meetingMemoryEntry{big, small})
+
+	if len([]rune(view[0].Text)) != artifactListExcerptRunes {
+		t.Fatalf("body excerpt = %d runes, want %d", len([]rune(view[0].Text)), artifactListExcerptRunes)
+	}
+	if len([]rune(view[0].Metadata["objective"])) != artifactListMetaFieldCap {
+		t.Fatalf("objective cap = %d, want %d", len([]rune(view[0].Metadata["objective"])), artifactListMetaFieldCap)
+	}
+	if len([]rune(view[0].Metadata["query"])) != artifactListMetaFieldCap {
+		t.Fatalf("query not capped")
+	}
+	if view[0].Metadata["goalPlan"] != bigPlan {
+		t.Fatalf("goalPlan must NOT be capped (goalcards render from it)")
+	}
+	if view[0].Metadata["bodyTrimmed"] != "true" {
+		t.Fatalf("trimmed entry not flagged bodyTrimmed")
+	}
+	if view[1].Metadata["bodyTrimmed"] == "true" {
+		t.Fatalf("small entry should not be flagged")
+	}
+
+	// originals untouched
+	if len(big.Text) != artifactListExcerptRunes+500 || big.Metadata["objective"] != bigObjective {
+		t.Fatalf("artifactListView mutated the stored entry")
+	}
+	if _, leaked := big.Metadata["bodyTrimmed"]; leaked {
+		t.Fatalf("bodyTrimmed leaked into the stored metadata map")
+	}
+}
+
 // The trust boundary is the signed-in team: every account lists, reads, and
 // edits artifacts. ONLY the external-write approval actions stay admin-only.
 func TestArtifactsOpenToAllSignedInUsersExceptExternalWriteApproval(t *testing.T) {

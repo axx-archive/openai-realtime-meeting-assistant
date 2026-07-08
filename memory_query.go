@@ -247,7 +247,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	defer cancel()
 
 	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
-	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
+	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
 	// Sonnet 5 fronts chat whenever an Anthropic key is present (packaging-os
 	// §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps the gpt-5.5 path
 	// below byte-for-byte so keyless deploys degrade exactly as before.
@@ -1238,7 +1238,7 @@ func assistantQueryInstructions() string {
 	return strings.Join(lines, " ")
 }
 
-func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool, pinned ...assistantPinnedNote) string {
+func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, storylines []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool, pinned ...assistantPinnedNote) string {
 	location := meetingTimeLocation()
 	boardJSON, err := json.MarshalIndent(cards, "", "  ")
 	if err != nil {
@@ -1278,6 +1278,21 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 			builder.WriteString(", ")
 			builder.WriteString(decision.CreatedAt.In(location).Format("2006-01-02"))
 			builder.WriteString(")\n")
+		}
+	}
+	// Active storylines ride along unconditionally, like the decisions above:
+	// chat and voice answers must be storyline-aware even before search
+	// matches ("where are we with Samsung?"). Title + one status line each —
+	// the full dossier body arrives via search matches when the question
+	// actually names the storyline (narratives are a searchable kind).
+	if len(storylines) > 0 {
+		builder.WriteString("\n\n# Active storylines\n")
+		for _, storyline := range storylines {
+			builder.WriteString("- ")
+			builder.WriteString(firstNonEmptyString(strings.TrimSpace(storyline.Metadata["title"]), strings.TrimSpace(storyline.Metadata["slug"]), "untitled"))
+			builder.WriteString(": ")
+			builder.WriteString(narrativeStatusLine(storyline))
+			builder.WriteByte('\n')
 		}
 	}
 	// Distilled taste rides along unconditionally, exactly like the decisions

@@ -16,13 +16,70 @@ import (
 	"time"
 )
 
+// --- Model + effort routing doctrine (founder directive, 2026-07-07) ----------
+//
+// Fable 5 (claude-fable-5) is the orchestrator: it plans, fans out, and
+// verifies. Worker seats — review/gate, chat, follow-ups, refusal fallback —
+// are Sonnet/Opus tier ONLY (claude-sonnet-5 / claude-opus-4-8); Haiku is
+// never an acceptable model for any reasoning seat, and the env dials below
+// refuse a haiku id rather than honoring it (doctrineModelOrDefault).
+//
+// Effort floor: no Anthropic surface runs below "medium" — the founder saw
+// orchestratorEffort=low stamped on his research runs and low-depth reasoning
+// on founder-facing work is a doctrine violation, not a cost win. The
+// orchestrator DEFAULTS to "high" (Anthropic's own guidance for long-horizon
+// agentic work); a configured value below medium clamps UP to medium with a
+// logged warning (flooredEffort). Within these floors, the Fable
+// orchestrator's own judgment governs how hard it works a given turn.
+//
+// Sanctioned future seam (designed, NOT built): the orchestrator delegating
+// scoped subtasks to Sonnet 5 workers — Anthropic's published multi-agent
+// pattern (Fable plans and fans out, Sonnet workers execute well-scoped
+// subtasks, escalate hard calls back up). When that fan-out lands it routes
+// through the same doctrineModelOrDefault guard, so the never-Haiku and
+// effort-floor rules bind worker seats automatically.
 const (
 	anthropicMessagesURL       = "https://api.anthropic.com/v1/messages"
 	anthropicAPIVersion        = "2023-06-01"
 	defaultOrchestratorModel   = "claude-fable-5"
 	defaultFallbackModel       = "claude-opus-4-8"
 	controlToolReportGoalState = "report_goal_state"
+
+	// doctrineEffortFloor is the minimum thinking depth any Anthropic surface
+	// may run at. Configured dials below it clamp UP, never down.
+	doctrineEffortFloor = "medium"
 )
+
+// flooredEffort validates one effort value against the API enum and applies
+// the doctrine floor: medium/high/xhigh/max pass through, anything below
+// medium clamps up to the floor (reported via the bool so env-dial callers
+// can log the misconfiguration), and unknown/empty values take fallback.
+func flooredEffort(value string, fallback string) (string, bool) {
+	switch effort := strings.ToLower(strings.TrimSpace(value)); effort {
+	case "medium", "high", "xhigh", "max":
+		return effort, false
+	case "low", "minimal":
+		return doctrineEffortFloor, true
+	default:
+		return fallback, false
+	}
+}
+
+// doctrineModelOrDefault resolves one env model dial under the routing
+// doctrine above: empty keeps the doctrine default, and a configured id
+// containing "haiku" is refused (logged) in favor of the default — Haiku is
+// below the Sonnet/Opus worker tier and never takes a reasoning seat.
+func doctrineModelOrDefault(envName string, fallback string) string {
+	model := strings.TrimSpace(os.Getenv(envName))
+	if model == "" {
+		return fallback
+	}
+	if strings.Contains(strings.ToLower(model), "haiku") {
+		log.Warnf("%s=%q is below the Sonnet/Opus worker tier (routing doctrine: never Haiku); using %s", envName, model, fallback)
+		return fallback
+	}
+	return model
+}
 
 var errAgentWorkerNotConfigured = errors.New("agent worker is not configured")
 
@@ -45,7 +102,7 @@ func currentAnthropicAPIKey() string {
 }
 
 func orchestratorModel() string {
-	return getenvDefault("BONFIRE_ORCHESTRATOR_MODEL", defaultOrchestratorModel)
+	return doctrineModelOrDefault("BONFIRE_ORCHESTRATOR_MODEL", defaultOrchestratorModel)
 }
 
 // orchestratorFallbackModel is the refusal-fallback target. Fable 5's safety
@@ -54,27 +111,52 @@ func orchestratorModel() string {
 // mid-pipeline, so the loop retries the same request once on this model before
 // taking the needs_attention branch (packaging-os-analysis §1).
 func orchestratorFallbackModel() string {
-	return getenvDefault("BONFIRE_FALLBACK_MODEL", defaultFallbackModel)
+	return doctrineModelOrDefault("BONFIRE_FALLBACK_MODEL", defaultFallbackModel)
 }
 
 func orchestratorMaxTurns() int {
 	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TURNS", 24)
 }
 
-func orchestratorMaxTokens() int {
-	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", 4096)
+// orchestratorMaxPauses bounds how many times the server-tool loop may
+// stop_reason:"pause_turn" within one run. A pause is NOT a tool turn (the
+// server paused its own web_search/web_fetch loop mid-turn), so it must not
+// consume the maxTurns budget — a search-heavy research run would otherwise be
+// starved of real tool turns. This separate budget is the only thing that
+// stops an infinite pause loop from hanging the run.
+func orchestratorMaxPauses() int {
+	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_PAUSES", 24)
 }
 
-// orchestratorEffort controls thinking depth / token spend on Fable 5. Default
-// low keeps the control loop snappy; Fable 5 at low still clears prior-model
-// ceilings. Any of low|medium|high|xhigh|max is accepted.
+// serverToolMaxUses caps how many times ONE server tool (web_search or
+// web_fetch) may run inside a single assistant turn. Env-tunable per tool with
+// a sane default so a runaway loop can't burn the org's search quota, and a
+// legitimately deep research turn still has room.
+func serverToolMaxUses(envName string) int {
+	return positiveIntEnv(envName, 8)
+}
+
+// orchestratorMaxTokens default 16384: the 4096 ceiling was tuned for the
+// effort-low era. Fable 5's always-on thinking counts against max_tokens
+// (thinking + text COMBINED), and at the doctrine default of effort high a
+// planning turn's thinking alone can exhaust 4K — manufacturing max_tokens
+// stops the runner honestly reports as incomplete/needs_attention. The wire
+// layer always streams (createAnthropicMessagesResponseHTTP), so a larger
+// ceiling has no HTTP-timeout cost and an unused ceiling costs nothing.
+func orchestratorMaxTokens() int {
+	return positiveIntEnv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", 16384)
+}
+
+// orchestratorEffort controls thinking depth / token spend on Fable 5.
+// Default HIGH per the routing doctrine above (the effort-low default shipped
+// shallow reasoning on founder-facing research runs); a configured value
+// below medium clamps UP to the doctrine floor with a logged warning.
 func orchestratorEffort() string {
-	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_ORCHESTRATOR_EFFORT"))); effort {
-	case "low", "medium", "high", "xhigh", "max":
-		return effort
-	default:
-		return "low"
+	effort, clamped := flooredEffort(os.Getenv("BONFIRE_ORCHESTRATOR_EFFORT"), "high")
+	if clamped {
+		log.Warnf("BONFIRE_ORCHESTRATOR_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
 	}
+	return effort
 }
 
 // orchestratorTimeout bounds one orchestrator run. Default 15m: deliverable
@@ -101,15 +183,15 @@ func deliverableMaxTokens() int {
 
 // deliverableEffort is the thinking depth for the deliverable subtask. Default
 // high — the deliverable IS the product; paying Fable-5 rates for medium depth
-// was the worst of both worlds (packaging-os-analysis §1). Any of
-// low|medium|high|xhigh|max is accepted; anything else falls back to high.
+// was the worst of both worlds (packaging-os-analysis §1). The doctrine floor
+// applies here too: a configured value below medium clamps UP with a warning;
+// anything unrecognized falls back to high.
 func deliverableEffort() string {
-	switch effort := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"))); effort {
-	case "low", "medium", "high", "xhigh", "max":
-		return effort
-	default:
-		return "high"
+	effort, clamped := flooredEffort(os.Getenv("BONFIRE_DELIVERABLE_EFFORT"), "high")
+	if clamped {
+		log.Warnf("BONFIRE_DELIVERABLE_EFFORT is below the doctrine floor (never below medium); clamping up to %s", doctrineEffortFloor)
 	}
+	return effort
 }
 
 // --- Anthropic Messages API wire types ---------------------------------------
@@ -122,11 +204,29 @@ type anthropicCacheControl struct {
 
 var ephemeralCacheControl = &anthropicCacheControl{Type: "ephemeral"}
 
+// anthropicTool carries both client tools (Name + InputSchema, executed
+// in-process) and Anthropic SERVER tools (Type + Name, executed on Anthropic's
+// side — web_search / web_fetch). A server tool has no input_schema, so
+// InputSchema is omitempty; every client tool sets a non-nil schema, so their
+// serialized bytes are unchanged. Type is empty on a client tool (omitted).
+// The server-tool params (max_uses, domain allow/block lists, citations) are
+// all optional and marshal only when set.
 type anthropicTool struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	InputSchema  map[string]any         `json:"input_schema"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Type           string                  `json:"type,omitempty"`
+	Name           string                  `json:"name"`
+	Description    string                  `json:"description,omitempty"`
+	InputSchema    map[string]any          `json:"input_schema,omitempty"`
+	MaxUses        int                     `json:"max_uses,omitempty"`
+	AllowedDomains []string                `json:"allowed_domains,omitempty"`
+	BlockedDomains []string                `json:"blocked_domains,omitempty"`
+	Citations      *anthropicToolCitations `json:"citations,omitempty"`
+	CacheControl   *anthropicCacheControl  `json:"cache_control,omitempty"`
+}
+
+// anthropicToolCitations toggles inline source citations on a server tool
+// (web_fetch): {"enabled": true} makes fetched content carry cited URLs.
+type anthropicToolCitations struct {
+	Enabled bool `json:"enabled"`
 }
 
 // anthropicMessage.Content is raw so assistant turns (including Fable 5 thinking
@@ -216,6 +316,13 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 	httpRequest.Header.Set("anthropic-version", anthropicAPIVersion)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
+	// The server web tools (web_search_20250305 / web_fetch_20250910) need NO
+	// anthropic-beta header on Fable 5. But if a live run ever 400s citing a
+	// beta requirement, an operator can set BONFIRE_ANTHROPIC_BETA to add the
+	// header with no code change.
+	if beta := strings.TrimSpace(os.Getenv("BONFIRE_ANTHROPIC_BETA")); beta != "" {
+		httpRequest.Header.Set("anthropic-beta", beta)
+	}
 
 	response, err := (&http.Client{}).Do(httpRequest)
 	if err != nil {
@@ -472,9 +579,11 @@ func (block *anthropicStreamBlock) finalize() (json.RawMessage, error) {
 		if block.signature.Len() > 0 {
 			block.fields["signature"], _ = json.Marshal(block.signature.String())
 		}
-	case "tool_use":
+	case "tool_use", "server_tool_use":
 		// An argument-less tool call streams no input_json_delta; keep the
-		// start block's empty-object input in that case.
+		// start block's empty-object input in that case. server_tool_use
+		// (web_search / web_fetch) streams its query the same way and must
+		// round-trip with its input intact so the paused turn resumes.
 		if input := strings.TrimSpace(block.inputJSON.String()); input != "" {
 			if !json.Valid([]byte(input)) {
 				return nil, fmt.Errorf("Anthropic stream tool_use input is not valid JSON")
@@ -579,7 +688,18 @@ type anthropicFableRunner struct {
 	effort       string
 	maxTurns     int
 	maxTokens    int
-	responder    anthropicMessagesResponder
+	// maxPauses bounds server-tool pause_turn continuations per run — separate
+	// from maxTurns so a search-heavy research turn is not starved of real tool
+	// turns, while an infinite pause loop still can't hang. Job-local: the
+	// runner is built per job (selectAgentRunner).
+	maxPauses int
+	// progressHighWater is the highest percent this run has reported (the goal
+	// engine's MaxProgress pattern): the per-turn heuristic only climbs, but a
+	// later report_goal_state can legitimately carry a lower number — the bar
+	// must never walk backwards. Job-local: the runner is built per job
+	// (selectAgentRunner).
+	progressHighWater int
+	responder         anthropicMessagesResponder
 }
 
 func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
@@ -591,6 +711,7 @@ func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
 		effort:        orchestratorEffort(),
 		maxTurns:      orchestratorMaxTurns(),
 		maxTokens:     orchestratorMaxTokens(),
+		maxPauses:     orchestratorMaxPauses(),
 		responder:     createAnthropicMessagesResponse,
 	}
 }
@@ -627,7 +748,7 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		}
 
 		system := r.systemPrompt(job)
-		tools := r.tools()
+		tools := r.tools(job.Mode)
 		messages := []anthropicMessage{{
 			Role:    "user",
 			Content: []json.RawMessage{anthropicTextBlock(r.userPrompt(job))},
@@ -639,6 +760,12 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		// report_goal_state — e.g. an approval_required gate — must survive into
 		// the terminal progress rather than being reset to the verified default.
 		control := AgentProgress{}
+		// pausesRemaining bounds server-tool pause_turn continuations. It is
+		// separate from the turn counter on purpose: a pause is the server
+		// resuming its own web_search/web_fetch loop, not a new tool turn, so it
+		// must not spend the maxTurns budget (turn is decremented back on a
+		// pause) — but this budget still caps an infinite pause loop.
+		pausesRemaining := r.maxPauses
 		for turn := 1; turn <= r.maxTurns; turn++ {
 			request := anthropicMessagesRequest{
 				Model:     r.model,
@@ -735,14 +862,42 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 				// then answer every tool_use with a tool_result in one user turn.
 				messages = append(messages, anthropicMessage{Role: "assistant", Content: response.Content})
 				messages = append(messages, anthropicMessage{Role: "user", Content: toolResults})
+			case "pause_turn":
+				// The server paused its own web_search/web_fetch tool loop
+				// mid-turn (default: after 10 server iterations). This is NOT a
+				// truncated turn — it must continue, not die as needs_attention
+				// the way the default branch below would. Echo the assistant turn
+				// VERBATIM (the trailing server_tool_use is what the API detects
+				// to resume) and add NO user turn — a synthetic "Continue." would
+				// break the resume. The pause budget bounds a runaway loop.
+				if pausesRemaining <= 0 {
+					out <- r.incompleteProgress(job, finalText, control, turn, response)
+					return
+				}
+				pausesRemaining--
+				progress := r.turnProgress(finalText, control, turn, response)
+				progress.Note = firstNonEmptyString(serverToolPauseNote(response), "running a live web search")
+				out <- progress
+				messages = append(messages, anthropicMessage{Role: "assistant", Content: response.Content})
+				// A pure server pause carries no client tool_use, so toolResults is
+				// normally empty. Guard the rare mixed turn (a client tool_use
+				// resolved alongside the server pause): those tool_use blocks are in
+				// the echoed assistant turn and MUST be answered, or the resume
+				// request 400s on an unanswered tool_use id.
+				if len(toolResults) > 0 {
+					messages = append(messages, anthropicMessage{Role: "user", Content: toolResults})
+				}
+				// A pause is not a tool turn: cancel this iteration's turn++ so a
+				// search-heavy run keeps its full maxTurns budget for real work.
+				turn--
 			case "end_turn":
 				out <- r.terminalProgress(job, finalText, control, turn, response)
 				return
 			default:
-				// max_tokens / stop_sequence / pause_turn / unknown: the turn was
-				// cut off, not completed. It must NOT earn the verified/passed
-				// defaults — that would violate the orchestrator's own
-				// gate-before-shipping rule and ship a truncated artifact silently.
+				// max_tokens / stop_sequence / unknown: the turn was cut off, not
+				// completed. It must NOT earn the verified/passed defaults — that
+				// would violate the orchestrator's own gate-before-shipping rule
+				// and ship a truncated artifact silently.
 				out <- r.incompleteProgress(job, finalText, control, turn, response)
 				return
 			}
@@ -772,15 +927,31 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		modeContract = raw
 		finalLine = "When the goal is met, your final message is the deliverable FILE ITSELF — nothing before the <!doctype html>, nothing after the closing </html>."
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"You are Scout, the in-process orchestrator for Bonfire OS.",
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",
 		"Authority: this job is " + authority + ". read_only may inspect and report; workspace_write may change the board, memory, packages, and notifications; external_write (commit, push, deploy, SSH, email, external APIs, production mutations) is never granted in this loop — if the goal needs it, stop and report that an approval gate is required. Never claim you performed shell, browser, SSH, repository, or external work; that is a handoff to the execution runner.",
 		modeContract,
-		finalLine,
-	}, "\n")
+	}
+	// Research mode carries the live server web tools (attached in tools()); tell
+	// Scout to prefer fetching current data over recalling it. The "no live web
+	// this loop → grade D + flag" honesty clause stays valid for non-research
+	// modes and for any claim Scout could not fetch this run.
+	if normalizeAgentThreadMode(job.Mode) == "research" {
+		lines = append(lines, "This is a research run: you have LIVE web_search and web_fetch server tools. Prefer fetching current data over recalling it — search anything time-sensitive or externally verifiable, then fetch the primary/official source and cite its URL under Sources. Only sources you actually fetched this run earn grade A; any claim you could not verify against live web this loop is grade D and you must flag it.")
+	}
+	lines = append(lines, finalLine)
+	// Terminal-output law (Fable long-horizon early-stopping guard): across a
+	// multi-turn run — especially a web-search-heavy research run — the model
+	// can drift into ending with a "done / shipped above" confirmation instead
+	// of the report itself. But the run persists ONLY the text of your final
+	// message; there is no "above". If the last message is a status line, the
+	// deliverable is lost. This is the single most important rule for a research
+	// run, so it is stated last.
+	lines = append(lines, "CRITICAL — your FINAL message IS the deliverable and the ONLY place it is saved: there is no report 'above' and nothing else is persisted. Do NOT end with a confirmation, a status update, or a claim that the report is shipped/done/attached. Your last message must be the COMPLETE artifact text itself, every section populated from your actual tool results. If you are about to write a short 'goal complete' note, write the full report instead.")
+	return strings.Join(lines, "\n")
 }
 
 func (r *anthropicFableRunner) userPrompt(job AgentJob) string {
@@ -838,7 +1009,7 @@ var orchestratorToolAllowlist = map[string]bool{
 	"fiscal_data_query":          true,
 }
 
-func (r *anthropicFableRunner) tools() []anthropicTool {
+func (r *anthropicFableRunner) tools(mode string) []anthropicTool {
 	var tools []anthropicTool
 	for _, tool := range r.app.kanbanTools() {
 		name := asString(tool["name"])
@@ -855,7 +1026,50 @@ func (r *anthropicFableRunner) tools() []anthropicTool {
 			InputSchema: schema,
 		})
 	}
+	// Research mode gets Anthropic's SERVER web tools so the loop can pull
+	// current, externally-verifiable data instead of recalling it — the single
+	// biggest research-quality unlock (a read-only loop can't produce current
+	// data). Only research mode: other modes stay byte-for-byte unchanged.
+	// Inserted BEFORE report_goal_state so the control tool stays the last
+	// (cache-breakpoint) tool the payload builder stamps.
+	if normalizeAgentThreadMode(mode) == "research" {
+		tools = append(tools, webSearchServerTool(), webFetchServerTool())
+	}
 	return append(tools, reportGoalStateTool())
+}
+
+// webSearchServerTool is Anthropic's server-side web_search (no beta header on
+// Fable 5). It carries a Type + Name but no input_schema — the server owns the
+// schema. max_uses caps searches per assistant turn.
+//
+// We use the BASIC web_search_20250305 variant, NOT the newer _20260209
+// dynamic-filtering one. The _20260209 variant runs its filtering inside a
+// server-side code_execution sandbox, so the assistant turn comes back carrying
+// code_execution server_tool_use blocks; resending that history verbatim (which
+// our raw tool loop must do to resume a pause_turn) 400s. The basic variant
+// emits plain server_tool_use + web_search_tool_result blocks that round-trip
+// cleanly through the loop — verified live on prod against api.anthropic.com.
+func webSearchServerTool() anthropicTool {
+	return anthropicTool{
+		Type:    "web_search_20250305",
+		Name:    "web_search",
+		MaxUses: serverToolMaxUses("BONFIRE_WEB_SEARCH_MAX_USES"),
+	}
+}
+
+// webFetchServerTool is Anthropic's server-side web_fetch with citations on, so
+// a fetched primary source carries its cited URL back into the report's Sources
+// (the research contract reserves grade A for fetched-this-run sources). Basic
+// web_fetch_20250910 variant for the same clean-round-trip reason as web_search
+// above; no beta header required on Fable 5 (verified live). web_fetch only
+// fetches URLs already surfaced by web_search earlier in the turn.
+func webFetchServerTool() anthropicTool {
+	return anthropicTool{
+		Type:      "web_fetch_20250910",
+		Name:      "web_fetch",
+		MaxUses:   serverToolMaxUses("BONFIRE_WEB_FETCH_MAX_USES"),
+		Citations: &anthropicToolCitations{Enabled: true},
+	}
 }
 
 func reportGoalStateTool() anthropicTool {
@@ -890,10 +1104,124 @@ func (r *anthropicFableRunner) turnProgress(finalText string, control AgentProgr
 	if progress.ReviewGate == "" {
 		progress.ReviewGate = "pending"
 	}
+	// The note under the bar wants the freshest signal, not the sticky control
+	// note from three turns ago: a report_goal_state note from THIS turn wins,
+	// else the tool the model is calling right now ("consulting memory"), else
+	// the sticky control note, else the latest assistant prose.
+	if note := turnNoteFromBlocks(response); note != "" {
+		progress.Note = note
+	}
 	if progress.Note == "" {
 		progress.Note = compactAssistantLine(finalText)
 	}
+	progress.ProgressPercent = r.monotonicTurnPercent(turn, progress.ProgressPercent)
 	return progress
+}
+
+// monotonicTurnPercent gives every non-terminal turn a rising percent so the
+// bar moves off the 35% launch scaffold instead of freezing until terminal.
+// Typical runs finish in 3-8 turns of the 24-turn cap, so the heuristic climbs
+// 35→90 across eight turns and parks at 92 — the honest 100/72 stays terminal's
+// call. A percent the model reported via report_goal_state wins when it is
+// ahead; the job-local high-water mark keeps the bar monotonic when a later
+// report comes in behind it.
+func (r *anthropicFableRunner) monotonicTurnPercent(turn int, reported int) int {
+	percent := 35 + (55*turn)/8
+	if percent > 92 {
+		percent = 92
+	}
+	if reported > percent {
+		percent = reported
+	}
+	if percent < r.progressHighWater {
+		return r.progressHighWater
+	}
+	r.progressHighWater = percent
+	return percent
+}
+
+// turnNoteFromBlocks derives this turn's operator-voice note from the turn's
+// own blocks: an explicit report_goal_state note beats the tool-derived phrase
+// (the model's line is more specific than "consulting memory"), and with
+// several tool calls in one turn the last one names the freshest action.
+func turnNoteFromBlocks(response anthropicMessagesResponse) string {
+	controlNote := ""
+	toolNote := ""
+	for _, rawBlock := range response.Content {
+		block := decodeAnthropicBlock(rawBlock)
+		if block.Type != "tool_use" {
+			continue
+		}
+		if block.Name == controlToolReportGoalState {
+			if note := asString(decodeToolArgs(block.Input)["note"]); strings.TrimSpace(note) != "" {
+				controlNote = note
+			}
+			continue
+		}
+		if phrase := agentToolProgressPhrase(block.Name); phrase != "" {
+			toolNote = phrase
+		}
+	}
+	return firstNonEmptyString(controlNote, toolNote)
+}
+
+// serverToolPauseNote names the live web activity behind a pause_turn so the
+// progress card reads "running a live web search" / "fetching a live source"
+// rather than the sticky prose. Server tools arrive as server_tool_use blocks
+// (not the tool_use blocks turnNoteFromBlocks reads), so the pause path derives
+// its own note; the last server tool in the turn names the freshest action.
+func serverToolPauseNote(response anthropicMessagesResponse) string {
+	note := ""
+	for _, rawBlock := range response.Content {
+		block := decodeAnthropicBlock(rawBlock)
+		if block.Type != "server_tool_use" {
+			continue
+		}
+		switch block.Name {
+		case "web_search":
+			note = "running a live web search"
+		case "web_fetch":
+			note = "fetching a live source"
+		default:
+			note = "running a live web tool"
+		}
+	}
+	return note
+}
+
+// agentToolProgressPhrases maps orchestrator tool names to the short human
+// phrase the progress card renders under the bar while that tool runs.
+var agentToolProgressPhrases = map[string]string{
+	"answer_memory_question":     "consulting memory",
+	"create_ticket":              "filing a board card",
+	"update_ticket":              "updating a board card",
+	"move_ticket":                "moving a board card",
+	"add_tags":                   "tagging board cards",
+	"add_key_date":               "logging a key date",
+	"remove_key_dates":           "clearing key dates",
+	"create_artifact":            "drafting the report",
+	"update_artifact":            "revising the report",
+	"create_package":             "assembling a package",
+	"attach_to_package":          "attaching work to a package",
+	"advance_package_stage":      "advancing a package stage",
+	"send_notification":          "sending a notification",
+	"company_financial_snapshot": "pulling a financial snapshot",
+	"financial_comps":            "comparing company financials",
+	"fiscal_api_docs":            "checking fiscal data coverage",
+	"fiscal_data_query":          "querying fiscal data",
+}
+
+// agentToolProgressPhrase resolves the note for one tool call. Unknown tools
+// read as their name with the underscores dropped; do_nothing stays silent so
+// the previous note holds instead of announcing idleness.
+func agentToolProgressPhrase(name string) string {
+	if name == "do_nothing" {
+		return ""
+	}
+	if phrase, ok := agentToolProgressPhrases[name]; ok {
+		return phrase
+	}
+	return strings.ReplaceAll(name, "_", " ")
 }
 
 func (r *anthropicFableRunner) terminalProgress(job AgentJob, finalText string, control AgentProgress, turn int, response anthropicMessagesResponse) AgentProgress {

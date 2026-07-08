@@ -192,7 +192,7 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		// without this, a channel created from the + button never reaches
 		// peers' sidebars until its first message forces a list refresh.
 		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-			broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+			broadcastSignedInKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
 		} else {
 			// private threads only need the owner's OTHER tabs to learn of it
 			sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
@@ -1594,10 +1594,11 @@ func (app *kanbanBoardApp) createChannelByVoice(args map[string]any, requesterEm
 		return nil, false, err
 	}
 
-	// Office fan-out so open chat rails learn the new channel; the payload
+	// Signed-in fan-out (office + room sockets) so open chat rails learn the
+	// new channel — including tabs sitting in a live video room; the payload
 	// carries no message (handleChatThreadEvent tolerates that and refreshes
 	// the list for unknown thread ids).
-	broadcastOfficeKanbanEvent("chat_thread", map[string]any{
+	broadcastSignedInKanbanEvent("chat_thread", map[string]any{
 		"id":         thread.ID,
 		"title":      thread.Title,
 		"preview":    thread.Preview,
@@ -1716,7 +1717,7 @@ func (app *kanbanBoardApp) resolveOrCreatePublicChannel(requesterEmail string, a
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+	broadcastSignedInKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
 	return thread, nil
 }
 
@@ -1851,20 +1852,23 @@ func scoutChatThreadUpdatePayload(thread scoutChatThreadRecord, message scoutCha
 }
 
 // broadcastScoutChatThreadUpdate fans a public-channel append out over the
-// office channel (every signed-in tab holds an office socket, in-room or
-// not) so open chat tabs upsert live; tabs whose office socket is down catch
-// up via the 12s fallback poll.
+// signed-in union (office + media-joined room sockets, deduped by writer) so
+// open chat tabs upsert live — a tab sitting in a live video room must never
+// need a refresh (which drops its room seat) to see a new channel message.
+// Tabs with no live socket at all catch up via the 12s fallback poll; clients
+// upsert by message id, so the union's double delivery is a harmless
+// re-render.
 func broadcastScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
-	broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadUpdatePayload(thread, message))
+	broadcastSignedInKanbanEvent("chat_thread", scoutChatThreadUpdatePayload(thread, message))
 }
 
 // deliverScoutChatThreadUpdate routes one committed chat message (or thread
 // ref status flip) to the tabs allowed to see it live: public channels fan
-// out to every signed-in office socket, private threads go only to the
-// owner's authenticated connections via the targeted send. Without the
-// targeted path a private thread's agent-run status flip has no live route
-// at all — chat_thread broadcasts are public-only and the 12s chat poll
-// skips its fetch while the office socket is up.
+// out to every signed-in socket (office + room union), private threads go
+// only to the owner's authenticated connections via the targeted send.
+// Without the targeted path a private thread's agent-run status flip has no
+// live route at all — chat_thread broadcasts are public-only and the 12s
+// chat poll skips its fetch while the office socket is up.
 func deliverScoutChatThreadUpdate(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		broadcastScoutChatThreadUpdate(thread, message)
@@ -1881,7 +1885,7 @@ func deliverScoutChatThreadDeletion(thread scoutChatThreadRecord, messageID stri
 	payload := scoutChatThreadEventPayload(thread)
 	payload["deletedMessageId"] = messageID
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		broadcastOfficeKanbanEvent("chat_thread", payload)
+		broadcastSignedInKanbanEvent("chat_thread", payload)
 		return
 	}
 	sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", payload)
@@ -1935,7 +1939,7 @@ func (app *kanbanBoardApp) renameScoutChatThread(viewerEmail string, threadID st
 		return scoutChatThreadRecord{}, err
 	}
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		broadcastOfficeKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
+		broadcastSignedInKanbanEvent("chat_thread", scoutChatThreadEventPayload(thread))
 	} else {
 		sendKanbanEventToUser(thread.OwnerEmail, "chat_thread", scoutChatThreadEventPayload(thread))
 	}

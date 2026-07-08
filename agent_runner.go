@@ -235,7 +235,8 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 // dependency order so each stage consumes what the previous one just landed:
 // the original archive four (brain summarizes the final transcript window,
 // the decision ledger and board consume it, mission intel titles the RIGHT
-// record before rotation), then the Track-2 rollup tiers — meeting digest
+// record before rotation), the narrative maintainer (axx/main: storyline
+// dossiers fold the meeting in), then the Track-2 rollup tiers — meeting digest
 // (consumes the fresh brains: the closing meeting's cumulative T2 digest),
 // day digest (folds the fresh meeting digests into the local-day T3 slices),
 // entity ledger (consolidates the digest's facts plus new decision rows into
@@ -248,6 +249,7 @@ func closeFlushChain() []ambientAgentConfig {
 		decisionLedgerAgent(),
 		meetingBoardAgent(),
 		missionIntelligenceAgent(),
+		narrativeMaintainerAgent(),
 		meetingDigestAgent(),
 		dayDigestAgent(),
 		entityLedgerAgent(),

@@ -385,17 +385,22 @@ func TestAnthropicFableRunnerHonorsPerJobBudget(t *testing.T) {
 	}
 	collectProgress(out2)
 	if got.MaxTokens != 4096 || got.Effort != "low" {
-		t.Fatalf("planning request budget=%d/%q, want runner default 4096/low", got.MaxTokens, got.Effort)
+		t.Fatalf("planning request budget=%d/%q, want the runner's configured 4096/low", got.MaxTokens, got.Effort)
 	}
 }
 
 // The raised Fable dials ship together: deliverables default to effort high
-// with a 32K output ceiling, and the orchestrator timeout default is 15m so
-// slow-but-good high-effort runs are not manufactured into failures.
+// with a 32K output ceiling, the orchestrator defaults to effort high with a
+// 16K ceiling (thinking + text share max_tokens on Fable 5, so the effort-low
+// era's 4096 would manufacture max_tokens stops at high), and the
+// orchestrator timeout default is 15m so slow-but-good high-effort runs are
+// not manufactured into failures.
 func TestFableDialDefaults(t *testing.T) {
 	t.Setenv("BONFIRE_DELIVERABLE_MAX_TOKENS", "")
 	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "")
 	t.Setenv("BONFIRE_ORCHESTRATOR_TIMEOUT", "")
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "")
+	t.Setenv("BONFIRE_ORCHESTRATOR_MAX_TOKENS", "")
 
 	if got := deliverableMaxTokens(); got != 32768 {
 		t.Fatalf("deliverableMaxTokens()=%d, want 32768", got)
@@ -403,8 +408,63 @@ func TestFableDialDefaults(t *testing.T) {
 	if got := deliverableEffort(); got != "high" {
 		t.Fatalf("deliverableEffort()=%q, want high", got)
 	}
+	if got := orchestratorEffort(); got != "high" {
+		t.Fatalf("orchestratorEffort()=%q, want the doctrine default high", got)
+	}
+	if got := orchestratorMaxTokens(); got != 16384 {
+		t.Fatalf("orchestratorMaxTokens()=%d, want 16384", got)
+	}
 	if got := orchestratorTimeout(); got != 15*time.Minute {
 		t.Fatalf("orchestratorTimeout()=%s, want 15m", got)
+	}
+}
+
+// The doctrine effort floor: no dial may run below medium. A configured low
+// (or minimal) clamps UP to medium; medium and above pass through; junk falls
+// back to the dial's own default (high on both orchestrator dials).
+func TestEffortDoctrineFloorClampsLowUpToMedium(t *testing.T) {
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "low")
+	if got := orchestratorEffort(); got != "medium" {
+		t.Fatalf("orchestratorEffort() with low=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "minimal")
+	if got := orchestratorEffort(); got != "medium" {
+		t.Fatalf("orchestratorEffort() with minimal=%q, want medium (doctrine floor)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "XHigh")
+	if got := orchestratorEffort(); got != "xhigh" {
+		t.Fatalf("orchestratorEffort() with xhigh=%q, want xhigh (above the floor passes through)", got)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_EFFORT", "galactic")
+	if got := orchestratorEffort(); got != "high" {
+		t.Fatalf("orchestratorEffort() with junk=%q, want the high default", got)
+	}
+
+	t.Setenv("BONFIRE_DELIVERABLE_EFFORT", "low")
+	if got := deliverableEffort(); got != "medium" {
+		t.Fatalf("deliverableEffort() with low=%q, want medium (doctrine floor)", got)
+	}
+}
+
+// The never-Haiku guard on the orchestrator-side model dials: a haiku id is
+// refused in favor of the doctrine default; Sonnet/Opus overrides pass.
+func TestOrchestratorModelDialsRefuseHaiku(t *testing.T) {
+	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "claude-haiku-4-5")
+	if got := orchestratorModel(); got != defaultOrchestratorModel {
+		t.Fatalf("orchestratorModel() with haiku=%q, want the %s doctrine default", got, defaultOrchestratorModel)
+	}
+	t.Setenv("BONFIRE_ORCHESTRATOR_MODEL", "claude-opus-4-8")
+	if got := orchestratorModel(); got != "claude-opus-4-8" {
+		t.Fatalf("orchestratorModel() opus override=%q, want claude-opus-4-8", got)
+	}
+
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "claude-haiku-4-5")
+	if got := orchestratorFallbackModel(); got != defaultFallbackModel {
+		t.Fatalf("orchestratorFallbackModel() with haiku=%q, want the %s doctrine default", got, defaultFallbackModel)
+	}
+	t.Setenv("BONFIRE_FALLBACK_MODEL", "claude-sonnet-5")
+	if got := orchestratorFallbackModel(); got != "claude-sonnet-5" {
+		t.Fatalf("orchestratorFallbackModel() sonnet override=%q, want claude-sonnet-5", got)
 	}
 }
 
@@ -1132,6 +1192,219 @@ func TestBuildAnthropicMessagesPayloadCacheBreakpointNeverOnImages(t *testing.T)
 	}
 }
 
+// Research mode attaches Anthropic's SERVER web tools (web_search / web_fetch)
+// with the right server type + name and no input_schema; report_goal_state
+// stays the last (cache-breakpoint) tool. Non-research modes get no server
+// tools — the read-only-loop path is byte-for-byte unchanged there.
+func TestAnthropicFableRunnerResearchModeAttachesServerWebTools(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	runner := newAnthropicFableRunner(app)
+
+	research := runner.tools("research")
+	var search, fetch *anthropicTool
+	for i := range research {
+		switch research[i].Name {
+		case "web_search":
+			search = &research[i]
+		case "web_fetch":
+			fetch = &research[i]
+		}
+	}
+	if search == nil || fetch == nil {
+		t.Fatalf("research tools missing server web tools: %v", toolNames(research))
+	}
+	if search.Type != "web_search_20250305" {
+		t.Fatalf("web_search type=%q, want web_search_20250305", search.Type)
+	}
+	if fetch.Type != "web_fetch_20250910" {
+		t.Fatalf("web_fetch type=%q, want web_fetch_20250910", fetch.Type)
+	}
+	if search.InputSchema != nil || fetch.InputSchema != nil {
+		t.Fatal("server tools must carry no input_schema")
+	}
+	if search.MaxUses <= 0 || fetch.MaxUses <= 0 {
+		t.Fatalf("server tools missing max_uses: search=%d fetch=%d", search.MaxUses, fetch.MaxUses)
+	}
+	if fetch.Citations == nil || !fetch.Citations.Enabled {
+		t.Fatal("web_fetch must enable citations")
+	}
+	// report_goal_state stays the LAST tool so it remains the cache breakpoint.
+	if last := research[len(research)-1]; last.Name != controlToolReportGoalState {
+		t.Fatalf("last research tool=%q, want %s", last.Name, controlToolReportGoalState)
+	}
+
+	// Non-research modes get NO server tools.
+	for _, mode := range []string{"workflow", "design", "grill", "artifacts"} {
+		got := runner.tools(mode)
+		if toolNamesContain(got, "web_search") || toolNamesContain(got, "web_fetch") {
+			t.Fatalf("%s mode leaked server web tools: %v", mode, toolNames(got))
+		}
+	}
+}
+
+// The wire proof of the omitempty change: a server tool serializes WITH "type"
+// and WITHOUT "input_schema", while a client tool (non-nil schema) still
+// serializes its input_schema unchanged — so making InputSchema omitempty is
+// safe for every existing tool.
+func TestAnthropicServerToolSerialization(t *testing.T) {
+	raw, err := json.Marshal(webSearchServerTool())
+	if err != nil {
+		t.Fatalf("marshal web_search: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"web_search_20250305"`) {
+		t.Fatalf("web_search missing type: %s", raw)
+	}
+	if strings.Contains(string(raw), "input_schema") {
+		t.Fatalf("server tool must not carry input_schema: %s", raw)
+	}
+
+	rawFetch, err := json.Marshal(webFetchServerTool())
+	if err != nil {
+		t.Fatalf("marshal web_fetch: %v", err)
+	}
+	if !strings.Contains(string(rawFetch), `"citations":{"enabled":true}`) {
+		t.Fatalf("web_fetch missing citations: %s", rawFetch)
+	}
+	if strings.Contains(string(rawFetch), "input_schema") {
+		t.Fatalf("server tool must not carry input_schema: %s", rawFetch)
+	}
+
+	// A client tool with a non-nil schema still serializes input_schema (the
+	// omitempty change leaves every existing client tool's bytes unchanged), and
+	// gains no TOP-LEVEL type field.
+	rawClient, _ := json.Marshal(anthropicTool{Name: "create_ticket", InputSchema: map[string]any{"type": "object"}})
+	var clientFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawClient, &clientFields); err != nil {
+		t.Fatalf("decode client tool: %v", err)
+	}
+	if _, ok := clientFields["input_schema"]; !ok {
+		t.Fatalf("client tool dropped input_schema: %s", rawClient)
+	}
+	if _, ok := clientFields["type"]; ok {
+		t.Fatalf("client tool must not grow a top-level type field: %s", rawClient)
+	}
+}
+
+// A server-tool pause_turn must CONTINUE the run, not die as needs_attention:
+// the runner echoes the paused assistant turn verbatim (server_tool_use
+// included), adds NO synthetic user turn, and the run reaches a clean verified
+// terminal. This is the critical bug fix — web_search emits pause_turn and the
+// old default branch killed the run mid-search.
+func TestAnthropicFableRunnerPauseTurnContinues(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	serverToolUse, _ := json.Marshal(map[string]any{
+		"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search",
+		"input": map[string]any{"query": "latest figures"},
+	})
+
+	var requests []anthropicMessagesRequest
+	responder := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		requests = append(requests, request)
+		if len(requests) == 1 {
+			return anthropicMessagesResponse{
+				StopReason: "pause_turn",
+				Content: []json.RawMessage{
+					mockAnthropicTextBlock("Searching the web for current data."),
+					json.RawMessage(serverToolUse),
+				},
+			}, nil
+		}
+		return anthropicMessagesResponse{
+			StopReason: "end_turn",
+			Content:    []json.RawMessage{mockAnthropicTextBlock("# Report\n\nBased on current data.")},
+		}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.maxTurns = 6
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "research", Query: "current data"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	if len(requests) != 2 {
+		t.Fatalf("responder called %d times, want 2 (pause + resume)", len(requests))
+	}
+	// The resume echoes the paused assistant turn VERBATIM and adds NO user
+	// turn: messages = [initial user, echoed assistant].
+	if len(requests[1].Messages) != 2 {
+		t.Fatalf("resume request has %d messages, want user + echoed assistant (no synthetic user turn)", len(requests[1].Messages))
+	}
+	if role := requests[1].Messages[1].Role; role != "assistant" {
+		t.Fatalf("resume request last message role=%q, want assistant", role)
+	}
+	if !blockTypePresent(requests[1].Messages[1].Content, "server_tool_use") {
+		t.Fatal("resume request dropped the server_tool_use block")
+	}
+
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err != nil {
+		t.Fatalf("pause→resume terminal = %+v, want clean terminal", last)
+	}
+	if last.GoalStatus != "verified" || last.ReviewGate != "passed" {
+		t.Fatalf("pause→resume status wrong: %+v", last)
+	}
+	// A non-terminal pause progress reflects the live web activity.
+	sawLiveNote := false
+	for _, progress := range progresses {
+		if !progress.Terminal && strings.Contains(strings.ToLower(progress.Note), "live web search") {
+			sawLiveNote = true
+		}
+	}
+	if !sawLiveNote {
+		t.Fatalf("no pause progress reflected live web activity; progresses=%+v", progresses)
+	}
+}
+
+// The pause budget bounds a runaway server-tool loop: a responder that ALWAYS
+// returns pause_turn terminates (needs_attention) after maxPauses continuations
+// rather than hanging, and it never consumes the far larger maxTurns budget.
+func TestAnthropicFableRunnerPauseBudgetBoundsRunaway(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	serverToolUse, _ := json.Marshal(map[string]any{
+		"type": "server_tool_use", "id": "srvtoolu_x", "name": "web_search", "input": map[string]any{},
+	})
+	calls := 0
+	responder := func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		calls++
+		return anthropicMessagesResponse{
+			StopReason: "pause_turn",
+			Content:    []json.RawMessage{json.RawMessage(serverToolUse)},
+		}, nil
+	}
+
+	runner := newAnthropicFableRunner(app)
+	runner.responder = responder
+	runner.apiKey = func() string { return "test-key" }
+	runner.maxTurns = 100 // large: the pause budget, not maxTurns, must stop the loop
+	runner.maxPauses = 4
+
+	out, err := runner.RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "t", Mode: "research", Query: "loop forever"}))
+	if err != nil {
+		t.Fatalf("RunJob: %v", err)
+	}
+	progresses := collectProgress(out)
+
+	// maxPauses continuations, then one more call whose pause finds the budget
+	// spent and terminates — bounded, never the 100-turn ceiling.
+	if calls != runner.maxPauses+1 {
+		t.Fatalf("responder called %d times, want maxPauses+1=%d (pause budget bounds the loop)", calls, runner.maxPauses+1)
+	}
+	last := progresses[len(progresses)-1]
+	if !last.Terminal || last.Err == nil {
+		t.Fatalf("runaway pause must terminate with an error: %+v", last)
+	}
+	if last.GoalStatus != "needs_attention" {
+		t.Fatalf("runaway pause goalStatus=%q, want needs_attention", last.GoalStatus)
+	}
+}
+
 func toolNames(tools []anthropicTool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
@@ -1156,4 +1429,99 @@ func blockTypePresent(blocks []json.RawMessage, blockType string) bool {
 		}
 	}
 	return false
+}
+
+// A research run's bar used to freeze at the 35% launch scaffold until the
+// terminal write: turnProgress never set ProgressPercent. Every non-terminal
+// turn now climbs a heuristic (typical runs are 3-8 turns of the 24-turn cap),
+// a report_goal_state percent ahead of the heuristic wins, and the job-local
+// high-water mark keeps the bar monotonic when a later report comes in lower.
+func TestAnthropicFableRunnerTurnProgressRisingMonotonic(t *testing.T) {
+	runner := &anthropicFableRunner{model: "test-model", effort: "high"}
+	steps := []struct {
+		turn     int
+		reported int // percent the sticky control carries from report_goal_state
+		want     int
+	}{
+		{turn: 1, reported: 0, want: 41},  // 35 + (55*1)/8
+		{turn: 2, reported: 0, want: 48},  // keeps climbing per turn
+		{turn: 3, reported: 80, want: 80}, // a model report ahead of the heuristic wins
+		{turn: 4, reported: 20, want: 80}, // high-water: a lower report never walks the bar back
+		{turn: 9, reported: 0, want: 92},  // heuristic parks at 92 — 100/72 stays terminal's call
+		{turn: 24, reported: 0, want: 92},
+	}
+	for _, step := range steps {
+		progress := runner.turnProgress("working", AgentProgress{ProgressPercent: step.reported}, step.turn, anthropicMessagesResponse{})
+		if progress.ProgressPercent != step.want {
+			t.Fatalf("turn %d (reported %d): percent=%d, want %d", step.turn, step.reported, progress.ProgressPercent, step.want)
+		}
+		if progress.Terminal {
+			t.Fatalf("turn %d: non-terminal turn marked terminal", step.turn)
+		}
+	}
+}
+
+// Each turn's note names what the orchestrator is doing RIGHT NOW: an explicit
+// report_goal_state note from this turn wins, else the tool being called maps
+// to a short human phrase (unknown tools read as their name), else the sticky
+// control note holds, else the latest assistant prose.
+func TestAnthropicFableRunnerTurnProgressNotes(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		control  AgentProgress
+		text     string
+		response anthropicMessagesResponse
+		want     string
+	}{
+		{
+			name: "memory tool maps to a human phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "answer_memory_question", map[string]any{"question": "what shipped?"}),
+			}},
+			want: "consulting memory",
+		},
+		{
+			name: "fiscal tool maps to a human phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "fiscal_data_query", map[string]any{"query": "revenue"}),
+			}},
+			want: "querying fiscal data",
+		},
+		{
+			name: "report_goal_state note this turn beats the tool phrase",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", controlToolReportGoalState, map[string]any{"note": "reviewing sources"}),
+				mockAnthropicToolUseBlock("toolu_2", "answer_memory_question", map[string]any{}),
+			}},
+			want: "reviewing sources",
+		},
+		{
+			name: "unknown tool falls back to its name",
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "future_tool", map[string]any{}),
+			}},
+			want: "future tool",
+		},
+		{
+			name:    "do_nothing stays silent so the sticky note holds",
+			control: AgentProgress{Note: "drafting the report"},
+			response: anthropicMessagesResponse{Content: []json.RawMessage{
+				mockAnthropicToolUseBlock("toolu_1", "do_nothing", map[string]any{}),
+			}},
+			want: "drafting the report",
+		},
+		{
+			name: "no tools falls back to the assistant prose",
+			text: "Working through the evidence now.",
+			want: "Working through the evidence now.",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &anthropicFableRunner{model: "test-model", effort: "high"}
+			progress := runner.turnProgress(tt.text, tt.control, 1, tt.response)
+			if progress.Note != tt.want {
+				t.Fatalf("Note=%q, want %q", progress.Note, tt.want)
+			}
+		})
+	}
 }

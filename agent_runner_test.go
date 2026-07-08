@@ -137,6 +137,10 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "narrative maintainer") {
+			calls = append(calls, "narrative")
+			return `{"narratives":[]}`, nil
+		}
 		if strings.Contains(request.Instructions, "meeting digest compiler") {
 			calls = append(calls, "digest")
 			return cannedMeetingDigestJSON(), nil
@@ -161,8 +165,8 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	}
 	// the close chain in dependency order; the day fold and the entity-ledger
 	// consolidation are deterministic (no model call).
-	if strings.Join(calls, ",") != "brain,ledger,board,mission,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, meeting-digest, then company", calls)
+	if strings.Join(calls, ",") != "brain,ledger,board,mission,narrative,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, narrative, meeting-digest, then company", calls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
 		t.Fatalf("downloadUrl=%q, want embedded room key", result.DownloadURL)
@@ -309,6 +313,10 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 			calls = append(calls, "mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
+		if strings.Contains(request.Instructions, "narrative maintainer") {
+			calls = append(calls, "narrative")
+			return `{"narratives":[]}`, nil
+		}
 		if strings.Contains(request.Instructions, "meeting digest compiler") {
 			calls = append(calls, "digest")
 			return cannedMeetingDigestJSON(), nil
@@ -341,8 +349,8 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	// company narrative rides the ledger events the consolidation just landed.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if strings.Join(calls, ",") != "brain,ledger,board,mission,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, meeting-digest, then company for post-boot input", calls)
+	if strings.Join(calls, ",") != "brain,ledger,board,mission,narrative,digest,company" {
+		t.Fatalf("calls=%v, want brain, decision-ledger, board, mission, narrative, meeting-digest, then company for post-boot input", calls)
 	}
 	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
 		t.Fatal("archive flush did not fold a day digest")

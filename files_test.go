@@ -5,7 +5,9 @@ package main
 // "stored" badge), the 085 ingestion seam firing exactly once with a key, the
 // chat-attachment adapter's visibility law (private threads stay the owner's),
 // newest-first ordering, the memory-timeline exclusion, control_app opening
-// the surface, and the GC sweep treating drive uploads as live refs.
+// the surface, the GC sweep treating drive uploads as live refs, and the
+// third source: terminal agent deliverables (artifact-stage rows) filing into
+// the folder layer alongside uploads.
 
 import (
 	"bytes"
@@ -409,6 +411,134 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	teammateRows := app.assistantFilesForUser("tom@shareability.com")
 	if len(teammateRows) != 1 || teammateRows[0].Name != "onesheet.pdf" {
 		t.Fatalf("teammate rows=%+v, want only the channel file", teammateRows)
+	}
+}
+
+func TestAssistantFilesListsDeliverablesAndFolders(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	// A finished research run files as a deliverable row...
+	report, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Samsung ambient teardown", "# Samsung ambient teardown\n\nFindings ride here.", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+		"updatedBy":    "Scout",
+	})
+	if err != nil {
+		t.Fatalf("create report artifact: %v", err)
+	}
+	// ...an html_deck maps onto the deck mime...
+	deck, _, err := kanbanApp.createOSArtifactWithMetadata("design", "StationTenn deck", "<!DOCTYPE html><html><body>deck</body></html>", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+		"type":         "html_deck",
+	})
+	if err != nil {
+		t.Fatalf("create deck artifact: %v", err)
+	}
+	// ...while an error scaffold and a hand-saved draft never do.
+	failed, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Broken run", "Scaffold body.", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "error",
+		"threadStatus": "error",
+	})
+	if err != nil {
+		t.Fatalf("create error scaffold: %v", err)
+	}
+	draft, _, err := kanbanApp.createOSArtifactWithMetadata("artifacts", "Hand-saved note", "Just a note.", "AJ", nil)
+	if err != nil {
+		t.Fatalf("create draft artifact: %v", err)
+	}
+
+	// One direct upload rides alongside, then files into a fresh folder next
+	// to the deck deliverable — folders take any row id.
+	if recorder := postFileUpload(t, cookies, "pitch.pdf", "application/pdf", []byte("%PDF-1.7 bytes")); recorder.Code != http.StatusOK {
+		t.Fatalf("upload status=%d, want 200", recorder.Code)
+	}
+	folder, err := createFileFolder("Diligence", "AJ")
+	if err != nil {
+		t.Fatalf("createFileFolder: %v", err)
+	}
+	uploadID := kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0)[0].ID
+	if err := moveFileToFolder(uploadID, folder.ID); err != nil {
+		t.Fatalf("move upload: %v", err)
+	}
+	if err := moveFileToFolder(deck.ID, folder.ID); err != nil {
+		t.Fatalf("move deliverable: %v", err)
+	}
+	// A dangling assignment (row id no source lists) is ignored at read time.
+	if err := moveFileToFolder("file-long-gone", folder.ID); err != nil {
+		t.Fatalf("move dangling: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/assistant/files", nil)
+	for _, cookie := range cookies {
+		listReq.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFilesHandler(recorder, listReq)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	var listPayload struct {
+		OK      bool                         `json:"ok"`
+		Files   []assistantFileRecord        `json:"files"`
+		Folders []assistantFileFolderPayload `json:"folders"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if !listPayload.OK || len(listPayload.Files) != 3 {
+		t.Fatalf("files=%+v, want the upload + two deliverables", listPayload.Files)
+	}
+	rowsByID := map[string]assistantFileRecord{}
+	for _, row := range listPayload.Files {
+		rowsByID[row.ID] = row
+	}
+	if _, present := rowsByID[failed.ID]; present {
+		t.Fatal("error scaffold must never file as a deliverable")
+	}
+	if _, present := rowsByID[draft.ID]; present {
+		t.Fatal("a hand-saved draft has no deliverable provenance")
+	}
+	reportRow, present := rowsByID[report.ID]
+	if !present {
+		t.Fatalf("rows=%+v, want the terminal research report", listPayload.Files)
+	}
+	if reportRow.Origin != "deliverable" || reportRow.ArtifactID != report.ID || !reportRow.Previewable {
+		t.Fatalf("report row=%+v, want a previewable deliverable pointing at its artifact", reportRow)
+	}
+	if reportRow.Name != "Samsung ambient teardown" || reportRow.Mime != "text/markdown" || reportRow.UploaderName != "Scout" {
+		t.Fatalf("report row=%+v, want title name, markdown mime, updatedBy attribution", reportRow)
+	}
+	if reportRow.BrainStatus != fileBrainStatusIngested || reportRow.FolderID != "" {
+		t.Fatalf("report row=%+v, want ingested badge at root", reportRow)
+	}
+	deckRow := rowsByID[deck.ID]
+	if deckRow.Mime != "text/html" || deckRow.FolderID != folder.ID {
+		t.Fatalf("deck row=%+v, want html_deck mime filed under the folder", deckRow)
+	}
+	uploadRow := rowsByID[uploadID]
+	if uploadRow.FolderID != folder.ID || uploadRow.ArtifactID != "" {
+		t.Fatalf("upload row=%+v, want folderId stamped and no artifact pointer", uploadRow)
+	}
+
+	// The folders payload counts only visible rows — the dangling assignment
+	// does not inflate it.
+	if len(listPayload.Folders) != 1 {
+		t.Fatalf("folders=%+v, want the one folder", listPayload.Folders)
+	}
+	if chip := listPayload.Folders[0]; chip.ID != folder.ID || chip.Name != "Diligence" || chip.Count != 2 {
+		t.Fatalf("folder chip=%+v, want id/name with count 2", chip)
 	}
 }
 

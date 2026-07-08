@@ -1,7 +1,7 @@
 package main
 
 // Files surface (card 095) — the Google-Drive-like door over everything the
-// team has uploaded. One list, two sources:
+// team has uploaded. One list, three sources:
 //
 //  1. Direct uploads: POST /assistant/files/upload stores the bytes through
 //     putBlob and appends a first-class kind=file memory entry whose Text is
@@ -11,11 +11,17 @@ package main
 //     records 085 already persists inside thread messages — no double-write,
 //     and thread visibility (private vs public channel) keeps governing who
 //     sees which files.
+//  3. Agent deliverables: terminal, good-status os_artifact work products
+//     (research reports, decks, goal outputs) adapt into rows that open in the
+//     artifact stage via ArtifactID — no bytes to download, the artifact IS
+//     the file.
 //
 // Every row is decorated for the client with the session-gated blob download
 // URL (/artifacts/blob, blobs.go) plus the honest feeds-the-brain badge:
 // "ingested" when derived/extracted text rides model context, "stored" when
-// only the bytes are durable (keyless deploys, non-model mimes).
+// only the bytes are durable (keyless deploys, non-model mimes). Rows organize
+// into the flat folder layer of file_folders.go (folderId + the folders list
+// on the GET payload).
 
 import (
 	"errors"
@@ -66,6 +72,12 @@ type assistantFileRecord struct {
 	BrainStatus       string `json:"brainStatus"`
 	DownloadURL       string `json:"downloadUrl,omitempty"`
 	Previewable       bool   `json:"previewable,omitempty"`
+	// ArtifactID points a deliverable row at its os_artifact so the client
+	// opens it in the artifact stage instead of downloading bytes.
+	ArtifactID string `json:"artifactId,omitempty"`
+	// FolderID files the row under a Files-surface folder (file_folders.go);
+	// empty means root.
+	FolderID string `json:"folderId,omitempty"`
 }
 
 // fileBlobDownloadURL builds the session-gated content-addressed download
@@ -187,10 +199,66 @@ func fileRecordsFromThread(thread scoutChatThreadRecord) []assistantFileRecord {
 	return rows
 }
 
+// fileDeliverableRecord adapts a finished agent work product (os_artifact)
+// into a Files row. Only real deliverables qualify: provenance must be an
+// agent-thread run (source scout_thread — including goal writer children) or
+// the goal engine's own stamps (goalPlan on the parent, goalDeliverable on a
+// flagged child), the status must be terminally good (complete/published —
+// running scaffolds and error/needs_attention bodies never file), and
+// UI-state-ish artifacts (taste profiles, the house-style doc, quarantined
+// entries) stay out. The row carries ArtifactID so the client opens the
+// artifact stage instead of downloading bytes.
+func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool) {
+	metadata := entry.Metadata
+	if metadata == nil {
+		return assistantFileRecord{}, false
+	}
+	if strings.TrimSpace(metadata["source"]) != "scout_thread" &&
+		strings.TrimSpace(metadata["goalPlan"]) == "" &&
+		!strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") {
+		return assistantFileRecord{}, false
+	}
+	if strings.TrimSpace(metadata[tasteProfileArtifactTypeKey]) != "" {
+		return assistantFileRecord{}, false
+	}
+	if memoryEntryHiddenFromRecall(entry) {
+		return assistantFileRecord{}, false
+	}
+	switch agentThreadStatusValue(entry) {
+	case artifactStatusComplete, artifactStatusPublished:
+	default:
+		return assistantFileRecord{}, false
+	}
+
+	name := firstNonEmptyString(strings.TrimSpace(metadata["title"]), strings.TrimSpace(metadata["threadQuery"]), "Deliverable")
+	deliverableMime := "text/markdown"
+	if artifactType(entry) == artifactTypeHTMLDeck {
+		deliverableMime = "text/html"
+	}
+	createdAt := ""
+	if !entry.CreatedAt.IsZero() {
+		createdAt = entry.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return assistantFileRecord{
+		ID:           entry.ID,
+		ArtifactID:   entry.ID,
+		Name:         name,
+		Mime:         deliverableMime,
+		UploaderName: firstNonEmptyString(strings.TrimSpace(metadata["updatedBy"]), strings.TrimSpace(metadata["createdBy"])),
+		CreatedAt:    createdAt,
+		Origin:       "deliverable",
+		// The artifact body IS meeting memory — deliverables always feed the
+		// brain.
+		BrainStatus: fileBrainStatusIngested,
+		Previewable: true,
+	}, true
+}
+
 // assistantFilesForUser assembles the viewer's file list: every direct upload
-// (team-wide, like a shared drive) plus the chat attachments the viewer may
+// (team-wide, like a shared drive), the chat attachments the viewer may
 // read — their own threads and public channels, the same visibility law
-// scoutChatThreadsSnapshot already enforces. Newest first.
+// scoutChatThreadsSnapshot already enforces — plus the finished agent
+// deliverables. Newest first, capped after the merge.
 func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistantFileRecord {
 	if app == nil || app.memory == nil {
 		return nil
@@ -201,6 +269,11 @@ func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistant
 	}
 	for _, thread := range app.scoutChatThreadsSnapshot(viewerEmail, true, 0) {
 		rows = append(rows, fileRecordsFromThread(thread)...)
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		if row, ok := fileDeliverableRecord(entry); ok {
+			rows = append(rows, row)
+		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		return fileRecordTime(rows[i]).After(fileRecordTime(rows[j]))
@@ -242,9 +315,12 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rows := kanbanApp.assistantFilesForUser(user.Email)
+	folders := decorateAssistantFileFolders(rows)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"files": kanbanApp.assistantFilesForUser(user.Email),
+		"ok":      true,
+		"files":   rows,
+		"folders": folders,
 	})
 }
 
