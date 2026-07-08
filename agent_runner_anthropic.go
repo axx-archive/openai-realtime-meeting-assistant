@@ -316,7 +316,7 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 	httpRequest.Header.Set("anthropic-version", anthropicAPIVersion)
 	httpRequest.Header.Set("content-type", "application/json")
 	httpRequest.Header.Set("accept", "text/event-stream")
-	// The server web tools (web_search_20260209 / web_fetch_20260209) need NO
+	// The server web tools (web_search_20250305 / web_fetch_20250910) need NO
 	// anthropic-beta header on Fable 5. But if a live run ever 400s citing a
 	// beta requirement, an operator can set BONFIRE_ANTHROPIC_BETA to add the
 	// header with no code change.
@@ -1030,9 +1030,17 @@ func (r *anthropicFableRunner) tools(mode string) []anthropicTool {
 // webSearchServerTool is Anthropic's server-side web_search (no beta header on
 // Fable 5). It carries a Type + Name but no input_schema — the server owns the
 // schema. max_uses caps searches per assistant turn.
+//
+// We use the BASIC web_search_20250305 variant, NOT the newer _20260209
+// dynamic-filtering one. The _20260209 variant runs its filtering inside a
+// server-side code_execution sandbox, so the assistant turn comes back carrying
+// code_execution server_tool_use blocks; resending that history verbatim (which
+// our raw tool loop must do to resume a pause_turn) 400s. The basic variant
+// emits plain server_tool_use + web_search_tool_result blocks that round-trip
+// cleanly through the loop — verified live on prod against api.anthropic.com.
 func webSearchServerTool() anthropicTool {
 	return anthropicTool{
-		Type:    "web_search_20260209",
+		Type:    "web_search_20250305",
 		Name:    "web_search",
 		MaxUses: serverToolMaxUses("BONFIRE_WEB_SEARCH_MAX_USES"),
 	}
@@ -1040,10 +1048,13 @@ func webSearchServerTool() anthropicTool {
 
 // webFetchServerTool is Anthropic's server-side web_fetch with citations on, so
 // a fetched primary source carries its cited URL back into the report's Sources
-// (the research contract reserves grade A for fetched-this-run sources).
+// (the research contract reserves grade A for fetched-this-run sources). Basic
+// web_fetch_20250910 variant for the same clean-round-trip reason as web_search
+// above; no beta header required on Fable 5 (verified live). web_fetch only
+// fetches URLs already surfaced by web_search earlier in the turn.
 func webFetchServerTool() anthropicTool {
 	return anthropicTool{
-		Type:      "web_fetch_20260209",
+		Type:      "web_fetch_20250910",
 		Name:      "web_fetch",
 		MaxUses:   serverToolMaxUses("BONFIRE_WEB_FETCH_MAX_USES"),
 		Citations: &anthropicToolCitations{Enabled: true},

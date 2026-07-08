@@ -1213,11 +1213,11 @@ func TestAnthropicFableRunnerResearchModeAttachesServerWebTools(t *testing.T) {
 	if search == nil || fetch == nil {
 		t.Fatalf("research tools missing server web tools: %v", toolNames(research))
 	}
-	if search.Type != "web_search_20260209" {
-		t.Fatalf("web_search type=%q, want web_search_20260209", search.Type)
+	if search.Type != "web_search_20250305" {
+		t.Fatalf("web_search type=%q, want web_search_20250305", search.Type)
 	}
-	if fetch.Type != "web_fetch_20260209" {
-		t.Fatalf("web_fetch type=%q, want web_fetch_20260209", fetch.Type)
+	if fetch.Type != "web_fetch_20250910" {
+		t.Fatalf("web_fetch type=%q, want web_fetch_20250910", fetch.Type)
 	}
 	if search.InputSchema != nil || fetch.InputSchema != nil {
 		t.Fatal("server tools must carry no input_schema")
@@ -1251,7 +1251,7 @@ func TestAnthropicServerToolSerialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal web_search: %v", err)
 	}
-	if !strings.Contains(string(raw), `"type":"web_search_20260209"`) {
+	if !strings.Contains(string(raw), `"type":"web_search_20250305"`) {
 		t.Fatalf("web_search missing type: %s", raw)
 	}
 	if strings.Contains(string(raw), "input_schema") {
