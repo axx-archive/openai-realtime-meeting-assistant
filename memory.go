@@ -93,6 +93,23 @@ const (
 	// reflection describes a PAST day, so it must neither join the live
 	// meeting's snapshotForMeeting nor lazily mint a meeting id at idle.
 	meetingMemoryKindReflection = "reflection"
+	// meetingMemoryKindLedgerEvent is one entity-ledger consolidation op
+	// (Track-2 Wave 3, amendment A1): entry.Text = a ledgerEventPayload JSON
+	// carrying the op (add/update/supersede/close) plus the FULL post-state of
+	// one canonical ledger record. The append-only event log is the ledger's
+	// source of truth; the entity-keyed read-model is derived by folding these
+	// entries in log order (ledgerState, entity_ledger.go) and is therefore
+	// rebuildable from scratch. Record JSON, never prose: UI state (excluded
+	// from Scout search/context and the client timeline) — recall reads the
+	// FOLDED state view, never raw events. Written through appendLedgerEvents
+	// (mint-free: a ledger record spans meetings, so no meetingId is stamped).
+	meetingMemoryKindLedgerEvent = "ledger_event"
+	// meetingMemoryKindLedgerPass is the entity-ledger agent's per-pass cursor
+	// artifact (the decision_pass pattern): carries throughMeetingDigestId and
+	// throughDecisionId so a zero-event pass still advances consumption. Pure
+	// bookkeeping: UI state, never knowledge. Written through
+	// appendAmbientEntry, so it carries NO meetingId and never mints one.
+	meetingMemoryKindLedgerPass = "ledger_pass"
 	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
@@ -352,15 +369,15 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 
 	// resume the in-flight meeting after a restart: if the newest entry was not
 	// an archive, the meeting it belongs to is still open. Digest rollups,
-	// reflections, and day-digest pass artifacts are skipped: they are ambient
-	// cross-meeting bookkeeping — a meeting_digest may describe a PAST meeting
-	// (its meetingId stamp = the digested meeting, not the live one) and the
-	// day/company digests, reflections, and pass artifacts carry no meetingId
-	// at all — so one of them as the newest line must neither clear nor
-	// redirect the in-flight meeting id.
+	// reflections, ledger events, and pass artifacts are skipped: they are
+	// ambient cross-meeting bookkeeping — a meeting_digest may describe a PAST
+	// meeting (its meetingId stamp = the digested meeting, not the live one)
+	// and the day/company digests, reflections, ledger events/passes, and
+	// day-digest pass artifacts carry no meetingId at all — so one of them as
+	// the newest line must neither clear nor redirect the in-flight meeting id.
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		last := store.entries[index]
-		if isMeetingDigestKind(last.Kind) || last.Kind == meetingMemoryKindReflection || last.Kind == meetingMemoryKindDayDigestPass {
+		if isAmbientBookkeepingMemoryKind(last.Kind) {
 			continue
 		}
 		if last.Kind != meetingMemoryKindArchive {
@@ -1185,6 +1202,19 @@ func isMeetingDigestKind(kind string) bool {
 	return false
 }
 
+// isAmbientBookkeepingMemoryKind reports the cross-meeting ambient kinds the
+// boot meeting-resume scan must skip: they describe PAST meetings/days (or no
+// meeting at all — the mint-free appendAmbientEntry/appendLedgerEvents lanes),
+// so one of them as the newest JSONL line must neither clear nor redirect the
+// in-flight meeting id across a restart.
+func isAmbientBookkeepingMemoryKind(kind string) bool {
+	switch kind {
+	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass:
+		return true
+	}
+	return isMeetingDigestKind(kind)
+}
+
 // dayBucket returns the canonical calendar-day key for t in the pinned meeting
 // timezone (MEETING_TIME_ZONE, default America/Los_Angeles). Both the digest
 // producers and digestsInRange must bucket through this one helper so a
@@ -1684,7 +1714,7 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -1858,11 +1888,11 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindReflection && !isMeetingDigestKind(kind) {
-		// digest kinds take the structure-preserving branch below: their
-		// bodies are strict JSON (like mission_insight) and the whitespace
-		// collapse would mutate content inside JSON string values; reflection
-		// bodies are sectioned markdown (like brain write-ups).
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindReflection && kind != meetingMemoryKindLedgerEvent && !isMeetingDigestKind(kind) {
+		// digest kinds and ledger events take the structure-preserving branch
+		// below: their bodies are strict JSON (like mission_insight) and the
+		// whitespace collapse would mutate content inside JSON string values;
+		// reflection bodies are sectioned markdown (like brain write-ups).
 		return normalizeMemoryText(value)
 	}
 

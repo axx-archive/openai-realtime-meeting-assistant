@@ -516,6 +516,14 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// so a first deploy never token-spikes over weeks of stored brains.
 	app.startMeetingDigestWorker(apiKey)
 	app.startDayDigestWorker(apiKey)
+	// Track-2 Wave 3 (amendment A1): the entity ledger consolidates each landed
+	// meeting_digest's facts — plus new decision-ledger rows — into the
+	// canonical cross-meeting registry of decisions / action items / topics /
+	// open questions (entity_ledger.go: deterministic match first, one batched
+	// LLM adjudication call only for ambiguity, ADD/UPDATE/SUPERSEDE/CLOSE
+	// events folded into a rebuildable read-model). Backfill OFF by default
+	// (ENTITY_LEDGER_BACKFILL).
+	app.startEntityLedgerWorker(apiKey)
 	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
 	// proposals and any auto_run-lane standing-approved work. Model-free, so it
 	// starts independent of the API key gate above.
@@ -3744,7 +3752,7 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// recall/bookkeeping material with no timeline rendering either: the
 		// briefing surfaces read digests through the range helpers, not this
 		// feed.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || isMeetingDigestKind(entry.Kind) {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || isMeetingDigestKind(entry.Kind) {
 			continue
 		}
 		visible = append(visible, entry)
