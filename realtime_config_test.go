@@ -124,7 +124,11 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		"end_private_grill":   true,
 		"meeting_recap":       true,
 		"catch_me_up":         true,
-		"do_nothing":          true,
+		// Track-2 Wave 6: read-only cross-meeting recall — the private user
+		// owns their own catch-up briefings and drill-downs.
+		"cross_meeting_briefing": true,
+		"get_meeting_detail":     true,
+		"do_nothing":             true,
 		// fiscal.ai grounding: only the typed, spoken-ready pair rides voice;
 		// fiscal_api_docs / fiscal_data_query stay orchestrator-only (too heavy).
 		"company_financial_snapshot": true,

@@ -1069,7 +1069,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
 		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
-		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud.",
+		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
@@ -1574,7 +1574,7 @@ func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool, 
 	// tools speak only when they changed something. do_nothing never speaks
 	// on its own — it is the marker that nothing scout-addressed happened.
 	switch toolName {
-	case "answer_memory_question":
+	case "answer_memory_question", "cross_meeting_briefing", "get_meeting_detail":
 		return true
 	case "do_nothing":
 		return false
@@ -1702,7 +1702,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
 		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. When the user says \"after this meeting/call, remind…\" or asks for the reminder once the meeting is over, pass deliver \"after_meeting\" so it queues until the meeting is archived. Do not use send_notification for routine acknowledgements or board updates.",
 		"# Channels\nUse post_to_channel when a user says put/post/share that in #channel or tell the team in a channel; quote their content faithfully, never embellish. Use mention to flag one person by name. create_channel makes a new public team channel, but only from a user's private Scout — tell room requesters to create channels from their private Scout or the chat surface.",
-		"# Meeting recap\nUse meeting_recap when someone asks where are we, recap this meeting, or what did I miss; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell.",
+		"# Meeting recap\nUse meeting_recap when someone asks where are we, recap this meeting, or what did I miss in THIS meeting; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell. When the catch-up spans MULTIPLE meetings or days — what did I miss this week, what happened yesterday, catch me up since last week — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; speak the top decisions and blockers only. Use get_meeting_detail with a meeting_id for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Grill sessions\nUse start_grill_session when a user says grill us, pressure-test us, or play investor on a topic; you will switch into the named persona and question the room. Use end_grill_session when anyone asks to stop grilling or stand down — a graded report thread is filed automatically.",
 		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. A separate background workflow ticker may later launch proposals a human has already approved, but proposing itself starts nothing. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
@@ -2253,6 +2253,33 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "cross_meeting_briefing",
+			"description": "Comprehensive day-by-day briefing across ALL meetings in a date range — decisions, action items, topics, open questions, and themes, importance-ranked, with decision-ledger entries quoted verbatim. Use for what did I miss this week / yesterday, catch me up on the last few days, or any catch-up spanning more than the live meeting. Composed from stored digests; falls back to summarizing raw meeting memory when digests do not cover the range.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"range":     map[string]any{"type": "string", "description": "Natural range phrase: today, yesterday, this week, last week, or last N hours/minutes. Defaults to this week."},
+					"start_day": map[string]any{"type": "string", "description": "Optional explicit start day YYYY-MM-DD (local time); overrides range."},
+					"end_day":   map[string]any{"type": "string", "description": "Optional explicit end day YYYY-MM-DD, inclusive; defaults to start_day."},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
+			"name":        "get_meeting_detail",
+			"description": "Drill into ONE past meeting: returns its digest (decisions, action items, topics, open questions with transcript anchors) plus its newest brain write-ups. Pass anchor with a transcript entry id (from a briefing or digest anchor) to quote the verbatim exchange around that moment.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"meeting_id": map[string]any{"type": "string", "description": "Meeting id, e.g. meeting-20260706-021630 (from a briefing's meeting list)."},
+					"anchor":     map[string]any{"type": "string", "description": "Optional transcript entry id to quote verbatim with surrounding lines."},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "start_grill_session",
 			"description": "Start a grill session: Scout switches into a pressure-test persona and questions the room on the topic until end_grill_session. Use when a user says grill us, pressure-test us, or play investor.",
 			"parameters": map[string]any{
@@ -2625,9 +2652,10 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "end_grill_session":
-		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s)
-		// and end_grill_session files a report thread; run them off the
+	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "cross_meeting_briefing", "end_grill_session":
+		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s),
+		// cross_meeting_briefing can block on its map-reduce fallback, and
+		// end_grill_session files a report thread; run them off the
 		// datachannel event loop like the other slow tools.
 		return true
 	case "company_financial_snapshot", "financial_comps", "fiscal_api_docs", "fiscal_data_query":
@@ -2868,6 +2896,14 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.meetingRecap(args, "")
 	case "catch_me_up":
 		return app.catchMeUp(args, "")
+	case "cross_meeting_briefing":
+		// Read-only cross-meeting recall; no requester needed, so the shared
+		// dispatch serves the room, private voice, and orchestrator paths.
+		// (Personalization hook per the amendments non-goals: a per-person
+		// variant would thread requesterEmail through here — not built.)
+		return app.crossMeetingBriefingTool(args)
+	case "get_meeting_detail":
+		return app.getMeetingDetail(args)
 	case "start_grill_session":
 		return app.startGrillSession(args)
 	case "end_grill_session":
@@ -3021,10 +3057,10 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		// for you; the mutation path is the same shared applyToolCallArgs.
 		"create_ticket", "move_ticket", "update_ticket", "add_tags",
 		"add_key_date", "remove_key_dates", "delete_ticket", "undo_delete_ticket",
-		// Packages, notifications, channels, recap.
+		// Packages, notifications, channels, recap, cross-meeting recall.
 		"create_package", "attach_to_package", "advance_package_stage", "portfolio_health",
 		"send_notification", "post_to_channel", "create_channel",
-		"meeting_recap", "catch_me_up",
+		"meeting_recap", "catch_me_up", "cross_meeting_briefing", "get_meeting_detail",
 		// fiscal.ai grounding — only the typed, spoken-ready pair; fiscal_api_docs
 		// and fiscal_data_query return payloads too heavy for a voice turn.
 		"company_financial_snapshot", "financial_comps",
@@ -3816,9 +3852,13 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		log.Errorf("Failed to answer memory question with model: %v", modelErr)
 	}
 	if strings.TrimSpace(answer) == "" {
-		// A5: a current-state question degrades to the deterministic ledger
-		// fold, never to keyword scraps; everything else keeps the old path.
-		if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+		// Wave 6: a time-ranged briefing question degrades to the composed
+		// digest/ledger briefing (then on-demand map-reduce over raw memory);
+		// A5 keeps current-state questions on the deterministic ledger fold.
+		// Only queries neither lane serves keep the 8-keyword-hit last resort.
+		if briefingAnswer, ok := app.rangedBriefingAnswer(query); ok {
+			answer = briefingAnswer
+		} else if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
 			answer = ledgerAnswer
 		} else {
 			answer = buildMemoryAnswer(query, matches)

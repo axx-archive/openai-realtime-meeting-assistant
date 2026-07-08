@@ -154,9 +154,13 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
 	if strings.TrimSpace(answer) == "" {
-		// A5: a current-state question degrades to the deterministic ledger
-		// fold, never to keyword scraps; everything else keeps the old path.
-		if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+		// Wave 6: a time-ranged briefing question degrades to the composed
+		// digest/ledger briefing (then on-demand map-reduce over raw memory);
+		// A5 keeps current-state questions on the deterministic ledger fold.
+		// Only queries neither lane serves keep the 8-keyword-hit last resort.
+		if briefingAnswer, ok := app.rangedBriefingAnswer(query); ok {
+			answer = briefingAnswer
+		} else if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
 			answer = ledgerAnswer
 		} else {
 			answer = buildMemoryAnswer(query, matches)
