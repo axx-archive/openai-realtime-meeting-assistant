@@ -326,6 +326,8 @@ func meetingBoardInstructions() string {
 		"Create at most three new cards per pass. When the discussion suggests more, keep the clearest commitments and let the rest ride in the summaries until the room commits.",
 		"Write notes as a work spec in at most three sentences: what to do, why, and what done looks like. Name a person only for ownership or a commitment. When updating a card, rewrite the notes into the current best spec — never append a running chronology of who said what.",
 		"Tag every card you create with exactly one category tag — build, fix, workflow, or business — plus topical tags.",
+		"The board has exactly four status columns and status must be one of them, spelled exactly: Backlog, In Progress, Blocked, Done. \"Draft\" is NOT a status — draft is a boolean flag applied automatically to every card you create, so never send Draft, To Do, or Todo as a status; new work belongs in Backlog.",
+		"When updating, moving, or tagging an existing card, pass its card_id exactly as it appears in the board snapshot.",
 		"The board exists for work that gets BUILT, FIXED, or run as a WORKFLOW (research, decks, design).",
 		"Business cards are never cut silently: they require a named owner and notes stating the concrete next step, and they always stay drafts for human accept/dismiss — that review is the debate.",
 		"Workflow cards must name their deliverable — the exact artifact title — in the notes so a finished agent thread binds to the card and advances it.",

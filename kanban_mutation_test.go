@@ -62,6 +62,150 @@ func TestBoardMutationsNoopWhenStateAlreadyMatches(t *testing.T) {
 	}
 }
 
+func TestParseKanbanStatusAcceptsAliasesCaseInsensitively(t *testing.T) {
+	cases := map[string]kanbanStatus{
+		"Backlog":     kanbanStatusBacklog,
+		"backlog":     kanbanStatusBacklog,
+		"To Do":       kanbanStatusBacklog,
+		"Todo":        kanbanStatusBacklog,
+		"to-do":       kanbanStatusBacklog,
+		"TO  DO":      kanbanStatusBacklog,
+		"Draft":       kanbanStatusBacklog,
+		"new":         kanbanStatusBacklog,
+		"In Progress": kanbanStatusInProgress,
+		"in progress": kanbanStatusInProgress,
+		"In-Progress": kanbanStatusInProgress,
+		"doing":       kanbanStatusInProgress,
+		"WIP":         kanbanStatusInProgress,
+		"Blocked":     kanbanStatusBlocked,
+		"blocker":     kanbanStatusBlocked,
+		"Done":        kanbanStatusDone,
+		"DONE":        kanbanStatusDone,
+		"complete":    kanbanStatusDone,
+		"Completed":   kanbanStatusDone,
+		"finished":    kanbanStatusDone,
+		"shipped":     kanbanStatusDone,
+		" To Do \n":   kanbanStatusBacklog,
+	}
+	for input, want := range cases {
+		got, err := parseKanbanStatus(input)
+		if err != nil {
+			t.Fatalf("parseKanbanStatus(%q): %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("parseKanbanStatus(%q)=%q, want %q", input, got, want)
+		}
+	}
+
+	for _, input := range []string{"", "someday", "column 5"} {
+		if got, err := parseKanbanStatus(input); err == nil {
+			t.Fatalf("parseKanbanStatus(%q)=%q, want error", input, got)
+		}
+	}
+}
+
+func TestCreateTicketUnknownStatusDefaultsToBacklogInsteadOfDropping(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, changed, err := app.createTicket(map[string]any{
+		"title":  "Card with unknown status",
+		"status": "Someday",
+		"draft":  true,
+	})
+	if err != nil {
+		t.Fatalf("createTicket with unknown status: %v", err)
+	}
+	if !changed {
+		t.Fatal("createTicket changed=false, want true")
+	}
+	card, ok := result["card"].(kanbanCard)
+	if !ok {
+		t.Fatalf("createTicket result card=%T, want kanbanCard", result["card"])
+	}
+	if card.Status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want Backlog", card.Status)
+	}
+	if !card.Draft {
+		t.Fatal("draft=false, want true (Scout draft flag must survive the status fallback)")
+	}
+}
+
+func TestCreateTicketAliasStatusLandsOnCanonicalColumn(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	result, _, err := app.createTicket(map[string]any{
+		"title":  "Card created as To Do",
+		"status": "To Do",
+	})
+	if err != nil {
+		t.Fatalf("createTicket with alias status: %v", err)
+	}
+	card, ok := result["card"].(kanbanCard)
+	if !ok {
+		t.Fatalf("createTicket result card=%T, want kanbanCard", result["card"])
+	}
+	if card.Status != kanbanStatusBacklog {
+		t.Fatalf("status=%q, want Backlog", card.Status)
+	}
+	if card.Draft {
+		t.Fatal("draft=true for a human create without the draft flag, want false")
+	}
+}
+
+func TestCardMutationsResolveTargetByTitleWhenCardIDMissing(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	card := app.snapshotState().Cards[0]
+
+	if _, changed, err := app.moveTicket(map[string]any{
+		"title":  strings.ToUpper(card.Title),
+		"status": "Done",
+	}); err != nil {
+		t.Fatalf("moveTicket by title: %v", err)
+	} else if !changed {
+		t.Fatal("moveTicket by title changed=false, want true")
+	}
+	if moved, ok := findSnapshotCard(app.snapshotState().Cards, card.ID); !ok || moved.Status != kanbanStatusDone {
+		t.Fatalf("card %q status=%q, want Done", card.ID, moved.Status)
+	}
+
+	if _, changed, err := app.addTags(map[string]any{
+		"title": card.Title,
+		"tags":  []any{"resolved-by-title"},
+	}); err != nil {
+		t.Fatalf("addTags by title: %v", err)
+	} else if !changed {
+		t.Fatal("addTags by title changed=false, want true")
+	}
+
+	if _, changed, err := app.updateTicket(map[string]any{
+		"card_title": card.Title,
+		"notes":      "Updated through title resolution.",
+	}); err != nil {
+		t.Fatalf("updateTicket by card_title: %v", err)
+	} else if !changed {
+		t.Fatal("updateTicket by card_title changed=false, want true")
+	}
+	if updated, ok := findSnapshotCard(app.snapshotState().Cards, card.ID); !ok || !strings.Contains(updated.Notes, "title resolution") {
+		t.Fatalf("card %q notes=%q, want title-resolution update", card.ID, updated.Notes)
+	}
+
+	// No card_id and no title keeps the original error.
+	if _, _, err := app.moveTicket(map[string]any{"status": "Done"}); err == nil {
+		t.Fatal("moveTicket without card_id or title succeeded, want error")
+	}
+
+	// An ambiguous title (two cards sharing it) keeps the original error.
+	if _, _, err := app.createTicket(map[string]any{"title": card.Title}); err != nil {
+		t.Fatalf("createTicket duplicate title: %v", err)
+	}
+	if _, _, err := app.moveTicket(map[string]any{
+		"title":  card.Title,
+		"status": "Blocked",
+	}); err == nil {
+		t.Fatal("moveTicket with ambiguous title succeeded, want error")
+	}
+}
+
 func TestAddTagsRequiresAtLeastOneTag(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	card := app.snapshotState().Cards[0]
