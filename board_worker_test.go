@@ -154,6 +154,76 @@ func TestMeetingBoardWorkerRejectsDestructiveSummaryTools(t *testing.T) {
 	}
 }
 
+func TestMeetingBoardWorkerToleratesAliasStatusAndMissingCardID(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+
+	app := newKanbanBoardApp()
+	existing := app.snapshotState().Cards[0]
+
+	result := app.applyMeetingBoardAnalysis(meetingBoardAnalysis{
+		Summary: "Alias status and title-addressed update.",
+		Operations: []meetingBoardOperation{
+			{
+				Tool: "create_ticket",
+				Arguments: map[string]any{
+					"title":  "Ship the onboarding email",
+					"notes":  "Draft and send the onboarding email to the pilot cohort.",
+					"owner":  "Unassigned",
+					"tags":   []any{"workflow", "email"},
+					"status": "To Do",
+				},
+			},
+			{
+				Tool: "move_ticket",
+				Arguments: map[string]any{
+					"title":  existing.Title,
+					"status": "Blocked",
+				},
+			},
+		},
+	})
+	if result.ErrorCount != 0 {
+		t.Fatalf("errors=%d (%+v), want 0", result.ErrorCount, result.Applications)
+	}
+	if result.ChangedCount != 2 {
+		t.Fatalf("changed=%d, want 2", result.ChangedCount)
+	}
+
+	var created kanbanCard
+	found := false
+	for _, card := range app.snapshotState().Cards {
+		if card.Title == "Ship the onboarding email" {
+			created = card
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("card created with status \"To Do\" was dropped")
+	}
+	if created.Status != kanbanStatusBacklog {
+		t.Fatalf("created status=%q, want Backlog", created.Status)
+	}
+	if !created.Draft {
+		t.Fatal("worker-created card draft=false, want true")
+	}
+
+	moved, ok := findSnapshotCard(app.snapshotState().Cards, existing.ID)
+	if !ok || moved.Status != kanbanStatusBlocked {
+		t.Fatalf("card %q status=%q, want Blocked via title resolution", existing.ID, moved.Status)
+	}
+}
+
+func TestMeetingBoardInstructionsEnumerateColumnsAndDraftFlag(t *testing.T) {
+	instructions := meetingBoardInstructions()
+	for _, want := range []string{"Backlog, In Progress, Blocked, Done", "NOT a status", "card_id"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("meetingBoardInstructions missing %q", want)
+		}
+	}
+}
+
 func TestParseMeetingBoardAnalysisAcceptsFencedJSON(t *testing.T) {
 	analysis, err := parseMeetingBoardAnalysis("```json\n{\"summary\":\"ok\",\"operations\":[{\"tool\":\"do_nothing\",\"arguments\":{\"reason\":\"nothing actionable\"}}]}\n```")
 	if err != nil {

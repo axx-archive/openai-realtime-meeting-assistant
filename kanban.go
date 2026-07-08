@@ -3826,11 +3826,12 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 	}
 	status := kanbanStatusBacklog
 	if rawStatus, ok := args["status"]; ok {
-		parsedStatus, err := parseKanbanStatus(rawStatus)
-		if err != nil {
-			return nil, false, err
+		// A status outside the canon (even after alias mapping) must never
+		// drop the card: the card matters more than its column, so unknown
+		// spellings default to Backlog instead of erroring out the create.
+		if parsedStatus, err := parseKanbanStatus(rawStatus); err == nil {
+			status = parsedStatus
 		}
-		status = parsedStatus
 	}
 
 	// Scout-drafted cards (board worker, D4) land as pending drafts a human
@@ -3938,9 +3939,9 @@ func (app *kanbanBoardApp) dismissDraftTicket(args map[string]any) (map[string]a
 }
 
 func (app *kanbanBoardApp) moveTicket(args map[string]any) (map[string]any, bool, error) {
-	cardID := asString(args["card_id"])
-	if cardID == "" {
-		return nil, false, fmt.Errorf("card_id is required")
+	cardID, err := app.resolveCardIDArg(args)
+	if err != nil {
+		return nil, false, err
 	}
 
 	status, err := parseKanbanStatus(args["status"])
@@ -3977,9 +3978,9 @@ func (app *kanbanBoardApp) moveTicket(args map[string]any) (map[string]any, bool
 }
 
 func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, error) {
-	cardID := asString(args["card_id"])
-	if cardID == "" {
-		return nil, false, fmt.Errorf("card_id is required")
+	cardID, err := app.resolveCardIDArg(args)
+	if err != nil {
+		return nil, false, err
 	}
 
 	tags := canonicalizeBoardTags(asStringSlice(args["tags"]))
@@ -4115,9 +4116,12 @@ func (app *kanbanBoardApp) removeKeyDates(args map[string]any) (map[string]any, 
 }
 
 func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bool, error) {
-	cardID := asString(args["card_id"])
-	if cardID == "" {
-		return nil, false, fmt.Errorf("card_id is required")
+	// When card_id is absent the title names the target card (exact,
+	// case-insensitive) rather than a rename; the rename path below then
+	// leaves the card's title effectively unchanged (casing at most).
+	cardID, err := app.resolveCardIDArg(args)
+	if err != nil {
+		return nil, false, err
 	}
 
 	title := canonicalizeBoardText(asString(args["title"]))
@@ -5112,6 +5116,42 @@ func (app *kanbanBoardApp) createCardIDLocked() string {
 	}
 }
 
+// resolveCardIDArg returns the target card id for a card mutation. When the
+// model omits card_id but names the card (title or card_title), the card is
+// resolved by exact case-insensitive title match — the board worker omits
+// card_id dozens of times per pass and every such op used to hard-fail. An
+// absent title or an ambiguous one (multiple matching cards) keeps the
+// original card_id-is-required error.
+func (app *kanbanBoardApp) resolveCardIDArg(args map[string]any) (string, error) {
+	if cardID := strings.TrimSpace(asString(args["card_id"])); cardID != "" {
+		return cardID, nil
+	}
+	title := canonicalizeBoardText(asString(args["title"]))
+	if title == "" {
+		title = canonicalizeBoardText(asString(args["card_title"]))
+	}
+	if title == "" {
+		return "", fmt.Errorf("card_id is required")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	matchID := ""
+	matches := 0
+	for index := range app.cards {
+		if strings.EqualFold(app.cards[index].Title, title) {
+			matchID = app.cards[index].ID
+			matches++
+		}
+	}
+	if matches != 1 {
+		return "", fmt.Errorf("card_id is required")
+	}
+
+	return matchID, nil
+}
+
 func (app *kanbanBoardApp) findCardLocked(cardID string) (*kanbanCard, bool) {
 	for index := range app.cards {
 		if app.cards[index].ID == cardID {
@@ -5467,12 +5507,35 @@ func formatKanbanKeyDates(dates []kanbanKeyDate) string {
 	return strings.Join(parts, ", ")
 }
 
+// kanbanStatusAliases maps normalized (lowercased, whitespace-collapsed)
+// status spellings the models actually emit to the four canonical board
+// columns. The board worker and realtime Scout both send statuses like
+// "To Do", "Todo", or "Draft"; treating spelling as fatal silently dropped
+// whole cards, so every known spelling lands on a real column instead.
+var kanbanStatusAliases = map[string]kanbanStatus{
+	"backlog":     kanbanStatusBacklog,
+	"todo":        kanbanStatusBacklog,
+	"to do":       kanbanStatusBacklog,
+	"to-do":       kanbanStatusBacklog,
+	"draft":       kanbanStatusBacklog,
+	"new":         kanbanStatusBacklog,
+	"in progress": kanbanStatusInProgress,
+	"in-progress": kanbanStatusInProgress,
+	"doing":       kanbanStatusInProgress,
+	"wip":         kanbanStatusInProgress,
+	"blocked":     kanbanStatusBlocked,
+	"blocker":     kanbanStatusBlocked,
+	"done":        kanbanStatusDone,
+	"complete":    kanbanStatusDone,
+	"completed":   kanbanStatusDone,
+	"finished":    kanbanStatusDone,
+	"shipped":     kanbanStatusDone,
+}
+
 func parseKanbanStatus(value any) (kanbanStatus, error) {
-	status := kanbanStatus(asString(value))
-	for _, candidate := range kanbanStatuses {
-		if candidate == status {
-			return status, nil
-		}
+	normalized := strings.ToLower(strings.Join(strings.Fields(asString(value)), " "))
+	if canonical, ok := kanbanStatusAliases[normalized]; ok {
+		return canonical, nil
 	}
 
 	return "", fmt.Errorf("unknown Kanban status: %v", value)
