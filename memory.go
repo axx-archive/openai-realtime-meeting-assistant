@@ -57,7 +57,24 @@ const (
 	// transcript cursor and, for an expiry deletion, the deleted id + reason so
 	// the FACT of a hard delete survives even though the content does not.
 	meetingMemoryKindSlopPass = "slop_pass"
-	defaultMeetingMemoryPath  = "data/meeting-memory.jsonl"
+	// Digest tiers (Track-2 Wave 1). One compact rollup entry per scope,
+	// written ONLY through upsertDigest (supersede-in-place, exactly one
+	// current entry per (kind, digestKey)). Deliberately NOT UI-state kinds:
+	// unlike mission_insight they must be recall-eligible — their bounded
+	// ~4KB bodies (producer MaxOutputTokens-capped, Wave 2) make that
+	// token-safe, and isPromptBodyCapExemptKind exempts them from the
+	// prompt-body cap so a long rollup is never stubbed.
+	//   meeting_digest — one anchored-JSON digest per meetingId (digestKey =
+	//   meetingId; span metadata = the meeting's covered window).
+	meetingMemoryKindMeetingDigest = "meeting_digest"
+	//   day_digest — one rollup per local calendar day (digestKey = the
+	//   dayBucket key, bucketed on entry CreatedAt in meetingTimeLocation so a
+	//   marathon meeting still splits into per-day slices).
+	meetingMemoryKindDayDigest = "day_digest"
+	//   company_digest — the latest-only running fold across recent days
+	//   (digestKey = companyDigestKey).
+	meetingMemoryKindCompanyDigest = "company_digest"
+	defaultMeetingMemoryPath       = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -68,6 +85,11 @@ const (
 // is down-ranked in store.search); quarantined/expired are excluded from recall,
 // model context, and the client timeline. quarantined hard-deletes 30 visible
 // days after quarantinedAt, leaving a slop_pass audit stub.
+//
+// Digest-kind exception (Track-2 Wave 1): a relevanceArchived meeting/day/
+// company digest is a SUPERSEDED rollup — dead state, not down-ranked
+// knowledge — so memoryEntryHiddenFromRecall hides it entirely; the
+// replacement digest carries the same facts.
 const (
 	relevanceMetadataKey = "relevance"
 	relevanceActive      = "active"
@@ -89,11 +111,16 @@ func memoryEntryRelevance(entry meetingMemoryEntry) string {
 }
 
 // memoryEntryHiddenFromRecall reports entries excluded from search, model
-// context, and the client timeline: quarantined or expired.
+// context, and the client timeline: quarantined or expired material, plus
+// SUPERSEDED digests (a digest-kind entry upsertDigest marked archived) —
+// exactly one current digest per (kind, digestKey) may ever ground recall,
+// otherwise a stale rollup could contradict its replacement.
 func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
 	switch memoryEntryRelevance(entry) {
 	case relevanceQuarantined, relevanceExpired:
 		return true
+	case relevanceArchived:
+		return isMeetingDigestKind(entry.Kind)
 	}
 	return false
 }
@@ -305,12 +332,21 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	}
 
 	// resume the in-flight meeting after a restart: if the newest entry was not
-	// an archive, the meeting it belongs to is still open.
-	if count := len(store.entries); count > 0 {
-		last := store.entries[count-1]
+	// an archive, the meeting it belongs to is still open. Digest rollups are
+	// skipped: they are ambient cross-meeting bookkeeping — a meeting_digest
+	// may describe a PAST meeting (its meetingId stamp = the digested meeting,
+	// not the live one) and day/company digests carry no meetingId at all —
+	// so a digest as the newest line must neither clear nor redirect the
+	// in-flight meeting id.
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		last := store.entries[index]
+		if isMeetingDigestKind(last.Kind) {
+			continue
+		}
 		if last.Kind != meetingMemoryKindArchive {
 			store.meetingID = strings.TrimSpace(last.Metadata["meetingId"])
 		}
+		break
 	}
 
 	return store, nil
@@ -884,10 +920,10 @@ const promptBodyOmittedMetadataKey = "promptBodyOmitted"
 
 // isPromptBodyCapExemptKind reports kinds whose Text must never be stubbed by
 // the prompt-body cap:
-//   - brain write-ups (and the Wave-1 digest tiers meeting_digest/day_digest/
-//     company_digest, exempted by name ahead of their consts) are model-written
-//     summaries already bounded by their producers' MaxOutputTokens — the
-//     summary layer must survive whole so future long roll-ups aren't stubbed;
+//   - brain write-ups and the digest tiers (meeting_digest/day_digest/
+//     company_digest) are model-written summaries already bounded by their
+//     producers' MaxOutputTokens — the summary layer must survive whole so
+//     future long roll-ups aren't stubbed;
 //   - UI-state record kinds (isUIStateMemoryKind: scout chat threads, packages,
 //     deal rooms, …) carry decoded-verbatim JSON that feature code reads through
 //     snapshot(0) (thread lists, channel linkage, the blob-sweep reference scan)
@@ -896,8 +932,7 @@ const promptBodyOmittedMetadataKey = "promptBodyOmitted"
 //     contextEntriesForQuery/search and from the client timeline by
 //     visibleMeetingMemoryEntries.
 func isPromptBodyCapExemptKind(kind string) bool {
-	switch kind {
-	case meetingMemoryKindBrain, "meeting_digest", "day_digest", "company_digest":
+	if kind == meetingMemoryKindBrain || isMeetingDigestKind(kind) {
 		return true
 	}
 	return isUIStateMemoryKind(kind)
@@ -1082,6 +1117,429 @@ func (store *meetingMemoryStore) entriesByRelevance(relevance string) []meetingM
 	}
 
 	return matched
+}
+
+// --- Digest tiers (Track-2 Wave 1): store primitives for the rolling rollup
+// hierarchy brain (T1) → meeting_digest (T2) → day_digest (T3) →
+// company_digest (T4). This wave is pure store plumbing — no model calls; the
+// producers land in Wave 2 and the recall wiring in Waves 4/5.
+
+const (
+	// digestKeyMetadataKey scopes a digest: the meetingId for meeting_digest,
+	// the dayBucket key for day_digest, companyDigestKey for company_digest.
+	// upsertDigest ALWAYS stamps it (digestsInRange/latestDigestPerMeeting
+	// silently match nothing on a missing key, so stamping is load-bearing).
+	digestKeyMetadataKey = "digestKey"
+	// digestCurrentMetadataKey is "true" on the single live digest per
+	// (kind, digestKey) and "false" once superseded. Written only by
+	// upsertDigest under the store mutex.
+	digestCurrentMetadataKey = "current"
+	digestCurrentTrue        = "true"
+	digestCurrentFalse       = "false"
+	// digestSupersededByMetadataKey names the replacing entry id on a
+	// superseded digest, for audit/drill-down.
+	digestSupersededByMetadataKey = "supersededBy"
+	// digestDayMetadataKey holds the local-calendar-day bucket ("2006-01-02"
+	// in meetingTimeLocation) a digest belongs to. Producers stamp it via
+	// dayBucket on entry CreatedAt so a marathon meeting files per-day.
+	digestDayMetadataKey = "day"
+	// digestSpanStartMetadataKey/digestSpanEndMetadataKey bound the window a
+	// meeting_digest covers (RFC3339); digestsInRange overlap-matches on them.
+	digestSpanStartMetadataKey = "spanStart"
+	digestSpanEndMetadataKey   = "spanEnd"
+	// companyDigestKey is the fixed digestKey of the latest-only company fold.
+	companyDigestKey = "company"
+	// dayBucketLayout is the canonical day-key format shared by dayBucket,
+	// the day-digest producer, and digestsInRange.
+	dayBucketLayout = "2006-01-02"
+)
+
+// isMeetingDigestKind reports the three digest tiers. They are recall-eligible
+// knowledge (never UI-state), exempt from the prompt-body cap, and hidden from
+// recall once superseded (memoryEntryHiddenFromRecall).
+func isMeetingDigestKind(kind string) bool {
+	switch kind {
+	case meetingMemoryKindMeetingDigest, meetingMemoryKindDayDigest, meetingMemoryKindCompanyDigest:
+		return true
+	}
+	return false
+}
+
+// dayBucket returns the canonical calendar-day key for t in the pinned meeting
+// timezone (MEETING_TIME_ZONE, default America/Los_Angeles). Both the digest
+// producers and digestsInRange must bucket through this one helper so a
+// late-night entry files to — and is queried under — the same local day.
+func dayBucket(t time.Time) string {
+	return t.In(meetingTimeLocation()).Format(dayBucketLayout)
+}
+
+func digestEntryKey(entry meetingMemoryEntry) string {
+	return strings.TrimSpace(entry.Metadata[digestKeyMetadataKey])
+}
+
+// digestEntryCurrent reports whether a digest entry is the live one for its
+// (kind, digestKey). Only upsertDigest writes digests, and it always stamps
+// current="true", so an explicit match is the complete check.
+func digestEntryCurrent(entry meetingMemoryEntry) bool {
+	return strings.TrimSpace(entry.Metadata[digestCurrentMetadataKey]) == digestCurrentTrue
+}
+
+// upsertDigest writes the new current digest for (kind, key) and supersedes
+// the prior one in place: every still-current digest for that scope is marked
+// relevanceArchived + current="false" + supersededBy — which drops it from
+// recall via memoryEntryHiddenFromRecall (snapshot lanes, search, context)
+// while the raw JSONL keeps it for audit. Mark-stale + append run under ONE
+// critical section so a concurrent double-run can never leave two current
+// digests, and both land in a single atomic temp+rename rewrite when a prior
+// digest existed (plain O_APPEND on first write). Metadata should carry the
+// producer's day/span/cursor stamps; digestKey and current are stamped here.
+// No meetingId is auto-stamped: a digest usually describes a PAST meeting or
+// day, and stamping the live meeting id would leak it into an unrelated
+// snapshotForMeeting (the meeting-digest producer passes meetingId == key).
+func (store *meetingMemoryStore) upsertDigest(kind string, key string, text string, metadata map[string]string) (meetingMemoryEntry, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, fmt.Errorf("memory store is unavailable")
+	}
+	kind = strings.TrimSpace(kind)
+	if !isMeetingDigestKind(kind) {
+		return meetingMemoryEntry{}, fmt.Errorf("upsertDigest: %q is not a digest kind", kind)
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return meetingMemoryEntry{}, fmt.Errorf("upsertDigest: digest key is required")
+	}
+	text = normalizeMemoryEntryText(kind, text)
+	if text == "" {
+		return meetingMemoryEntry{}, fmt.Errorf("upsertDigest: digest text is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	// Mint a unique id under the lock so the seen-map guard is race-free.
+	id := fmt.Sprintf("%s-%s-%d", kind, key, time.Now().UnixNano())
+	for suffix := 1; ; suffix++ {
+		if _, ok := store.seen[id]; !ok {
+			break
+		}
+		id = fmt.Sprintf("%s-%s-%d-%d", kind, key, time.Now().UnixNano(), suffix)
+	}
+
+	stamped := make(map[string]string, len(metadata)+2)
+	for metaKey, metaValue := range metadata {
+		metaKey = strings.TrimSpace(metaKey)
+		if metaKey == "" {
+			continue
+		}
+		stamped[metaKey] = strings.TrimSpace(metaValue)
+	}
+	stamped[digestKeyMetadataKey] = key
+	stamped[digestCurrentMetadataKey] = digestCurrentTrue
+
+	entry := meetingMemoryEntry{
+		ID:        id,
+		Kind:      kind,
+		Text:      text,
+		CreatedAt: time.Now().UTC(),
+		Metadata:  stamped,
+	}
+
+	// Supersede in place. The loop archives EVERY current match (not just the
+	// newest) so a crash that once left two current digests self-heals on the
+	// next upsert.
+	type supersededDigest struct {
+		index int
+		prior meetingMemoryEntry
+	}
+	superseded := make([]supersededDigest, 0, 1)
+	for index := range store.entries {
+		prior := store.entries[index]
+		if prior.Kind != kind || digestEntryKey(prior) != key || !digestEntryCurrent(prior) {
+			continue
+		}
+		updated := cloneMemoryEntry(prior)
+		if updated.Metadata == nil {
+			updated.Metadata = map[string]string{}
+		}
+		updated.Metadata[relevanceMetadataKey] = relevanceArchived
+		updated.Metadata[digestCurrentMetadataKey] = digestCurrentFalse
+		updated.Metadata[digestSupersededByMetadataKey] = id
+		superseded = append(superseded, supersededDigest{index: index, prior: prior})
+		store.entries[index] = updated
+	}
+
+	store.entries = append(store.entries, entry)
+	store.seen[id] = struct{}{}
+
+	var err error
+	if len(superseded) == 0 {
+		err = store.appendEntryLineLocked(entry)
+	} else {
+		err = store.rewriteLocked()
+	}
+	if err != nil {
+		// roll back the in-RAM mutation so RAM matches the file.
+		store.entries = store.entries[:len(store.entries)-1]
+		delete(store.seen, id)
+		for _, stale := range superseded {
+			store.entries[stale.index] = stale.prior
+		}
+		return meetingMemoryEntry{}, err
+	}
+
+	return cloneMemoryEntry(entry), nil
+}
+
+// appendEntryLineLocked O_APPEND-writes one already-validated entry line.
+// Caller holds store.mu and owns the entries/seen bookkeeping (including
+// rollback on error).
+func (store *meetingMemoryStore) appendEntryLineLocked(entry meetingMemoryEntry) error {
+	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open memory file: %w", err)
+	}
+	defer file.Close()
+
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encode memory entry: %w", err)
+	}
+	if _, err := file.Write(append(raw, '\n')); err != nil {
+		return fmt.Errorf("write memory entry: %w", err)
+	}
+
+	return nil
+}
+
+// latestDigestPerMeeting returns the current meeting_digest per meetingId
+// (digestKey), cloned. Exactly one current digest per key is the upsertDigest
+// invariant; newest-CreatedAt wins here as belt-and-suspenders for the crash
+// window that could briefly leave two.
+func (store *meetingMemoryStore) latestDigestPerMeeting() map[string]meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	latest := make(map[string]meetingMemoryEntry)
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindMeetingDigest {
+			continue
+		}
+		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		key := digestEntryKey(entry)
+		if key == "" {
+			continue
+		}
+		if prior, ok := latest[key]; ok && prior.CreatedAt.After(entry.CreatedAt) {
+			continue
+		}
+		latest[key] = entry
+	}
+	for key, entry := range latest {
+		latest[key] = cloneMemoryEntry(entry)
+	}
+
+	return latest
+}
+
+// digestSpan resolves the window a digest covers, for range matching:
+//   - day_digest: its local calendar day [00:00, 24:00) from the day stamp;
+//   - meeting_digest: [spanStart, spanEnd] when stamped, else its day stamp,
+//     else the point CreatedAt.
+//
+// The reported end is inclusive (a day ends at 23:59:59.999…), so two
+// adjacent days never both match a boundary instant.
+func digestSpan(entry meetingMemoryEntry, location *time.Location) (time.Time, time.Time) {
+	switch entry.Kind {
+	case meetingMemoryKindDayDigest:
+		day := strings.TrimSpace(entry.Metadata[digestDayMetadataKey])
+		if day == "" {
+			// the digestKey IS the day bucket for a day_digest.
+			day = digestEntryKey(entry)
+		}
+		if start, err := time.ParseInLocation(dayBucketLayout, day, location); err == nil {
+			return start, start.Add(24*time.Hour - time.Nanosecond)
+		}
+	case meetingMemoryKindMeetingDigest:
+		start, startErr := time.Parse(time.RFC3339, strings.TrimSpace(entry.Metadata[digestSpanStartMetadataKey]))
+		end, endErr := time.Parse(time.RFC3339, strings.TrimSpace(entry.Metadata[digestSpanEndMetadataKey]))
+		if startErr == nil && endErr == nil {
+			if end.Before(start) {
+				start, end = end, start
+			}
+			return start, end
+		}
+		if day := strings.TrimSpace(entry.Metadata[digestDayMetadataKey]); day != "" {
+			if dayStart, err := time.ParseInLocation(dayBucketLayout, day, location); err == nil {
+				return dayStart, dayStart.Add(24*time.Hour - time.Nanosecond)
+			}
+		}
+	}
+	return entry.CreatedAt, entry.CreatedAt
+}
+
+// digestsInRange returns the current day_digests whose local calendar day
+// falls in [start, end] plus the current meeting_digests whose covered span
+// overlaps it, oldest-first by covered window. Both bounds are inclusive.
+// Superseded digests never match (memoryEntryHiddenFromRecall).
+func (store *meetingMemoryStore) digestsInRange(start time.Time, end time.Time) []meetingMemoryEntry {
+	if store == nil || start.IsZero() || end.IsZero() || end.Before(start) {
+		return nil
+	}
+	location := meetingTimeLocation()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	type rangedDigest struct {
+		entry meetingMemoryEntry
+		start time.Time
+	}
+	matched := make([]rangedDigest, 0, 16)
+	for _, entry := range store.entries {
+		switch entry.Kind {
+		case meetingMemoryKindDayDigest, meetingMemoryKindMeetingDigest:
+		default:
+			continue
+		}
+		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		spanStart, spanEnd := digestSpan(entry, location)
+		if spanStart.After(end) || spanEnd.Before(start) {
+			continue
+		}
+		matched = append(matched, rangedDigest{entry: entry, start: spanStart})
+	}
+
+	sort.SliceStable(matched, func(i, j int) bool {
+		if !matched[i].start.Equal(matched[j].start) {
+			return matched[i].start.Before(matched[j].start)
+		}
+		// same window start: the day rollup leads its meetings.
+		return matched[i].entry.Kind == meetingMemoryKindDayDigest && matched[j].entry.Kind != meetingMemoryKindDayDigest
+	})
+
+	digests := make([]meetingMemoryEntry, 0, len(matched))
+	for _, ranged := range matched {
+		digests = append(digests, cloneMemoryEntry(ranged.entry))
+	}
+
+	return digests
+}
+
+// latestCompanyDigest returns the newest current company_digest (mirrors
+// latestMissionInsight, but store-level and supersede-aware).
+func (store *meetingMemoryStore) latestCompanyDigest() (meetingMemoryEntry, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, false
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindCompanyDigest {
+			continue
+		}
+		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		return cloneMemoryEntry(entry), true
+	}
+
+	return meetingMemoryEntry{}, false
+}
+
+// transcriptWindowAround resolves a digest anchor to its verbatim exchange:
+// the transcript entries of the anchor's meeting ordered by CreatedAt, radius
+// entries either side of the anchor, never crossing a meetingId boundary.
+// A non-transcript (or hidden) anchor centers on its CreatedAt position among
+// the meeting's transcripts. Hidden (quarantined/expired) transcripts never
+// resurface, and bodies ride the prompt cap since this feeds drill-down
+// prompts (real transcripts are far under the cap).
+func (store *meetingMemoryStore) transcriptWindowAround(entryID string, radius int) []meetingMemoryEntry {
+	entryID = strings.TrimSpace(entryID)
+	if store == nil || entryID == "" || radius < 0 {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	var anchor meetingMemoryEntry
+	found := false
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		if store.entries[index].ID == entryID {
+			anchor = store.entries[index]
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	meetingID := strings.TrimSpace(anchor.Metadata["meetingId"])
+
+	transcripts := make([]meetingMemoryEntry, 0, 64)
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindTranscript {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
+			continue
+		}
+		if memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		transcripts = append(transcripts, entry)
+	}
+	if len(transcripts) == 0 {
+		return nil
+	}
+	sort.SliceStable(transcripts, func(i, j int) bool {
+		return transcripts[i].CreatedAt.Before(transcripts[j].CreatedAt)
+	})
+
+	anchorIndex := -1
+	for index, entry := range transcripts {
+		if entry.ID == anchor.ID {
+			anchorIndex = index
+			break
+		}
+	}
+	if anchorIndex < 0 {
+		// non-transcript anchor: center on where it falls in time.
+		anchorIndex = len(transcripts) - 1
+		for index, entry := range transcripts {
+			if !entry.CreatedAt.Before(anchor.CreatedAt) {
+				anchorIndex = index
+				break
+			}
+		}
+	}
+
+	low := anchorIndex - radius
+	if low < 0 {
+		low = 0
+	}
+	high := anchorIndex + radius
+	if high > len(transcripts)-1 {
+		high = len(transcripts) - 1
+	}
+
+	window := cloneMemoryEntries(transcripts[low : high+1])
+	for index := range window {
+		window[index] = stripOversizeBody(window[index])
+	}
+
+	return window
 }
 
 // deleteEntryByID hard-deletes one entry (any kind) and rewrites the log. Two
@@ -1305,7 +1763,10 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && !isMeetingDigestKind(kind) {
+		// digest kinds take the structure-preserving branch below: their
+		// bodies are strict JSON (like mission_insight) and the whitespace
+		// collapse would mutate content inside JSON string values.
 		return normalizeMemoryText(value)
 	}
 
