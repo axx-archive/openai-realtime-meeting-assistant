@@ -26656,8 +26656,13 @@
           return { verdict: '', rest: String(objective || '').trim() }
         }
         const verdict = lines.splice(index, 1)[0]
-          .replace(/^\s*(?:\*\*)?gate result:?(?:\*\*)?\s*/i, '')
+          // tolerate a parenthetical rubric name between the label and the colon
+          // ("**Gate result (research_brief_gate_v1):** …") and either bold style
+          .replace(/^\s*\*{0,2}\s*gate result\b[^:*]*:?\s*\*{0,2}\s*/i, '')
           .replace(/^[:\s]+/, '') // the "**Gate result**: …" variant leaves its colon behind
+          // the model often bold-wraps the entire gate line; the strip carries
+          // its own emphasis, so drop stray ** markers rather than leak them
+          .replace(/\*\*/g, '')
           .trim()
         return { verdict, rest: lines.join('\n').trim() }
       }
