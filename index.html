@@ -33718,6 +33718,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!liveTrack(videoTrack)) {
             continue
           }
+          // A frozen-marked track only gets rebuilt on the freeze watch's
+          // per-track cadence. Without this the shared 4s media-quality and 8s
+          // room-state repair passes — which key off remoteTileHasRenderedVideo,
+          // false for any frozen tile — would dispose+recreate the tile every
+          // tick (the 2026-07-06 flicker loop). Sharing one lastRepairAt clock
+          // keeps a persistent freeze (e.g. a CPU-starved sender no PLI can fix)
+          // a STABLE stalled tile with bounded ~6s repair attempts.
+          const freezeState = remoteVideoFreezeStates.get(videoTrack.id)
+          if (freezeState && frozenRemoteVideoTrackIds.has(videoTrack.id)) {
+            if (now - freezeState.lastRepairAt < remoteVideoFreezeRepairIntervalMs) {
+              continue
+            }
+            freezeState.lastRepairAt = now
+          }
           const keys = remoteKeysForTile(tile)
           const stream = remoteVideoStreamForTrack(video?.srcObject || new MediaStream([videoTrack]), videoTrack)
           disposeRemoteTile(tile)
@@ -42335,6 +42349,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           renderScreenStage()
         }
         applyParticipantMediaStateToTile(tile, participantName)
+        // A rebuild from refreshStalledRemoteVideoTiles reuses the same still-
+        // frozen track; cover it with the stalled avatar at creation so there
+        // is no black/last-frame flash between the rebuild and the next 1s
+        // freeze poll that would otherwise re-apply the class.
+        if (track && frozenRemoteVideoTrackIds.has(track.id)) {
+          tile.classList.add('is-video-stalled')
+        }
         pruneDeadRemoteVideoTiles()
         pruneStaleUnidentifiedRemoteVideoTiles()
         updateHearthParticipants()
@@ -42598,25 +42619,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           return
         }
+        // A track that goes muted (peer dropped / slept / mid-renegotiation)
+        // stops advancing bytes too and belongs to the mute watcher, not the
+        // freeze watch. Unmark it so a frozen-then-muted track can't stay in
+        // the freeze set forever — that would keep remoteTileHasRenderedVideo
+        // false and drive its now mute-covered tile into the rebuild loop.
+        if (track.muted) {
+          if (frozenRemoteVideoTrackIds.delete(track.id)) {
+            state.lastRepairAt = 0
+          }
+          return
+        }
         // No new frames this tick. Only bytes-still-arriving counts as a
-        // freeze: a sender pause / camera-off stops the bytes too and is the
-        // mute watcher's job, and a never-decoded fresh track stays with the
-        // existing 3.5s-grace repair passes instead of fighting them.
-        if (!bytesAdvanced || framesDecoded === 0 || track.muted) {
+        // freeze: a camera-off / sender pause stops the bytes too, and a
+        // never-decoded fresh track stays with the existing 3.5s-grace repair
+        // passes instead of fighting them.
+        if (!bytesAdvanced || framesDecoded === 0) {
           return
         }
         const frozenMs = now - state.lastAdvanceAt
         if (frozenMs < remoteVideoFreezeStallMs) {
           return
         }
-        const firstDetection = !frozenRemoteVideoTrackIds.has(track.id)
         frozenRemoteVideoTrackIds.add(track.id)
         const tile = remoteTileShowingTrack(track)
         if (tile) {
           tile.classList.add('is-video-stalled')
         }
-        if (firstDetection || now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
-          state.lastRepairAt = now
+        // Drive the repair (and its telemetry) on the per-track cadence only.
+        // refreshStalledRemoteVideoTiles honors this same lastRepairAt clock,
+        // so no repair path can dispose+recreate this tile faster than
+        // remoteVideoFreezeRepairIntervalMs. Stamp after the rebuild attempt so
+        // the log/track-refresh stay throttled even when the tile is still
+        // inside its 3.5s creation grace and refresh no-ops.
+        if (now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
           logRoomRecovery('remote_video_frozen', {
             participant: tile ? remoteTileName(tile) : '',
             frozenMs: Math.round(frozenMs),
@@ -42625,6 +42661,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           })
           refreshStalledRemoteVideoTiles('frozen remote video')
           requestParticipantTrackRefresh('frozen remote video')
+          state.lastRepairAt = now
         }
       }
 
