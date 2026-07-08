@@ -1971,6 +1971,10 @@ func serviceWorkerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
+	return newPeerConnectionWithConfiguration(webrtc.Configuration{})
+}
+
+func newPeerConnectionWithConfiguration(configuration webrtc.Configuration) (*webrtc.PeerConnection, error) {
 	settingEngine := webrtc.SettingEngine{}
 	if nat1To1IP := os.Getenv("PION_NAT1TO1_IP"); nat1To1IP != "" {
 		settingEngine.SetNAT1To1IPs([]string{nat1To1IP}, webrtc.ICECandidateTypeHost)
@@ -1988,7 +1992,65 @@ func newPeerConnection() (*webrtc.PeerConnection, error) {
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithInterceptorRegistry(registry),
 		webrtc.WithSettingEngine(settingEngine),
-	).NewPeerConnection(webrtc.Configuration{})
+	).NewPeerConnection(configuration)
+}
+
+// newRoomPeerConnection builds the server side of a room participant session.
+// Unlike newPeerConnection (also used for the OpenAI Realtime peer, which
+// must not wait on relay gathering before its non-trickle handshake), room
+// connections include the configured TURN servers so the server itself offers
+// relay candidates. Historically the server offered only host candidates
+// (public VPS IP via PION_NAT1TO1_IP): desktop networks reach those fine, but
+// mobile networks that filter inbound-unrelated UDP to arbitrary high ports
+// never complete a candidate pair even though the browser holds valid TURN
+// credentials — the browser-relay<->server-host pair is the only option and
+// some carrier NATs drop it. With server-side relay candidates the pair
+// browser<->server-relay routes via coturn's well-known port from both ends.
+// Browsers use trickle ICE here, so the extra relay gathering never delays
+// signaling; if TURN is unreachable pion simply proceeds with host candidates.
+func newRoomPeerConnection() (*webrtc.PeerConnection, error) {
+	iceServers := serverICEServersFromEnv()
+	if len(iceServers) == 0 {
+		return newPeerConnection()
+	}
+
+	peerConnection, err := newPeerConnectionWithConfiguration(webrtc.Configuration{ICEServers: iceServers})
+	if err != nil {
+		// A malformed MEETING_TURN_URLS entry fails pion's constructor-time URL
+		// validation even though browsers may tolerate it. Never let that take
+		// the room down — fall back to the host-only behaviour we shipped with.
+		log.Errorf("Failed to create room PeerConnection with server-side TURN relay (%v); falling back to host-only ICE", err)
+		return newPeerConnection()
+	}
+
+	return peerConnection, nil
+}
+
+// serverICEServersFromEnv resolves the TURN servers the SERVER dials for its
+// own relay candidates. It reuses the browser-facing MEETING_TURN_URLS and the
+// ephemeral HMAC credential mint, so no new deployment configuration is
+// required. Returns nil (host-only ICE, the pre-existing behaviour) when TURN
+// is unconfigured, when credentials cannot be minted (pion rejects TURN URLs
+// without credentials at construction), or when explicitly opted out via
+// MEETING_DISABLE_SERVER_TURN.
+func serverICEServersFromEnv() []webrtc.ICEServer {
+	if boolEnv("MEETING_DISABLE_SERVER_TURN") {
+		return nil
+	}
+	turnURLs := splitEnvList("MEETING_TURN_URLS")
+	if len(turnURLs) == 0 {
+		return nil
+	}
+	username, credential := turnCredentialsFromEnv()
+	if username == "" || credential == "" {
+		return nil
+	}
+
+	return []webrtc.ICEServer{{
+		URLs:       turnURLs,
+		Username:   username,
+		Credential: credential,
+	}}
 }
 
 func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error) {
@@ -2210,6 +2272,7 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 		delete(trackSourceIDs, staleID)
 		delete(trackLayerRIDs, staleID)
 		delete(trackLayerGroups, staleID)
+		subscriberKeyframeThrottle.forget(staleID)
 	}
 }
 
@@ -2279,6 +2342,7 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackSourceIDs, t.ID())
 	delete(trackLayerRIDs, t.ID())
 	delete(trackLayerGroups, t.ID())
+	subscriberKeyframeThrottle.forget(t.ID())
 	totalTracks, audioTracks, videoTracks = forwardedTrackCountsLocked()
 }
 
@@ -2297,6 +2361,7 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackSourceIDs, trackID)
 		delete(trackLayerRIDs, trackID)
 		delete(trackLayerGroups, trackID)
+		subscriberKeyframeThrottle.forget(trackID)
 		removedTracks = true
 	}
 
@@ -3004,6 +3069,11 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 						log.Errorf("Failed to prefer source codec for sender track=%s: %v", trackID, err)
 						return true
 					}
+					// Every forwarded-track sender is created exactly here, so
+					// each gets exactly one RTCP drain goroutine. It blocks in
+					// Read until the sender starts and exits when the sender is
+					// stopped (RemoveTrack above / PeerConnection close).
+					go forwardSubscriberRTCP(transceiver.Sender(), trackID, peer.participantName, peer.sessionID)
 					needsOffer = true
 				}
 			}
@@ -3176,6 +3246,186 @@ func dispatchKeyFrame() {
 	}
 }
 
+// keyframeRequestThrottle coalesces subscriber keyframe requests per forwarded
+// source so N subscribers asking at once (or one subscriber spamming PLI while
+// its decoder is stuck) produce at most one upstream request per interval —
+// one fresh keyframe satisfies every subscriber because the SFU fans the same
+// RTP out to all of them.
+type keyframeRequestThrottle struct {
+	mu       sync.Mutex
+	interval time.Duration
+	last     map[string]time.Time
+}
+
+func newKeyframeRequestThrottle(interval time.Duration) *keyframeRequestThrottle {
+	return &keyframeRequestThrottle{interval: interval, last: map[string]time.Time{}}
+}
+
+// allow reports whether a keyframe request for sourceKey may be forwarded at
+// time now, recording the request when allowed.
+func (t *keyframeRequestThrottle) allow(sourceKey string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if last, ok := t.last[sourceKey]; ok && now.Sub(last) < t.interval {
+		return false
+	}
+	t.last[sourceKey] = now
+
+	return true
+}
+
+// forget drops throttle state for a removed source so the map never outgrows
+// the set of live forwarded tracks.
+func (t *keyframeRequestThrottle) forget(sourceKey string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.last, sourceKey)
+}
+
+// subscriberKeyframeInterval caps forwarded keyframe requests at roughly one
+// per source per second. Frequent enough that a frozen tile recovers within a
+// second; slow enough that a burst of PLIs from many subscribers costs the
+// publisher a single encode.
+const subscriberKeyframeInterval = time.Second
+
+var subscriberKeyframeThrottle = newKeyframeRequestThrottle(subscriberKeyframeInterval)
+
+// forwardSubscriberRTCP drains RTCP from a subscriber-facing RTPSender and
+// forwards keyframe requests (PLI/FIR) to the publisher of the forwarded
+// track. Without this read loop the sender's inbound RTCP is never consumed,
+// so a subscriber whose decoder lost state (packet loss, backgrounded tab,
+// renderer restart) asks for a keyframe and is ignored forever — the tile
+// stays frozen until the publisher happens to emit one. Draining also feeds
+// the sender's interceptor chain (NACK responder, RTCP reports), which only
+// observes inbound RTCP when something reads it. The goroutine exits cleanly
+// when the sender is stopped — RemoveTrack calls sender.Stop() and closing
+// the PeerConnection stops every sender — because Read then returns an error.
+func forwardSubscriberRTCP(sender *webrtc.RTPSender, forwardedTrackID string, subscriberName string, subscriberSession string) {
+	if sender == nil {
+		return
+	}
+	for {
+		packets, _, err := sender.ReadRTCP()
+		if err != nil {
+			return
+		}
+		if !rtcpHasKeyframeRequest(packets) {
+			continue
+		}
+		requestSourceKeyframe(forwardedTrackID, subscriberName, subscriberSession)
+	}
+}
+
+// rtcpHasKeyframeRequest reports whether a compound RTCP batch contains a
+// keyframe request (PLI or FIR).
+func rtcpHasKeyframeRequest(packets []rtcp.Packet) bool {
+	for _, packet := range packets {
+		switch packet.(type) {
+		case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+			return true
+		}
+	}
+
+	return false
+}
+
+// requestSourceKeyframe sends a PLI to the publisher of a forwarded track,
+// coalesced through subscriberKeyframeThrottle so concurrent subscriber
+// requests cost one keyframe.
+func requestSourceKeyframe(forwardedTrackID string, subscriberName string, subscriberSession string) {
+	if !subscriberKeyframeThrottle.allow(forwardedTrackID, time.Now()) {
+		return // another subscriber already asked within the window
+	}
+
+	publisherConnection, sourceSSRC, ok := publisherKeyframeTarget(forwardedTrackID)
+	if !ok {
+		return // publisher already gone; the forwarded track is on its way out
+	}
+
+	if err := publisherConnection.WriteRTCP([]rtcp.Packet{
+		&rtcp.PictureLossIndication{MediaSSRC: sourceSSRC},
+	}); err != nil {
+		log.Errorf("room_keyframe_forward_failed track_id=%s ssrc=%d requested_by=%s session=%s error=%v",
+			forwardedTrackID, sourceSSRC, subscriberName, subscriberSession, err)
+		return
+	}
+	log.Infof("room_keyframe_forwarded track_id=%s ssrc=%d requested_by=%s session=%s",
+		forwardedTrackID, sourceSSRC, subscriberName, subscriberSession)
+}
+
+// publisherKeyframeTarget maps a forwarded track ID back to its source: the
+// publisher's PeerConnection (via the trackParticipantSessions bookkeeping)
+// and the publisher-side SSRC embedded in the forwarded ID by
+// forwardedTrackLocalID, which is the MediaSSRC a PLI toward the publisher
+// must carry.
+func publisherKeyframeTarget(forwardedTrackID string) (*webrtc.PeerConnection, uint32, bool) {
+	sourceSSRC, ok := forwardedTrackSSRC(forwardedTrackID)
+	if !ok {
+		return nil, 0, false
+	}
+
+	listLock.RLock()
+	defer listLock.RUnlock()
+	sessionID := trackParticipantSessions[forwardedTrackID]
+	if sessionID == "" {
+		return nil, 0, false
+	}
+	for i := range peerConnections {
+		if peerConnections[i].sessionID == sessionID && peerConnections[i].peerConnection != nil {
+			return peerConnections[i].peerConnection, sourceSSRC, true
+		}
+	}
+
+	return nil, 0, false
+}
+
+// forwardedTrackSSRC extracts the source SSRC that forwardedTrackLocalID
+// appended as the final ":"-separated segment of a forwarded track ID.
+func forwardedTrackSSRC(forwardedTrackID string) (uint32, bool) {
+	separator := strings.LastIndex(forwardedTrackID, ":")
+	if separator < 0 {
+		return 0, false
+	}
+	ssrc, err := strconv.ParseUint(forwardedTrackID[separator+1:], 10, 32)
+	if err != nil {
+		return 0, false
+	}
+
+	return uint32(ssrc), true
+}
+
+// logSelectedCandidatePair records which ICE candidate pair a session settled
+// on. Mobile telemetry showed sessions dying with an EMPTY selected pair and
+// this is the server-side counterpart signal: after a fix attempt (server-side
+// TURN relay candidates) it tells us whether mobile sessions now select a
+// relay pair, a srflx pair, or still nothing at all.
+func logSelectedCandidatePair(peerConnection *webrtc.PeerConnection, participantName string, sessionID string) {
+	if peerConnection == nil {
+		return
+	}
+	sctpTransport := peerConnection.SCTP()
+	if sctpTransport == nil {
+		return
+	}
+	dtlsTransport := sctpTransport.Transport()
+	if dtlsTransport == nil {
+		return
+	}
+	iceTransport := dtlsTransport.ICETransport()
+	if iceTransport == nil {
+		return
+	}
+	pair, err := iceTransport.GetSelectedCandidatePair()
+	if err != nil || pair == nil || pair.Local == nil || pair.Remote == nil {
+		log.Infof("ice_selected_pair participant=%s session=%s pair=none error=%v", participantName, sessionID, err)
+		return
+	}
+	log.Infof("ice_selected_pair participant=%s session=%s local_type=%s local_protocol=%s local=%s:%d remote_type=%s remote_protocol=%s remote=%s:%d",
+		participantName, sessionID,
+		pair.Local.Typ, pair.Local.Protocol, pair.Local.Address, pair.Local.Port,
+		pair.Remote.Typ, pair.Remote.Protocol, pair.Remote.Address, pair.Remote.Port)
+}
+
 // Handle incoming websockets.
 func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// Accounts gate the room: resolve the session cookie before upgrading so
@@ -3284,7 +3534,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	}()
 
 	// Create new PeerConnection
-	peerConnection, err := newPeerConnection()
+	peerConnection, err := newRoomPeerConnection()
 	if err != nil {
 		log.Errorf("Failed to creates a PeerConnection: %v", err)
 
@@ -3494,6 +3744,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			scheduleICERecovery()
 		case is == webrtc.ICEConnectionStateConnected || is == webrtc.ICEConnectionStateCompleted:
 			cancelICERecovery()
+			logSelectedCandidatePair(peerConnection, currentParticipantName(), participantSessionID)
 		}
 	})
 
