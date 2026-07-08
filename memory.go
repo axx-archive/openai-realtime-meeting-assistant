@@ -917,6 +917,13 @@ func (store *meetingMemoryStore) rewriteLocked() error {
 		_ = file.Close()
 		return fmt.Errorf("chmod memory temp file: %w", err)
 	}
+	// Flush to disk before the rename: upsertDigest makes full-file rewrites
+	// routine, and a crash after rename with unflushed data could truncate
+	// the entire memory file.
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync memory temp file: %w", err)
+	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close memory temp file: %w", err)
 	}
@@ -1536,7 +1543,10 @@ func (store *meetingMemoryStore) digestsInRange(start time.Time, end time.Time) 
 			continue
 		}
 		spanStart, spanEnd := digestSpan(entry, location)
-		if spanStart.After(end) || spanEnd.Before(start) {
+		// end is exclusive (relativeQueryTimeRange semantics): a digest whose
+		// window STARTS exactly at end (e.g. today's day_digest on a
+		// "yesterday" query) must not ride into the range.
+		if !spanStart.Before(end) || spanEnd.Before(start) {
 			continue
 		}
 		matched = append(matched, rangedDigest{entry: entry, start: spanStart})
