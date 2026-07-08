@@ -44943,7 +44943,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               const full = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
               if (full && typeof full.text === 'string') {
                 entry.text = full.text
-                if (entry.metadata) {
+                // restore the full metadata too — the list caps heavy free-text
+                // fields (query/objective/threadQuery), and the ?id= entry carries
+                // them in full and without the bodyTrimmed marker
+                if (full.metadata && typeof full.metadata === 'object') {
+                  entry.metadata = full.metadata
+                } else if (entry.metadata) {
                   delete entry.metadata.bodyTrimmed
                 }
               }

@@ -1799,28 +1799,53 @@ func isArtifactApprovalAdmin(user *userAccount) bool {
 // on demand via GET /artifacts?id=<id> only when a deliverable is opened.
 const artifactListExcerptRunes = 1500
 
+// artifactListMetaFieldCap bounds the free-text metadata fields the list carries.
+// query / threadQuery / objective are near-duplicate copies of the user's
+// request (measured live: 1.3 MB across 100 artifacts, one objective 35 KB) and
+// are only needed at full length by the reader, which fetches the full entry via
+// ?id=. Capping them is safe: they serve only as short title fallbacks in the
+// list. goalPlan/workflowStages are structured and drive goalcard rendering, so
+// they are NOT capped.
+const artifactListMetaFieldCap = 300
+
+var artifactListHeavyMetaFields = []string{"query", "threadQuery", "objective"}
+
 // artifactListView returns lightweight COPIES of the given artifacts for a list
-// response: any entry whose body exceeds the excerpt is trimmed to the leading
-// runes and flagged bodyTrimmed. It never mutates the stored entries or their
+// response: an entry whose body exceeds the excerpt is trimmed to the leading
+// runes, and its heavy free-text metadata fields are capped. Anything trimmed is
+// flagged bodyTrimmed so the client fetches the full entry (body AND full
+// metadata) via ?id= on open. It never mutates the stored entries or their
 // metadata maps (the memory store owns them; search/context/recall still need
-// full bodies), so the metadata map is deep-copied before the flag is added.
+// the full values), so the metadata map is deep-copied before anything changes.
 func artifactListView(entries []meetingMemoryEntry) []meetingMemoryEntry {
 	out := make([]meetingMemoryEntry, len(entries))
 	for i, entry := range entries {
-		runes := []rune(entry.Text)
-		if len(runes) <= artifactListExcerptRunes {
-			out[i] = entry
-			continue
+		trimmedBody := false
+		text := entry.Text
+		if runes := []rune(entry.Text); len(runes) > artifactListExcerptRunes {
+			text = string(runes[:artifactListExcerptRunes])
+			trimmedBody = true
 		}
-		trimmed := entry
-		trimmed.Text = string(runes[:artifactListExcerptRunes])
 		meta := make(map[string]string, len(entry.Metadata)+1)
+		trimmedMeta := false
 		for key, value := range entry.Metadata {
 			meta[key] = value
 		}
+		for _, field := range artifactListHeavyMetaFields {
+			if runes := []rune(meta[field]); len(runes) > artifactListMetaFieldCap {
+				meta[field] = string(runes[:artifactListMetaFieldCap])
+				trimmedMeta = true
+			}
+		}
+		if !trimmedBody && !trimmedMeta {
+			out[i] = entry
+			continue
+		}
 		meta["bodyTrimmed"] = "true"
-		trimmed.Metadata = meta
-		out[i] = trimmed
+		copyEntry := entry
+		copyEntry.Text = text
+		copyEntry.Metadata = meta
+		out[i] = copyEntry
 	}
 	return out
 }

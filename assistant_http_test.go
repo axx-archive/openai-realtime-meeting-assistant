@@ -657,6 +657,56 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 	}
 }
 
+// artifactListView caps the near-duplicate free-text metadata (query/objective/
+// threadQuery) that dominate a list payload, preserves structured metadata that
+// drives rendering (goalPlan), flags anything trimmed, and never mutates the
+// stored entries.
+func TestArtifactListViewCapsHeavyMetadataPreservesGoalPlan(t *testing.T) {
+	bigObjective := strings.Repeat("o", artifactListMetaFieldCap+500)
+	bigPlan := strings.Repeat("g", 5000)
+	big := meetingMemoryEntry{
+		ID:   "big",
+		Kind: "os_artifact",
+		Text: strings.Repeat("x", artifactListExcerptRunes+500),
+		Metadata: map[string]string{
+			"title":     "Big",
+			"objective": bigObjective,
+			"query":     bigObjective,
+			"goalPlan":  bigPlan,
+		},
+	}
+	small := meetingMemoryEntry{ID: "small", Text: "short", Metadata: map[string]string{"title": "Small"}}
+
+	view := artifactListView([]meetingMemoryEntry{big, small})
+
+	if len([]rune(view[0].Text)) != artifactListExcerptRunes {
+		t.Fatalf("body excerpt = %d runes, want %d", len([]rune(view[0].Text)), artifactListExcerptRunes)
+	}
+	if len([]rune(view[0].Metadata["objective"])) != artifactListMetaFieldCap {
+		t.Fatalf("objective cap = %d, want %d", len([]rune(view[0].Metadata["objective"])), artifactListMetaFieldCap)
+	}
+	if len([]rune(view[0].Metadata["query"])) != artifactListMetaFieldCap {
+		t.Fatalf("query not capped")
+	}
+	if view[0].Metadata["goalPlan"] != bigPlan {
+		t.Fatalf("goalPlan must NOT be capped (goalcards render from it)")
+	}
+	if view[0].Metadata["bodyTrimmed"] != "true" {
+		t.Fatalf("trimmed entry not flagged bodyTrimmed")
+	}
+	if view[1].Metadata["bodyTrimmed"] == "true" {
+		t.Fatalf("small entry should not be flagged")
+	}
+
+	// originals untouched
+	if len(big.Text) != artifactListExcerptRunes+500 || big.Metadata["objective"] != bigObjective {
+		t.Fatalf("artifactListView mutated the stored entry")
+	}
+	if _, leaked := big.Metadata["bodyTrimmed"]; leaked {
+		t.Fatalf("bodyTrimmed leaked into the stored metadata map")
+	}
+}
+
 // The trust boundary is the signed-in team: every account lists, reads, and
 // edits artifacts. ONLY the external-write approval actions stay admin-only.
 func TestArtifactsOpenToAllSignedInUsersExceptExternalWriteApproval(t *testing.T) {
