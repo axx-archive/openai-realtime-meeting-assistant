@@ -40,6 +40,15 @@ func TestTranscriptionLaneSessionConfigUsesStreamingTranscription(t *testing.T) 
 	if turnDetection := input["turn_detection"]; turnDetection != nil {
 		t.Fatalf("turn_detection=%v, want nil for manual transcript commits", turnDetection)
 	}
+
+	// whisper rejects prompt/near-field live ("prompt not supported for this
+	// model"), so they MUST be omitted for it — otherwise the session errors.
+	if _, present := transcription["prompt"]; present {
+		t.Fatalf("whisper config must NOT carry a prompt (API rejects it)")
+	}
+	if _, present := input["noise_reduction"]; present {
+		t.Fatalf("whisper config must NOT carry noise_reduction")
+	}
 }
 
 func TestTranscriptionLaneSessionConfigBiasesDomainVocabulary(t *testing.T) {

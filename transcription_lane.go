@@ -523,32 +523,45 @@ func transcriptionLaneWebSocketURL() string {
 	return realtimeWebSocketURL + "?" + values.Encode()
 }
 
+// transcriptionModelAcceptsPrompt reports whether the realtime transcription
+// session config may carry a free-text `prompt` for this model. The gpt-4o
+// transcription family accepts it (A4 domain-vocabulary biasing); the realtime
+// whisper model does NOT — sending `prompt` there is rejected live with
+// "The 'prompt' parameter is not supported for this model" and would break the
+// session. So the prompt/near-field config is gated by model rather than sent
+// unconditionally (prod pins OPENAI_TRANSCRIPT_MODEL=gpt-realtime-whisper).
+func transcriptionModelAcceptsPrompt(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "gpt-4o")
+}
+
 func transcriptionLaneSessionConfig(model string) map[string]any {
+	model = strings.TrimSpace(model)
+	transcription := map[string]any{
+		"model":    model,
+		"language": "en",
+	}
+	input := map[string]any{
+		"format": map[string]any{
+			"type": "audio/pcm",
+			"rate": transcriptionLaneInputSampleRate,
+		},
+		"transcription":  transcription,
+		"turn_detection": nil,
+	}
+	// A4: bias the authoritative persisted stream with the same near-field noise
+	// reduction + domain-vocabulary prompt the Scout realtime peer uses — but
+	// ONLY for models that accept it. Whisper rejects both fields, so it keeps
+	// the plain config it always had (domain-vocab requires switching
+	// OPENAI_TRANSCRIPT_MODEL to gpt-4o-transcribe).
+	if transcriptionModelAcceptsPrompt(model) {
+		input["noise_reduction"] = map[string]any{"type": "near_field"}
+		transcription["prompt"] = realtimeTranscriptionPrompt()
+	}
 	return map[string]any{
 		"type": "session.update",
 		"session": map[string]any{
-			"type": "transcription",
-			"audio": map[string]any{
-				"input": map[string]any{
-					// A4: bias the authoritative persisted stream with the same
-					// near-field noise reduction + domain-vocabulary prompt the
-					// Scout realtime peer uses, so the persisted path (not just the
-					// discarded Scout copy) gets the proper-noun corrections.
-					"noise_reduction": map[string]any{
-						"type": "near_field",
-					},
-					"format": map[string]any{
-						"type": "audio/pcm",
-						"rate": transcriptionLaneInputSampleRate,
-					},
-					"transcription": map[string]any{
-						"model":    strings.TrimSpace(model),
-						"language": "en",
-						"prompt":   realtimeTranscriptionPrompt(),
-					},
-					"turn_detection": nil,
-				},
-			},
+			"type":  "transcription",
+			"audio": map[string]any{"input": input},
 		},
 	}
 }
