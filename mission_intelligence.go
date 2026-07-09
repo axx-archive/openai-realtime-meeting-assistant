@@ -54,6 +54,7 @@ func missionIntelligenceAgent() ambientAgentConfig {
 		defaultMaxBatch:   12,
 		inputKind:         meetingMemoryKindBrain,
 		artifactKind:      meetingMemoryKindMissionInsight,
+		roomScoped:        true, // W4 §7.4: titles THE ROOM's record off its own brains
 		cursorMetadataKey: "throughBrainId",
 		requestTimeout:    missionIntelRequestTimeout,
 		produce:           (*kanbanBoardApp).produceMissionInsight,
@@ -124,9 +125,10 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 	// started belongs to the PRIOR sitting and is dropped entirely (the seam the
 	// stale Samsung(15) title leaked through — one meeting id can span two
 	// sittings, so we key the reset off record.StartedAt, never the id).
-	if previous := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 1); len(previous) > 0 {
-		prev := previous[0]
-		if app.previousInsightBelongsToSitting(prev) {
+	roomID := ambientWindowRoomID(inputs)
+	if previous := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 0); len(previous) > 0 {
+		prev, hasPrev := newestEntryForRoom(previous, roomID)
+		if hasPrev && app.previousInsightBelongsToSitting(prev, roomID) {
 			if block := sanitizedPreviousInsight(prev.Text); block != "" {
 				builder.WriteString("\n\n# Previous mission insight (themes carried forward — recount mentions from THIS window, do not inherit prior counts)\n")
 				builder.WriteString(block)
@@ -189,6 +191,7 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 }
 
 func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	roomID := ambientWindowRoomID(inputs)
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
@@ -214,6 +217,7 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	metadata := map[string]string{
 		"source":         "openai_responses",
 		"model":          model,
+		"roomId":         roomID,
 		"fromBrainId":    firstBrain.ID,
 		"throughBrainId": lastBrain.ID,
 		"brainCount":     strconv.Itoa(len(inputs)),
@@ -231,10 +235,24 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	// (narrative segments when the maintainer has produced them, decayed mission
 	// themes otherwise) — NOT raw max-mentions, so a single last-tick blip can
 	// never steal the title from a topic that owned the airtime.
-	// refreshDominantTitle no-ops when no meeting is live.
-	app.refreshDominantTitle(time.Now().UTC())
+	// refreshDominantTitle no-ops when no meeting is live. W4: it titles THE
+	// WINDOW'S ROOM's active record, never the office's by default.
+	app.refreshDominantTitle(roomID, time.Now().UTC())
 
 	return entry, nil
+}
+
+// newestEntryForRoom picks the newest entry (entriesOfKind order is oldest
+// first) whose roomId resolves to roomID — the W4 room dimension on the
+// continuity carries. Absent roomId reads as office (§9).
+func newestEntryForRoom(entries []meetingMemoryEntry, roomID string) (meetingMemoryEntry, bool) {
+	roomID = normalizeRoomID(roomID)
+	for index := len(entries) - 1; index >= 0; index-- {
+		if normalizeRoomID(entries[index].Metadata["roomId"]) == roomID {
+			return entries[index], true
+		}
+	}
+	return meetingMemoryEntry{}, false
 }
 
 // refreshDominantTitle recomputes the active meeting's auto title from
@@ -243,11 +261,11 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 // tracks the conversation on a ~10-minute cadence instead of only the final
 // mission tick. Scope keys off record.StartedAt, never the meeting id (one id
 // can span sittings — the load-bearing gotcha).
-func (app *kanbanBoardApp) refreshDominantTitle(now time.Time) {
+func (app *kanbanBoardApp) refreshDominantTitle(roomID string, now time.Time) {
 	if app == nil || app.meetings == nil {
 		return
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(normalizeRoomID(roomID))
 	if !ok {
 		return
 	}
@@ -291,8 +309,13 @@ func (app *kanbanBoardApp) decayedDominantTheme(record meetingRecord, now time.T
 	}
 	weights := map[string]float64{}
 	order := make([]string, 0, 8)
+	recordRoom := meetingRoomID(record)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 0) {
 		if entry.CreatedAt.Before(startedAt) {
+			continue
+		}
+		// W4: another room's insights never weigh this room's title.
+		if normalizeRoomID(entry.Metadata["roomId"]) != recordRoom {
 			continue
 		}
 		insight, _, parsed := parseMissionInsight(entry.Text)
@@ -348,11 +371,11 @@ func parseMeetingStartedAt(record meetingRecord) (time.Time, bool) {
 // live sitting started. An insight older than record.StartedAt belongs to the
 // previous sitting and would leak its themes forward (the priming ratchet).
 // With no active record we cannot prove staleness, so we allow priming.
-func (app *kanbanBoardApp) previousInsightBelongsToSitting(prev meetingMemoryEntry) bool {
+func (app *kanbanBoardApp) previousInsightBelongsToSitting(prev meetingMemoryEntry, roomID string) bool {
 	if app == nil || app.meetings == nil {
 		return true
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(normalizeRoomID(roomID))
 	if !ok {
 		return true
 	}
@@ -694,8 +717,8 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		// unarchived memory exists, so it must never drive "meeting live".
 		// liveParticipants is real room occupancy (the same seat count the
 		// /participants snapshot reports) and is what liveness keys on.
-		"currentMeetingId": app.memory.currentMeetingID(),
-		"liveParticipants": app.activeParticipantCount(),
+		"currentMeetingId": app.memory.currentMeetingID(officeRoomID),
+		"liveParticipants": app.activeParticipantCount(officeRoomID),
 		// The pulse chart + stat tiles (design §9.1): a real ingestion
 		// histogram and real counters — never the prototype's fake ticker.
 		"histogram":       missionPulseHistogram(entries, now),

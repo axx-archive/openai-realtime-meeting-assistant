@@ -20,10 +20,11 @@ import (
 // before slow tools.
 const meetingRecapRequestTimeout = 60 * time.Second
 
-func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail string, roomID string) (map[string]any, bool, error) {
 	if app == nil || app.memory == nil {
 		return nil, false, fmt.Errorf("meeting memory is unavailable")
 	}
+	roomID = normalizeRoomID(roomID)
 
 	audience := strings.ToLower(strings.TrimSpace(asString(args["audience"])))
 	switch audience {
@@ -47,20 +48,20 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 		return nil, false, fmt.Errorf("Scout needs an OpenAI API key to build a recap")
 	}
 
-	// Force the brain pass — exactly the archive-flush machinery. The
-	// per-agent run lock serializes against the 5-minute ticker and archive
-	// flushes. A pass error is logged, not fatal: fall back to the last brain
-	// entry.
+	// Force THE ROOM's brain pass — exactly the archive-flush machinery. The
+	// per-(agent, room) run lock serializes against the 5-minute ticker and
+	// close flushes; another room's window is never touched (W4 §7.4). A pass
+	// error is logged, not fatal: fall back to the room's last brain entry.
 	agent := meetingBrainAgent()
-	app.ensureAmbientAgentBaseline(agent)
+	app.ensureAmbientAgentRoomBaseline(agent, roomID)
 	ctx, cancel := context.WithTimeout(context.Background(), meetingRecapRequestTimeout)
 	defer cancel()
-	if _, err := app.runAmbientAgentOnce(agent, ctx, apiKey, nil, 1); err != nil {
+	if _, err := app.runAmbientAgentOnceForRoom(agent, ctx, apiKey, nil, 1, roomID); err != nil {
 		log.Errorf("meeting recap brain pass failed: %v", err)
 	}
 
 	recapText := ""
-	for _, entry := range app.memory.snapshotForMeeting(app.memory.currentMeetingID(), 0) {
+	for _, entry := range app.memory.snapshotForMeeting(app.memory.currentMeetingID(roomID), 0) {
 		if entry.Kind == meetingMemoryKindBrain {
 			recapText = strings.TrimSpace(entry.Text)
 		}
@@ -78,11 +79,17 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 	} else {
 		// Room delivery: the recap re-enters the transcript stream (typed-chat
 		// path), consistent with Scout's spoken output being transcribed too.
-		// Fan-out is the signed-in union (office ∪ room) like every other
-		// room_chat writer — office tabs get the recap line and unread pip
-		// live; roomChatSeenIds dedupe makes dual-socket delivery harmless.
-		if payload, ok := app.recordRoomChatMessage(scoutParticipantName, "Meeting recap:\n"+recapText); ok {
-			broadcastSignedInKanbanEvent("room_chat", payload)
+		// The OFFICE keeps its signed-in union (office ∪ room, like every other
+		// office room_chat writer — the unread pip stays live and roomChatSeenIds
+		// dedupe makes dual-socket delivery harmless); a NAMED room's recap
+		// fans out room-scoped ONLY (W4 §7.4 — never the signed-in union, which
+		// leaked one room's recap office-wide).
+		if payload, ok := app.recordRoomChatMessage(roomID, scoutParticipantName, "Meeting recap:\n"+recapText); ok {
+			if roomID == officeRoomID {
+				broadcastSignedInKanbanEvent("room_chat", payload)
+			} else {
+				broadcastRoomKanbanEvent(roomID, "room_chat", payload)
+			}
 		}
 	}
 
@@ -96,7 +103,7 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 
 // catchMeUp is the catch_me_up tool: meeting_recap with audience forced to
 // "me" (which still falls back to a room post when there is no requester).
-func (app *kanbanBoardApp) catchMeUp(args map[string]any, requesterEmail string) (map[string]any, bool, error) {
+func (app *kanbanBoardApp) catchMeUp(args map[string]any, requesterEmail string, roomID string) (map[string]any, bool, error) {
 	forced := map[string]any{"audience": notificationAudienceMe}
 	for key, value := range args {
 		if key == "audience" {
@@ -104,7 +111,7 @@ func (app *kanbanBoardApp) catchMeUp(args map[string]any, requesterEmail string)
 		}
 		forced[key] = value
 	}
-	return app.meetingRecap(forced, requesterEmail)
+	return app.meetingRecap(forced, requesterEmail, roomID)
 }
 
 // meetingRecapHeadline extracts the first substantive paragraph of a brain

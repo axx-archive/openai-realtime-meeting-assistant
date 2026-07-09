@@ -70,6 +70,7 @@ func narrativeMaintainerAgent() ambientAgentConfig {
 		artifactKind:      meetingMemoryKindNarrative,
 		cursorMetadataKey: narrativeCursorKey,
 		requestTimeout:    narrativeMaintainerRequestTimeout,
+		roomScoped:        true, // W4 §7.4: segments THE ROOM's sitting off its own brains
 		produce:           (*kanbanBoardApp).produceNarrativeUpdates,
 	}
 }
@@ -316,8 +317,10 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	// Segment bookkeeping: stamp the sitting id plus the [firstSeen,lastSeen]
 	// window of the brains that fed this pass, so the per-meeting topic timeline
 	// (meetingSegments) has a real time range to draw without a second pass.
+	// W4: the sitting is THE WINDOW'S ROOM's — never the office's by default.
 	windowFirst, windowLast := brainWindowBounds(inputs)
-	meetingID := app.memory.currentMeetingID()
+	roomID := ambientWindowRoomID(inputs)
+	meetingID := app.memory.currentMeetingID(roomID)
 	var latest meetingMemoryEntry
 	for _, update := range output.Narratives {
 		slug := normalizeNarrativeSlug(update.Slug)
@@ -332,6 +335,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			"status":           compactAssistantLine(update.Status),
 			"source":           "narrative_maintainer",
 			"model":            model,
+			"roomId":           roomID,
 			"fromBrainId":      firstBrain.ID,
 			narrativeCursorKey: lastBrain.ID,
 			"brainCount":       strconv.Itoa(len(inputs)),
@@ -376,16 +380,17 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	// Recompute the dominant room title from the freshly-updated segment
 	// salience — no extra model call. This is the ~10-minute re-derive trigger
 	// that keeps the title off the 15-minute mission tick's lag.
-	app.refreshDominantTitle(now)
+	app.refreshDominantTitle(roomID, now)
 
 	if strings.TrimSpace(latest.ID) == "" {
 		// A legitimate "nothing storyline-worthy" pass appends no artifact, so
 		// the chassis cursor would stall and re-feed the same brains every
 		// tick. Advance it by stamping the consumed-through id onto the newest
-		// existing narrative entry — or, on cold start (no narrative yet), onto
-		// a hidden cursor-carrier entry, so an all-empty workspace never
-		// re-reads the same brain window forever.
-		app.stampNarrativeCursor(lastBrain.ID)
+		// existing narrative entry OF THIS ROOM — or, on cold start (no
+		// narrative for the room yet), onto a hidden cursor-carrier entry, so
+		// an all-empty workspace never re-reads the same brain window forever
+		// and one room's stamp never corrupts another room's cursor.
+		app.stampNarrativeCursor(roomID, lastBrain.ID)
 		return meetingMemoryEntry{}, nil
 	}
 
@@ -401,16 +406,18 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 // production (mission intelligence appends its artifact even on a thin
 // window); without it, a workspace whose every pass legitimately returns
 // {"narratives":[]} would re-read the same brain window forever.
-func (app *kanbanBoardApp) stampNarrativeCursor(throughBrainID string) {
+func (app *kanbanBoardApp) stampNarrativeCursor(roomID string, throughBrainID string) {
 	if app == nil || app.memory == nil || strings.TrimSpace(throughBrainID) == "" {
 		return
 	}
-	latestID := app.memory.latestEntryIDOfKind(meetingMemoryKindNarrative)
+	roomID = normalizeRoomID(roomID)
+	latestID := app.memory.latestEntryIDOfKindForRoom(meetingMemoryKindNarrative, roomID)
 	if latestID == "" {
 		now := time.Now()
 		if _, _, err := app.memory.appendNarrative(durableTimestampID("narrative-cursor", now), "Narrative maintainer cursor stamp — no storylines yet.", map[string]string{
 			narrativeCursorKey:   throughBrainID,
 			"source":             "narrative_maintainer",
+			"roomId":             roomID,
 			relevanceMetadataKey: relevanceExpired,
 			"generatedAt":        now.UTC().Format(time.RFC3339),
 		}); err != nil {
@@ -554,12 +561,18 @@ func (app *kanbanBoardApp) meetingSegments(record meetingRecord, now time.Time) 
 	}
 	bySlug := map[string]*accum{}
 	order := make([]string, 0, 8)
+	recordRoom := meetingRoomID(record)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindNarrative, 0) {
 		slug := strings.TrimSpace(entry.Metadata["slug"])
 		if slug == "" {
 			continue
 		}
 		if entry.CreatedAt.Before(startedAt) {
+			continue
+		}
+		// W4: versions written for another room's sitting never shape this
+		// room's timeline (absent roomId == office, the legacy invariant).
+		if normalizeRoomID(entry.Metadata["roomId"]) != recordRoom {
 			continue
 		}
 		ac := bySlug[slug]
@@ -624,7 +637,7 @@ func (app *kanbanBoardApp) meetingSegmentRows(now time.Time) []map[string]any {
 	if app == nil || app.meetings == nil {
 		return rows
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		return rows
 	}

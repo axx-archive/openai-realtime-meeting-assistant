@@ -39,6 +39,34 @@ func canonicalParticipantName(name string) string {
 	return ""
 }
 
+// guestNamePrefix is the server-enforced display prefix for guest seats
+// (multi-room §5.2). It is stamped at admission and carried into presence,
+// track bookkeeping, and transcript attribution — never applied only at the
+// display layer — so a guest can never be recorded under a member's name.
+const guestNamePrefix = "Guest "
+
+// isGuestDisplayName recognizes a server-minted guest display name. Roster
+// collision is rejected at /guest/join, so the prefix is unambiguous.
+func isGuestDisplayName(name string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), strings.ToLower(guestNamePrefix))
+}
+
+// canonicalRoomParticipantName resolves a name for room presence/media/
+// attribution bookkeeping: seeded roster names canonicalize exactly as
+// canonicalParticipantName; server-minted guest display names pass through
+// verbatim (they only exist because admission stamped them). Anything else is
+// rejected, preserving the roster-only contract for member paths.
+func canonicalRoomParticipantName(name string) string {
+	if canonical := canonicalParticipantName(name); canonical != "" {
+		return canonical
+	}
+	trimmed := strings.TrimSpace(name)
+	if isGuestDisplayName(trimmed) {
+		return trimmed
+	}
+	return ""
+}
+
 const archiveSecretFileName = "archive-secret"
 
 var (
@@ -137,6 +165,25 @@ func participantEmail(name string) string {
 	}
 
 	return strings.ToLower(name) + "@shareability.com"
+}
+
+// guestNameCollidesWithRoster rejects guest display names that would
+// impersonate a seeded member (multi-room §5.2). The comparison is EqualFold
+// against the names the seeded roster resolves to via participantNameForEmail
+// — deliberately NOT a canonicalizer-non-empty predicate, so legitimate
+// non-roster names always pass.
+func guestNameCollidesWithRoster(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	for _, seed := range seededAccounts {
+		rosterName := participantNameForEmail(seed.Email)
+		if rosterName != "" && strings.EqualFold(trimmed, rosterName) {
+			return true
+		}
+	}
+	return false
 }
 
 func participantNameForEmail(email string) string {

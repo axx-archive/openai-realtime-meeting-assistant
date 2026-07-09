@@ -67,13 +67,17 @@ var (
 	trackLocals                  map[string]*webrtc.TrackLocalStaticRTP
 	trackParticipants            map[string]string
 	trackParticipantSessions     map[string]string
-	trackSourceIDs               map[string]string
-	trackLayerRIDs               map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
-	trackLayerGroups             map[string]string // forwarded track ID -> source group key (shared by sibling layers)
-	subscriberLayerTiers         map[string]string // subscriber session ID -> requested layer tier
-	signalRequestLock            sync.Mutex
-	signalRequestTimer           *time.Timer
-	participantSessionSeq        atomic.Uint64
+	// trackRooms maps a forwarded track ID to the room it was published in
+	// (multi-room W3). acceptsTrack rejects cross-room forwards, so room A's
+	// media is never offered to room B's subscribers.
+	trackRooms            map[string]string
+	trackSourceIDs        map[string]string
+	trackLayerRIDs        map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
+	trackLayerGroups      map[string]string // forwarded track ID -> source group key (shared by sibling layers)
+	subscriberLayerTiers  map[string]string // subscriber session ID -> requested layer tier
+	signalRequestLock     sync.Mutex
+	signalRequestTimer    *time.Timer
+	participantSessionSeq atomic.Uint64
 	// activeWebsocketHandlers counts in-flight websocketHandler goroutines. A
 	// hijacked websocket outlives httptest.Server.Close, so tests that swap
 	// package globals the handler reads (e.g. kanbanApp) must wait for handlers
@@ -176,8 +180,13 @@ type peerConnectionState struct {
 	endpointID string
 	// sessionEmail is the server-side authenticated account email resolved by
 	// websocketHandler at admission. Targeted fan-out (sendKanbanEventToUser)
-	// filters on it; it is never taken from a client payload.
+	// filters on it; it is never taken from a client payload. Empty for guests.
 	sessionEmail string
+	// roomID is the room this socket was admitted into (multi-room W3): empty
+	// means office (the migration invariant), so every legacy entry — and
+	// every existing test that constructs states without it — keeps its exact
+	// behavior. Room-scoped fan-out and track acceptance filter on it.
+	roomID       string
 	acceptTrack  func(*webrtc.TrackLocalStaticRTP) bool
 	shouldSignal func(desiredTrackCount int) bool
 	signal       func(gatherComplete <-chan struct{}) error
@@ -209,10 +218,17 @@ type participantTrackSnapshot struct {
 	TrackID       string `json:"trackId"`
 	SourceTrackID string `json:"sourceTrackId,omitempty"`
 	StreamID      string `json:"streamId,omitempty"`
+	RoomID        string `json:"roomId"`
 }
 
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
 	if track != nil && sameParticipantName(trackParticipants[track.ID()], p.participantName) {
+		return false
+	}
+	// Two-room isolation (multi-room W3): a track only forwards to subscribers
+	// seated in the room it was published in. Absent room ids mean office on
+	// both sides (§9 migration invariant).
+	if track != nil && normalizeRoomID(trackRooms[track.ID()]) != normalizeRoomID(p.roomID) {
 		return false
 	}
 	if p.acceptTrack != nil {
@@ -499,6 +515,7 @@ func main() {
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
 	trackParticipantSessions = map[string]string{}
+	trackRooms = map[string]string{}
 	trackSourceIDs = map[string]string{}
 	trackLayerRIDs = map[string]string{}
 	trackLayerGroups = map[string]string{}
@@ -550,6 +567,11 @@ func main() {
 	// public key is ready the moment a client asks to subscribe. Persists to
 	// data/vapid-keys.json, which survives deploys like users.json.
 	loadOrCreateVAPIDKeys()
+
+	// Multi-room W1: seed data/rooms.json with the office room at boot so the
+	// registry exists before any request needs it (§9.1 — no passcode on the
+	// office, one-click join preserved).
+	appRoomStore()
 
 	// websocket handler
 	http.HandleFunc("/healthz", healthHandler)
@@ -614,6 +636,13 @@ func main() {
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
 	http.HandleFunc("/native/config", nativeClientConfigHandler)
+	// Multi-room W1: room registry + guest capability surface (rooms.go).
+	http.HandleFunc("/rooms", roomsHandler)
+	http.HandleFunc("/rooms/", roomActionHandler)
+	http.HandleFunc("/g", guestPageHandler)
+	http.HandleFunc("/g/", guestPageHandler)
+	http.HandleFunc("/guest/join", guestJoinHandler)
+	http.HandleFunc("/guest/me", guestMeHandler)
 	http.HandleFunc("/ice-test", iceTestHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
 	// The service worker must be served from the ORIGIN ROOT so its scope is
@@ -1256,16 +1285,20 @@ func participantsHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
-			"occupiedSeats": kanbanApp.activeParticipantCount(),
+			"occupiedSeats": kanbanApp.activeParticipantCount(officeRoomID),
 		}); err != nil {
 			log.Errorf("Failed to encode presence summary: %v", err)
 		}
 		return
 	}
 
+	// Members may ask about any room (?room=<id>); the bare call keeps the
+	// legacy office shape. Named rooms are never enumerable pre-auth — the
+	// signed-out branch above returns before this.
+	roomID := normalizeRoomID(r.URL.Query().Get("room"))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(kanbanApp.roomSnapshot()); err != nil {
+	if err := json.NewEncoder(w).Encode(kanbanApp.roomSnapshotForRoom(roomID)); err != nil {
 		log.Errorf("Failed to encode participant snapshot: %v", err)
 	}
 }
@@ -1290,6 +1323,13 @@ func clientConfigHandler(w http.ResponseWriter, r *http.Request) {
 func nativeClientConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Session-gated (multi-room §5.3): this payload carries the full member
+	// roster, which must not be readable unauthenticated once guest links put
+	// outsiders on this origin. The native app owns an account session.
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
 
@@ -1746,6 +1786,14 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "OpenAI Realtime is not configured")
 		return
 	}
+	// §7.3 (W4): the private voice binds to the caller's CURRENT room and a
+	// listen-only sitting refuses it — a member seated in a guest-exposed room
+	// gets no Scout voice, and can never attach the assistant to another
+	// room's context (the old room-agnostic hole).
+	if kanbanApp.sittingListenOnly(kanbanApp.memberCurrentRoom(user.Email)) {
+		writeAuthError(w, http.StatusForbidden, "Scout voice is off while this room is listen-only")
+		return
+	}
 
 	payload := struct {
 		SDP string `json:"sdp"`
@@ -1795,6 +1843,13 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if kanbanApp == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "assistant is unavailable")
+		return
+	}
+
+	// §7.3 (W4): tools ride the same room binding as the offer — a caller
+	// seated in a listen-only room gets no assistant actions.
+	if kanbanApp.sittingListenOnly(kanbanApp.memberCurrentRoom(user.Email)) {
+		writeAuthError(w, http.StatusForbidden, "Scout is off while this room is listen-only")
 		return
 	}
 
@@ -2329,7 +2384,7 @@ func websocketOriginAllowed(r *http.Request) bool {
 }
 
 // Add to list of tracks. Callers publish track metadata before renegotiating.
-func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
+func addTrack(roomID string, t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
@@ -2346,6 +2401,9 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	if trackParticipantSessions == nil {
 		trackParticipantSessions = map[string]string{}
 	}
+	if trackRooms == nil {
+		trackRooms = map[string]string{}
+	}
 	if trackSourceIDs == nil {
 		trackSourceIDs = map[string]string{}
 	}
@@ -2358,8 +2416,9 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 	groupKey := layerGroupKey(t.StreamID(), t.ID())
 	reapStaleLayerTwinsLocked(groupKey, t.RID(), trackLocal.ID())
 	trackLocals[trackLocal.ID()] = trackLocal
-	trackParticipants[trackLocal.ID()] = canonicalParticipantName(participantName)
+	trackParticipants[trackLocal.ID()] = canonicalRoomParticipantName(participantName)
 	trackParticipantSessions[trackLocal.ID()] = sessionID
+	trackRooms[trackLocal.ID()] = normalizeRoomID(roomID)
 	trackSourceIDs[trackLocal.ID()] = t.ID()
 	trackLayerRIDs[trackLocal.ID()] = t.RID()
 	trackLayerGroups[trackLocal.ID()] = groupKey
@@ -2368,7 +2427,7 @@ func addTrack(t *webrtc.TrackRemote, participantName string, sessionID string) (
 
 	codec := t.Codec()
 	log.Infof("room_track_added participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
-		canonicalParticipantName(participantName), sessionID, t.Kind(), trackLocal.ID(), t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), totalTracks, audioTracks, videoTracks)
+		canonicalRoomParticipantName(participantName), sessionID, t.Kind(), trackLocal.ID(), t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), totalTracks, audioTracks, videoTracks)
 
 	return trackLocal, nil
 }
@@ -2387,6 +2446,7 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 		delete(trackLocals, staleID)
 		delete(trackParticipants, staleID)
 		delete(trackParticipantSessions, staleID)
+		delete(trackRooms, staleID)
 		delete(trackSourceIDs, staleID)
 		delete(trackLayerRIDs, staleID)
 		delete(trackLayerGroups, staleID)
@@ -2396,7 +2456,7 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 
 func participantTrackPayload(name string, t *webrtc.TrackRemote) map[string]any {
 	return map[string]any{
-		"name":          canonicalParticipantName(name),
+		"name":          canonicalRoomParticipantName(name),
 		"kind":          t.Kind().String(),
 		"trackId":       forwardedRemoteTrackID(t),
 		"sourceTrackId": t.ID(),
@@ -2430,8 +2490,8 @@ func mediaIDPart(value string, fallback string) string {
 }
 
 func sameParticipantName(a string, b string) bool {
-	a = canonicalParticipantName(a)
-	b = canonicalParticipantName(b)
+	a = canonicalRoomParticipantName(a)
+	b = canonicalRoomParticipantName(b)
 	return a != "" && b != "" && strings.EqualFold(a, b)
 }
 
@@ -2457,6 +2517,7 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackLocals, t.ID())
 	delete(trackParticipants, t.ID())
 	delete(trackParticipantSessions, t.ID())
+	delete(trackRooms, t.ID())
 	delete(trackSourceIDs, t.ID())
 	delete(trackLayerRIDs, t.ID())
 	delete(trackLayerGroups, t.ID())
@@ -2476,6 +2537,7 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackLocals, trackID)
 		delete(trackParticipants, trackID)
 		delete(trackParticipantSessions, trackID)
+		delete(trackRooms, trackID)
 		delete(trackSourceIDs, trackID)
 		delete(trackLayerRIDs, trackID)
 		delete(trackLayerGroups, trackID)
@@ -2486,20 +2548,27 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 	return removedTracks
 }
 
-func participantTrackSnapshots(excludeParticipant string) []participantTrackSnapshot {
+func participantTrackSnapshots(roomID string, excludeParticipant string) []participantTrackSnapshot {
 	listLock.RLock()
 	defer listLock.RUnlock()
 
-	return participantTrackSnapshotsLocked(excludeParticipant)
+	return participantTrackSnapshotsLocked(roomID, excludeParticipant)
 }
 
-func participantTrackSnapshotsLocked(excludeParticipant string) []participantTrackSnapshot {
+func participantTrackSnapshotsLocked(roomID string, excludeParticipant string) []participantTrackSnapshot {
+	// Room isolation must hold server-side (§6.2): the replay mirrors
+	// acceptsTrack — only tracks published in the requester's room, each
+	// stamped with roomId. Absent room ids mean office on both sides (§9).
+	snapshotRoomID := normalizeRoomID(roomID)
 	snapshots := make([]participantTrackSnapshot, 0, len(trackLocals))
 	for trackID, trackLocal := range trackLocals {
 		if trackLocal == nil {
 			continue
 		}
-		name := canonicalParticipantName(trackParticipants[trackID])
+		if normalizeRoomID(trackRooms[trackID]) != snapshotRoomID {
+			continue
+		}
+		name := canonicalRoomParticipantName(trackParticipants[trackID])
 		if sameParticipantName(name, excludeParticipant) {
 			continue
 		}
@@ -2509,6 +2578,7 @@ func participantTrackSnapshotsLocked(excludeParticipant string) []participantTra
 			TrackID:       trackID,
 			SourceTrackID: trackSourceIDs[trackID],
 			StreamID:      trackLocal.StreamID(),
+			RoomID:        snapshotRoomID,
 		})
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
@@ -2530,8 +2600,8 @@ func sendParticipantTrackSnapshot(websocket *threadSafeWriter, snapshot particip
 	}
 }
 
-func sendParticipantTrackSnapshots(websocket *threadSafeWriter, excludeParticipant string) {
-	for _, snapshot := range participantTrackSnapshots(excludeParticipant) {
+func sendParticipantTrackSnapshots(websocket *threadSafeWriter, roomID string, excludeParticipant string) {
+	for _, snapshot := range participantTrackSnapshots(roomID, excludeParticipant) {
 		sendParticipantTrackSnapshot(websocket, snapshot)
 	}
 }
@@ -2883,7 +2953,11 @@ func replaceExistingParticipantSession(name string, sessionID string, currentPee
 // tab). Other endpoints of the same account — the mandated laptop+phone case —
 // are left fully intact: their connections and forwarded tracks are untouched.
 func replaceExistingParticipantSessionEndpoint(name string, sessionID string, endpointID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
-	name = canonicalParticipantName(name)
+	replaceExistingParticipantSessionEndpointInRoom(officeRoomID, name, sessionID, endpointID, currentPeerConnection, currentWebsocket, sessionEmail)
+}
+
+func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string, sessionID string, endpointID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return
 	}
@@ -2906,6 +2980,7 @@ func replaceExistingParticipantSessionEndpoint(name string, sessionID string, en
 		sessionID:       sessionID,
 		endpointID:      endpointID,
 		sessionEmail:    normalizeAccountEmail(sessionEmail),
+		roomID:          normalizeRoomID(roomID),
 	}
 
 	retainedConnections := peerConnections[:0]
@@ -2941,7 +3016,7 @@ func replaceExistingParticipantSessionEndpoint(name string, sessionID string, en
 // closes, scoped by sessionID so a person's other device (a different endpoint,
 // a different session) keeps its connection, tracks, and layer tier.
 func unregisterParticipantSession(name string, sessionID string) {
-	name = canonicalParticipantName(name)
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return
 	}
@@ -3225,7 +3300,7 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			offerMetadata := startPendingOfferMetadata(peer)
 
 			if peer.websocket != nil {
-				for _, snapshot := range participantTrackSnapshotsLocked(peer.participantName) {
+				for _, snapshot := range participantTrackSnapshotsLocked(peer.roomID, peer.participantName) {
 					sendParticipantTrackSnapshot(peer.websocket, snapshot)
 				}
 			}
@@ -3555,20 +3630,104 @@ func sendServerBuildVersion(c *threadSafeWriter) {
 	}
 }
 
+// websocketFrameForLog scrubs secrets out of a raw inbound room frame before
+// it reaches the read-loop Info log. The participant hello carries the room
+// passcode (§4.5 — "never in URL/logs"), and prod runs PION_LOG_INFO=all, so
+// the raw frame must never be echoed verbatim once it mentions one. Frames
+// with no "passcode" substring pass through untouched (the hot path: ICE
+// candidates, answers, chat); frames that mention one are re-serialized with
+// the passcode value replaced, and withheld entirely if they will not parse
+// (fail closed — a malformed frame could still hold the secret in cleartext).
+func websocketFrameForLog(raw []byte) string {
+	if !bytes.Contains(raw, []byte("passcode")) {
+		return string(raw)
+	}
+	var envelope websocketMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return fmt.Sprintf("[unparseable %d-byte frame withheld: mentions a passcode]", len(raw))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(envelope.Data), &payload); err == nil {
+		if _, ok := payload["passcode"]; ok {
+			payload["passcode"] = "[redacted]"
+		}
+		if scrubbed, err := json.Marshal(payload); err == nil {
+			envelope.Data = string(scrubbed)
+		} else {
+			envelope.Data = "[payload withheld: mentions a passcode]"
+		}
+	} else {
+		envelope.Data = "[payload withheld: mentions a passcode]"
+	}
+	out, err := json.Marshal(&envelope)
+	if err != nil {
+		return "[frame withheld: mentions a passcode]"
+	}
+	return string(out)
+}
+
 func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
-	// Accounts gate the room: resolve the session cookie before upgrading so
-	// an unauthenticated socket never allocates a PeerConnection or chat
-	// session.
+	// Principal + room resolved BEFORE the upgrade (multi-room §4.5): a member
+	// session wins; a guest session is accepted only for its own room; neither
+	// principal is a cheap pre-upgrade 401 — an unauthenticated socket never
+	// allocates a PeerConnection or chat session.
 	sessionUser := userFromRequest(r)
+	var guest *guestPrincipal
 	if sessionUser == nil {
+		guest = guestFromRequest(r)
+	}
+	if sessionUser == nil && guest == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Missing ?room means office — mid-deploy back-compat for stale tabs; the
+	// version-gated auto-refresh reloads them. Guests have their room FORCED
+	// from the session: a mismatched ?room is a 403 before any upgrade cost.
+	requestedRoom := strings.TrimSpace(r.URL.Query().Get("room"))
+	connRoomID := normalizeRoomID(requestedRoom)
+	if guest != nil {
+		if requestedRoom != "" && connRoomID != normalizeRoomID(guest.RoomID) {
+			http.Error(w, "guests can only join their own room", http.StatusForbidden)
+			return
+		}
+		connRoomID = normalizeRoomID(guest.RoomID)
+	}
+	if room, ok := appRoomStore().byID(connRoomID); !ok {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	} else if room.Archived {
+		http.Error(w, "room is archived", http.StatusForbidden)
+		return
+	}
+
+	// §6.1 numeric guest caps, checked pre-upgrade and rejected with 429:
+	// sockets per guest session, pre-hello sockets per client IP, and the
+	// per-room guest seat cap (advisory here, authoritative at admission).
+	clientIP := clientIPForRateLimit(r)
+	var admitGuestCaps func()
+	var releaseGuestCaps func()
+	if guest != nil {
+		admit, release, ok := guestSocketCaps.acquire(guest.SessionKey, clientIP)
+		if !ok {
+			http.Error(w, "too many guest connections", http.StatusTooManyRequests)
+			return
+		}
+		if kanbanApp != nil && kanbanApp.guestRoomAtCapacity(connRoomID, guest.SessionKey) {
+			release()
+			http.Error(w, "this room already has its maximum number of guests", http.StatusTooManyRequests)
+			return
+		}
+		admitGuestCaps, releaseGuestCaps = admit, release
 	}
 
 	// Upgrade HTTP request to Websocket
 	unsafeConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Errorf("Failed to upgrade HTTP to Websocket: ", err)
+		if releaseGuestCaps != nil {
+			releaseGuestCaps()
+		}
 
 		return
 	}
@@ -3579,22 +3738,30 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// after every other defer below.
 	activeWebsocketHandlers.Add(1)
 	defer activeWebsocketHandlers.Add(-1)
+	if releaseGuestCaps != nil {
+		defer releaseGuestCaps()
+	}
 
 	// Bound per-message memory: signaling frames (SDP/ICE/board events) are small;
 	// reject oversized frames so an unauthenticated client cannot stream an
 	// arbitrarily large frame and force the server to buffer it before parsing.
 	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
 
-	c := &threadSafeWriter{unsafeConn, sync.Mutex{}} // nolint
+	c := &threadSafeWriter{Conn: unsafeConn, guest: guest != nil} // nolint
 	scoutChat := newScoutChatSession(c)
 	// Stop the chat worker and cancel any queued/in-flight model calls as
 	// soon as this connection ends.
 	defer func() { scoutChat.close() }()
+	sessionEmail := ""
+	if sessionUser != nil {
+		sessionEmail = sessionUser.Email
+	}
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	// endpointID is the stable per-device id from the participant hello. It is
 	// set once at admission and only ever read afterwards on this same read-loop
-	// goroutine, so it needs no lock. Empty for legacy/native clients.
+	// goroutine, so it needs no lock. Empty for legacy/native clients; guests
+	// use their per-socket session id (each socket is an endpoint of the seat).
 	endpointID := ""
 	participantAccepted := false
 	officeAccepted := false
@@ -3619,7 +3786,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if participantAcceptedState.Load() {
 				name := currentParticipantName()
 				unregisterParticipantSession(name, participantSessionID)
-				if removed, stillPresent := kanbanApp.forgetParticipantSessionResult(name, participantSessionID); removed {
+				if removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID); removed {
 					// participant_left means a PERSON left. When one of an
 					// account's two devices drops but another stays connected,
 					// the person is still here: suppress the "left" (peers would
@@ -3628,14 +3795,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					// back to one. Only arm the idle-end timer once the last
 					// device is gone.
 					if !stillPresent {
-						broadcastKanbanEvent("participant_left", map[string]any{
-							"name": name,
+						broadcastRoomKanbanEvent(connRoomID, "participant_left", map[string]any{
+							"name":   name,
+							"roomId": connRoomID,
 						})
 					}
-					broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
-					if !stillPresent {
-						kanbanApp.noteMeetingOccupancy()
+					broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.roomSnapshotForRoom(connRoomID))
+					if guest != nil {
+						kanbanApp.releaseGuestSeatIfGone(connRoomID, guest.SessionKey)
 					}
+					if !stillPresent {
+						kanbanApp.noteMeetingOccupancy(connRoomID)
+					}
+					broadcastRoomsSnapshot()
 				}
 			}
 			if closeSocket {
@@ -3661,220 +3833,250 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		listLock.Unlock()
 	}()
 
-	// Create new PeerConnection
-	peerConnection, err := newRoomPeerConnection()
-	if err != nil {
-		log.Errorf("Failed to creates a PeerConnection: %v", err)
-
-		return
-	}
-
-	// When this frame returns close the PeerConnection
-	defer peerConnection.Close() //nolint
-
-	// Accept one audio and one video track incoming
-	for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
-		if _, err := peerConnection.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
-		}); err != nil {
-			log.Errorf("Failed to add transceiver: %v", err)
-
-			return
+	// The PeerConnection is created immediately for members (today's flow) but
+	// DEFERRED for guests until their participant hello is admitted (§6.1: the
+	// strongest fix for the pre-hello allocation DoS — an unadmitted guest
+	// socket never owns transceivers or ICE state). Only the read-loop
+	// goroutine assigns peerConnection; the media callbacks capture the pc
+	// they were installed on.
+	var peerConnection *webrtc.PeerConnection
+	defer func() {
+		if peerConnection != nil {
+			_ = peerConnection.Close()
 		}
-	}
+	}()
+	cancelICERecovery := func() {}
+	defer func() { cancelICERecovery() }()
 
-	// Trickle ICE. Emit server candidate to client
-	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		if i == nil {
-			return
-		}
-		// If you are serializing a candidate make sure to use ToJSON
-		// Using Marshal will result in errors around `sdpMid`
-		candidateString, err := json.Marshal(i.ToJSON())
+	setupPeerConnection := func() error {
+		pc, err := newRoomPeerConnection()
 		if err != nil {
-			log.Errorf("Failed to marshal candidate to json: %v", err)
-
-			return
+			return err
 		}
+		websocketPeerAllocations.Add(1)
 
-		log.Infof("Send candidate to client: %s", candidateString)
-
-		if writeErr := c.WriteJSON(&websocketMessage{
-			Event: "candidate",
-			Data:  string(candidateString),
-		}); writeErr != nil {
-			log.Errorf("Failed to write JSON: %v", writeErr)
-		}
-	})
-
-	// If PeerConnection is closed remove it from global list
-	peerConnection.OnConnectionStateChange(func(p webrtc.PeerConnectionState) {
-		log.Infof("Connection state change: %s", p)
-
-		switch p {
-		case webrtc.PeerConnectionStateFailed:
-			if mediaJoinedState.Load() {
-				cleanupParticipantSession("media connection failed; rejoin the room.", true)
+		// Accept one audio and one video track incoming
+		for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
+			if _, err := pc.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
+				Direction: webrtc.RTPTransceiverDirectionRecvonly,
+			}); err != nil {
+				_ = pc.Close()
+				return err
 			}
-			// Drop the dead peer from the fan-out pool before closing so it stops
-			// receiving forwarded media immediately, then release its transports.
-			prunePeerConnectionPool(peerConnection)
-			if err := peerConnection.Close(); err != nil {
-				log.Errorf("Failed to close PeerConnection: %v", err)
+		}
+
+		// Trickle ICE. Emit server candidate to client
+		pc.OnICECandidate(func(i *webrtc.ICECandidate) {
+			if i == nil {
+				return
 			}
-		case webrtc.PeerConnectionStateClosed:
-			prunePeerConnectionPool(peerConnection)
-			if mediaJoinedState.Load() {
-				cleanupParticipantSession("", false)
-			} else {
-				signalPeerConnections()
-			}
-		default:
-		}
-	})
-
-	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		trackParticipantName := currentParticipantName()
-		trackParticipantSessionID := participantSessionID
-		forwardedTrackID := forwardedRemoteTrackID(t)
-		codec := t.Codec()
-		log.Infof("room_ontrack_start participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
-			trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
-		broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
-			"participant":   trackParticipantName,
-			"trackId":       forwardedTrackID,
-			"sourceTrackId": t.ID(),
-			"streamId":      t.StreamID(),
-			"payloadType":   t.PayloadType(),
-		})
-
-		// Create a track to fan out our incoming media to all browser peers.
-		trackLocal, err := addTrack(t, trackParticipantName, trackParticipantSessionID)
-		if err != nil {
-			log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
-			return
-		}
-		broadcastKanbanEvent("participant_track", participantTrackPayload(trackParticipantName, t))
-		signalPeerConnections()
-		defer removeTrack(trackLocal)
-
-		audioDecoder, audioChannels, err := newRoomAudioDecoder(t)
-		if err != nil {
-			log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
-		}
-		audioTrackKey := roomAudioTrackKey(t)
-		if audioDecoder != nil {
-			defer roomMixer.removeTrack(audioTrackKey)
-		}
-		audioDecodeBuffer := make([]int16, roomAudioDecodeBufferSize(audioChannels))
-		announcedAudioPacket := false
-		announcedDecodedAudio := false
-		announcedRTPDetails := false
-		onTrackStartedAt := time.Now()
-		packetsForwarded := 0
-		payloadBytesForwarded := 0
-		defer func() {
-			log.Infof("room_ontrack_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s packets=%d payload_bytes=%d duration=%s",
-				trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), packetsForwarded, payloadBytesForwarded, time.Since(onTrackStartedAt).Round(time.Millisecond))
-		}()
-
-		for {
-			packet, _, err := t.ReadRTP()
+			// If you are serializing a candidate make sure to use ToJSON
+			// Using Marshal will result in errors around `sdpMid`
+			candidateString, err := json.Marshal(i.ToJSON())
 			if err != nil {
-				log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
-					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
+				log.Errorf("Failed to marshal candidate to json: %v", err)
+
 				return
 			}
-			if !announcedRTPDetails {
-				announcedRTPDetails = true
-				log.Infof("room_ontrack_first_rtp participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d marker=%t payload_type=%d payload_bytes=%d extension_profile=0x%x extension_ids=%s",
-					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
-			}
 
-			if audioDecoder != nil {
-				if !announcedAudioPacket {
-					announcedAudioPacket = true
-					broadcastAssistantEvent("audio", "browser microphone packets are reaching the server", nil)
-				}
-				pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)
-				if decodeErr != nil {
-					log.Errorf("Failed to decode room audio for track=%s: %v", t.ID(), decodeErr)
-					if !announcedDecodedAudio {
-						broadcastAssistantEvent("error", "server could not decode microphone audio: "+decodeErr.Error(), nil)
-						announcedDecodedAudio = true
-					}
-				} else {
-					if !announcedDecodedAudio && len(pcm) > 0 {
-						announcedDecodedAudio = true
-						broadcastAssistantEvent("audio", "browser microphone audio decoded on the server", nil)
-					}
-					roomMixer.submit(audioTrackKey, trackParticipantName, pcm)
-				}
-			}
+			log.Infof("Send candidate to client: %s", candidateString)
 
-			// Preserve RTP header extensions from the publisher. Mobile browsers
-			// can carry video orientation/rotation and congestion metadata there;
-			// stripping them makes phone video look unstable to subscribers.
-			if err = trackLocal.WriteRTP(packet); err != nil {
-				log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
-					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
-				return
+			if writeErr := c.WriteJSON(&websocketMessage{
+				Event: "candidate",
+				Data:  string(candidateString),
+			}); writeErr != nil {
+				log.Errorf("Failed to write JSON: %v", writeErr)
 			}
-			packetsForwarded++
-			payloadBytesForwarded += len(packet.Payload)
-		}
-	})
-
-	// Proactively recover from network changes. When ICE drops to
-	// "disconnected" we wait out a short grace window (transient blips self-heal)
-	// and, if still unhealthy, trigger a server-side ICE restart that refreshes
-	// ICE credentials and renegotiates — reconnecting the peer without making the
-	// browser notice. Returning to "connected"/"completed" cancels a pending
-	// attempt.
-	var iceRecoveryMu sync.Mutex
-	var iceRecoveryTimer *time.Timer
-	cancelICERecovery := func() {
-		iceRecoveryMu.Lock()
-		defer iceRecoveryMu.Unlock()
-		if iceRecoveryTimer != nil {
-			iceRecoveryTimer.Stop()
-			iceRecoveryTimer = nil
-		}
-	}
-	defer cancelICERecovery()
-	scheduleICERecovery := func() {
-		iceRecoveryMu.Lock()
-		defer iceRecoveryMu.Unlock()
-		if iceRecoveryTimer != nil {
-			return // recovery already pending for this disconnect episode
-		}
-		iceRecoveryTimer = time.AfterFunc(iceDisconnectGrace, func() {
-			iceRecoveryMu.Lock()
-			iceRecoveryTimer = nil
-			iceRecoveryMu.Unlock()
-
-			if !mediaJoinedState.Load() {
-				return
-			}
-			if !iceStateNeedsRecovery(peerConnection.ICEConnectionState()) {
-				return // recovered on its own during the grace window
-			}
-			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
-			log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
-			signalPeerConnectionICE(peerConnection)
 		})
+
+		// If PeerConnection is closed remove it from global list
+		pc.OnConnectionStateChange(func(p webrtc.PeerConnectionState) {
+			log.Infof("Connection state change: %s", p)
+
+			switch p {
+			case webrtc.PeerConnectionStateFailed:
+				if mediaJoinedState.Load() {
+					cleanupParticipantSession("media connection failed; rejoin the room.", true)
+				}
+				// Drop the dead peer from the fan-out pool before closing so it stops
+				// receiving forwarded media immediately, then release its transports.
+				prunePeerConnectionPool(pc)
+				if err := pc.Close(); err != nil {
+					log.Errorf("Failed to close PeerConnection: %v", err)
+				}
+			case webrtc.PeerConnectionStateClosed:
+				prunePeerConnectionPool(pc)
+				if mediaJoinedState.Load() {
+					cleanupParticipantSession("", false)
+				} else {
+					signalPeerConnections()
+				}
+			default:
+			}
+		})
+
+		pc.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+			trackParticipantName := currentParticipantName()
+			trackParticipantSessionID := participantSessionID
+			forwardedTrackID := forwardedRemoteTrackID(t)
+			codec := t.Codec()
+			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
+				trackParticipantName, trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
+			broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
+				"participant":   trackParticipantName,
+				"trackId":       forwardedTrackID,
+				"sourceTrackId": t.ID(),
+				"streamId":      t.StreamID(),
+				"payloadType":   t.PayloadType(),
+			})
+
+			// Create a track to fan out our incoming media to all browser peers
+			// of THIS room only (trackRooms + acceptsTrack, multi-room W3).
+			trackLocal, err := addTrack(connRoomID, t, trackParticipantName, trackParticipantSessionID)
+			if err != nil {
+				log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
+				return
+			}
+			trackPayload := participantTrackPayload(trackParticipantName, t)
+			trackPayload["roomId"] = connRoomID
+			broadcastRoomKanbanEvent(connRoomID, "participant_track", trackPayload)
+			signalPeerConnections()
+			defer removeTrack(trackLocal)
+
+			audioDecoder, audioChannels, err := newRoomAudioDecoder(t)
+			if err != nil {
+				log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
+			}
+			audioTrackKey := roomAudioTrackKey(t)
+			if audioDecoder != nil {
+				// remove from whatever mixer the room holds at teardown time —
+				// the lazy lifecycle may have replaced it mid-session.
+				defer func() {
+					kanbanApp.roomMixerFor(connRoomID).removeTrack(audioTrackKey)
+				}()
+			}
+			audioDecodeBuffer := make([]int16, roomAudioDecodeBufferSize(audioChannels))
+			announcedAudioPacket := false
+			announcedDecodedAudio := false
+			announcedRTPDetails := false
+			onTrackStartedAt := time.Now()
+			packetsForwarded := 0
+			payloadBytesForwarded := 0
+			defer func() {
+				log.Infof("room_ontrack_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s packets=%d payload_bytes=%d duration=%s",
+					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), packetsForwarded, payloadBytesForwarded, time.Since(onTrackStartedAt).Round(time.Millisecond))
+			}()
+
+			for {
+				packet, _, err := t.ReadRTP()
+				if err != nil {
+					log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
+						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
+					return
+				}
+				if !announcedRTPDetails {
+					announcedRTPDetails = true
+					log.Infof("room_ontrack_first_rtp participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d marker=%t payload_type=%d payload_bytes=%d extension_profile=0x%x extension_ids=%s",
+						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
+				}
+
+				if audioDecoder != nil {
+					if !announcedAudioPacket {
+						announcedAudioPacket = true
+						broadcastAssistantEvent("audio", "browser microphone packets are reaching the server", nil)
+					}
+					pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)
+					if decodeErr != nil {
+						log.Errorf("Failed to decode room audio for track=%s: %v", t.ID(), decodeErr)
+						if !announcedDecodedAudio {
+							broadcastAssistantEvent("error", "server could not decode microphone audio: "+decodeErr.Error(), nil)
+							announcedDecodedAudio = true
+						}
+					} else {
+						if !announcedDecodedAudio && len(pcm) > 0 {
+							announcedDecodedAudio = true
+							broadcastAssistantEvent("audio", "browser microphone audio decoded on the server", nil)
+						}
+						// nil-mixer frames (a join racing the lazy teardown) are
+						// dropped by the nil-safe mixer methods.
+						kanbanApp.roomMixerFor(connRoomID).submit(audioTrackKey, trackParticipantName, pcm)
+					}
+				}
+
+				// Preserve RTP header extensions from the publisher. Mobile browsers
+				// can carry video orientation/rotation and congestion metadata there;
+				// stripping them makes phone video look unstable to subscribers.
+				if err = trackLocal.WriteRTP(packet); err != nil {
+					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
+						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
+					return
+				}
+				packetsForwarded++
+				payloadBytesForwarded += len(packet.Payload)
+			}
+		})
+
+		// Proactively recover from network changes. When ICE drops to
+		// "disconnected" we wait out a short grace window (transient blips self-heal)
+		// and, if still unhealthy, trigger a server-side ICE restart that refreshes
+		// ICE credentials and renegotiates — reconnecting the peer without making the
+		// browser notice. Returning to "connected"/"completed" cancels a pending
+		// attempt.
+		var iceRecoveryMu sync.Mutex
+		var iceRecoveryTimer *time.Timer
+		cancelICERecovery = func() {
+			iceRecoveryMu.Lock()
+			defer iceRecoveryMu.Unlock()
+			if iceRecoveryTimer != nil {
+				iceRecoveryTimer.Stop()
+				iceRecoveryTimer = nil
+			}
+		}
+		scheduleICERecovery := func() {
+			iceRecoveryMu.Lock()
+			defer iceRecoveryMu.Unlock()
+			if iceRecoveryTimer != nil {
+				return // recovery already pending for this disconnect episode
+			}
+			iceRecoveryTimer = time.AfterFunc(iceDisconnectGrace, func() {
+				iceRecoveryMu.Lock()
+				iceRecoveryTimer = nil
+				iceRecoveryMu.Unlock()
+
+				if !mediaJoinedState.Load() {
+					return
+				}
+				if !iceStateNeedsRecovery(pc.ICEConnectionState()) {
+					return // recovered on its own during the grace window
+				}
+				totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
+				log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
+				signalPeerConnectionICE(pc)
+			})
+		}
+
+		pc.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
+			log.Infof("ICE connection state changed: %s", is)
+			switch {
+			case iceStateNeedsRecovery(is):
+				scheduleICERecovery()
+			case is == webrtc.ICEConnectionStateConnected || is == webrtc.ICEConnectionStateCompleted:
+				cancelICERecovery()
+				logSelectedCandidatePair(pc, currentParticipantName(), participantSessionID)
+			}
+		})
+
+		peerConnection = pc
+		return nil
 	}
 
-	peerConnection.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
-		log.Infof("ICE connection state changed: %s", is)
-		switch {
-		case iceStateNeedsRecovery(is):
-			scheduleICERecovery()
-		case is == webrtc.ICEConnectionStateConnected || is == webrtc.ICEConnectionStateCompleted:
-			cancelICERecovery()
-			logSelectedCandidatePair(peerConnection, currentParticipantName(), participantSessionID)
+	if guest == nil {
+		if err := setupPeerConnection(); err != nil {
+			log.Errorf("Failed to creates a PeerConnection: %v", err)
+
+			return
 		}
-	})
+	}
 
 	message := &websocketMessage{}
 	for {
@@ -3891,11 +4093,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			return
 		}
 
-		log.Infof("Got message: %s", raw)
+		log.Infof("Got message: %s", websocketFrameForLog(raw))
 
 		// An inbound room frame is proof of life for the liveness sweep, alongside
 		// the heartbeat pong (no-op until this socket is admitted).
-		kanbanApp.touchParticipantLiveness(currentParticipantName())
+		kanbanApp.touchParticipantLivenessInRoom(connRoomID, currentParticipantName())
 
 		if err := json.Unmarshal(raw, &message); err != nil {
 			log.Errorf("Failed to unmarshal json to message: %v", err)
@@ -3903,32 +4105,126 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			return
 		}
 
-		if participantAccepted && message.Event != "participant" && !kanbanApp.participantSessionCurrent(currentParticipantName(), participantSessionID) {
+		// §5.4 guest inbound containment: the hello, signaling, liveness, and
+		// room chat pass; the office hello is denied and closed; anything else
+		// is dropped and logged.
+		if guest != nil {
+			if message.Event == "office" {
+				_ = sendKanbanEvent(c, "access_denied", "Guests cannot open office delivery.")
+				return
+			}
+			if !guestInboundEvents[message.Event] {
+				log.Infof("guest_inbound_dropped event=%s session=%s", message.Event, participantSessionID)
+				continue
+			}
+		}
+
+		if participantAccepted && message.Event != "participant" && !kanbanApp.participantSessionCurrentInRoom(connRoomID, currentParticipantName(), participantSessionID) {
 			_ = sendKanbanEvent(c, "session_replaced", "This browser session was replaced by a newer room join.")
 			return
 		}
 
 		switch message.Event {
 		case "participant":
-			// Identity comes from the authenticated session, never from the
-			// payload: a client cannot join as anyone but their own account.
-			name := participantNameForAccount(sessionUser)
 			if participantAccepted {
 				continue
 			}
+			if guest != nil {
+				// Guest identity comes from the guest session, never the hello
+				// payload; the display name is server-prefixed and deduped, and
+				// the seat keys on the guest session (two guests named Sam
+				// coexist; a second socket of one session shares its seat).
+				admittedName, firstEndpoint, err := kanbanApp.admitGuestParticipant(connRoomID, guest.SessionKey, guest.Name, participantSessionID)
+				if err != nil {
+					_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
+					continue
+				}
+				endpointID = participantSessionID
+				setParticipantName(admittedName)
+				participantAccepted = true
+				participantAcceptedState.Store(true)
+				if admitGuestCaps != nil {
+					admitGuestCaps()
+				}
+				// The PeerConnection exists only NOW (§6.1 deferred alloc).
+				if peerConnection == nil {
+					if err := setupPeerConnection(); err != nil {
+						log.Errorf("Failed to create guest PeerConnection: %v", err)
+						_ = sendKanbanEvent(c, "access_denied", "could not start media for this room.")
+						return
+					}
+				}
+				replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, "")
+				kanbanApp.noteMeetingAdmission(connRoomID, admittedName)
+				kanbanApp.ensureRoomMedia(connRoomID)
+				// §5.4(d): the guest replay branch withholds board/memory/
+				// notifications/proposals — only room-scoped, allowlisted state.
+				if err := sendKanbanEvent(c, "access_granted", map[string]any{
+					"name":   admittedName,
+					"roomId": connRoomID,
+					"guest":  true,
+				}); err != nil {
+					log.Errorf("Failed to send guest access grant: %v", err)
+				}
+				if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshotForRoom(connRoomID)); err != nil {
+					log.Errorf("Failed to send participant state: %v", err)
+				}
+				if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistoryForRoom(connRoomID, roomChatHistoryLimit)); err != nil {
+					log.Errorf("Failed to send room chat history: %v", err)
+				}
+				if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot(connRoomID)); err != nil {
+					log.Errorf("Failed to send meeting record: %v", err)
+				}
+				sendServerBuildVersion(c)
+				if firstEndpoint {
+					broadcastRoomKanbanEvent(connRoomID, "participant_joined", map[string]any{
+						"name":   admittedName,
+						"roomId": connRoomID,
+					})
+				}
+				broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.roomSnapshotForRoom(connRoomID))
+				broadcastRoomsSnapshot()
+				continue
+			}
+
+			// Identity comes from the authenticated session, never from the
+			// payload: a client cannot join as anyone but their own account.
+			name := participantNameForAccount(sessionUser)
 			// The endpoint id is an additive, optional hint carried in the
 			// hello payload (never identity — that still comes from the
 			// session). Absent/invalid ids fall back to the legacy single-slot
-			// behaviour.
+			// behaviour. The passcode rides the same hello (§4.5) — never the
+			// URL, never logged.
+			helloPasscode := ""
 			if trimmed := strings.TrimSpace(message.Data); trimmed != "" {
 				var hello struct {
 					EndpointID string `json:"endpointId"`
+					Passcode   string `json:"passcode"`
 				}
 				if err := json.Unmarshal([]byte(trimmed), &hello); err == nil {
 					endpointID = sanitizeEndpointID(hello.EndpointID)
+					helloPasscode = hello.Passcode
 				}
 			}
-			admittedName, firstEndpoint, err := kanbanApp.admitParticipantSessionEndpoint(name, participantSessionID, endpointID)
+			room, roomOK := appRoomStore().byID(connRoomID)
+			if !roomOK || room.Archived {
+				_ = sendKanbanEvent(c, "access_denied", "this room is no longer joinable.")
+				continue
+			}
+			// The passcode is admission-only — NEVER an API credential
+			// anywhere else. bcrypt compare behind the shared auth limiter.
+			if room.PasscodeHash != "" {
+				if !authAttemptAllowedForKeys("roompass:"+connRoomID, "roompass-ip:"+clientIP) {
+					_ = sendKanbanEvent(c, "access_denied", "too many passcode attempts; try again in a few minutes.")
+					continue
+				}
+				if !roomPasscodeOK(room, helloPasscode) {
+					_ = sendKanbanEvent(c, "access_denied", "wrong room passcode.")
+					continue
+				}
+				clearAuthAttempts("roompass:"+connRoomID, "roompass-ip:"+clientIP)
+			}
+			admittedName, firstEndpoint, err := kanbanApp.admitParticipantSessionEndpointInRoom(connRoomID, name, participantSessionID, endpointID)
 			if err != nil {
 				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 				continue
@@ -3936,16 +4232,22 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			setParticipantName(admittedName)
 			participantAccepted = true
 			participantAcceptedState.Store(true)
-			replaceExistingParticipantSessionEndpoint(admittedName, participantSessionID, endpointID, peerConnection, c, sessionUser.Email)
+			replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, sessionEmail)
+			// One account, one live room (§2): joining here evicts the
+			// account's seat in any other room via session_replaced.
+			kanbanApp.evictAccountFromOtherRooms(admittedName, connRoomID)
 			// admission opens (or extends) the first-class meeting record and
-			// cancels any pending idle-end from a briefly empty room.
-			kanbanApp.noteMeetingAdmission(admittedName)
+			// cancels any pending idle-end from a briefly empty room; named
+			// rooms lazily start their mixer + transcription lane here.
+			kanbanApp.noteMeetingAdmission(connRoomID, admittedName)
+			kanbanApp.ensureRoomMedia(connRoomID)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
-				"name": admittedName,
+				"name":   admittedName,
+				"roomId": connRoomID,
 			}); err != nil {
 				log.Errorf("Failed to send access grant: %v", err)
 			}
-			if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshot()); err != nil {
+			if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshotForRoom(connRoomID)); err != nil {
 				log.Errorf("Failed to send participant state: %v", err)
 			}
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
@@ -3959,17 +4261,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			// Direct send: this socket is not in peerConnections until
 			// media_ready, so broadcasts cannot reach it yet.
-			if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistory(roomChatHistoryLimit)); err != nil {
+			if err := sendKanbanEvent(c, "room_chat_history", kanbanApp.roomChatHistoryForRoom(connRoomID, roomChatHistoryLimit)); err != nil {
 				log.Errorf("Failed to send room chat history: %v", err)
 			}
 			// Meeting record snapshot (null clears client state): the shared
 			// clock anchor must land before media join.
-			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot()); err != nil {
+			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot(connRoomID)); err != nil {
 				log.Errorf("Failed to send meeting record: %v", err)
 			}
 			// Unread notification backlog is per-account, so it replays as a
 			// direct send scoped to this socket's session user.
-			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionUser.Email, notificationListLimit)); err != nil {
+			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionEmail, notificationListLimit)); err != nil {
 				log.Errorf("Failed to send notification backlog: %v", err)
 			}
 			// Codex proposals render as confirm/dismiss cards in the room;
@@ -3986,7 +4288,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					log.Errorf("Failed to send assistant status: %v", err)
 				}
 			}
-			if activeSpeaker := kanbanApp.activeSpeakerSnapshot(); activeSpeaker != nil {
+			if activeSpeaker := kanbanApp.activeSpeakerSnapshotForRoom(connRoomID); activeSpeaker != nil {
 				if err := sendKanbanEvent(c, "active_speaker", activeSpeaker); err != nil {
 					log.Errorf("Failed to send active speaker snapshot: %v", err)
 				}
@@ -3999,18 +4301,21 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// The roster snapshot below still refreshes unconditionally so the
 			// "· 2 devices" affordance updates.
 			if firstEndpoint {
-				broadcastKanbanEvent("participant_joined", map[string]any{
-					"name": admittedName,
+				broadcastRoomKanbanEvent(connRoomID, "participant_joined", map[string]any{
+					"name":   admittedName,
+					"roomId": connRoomID,
 				})
 			}
-			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.roomSnapshotForRoom(connRoomID))
+			broadcastRoomsSnapshot()
 		case "office":
 			// Office hello: an authenticated tab claims signed-in event
 			// delivery without taking a room seat. Identity comes from the
 			// session cookie, never the payload; repeat hellos are
 			// idempotent. Room-gated cases below still require admission, so
 			// an office socket that tries to edit the board or speak gets
-			// access_denied like any other unadmitted socket.
+			// access_denied like any other unadmitted socket. (Guests never
+			// reach here — their office hello was denied above.)
 			if officeAccepted {
 				continue
 			}
@@ -4018,11 +4323,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			listLock.Lock()
 			officeConnections[participantSessionID] = officeConnectionState{
 				websocket:    c,
-				sessionEmail: normalizeAccountEmail(sessionUser.Email),
+				sessionEmail: normalizeAccountEmail(sessionEmail),
 			}
 			listLock.Unlock()
 			if err := sendKanbanEvent(c, "office_granted", map[string]any{
-				"email": sessionUser.Email,
+				"email": sessionEmail,
 				"name":  participantNameForAccount(sessionUser),
 			}); err != nil {
 				log.Errorf("Failed to send office grant: %v", err)
@@ -4040,7 +4345,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			// Meeting record snapshot (null clears client state) keeps the
 			// office shell's shared clock anchored while out of the room.
-			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot()); err != nil {
+			if err := sendKanbanEvent(c, "meeting", kanbanApp.meetingSnapshot(officeRoomID)); err != nil {
 				log.Errorf("Failed to send meeting record: %v", err)
 			}
 			// Room-chat history seeds the out-of-room unread pip.
@@ -4049,7 +4354,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			// Unread notification backlog is per-account, so it replays as a
 			// direct send scoped to this socket's session user.
-			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionUser.Email, notificationListLimit)); err != nil {
+			if err := sendKanbanEvent(c, "notification_backlog", kanbanApp.unreadNotificationsFor(sessionEmail, notificationListLimit)); err != nil {
 				log.Errorf("Failed to send notification backlog: %v", err)
 			}
 			if err := sendKanbanEvent(c, "codex_proposals", kanbanApp.codexProposalsSnapshot(codexProposalHistoryLimit)); err != nil {
@@ -4079,7 +4384,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before joining media.")
 				continue
 			}
-			if mediaJoined {
+			if mediaJoined || peerConnection == nil {
 				continue
 			}
 			mediaJoined = true
@@ -4091,25 +4396,31 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				participantName: currentParticipantName(),
 				sessionID:       participantSessionID,
 				endpointID:      endpointID,
-				sessionEmail:    normalizeAccountEmail(sessionUser.Email),
+				sessionEmail:    normalizeAccountEmail(sessionEmail),
+				roomID:          connRoomID,
 			})
 			listLock.Unlock()
-			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
-				log.Errorf("Failed to send Kanban board state after media join: %v", err)
+			if guest == nil {
+				if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
+					log.Errorf("Failed to send Kanban board state after media join: %v", err)
+				}
+				if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
+					log.Errorf("Failed to send undo state after media join: %v", err)
+				}
 			}
-			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
-				log.Errorf("Failed to send undo state after media join: %v", err)
-			}
-			sendParticipantTrackSnapshots(c, currentParticipantName())
-			broadcastKanbanEvent("participants", kanbanApp.roomSnapshot())
+			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
+			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.roomSnapshotForRoom(connRoomID))
 			signalPeerConnections()
 		case "request_participant_tracks":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before requesting media labels.")
 				continue
 			}
-			sendParticipantTrackSnapshots(c, currentParticipantName())
+			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
 		case "candidate":
+			if peerConnection == nil {
+				continue
+			}
 			candidate := webrtc.ICECandidateInit{}
 			if err := json.Unmarshal([]byte(message.Data), &candidate); err != nil {
 				log.Errorf("Failed to unmarshal json to candidate: %v", err)
@@ -4129,6 +4440,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to add ICE candidate: %v", err)
 			}
 		case "answer":
+			if peerConnection == nil {
+				continue
+			}
 			answer := webrtc.SessionDescription{}
 			if err := json.Unmarshal([]byte(message.Data), &answer); err != nil {
 				log.Errorf("Failed to unmarshal json to answer: %v", err)
@@ -4171,7 +4485,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			pendingRemoteCandidates = pendingRemoteCandidates[:0]
 			signalPeerConnections()
 		case "restart_ice":
-			if !participantAccepted || !mediaJoined {
+			if !participantAccepted || !mediaJoined || peerConnection == nil {
 				continue
 			}
 			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
@@ -4257,6 +4571,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before sending room chat")
 				continue
 			}
+			// §6.5: guest chat is token-bucketed per guest session (burst 5,
+			// refill 1 per 3s) BEFORE anything persists.
+			if guest != nil && !kanbanApp.allowGuestRoomChat(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_chat_rate_limited session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
 			chat := struct {
 				Text string `json:"text"`
 			}{}
@@ -4268,14 +4588,24 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// persistence happens first so the echo-on-broadcast carries the
 			// durable id and everyone (sender included) renders one ordering.
 			// The authorEmail stamp is what later authorizes the sender — and
-			// only the sender — to delete the message.
-			payload, ok := kanbanApp.recordRoomChatMessageWithMetadata(currentParticipantName(), chat.Text, map[string]string{
-				"authorEmail": normalizeAccountEmail(sessionUser.Email),
-			})
+			// only the sender — to delete the message. Guests carry the
+			// server-minted display name instead (they cannot delete).
+			chatMetadata := map[string]string{
+				"authorEmail": normalizeAccountEmail(sessionEmail),
+			}
+			if guest != nil {
+				chatMetadata = map[string]string{
+					"speaker": currentParticipantName(),
+					"guest":   "true",
+				}
+			}
+			payload, ok := kanbanApp.recordRoomChatMessageWithMetadata(connRoomID, currentParticipantName(), chat.Text, chatMetadata)
 			if !ok {
 				continue
 			}
+			payload["roomId"] = connRoomID
 			broadcastSignedInKanbanEvent("room_chat", payload)
+			broadcastRoomGuestsKanbanEvent(connRoomID, "room_chat", payload)
 		case "room_chat_delete":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before deleting room chat")
@@ -4290,7 +4620,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			// The payload only names the entry; whether the requester may
 			// remove it is decided from the session identity server-side.
-			payload, ok := kanbanApp.deleteRoomChatMessage(deletion.ID, sessionUser.Email, currentParticipantName())
+			payload, ok := kanbanApp.deleteRoomChatMessage(deletion.ID, sessionEmail, currentParticipantName())
 			if !ok {
 				continue
 			}
@@ -4350,6 +4680,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before archiving the meeting.")
 				continue
 			}
+			if connRoomID != officeRoomID {
+				// Named rooms archive automatically at idle-end; the manual
+				// archive verb stays office-scoped until the W4 close chain.
+				_ = sendKanbanEvent(c, "assistant_event", map[string]any{
+					"kind":      "error",
+					"text":      "manual archiving is available in the office; this room archives itself when it empties",
+					"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				continue
+			}
 			result, err := kanbanApp.archiveMeeting(currentParticipantName())
 			if err != nil {
 				log.Errorf("Failed to archive meeting: %v", err)
@@ -4374,9 +4714,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to unmarshal recording state: %v", err)
 				continue
 			}
-			snapshot := kanbanApp.setTranscriptRecording(payload.Enabled, currentParticipantName())
+			snapshot := kanbanApp.setTranscriptRecordingInRoom(connRoomID, payload.Enabled, currentParticipantName())
 			recording, _ := snapshot["recording"].(roomRecordingState)
-			broadcastKanbanEvent("participants", snapshot)
+			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
 			broadcastAssistantEvent("answer", roomRecordingAnnouncementText(recording), map[string]any{
 				"tool":       "set_recording",
 				"recording":  recording,
@@ -4396,7 +4736,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to unmarshal participant media state: %v", err)
 				continue
 			}
-			snapshot, err := kanbanApp.setParticipantMediaState(currentParticipantName(), participantMediaState{
+			snapshot, err := kanbanApp.setParticipantMediaStateInRoom(connRoomID, currentParticipantName(), participantMediaState{
 				MicMuted:      payload.MicMuted,
 				CameraOff:     payload.CameraOff,
 				ScreenSharing: payload.ScreenSharing,
@@ -4405,7 +4745,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to update participant media state: %v", err)
 				continue
 			}
-			broadcastKanbanEvent("participants", snapshot)
+			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
 		case "voice_control":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before changing voice control.")
@@ -4434,9 +4774,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")
 				continue
 			}
-			broadcastKanbanEvent("participants", kanbanApp.setParticipantScreenSharing(currentParticipantName(), true))
-			broadcastKanbanEvent("screen_share_started", map[string]any{
-				"name": currentParticipantName(),
+			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.setParticipantScreenSharingInRoom(connRoomID, currentParticipantName(), true))
+			broadcastRoomKanbanEvent(connRoomID, "screen_share_started", map[string]any{
+				"name":   currentParticipantName(),
+				"roomId": connRoomID,
 			})
 			go dispatchKeyFrame()
 			broadcastAssistantEvent("status", currentParticipantName()+" started sharing their screen", nil)
@@ -4444,9 +4785,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted {
 				continue
 			}
-			broadcastKanbanEvent("participants", kanbanApp.setParticipantScreenSharing(currentParticipantName(), false))
-			broadcastKanbanEvent("screen_share_stopped", map[string]any{
-				"name": currentParticipantName(),
+			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.setParticipantScreenSharingInRoom(connRoomID, currentParticipantName(), false))
+			broadcastRoomKanbanEvent(connRoomID, "screen_share_stopped", map[string]any{
+				"name":   currentParticipantName(),
+				"roomId": connRoomID,
 			})
 			go dispatchKeyFrame()
 			broadcastAssistantEvent("status", currentParticipantName()+" stopped sharing their screen", nil)
@@ -4455,6 +4797,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		}
 	}
 }
+
+// websocketPeerAllocations counts room PeerConnection allocations inside
+// websocketHandler. Tests pin the §6.1 guarantee on it: an unadmitted guest
+// socket never allocates a PeerConnection.
+var websocketPeerAllocations atomic.Int64
 
 func manualBoardArgs(message *websocketMessage) (map[string]any, error) {
 	args := map[string]any{}
@@ -4511,6 +4858,11 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 type threadSafeWriter struct {
 	*websocket.Conn
 	sync.Mutex
+	// guest marks the writer's principal class (multi-room §6.2): set once at
+	// connection setup, read by the write-time event allowlist so a guest
+	// socket can only ever receive allowlisted events — whichever broadcast
+	// pool mis-routes to it.
+	guest bool
 }
 
 func (t *threadSafeWriter) Close() error {
@@ -4622,6 +4974,16 @@ func startRoomWebsocketHeartbeat(c *threadSafeWriter, participantName func() str
 }
 
 func (t *threadSafeWriter) WriteJSON(v any) error {
+	// §6.2: a guest writer accepts only the kanban envelope (inner event gated
+	// in sendKanbanEvent/deliverKanbanEvent) and raw signaling frames. The
+	// drop happens before any connection state is consulted.
+	if t != nil && t.guest {
+		if message, ok := v.(*websocketMessage); ok && !guestTopLevelEvents[message.Event] {
+			guestEventsDropped.Add(1)
+			log.Infof("guest_event_dropped event=%s total=%d", message.Event, guestEventsDropped.Load())
+			return nil
+		}
+	}
 	if t == nil || t.Conn == nil {
 		return fmt.Errorf("websocket is closed")
 	}

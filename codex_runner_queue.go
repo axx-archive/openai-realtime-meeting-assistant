@@ -1126,7 +1126,7 @@ func (app *kanbanBoardApp) rerunOriginForUser(artifact meetingMemoryEntry, userE
 		origin["originId"] = originID
 	case agentThreadOriginRoom:
 		originMeetingID := strings.TrimSpace(artifact.Metadata["originMeetingId"])
-		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID() {
+		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID(officeRoomID) {
 			return origin
 		}
 		origin["originKind"] = agentThreadOriginRoom

@@ -17,6 +17,7 @@ func snapshotPeerState(t *testing.T) {
 	prevActive := activeParticipantConnections
 	prevTrackParticipants := trackParticipants
 	prevTrackParticipantSessions := trackParticipantSessions
+	prevTrackRooms := trackRooms
 	prevTrackSourceIDs := trackSourceIDs
 	prevTrackLayerRIDs := trackLayerRIDs
 	prevTrackLayerGroups := trackLayerGroups
@@ -30,6 +31,7 @@ func snapshotPeerState(t *testing.T) {
 		activeParticipantConnections = prevActive
 		trackParticipants = prevTrackParticipants
 		trackParticipantSessions = prevTrackParticipantSessions
+		trackRooms = prevTrackRooms
 		trackSourceIDs = prevTrackSourceIDs
 		trackLayerRIDs = prevTrackLayerRIDs
 		trackLayerGroups = prevTrackLayerGroups

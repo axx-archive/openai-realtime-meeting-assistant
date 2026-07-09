@@ -57,6 +57,8 @@ const meetingTitleSourceAuto = "auto"
 // strings (same convention as notificationRecord.CreatedAt).
 type meetingRecord struct {
 	ID           string   `json:"id"`                    // == memory meetingId ("meeting-YYYYMMDD-HHMMSS-nnnnnnnnn")
+	RoomID       string   `json:"roomId,omitempty"`      // empty on read == office (§9 migration rule)
+	ListenOnly   bool     `json:"listenOnly,omitempty"`  // per-sitting latch (§7.1) — set/enforced in W4
 	Title        string   `json:"title,omitempty"`       // empty until auto-titled
 	TitleSource  string   `json:"titleSource,omitempty"` // "auto" (manual reserved for later)
 	StartedAt    string   `json:"startedAt"`
@@ -66,23 +68,43 @@ type meetingRecord struct {
 	Participants []string `json:"participants"`          // union of admitted canonical names, meetingParticipantNames order
 }
 
+// meetingRoomID resolves a record's room under the migration invariant:
+// records written before rooms existed carry no RoomID and are the office's.
+func meetingRoomID(record meetingRecord) string {
+	return normalizeRoomID(record.RoomID)
+}
+
+// storedMeetingRoomID is the write-side convention: office records persist
+// with an EMPTY RoomID (omitempty), so meetings.json stays byte-compatible
+// with the pre-room shape and a rolled-back binary reads them unchanged.
+func storedMeetingRoomID(roomID string) string {
+	if normalizeRoomID(roomID) == officeRoomID {
+		return ""
+	}
+	return strings.TrimSpace(roomID)
+}
+
 type meetingStoreState struct {
 	Meetings  []meetingRecord `json:"meetings"`
 	UpdatedAt string          `json:"updatedAt,omitempty"`
 }
 
 type meetingStore struct {
-	mu        sync.Mutex
-	path      string
-	records   []meetingRecord // oldest-first, capped
-	idleTimer *time.Timer
-	// idleGeneration invalidates an in-flight idle fire: every admission's
-	// cancelIdleEnd (and every re-arm) bumps it, and endMeetingForIdle only
-	// closes the record when the generation captured at arm time still
-	// matches — validated under mu in the SAME critical section that stamps
-	// EndedAt, so a join landing after the fire's occupancy check can never
-	// have its meeting closed underneath it.
-	idleGeneration uint64
+	mu      sync.Mutex
+	path    string
+	records []meetingRecord // oldest-first, capped
+	// idleTimers holds each room's pending idle-end timer (multi-room W2:
+	// every sitting seam is keyed by normalized room id; office aliases the
+	// pre-room behavior exactly).
+	idleTimers map[string]*time.Timer
+	// idleGenerations invalidates an in-flight idle fire PER ROOM: every
+	// admission's cancelIdleEnd (and every re-arm) bumps the room's
+	// generation, and endMeetingForIdle only closes the record when the
+	// generation captured at arm time still matches — validated under mu in
+	// the SAME critical section that stamps EndedAt, so a join landing after
+	// the fire's occupancy check can never have its meeting closed underneath
+	// it, and room A's fire can never validate against room B's counter.
+	idleGenerations map[string]uint64
 }
 
 func meetingsPath() string {
@@ -191,42 +213,72 @@ func cloneMeetingRecord(record meetingRecord) meetingRecord {
 	return record
 }
 
-// openRecordIndexLocked returns the index of the newest open record, or -1.
-func (store *meetingStore) openRecordIndexLocked() int {
+// openRecordIndexLocked returns the index of the room's newest open record,
+// or -1. Room identity follows meetingRoomID (absent RoomID == office).
+func (store *meetingStore) openRecordIndexLocked(roomID string) int {
+	roomID = normalizeRoomID(roomID)
 	for index := len(store.records) - 1; index >= 0; index-- {
-		if store.records[index].EndedAt == "" {
+		if store.records[index].EndedAt == "" && meetingRoomID(store.records[index]) == roomID {
 			return index
 		}
 	}
 	return -1
 }
 
-// activeRecord returns the newest open record.
-func (store *meetingStore) activeRecord() (meetingRecord, bool) {
+// activeRecord returns the room's newest open record.
+func (store *meetingStore) activeRecord(roomID string) (meetingRecord, bool) {
 	if store == nil {
 		return meetingRecord{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if index := store.openRecordIndexLocked(); index >= 0 {
+	if index := store.openRecordIndexLocked(roomID); index >= 0 {
 		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
 }
 
-// startMeeting opens (or extends) the record for id. If the open record
-// already carries the SAME id the start is a no-op that unions participants;
-// an open record with a DIFFERENT id (should not happen; defensive against
-// the idle-timer race) is closed with reason restart first.
-func (store *meetingStore) startMeeting(id string, startedAt time.Time, participants []string) (meetingRecord, bool) {
+// openRoomIDs lists the rooms that currently hold an open record — the boot
+// reconciliation walks these alongside the memory store's resumed rooms.
+func (store *meetingStore) openRoomIDs() []string {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	seen := map[string]struct{}{}
+	roomIDs := []string{}
+	for _, record := range store.records {
+		if record.EndedAt != "" {
+			continue
+		}
+		roomID := meetingRoomID(record)
+		if _, ok := seen[roomID]; ok {
+			continue
+		}
+		seen[roomID] = struct{}{}
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs
+}
+
+// startMeeting opens (or extends) the room's record for id. If the room's
+// open record already carries the SAME id the start is a no-op that unions
+// participants; an open record with a DIFFERENT id (should not happen;
+// defensive against the idle-timer race) is closed with reason restart first.
+// The defensive close is room-scoped by construction: it can only ever close
+// a record belonging to the SAME room (openRecordIndexLocked filters by
+// room), so one room starting a sitting never restarts another's.
+func (store *meetingStore) startMeeting(roomID string, id string, startedAt time.Time, participants []string) (meetingRecord, bool) {
 	if store == nil || strings.TrimSpace(id) == "" {
 		return meetingRecord{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if index := store.openRecordIndexLocked(); index >= 0 {
+	if index := store.openRecordIndexLocked(roomID); index >= 0 {
 		if store.records[index].ID == id {
 			union, changed := unionMeetingParticipants(store.records[index].Participants, participants)
 			if changed {
@@ -242,6 +294,7 @@ func (store *meetingStore) startMeeting(id string, startedAt time.Time, particip
 	union, _ := unionMeetingParticipants(nil, participants)
 	record := meetingRecord{
 		ID:           id,
+		RoomID:       storedMeetingRoomID(roomID),
 		StartedAt:    startedAt.UTC().Format(time.RFC3339Nano),
 		Participants: union,
 	}
@@ -253,6 +306,48 @@ func (store *meetingStore) startMeeting(id string, startedAt time.Time, particip
 	return cloneMeetingRecord(record), true
 }
 
+// recordByID returns the record (open or ended) carrying id — the
+// meetingListenOnly lookup workers use over historical windows.
+func (store *meetingStore) recordByID(id string) (meetingRecord, bool) {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return meetingRecord{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.records) - 1; index >= 0; index-- {
+		if store.records[index].ID == id {
+			return cloneMeetingRecord(store.records[index]), true
+		}
+	}
+	return meetingRecord{}, false
+}
+
+// latchListenOnly sets the §7.1 per-sitting listen-only latch on the OPEN
+// record carrying id. One-way by construction: nothing ever writes false, so
+// the latch persists after the last guest leaves and only the next sitting's
+// fresh record returns to full mode.
+func (store *meetingStore) latchListenOnly(id string) (meetingRecord, bool) {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return meetingRecord{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.records) - 1; index >= 0; index-- {
+		if store.records[index].ID != id || store.records[index].EndedAt != "" {
+			continue
+		}
+		if store.records[index].ListenOnly {
+			return cloneMeetingRecord(store.records[index]), false
+		}
+		store.records[index].ListenOnly = true
+		store.persistLocked()
+		return cloneMeetingRecord(store.records[index]), true
+	}
+	return meetingRecord{}, false
+}
+
 // addParticipant union-adds a canonical name to the open record with this id.
 func (store *meetingStore) addParticipant(id string, name string) (meetingRecord, bool) {
 	if store == nil || strings.TrimSpace(id) == "" {
@@ -261,8 +356,16 @@ func (store *meetingStore) addParticipant(id string, name string) (meetingRecord
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	index := store.openRecordIndexLocked()
-	if index < 0 || store.records[index].ID != id {
+	// look the OPEN record up by id directly (ids are globally unique): with
+	// per-room records the newest open record may belong to another room.
+	index := -1
+	for candidate := len(store.records) - 1; candidate >= 0; candidate-- {
+		if store.records[candidate].ID == id && store.records[candidate].EndedAt == "" {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
 		return meetingRecord{}, false
 	}
 	union, changed := unionMeetingParticipants(store.records[index].Participants, []string{name})
@@ -286,17 +389,18 @@ func (store *meetingStore) endMeeting(id string, endedAt time.Time, reason strin
 }
 
 // endMeetingIfIdleGeneration is endMeeting for the idle-end seam: the close
-// only lands when generation still matches idleGeneration, checked under mu
-// atomically with the EndedAt stamp. A rejoin whose cancelIdleEnd bumped the
-// generation after the timer fired makes the in-flight close a no-op.
-func (store *meetingStore) endMeetingIfIdleGeneration(id string, endedAt time.Time, generation uint64) (meetingRecord, bool) {
+// only lands when generation still matches the ROOM's idle generation,
+// checked under mu atomically with the EndedAt stamp. A rejoin whose
+// cancelIdleEnd bumped the room's generation after the timer fired makes the
+// in-flight close a no-op — and another room's fire can never validate here.
+func (store *meetingStore) endMeetingIfIdleGeneration(roomID string, id string, endedAt time.Time, generation uint64) (meetingRecord, bool) {
 	if store == nil || strings.TrimSpace(id) == "" {
 		return meetingRecord{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if generation != store.idleGeneration {
+	if generation != store.idleGenerations[normalizeRoomID(roomID)] {
 		return meetingRecord{}, false
 	}
 	return store.endMeetingLocked(id, endedAt, meetingEndedReasonIdle, "")
@@ -442,39 +546,51 @@ func (store *meetingStore) countStartedSince(now time.Time) (int, int) {
 	return today, week
 }
 
-// armIdleEnd schedules fire after the idle grace; arming replaces any pending
-// timer (which bumps the generation so the replaced fire cannot land). fire
-// receives the generation captured at arm time and must hand it back to
-// endMeetingIfIdleGeneration for validation.
-func (store *meetingStore) armIdleEnd(fire func(generation uint64)) {
+// armIdleEnd schedules fire for the room after the idle grace; arming
+// replaces any pending timer for that room (which bumps the room's generation
+// so the replaced fire cannot land). fire receives the generation captured at
+// arm time and must hand it back to endMeetingIfIdleGeneration for
+// validation. Timers are per room: arming room A never disturbs room B's.
+func (store *meetingStore) armIdleEnd(roomID string, fire func(generation uint64)) {
 	if store == nil {
 		return
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if store.idleTimer != nil {
-		store.idleTimer.Stop()
-		store.idleGeneration++
+	roomID = normalizeRoomID(roomID)
+	if store.idleTimers == nil {
+		store.idleTimers = map[string]*time.Timer{}
 	}
-	generation := store.idleGeneration
-	store.idleTimer = time.AfterFunc(meetingIdleEndGrace(), func() { fire(generation) })
+	if store.idleGenerations == nil {
+		store.idleGenerations = map[string]uint64{}
+	}
+	if store.idleTimers[roomID] != nil {
+		store.idleTimers[roomID].Stop()
+		store.idleGenerations[roomID]++
+	}
+	generation := store.idleGenerations[roomID]
+	store.idleTimers[roomID] = time.AfterFunc(meetingIdleEndGrace(), func() { fire(generation) })
 }
 
-// cancelIdleEnd stops any pending idle end AND bumps the generation: a timer
-// whose callback already fired (Stop returned false) is invalidated before it
-// can stamp EndedAt.
-func (store *meetingStore) cancelIdleEnd() {
+// cancelIdleEnd stops the room's pending idle end AND bumps the room's
+// generation: a timer whose callback already fired (Stop returned false) is
+// invalidated before it can stamp EndedAt.
+func (store *meetingStore) cancelIdleEnd(roomID string) {
 	if store == nil {
 		return
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	store.idleGeneration++
-	if store.idleTimer != nil {
-		store.idleTimer.Stop()
-		store.idleTimer = nil
+	roomID = normalizeRoomID(roomID)
+	if store.idleGenerations == nil {
+		store.idleGenerations = map[string]uint64{}
+	}
+	store.idleGenerations[roomID]++
+	if store.idleTimers[roomID] != nil {
+		store.idleTimers[roomID].Stop()
+		delete(store.idleTimers, roomID)
 	}
 }
 
@@ -501,6 +617,7 @@ func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 	}
 	return map[string]any{
 		"id":              record.ID,
+		"roomId":          normalizeRoomID(record.RoomID),
 		"title":           record.Title,
 		"titleSource":     record.TitleSource,
 		"startedAt":       record.StartedAt,
@@ -516,67 +633,82 @@ func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 
 /* ---------- app lifecycle hooks ---------- */
 
-// noteMeetingAdmission opens/extends the meeting record for an admitted
-// participant. Called from the websocket accept path AFTER
-// admitParticipantSession succeeds. Cancels any pending idle end FIRST so a
-// rejoin inside the grace window keeps the meeting open. Broadcasts `meeting`
-// on change.
-func (app *kanbanBoardApp) noteMeetingAdmission(name string) {
+// noteMeetingAdmission opens/extends the room's meeting record for an
+// admitted participant. Called from the websocket accept path AFTER
+// admitParticipantSession succeeds. Cancels the room's pending idle end FIRST
+// so a rejoin inside the grace window keeps the meeting open. Broadcasts
+// `meeting` on change.
+func (app *kanbanBoardApp) noteMeetingAdmission(roomID string, name string) {
 	if app == nil || app.meetings == nil || app.memory == nil {
 		return
 	}
-	app.meetings.cancelIdleEnd()
-	id := app.memory.ensureMeetingID()
+	roomID = normalizeRoomID(roomID)
+	app.meetings.cancelIdleEnd(roomID)
+	id := app.memory.ensureMeetingID(roomID)
 	if app.meetings.hasEndedRecord(id) {
 		// The idle-end fire (or an archive) closed this id after the memory
 		// store handed it out but before its rotation landed. An ended id must
 		// never be re-minted onto a second record: rotate and start fresh. The
 		// closer's own rotation is conditional (rotateMeetingIDIfCurrent), so
 		// the fresh id below can never be clobbered by the racing seam.
-		app.memory.rotateMeetingID()
-		id = app.memory.ensureMeetingID()
+		app.memory.rotateMeetingID(roomID)
+		id = app.memory.ensureMeetingID(roomID)
 	}
-	record, changed := app.meetings.startMeeting(id, time.Now().UTC(), []string{name})
+	record, changed := app.meetings.startMeeting(roomID, id, time.Now().UTC(), []string{name})
+	// §7.1 listen-only latch: guest-enabled at the sitting's start OR a guest
+	// admitted mid-sitting (guest admissions land here too) latches the record.
+	// One-way — latchListenOnly never writes false — so a guest leaving
+	// mid-meeting cannot return the sitting to full mode.
+	if !record.ListenOnly && app.roomListenOnly(roomID) {
+		if latched, flipped := app.meetings.latchListenOnly(id); flipped {
+			record = latched
+			changed = true
+		}
+	}
 	if changed {
 		app.broadcastMeetingRecord(record)
 	}
 }
 
-// noteMeetingOccupancy arms the idle-end timer when the room empties. Called
-// after forgetParticipantSession in the websocket cleanup path.
-func (app *kanbanBoardApp) noteMeetingOccupancy() {
+// noteMeetingOccupancy arms the room's idle-end timer when that room empties.
+// Called after forgetParticipantSession in the websocket cleanup path.
+func (app *kanbanBoardApp) noteMeetingOccupancy(roomID string) {
 	if app == nil || app.meetings == nil {
 		return
 	}
-	if app.activeParticipantCount() > 0 {
+	roomID = normalizeRoomID(roomID)
+	if app.activeParticipantCount(roomID) > 0 {
 		return
 	}
-	if _, ok := app.meetings.activeRecord(); !ok {
+	if _, ok := app.meetings.activeRecord(roomID); !ok {
 		return
 	}
-	app.meetings.armIdleEnd(app.endMeetingForIdle)
+	app.meetings.armIdleEnd(roomID, func(generation uint64) { app.endMeetingForIdle(roomID, generation) })
 }
 
-// endMeetingForIdle fires from the grace timer: re-check emptiness, close the
-// record, and rotate the memory meeting id so record lifecycle and entry
-// keying stay aligned (the invariant other designs rely on). The locks never
-// overlap, so the close itself validates the arm-time generation against
-// cancelIdleEnd (see endMeetingIfIdleGeneration) — an admission racing the
-// fired timer keeps its meeting open, and the rotation is conditional so a
-// racing admission's freshly minted id is never cleared.
-func (app *kanbanBoardApp) endMeetingForIdle(generation uint64) {
+// endMeetingForIdle fires from a room's grace timer: re-check that room's
+// emptiness, close its record, and rotate its memory meeting id so record
+// lifecycle and entry keying stay aligned (the invariant other designs rely
+// on). The locks never overlap, so the close itself validates the arm-time
+// generation against the room's cancelIdleEnd counter (see
+// endMeetingIfIdleGeneration) — an admission racing the fired timer keeps its
+// meeting open, and the rotation is conditional AND room-scoped, so a racing
+// admission's freshly minted id — or another room's live sitting — is never
+// cleared.
+func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	if app == nil || app.meetings == nil {
 		return
 	}
-	if app.activeParticipantCount() > 0 {
+	roomID = normalizeRoomID(roomID)
+	if app.activeParticipantCount(roomID) > 0 {
 		// someone rejoined during the race; the meeting stays open.
 		return
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(roomID)
 	if !ok {
 		return
 	}
-	closed, changed := app.meetings.endMeetingIfIdleGeneration(record.ID, time.Now().UTC(), generation)
+	closed, changed := app.meetings.endMeetingIfIdleGeneration(roomID, record.ID, time.Now().UTC(), generation)
 	if !changed {
 		return
 	}
@@ -594,9 +726,12 @@ func (app *kanbanBoardApp) endMeetingForIdle(generation uint64) {
 	// below ALWAYS proceeds. A participant admitted mid-flush self-heals — the
 	// record is already ended, so noteMeetingAdmission mints a fresh id via
 	// hasEndedRecord and the conditional rotation here can never clobber it.
-	app.flushAmbientAgentsForClose("idle-end")
+	// W4: the flush is room-scoped (only the closing room's chain runs, under
+	// per-(agent, room) locks) and carries the sitting's listen-only latch so
+	// the board stage is skipped for a guest-exposed sitting (§7.3).
+	app.flushAmbientAgentsForClose("idle-end", roomID, closed.ListenOnly)
 	if app.memory != nil {
-		app.memory.rotateMeetingIDIfCurrent(closed.ID)
+		app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
 	}
 	app.broadcastMeetingRecord(closed)
 	// The session is over for good (empty past the grace): silently archive
@@ -604,46 +739,75 @@ func (app *kanbanBoardApp) endMeetingForIdle(generation uint64) {
 	// the prior one preserved. Synchronous is fine — this already runs on the
 	// grace timer's goroutine, and a contentless meeting is skipped inside.
 	app.autoArchiveIdleMeeting(closed)
+	// Multi-room W3 (§4.4): AFTER the close-flush chain and archive, tear down
+	// the named room's lazy media (lane, mixer, cap timer) and bump mediaGen.
+	// A rejoin during the grace window cancels the idle end upstream; a rejoin
+	// after this simply recreates media at the next admission. Office media
+	// stays boot-managed until W4 (no-op inside).
+	app.teardownRoomMediaAfterIdle(roomID)
+	broadcastRoomsSnapshot()
 }
 
-// reconcileMeetingRecordsAtBoot runs once from newKanbanBoardApp: a stale open
-// record whose id no longer matches the resumed memory meeting id closes with
-// reason restart; a matching open record (memory resumed the same in-flight
-// meeting) stays open with the idle timer armed — occupancy is zero at boot,
-// and a join inside the grace window cancels it. With NO open record, a
-// resumed memory id that matches an ENDED record is rotated away: idle end
-// rotates only in-process, so after a restart newMeetingMemoryStore resumes
-// the ended meeting's id (the last JSONL entry is not an archive) and the
-// next admission would otherwise re-mint it onto a duplicate record.
+// reconcileMeetingRecordsAtBoot runs once from newKanbanBoardApp, PER ROOM
+// (the union of rooms holding an open record and rooms whose memory meeting
+// id resumed): a stale open record whose id no longer matches the room's
+// resumed memory meeting id closes with reason restart; a matching open
+// record (memory resumed the same in-flight meeting) stays open with the
+// room's idle timer armed — occupancy is zero at boot, and a join inside the
+// grace window cancels it. With NO open record, a resumed memory id that
+// matches an ENDED record is rotated away: idle end rotates only in-process,
+// so after a restart newMeetingMemoryStore resumes the ended meeting's id
+// (the room's last JSONL entry is not an archive) and the next admission
+// would otherwise re-mint it onto a duplicate record.
 func (app *kanbanBoardApp) reconcileMeetingRecordsAtBoot() {
 	if app == nil || app.meetings == nil {
 		return
 	}
-	record, ok := app.meetings.activeRecord()
+	roomIDs := map[string]struct{}{officeRoomID: {}}
+	for _, roomID := range app.meetings.openRoomIDs() {
+		roomIDs[roomID] = struct{}{}
+	}
+	if app.memory != nil {
+		for _, roomID := range app.memory.meetingRoomIDs() {
+			roomIDs[roomID] = struct{}{}
+		}
+	}
+	for roomID := range roomIDs {
+		app.reconcileMeetingRecordsAtBootForRoom(roomID)
+	}
+}
+
+func (app *kanbanBoardApp) reconcileMeetingRecordsAtBootForRoom(roomID string) {
+	roomID = normalizeRoomID(roomID)
+	record, ok := app.meetings.activeRecord(roomID)
 	if !ok {
-		if resumed := app.memory.currentMeetingID(); resumed != "" && app.meetings.hasEndedRecord(resumed) {
-			app.memory.rotateMeetingID()
+		if resumed := app.memory.currentMeetingID(roomID); resumed != "" && app.meetings.hasEndedRecord(resumed) {
+			app.memory.rotateMeetingID(roomID)
 		}
 		return
 	}
-	if record.ID != app.memory.currentMeetingID() {
+	if record.ID != app.memory.currentMeetingID(roomID) {
 		app.meetings.endMeeting(record.ID, time.Now().UTC(), meetingEndedReasonRestart, "")
 		return
 	}
-	app.meetings.armIdleEnd(app.endMeetingForIdle)
+	app.meetings.armIdleEnd(roomID, func(generation uint64) { app.endMeetingForIdle(roomID, generation) })
 }
 
 func (app *kanbanBoardApp) broadcastMeetingRecord(record meetingRecord) {
-	broadcastSignedInKanbanEvent("meeting", meetingRecordPayload(record, time.Now().UTC()))
+	payload := meetingRecordPayload(record, time.Now().UTC())
+	broadcastSignedInKanbanEvent("meeting", payload)
+	// Guests never appear in the signed-in pools, but their own room's meeting
+	// record is allowlisted state — deliver it on the guest sidecar (§5.4).
+	broadcastRoomGuestsKanbanEvent(record.RoomID, "meeting", payload)
 }
 
-// meetingSnapshot returns the active record payload for direct sends / HTTP,
-// or nil when no meeting is active (the client clears its state on null).
-func (app *kanbanBoardApp) meetingSnapshot() map[string]any {
+// meetingSnapshot returns the room's active record payload for direct sends /
+// HTTP, or nil when no meeting is active (the client clears its state on null).
+func (app *kanbanBoardApp) meetingSnapshot(roomID string) map[string]any {
 	if app == nil || app.meetings == nil {
 		return nil
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(roomID)
 	if !ok {
 		return nil
 	}

@@ -315,6 +315,10 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 
 	deltas := make([]string, 0, len(inputs))
 	for _, input := range inputs {
+		// §6.4 (RATIFIED 2026-07-09): listen-only-sitting deltas flow into the
+		// company narrative like any other material — external-meeting memory
+		// must be Scout-recallable company-wide. Provenance stays on the
+		// upstream stamps; re-quarantining is a read-side filter on them.
 		if line, ok := describeLedgerDelta(input); ok {
 			deltas = append(deltas, line)
 		}
@@ -347,8 +351,8 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 		return meetingMemoryEntry{}, err
 	}
 	metadata := map[string]string{
-		"source": companyDigestSource,
-		"model":  model,
+		"source":                       companyDigestSource,
+		"model":                        model,
 		companyDigestCursorMetadataKey: inputs[len(inputs)-1].ID,
 		"eventCount":                   strconv.Itoa(len(inputs)),
 		"generatedAt":                  now.UTC().Format(time.RFC3339),

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -180,71 +181,56 @@ type kanbanBoardApp struct {
 	updatedAt        time.Time
 	handledCalls     map[string]struct{}
 	memory           *meetingMemoryStore
-	// participants maps a present account's canonical name to the last time its
-	// room socket proved liveness (admission, an inbound room frame, or a pong).
-	// The liveness sweep reaps an account whose stamp is stale past
-	// participantLivenessTimeout, the backstop that lets activeParticipantCount()
-	// reach zero when a zombie/backgrounded socket lingers.
-	participants      map[string]time.Time
-	participantCounts map[string]int
-	// participantEndpoints keys live sessions by (participant name -> endpoint
-	// id -> session id). One account can hold several concurrent endpoints (a
-	// laptop and a phone) at once; each device has a stable endpoint id and its
-	// own session slot, so a refresh on one device replaces only that device's
-	// prior session while the other device stays admitted. Legacy/native
-	// clients that send no endpoint id share the empty-string slot, which
-	// collapses to the original one-name-one-session behaviour.
-	participantEndpoints         map[string]map[string]string
-	participantMedia             map[string]participantMediaState
-	transcriptRecordingEnabled   bool
-	transcriptRecordingUpdatedAt time.Time
-	transcriptRecordingUpdatedBy string
-	lastDeletedCard              *kanbanCard
-	apiKey                       string
-	restarting                   bool
-	assistantStatus              string
+	// roomLive is the per-room live plane (multi-room W3, room_live.go): each
+	// room's presence maps (participant name -> liveness stamp, endpoint
+	// sessions, media state — the laptop+phone endpoint contract unchanged),
+	// recording toggle, speaker-attribution state, and lazy mixer/lane. The
+	// office room is seeded at construction; a room's state is created lazily
+	// on first touch. Guarded by mu, exactly like the fields it replaced.
+	roomLive        map[string]*roomLiveState
+	lastDeletedCard *kanbanCard
+	apiKey          string
+	restarting      bool
+	assistantStatus string
 
-	model                   string
-	pc                      *webrtc.PeerConnection
-	events                  *webrtc.DataChannel
-	inputTrack              *webrtc.TrackLocalStaticSample
-	inputEnc                *opusEncoder
-	connected               bool
-	forwardedAudioNotice    bool
-	realtimeResponseActive  bool
-	voiceControlActive      bool
-	voiceControlUpdatedAt   time.Time
-	voiceControlUpdatedBy   string
-	scoutVoiceArmedAt       time.Time
-	scoutVoiceArmedUntil    time.Time
-	scoutSpokenResponse     bool
-	scoutSpokenResponseSent bool
-	scoutLastToolResultAt   time.Time
-	scoutLastToolResultName string
-	scoutToolCallsInFlight  int
-	transcriptLane          *meetingTranscriptionLane
-	audioActivity           []participantAudioFrame
-	currentSpeechStartedAt  time.Time
-	currentSpeechStoppedAt  time.Time
-	// A6: attribution windows frozen at input_audio_buffer.commit time, in commit
-	// order. speakerForCommittedTranscript pops the front when the matching
-	// transcription.completed lands, so a rapid B-follows-A handoff can no longer
-	// mis-attribute A's committed text to B (whose turn overwrote the shared
-	// currentSpeech* markers while A's completed event was still in flight).
-	pendingAttributionWindows []attributionWindow
-	activeSpeakerName         string
-	activeSpeakerCandidate    string
-	activeSpeakerCandidateAt  time.Time
-	activeSpeakerPayload      *activeSpeakerPayload
-	proactiveReconnectCancel  chan struct{}
-	agentCancels              map[string]chan struct{}
-	agentDones                map[string]chan struct{}
-	agentBaselineIDs          map[string]string
-	agentRunLocks             map[string]*sync.Mutex
+	model                    string
+	pc                       *webrtc.PeerConnection
+	events                   *webrtc.DataChannel
+	inputTrack               *webrtc.TrackLocalStaticSample
+	inputEnc                 *opusEncoder
+	connected                bool
+	forwardedAudioNotice     bool
+	realtimeResponseActive   bool
+	voiceControlActive       bool
+	voiceControlUpdatedAt    time.Time
+	voiceControlUpdatedBy    string
+	scoutVoiceArmedAt        time.Time
+	scoutVoiceArmedUntil     time.Time
+	scoutSpokenResponse      bool
+	scoutSpokenResponseSent  bool
+	scoutLastToolResultAt    time.Time
+	scoutLastToolResultName  string
+	scoutToolCallsInFlight   int
+	transcriptLane           *meetingTranscriptionLane
+	proactiveReconnectCancel chan struct{}
+	// realtimeStarting serializes lazy admission-time peer creation (W4 §4.4);
+	// realtimeMediaGen captures the office roomLive mediaGen the current peer
+	// was created under so restart loops abort after an idle teardown bumps it
+	// (the teardown-vs-restart fence).
+	realtimeStarting bool
+	realtimeMediaGen uint64
+	agentCancels     map[string]chan struct{}
+	agentDones       map[string]chan struct{}
+	agentBaselineIDs map[string]string
+	agentRunLocks    map[string]*sync.Mutex
 	// agentNudges holds the A3 per-agent buffered(1) wake channels (agent_runner.go):
 	// a transcript append, or the brain-append cascade, signals one so the runner
 	// re-checks its window immediately instead of waiting for the safety-floor tick.
 	agentNudges map[string]chan struct{}
+	// agentPendingRooms records WHICH rooms nudged each agent since its last
+	// wake (multi-room W4 §7.4): the wake channel stays buffered(1) so bursts
+	// coalesce, and the pending set guarantees no room's nudge is lost.
+	agentPendingRooms map[string]map[string]struct{}
 	// agentFailures holds the A8 per-agent same-window retry state (attempts +
 	// backoff, agent_runner.go) so a permanently-failing window backs off and is
 	// finally skipped instead of re-sent every tick forever.
@@ -354,17 +340,14 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:                        cards,
-		nextCreatedIndex:             nextKanbanCardIndex(cards),
-		updatedAt:                    updatedAt,
-		handledCalls:                 map[string]struct{}{},
-		memory:                       memory,
-		participants:                 map[string]time.Time{},
-		participantCounts:            map[string]int{},
-		participantEndpoints:         map[string]map[string]string{},
-		participantMedia:             map[string]participantMediaState{},
-		transcriptRecordingEnabled:   true,
-		transcriptRecordingUpdatedAt: updatedAt,
+		cards:            cards,
+		nextCreatedIndex: nextKanbanCardIndex(cards),
+		updatedAt:        updatedAt,
+		handledCalls:     map[string]struct{}{},
+		memory:           memory,
+		roomLive: map[string]*roomLiveState{
+			officeRoomID: newRoomLiveState(officeRoomID, updatedAt),
+		},
 	}
 	if notifications, err := loadNotificationStoreState(notificationsPath()); err != nil {
 		log.Errorf("Notification persistence disabled: %v", err)
@@ -532,7 +515,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.mu.Lock()
 	app.apiKey = apiKey
 	app.mu.Unlock()
-	app.startTranscriptionLane(apiKey)
+	// W4 (§4.4/§9.10, the plan's ONE deliberate behavior change): the office
+	// transcription lane and the Scout Realtime peer are no longer boot-started
+	// — they are created lazily at the first admission (ensureRoomMedia →
+	// ensureOfficeMedia) and torn down after the idle-end close chain, ending
+	// the always-on OpenAI spend. Scout connects concurrently with the join
+	// handshake, so the first-join delay is invisible.
 	app.startMeetingBrainWorker(apiKey)
 	app.startMeetingBoardWorker(apiKey)
 	// Item B: the ambient research-suggestion worker rides the SAME brain stream
@@ -570,11 +558,84 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startWorkflowTicker()
 	app.reconcileGoalThreadsAtBoot()
 
-	if err := app.startRealtimePeer(apiKey, realtimeModel()); err != nil {
-		return err
-	}
-
 	return nil
+}
+
+// ensureOfficeMedia lazily creates the office's media plane on admission (W4
+// §4.4): the transcription lane on first seat, and the Scout Realtime peer
+// ONLY while the sitting is not listen-only (§7.3's never-started layer).
+// Idempotent per sitting; keyless boots no-op exactly like before.
+func (app *kanbanBoardApp) ensureOfficeMedia() {
+	app.mu.Lock()
+	apiKey := app.apiKey
+	laneRunning := app.transcriptLane != nil
+	app.mu.Unlock()
+	if strings.TrimSpace(apiKey) == "" {
+		return
+	}
+	if !laneRunning {
+		app.startTranscriptionLane(apiKey)
+	}
+	if !app.sittingListenOnly(officeRoomID) {
+		app.ensureOfficeRealtimePeer(apiKey)
+	}
+}
+
+// ensureOfficeRealtimePeer starts the office Scout peer when none is live.
+// The office roomLive mediaGen is captured onto realtimeMediaGen so the
+// restart loops are fenced against a teardown (the sitting ended) racing a
+// reconnect — a moved gen aborts the restart instead of resurrecting a peer
+// for an empty room.
+func (app *kanbanBoardApp) ensureOfficeRealtimePeer(apiKey string) {
+	app.mu.Lock()
+	if app.pc != nil || app.restarting || app.realtimeStarting {
+		app.mu.Unlock()
+		return
+	}
+	app.realtimeStarting = true
+	app.realtimeMediaGen = app.roomLiveLocked(officeRoomID).mediaGen
+	app.mu.Unlock()
+
+	err := app.startRealtimePeer(apiKey, realtimeModel())
+	app.mu.Lock()
+	app.realtimeStarting = false
+	app.mu.Unlock()
+	if err != nil {
+		log.Errorf("Failed to start OpenAI Realtime peer on admission: %v", err)
+		broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
+	}
+}
+
+// teardownRealtimePeerForIdle closes the office Scout peer at the tail of the
+// office idle-end close chain (W4 §4.4) WITHOUT scheduling a restart: the
+// proactive-restart cancel is closed, every session field resets, and the
+// next admission recreates the peer via ensureOfficeMedia.
+func (app *kanbanBoardApp) teardownRealtimePeerForIdle() {
+	app.mu.Lock()
+	peerConnection := app.pc
+	app.pc = nil
+	app.events = nil
+	app.inputTrack = nil
+	app.inputEnc = nil
+	app.connected = false
+	app.forwardedAudioNotice = false
+	app.realtimeResponseActive = false
+	app.scoutVoiceArmedAt = time.Time{}
+	app.scoutVoiceArmedUntil = time.Time{}
+	app.scoutSpokenResponse = false
+	app.scoutSpokenResponseSent = false
+	app.scoutLastToolResultAt = time.Time{}
+	app.scoutLastToolResultName = ""
+	cancelProactiveRestart := app.proactiveReconnectCancel
+	app.proactiveReconnectCancel = nil
+	app.mu.Unlock()
+
+	if cancelProactiveRestart != nil {
+		close(cancelProactiveRestart)
+	}
+	if peerConnection != nil {
+		_ = peerConnection.Close()
+	}
 }
 
 func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string) error {
@@ -717,6 +778,14 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 		app.mu.Unlock()
 		return
 	}
+	// W4 mediaGen fence: after an idle teardown (pc nil, or the office media
+	// generation moved) there is nothing to restart — the next admission
+	// recreates the peer lazily. Without this, a queued reconnect could
+	// resurrect a Scout session for an empty room.
+	if app.pc == nil || app.roomLiveLocked(officeRoomID).mediaGen != app.realtimeMediaGen {
+		app.mu.Unlock()
+		return
+	}
 	app.restarting = true
 	apiKey := app.apiKey
 	peerConnection := app.pc
@@ -801,6 +870,7 @@ func (app *kanbanBoardApp) Close() error {
 		app.agentDones = nil
 		app.agentBaselineIDs = nil
 		app.agentNudges = nil
+		app.agentPendingRooms = nil
 		app.agentFailures = nil
 		app.mu.Unlock()
 		if transcriptLane != nil {
@@ -1015,7 +1085,10 @@ func (app *kanbanBoardApp) forwardRealtimeOutputTrack(t *webrtc.TrackRemote) {
 		"payloadType":   t.PayloadType(),
 	})
 
-	trackLocal, err := addTrack(t, scoutParticipantName, "scout")
+	// Scout's realtime output voice registers ONLY into its room's track table
+	// (the office until the W4 per-room realtime extraction), so a second
+	// room's subscribers are never offered it.
+	trackLocal, err := addTrack(officeRoomID, t, scoutParticipantName, "scout")
 	if err != nil {
 		log.Errorf("Failed to create local track for Scout voice=%s: %v", t.ID(), err)
 		return
@@ -2519,7 +2592,7 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 	case "conversation.item.input_audio_transcription.completed":
 		app.armScoutVoiceResponse(event.Transcript)
 		if !app.transcriptionLaneConnected() {
-			app.rememberTranscript(event, "scout_realtime", app.currentRealtimeModel())
+			app.rememberTranscript(officeRoomID, event, "scout_realtime", app.currentRealtimeModel())
 		}
 	case "conversation.item.input_audio_transcription.failed":
 		// A6: mirror the .completed gate. When the Scout peer is the persisting
@@ -2917,7 +2990,7 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// in applyPrivateRealtimeVoiceTool and passes no origin.
 		return app.launchRealtimeAgentThread(args, map[string]string{
 			"originKind":      agentThreadOriginRoom,
-			"originMeetingId": app.memory.currentMeetingID(),
+			"originMeetingId": app.memory.currentMeetingID(officeRoomID),
 		})
 	case "update_artifact":
 		return app.updateRealtimeArtifact(args)
@@ -2970,9 +3043,11 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.createChannelByVoice(args, "")
 	case "meeting_recap":
 		// Room voice: audience "me" falls back to a room post (no requester).
-		return app.meetingRecap(args, "")
+		// The shared room voice is the office's (per-room Scout voice is not
+		// instantiated for named rooms), so the recap binds to the office.
+		return app.meetingRecap(args, "", officeRoomID)
 	case "catch_me_up":
-		return app.catchMeUp(args, "")
+		return app.catchMeUp(args, "", officeRoomID)
 	case "cross_meeting_briefing":
 		// Read-only cross-meeting recall; no requester needed, so the shared
 		// dispatch serves the room, private voice, and orchestrator paths.
@@ -3184,10 +3259,12 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 		return app.createChannelByVoice(args, requesterEmail)
 	}
 	if toolName == "meeting_recap" {
-		return app.meetingRecap(args, requesterEmail)
+		// W4: the recap binds to the caller's CURRENT room — a member in room A
+		// can never pull (or post) another room's recap through private voice.
+		return app.meetingRecap(args, requesterEmail, app.memberCurrentRoom(requesterEmail))
 	}
 	if toolName == "catch_me_up" {
-		return app.catchMeUp(args, requesterEmail)
+		return app.catchMeUp(args, requesterEmail, app.memberCurrentRoom(requesterEmail))
 	}
 	// Package mutations carry the signed-in requester's identity from the
 	// private dashboard voice; the shared dispatch falls back to Scout.
@@ -3641,21 +3718,21 @@ func normalizeRealtimeArtifactMode(mode string) string {
 	}
 }
 
-func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source string, model string) {
+func (app *kanbanBoardApp) rememberTranscript(roomID string, event kanbanRealtimeEvent, source string, model string) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; transcript was not saved")
 		return
 	}
-	if !app.transcriptRecordingActive() {
+	if !app.transcriptRecordingActiveInRoom(roomID) {
 		log.Infof("Transcript recording disabled; transcript was not saved")
 		return
 	}
 
-	speaker, confidence := app.speakerForCommittedTranscript(time.Now().UTC())
-	entry, appended, err := app.memory.appendAttributedTranscriptWithMetadata(event.EventID, event.ItemID, speaker, confidence, event.Transcript, map[string]string{
+	speaker, confidence := app.speakerForCommittedTranscriptForRoom(roomID, time.Now().UTC())
+	entry, appended, err := app.memory.appendAttributedTranscriptEntry(roomID, event.EventID, event.ItemID, speaker, confidence, event.Transcript, map[string]string{
 		"source": source,
 		"model":  model,
-	})
+	}, false, "")
 	if err != nil {
 		log.Errorf("Failed to write meeting memory: %v", err)
 		return
@@ -3665,17 +3742,19 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 	}
 
 	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
-	broadcastKanbanEvent("memory_transcript", entry)
-	// A3: wake the meeting-brain worker so it re-checks its window on this fresh
-	// transcript instead of waiting up to a full brain interval. The worker
-	// debounces (a buffered wake) and, once it appends, cascades the nudge to the
-	// board / decision / mission / narrative workers that consume brains.
-	app.nudgeAmbientAgent(meetingBrainAgentName)
+	broadcastRoomKanbanEvent(roomID, "memory_transcript", entry)
+	// A3: wake the meeting-brain worker so it re-checks THIS ROOM's window on
+	// this fresh transcript instead of waiting up to a full brain interval (W4
+	// §7.4: nudges carry the room). The worker debounces (a buffered wake) and,
+	// once it appends, cascades the room-carrying nudge to the board / decision
+	// / mission / narrative workers that consume brains.
+	app.nudgeAmbientAgentForRoom(meetingBrainAgentName, roomID)
 	// Wake-word presence cue (VISUAL only — no auto-arming): a transcript
 	// naming Scout pulses the brand mark / voice island on room clients.
 	// Detection lives only here, so typed room chat never pulses, and the
-	// recording toggle gates it (no transcripts = no presence).
-	if scoutWakePattern.MatchString(entry.Text) {
+	// recording toggle gates it (no transcripts = no presence). §7.3: a
+	// listen-only sitting has no Scout — the wake pulse is skipped too.
+	if scoutWakePattern.MatchString(entry.Text) && !app.sittingListenOnly(roomID) {
 		broadcastAssistantEvent("wake", "Scout heard its name", map[string]any{"speaker": speaker})
 	}
 }
@@ -3709,8 +3788,8 @@ func normalizeRoomChatText(text string) string {
 // rememberTranscript's broadcast pattern and returns the room_chat broadcast
 // payload. Speaker is passed explicitly; never speakerForCompletedTranscript,
 // which would steal attribution state from the audio pipeline.
-func (app *kanbanBoardApp) recordRoomChatMessage(senderName string, text string) (map[string]any, bool) {
-	return app.recordRoomChatMessageWithMetadata(senderName, text, nil)
+func (app *kanbanBoardApp) recordRoomChatMessage(roomID string, senderName string, text string) (map[string]any, bool) {
+	return app.recordRoomChatMessageWithMetadata(roomID, senderName, text, nil)
 }
 
 // recordRoomChatMessageWithArtifact posts a room-chat message that carries a
@@ -3720,25 +3799,25 @@ func (app *kanbanBoardApp) recordRoomChatMessage(senderName string, text string)
 // the append atomically on that meeting still being active (empty = ungated):
 // the delivery seam passes the origin meeting id so a rotation racing the
 // delivery can never mint a phantom meeting or leak into the successor.
-func (app *kanbanBoardApp) recordRoomChatMessageWithArtifact(senderName string, text string, artifactID string, expectedMeetingID string) (map[string]any, bool) {
+func (app *kanbanBoardApp) recordRoomChatMessageWithArtifact(roomID string, senderName string, text string, artifactID string, expectedMeetingID string) (map[string]any, bool) {
 	artifactID = strings.TrimSpace(artifactID)
 	if artifactID == "" {
-		return app.recordRoomChatMessage(senderName, text)
+		return app.recordRoomChatMessage(roomID, senderName, text)
 	}
 	// Scout is not a canonical meeting participant, so the transcript path's
 	// speaker normalization drops it; the explicit metadata fallback keeps the
 	// card attributed (a canonical sender still wins inside the append).
-	return app.recordRoomChatMessageForMeeting(senderName, text, map[string]string{
+	return app.recordRoomChatMessageForMeeting(roomID, senderName, text, map[string]string{
 		"artifactId": artifactID,
 		"speaker":    strings.TrimSpace(senderName),
 	}, expectedMeetingID)
 }
 
-func (app *kanbanBoardApp) recordRoomChatMessageWithMetadata(senderName string, text string, extraMetadata map[string]string) (map[string]any, bool) {
-	return app.recordRoomChatMessageForMeeting(senderName, text, extraMetadata, "")
+func (app *kanbanBoardApp) recordRoomChatMessageWithMetadata(roomID string, senderName string, text string, extraMetadata map[string]string) (map[string]any, bool) {
+	return app.recordRoomChatMessageForMeeting(roomID, senderName, text, extraMetadata, "")
 }
 
-func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(senderName string, text string, extraMetadata map[string]string, expectedMeetingID string) (map[string]any, bool) {
+func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, senderName string, text string, extraMetadata map[string]string, expectedMeetingID string) (map[string]any, bool) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; room chat message was not saved")
 		return nil, false
@@ -3749,7 +3828,7 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(senderName string, te
 	}
 
 	id := durableTimestampID("chat", time.Now())
-	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(id, senderName, text, extraMetadata, expectedMeetingID)
+	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, extraMetadata, expectedMeetingID)
 	if err != nil {
 		log.Errorf("Failed to write room chat to meeting memory: %v", err)
 		return nil, false
@@ -3759,11 +3838,11 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(senderName string, te
 	}
 
 	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
-	broadcastKanbanEvent("memory_transcript", entry)
-	// A3: typed room chat is a brain input too — wake the brain worker the same
-	// way spoken transcripts do so a text-only exchange is not left un-brained
-	// until the next floor tick.
-	app.nudgeAmbientAgent(meetingBrainAgentName)
+	broadcastRoomKanbanEvent(roomID, "memory_transcript", entry)
+	// A3: typed room chat is a brain input too — wake the brain worker for THIS
+	// ROOM the same way spoken transcripts do so a text-only exchange is not
+	// left un-brained until the next floor tick (W4 §7.4: nudges carry the room).
+	app.nudgeAmbientAgentForRoom(meetingBrainAgentName, roomID)
 	return roomChatEventPayload(entry), true
 }
 
@@ -3784,6 +3863,10 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 		"name":      name,
 		"text":      text,
 		"createdAt": entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+		// W5 §8.2: every room_chat frame carries its room so the client's
+		// roomId filter can scope it — a named room's recap delivery
+		// (broadcastRoomKanbanEvent, recap.go) has no other stamp.
+		"roomId": normalizeRoomID(entry.Metadata["roomId"]),
 	}
 	// Completion-delivery messages carry the artifact id so the client can
 	// render a "view report" chip on the bubble.
@@ -3837,15 +3920,20 @@ func roomChatEntryAuthoredBy(entry meetingMemoryEntry, requesterEmail string, re
 	return speaker != "" && strings.EqualFold(speaker, strings.TrimSpace(requesterName))
 }
 
-// roomChatHistory returns the newest room-chat messages of the current
-// meeting, oldest first, shaped like room_chat broadcast payloads.
+// roomChatHistory returns the newest room-chat messages of the office's
+// current meeting, oldest first, shaped like room_chat broadcast payloads.
 func (app *kanbanBoardApp) roomChatHistory(limit int) []map[string]any {
+	return app.roomChatHistoryForRoom(officeRoomID, limit)
+}
+
+// roomChatHistoryForRoom is roomChatHistory scoped to one room's live meeting.
+func (app *kanbanBoardApp) roomChatHistoryForRoom(roomID string, limit int) []map[string]any {
 	history := []map[string]any{}
 	if app == nil || app.memory == nil {
 		return history
 	}
 
-	entries := app.memory.snapshotForMeeting(app.memory.currentMeetingID(), 0)
+	entries := app.memory.snapshotForMeeting(app.memory.currentMeetingID(normalizeRoomID(roomID)), 0)
 	chats := make([]meetingMemoryEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Kind != meetingMemoryKindTranscript || entry.Metadata["source"] != transcriptSourceRoomChat {
@@ -4697,31 +4785,42 @@ func (app *kanbanBoardApp) admitParticipantSession(name string, sessionID string
 }
 
 // admitParticipantSessionEndpoint admits (or refreshes) one endpoint of an
-// account. Capacity is counted per distinct name, so a person on two devices
-// still consumes a single seat; the number of concurrent endpoints one account
-// may hold is bounded by maxEndpointsPerUser so fan-out stays affordable. The
-// returned firstEndpoint is true only when this admission brought the account
-// from absent to present, so callers can announce a genuine "joined" to the
-// room without firing a spurious join every time a second device connects.
+// account in the office — the legacy single-room contract every existing
+// caller and test relies on. Room-scoped admission (multi-room W3) rides
+// admitParticipantSessionEndpointInRoom.
 func (app *kanbanBoardApp) admitParticipantSessionEndpoint(name string, sessionID string, endpointID string) (admitted string, firstEndpoint bool, err error) {
-	name = canonicalParticipantName(name)
+	return app.admitParticipantSessionEndpointInRoom(officeRoomID, name, sessionID, endpointID)
+}
+
+// admitParticipantSessionEndpointInRoom admits (or refreshes) one endpoint of
+// an account in one room. Capacity is counted per distinct name, so a person
+// on two devices still consumes a single seat; the number of concurrent
+// endpoints one account may hold is bounded by maxEndpointsPerUser so fan-out
+// stays affordable. The returned firstEndpoint is true only when this
+// admission brought the account from absent to present, so callers can
+// announce a genuine "joined" to the room without firing a spurious join
+// every time a second device connects. Guest seats arrive here too, with the
+// server-minted "Guest " display name (canonicalRoomParticipantName).
+func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, name string, sessionID string, endpointID string) (admitted string, firstEndpoint bool, err error) {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return "", false, fmt.Errorf("choose a listed participant and enter the room password")
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
 
 	capacity := configuredMeetingRoomCapacity()
-	alreadyPresent := app.participantCounts[name] > 0
-	if !alreadyPresent && app.activeParticipantCountLocked() >= capacity {
+	alreadyPresent := state.participantCounts[name] > 0
+	if !alreadyPresent && app.activeParticipantCountInRoomLocked(state) >= capacity {
 		return "", false, fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
 	}
 
-	endpoints := app.participantEndpoints[name]
+	endpoints := state.participantEndpoints[name]
 	if endpoints == nil {
 		endpoints = map[string]string{}
-		app.participantEndpoints[name] = endpoints
+		state.participantEndpoints[name] = endpoints
 	}
 	_, endpointExisted := endpoints[endpointID]
 	if !endpointExisted && len(endpoints) >= maxEndpointsPerUser() {
@@ -4730,14 +4829,14 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpoint(name string, sessionI
 	endpoints[endpointID] = sessionID
 
 	now := time.Now().UTC()
-	app.participants[name] = now
-	app.participantCounts[name] = len(endpoints)
+	state.participants[name] = now
+	state.participantCounts[name] = len(endpoints)
 	// Reset the shared media state on a fresh account or when an endpoint's own
 	// session reconnects (a refreshed tab), but NOT when an additional device
 	// joins an already-present account — otherwise the first device's mute/
 	// camera state would be clobbered by the second device's arrival.
 	if !alreadyPresent || endpointExisted {
-		app.participantMedia[name] = participantMediaState{
+		state.participantMedia[name] = participantMediaState{
 			UpdatedAt: now.Format(time.RFC3339Nano),
 		}
 	}
@@ -4764,15 +4863,20 @@ func (app *kanbanBoardApp) forgetParticipantSession(name string, sessionID strin
 // endpoint after this removal, so callers announce "left" only when the last
 // device is gone — not when one of a person's two devices disconnects.
 func (app *kanbanBoardApp) forgetParticipantSessionResult(name string, sessionID string) (removed bool, stillPresent bool) {
-	name = canonicalParticipantName(name)
+	return app.forgetParticipantSessionResultInRoom(officeRoomID, name, sessionID)
+}
+
+func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, name string, sessionID string) (removed bool, stillPresent bool) {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return false, false
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
 
-	endpoints := app.participantEndpoints[name]
+	endpoints := state.participantEndpoints[name]
 
 	if sessionID != "" {
 		matchedEndpoint := ""
@@ -4785,20 +4889,20 @@ func (app *kanbanBoardApp) forgetParticipantSessionResult(name string, sessionID
 			}
 		}
 		if !matched {
-			return false, app.participantCounts[name] > 0
+			return false, state.participantCounts[name] > 0
 		}
 		delete(endpoints, matchedEndpoint)
 		if len(endpoints) > 0 {
-			app.participantCounts[name] = len(endpoints)
-			app.participants[name] = time.Now().UTC()
+			state.participantCounts[name] = len(endpoints)
+			state.participants[name] = time.Now().UTC()
 			return true, true
 		}
 	}
 
-	delete(app.participantCounts, name)
-	delete(app.participants, name)
-	delete(app.participantEndpoints, name)
-	delete(app.participantMedia, name)
+	delete(state.participantCounts, name)
+	delete(state.participants, name)
+	delete(state.participantEndpoints, name)
+	delete(state.participantMedia, name)
 
 	return true, false
 }
@@ -4808,22 +4912,27 @@ func (app *kanbanBoardApp) forgetParticipantSessionResult(name string, sessionID
 // replaces it on the SAME endpoint (a refreshed tab); a second device with its
 // own endpoint id never invalidates the first device's session.
 func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID string) bool {
-	name = canonicalParticipantName(name)
+	return app.participantSessionCurrentInRoom(officeRoomID, name, sessionID)
+}
+
+func (app *kanbanBoardApp) participantSessionCurrentInRoom(roomID string, name string, sessionID string) bool {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return false
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
 
-	if app.participantCounts[name] <= 0 {
+	if state.participantCounts[name] <= 0 {
 		return false
 	}
 	if sessionID == "" {
 		return true
 	}
 
-	for _, storedSessionID := range app.participantEndpoints[name] {
+	for _, storedSessionID := range state.participantEndpoints[name] {
 		if storedSessionID == sessionID {
 			return true
 		}
@@ -4838,18 +4947,23 @@ func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID stri
 // here; a stamp for an absent account is ignored so a late frame can never
 // resurrect a departed participant.
 func (app *kanbanBoardApp) touchParticipantLiveness(name string) {
-	name = canonicalParticipantName(name)
+	app.touchParticipantLivenessInRoom(officeRoomID, name)
+}
+
+func (app *kanbanBoardApp) touchParticipantLivenessInRoom(roomID string, name string) {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
 
-	if app.participantCounts[name] <= 0 {
+	if state.participantCounts[name] <= 0 {
 		return
 	}
-	app.participants[name] = time.Now().UTC()
+	state.participants[name] = time.Now().UTC()
 }
 
 // participantLivenessReap describes one account the liveness sweep dropped: its
@@ -4862,28 +4976,38 @@ type participantLivenessReap struct {
 }
 
 // reapStaleParticipantSessionsLocked drops every present account whose last
-// liveness stamp is older than timeout and returns what it removed. Callers
-// hold app.mu. Deleting from the ranged map mid-iteration is safe in Go.
-func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, timeout time.Duration) []participantLivenessReap {
-	var reaped []participantLivenessReap
-	for name, lastSeen := range app.participants {
-		if app.participantCounts[name] <= 0 {
-			continue
+// liveness stamp is older than timeout and returns what it removed, per room.
+// Callers hold app.mu. Deleting from the ranged map mid-iteration is safe in Go.
+func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, timeout time.Duration) map[string][]participantLivenessReap {
+	reapedByRoom := map[string][]participantLivenessReap{}
+	for roomID, state := range app.roomLive {
+		for name, lastSeen := range state.participants {
+			if state.participantCounts[name] <= 0 {
+				continue
+			}
+			if now.Sub(lastSeen) <= timeout {
+				continue
+			}
+			sessionIDs := make([]string, 0, len(state.participantEndpoints[name]))
+			for _, sessionID := range state.participantEndpoints[name] {
+				sessionIDs = append(sessionIDs, sessionID)
+			}
+			delete(state.participantCounts, name)
+			delete(state.participants, name)
+			delete(state.participantEndpoints, name)
+			delete(state.participantMedia, name)
+			if isGuestDisplayName(name) {
+				for sessionKey, display := range state.guestSeats {
+					if strings.EqualFold(display, name) {
+						delete(state.guestSeats, sessionKey)
+						delete(state.chatBuckets, sessionKey)
+					}
+				}
+			}
+			reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{name: name, sessionIDs: sessionIDs})
 		}
-		if now.Sub(lastSeen) <= timeout {
-			continue
-		}
-		sessionIDs := make([]string, 0, len(app.participantEndpoints[name]))
-		for _, sessionID := range app.participantEndpoints[name] {
-			sessionIDs = append(sessionIDs, sessionID)
-		}
-		delete(app.participantCounts, name)
-		delete(app.participants, name)
-		delete(app.participantEndpoints, name)
-		delete(app.participantMedia, name)
-		reaped = append(reaped, participantLivenessReap{name: name, sessionIDs: sessionIDs})
 	}
-	return reaped
+	return reapedByRoom
 }
 
 // sweepStaleParticipantSessions is the periodic backstop to the per-socket
@@ -4900,22 +5024,25 @@ func (app *kanbanBoardApp) sweepStaleParticipantSessions() {
 		return
 	}
 	app.mu.Lock()
-	reaped := app.reapStaleParticipantSessionsLocked(time.Now().UTC(), participantLivenessTimeout)
+	reapedByRoom := app.reapStaleParticipantSessionsLocked(time.Now().UTC(), participantLivenessTimeout)
 	app.mu.Unlock()
-	if len(reaped) == 0 {
+	if len(reapedByRoom) == 0 {
 		return
 	}
-	for _, entry := range reaped {
-		for _, sessionID := range entry.sessionIDs {
-			unregisterParticipantSession(entry.name, sessionID)
+	for roomID, reaped := range reapedByRoom {
+		for _, entry := range reaped {
+			for _, sessionID := range entry.sessionIDs {
+				unregisterParticipantSession(entry.name, sessionID)
+			}
+			log.Infof("participant_liveness_reap participant=%s room=%s sessions=%d; room socket silent past %s", entry.name, roomID, len(entry.sessionIDs), participantLivenessTimeout)
+			broadcastRoomKanbanEvent(roomID, "participant_left", map[string]any{"name": entry.name, "roomId": roomID})
 		}
-		log.Infof("participant_liveness_reap participant=%s sessions=%d; room socket silent past %s", entry.name, len(entry.sessionIDs), participantLivenessTimeout)
-		broadcastKanbanEvent("participant_left", map[string]any{"name": entry.name})
+		broadcastRoomKanbanEvent(roomID, "participants", app.roomSnapshotForRoom(roomID))
+		// occupancy may now be zero: arm the empty-room idle end so the sitting
+		// finalizes and the next entry mints a fresh meeting id.
+		app.noteMeetingOccupancy(roomID)
 	}
-	broadcastKanbanEvent("participants", app.roomSnapshot())
-	// occupancy may now be zero: arm the empty-room idle end so the sitting
-	// finalizes and the next entry mints a fresh meeting id.
-	app.noteMeetingOccupancy()
+	broadcastRoomsSnapshot()
 }
 
 // startParticipantLivenessSweeper launches the backstop sweep on a ticker for
@@ -4934,16 +5061,22 @@ func (app *kanbanBoardApp) startParticipantLivenessSweeper() {
 	}()
 }
 
-func (app *kanbanBoardApp) activeParticipantCount() int {
+// activeParticipantCount reports the room's live seat count (multi-room W3:
+// real per-room presence — a room with no live plane has no occupants).
+func (app *kanbanBoardApp) activeParticipantCount(roomID string) int {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.activeParticipantCountLocked()
+	return app.activeParticipantCountInRoomLocked(app.roomLiveLocked(roomID))
 }
 
 func (app *kanbanBoardApp) activeParticipantCountLocked() int {
+	return app.activeParticipantCountInRoomLocked(app.roomLiveLocked(officeRoomID))
+}
+
+func (app *kanbanBoardApp) activeParticipantCountInRoomLocked(state *roomLiveState) int {
 	active := 0
-	for _, count := range app.participantCounts {
+	for _, count := range state.participantCounts {
 		if count > 0 {
 			active++
 		}
@@ -4956,9 +5089,9 @@ func (app *kanbanBoardApp) activeParticipantCountLocked() int {
 // in-room account currently holds, so the roster can render a subtle
 // "· 2 devices" affordance for a person on more than one endpoint. Callers must
 // hold app.mu.
-func (app *kanbanBoardApp) participantEndpointCountsLocked() map[string]int {
-	counts := make(map[string]int, len(app.participantEndpoints))
-	for name, endpoints := range app.participantEndpoints {
+func (app *kanbanBoardApp) participantEndpointCountsLocked(state *roomLiveState) map[string]int {
+	counts := make(map[string]int, len(state.participantEndpoints))
+	for name, endpoints := range state.participantEndpoints {
 		if count := len(endpoints); count > 0 {
 			counts[name] = count
 		}
@@ -4967,96 +5100,146 @@ func (app *kanbanBoardApp) participantEndpointCountsLocked() map[string]int {
 }
 
 func (app *kanbanBoardApp) participantSnapshot() []string {
+	return app.participantSnapshotForRoom(officeRoomID)
+}
+
+// participantSnapshotForRoom lists the room's present participants — the W4
+// room-scoped agents feed their prompts THE ROOM's roster, not the office's.
+func (app *kanbanBoardApp) participantSnapshotForRoom(roomID string) []string {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.participantSnapshotLocked()
+	return app.participantSnapshotLocked(app.roomLiveLocked(roomID))
 }
 
-func (app *kanbanBoardApp) participantSnapshotLocked() []string {
-	participants := make([]string, 0, len(app.participants))
+// participantSnapshotLocked lists present participants: roster members in
+// canonical order first, then guest seats sorted by display name.
+func (app *kanbanBoardApp) participantSnapshotLocked(state *roomLiveState) []string {
+	participants := make([]string, 0, len(state.participants))
 	for _, candidate := range meetingParticipantNames {
-		if app.participantCounts[candidate] > 0 {
+		if state.participantCounts[candidate] > 0 {
 			participants = append(participants, candidate)
 		}
 	}
+	guests := make([]string, 0, len(state.guestSeats))
+	for name := range state.participants {
+		if isGuestDisplayName(name) && state.participantCounts[name] > 0 {
+			guests = append(guests, name)
+		}
+	}
+	sort.Strings(guests)
+	participants = append(participants, guests...)
 
 	return participants
 }
 
 func (app *kanbanBoardApp) roomSnapshot() map[string]any {
+	return app.roomSnapshotForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) roomSnapshotForRoom(roomID string) map[string]any {
 	capacity := configuredMeetingRoomCapacity()
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.roomSnapshotLocked(capacity)
+	return app.roomSnapshotLockedForRoom(app.roomLiveLocked(roomID), capacity)
 }
 
 func (app *kanbanBoardApp) setParticipantMediaState(name string, state participantMediaState) (map[string]any, error) {
-	name = canonicalParticipantName(name)
+	return app.setParticipantMediaStateInRoom(officeRoomID, name, state)
+}
+
+func (app *kanbanBoardApp) setParticipantMediaStateInRoom(roomID string, name string, state participantMediaState) (map[string]any, error) {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return nil, fmt.Errorf("unknown participant")
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	room := app.roomLiveLocked(roomID)
 
-	if app.participantCounts[name] <= 0 {
+	if room.participantCounts[name] <= 0 {
 		return nil, fmt.Errorf("%s is not in the room", name)
 	}
 
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	app.participantMedia[name] = state
+	room.participantMedia[name] = state
 
-	return app.roomSnapshotLocked(configuredMeetingRoomCapacity()), nil
+	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity()), nil
 }
 
 func (app *kanbanBoardApp) setParticipantScreenSharing(name string, screenSharing bool) map[string]any {
-	name = canonicalParticipantName(name)
+	return app.setParticipantScreenSharingInRoom(officeRoomID, name, screenSharing)
+}
+
+func (app *kanbanBoardApp) setParticipantScreenSharingInRoom(roomID string, name string, screenSharing bool) map[string]any {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
-		return app.roomSnapshot()
+		return app.roomSnapshotForRoom(roomID)
 	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	room := app.roomLiveLocked(roomID)
 
-	if app.participantCounts[name] <= 0 {
-		return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+	if room.participantCounts[name] <= 0 {
+		return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity())
 	}
 
-	state := app.participantMedia[name]
+	state := room.participantMedia[name]
 	state.ScreenSharing = screenSharing
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	app.participantMedia[name] = state
+	room.participantMedia[name] = state
 
-	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity())
 }
 
 func (app *kanbanBoardApp) transcriptRecordingActive() bool {
+	return app.transcriptRecordingActiveInRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) transcriptRecordingActiveInRoom(roomID string) bool {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.transcriptRecordingEnabled
+	return app.roomLiveLocked(roomID).recordingEnabled
 }
 
 func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string) map[string]any {
-	updatedBy = canonicalRoomActorName(updatedBy)
+	return app.setTranscriptRecordingInRoom(officeRoomID, enabled, updatedBy)
+}
+
+func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled bool, updatedBy string) map[string]any {
+	// System actors (the §6.5 guest transcription cap) keep their verbatim
+	// stamp; everything else normalizes through the roster like before.
+	if !strings.HasPrefix(updatedBy, "system:") {
+		updatedBy = canonicalRoomActorName(updatedBy)
+	}
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
 
-	if app.transcriptRecordingEnabled != enabled || app.transcriptRecordingUpdatedAt.IsZero() {
-		app.transcriptRecordingEnabled = enabled
-		app.transcriptRecordingUpdatedAt = time.Now().UTC()
-		app.transcriptRecordingUpdatedBy = updatedBy
+	if state.recordingEnabled != enabled || state.recordingUpdatedAt.IsZero() {
+		state.recordingEnabled = enabled
+		state.recordingUpdatedAt = time.Now().UTC()
+		state.recordingUpdatedBy = updatedBy
 		// A6: freeze runs at every commit but the pop (rememberTranscript ->
 		// speakerForCommittedTranscript) is skipped while recording is off. Clear the
 		// FIFO on any recording toggle so a window frozen across the boundary cannot
 		// drift attribution once recording resumes. (Already holding app.mu here.)
-		app.pendingAttributionWindows = nil
+		state.pendingAttributionWindows = nil
+		// §6.5: a member flipping recording back on in a guest-enabled room
+		// grants another transcription-cap window for the live sitting.
+		if enabled && state.id != officeRoomID && state.mixer != nil {
+			if room, ok := appRoomStore().byID(state.id); ok && room.GuestEnabled {
+				app.armGuestTranscriptionCapLocked(state, state.mediaGen)
+			}
+		}
 	}
-	if !enabled {
+	if !enabled && state.id == officeRoomID {
 		app.scoutVoiceArmedAt = time.Time{}
 		app.scoutVoiceArmedUntil = time.Time{}
 		app.scoutSpokenResponse = false
@@ -5065,7 +5248,7 @@ func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string
 		app.scoutLastToolResultName = ""
 	}
 
-	return app.roomSnapshotLocked(configuredMeetingRoomCapacity())
+	return app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
 }
 
 func roomRecordingAnnouncementText(recording roomRecordingState) string {
@@ -5085,21 +5268,25 @@ func roomRecordingAnnouncementText(recording roomRecordingState) string {
 	return fmt.Sprintf("Scout: %s %s for the room.", actor, action)
 }
 
-func (app *kanbanBoardApp) roomRecordingStateLocked() roomRecordingState {
+func (app *kanbanBoardApp) roomRecordingStateLocked(room *roomLiveState) roomRecordingState {
 	state := roomRecordingState{
-		Enabled:   app.transcriptRecordingEnabled,
-		UpdatedBy: app.transcriptRecordingUpdatedBy,
+		Enabled:   room.recordingEnabled,
+		UpdatedBy: room.recordingUpdatedBy,
 	}
-	if !app.transcriptRecordingUpdatedAt.IsZero() {
-		state.UpdatedAt = app.transcriptRecordingUpdatedAt.UTC().Format(time.RFC3339Nano)
+	if !room.recordingUpdatedAt.IsZero() {
+		state.UpdatedAt = room.recordingUpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 
 	return state
 }
 
 func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
-	participants := app.participantSnapshotLocked()
-	occupiedSeats := app.activeParticipantCountLocked()
+	return app.roomSnapshotLockedForRoom(app.roomLiveLocked(officeRoomID), capacity)
+}
+
+func (app *kanbanBoardApp) roomSnapshotLockedForRoom(room *roomLiveState, capacity int) map[string]any {
+	participants := app.participantSnapshotLocked(room)
+	occupiedSeats := app.activeParticipantCountInRoomLocked(room)
 
 	availableSeats := capacity - occupiedSeats
 	if availableSeats < 0 {
@@ -5107,17 +5294,18 @@ func (app *kanbanBoardApp) roomSnapshotLocked(capacity int) map[string]any {
 	}
 	mediaStates := make(map[string]participantMediaState, len(participants))
 	for _, participant := range participants {
-		mediaStates[participant] = app.participantMedia[participant]
+		mediaStates[participant] = room.participantMedia[participant]
 	}
 
 	return map[string]any{
+		"roomId":         room.id,
 		"participants":   participants,
 		"capacity":       capacity,
 		"occupiedSeats":  occupiedSeats,
 		"availableSeats": availableSeats,
 		"mediaStates":    mediaStates,
-		"endpointCounts": app.participantEndpointCountsLocked(),
-		"recording":      app.roomRecordingStateLocked(),
+		"endpointCounts": app.participantEndpointCountsLocked(room),
+		"recording":      app.roomRecordingStateLocked(room),
 	}
 }
 
@@ -5134,7 +5322,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	archiveID := durableTimestampID("meeting", archivedAt)
 	meetingID := ""
 	if app.memory != nil {
-		meetingID = app.memory.currentMeetingID()
+		meetingID = app.memory.currentMeetingID(officeRoomID)
 	}
 	board := app.snapshotState()
 	memory := app.memorySnapshotForMeeting(meetingID, 2000)
@@ -5149,7 +5337,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	// talking on an un-rotated memory id. The end stamps below mirror exactly
 	// what endMeeting will persist after the first successful write.
 	var closedMeeting *meetingRecord
-	if record, ok := app.meetings.activeRecord(); ok && record.ID == meetingID {
+	if record, ok := app.meetings.activeRecord(officeRoomID); ok && record.ID == meetingID {
 		pending := record
 		pending.EndedAt = archivedAt.Format(time.RFC3339Nano)
 		pending.EndedReason = meetingEndedReasonArchive
@@ -5254,11 +5442,11 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		// one. Conditional: a racing admission that already rotated and minted
 		// a successor id must not have it cleared by this stale close.
 		if meetingID != "" {
-			app.memory.rotateMeetingIDIfCurrent(meetingID)
+			app.memory.rotateMeetingIDIfCurrent(officeRoomID, meetingID)
 		} else {
 			// nothing was captured before the archive; clear whatever id the
 			// archive entries themselves lazily minted (pre-fix behavior).
-			app.memory.rotateMeetingID()
+			app.memory.rotateMeetingID(officeRoomID)
 		}
 	}
 
@@ -5268,9 +5456,9 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if closedMeetingChanged && closedMeeting != nil {
 		app.broadcastMeetingRecord(*closedMeeting)
 	}
-	if app.meetings != nil && app.memory != nil && app.activeParticipantCount() > 0 {
-		successorID := app.memory.ensureMeetingID()
-		if successor, started := app.meetings.startMeeting(successorID, time.Now().UTC(), app.participantSnapshot()); started {
+	if app.meetings != nil && app.memory != nil && app.activeParticipantCount(officeRoomID) > 0 {
+		successorID := app.memory.ensureMeetingID(officeRoomID)
+		if successor, started := app.meetings.startMeeting(officeRoomID, successorID, time.Now().UTC(), app.participantSnapshot()); started {
 			app.broadcastMeetingRecord(successor)
 		}
 	}
@@ -5355,16 +5543,20 @@ func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), %d participant(s), and %d project status item(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants), len(notes.ProjectStatuses))
 	summary += " Meeting notes were generated but not emailed: " + email.Reason
 
-	if _, _, err := app.memory.appendArchive(archiveID, summary, map[string]string{
+	// the archive entries file under the CLOSING record's room (multi-room W2:
+	// a named room's auto-archive must never stamp roomId=office, or that
+	// room's boot resume would read the office's tail instead of its own).
+	closedRoomID := meetingRoomID(closed)
+	if _, _, err := app.memory.appendEntryForMeeting(closedRoomID, meetingMemoryKindArchive, archiveID, summary, map[string]string{
 		"archiveId":   archiveID,
 		"downloadUrl": meetingArchiveDownloadURL(archiveID),
 		"archivedBy":  "",
 		"meetingId":   closed.ID,
-	}); err != nil {
+	}, ""); err != nil {
 		log.Errorf("Failed to remember idle auto-archive: %v", err)
 		return
 	}
-	if _, _, err := app.memory.appendOSArtifact(archiveID+"-artifact", buildMeetingArchiveArtifactText(archive, summary), map[string]string{
+	if _, _, err := app.memory.appendEntryForMeeting(closedRoomID, meetingMemoryKindOSArtifact, archiveID+"-artifact", buildMeetingArchiveArtifactText(archive, summary), map[string]string{
 		"mode":        "meeting",
 		"title":       meetingArchiveArtifactTitle(archive),
 		"archiveId":   archiveID,
@@ -5375,7 +5567,7 @@ func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 		"published":   "true",
 		"publishedAt": archivedAt.Format(time.RFC3339Nano),
 		"publishedBy": "",
-	}); err != nil {
+	}, ""); err != nil {
 		log.Errorf("Failed to remember idle auto-archive artifact: %v", err)
 		return
 	}
@@ -6023,6 +6215,11 @@ func broadcastAssistantEvent(kind string, text string, metadata map[string]any) 
 }
 
 func sendKanbanEvent(websocket *threadSafeWriter, event string, data any) error {
+	// §6.2 write-time backstop: an event outside the guest allowlist is
+	// dropped at the writer, whatever path routed it here.
+	if !guestWriterAllowsKanbanEvent(websocket, event) {
+		return nil
+	}
 	raw, err := json.Marshal(map[string]any{
 		"event": event,
 		"data":  data,
@@ -6048,8 +6245,13 @@ func encodeKanbanEvent(event string, data any) (string, error) {
 	return string(raw), nil
 }
 
-func deliverKanbanEvent(websockets []*threadSafeWriter, raw string) {
+func deliverKanbanEvent(event string, websockets []*threadSafeWriter, raw string) {
 	for _, websocket := range websockets {
+		// §6.2: broadcasts share this delivery path; guest writers only ever
+		// receive allowlisted events, whatever pool routed them here.
+		if !guestWriterAllowsKanbanEvent(websocket, event) {
+			continue
+		}
 		if err := websocket.WriteJSON(&websocketMessage{
 			Event: "kanban",
 			Data:  raw,
@@ -6062,10 +6264,19 @@ func deliverKanbanEvent(websockets []*threadSafeWriter, raw string) {
 	}
 }
 
-// broadcastKanbanEvent is the room fan-out: it reaches media-joined room
-// sockets only. Room-scoped events (signaling companions, participants,
-// transcripts, active speaker) must stay on this path.
+// broadcastKanbanEvent is the OFFICE room fan-out — the legacy name every
+// office-ambient caller (Scout status, assistant events) keeps. Room-scoped
+// paths carry their room through broadcastRoomKanbanEvent.
 func broadcastKanbanEvent(event string, data any) {
+	broadcastRoomKanbanEvent(officeRoomID, event, data)
+}
+
+// broadcastRoomKanbanEvent reaches the media-joined sockets of ONE room —
+// members and (allowlist permitting) guests seated there. Room-scoped events
+// (signaling companions, participants, transcripts, active speaker) must stay
+// on this path so a second live room can never overwrite another tab's state.
+func broadcastRoomKanbanEvent(roomID string, event string, data any) {
+	roomID = normalizeRoomID(roomID)
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode Kanban event: %v", err)
@@ -6075,13 +6286,37 @@ func broadcastKanbanEvent(event string, data any) {
 	listLock.RLock()
 	websockets := make([]*threadSafeWriter, 0, len(peerConnections))
 	for _, state := range peerConnections {
-		if state.websocket != nil {
+		if state.websocket != nil && normalizeRoomID(state.roomID) == roomID {
 			websockets = append(websockets, state.websocket)
 		}
 	}
 	listLock.RUnlock()
 
-	deliverKanbanEvent(websockets, raw)
+	deliverKanbanEvent(event, websockets, raw)
+}
+
+// broadcastRoomGuestsKanbanEvent reaches only the GUEST sockets of one room —
+// the sidecar for signed-in broadcasts whose payload guests are entitled to
+// (their room's meeting record, room chat), since guests never appear in the
+// office/signed-in pools.
+func broadcastRoomGuestsKanbanEvent(roomID string, event string, data any) {
+	roomID = normalizeRoomID(roomID)
+	raw, err := encodeKanbanEvent(event, data)
+	if err != nil {
+		log.Errorf("Failed to encode guest Kanban event: %v", err)
+		return
+	}
+
+	listLock.RLock()
+	websockets := make([]*threadSafeWriter, 0, 4)
+	for _, state := range peerConnections {
+		if state.websocket != nil && state.websocket.guest && normalizeRoomID(state.roomID) == roomID {
+			websockets = append(websockets, state.websocket)
+		}
+	}
+	listLock.RUnlock()
+
+	deliverKanbanEvent(event, websockets, raw)
 }
 
 // broadcastOfficeKanbanEvent fans an event out to office sockets only —
@@ -6105,14 +6340,16 @@ func broadcastOfficeKanbanEvent(event string, data any) {
 	}
 	listLock.RUnlock()
 
-	deliverKanbanEvent(websockets, raw)
+	deliverKanbanEvent(event, websockets, raw)
 }
 
 // broadcastSignedInKanbanEvent reaches the union of office sockets and
-// media-joined room sockets, deduped by writer pointer. Reserved for
-// idempotent, snapshot-shaped payloads (board, undo_available, memory,
-// meeting, meeting_archived, server_shutdown) and id-deduped entries
-// (notification, room_chat) where a double delivery is a harmless re-render.
+// media-joined MEMBER room sockets, deduped by writer pointer. Guests are
+// excluded at selection (they are never signed in) on top of the §6.2
+// write-time allowlist. Reserved for idempotent, snapshot-shaped payloads
+// (board, undo_available, memory, meeting, meeting_archived, server_shutdown)
+// and id-deduped entries (notification, room_chat) where a double delivery is
+// a harmless re-render.
 func broadcastSignedInKanbanEvent(event string, data any) {
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
@@ -6130,14 +6367,14 @@ func broadcastSignedInKanbanEvent(event string, data any) {
 		}
 	}
 	for _, state := range peerConnections {
-		if state.websocket != nil && !seen[state.websocket] {
+		if state.websocket != nil && !state.websocket.guest && !seen[state.websocket] {
 			seen[state.websocket] = true
 			websockets = append(websockets, state.websocket)
 		}
 	}
 	listLock.RUnlock()
 
-	deliverKanbanEvent(websockets, raw)
+	deliverKanbanEvent(event, websockets, raw)
 }
 
 // sendKanbanEventToUser delivers an event only to live connections whose

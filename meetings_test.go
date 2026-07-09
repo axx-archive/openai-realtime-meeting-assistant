@@ -13,13 +13,20 @@ import (
 	"time"
 )
 
-// fireIdleEndNow invokes the idle-end seam exactly as a live grace timer
-// would: with the generation the timer captured at arm time.
+// fireIdleEndNow invokes the office idle-end seam exactly as a live grace
+// timer would: with the generation the timer captured at arm time.
 func fireIdleEndNow(app *kanbanBoardApp) {
+	fireIdleEndNowInRoom(app, officeRoomID)
+}
+
+// fireIdleEndNowInRoom is fireIdleEndNow with the multi-room W2 dimension:
+// the fired generation is the ROOM's counter, exactly as a per-room grace
+// timer would capture it.
+func fireIdleEndNowInRoom(app *kanbanBoardApp, roomID string) {
 	app.meetings.mu.Lock()
-	generation := app.meetings.idleGeneration
+	generation := app.meetings.idleGenerations[roomID]
 	app.meetings.mu.Unlock()
-	app.endMeetingForIdle(generation)
+	app.endMeetingForIdle(roomID, generation)
 }
 
 // meetingArchiveFilesOnDisk lists archive JSON files under the isolated data
@@ -57,14 +64,14 @@ func TestMeetingIdleEndGraceDefaultsToAFewMinutes(t *testing.T) {
 func TestMeetingAdmissionOpensRecordAlignedWithMemoryID(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("admission did not open a meeting record")
 	}
-	if record.ID == "" || record.ID != app.memory.ensureMeetingID() {
-		t.Fatalf("record id=%q, want the memory store's meeting id %q", record.ID, app.memory.ensureMeetingID())
+	if record.ID == "" || record.ID != app.memory.ensureMeetingID(officeRoomID) {
+		t.Fatalf("record id=%q, want the memory store's meeting id %q", record.ID, app.memory.ensureMeetingID(officeRoomID))
 	}
 	if record.StartedAt == "" || record.EndedAt != "" {
 		t.Fatalf("record=%#v, want an open record with a start stamp", record)
@@ -83,8 +90,8 @@ func TestMeetingAdmissionOpensRecordAlignedWithMemoryID(t *testing.T) {
 	}
 
 	// a second admission unions participants without opening a new record.
-	app.noteMeetingAdmission("Tim")
-	second, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "Tim")
+	second, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || second.ID != record.ID {
 		t.Fatalf("second admission record=%#v, want the same open record %q", second, record.ID)
 	}
@@ -101,8 +108,8 @@ func TestIdleEndClosesRecordAndRotatesMemoryID(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
@@ -118,7 +125,7 @@ func TestIdleEndClosesRecordAndRotatesMemoryID(t *testing.T) {
 	// fire the grace callback directly instead of sleeping through the timer.
 	fireIdleEndNow(app)
 
-	closed, active := app.meetings.activeRecord()
+	closed, active := app.meetings.activeRecord(officeRoomID)
 	if active {
 		t.Fatalf("record=%#v, want no active record after idle end", closed)
 	}
@@ -155,8 +162,8 @@ func TestIdleEndAutoArchivesMeetingWithContent(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
@@ -235,8 +242,8 @@ func TestIdleEndAutoArchivesMeetingWithContent(t *testing.T) {
 	}
 
 	// the next join starts a fresh context, untouched by the archive appends.
-	app.noteMeetingAdmission("Tim")
-	fresh, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "Tim")
+	fresh, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || fresh.ID == open.ID {
 		t.Fatalf("fresh record=%#v, want a new meeting id after the idle reset", fresh)
 	}
@@ -249,8 +256,8 @@ func TestIdleEndSkipsArchiveForEmptyMeeting(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
@@ -285,8 +292,8 @@ func TestRestartAfterIdleEndNeverDuplicatesMeetingID(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	endedID := app.memory.currentMeetingID()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	endedID := app.memory.currentMeetingID(officeRoomID)
 	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
@@ -296,13 +303,13 @@ func TestRestartAfterIdleEndNeverDuplicatesMeetingID(t *testing.T) {
 	// routine deploy: the process restarts and the memory store resumes from
 	// the JSONL tail, which is the ENDED meeting's transcript.
 	reopened := newKanbanBoardApp()
-	if got := reopened.memory.currentMeetingID(); got == endedID {
+	if got := reopened.memory.currentMeetingID(officeRoomID); got == endedID {
 		t.Fatalf("boot resumed the ended meeting id %q; reconciliation must rotate it", got)
 	}
 
 	// next day's join: a FRESH id and record, never a duplicate.
-	reopened.noteMeetingAdmission("AJ")
-	record, ok := reopened.meetings.activeRecord()
+	reopened.noteMeetingAdmission(officeRoomID, "AJ")
+	record, ok := reopened.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("admission after restart did not open a record")
 	}
@@ -338,8 +345,8 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
@@ -348,24 +355,24 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 		t.Fatalf("append transcript: %v", err)
 	}
 	app.forgetParticipant("AJ")
-	app.noteMeetingOccupancy() // arms the timer
+	app.noteMeetingOccupancy(officeRoomID) // arms the timer
 	app.meetings.mu.Lock()
-	armTimeGeneration := app.meetings.idleGeneration
+	armTimeGeneration := app.meetings.idleGenerations[officeRoomID]
 	app.meetings.mu.Unlock()
 
 	// the timer fires and passes its occupancy check; the admission lands in
 	// that window — cancelIdleEnd bumps the generation even though the timer
 	// can no longer be stopped.
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 
 	// the fired timer's close is a no-op against the stale generation.
-	app.endMeetingForIdle(armTimeGeneration)
+	app.endMeetingForIdle(officeRoomID, armTimeGeneration)
 
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || record.ID != open.ID || record.EndedAt != "" {
 		t.Fatalf("record=%#v, want meeting %q still open", record, open.ID)
 	}
-	if got := app.memory.currentMeetingID(); got != open.ID {
+	if got := app.memory.currentMeetingID(officeRoomID); got != open.ID {
 		t.Fatalf("memory id=%q, want %q un-rotated", got, open.ID)
 	}
 	// the invalidated fire short-circuits before the auto-archive: no stray
@@ -378,9 +385,9 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 	}
 
 	// a genuinely empty room still idle-ends with the live generation.
-	app.noteMeetingOccupancy()
+	app.noteMeetingOccupancy(officeRoomID)
 	fireIdleEndNow(app)
-	if record, stillOpen := app.meetings.activeRecord(); stillOpen {
+	if record, stillOpen := app.meetings.activeRecord(officeRoomID); stillOpen {
 		t.Fatalf("record=%#v, want the fresh-generation idle end to close it", record)
 	}
 	// ... and the genuine close auto-archives the captured content.
@@ -398,28 +405,28 @@ func TestIdleFireInvalidatedByAdmissionGeneration(t *testing.T) {
 // ended one), and the closer's conditional rotation must not clobber it.
 func TestAdmissionNeverReMintsEndedMeetingID(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	app.noteMeetingAdmission("AJ")
-	endedID := app.memory.currentMeetingID()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	endedID := app.memory.currentMeetingID(officeRoomID)
 	if _, changed := app.meetings.endMeeting(endedID, time.Now().UTC(), meetingEndedReasonIdle, ""); !changed {
 		t.Fatal("endMeeting did not close the record")
 	}
 
-	app.noteMeetingAdmission("Tim")
-	record, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "Tim")
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("admission did not open a record")
 	}
 	if record.ID == endedID {
 		t.Fatalf("admission re-minted the ended id %q", endedID)
 	}
-	if got := app.memory.currentMeetingID(); got != record.ID {
+	if got := app.memory.currentMeetingID(officeRoomID); got != record.ID {
 		t.Fatalf("memory id=%q, want aligned with the new record %q", got, record.ID)
 	}
 
 	// the racing closer's rotation arrives last: conditional, so the fresh id
 	// survives.
-	app.memory.rotateMeetingIDIfCurrent(endedID)
-	if got := app.memory.currentMeetingID(); got != record.ID {
+	app.memory.rotateMeetingIDIfCurrent(officeRoomID, endedID)
+	if got := app.memory.currentMeetingID(officeRoomID); got != record.ID {
 		t.Fatalf("memory id=%q after the stale rotation, want %q intact", got, record.ID)
 	}
 }
@@ -430,16 +437,16 @@ func TestRejoinWithinGraceCancelsIdleEnd(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
 
 	app.forgetParticipant("AJ")
-	app.noteMeetingOccupancy()
+	app.noteMeetingOccupancy(officeRoomID)
 	app.meetings.mu.Lock()
-	armed := app.meetings.idleTimer != nil
+	armed := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if !armed {
 		t.Fatal("last leave did not arm the idle-end timer")
@@ -449,22 +456,22 @@ func TestRejoinWithinGraceCancelsIdleEnd(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("re-admit: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	app.meetings.mu.Lock()
-	stillArmed := app.meetings.idleTimer != nil
+	stillArmed := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if stillArmed {
 		t.Fatal("rejoin did not cancel the idle-end timer")
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || record.ID != open.ID || record.EndedAt != "" {
 		t.Fatalf("record=%#v, want the same meeting still open", record)
 	}
 
 	// occupancy check: a non-empty room never arms the timer.
-	app.noteMeetingOccupancy()
+	app.noteMeetingOccupancy(officeRoomID)
 	app.meetings.mu.Lock()
-	armedWhileOccupied := app.meetings.idleTimer != nil
+	armedWhileOccupied := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if armedWhileOccupied {
 		t.Fatal("noteMeetingOccupancy armed the timer while the room is occupied")
@@ -485,36 +492,36 @@ func TestLivenessSweepReapsZombieThenFinalizesAndMintsFreshID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	first, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	first, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
-	if app.activeParticipantCount() != 1 {
-		t.Fatalf("activeParticipantCount()=%d after admission, want 1", app.activeParticipantCount())
+	if app.activeParticipantCount(officeRoomID) != 1 {
+		t.Fatalf("activeParticipantCount()=%d after admission, want 1", app.activeParticipantCount(officeRoomID))
 	}
 
 	// A fresh liveness stamp is NOT reaped: the participant is really here.
 	app.sweepStaleParticipantSessions()
-	if app.activeParticipantCount() != 1 {
-		t.Fatalf("sweep reaped a live participant (count=%d)", app.activeParticipantCount())
+	if app.activeParticipantCount(officeRoomID) != 1 {
+		t.Fatalf("sweep reaped a live participant (count=%d)", app.activeParticipantCount(officeRoomID))
 	}
-	if record, _ := app.meetings.activeRecord(); record.EndedAt != "" {
+	if record, _ := app.meetings.activeRecord(officeRoomID); record.EndedAt != "" {
 		t.Fatal("sweep finalized the meeting with a live participant present")
 	}
 
 	// The socket goes zombie: no clean close ever ran, so the presence stayed
 	// but its liveness stamp is now stale past the timeout.
 	app.mu.Lock()
-	app.participants[admitted] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	app.roomLive[officeRoomID].participants[admitted] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
 	app.mu.Unlock()
 
 	app.sweepStaleParticipantSessions()
-	if app.activeParticipantCount() != 0 {
-		t.Fatalf("liveness sweep did not reap the zombie session (count=%d)", app.activeParticipantCount())
+	if app.activeParticipantCount(officeRoomID) != 0 {
+		t.Fatalf("liveness sweep did not reap the zombie session (count=%d)", app.activeParticipantCount(officeRoomID))
 	}
 	app.meetings.mu.Lock()
-	armed := app.meetings.idleTimer != nil
+	armed := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if !armed {
 		t.Fatal("sweep drove occupancy to zero but did not arm the idle end")
@@ -522,7 +529,7 @@ func TestLivenessSweepReapsZombieThenFinalizesAndMintsFreshID(t *testing.T) {
 
 	// The empty room stays empty past the grace: the sitting finalizes.
 	fireIdleEndNow(app)
-	if _, active := app.meetings.activeRecord(); active {
+	if _, active := app.meetings.activeRecord(officeRoomID); active {
 		t.Fatal("record still active after the empty-room idle end")
 	}
 	records := app.meetings.recent(1)
@@ -533,13 +540,13 @@ func TestLivenessSweepReapsZombieThenFinalizesAndMintsFreshID(t *testing.T) {
 	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
 		t.Fatalf("record=%#v, want the first sitting closed with reason idle", closed)
 	}
-	if app.memory.currentMeetingID() != "" {
-		t.Fatalf("memory id=%q after finalize, want it rotated (empty)", app.memory.currentMeetingID())
+	if app.memory.currentMeetingID(officeRoomID) != "" {
+		t.Fatalf("memory id=%q after finalize, want it rotated (empty)", app.memory.currentMeetingID(officeRoomID))
 	}
 
 	// The next entry is a NEW sitting: a fresh id on a fresh open record.
-	app.noteMeetingAdmission("AJ")
-	second, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	second, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after the next sitting's admission")
 	}
@@ -565,17 +572,17 @@ func TestDropRejoinWithinGraceDoesNotFinalize(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
 
 	// Ungraceful drop: last device leaves, idle end arms.
 	app.forgetParticipant("AJ")
-	app.noteMeetingOccupancy()
+	app.noteMeetingOccupancy(officeRoomID)
 	app.meetings.mu.Lock()
-	armed := app.meetings.idleTimer != nil
+	armed := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if !armed {
 		t.Fatal("last leave did not arm the idle end")
@@ -585,22 +592,22 @@ func TestDropRejoinWithinGraceDoesNotFinalize(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("re-admit: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	if app.activeParticipantCount() != 1 {
-		t.Fatalf("rejoin double-counted the participant (count=%d, want 1)", app.activeParticipantCount())
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	if app.activeParticipantCount(officeRoomID) != 1 {
+		t.Fatalf("rejoin double-counted the participant (count=%d, want 1)", app.activeParticipantCount(officeRoomID))
 	}
 
 	// A sweep right after the rejoin must NOT reap the fresh session.
 	app.sweepStaleParticipantSessions()
-	if app.activeParticipantCount() != 1 {
-		t.Fatalf("sweep reaped the rejoiner (count=%d)", app.activeParticipantCount())
+	if app.activeParticipantCount(officeRoomID) != 1 {
+		t.Fatalf("sweep reaped the rejoiner (count=%d)", app.activeParticipantCount(officeRoomID))
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || record.ID != open.ID || record.EndedAt != "" {
 		t.Fatalf("record=%#v, want the same sitting %q still open", record, open.ID)
 	}
 	app.meetings.mu.Lock()
-	stillArmed := app.meetings.idleTimer != nil
+	stillArmed := app.meetings.idleTimers[officeRoomID] != nil
 	app.meetings.mu.Unlock()
 	if stillArmed {
 		t.Fatal("rejoin left the idle end armed; a later fire could finalize a live sitting")
@@ -612,8 +619,8 @@ func TestArchiveMeetingClosesRecordEmbedsItAndOpensSuccessor(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	open, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no open record after admission")
 	}
@@ -672,15 +679,15 @@ func TestArchiveMeetingClosesRecordEmbedsItAndOpensSuccessor(t *testing.T) {
 	}
 
 	// AJ never left, so a successor record opens immediately on the new id.
-	successor, ok := app.meetings.activeRecord()
+	successor, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("mid-occupancy archive left no active record")
 	}
 	if successor.ID == open.ID {
 		t.Fatalf("successor id=%q, want a new meeting id", successor.ID)
 	}
-	if successor.ID != app.memory.currentMeetingID() {
-		t.Fatalf("successor id=%q, want the rotated memory id %q", successor.ID, app.memory.currentMeetingID())
+	if successor.ID != app.memory.currentMeetingID(officeRoomID) {
+		t.Fatalf("successor id=%q, want the rotated memory id %q", successor.ID, app.memory.currentMeetingID(officeRoomID))
 	}
 	if len(successor.Participants) != 1 || successor.Participants[0] != "AJ" {
 		t.Fatalf("successor participants=%v, want [AJ]", successor.Participants)
@@ -695,8 +702,8 @@ func TestArchiveMeetingWriteFailureLeavesMeetingOpen(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	meetingID := app.memory.currentMeetingID()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
@@ -711,14 +718,14 @@ func TestArchiveMeetingWriteFailureLeavesMeetingOpen(t *testing.T) {
 	if _, err := app.archiveMeeting("AJ"); err == nil {
 		t.Fatal("archiveMeeting must surface the write failure")
 	}
-	record, ok := app.meetings.activeRecord()
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok || record.ID != meetingID || record.EndedAt != "" {
 		t.Fatalf("record=%#v, want meeting %q still open after the failed write", record, meetingID)
 	}
-	if got := app.memory.currentMeetingID(); got != meetingID {
+	if got := app.memory.currentMeetingID(officeRoomID); got != meetingID {
 		t.Fatalf("memory id=%q, want %q un-rotated after the failed write", got, meetingID)
 	}
-	if app.meetingSnapshot() == nil {
+	if app.meetingSnapshot(officeRoomID) == nil {
 		t.Fatal("meetingSnapshot (the room clock) must survive a failed archive")
 	}
 
@@ -758,7 +765,7 @@ func TestArchiveMeetingWithEmptyRoomLeavesNoSuccessor(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
@@ -767,15 +774,15 @@ func TestArchiveMeetingWithEmptyRoomLeavesNoSuccessor(t *testing.T) {
 	if _, err := app.archiveMeeting("AJ"); err != nil {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
-	if record, ok := app.meetings.activeRecord(); ok {
+	if record, ok := app.meetings.activeRecord(officeRoomID); ok {
 		t.Fatalf("record=%#v, want no successor for an empty room", record)
 	}
 }
 
 func TestSetAutoTitleFromMissionInsight(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	app.noteMeetingAdmission("AJ")
-	meetingID := app.memory.currentMeetingID()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 
 	record, changed := app.meetings.setAutoTitle(meetingID, "Realtime as UI")
 	if !changed {
@@ -792,7 +799,7 @@ func TestSetAutoTitleFromMissionInsight(t *testing.T) {
 	if _, changed := app.meetings.setAutoTitle("meeting-unknown-id", "stray"); changed {
 		t.Fatal("unknown meeting id accepted a title")
 	}
-	if active, ok := app.meetings.activeRecord(); !ok || active.Title != "Realtime as UI" {
+	if active, ok := app.meetings.activeRecord(officeRoomID); !ok || active.Title != "Realtime as UI" {
 		t.Fatalf("record=%#v, want the auto title intact", active)
 	}
 }
@@ -809,7 +816,7 @@ func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
 	startedAt := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	for index := 0; index < total; index++ {
 		id := fmt.Sprintf("meeting-%03d", index)
-		if _, changed := store.startMeeting(id, startedAt.Add(time.Duration(index)*time.Minute), []string{"AJ"}); !changed {
+		if _, changed := store.startMeeting(officeRoomID, id, startedAt.Add(time.Duration(index)*time.Minute), []string{"AJ"}); !changed {
 			t.Fatalf("startMeeting %s reported no change", id)
 		}
 		if _, changed := store.endMeeting(id, startedAt.Add(time.Duration(index)*time.Minute+30*time.Second), meetingEndedReasonIdle, ""); !changed {
@@ -860,17 +867,17 @@ func TestMeetingStorePersistsCapsAndToleratesBadFiles(t *testing.T) {
 
 	// nil store stays inert everywhere the app touches it.
 	var nilStore *meetingStore
-	if _, ok := nilStore.activeRecord(); ok {
+	if _, ok := nilStore.activeRecord(officeRoomID); ok {
 		t.Fatal("nil store reported an active record")
 	}
-	if _, changed := nilStore.startMeeting("meeting-x", time.Now(), nil); changed {
+	if _, changed := nilStore.startMeeting(officeRoomID, "meeting-x", time.Now(), nil); changed {
 		t.Fatal("nil store accepted a start")
 	}
 	if got := nilStore.recent(5); len(got) != 0 {
 		t.Fatalf("nil store recent=%v, want empty", got)
 	}
-	nilStore.armIdleEnd(func(uint64) {})
-	nilStore.cancelIdleEnd()
+	nilStore.armIdleEnd(officeRoomID, func(uint64) {})
+	nilStore.cancelIdleEnd(officeRoomID)
 }
 
 func TestBootReconciliationClosesStaleOpenRecord(t *testing.T) {
@@ -892,7 +899,7 @@ func TestBootReconciliationClosesStaleOpenRecord(t *testing.T) {
 	}
 
 	app := newKanbanBoardApp()
-	if record, ok := app.meetings.activeRecord(); ok {
+	if record, ok := app.meetings.activeRecord(officeRoomID); ok {
 		t.Fatalf("record=%#v, want the stale record closed at boot", record)
 	}
 	records := app.meetings.recent(1)
@@ -903,21 +910,21 @@ func TestBootReconciliationClosesStaleOpenRecord(t *testing.T) {
 
 func TestBootReconciliationResumesMatchingOpenRecord(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 
 	// a restart resumes the same in-flight meeting: the record stays open and
 	// the idle timer arms (a join within the grace window cancels it).
 	reopened := newKanbanBoardApp()
-	record, ok := reopened.meetings.activeRecord()
+	record, ok := reopened.meetings.activeRecord(officeRoomID)
 	if !ok || record.ID != meetingID {
 		t.Fatalf("record=%#v, want the resumed open meeting %q", record, meetingID)
 	}
 	reopened.meetings.mu.Lock()
-	armed := reopened.meetings.idleTimer != nil
+	armed := reopened.meetings.idleTimers[officeRoomID] != nil
 	reopened.meetings.mu.Unlock()
 	if !armed {
 		t.Fatal("boot with a resumed open meeting did not arm the idle-end timer")
@@ -938,9 +945,9 @@ func TestAssistantMeetingsHandlerAuthAndShape(t *testing.T) {
 	}
 
 	earlier := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
-	kanbanApp.meetings.startMeeting("meeting-20260630-first", earlier, []string{"AJ"})
+	kanbanApp.meetings.startMeeting(officeRoomID, "meeting-20260630-first", earlier, []string{"AJ"})
 	kanbanApp.meetings.endMeeting("meeting-20260630-first", earlier.Add(45*time.Minute), meetingEndedReasonArchive, "meeting-archive-1")
-	kanbanApp.meetings.startMeeting("meeting-20260701-second", earlier.Add(24*time.Hour), []string{"Tim"})
+	kanbanApp.meetings.startMeeting(officeRoomID, "meeting-20260701-second", earlier.Add(24*time.Hour), []string{"Tim"})
 
 	fetchMeetings := func(query string) (items []map[string]any, serverNow string) {
 		t.Helper()
@@ -1007,7 +1014,7 @@ func TestAssistantMeetingsPayloadCarriesMemoryDetail(t *testing.T) {
 
 	started := time.Now().UTC().Add(-40 * time.Minute)
 	meetingID := "meeting-detail-0000001"
-	kanbanApp.meetings.startMeeting(meetingID, started, []string{"AJ", "Tim"})
+	kanbanApp.meetings.startMeeting(officeRoomID, meetingID, started, []string{"AJ", "Tim"})
 
 	cardResult, _, err := kanbanApp.applyToolCallArgs("create_ticket", map[string]any{"title": "Add bandwidth estimation probe"})
 	if err != nil {
@@ -1091,7 +1098,7 @@ func TestMissionPulseCarriesHistogramAndRealCounters(t *testing.T) {
 	if _, _, err := app.memory.appendTranscript("event-hist-2", "item-2", "AJ: agreed, keep the retransmission bounded."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
-	app.meetings.startMeeting("meeting-hist-1", time.Now().UTC(), []string{"AJ"})
+	app.meetings.startMeeting(officeRoomID, "meeting-hist-1", time.Now().UTC(), []string{"AJ"})
 
 	snapshot := app.missionIntelligenceSnapshot(time.Now().UTC())
 	pulse, ok := snapshot["pulse"].(map[string]any)
@@ -1162,9 +1169,9 @@ func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
 		}
 	}
 
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	appendTestTranscript(t, app, "tx-idle-1", "We choose vendor Zebra for the packaging pilot.")
-	closedID := app.memory.currentMeetingID()
+	closedID := app.memory.currentMeetingID(officeRoomID)
 	if closedID == "" {
 		t.Fatal("expected an active meeting id before the idle end")
 	}
@@ -1210,7 +1217,7 @@ func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
 
 	// liveness: the id rotated and the silent auto-archive still landed,
 	// pinned to the closed meeting.
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("meeting id %q not rotated after the flush", got)
 	}
 	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
@@ -1235,9 +1242,9 @@ func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
 		return "", fmt.Errorf("model down")
 	}
 
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	appendTestTranscript(t, app, "tx-idle-2", "We choose vendor Zebra for the packaging pilot.")
-	closedID := app.memory.currentMeetingID()
+	closedID := app.memory.currentMeetingID(officeRoomID)
 
 	fireIdleEndNow(app)
 
@@ -1250,7 +1257,7 @@ func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
 	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
 		t.Fatalf("record=%+v, want ended for idle despite the model failure", closed)
 	}
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("meeting id %q not rotated after a failed flush", got)
 	}
 	if digests := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(digests) != 0 {
@@ -1259,5 +1266,247 @@ func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
 	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
 	if len(archives) != 1 || strings.TrimSpace(archives[0].Metadata["meetingId"]) != closedID {
 		t.Fatalf("archives=%d, want the silent auto-archive despite the model failure", len(archives))
+	}
+}
+
+/* ---------- multi-room W2: per-room sitting spine (record layer) ---------- */
+
+// Two rooms hold independent sittings: records, meeting ids, and idle closes
+// are all room-scoped, and closing room B never rotates the office's id or
+// touches its record — the record-layer half of the cursor-corruption fence.
+func TestMeetingRecordsAndIdleEndPerRoom(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	app.noteMeetingAdmission("room-b", "Tim")
+
+	office, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open office record after admission")
+	}
+	roomB, ok := app.meetings.activeRecord("room-b")
+	if !ok {
+		t.Fatal("no open room-b record after admission")
+	}
+	if office.ID == roomB.ID {
+		t.Fatalf("both rooms share meeting id %q, want independent ids", office.ID)
+	}
+	// office records keep the pre-room shape (empty RoomID reads as office);
+	// named rooms stamp theirs.
+	if office.RoomID != "" || meetingRoomID(office) != officeRoomID {
+		t.Fatalf("office RoomID=%q, want empty (reads as office)", office.RoomID)
+	}
+	if roomB.RoomID != "room-b" {
+		t.Fatalf("room-b RoomID=%q, want room-b", roomB.RoomID)
+	}
+
+	// entries stamp the room's own meeting id plus metadata.roomId.
+	entryB, _, err := app.memory.appendAttributedTranscriptEntry("room-b", "event-b", "", "Tim", "", "Suit Barn side meeting notes for the record.", nil, true, "")
+	if err != nil {
+		t.Fatalf("append room-b transcript: %v", err)
+	}
+	if entryB.Metadata["meetingId"] != roomB.ID {
+		t.Fatalf("room-b entry meetingId=%q, want %q", entryB.Metadata["meetingId"], roomB.ID)
+	}
+	if entryB.Metadata["roomId"] != "room-b" {
+		t.Fatalf("room-b entry roomId=%q, want room-b", entryB.Metadata["roomId"])
+	}
+
+	// room B idle-ends (named rooms have no live plane in W2, so the fire's
+	// occupancy check reads zero); the office sitting must be untouched.
+	fireIdleEndNowInRoom(app, "room-b")
+	if record, active := app.meetings.activeRecord("room-b"); active {
+		t.Fatalf("room-b record=%#v, want closed after idle end", record)
+	}
+	if got := app.memory.currentMeetingID("room-b"); got != "" {
+		t.Fatalf("room-b memory id=%q after idle end, want rotated (empty)", got)
+	}
+	stillOpen, active := app.meetings.activeRecord(officeRoomID)
+	if !active || stillOpen.ID != office.ID || stillOpen.EndedAt != "" {
+		t.Fatalf("office record=%#v, want %q still open after room-b closed", stillOpen, office.ID)
+	}
+	if got := app.memory.currentMeetingID(officeRoomID); got != office.ID {
+		t.Fatalf("office memory id=%q, want %q un-rotated by room-b's close", got, office.ID)
+	}
+
+	// room B's next sitting mints a fresh id, never the closed one.
+	app.noteMeetingAdmission("room-b", "Tim")
+	successor, ok := app.meetings.activeRecord("room-b")
+	if !ok || successor.ID == roomB.ID {
+		t.Fatalf("successor=%#v, want a fresh room-b record distinct from %q", successor, roomB.ID)
+	}
+}
+
+// The admission-vs-fired-timer race, ported per room: a join landing between
+// room B's fired idle timer and its close bumps ROOM B's generation, so the
+// stale fire can neither end B's meeting nor rotate its id — and one room's
+// seam can never validate against another room's counter.
+func TestIdleFireInvalidatedByAdmissionGenerationPerRoom(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission("room-b", "AJ")
+	open, ok := app.meetings.activeRecord("room-b")
+	if !ok {
+		t.Fatal("no open room-b record after admission")
+	}
+
+	app.noteMeetingOccupancy("room-b") // arms room B's timer
+	app.meetings.mu.Lock()
+	armTimeGeneration := app.meetings.idleGenerations["room-b"]
+	app.meetings.mu.Unlock()
+
+	// the admission lands in the fired timer's window — cancelIdleEnd bumps
+	// room B's generation even though the timer can no longer be stopped.
+	app.noteMeetingAdmission("room-b", "AJ")
+
+	// the fired timer's close is a no-op against the stale generation.
+	app.endMeetingForIdle("room-b", armTimeGeneration)
+	record, ok := app.meetings.activeRecord("room-b")
+	if !ok || record.ID != open.ID || record.EndedAt != "" {
+		t.Fatalf("record=%#v, want room-b meeting %q still open", record, open.ID)
+	}
+	if got := app.memory.currentMeetingID("room-b"); got != open.ID {
+		t.Fatalf("room-b memory id=%q, want %q un-rotated", got, open.ID)
+	}
+
+	// another room's idle seam never touches room B: the office fire is a
+	// no-op (no office record), whatever generation it carries.
+	app.meetings.mu.Lock()
+	liveGeneration := app.meetings.idleGenerations["room-b"]
+	app.meetings.mu.Unlock()
+	app.endMeetingForIdle(officeRoomID, liveGeneration)
+	if record, stillOpen := app.meetings.activeRecord("room-b"); !stillOpen || record.EndedAt != "" {
+		t.Fatalf("record=%#v, want room-b untouched by the office seam", record)
+	}
+
+	// a genuinely empty room B still idle-ends with the live generation.
+	app.noteMeetingOccupancy("room-b")
+	fireIdleEndNowInRoom(app, "room-b")
+	if record, stillOpen := app.meetings.activeRecord("room-b"); stillOpen {
+		t.Fatalf("record=%#v, want the fresh-generation idle end to close it", record)
+	}
+}
+
+// The hasEndedRecord re-mint guard, ported per room: room B's admission after
+// its id ended mints a FRESH id, and the racing closer's conditional rotation
+// — for room B or any other room — can never clobber it.
+func TestAdmissionNeverReMintsEndedMeetingIDPerRoom(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission("room-b", "AJ")
+	endedID := app.memory.currentMeetingID("room-b")
+	if _, changed := app.meetings.endMeeting(endedID, time.Now().UTC(), meetingEndedReasonIdle, ""); !changed {
+		t.Fatal("endMeeting did not close the room-b record")
+	}
+
+	app.noteMeetingAdmission("room-b", "Tim")
+	record, ok := app.meetings.activeRecord("room-b")
+	if !ok {
+		t.Fatal("admission did not open a room-b record")
+	}
+	if record.ID == endedID {
+		t.Fatalf("admission re-minted the ended id %q", endedID)
+	}
+	if got := app.memory.currentMeetingID("room-b"); got != record.ID {
+		t.Fatalf("room-b memory id=%q, want aligned with the new record %q", got, record.ID)
+	}
+
+	// the racing closer's rotation arrives last: conditional AND room-scoped.
+	app.memory.rotateMeetingIDIfCurrent("room-b", endedID)
+	if got := app.memory.currentMeetingID("room-b"); got != record.ID {
+		t.Fatalf("room-b memory id=%q after the stale rotation, want %q intact", got, record.ID)
+	}
+	// an office-keyed rotation with room B's live id is a different room's
+	// seam entirely: no-op.
+	app.memory.rotateMeetingIDIfCurrent(officeRoomID, record.ID)
+	if got := app.memory.currentMeetingID("room-b"); got != record.ID {
+		t.Fatalf("room-b memory id=%q after a cross-room rotation, want %q intact", got, record.ID)
+	}
+}
+
+// startMeeting's defensive restart-close is room-scoped by construction: the
+// office starting a new sitting under a mismatched id closes only the OFFICE's
+// stale open record, never another room's.
+func TestStartMeetingDefensiveCloseIsRoomScoped(t *testing.T) {
+	store, err := loadMeetingStore(filepath.Join(t.TempDir(), "meetings.json"))
+	if err != nil {
+		t.Fatalf("loadMeetingStore: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, changed := store.startMeeting(officeRoomID, "meeting-office-1", now, []string{"AJ"}); !changed {
+		t.Fatal("startMeeting office did not open a record")
+	}
+	if _, changed := store.startMeeting("room-b", "meeting-b-1", now, []string{"Tim"}); !changed {
+		t.Fatal("startMeeting room-b did not open a record")
+	}
+
+	// office restart under a different id: the defensive close hits the office
+	// record only.
+	if _, changed := store.startMeeting(officeRoomID, "meeting-office-2", now.Add(time.Minute), []string{"AJ"}); !changed {
+		t.Fatal("startMeeting office-2 did not open a record")
+	}
+	roomB, ok := store.activeRecord("room-b")
+	if !ok || roomB.ID != "meeting-b-1" || roomB.EndedAt != "" {
+		t.Fatalf("room-b record=%#v, want meeting-b-1 still open after the office restart", roomB)
+	}
+	office, ok := store.activeRecord(officeRoomID)
+	if !ok || office.ID != "meeting-office-2" {
+		t.Fatalf("office record=%#v, want meeting-office-2 open", office)
+	}
+	for _, record := range store.recent(0) {
+		if record.ID == "meeting-office-1" && record.EndedReason != meetingEndedReasonRestart {
+			t.Fatalf("displaced office record=%#v, want reason restart", record)
+		}
+	}
+}
+
+// Boot reconciliation runs per room: the office's in-flight sitting resumes
+// while room B's idle-ended sitting rotates away, and room B's next admission
+// mints a fresh id — never the ended one.
+func TestBootReconcileResumesEachRoomIndependently(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	officeRecord, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open office record after admission")
+	}
+	if _, _, err := app.memory.appendTranscript("event-office", "item-1", "Boot Barn kickoff planning notes."); err != nil {
+		t.Fatalf("append office transcript: %v", err)
+	}
+	app.noteMeetingAdmission("room-b", "Tim")
+	bRecord, ok := app.meetings.activeRecord("room-b")
+	if !ok {
+		t.Fatal("no open room-b record after admission")
+	}
+	if _, _, err := app.memory.appendAttributedTranscriptEntry("room-b", "event-b", "", "Tim", "", "Suit Barn side meeting notes for the record.", nil, true, ""); err != nil {
+		t.Fatalf("append room-b transcript: %v", err)
+	}
+	fireIdleEndNowInRoom(app, "room-b") // closes B; the rotation is in-process only
+
+	// routine deploy: the process restarts on the same data dir.
+	reopened := newKanbanBoardApp()
+
+	// the office resumed its in-flight sitting on the same id and open record.
+	if got := reopened.memory.currentMeetingID(officeRoomID); got != officeRecord.ID {
+		t.Fatalf("office resumed id=%q, want %q", got, officeRecord.ID)
+	}
+	resumed, ok := reopened.meetings.activeRecord(officeRoomID)
+	if !ok || resumed.ID != officeRecord.ID {
+		t.Fatalf("office record=%#v, want %q still open across the restart", resumed, officeRecord.ID)
+	}
+
+	// room B's ended sitting must not resume (its JSONL tail is the archive
+	// artifact, whose id matches an ENDED record — reconciliation rotates it).
+	if got := reopened.memory.currentMeetingID("room-b"); got == bRecord.ID {
+		t.Fatalf("boot resumed room-b's ended meeting id %q; reconciliation must rotate it", got)
+	}
+	reopened.noteMeetingAdmission("room-b", "Tim")
+	fresh, ok := reopened.meetings.activeRecord("room-b")
+	if !ok {
+		t.Fatal("room-b admission after restart did not open a record")
+	}
+	if fresh.ID == bRecord.ID {
+		t.Fatalf("room-b admission re-minted the ended meeting id %q", bRecord.ID)
 	}
 }

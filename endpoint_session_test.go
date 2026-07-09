@@ -54,7 +54,7 @@ func TestSameEndpointRefreshReplacesPriorSession(t *testing.T) {
 	if !app.participantSessionCurrent("AJ", "aj-new") {
 		t.Fatal("fresh session on the refreshed endpoint is not current")
 	}
-	if count := app.activeParticipantCount(); count != 1 {
+	if count := app.activeParticipantCount(officeRoomID); count != 1 {
 		t.Fatalf("active participants=%d, want 1 (a refresh is not a second seat)", count)
 	}
 }
@@ -72,7 +72,7 @@ func TestTwoEndpointsCountAsOneSeat(t *testing.T) {
 	if _, _, err := app.admitParticipantSessionEndpoint("AJ", "aj-phone", "endpoint-phone"); err != nil {
 		t.Fatalf("admit AJ phone: %v", err)
 	}
-	if count := app.activeParticipantCount(); count != 1 {
+	if count := app.activeParticipantCount(officeRoomID); count != 1 {
 		t.Fatalf("active participants=%d, want 1 seat for AJ's two devices", count)
 	}
 
@@ -80,7 +80,7 @@ func TestTwoEndpointsCountAsOneSeat(t *testing.T) {
 	if _, _, err := app.admitParticipantSessionEndpoint("Tim", "tim-laptop", "endpoint-tim"); err != nil {
 		t.Fatalf("admit Tim into the room's second seat: %v", err)
 	}
-	if count := app.activeParticipantCount(); count != 2 {
+	if count := app.activeParticipantCount(officeRoomID); count != 2 {
 		t.Fatalf("active participants=%d, want 2 (AJ + Tim)", count)
 	}
 
@@ -123,7 +123,7 @@ func TestThirdEndpointRejectedCleanly(t *testing.T) {
 	if !app.participantSessionCurrent("AJ", "aj-1") || !app.participantSessionCurrent("AJ", "aj-2") {
 		t.Fatal("rejecting the third endpoint disturbed the first two")
 	}
-	if count := app.activeParticipantCount(); count != 1 {
+	if count := app.activeParticipantCount(officeRoomID); count != 1 {
 		t.Fatalf("active participants=%d, want 1", count)
 	}
 }
@@ -166,7 +166,7 @@ func TestEmptyEndpointIDKeepsLegacySingleSlot(t *testing.T) {
 	if !app.participantSessionCurrent("AJ", "aj-new") {
 		t.Fatal("legacy new session is not current")
 	}
-	if count := app.activeParticipantCount(); count != 1 {
+	if count := app.activeParticipantCount(officeRoomID); count != 1 {
 		t.Fatalf("active participants=%d, want 1", count)
 	}
 	// Legacy clients can never exceed one endpoint, so the device cap is moot.
@@ -197,7 +197,7 @@ func TestForgetOneEndpointLeavesTheOther(t *testing.T) {
 	if snapshot := app.participantSnapshot(); !containsParticipant(snapshot, "AJ") {
 		t.Fatalf("AJ left the roster while the laptop is still connected: %v", snapshot)
 	}
-	if count := app.activeParticipantCount(); count != 1 {
+	if count := app.activeParticipantCount(officeRoomID); count != 1 {
 		t.Fatalf("active participants=%d, want AJ still present", count)
 	}
 

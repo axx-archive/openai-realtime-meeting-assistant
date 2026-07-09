@@ -13,8 +13,8 @@ func TestSpeakerForCompletedTranscriptUsesDominantParticipantAudio(t *testing.T)
 	app := newKanbanBoardApp()
 	now := time.Now().UTC()
 	app.mu.Lock()
-	app.currentSpeechStartedAt = now
-	app.currentSpeechStoppedAt = now.Add(700 * time.Millisecond)
+	app.roomLive[officeRoomID].currentSpeechStartedAt = now
+	app.roomLive[officeRoomID].currentSpeechStoppedAt = now.Add(700 * time.Millisecond)
 	app.mu.Unlock()
 
 	app.NoteAudioActivity(now.Add(100*time.Millisecond), []audioActivityLevel{
@@ -46,8 +46,8 @@ func TestFrozenAttributionWindowSurvivesRapidHandoff(t *testing.T) {
 
 	// A's (Tom's) turn: set the live markers, record Tom-dominant audio, freeze.
 	app.mu.Lock()
-	app.currentSpeechStartedAt = base
-	app.currentSpeechStoppedAt = base.Add(600 * time.Millisecond)
+	app.roomLive[officeRoomID].currentSpeechStartedAt = base
+	app.roomLive[officeRoomID].currentSpeechStoppedAt = base.Add(600 * time.Millisecond)
 	app.mu.Unlock()
 	app.NoteAudioActivity(base.Add(100*time.Millisecond), []audioActivityLevel{
 		{ParticipantName: "Tom", RMS: 1800},
@@ -58,8 +58,8 @@ func TestFrozenAttributionWindowSurvivesRapidHandoff(t *testing.T) {
 	// B's (Tyler's) turn overwrites the shared markers while A's completed is still
 	// in flight; Tyler-dominant audio lands well outside A's frozen window.
 	app.mu.Lock()
-	app.currentSpeechStartedAt = base.Add(800 * time.Millisecond)
-	app.currentSpeechStoppedAt = base.Add(1400 * time.Millisecond)
+	app.roomLive[officeRoomID].currentSpeechStartedAt = base.Add(800 * time.Millisecond)
+	app.roomLive[officeRoomID].currentSpeechStoppedAt = base.Add(1400 * time.Millisecond)
 	app.mu.Unlock()
 	// base+1400ms clears Tom's padded window (stop base+600ms + 650ms padding =
 	// base+1250ms) yet sits inside Tyler's live window.
@@ -101,8 +101,8 @@ func TestActiveSpeakerSnapshotRequiresStableInRoomAudio(t *testing.T) {
 
 	app := newKanbanBoardApp()
 	now := time.Now().UTC()
-	app.participants["Tom"] = now
-	app.participants["Caitlyn"] = now
+	app.roomLive[officeRoomID].participants["Tom"] = now
+	app.roomLive[officeRoomID].participants["Caitlyn"] = now
 
 	app.NoteAudioActivity(now, []audioActivityLevel{
 		{ParticipantName: "Tom", RMS: 2200},
@@ -137,9 +137,9 @@ func TestActiveSpeakerIgnoresMutedAndDepartedParticipants(t *testing.T) {
 
 	app := newKanbanBoardApp()
 	now := time.Now().UTC()
-	app.participants["Tom"] = now
-	app.participants["Caitlyn"] = now
-	app.participantMedia["Tom"] = participantMediaState{MicMuted: true}
+	app.roomLive[officeRoomID].participants["Tom"] = now
+	app.roomLive[officeRoomID].participants["Caitlyn"] = now
+	app.roomLive[officeRoomID].participantMedia["Tom"] = participantMediaState{MicMuted: true}
 
 	app.NoteAudioActivity(now, []audioActivityLevel{
 		{ParticipantName: "Tom", RMS: 4000},
@@ -153,7 +153,7 @@ func TestActiveSpeakerIgnoresMutedAndDepartedParticipants(t *testing.T) {
 		t.Fatalf("muted Tom should be ignored, got %+v", snapshot)
 	}
 
-	delete(app.participants, "Caitlyn")
+	delete(app.roomLive[officeRoomID].participants, "Caitlyn")
 	if snapshot := app.activeSpeakerSnapshot(); snapshot != nil {
 		t.Fatalf("departed active speaker should not be reported: %+v", snapshot)
 	}

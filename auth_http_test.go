@@ -292,10 +292,28 @@ func TestIceTestEndpointRequiresSessionAndRedactsConfig(t *testing.T) {
 	}
 }
 
+func TestNativeClientConfigRequiresSession(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	// Multi-room §5.3 hardening: the payload carries the full member roster,
+	// which must not be readable unauthenticated once guest links put
+	// outsiders on this origin.
+	req := httptest.NewRequest(http.MethodGet, "/native/config", nil)
+	recorder := httptest.NewRecorder()
+	nativeClientConfigHandler(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected /native/config without session to return 401, got %d", recorder.Code)
+	}
+}
+
 func TestNativeClientConfigPublishesRosterAndProtocol(t *testing.T) {
 	setupAuthTestEnv(t)
 
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 	req := httptest.NewRequest(http.MethodGet, "/native/config", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
 	recorder := httptest.NewRecorder()
 	nativeClientConfigHandler(recorder, req)
 	if recorder.Code != http.StatusOK {

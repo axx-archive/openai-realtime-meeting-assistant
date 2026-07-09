@@ -82,7 +82,7 @@ func TestMeetingRecapReturnsExistingBrainEntryWhenNothingNew(t *testing.T) {
 		t.Fatalf("append brain entry: %v", err)
 	}
 
-	result, _, err := app.meetingRecap(map[string]any{"audience": "room"}, "")
+	result, _, err := app.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID)
 	if err != nil {
 		t.Fatalf("meetingRecap: %v", err)
 	}
@@ -99,13 +99,13 @@ func TestMeetingRecapErrorsWhenNothingCaptured(t *testing.T) {
 	app.apiKey = "test-key"
 	app.mu.Unlock()
 
-	if _, _, err := app.meetingRecap(map[string]any{}, ""); err == nil || !strings.Contains(err.Error(), "nothing has been captured") {
+	if _, _, err := app.meetingRecap(map[string]any{}, "", officeRoomID); err == nil || !strings.Contains(err.Error(), "nothing has been captured") {
 		t.Fatalf("err=%v, want the nothing-captured error", err)
 	}
 
 	// Missing API key errors before any pass.
 	keyless := newIsolatedKanbanBoardApp(t)
-	if _, _, err := keyless.meetingRecap(map[string]any{}, ""); err == nil || !strings.Contains(err.Error(), "API key") {
+	if _, _, err := keyless.meetingRecap(map[string]any{}, "", officeRoomID); err == nil || !strings.Contains(err.Error(), "API key") {
 		t.Fatalf("keyless err=%v, want an API key error", err)
 	}
 }

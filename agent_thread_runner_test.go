@@ -108,7 +108,7 @@ func TestLaunchAgentThreadWithOriginStampsOnlyOriginKeys(t *testing.T) {
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-	meetingID := app.memory.ensureMeetingID()
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
 	thread, err := app.launchAgentThreadWithOrigin("research", "map the delivery loop", "AJ", map[string]string{
 		"originKind":      agentThreadOriginRoom,
 		"originId":        "codex-proposal-42",
@@ -189,7 +189,7 @@ func TestUpdateQueuedAgentThreadDerivesTitleOnCompletion(t *testing.T) {
 func TestDeliverArtifactToOriginRoomPostsCardOnce(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	meetingID := app.memory.ensureMeetingID()
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
 	artifact, _, err := app.createOSArtifactWithMetadata("research", "coyote pricing", "# Coyote pricing teardown\n\nEvidence.", "AJ", map[string]string{
 		"title":           "Coyote pricing teardown",
 		"threadStatus":    "complete",
@@ -237,7 +237,7 @@ func TestDeliverArtifactToOriginRoomPostsCardOnce(t *testing.T) {
 func TestDeliverArtifactToOriginSkipsRotatedMeeting(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	meetingID := app.memory.ensureMeetingID()
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
 	artifact, _, err := app.createOSArtifactWithMetadata("research", "coyote pricing", "# Coyote pricing teardown\n\nEvidence.", "AJ", map[string]string{
 		"title":           "Coyote pricing teardown",
 		"threadStatus":    "complete",
@@ -249,10 +249,10 @@ func TestDeliverArtifactToOriginSkipsRotatedMeeting(t *testing.T) {
 		t.Fatalf("create artifact: %v", err)
 	}
 
-	app.memory.rotateMeetingID()
+	app.memory.rotateMeetingID(officeRoomID)
 	app.deliverArtifactToOrigin(artifact, "agent-thread-research-1")
 
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("meeting id %q was minted, delivery after rotation must not fabricate a meeting", got)
 	}
 	stored, _ := app.osArtifactByID(artifact.ID)
@@ -269,30 +269,30 @@ func TestDeliverArtifactToOriginSkipsRotatedMeeting(t *testing.T) {
 // neither mint a phantom meeting nor leak into the successor meeting.
 func TestRoomChatDeliveryAppendGatedOnMeetingID(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	meetingID := app.memory.ensureMeetingID()
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
 
 	// active origin meeting: the gated append lands.
-	if _, ok := app.recordRoomChatMessageWithArtifact(scoutParticipantName, "finished Research — brief", "os-artifact-live", meetingID); !ok {
+	if _, ok := app.recordRoomChatMessageWithArtifact(officeRoomID, scoutParticipantName, "finished Research — brief", "os-artifact-live", meetingID); !ok {
 		t.Fatal("gated append must land while the origin meeting is active")
 	}
 
 	// the id rotates AFTER the caller's guard would have passed: the append
 	// skips and must not lazily mint a phantom meeting.
-	app.memory.rotateMeetingID()
-	if _, ok := app.recordRoomChatMessageWithArtifact(scoutParticipantName, "finished Research — brief", "os-artifact-stale", meetingID); ok {
+	app.memory.rotateMeetingID(officeRoomID)
+	if _, ok := app.recordRoomChatMessageWithArtifact(officeRoomID, scoutParticipantName, "finished Research — brief", "os-artifact-stale", meetingID); ok {
 		t.Fatal("gated append landed after the origin meeting rotated")
 	}
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("meeting id %q was minted; the skipped delivery must not fabricate a meeting", got)
 	}
 
 	// a successor meeting is running: the stale-origin append must not leak
 	// into its transcript stream either.
-	successorID := app.memory.ensureMeetingID()
+	successorID := app.memory.ensureMeetingID(officeRoomID)
 	if successorID == meetingID {
 		t.Fatalf("successor id=%q, want a fresh meeting id", successorID)
 	}
-	if _, ok := app.recordRoomChatMessageWithArtifact(scoutParticipantName, "finished Research — brief", "os-artifact-stale-2", meetingID); ok {
+	if _, ok := app.recordRoomChatMessageWithArtifact(officeRoomID, scoutParticipantName, "finished Research — brief", "os-artifact-stale-2", meetingID); ok {
 		t.Fatal("stale-origin delivery leaked into the successor meeting")
 	}
 	for _, entry := range app.memory.snapshotForMeeting(successorID, 0) {
@@ -397,12 +397,12 @@ func TestRerunOriginForUserConditionalInheritance(t *testing.T) {
 	}
 
 	// room origin survives only while the origin meeting is still active.
-	meetingID := app.memory.ensureMeetingID()
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
 	origin = app.rerunOriginForUser(originArtifact(agentThreadOriginRoom, "", meetingID), "tim@shareability.com")
 	if origin["originKind"] != agentThreadOriginRoom || origin["originMeetingId"] != meetingID {
 		t.Fatalf("active-room rerun origin=%v, want room inherited", origin)
 	}
-	app.memory.rotateMeetingID()
+	app.memory.rotateMeetingID(officeRoomID)
 	origin = app.rerunOriginForUser(originArtifact(agentThreadOriginRoom, "", meetingID), "tim@shareability.com")
 	if origin["originKind"] != agentThreadOriginTool || origin["originMeetingId"] != "" {
 		t.Fatalf("rotated-room rerun origin=%v, want tool", origin)

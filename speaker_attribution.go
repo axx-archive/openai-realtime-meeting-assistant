@@ -33,19 +33,29 @@ type activeSpeakerPayload struct {
 	Confidence float64 `json:"confidence"`
 	Source     string  `json:"source"`
 	At         int64   `json:"at"`
+	RoomID     string  `json:"roomId,omitempty"`
 }
 
+// NoteAudioActivity is the OFFICE mixer's activity listener (the boot-started
+// global mixer registers kanbanApp itself). Named rooms feed the same state
+// machine through roomAudioActivityListener → noteAudioActivityForRoom, so
+// two live rooms never blend attribution energy (multi-room W3).
 func (app *kanbanBoardApp) NoteAudioActivity(at time.Time, levels []audioActivityLevel) {
+	app.noteAudioActivityForRoom(officeRoomID, at, levels)
+}
+
+func (app *kanbanBoardApp) noteAudioActivityForRoom(roomID string, at time.Time, levels []audioActivityLevel) {
 	if app == nil || len(levels) == 0 {
 		return
 	}
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
+	roomID = normalizeRoomID(roomID)
 
 	energyByParticipant := map[string]float64{}
 	for _, level := range levels {
-		name := canonicalParticipantName(level.ParticipantName)
+		name := canonicalRoomParticipantName(level.ParticipantName)
 		if name == "" {
 			continue
 		}
@@ -57,39 +67,45 @@ func (app *kanbanBoardApp) NoteAudioActivity(at time.Time, levels []audioActivit
 
 	var activeSpeaker *activeSpeakerPayload
 	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
 
-	app.audioActivity = append(app.audioActivity, participantAudioFrame{
+	state.audioActivity = append(state.audioActivity, participantAudioFrame{
 		At:                  at.UTC(),
 		EnergyByParticipant: energyByParticipant,
 	})
 	cutoff := at.Add(-speakerActivityRetention)
 	keepFrom := 0
-	for keepFrom < len(app.audioActivity) && app.audioActivity[keepFrom].At.Before(cutoff) {
+	for keepFrom < len(state.audioActivity) && state.audioActivity[keepFrom].At.Before(cutoff) {
 		keepFrom++
 	}
 	if keepFrom > 0 {
-		app.audioActivity = append([]participantAudioFrame(nil), app.audioActivity[keepFrom:]...)
+		state.audioActivity = append([]participantAudioFrame(nil), state.audioActivity[keepFrom:]...)
 	}
-	activeSpeaker = app.noteActiveSpeakerActivityLocked(at.UTC(), energyByParticipant)
+	activeSpeaker = app.noteActiveSpeakerActivityLocked(state, at.UTC(), energyByParticipant)
 	app.mu.Unlock()
 
 	if activeSpeaker != nil {
-		log.Infof("room_active_speaker name=%q level=%.5f confidence=%.3f", activeSpeaker.Name, activeSpeaker.Level, activeSpeaker.Confidence)
-		broadcastKanbanEvent("active_speaker", activeSpeaker)
+		log.Infof("room_active_speaker room=%s name=%q level=%.5f confidence=%.3f", roomID, activeSpeaker.Name, activeSpeaker.Level, activeSpeaker.Confidence)
+		broadcastRoomKanbanEvent(roomID, "active_speaker", activeSpeaker)
 	}
 }
 
 func (app *kanbanBoardApp) activeSpeakerSnapshot() *activeSpeakerPayload {
+	return app.activeSpeakerSnapshotForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) activeSpeakerSnapshotForRoom(roomID string) *activeSpeakerPayload {
 	if app == nil {
 		return nil
 	}
 	app.mu.Lock()
 	defer app.mu.Unlock()
-	if app.activeSpeakerPayload == nil {
+	state := app.roomLiveLocked(roomID)
+	if state.activeSpeakerPayload == nil {
 		return nil
 	}
-	payload := *app.activeSpeakerPayload
-	if !app.participantCanBeActiveSpeakerLocked(payload.Name) {
+	payload := *state.activeSpeakerPayload
+	if !app.participantCanBeActiveSpeakerLocked(state, payload.Name) {
 		return nil
 	}
 	return &payload
@@ -101,44 +117,48 @@ func (app *kanbanBoardApp) activeSpeakerSnapshot() *activeSpeakerPayload {
 // under the prior speaker; it rides the same stability gate as the active
 // speaker payload, so it won't thrash on momentary crosstalk.
 func (app *kanbanBoardApp) activeSpeakerNameForSegmentation() string {
-	snapshot := app.activeSpeakerSnapshot()
+	return app.activeSpeakerNameForSegmentationForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) activeSpeakerNameForSegmentationForRoom(roomID string) string {
+	snapshot := app.activeSpeakerSnapshotForRoom(roomID)
 	if snapshot == nil {
 		return ""
 	}
 	return snapshot.Name
 }
 
-func (app *kanbanBoardApp) noteActiveSpeakerActivityLocked(at time.Time, energyByParticipant map[string]float64) *activeSpeakerPayload {
-	ranked := rankedActiveSpeakerEnergyLocked(app, energyByParticipant)
+func (app *kanbanBoardApp) noteActiveSpeakerActivityLocked(state *roomLiveState, at time.Time, energyByParticipant map[string]float64) *activeSpeakerPayload {
+	ranked := rankedActiveSpeakerEnergyLocked(app, state, energyByParticipant)
 	if len(ranked) == 0 {
 		return nil
 	}
 
 	leader := ranked[0]
-	if leader.Name != app.activeSpeakerCandidate {
-		app.activeSpeakerCandidate = leader.Name
-		app.activeSpeakerCandidateAt = at
+	if leader.Name != state.activeSpeakerCandidate {
+		state.activeSpeakerCandidate = leader.Name
+		state.activeSpeakerCandidateAt = at
 		return nil
 	}
-	if app.activeSpeakerCandidateAt.IsZero() || at.Sub(app.activeSpeakerCandidateAt) < activeSpeakerStabilityWindow {
+	if state.activeSpeakerCandidateAt.IsZero() || at.Sub(state.activeSpeakerCandidateAt) < activeSpeakerStabilityWindow {
 		return nil
 	}
-	if leader.Name == app.activeSpeakerName {
-		if app.activeSpeakerPayload != nil && at.Sub(time.UnixMilli(app.activeSpeakerPayload.At)) >= activeSpeakerRefreshInterval {
-			payload := activeSpeakerPayloadForLeader(at, leader, ranked)
-			app.activeSpeakerPayload = payload
+	if leader.Name == state.activeSpeakerName {
+		if state.activeSpeakerPayload != nil && at.Sub(time.UnixMilli(state.activeSpeakerPayload.At)) >= activeSpeakerRefreshInterval {
+			payload := activeSpeakerPayloadForLeader(state.id, at, leader, ranked)
+			state.activeSpeakerPayload = payload
 			return payload
 		}
 		return nil
 	}
 
-	app.activeSpeakerName = leader.Name
-	payload := activeSpeakerPayloadForLeader(at, leader, ranked)
-	app.activeSpeakerPayload = payload
+	state.activeSpeakerName = leader.Name
+	payload := activeSpeakerPayloadForLeader(state.id, at, leader, ranked)
+	state.activeSpeakerPayload = payload
 	return payload
 }
 
-func activeSpeakerPayloadForLeader(at time.Time, leader participantEnergyScore, ranked []participantEnergyScore) *activeSpeakerPayload {
+func activeSpeakerPayloadForLeader(roomID string, at time.Time, leader participantEnergyScore, ranked []participantEnergyScore) *activeSpeakerPayload {
 	confidence := 1.0
 	if len(ranked) > 1 && leader.Energy > 0 {
 		confidence = leader.Energy / (leader.Energy + ranked[1].Energy)
@@ -149,14 +169,15 @@ func activeSpeakerPayloadForLeader(at time.Time, leader participantEnergyScore, 
 		Confidence: math.Max(0, math.Min(1, confidence)),
 		Source:     "server",
 		At:         at.UnixMilli(),
+		RoomID:     roomID,
 	}
 }
 
-func rankedActiveSpeakerEnergyLocked(app *kanbanBoardApp, energyByParticipant map[string]float64) []participantEnergyScore {
+func rankedActiveSpeakerEnergyLocked(app *kanbanBoardApp, state *roomLiveState, energyByParticipant map[string]float64) []participantEnergyScore {
 	ranked := make([]participantEnergyScore, 0, len(energyByParticipant))
 	for name, energy := range energyByParticipant {
-		name = canonicalParticipantName(name)
-		if name == "" || energy <= 0 || !app.participantCanBeActiveSpeakerLocked(name) {
+		name = canonicalRoomParticipantName(name)
+		if name == "" || energy <= 0 || !app.participantCanBeActiveSpeakerLocked(state, name) {
 			continue
 		}
 		ranked = append(ranked, participantEnergyScore{Name: name, Energy: energy})
@@ -170,15 +191,15 @@ func rankedActiveSpeakerEnergyLocked(app *kanbanBoardApp, energyByParticipant ma
 	return ranked
 }
 
-func (app *kanbanBoardApp) participantCanBeActiveSpeakerLocked(name string) bool {
-	name = canonicalParticipantName(name)
+func (app *kanbanBoardApp) participantCanBeActiveSpeakerLocked(state *roomLiveState, name string) bool {
+	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return false
 	}
-	if _, ok := app.participants[name]; !ok {
+	if _, ok := state.participants[name]; !ok {
 		return false
 	}
-	if app.participantMedia[name].MicMuted {
+	if state.participantMedia[name].MicMuted {
 		return false
 	}
 	return true
@@ -200,23 +221,32 @@ type attributionWindow struct {
 const maxPendingAttributionWindows = 64
 
 func (app *kanbanBoardApp) noteRealtimeSpeechStarted() {
+	app.noteRealtimeSpeechStartedForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) noteRealtimeSpeechStartedForRoom(roomID string) {
 	if app == nil {
 		return
 	}
 
 	app.mu.Lock()
-	app.currentSpeechStartedAt = time.Now().UTC()
-	app.currentSpeechStoppedAt = time.Time{}
+	state := app.roomLiveLocked(roomID)
+	state.currentSpeechStartedAt = time.Now().UTC()
+	state.currentSpeechStoppedAt = time.Time{}
 	app.mu.Unlock()
 }
 
 func (app *kanbanBoardApp) noteRealtimeSpeechStopped() {
+	app.noteRealtimeSpeechStoppedForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) noteRealtimeSpeechStoppedForRoom(roomID string) {
 	if app == nil {
 		return
 	}
 
 	app.mu.Lock()
-	app.currentSpeechStoppedAt = time.Now().UTC()
+	app.roomLiveLocked(roomID).currentSpeechStoppedAt = time.Now().UTC()
 	app.mu.Unlock()
 }
 
@@ -225,29 +255,34 @@ func (app *kanbanBoardApp) noteRealtimeSpeechStopped() {
 // (A6). Call it exactly once per input_audio_buffer.commit, right after the
 // matching noteRealtimeSpeechStopped, on whichever session persists.
 func (app *kanbanBoardApp) freezeAttributionWindowAtCommit() {
+	app.freezeAttributionWindowAtCommitForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) freezeAttributionWindowAtCommitForRoom(roomID string) {
 	if app == nil {
 		return
 	}
 
 	now := time.Now().UTC()
 	app.mu.Lock()
-	startedAt := app.currentSpeechStartedAt
-	stoppedAt := app.currentSpeechStoppedAt
+	state := app.roomLiveLocked(roomID)
+	startedAt := state.currentSpeechStartedAt
+	stoppedAt := state.currentSpeechStoppedAt
 	if stoppedAt.IsZero() || (!startedAt.IsZero() && stoppedAt.Before(startedAt)) {
 		stoppedAt = now
 	}
 	if startedAt.IsZero() {
 		startedAt = stoppedAt.Add(-speakerAttributionFallbackSpan)
 	}
-	app.pendingAttributionWindows = append(app.pendingAttributionWindows, attributionWindow{
+	state.pendingAttributionWindows = append(state.pendingAttributionWindows, attributionWindow{
 		startedAt: startedAt,
 		stoppedAt: stoppedAt,
 	})
-	if overflow := len(app.pendingAttributionWindows) - maxPendingAttributionWindows; overflow > 0 {
-		app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[overflow:]...)
+	if overflow := len(state.pendingAttributionWindows) - maxPendingAttributionWindows; overflow > 0 {
+		state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[overflow:]...)
 	}
-	app.currentSpeechStartedAt = time.Time{}
-	app.currentSpeechStoppedAt = time.Time{}
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
 	app.mu.Unlock()
 }
 
@@ -256,6 +291,10 @@ func (app *kanbanBoardApp) freezeAttributionWindowAtCommit() {
 // When no frozen window is queued (e.g. a completed with no preceding commit
 // hook) it falls back to the legacy live-marker path.
 func (app *kanbanBoardApp) speakerForCommittedTranscript(completedAt time.Time) (string, string) {
+	return app.speakerForCommittedTranscriptForRoom(officeRoomID, completedAt)
+}
+
+func (app *kanbanBoardApp) speakerForCommittedTranscriptForRoom(roomID string, completedAt time.Time) (string, string) {
 	if app == nil {
 		return "", "unknown"
 	}
@@ -264,13 +303,14 @@ func (app *kanbanBoardApp) speakerForCommittedTranscript(completedAt time.Time) 
 	}
 
 	app.mu.Lock()
-	if len(app.pendingAttributionWindows) == 0 {
+	state := app.roomLiveLocked(roomID)
+	if len(state.pendingAttributionWindows) == 0 {
 		app.mu.Unlock()
-		return app.speakerForCompletedTranscript(completedAt)
+		return app.speakerForCompletedTranscriptForRoom(roomID, completedAt)
 	}
-	window := app.pendingAttributionWindows[0]
-	app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[1:]...)
-	scores := app.attributionScoresLocked(window.startedAt, window.stoppedAt)
+	window := state.pendingAttributionWindows[0]
+	state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[1:]...)
+	scores := attributionScoresLocked(state, window.startedAt, window.stoppedAt)
 	app.mu.Unlock()
 
 	return dominantTranscriptSpeaker(scores)
@@ -284,12 +324,17 @@ func (app *kanbanBoardApp) speakerForCommittedTranscript(completedAt time.Time) 
 // shift every later transcript's attribution by one turn for the rest of the
 // sitting. Freeze (at commit) and pop must stay symmetric.
 func (app *kanbanBoardApp) popPendingAttributionWindow() {
+	app.popPendingAttributionWindowForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) popPendingAttributionWindowForRoom(roomID string) {
 	if app == nil {
 		return
 	}
 	app.mu.Lock()
-	if len(app.pendingAttributionWindows) > 0 {
-		app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[1:]...)
+	state := app.roomLiveLocked(roomID)
+	if len(state.pendingAttributionWindows) > 0 {
+		state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[1:]...)
 	}
 	app.mu.Unlock()
 }
@@ -300,11 +345,15 @@ func (app *kanbanBoardApp) popPendingAttributionWindow() {
 // that landed while recording was off) cannot drift the next connection's
 // attribution.
 func (app *kanbanBoardApp) resetPendingAttributionWindows() {
+	app.resetPendingAttributionWindowsForRoom(officeRoomID)
+}
+
+func (app *kanbanBoardApp) resetPendingAttributionWindowsForRoom(roomID string) {
 	if app == nil {
 		return
 	}
 	app.mu.Lock()
-	app.pendingAttributionWindows = nil
+	app.roomLiveLocked(roomID).pendingAttributionWindows = nil
 	app.mu.Unlock()
 }
 
@@ -312,6 +361,10 @@ func (app *kanbanBoardApp) resetPendingAttributionWindows() {
 // mutable shared speech markers. Retained as the fallback for
 // speakerForCommittedTranscript when no window was frozen at commit.
 func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) (string, string) {
+	return app.speakerForCompletedTranscriptForRoom(officeRoomID, completedAt)
+}
+
+func (app *kanbanBoardApp) speakerForCompletedTranscriptForRoom(roomID string, completedAt time.Time) (string, string) {
 	if app == nil {
 		return "", "unknown"
 	}
@@ -320,18 +373,19 @@ func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) 
 	}
 
 	app.mu.Lock()
-	startedAt := app.currentSpeechStartedAt
-	stoppedAt := app.currentSpeechStoppedAt
+	state := app.roomLiveLocked(roomID)
+	startedAt := state.currentSpeechStartedAt
+	stoppedAt := state.currentSpeechStoppedAt
 	if stoppedAt.IsZero() || (!startedAt.IsZero() && stoppedAt.Before(startedAt)) {
 		stoppedAt = completedAt
 	}
 	if startedAt.IsZero() {
 		startedAt = stoppedAt.Add(-speakerAttributionFallbackSpan)
 	}
-	scores := app.attributionScoresLocked(startedAt, stoppedAt)
+	scores := attributionScoresLocked(state, startedAt, stoppedAt)
 
-	app.currentSpeechStartedAt = time.Time{}
-	app.currentSpeechStoppedAt = time.Time{}
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
 	app.mu.Unlock()
 
 	return dominantTranscriptSpeaker(scores)
@@ -339,12 +393,12 @@ func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) 
 
 // attributionScoresLocked sums per-participant audio energy over the padded
 // attribution window. Caller must hold app.mu.
-func (app *kanbanBoardApp) attributionScoresLocked(startedAt, stoppedAt time.Time) map[string]float64 {
+func attributionScoresLocked(state *roomLiveState, startedAt, stoppedAt time.Time) map[string]float64 {
 	windowStart := startedAt.Add(-speakerAttributionStartPadding)
 	windowStop := stoppedAt.Add(speakerAttributionStopPadding)
 
 	scores := map[string]float64{}
-	for _, frame := range app.audioActivity {
+	for _, frame := range state.audioActivity {
 		if frame.At.Before(windowStart) || frame.At.After(windowStop) {
 			continue
 		}
@@ -358,7 +412,7 @@ func (app *kanbanBoardApp) attributionScoresLocked(startedAt, stoppedAt time.Tim
 func dominantTranscriptSpeaker(scores map[string]float64) (string, string) {
 	ranked := make([]participantEnergyScore, 0, len(scores))
 	for name, energy := range scores {
-		name = canonicalParticipantName(name)
+		name = canonicalRoomParticipantName(name)
 		if name == "" || energy <= 0 {
 			continue
 		}

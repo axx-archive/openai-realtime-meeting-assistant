@@ -213,7 +213,7 @@ func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	default:
 	}
 
-	app.rememberTranscript(kanbanRealtimeEvent{
+	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "event-paused-transcript",
 		ItemID:     "item-paused-transcript",
 		Transcript: "This paused transcript should not be persisted.",
@@ -223,7 +223,7 @@ func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	}
 
 	app.setTranscriptRecording(true, "AJ")
-	app.rememberTranscript(kanbanRealtimeEvent{
+	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "event-resumed-transcript",
 		ItemID:     "item-resumed-transcript",
 		Transcript: "This resumed transcript should be persisted.",

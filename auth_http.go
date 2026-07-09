@@ -20,6 +20,13 @@ const (
 	sessionCookieName = "bonfire_session"
 	sessionTTL        = 30 * 24 * time.Hour
 
+	// Guest sessions (multi-room §3.2) live in the SAME sessions.json under a
+	// SEPARATE cookie, so a signed-in member clicking a guest link never
+	// clobbers their real session; when both cookies exist the member wins.
+	guestCookieName  = "bonfire_guest"
+	guestSessionTTL  = 12 * time.Hour
+	sessionKindGuest = "guest"
+
 	loginAttemptLimit  = 12
 	loginAttemptWindow = 5 * time.Minute
 	authBodyLimit      = 16 * 1024
@@ -27,9 +34,14 @@ const (
 	avatarDataURLLimit = 192 * 1024
 )
 
+// Kind "" means "user": legacy rows keep resolving as member sessions, so a
+// deploy logs nobody out (§9.4).
 type sessionRecord struct {
-	Email   string    `json:"email"`
-	Expires time.Time `json:"expires"`
+	Email     string    `json:"email"`
+	Expires   time.Time `json:"expires"`
+	Kind      string    `json:"kind,omitempty"`
+	RoomID    string    `json:"roomId,omitempty"`
+	GuestName string    `json:"guestName,omitempty"`
 }
 
 // sessionStore keeps SHA-256 hashes of session tokens (never the tokens
@@ -75,6 +87,10 @@ func (s *sessionStore) persistLocked() {
 	if err := os.Rename(tmp, s.path); err != nil {
 		log.Errorf("Failed to persist session store: %v", err)
 	}
+	// Guest-link expiry rides the session-persist seam (multi-room §5.1):
+	// every session mutation already sweeps expired sessions above, and the
+	// same heartbeat retires expired guest links from the room store.
+	sweepExpiredGuestLinksIfOpen()
 }
 
 func (s *sessionStore) create(email string) (string, error) {
@@ -95,13 +111,44 @@ func (s *sessionStore) create(email string) (string, error) {
 }
 
 func (s *sessionStore) lookup(token string) (string, bool) {
+	record, ok := s.lookupRecord(token)
+	if !ok {
+		return "", false
+	}
+	return record.Email, true
+}
+
+func (s *sessionStore) lookupRecord(token string) (sessionRecord, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.sessions[hashResetToken(token)]
 	if !ok || time.Now().After(record.Expires) {
-		return "", false
+		return sessionRecord{}, false
 	}
-	return record.Email, true
+	return record, true
+}
+
+// createGuest mints a guest session (multi-room §3.2): no account email,
+// Kind=guest, bound to exactly ONE room, 12h TTL. It reuses the session
+// store's persistence and expiry sweep, and is deliberately invisible to
+// userFromRequest.
+func (s *sessionStore) createGuest(roomID, guestName string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(raw)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[hashResetToken(token)] = sessionRecord{
+		Expires:   time.Now().Add(guestSessionTTL),
+		Kind:      sessionKindGuest,
+		RoomID:    roomID,
+		GuestName: guestName,
+	}
+	s.persistLocked()
+	return token, nil
 }
 
 func (s *sessionStore) destroy(token string) {
@@ -154,11 +201,47 @@ func userFromRequest(r *http.Request) *userAccount {
 	if err != nil || cookie.Value == "" {
 		return nil
 	}
-	email, ok := userSessionStore().lookup(cookie.Value)
+	record, ok := userSessionStore().lookupRecord(cookie.Value)
 	if !ok {
 		return nil
 	}
-	return accountStore().findUser(email)
+	// CRITICAL (multi-room §3.2): a guest session must NEVER resolve to a
+	// member account, even if its token lands in the member cookie. This
+	// explicit guard — not the implicit empty-Email → findUser("")==nil
+	// invariant — is the allowlist guarantee for every session-gated
+	// endpoint.
+	if record.Kind == sessionKindGuest {
+		return nil
+	}
+	return accountStore().findUser(record.Email)
+}
+
+// guestPrincipal is the resolved identity of a guest session: the hashed
+// session key (safe to hold as a seat key), its ONE room, and the sanitized
+// display name without the server-applied "Guest " prefix.
+type guestPrincipal struct {
+	SessionKey string
+	RoomID     string
+	Name       string
+}
+
+// guestFromRequest resolves a guest principal from the bonfire_guest cookie
+// ONLY, and only for Kind=guest records — a member session in the guest
+// cookie slot resolves to nothing.
+func guestFromRequest(r *http.Request) *guestPrincipal {
+	cookie, err := r.Cookie(guestCookieName)
+	if err != nil || cookie.Value == "" {
+		return nil
+	}
+	record, ok := userSessionStore().lookupRecord(cookie.Value)
+	if !ok || record.Kind != sessionKindGuest {
+		return nil
+	}
+	return &guestPrincipal{
+		SessionKey: hashResetToken(cookie.Value),
+		RoomID:     record.RoomID,
+		Name:       record.GuestName,
+	}
 }
 
 func requestIsSecure(r *http.Request) bool {
@@ -168,6 +251,18 @@ func requestIsSecure(r *http.Request) bool {
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   requestIsSecure(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func setGuestSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     guestCookieName,
 		Value:    token,
 		Path:     "/",
 		MaxAge:   maxAge,

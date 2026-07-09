@@ -313,15 +313,24 @@ var lowQualityTranscriptPhrases = map[string]struct{}{
 }
 
 type meetingMemoryStore struct {
-	mu        sync.Mutex
-	path      string
-	entries   []meetingMemoryEntry
-	seen      map[string]struct{}
-	meetingID string
+	mu      sync.Mutex
+	path    string
+	entries []meetingMemoryEntry
+	seen    map[string]struct{}
+	// meetingIDs is the per-room active meeting id (multi-room W2): keyed by
+	// normalized room id (normalizeRoomID — absent metadata.roomId == office),
+	// one sitting id per room, minted lazily and rotated independently so one
+	// room's close can never clear or redirect another room's sitting.
+	meetingIDs map[string]string
 	// bootLatestIDs maps entry kind to the newest entry ID already persisted
 	// when the store was loaded — the baseline an ambient agent loop registers
 	// at startup so it never backfills pre-boot history.
 	bootLatestIDs map[string]string
+	// bootLatestRoomIDs is the same boot baseline PER ROOM (kind → normalized
+	// roomId → newest pre-boot id): a room-scoped agent first touching a room
+	// with pre-boot history baselines at that room's newest input instead of
+	// backfilling it (multi-room W4 §7.4 — a brand-new room baselines at now).
+	bootLatestRoomIDs map[string]map[string]string
 }
 
 type meetingMemoryEntry struct {
@@ -339,9 +348,11 @@ type meetingMemoryMatch struct {
 
 func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	store := &meetingMemoryStore{
-		path:          path,
-		seen:          map[string]struct{}{},
-		bootLatestIDs: map[string]string{},
+		path:              path,
+		seen:              map[string]struct{}{},
+		meetingIDs:        map[string]string{},
+		bootLatestIDs:     map[string]string{},
+		bootLatestRoomIDs: map[string]map[string]string{},
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -375,6 +386,10 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 				store.entries = append(store.entries, entry)
 				store.seen[entry.ID] = struct{}{}
 				store.bootLatestIDs[entry.Kind] = entry.ID
+				if store.bootLatestRoomIDs[entry.Kind] == nil {
+					store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
+				}
+				store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
 			}
 		}
 		if readErr != nil {
@@ -385,23 +400,32 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 		}
 	}
 
-	// resume the in-flight meeting after a restart: if the newest entry was not
-	// an archive, the meeting it belongs to is still open. Digest rollups,
-	// reflections, ledger events, and pass artifacts are skipped: they are
-	// ambient cross-meeting bookkeeping — a meeting_digest may describe a PAST
-	// meeting (its meetingId stamp = the digested meeting, not the live one)
-	// and the day/company digests, reflections, ledger events/passes, and
+	// resume the in-flight meetings after a restart, PER ROOM (multi-room W2):
+	// for each room (absent metadata.roomId == office), if that room's newest
+	// entry was not an archive, the meeting it belongs to is still open. Digest
+	// rollups, reflections, ledger events, and pass artifacts are skipped: they
+	// are ambient cross-meeting bookkeeping — a meeting_digest may describe a
+	// PAST meeting (its meetingId stamp = the digested meeting, not the live
+	// one) and the day/company digests, reflections, ledger events/passes, and
 	// day-digest pass artifacts carry no meetingId at all — so one of them as
-	// the newest line must neither clear nor redirect the in-flight meeting id.
+	// a room's newest line must neither clear nor redirect that room's
+	// in-flight meeting id.
+	decided := map[string]struct{}{}
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		last := store.entries[index]
 		if isAmbientBookkeepingMemoryKind(last.Kind) {
 			continue
 		}
-		if last.Kind != meetingMemoryKindArchive {
-			store.meetingID = strings.TrimSpace(last.Metadata["meetingId"])
+		roomID := normalizeRoomID(last.Metadata["roomId"])
+		if _, ok := decided[roomID]; ok {
+			continue
 		}
-		break
+		decided[roomID] = struct{}{}
+		if last.Kind != meetingMemoryKindArchive {
+			if id := strings.TrimSpace(last.Metadata["meetingId"]); id != "" {
+				store.meetingIDs[roomID] = id
+			}
+		}
 	}
 
 	return store, nil
@@ -421,9 +445,12 @@ func (store *meetingMemoryStore) bootBaselineIDOfKind(kind string) string {
 	return store.bootLatestIDs[kind]
 }
 
-// currentMeetingID returns the active meeting id, empty until the first entry
-// of a meeting is appended.
-func (store *meetingMemoryStore) currentMeetingID() string {
+// bootBaselineIDOfKindForRoom is bootBaselineIDOfKind with the W4 room
+// dimension: the newest pre-boot entry of kind whose roomId (absent == office)
+// matches — the baseline a room-scoped agent registers when it first touches
+// a room, so it resumes instead of backfilling. A room born after boot has no
+// pre-boot entries and baselines at "" (i.e. at now).
+func (store *meetingMemoryStore) bootBaselineIDOfKindForRoom(kind string, roomID string) string {
 	if store == nil {
 		return ""
 	}
@@ -431,12 +458,28 @@ func (store *meetingMemoryStore) currentMeetingID() string {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	return store.meetingID
+	if rooms := store.bootLatestRoomIDs[kind]; rooms != nil {
+		return rooms[normalizeRoomID(roomID)]
+	}
+	return ""
 }
 
-// rotateMeetingID closes the current meeting; the next appended entry lazily
-// starts a new meeting id. Called when archive_meeting completes.
-func (store *meetingMemoryStore) rotateMeetingID() {
+// currentMeetingID returns the room's active meeting id, empty until the
+// first entry of a meeting in that room is appended.
+func (store *meetingMemoryStore) currentMeetingID(roomID string) string {
+	if store == nil {
+		return ""
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return store.meetingIDs[normalizeRoomID(roomID)]
+}
+
+// rotateMeetingID closes the room's current meeting; the room's next appended
+// entry lazily starts a new meeting id. Called when archive_meeting completes.
+func (store *meetingMemoryStore) rotateMeetingID(roomID string) {
 	if store == nil {
 		return
 	}
@@ -444,14 +487,14 @@ func (store *meetingMemoryStore) rotateMeetingID() {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	store.meetingID = ""
+	delete(store.meetingIDs, normalizeRoomID(roomID))
 }
 
-// rotateMeetingIDIfCurrent rotates only while id is still the active meeting
-// id; reports whether the rotation landed. The closing seams (idle end,
-// archive) use it so a concurrent admission's freshly minted successor id is
-// never clobbered by a stale close.
-func (store *meetingMemoryStore) rotateMeetingIDIfCurrent(id string) bool {
+// rotateMeetingIDIfCurrent rotates only while id is still the room's active
+// meeting id; reports whether the rotation landed. The closing seams (idle
+// end, archive) use it so a concurrent admission's freshly minted successor id
+// is never clobbered by a stale close.
+func (store *meetingMemoryStore) rotateMeetingIDIfCurrent(roomID string, id string) bool {
 	if store == nil || strings.TrimSpace(id) == "" {
 		return false
 	}
@@ -459,16 +502,17 @@ func (store *meetingMemoryStore) rotateMeetingIDIfCurrent(id string) bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if store.meetingID != id {
+	roomID = normalizeRoomID(roomID)
+	if store.meetingIDs[roomID] != id {
 		return false
 	}
-	store.meetingID = ""
+	delete(store.meetingIDs, roomID)
 	return true
 }
 
-// ensureMeetingID mints (or returns) the active meeting id eagerly, so a
-// meeting record can be opened at room admission before any entry appends.
-func (store *meetingMemoryStore) ensureMeetingID() string {
+// ensureMeetingID mints (or returns) the room's active meeting id eagerly, so
+// a meeting record can be opened at room admission before any entry appends.
+func (store *meetingMemoryStore) ensureMeetingID(roomID string) string {
 	if store == nil {
 		return ""
 	}
@@ -476,17 +520,59 @@ func (store *meetingMemoryStore) ensureMeetingID() string {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	return store.currentMeetingIDLocked()
+	return store.currentMeetingIDLocked(roomID)
 }
 
-func (store *meetingMemoryStore) currentMeetingIDLocked() string {
-	if store.meetingID == "" {
+func (store *meetingMemoryStore) currentMeetingIDLocked(roomID string) string {
+	roomID = normalizeRoomID(roomID)
+	if store.meetingIDs == nil {
+		store.meetingIDs = map[string]string{}
+	}
+	if store.meetingIDs[roomID] == "" {
 		now := time.Now().UTC()
-		// nanosecond suffix keeps back-to-back meetings distinct.
-		store.meetingID = fmt.Sprintf("meeting-%s-%09d", now.Format("20060102-150405"), now.Nanosecond())
+		// nanosecond suffix keeps back-to-back meetings distinct; the bump
+		// loop keeps CONCURRENT rooms distinct — two rooms minting inside the
+		// same wall-clock tick (coarse clocks resolve microseconds) would
+		// otherwise share one id and blend their sittings.
+		nanos := now.Nanosecond()
+		id := fmt.Sprintf("meeting-%s-%09d", now.Format("20060102-150405"), nanos)
+		for store.meetingIDHeldByAnotherRoomLocked(roomID, id) {
+			nanos = (nanos + 1) % 1_000_000_000
+			id = fmt.Sprintf("meeting-%s-%09d", now.Format("20060102-150405"), nanos)
+		}
+		store.meetingIDs[roomID] = id
 	}
 
-	return store.meetingID
+	return store.meetingIDs[roomID]
+}
+
+// meetingIDHeldByAnotherRoomLocked reports whether id is already some OTHER
+// room's active meeting id — the cross-room uniqueness fence for the mint.
+func (store *meetingMemoryStore) meetingIDHeldByAnotherRoomLocked(roomID string, id string) bool {
+	for otherRoom, otherID := range store.meetingIDs {
+		if otherRoom != roomID && otherID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// meetingRoomIDs lists the rooms with a live (resumed or minted) meeting id —
+// the boot reconciliation walks these alongside the open meeting records.
+func (store *meetingMemoryStore) meetingRoomIDs() []string {
+	if store == nil {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	roomIDs := make([]string, 0, len(store.meetingIDs))
+	for roomID := range store.meetingIDs {
+		roomIDs = append(roomIDs, roomID)
+	}
+	sort.Strings(roomIDs)
+	return roomIDs
 }
 
 func meetingMemoryPath() string {
@@ -497,6 +583,9 @@ func meetingMemoryPath() string {
 	return defaultMeetingMemoryPath
 }
 
+// The office-defaulting transcript wrappers: everything below funnels into
+// appendAttributedTranscriptEntry, which carries the room dimension; callers
+// without a room in hand (tests, legacy seams) write office entries.
 func (store *meetingMemoryStore) appendTranscript(eventID string, itemID string, transcript string) (meetingMemoryEntry, bool, error) {
 	return store.appendAttributedTranscript(eventID, itemID, "", "", transcript)
 }
@@ -506,7 +595,7 @@ func (store *meetingMemoryStore) appendAttributedTranscript(eventID string, item
 }
 
 func (store *meetingMemoryStore) appendAttributedTranscriptWithMetadata(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.appendAttributedTranscriptEntry(eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, false, "")
+	return store.appendAttributedTranscriptEntry(officeRoomID, eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, false, "")
 }
 
 // appendRoomChatTranscript injects a typed room-chat message into the
@@ -520,7 +609,7 @@ func (store *meetingMemoryStore) appendRoomChatTranscript(eventID string, speake
 // metadata (e.g. artifactId on close-the-loop delivery messages); the
 // room_chat source marker always wins.
 func (store *meetingMemoryStore) appendRoomChatTranscriptWithMetadata(eventID string, speaker string, text string, extraMetadata map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.appendRoomChatTranscriptForMeeting(eventID, speaker, text, extraMetadata, "")
+	return store.appendRoomChatTranscriptForMeeting(officeRoomID, eventID, speaker, text, extraMetadata, "")
 }
 
 // appendRoomChatTranscriptForMeeting is appendRoomChatTranscriptWithMetadata
@@ -530,7 +619,7 @@ func (store *meetingMemoryStore) appendRoomChatTranscriptWithMetadata(eventID st
 // close-the-loop delivery guard: an archive/idle rotation racing the delivery
 // can never lazily mint a phantom meeting or leak the card into the successor
 // meeting's transcript stream.
-func (store *meetingMemoryStore) appendRoomChatTranscriptForMeeting(eventID string, speaker string, text string, extraMetadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) appendRoomChatTranscriptForMeeting(roomID string, eventID string, speaker string, text string, extraMetadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	metadata := make(map[string]string, len(extraMetadata)+1)
 	for key, value := range extraMetadata {
 		key = strings.TrimSpace(key)
@@ -541,10 +630,10 @@ func (store *meetingMemoryStore) appendRoomChatTranscriptForMeeting(eventID stri
 		metadata[key] = value
 	}
 	metadata["source"] = transcriptSourceRoomChat
-	return store.appendAttributedTranscriptEntry(eventID, "", speaker, "", text, metadata, true, expectedMeetingID)
+	return store.appendAttributedTranscriptEntry(roomID, eventID, "", speaker, "", text, metadata, true, expectedMeetingID)
 }
 
-func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) appendAttributedTranscriptEntry(roomID string, eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" {
 		return meetingMemoryEntry{}, false, nil
@@ -580,7 +669,7 @@ func (store *meetingMemoryStore) appendAttributedTranscriptEntry(eventID string,
 		}
 	}
 
-	return store.appendEntryForMeeting(meetingMemoryKindTranscript, id, transcript, metadata, expectedMeetingID)
+	return store.appendEntryForMeeting(roomID, meetingMemoryKindTranscript, id, transcript, metadata, expectedMeetingID)
 }
 
 func (store *meetingMemoryStore) appendBrainWriteUp(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -843,16 +932,54 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 	return cloneMemoryEntry(entry), true, nil
 }
 
+// appendEntry writes an office entry — the pre-multi-room default every
+// ambient/agent appender still uses until W4 rooms the agent layer.
 func (store *meetingMemoryStore) appendEntry(kind string, id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
-	return store.appendEntryForMeeting(kind, id, text, metadata, "")
+	// W4: a producer that pre-stamps metadata.roomId (a room-scoped ambient
+	// agent writing another room's artifact) routes to THAT room's meeting id;
+	// everything else keeps the office default exactly as before.
+	roomID := officeRoomID
+	if metadata != nil {
+		roomID = normalizeRoomID(metadata["roomId"])
+	}
+	return store.appendEntryForMeeting(roomID, kind, id, text, metadata, "")
 }
 
-// appendEntryForMeeting is appendEntry with an optional meeting-id gate: a
-// non-empty expectedMeetingID that no longer matches the active meeting id
-// (checked under the lock, atomically with the meetingId stamp) skips the
-// append with appended=false and no error — the caller's origin meeting is
-// simply over.
-func (store *meetingMemoryStore) appendEntryForMeeting(kind string, id string, text string, metadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+// roomIDsOfKind lists the distinct rooms (absent roomId == office) that hold
+// entries of kind — the rooms a room-scoped ambient agent's safety-floor tick
+// walks (multi-room W4 §7.4).
+func (store *meetingMemoryStore) roomIDsOfKind(kind string) []string {
+	if store == nil {
+		return nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	seen := map[string]struct{}{}
+	roomIDs := []string{}
+	for _, entry := range store.entries {
+		if entry.Kind != kind {
+			continue
+		}
+		roomID := normalizeRoomID(entry.Metadata["roomId"])
+		if _, ok := seen[roomID]; ok {
+			continue
+		}
+		seen[roomID] = struct{}{}
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs
+}
+
+// appendEntryForMeeting is appendEntry with a room dimension and an optional
+// meeting-id gate: a non-empty expectedMeetingID that no longer matches the
+// ROOM's active meeting id (checked under the lock, atomically with the
+// meetingId stamp) skips the append with appended=false and no error — the
+// caller's origin meeting is simply over. Every new entry is stamped with
+// metadata.roomId (§3.4) alongside the room's meetingId; readers keep treating
+// absent roomId as office, so the JSONL is never rewritten.
+func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind string, id string, text string, metadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	if strings.TrimSpace(kind) == "" {
 		kind = meetingMemoryKindTranscript
 	}
@@ -873,24 +1000,30 @@ func (store *meetingMemoryStore) appendEntryForMeeting(kind string, id string, t
 		Metadata:  metadata,
 	}
 
+	roomID = normalizeRoomID(roomID)
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	if _, ok := store.seen[entry.ID]; ok {
 		return entry, false, nil
 	}
-	if expectedMeetingID = strings.TrimSpace(expectedMeetingID); expectedMeetingID != "" && store.meetingID != expectedMeetingID {
+	if expectedMeetingID = strings.TrimSpace(expectedMeetingID); expectedMeetingID != "" && store.meetingIDs[roomID] != expectedMeetingID {
 		return meetingMemoryEntry{}, false, nil
 	}
 
-	// stamp every entry with the current meeting id (created lazily at the
-	// first entry of a meeting). entries without one stay readable.
-	stamped := make(map[string]string, len(metadata)+1)
+	// stamp every entry with the room's current meeting id (created lazily at
+	// the first entry of a meeting) plus the room id itself (§3.4). entries
+	// without either stay readable and read back as office.
+	stamped := make(map[string]string, len(metadata)+2)
 	for key, value := range metadata {
 		stamped[key] = value
 	}
 	if strings.TrimSpace(stamped["meetingId"]) == "" {
-		stamped["meetingId"] = store.currentMeetingIDLocked()
+		stamped["meetingId"] = store.currentMeetingIDLocked(roomID)
+	}
+	if strings.TrimSpace(stamped["roomId"]) == "" {
+		stamped["roomId"] = roomID
 	}
 	entry.Metadata = stamped
 
@@ -1878,7 +2011,10 @@ func normalizeTranscriptSpeaker(speaker string) string {
 	normalizedParts := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if canonical := canonicalParticipantName(part); canonical != "" {
+		// Guest display names ("Guest Sam") pass through verbatim — the
+		// server-enforced prefix is exactly what the record must carry so a
+		// guest can never be attributed as a roster member (multi-room §5.2).
+		if canonical := canonicalRoomParticipantName(part); canonical != "" {
 			normalizedParts = append(normalizedParts, canonical)
 		}
 	}
@@ -1886,7 +2022,7 @@ func normalizeTranscriptSpeaker(speaker string) string {
 		return strings.Join(uniqueStrings(normalizedParts), " + ")
 	}
 
-	if canonical := canonicalParticipantName(speaker); canonical != "" {
+	if canonical := canonicalRoomParticipantName(speaker); canonical != "" {
 		return canonical
 	}
 

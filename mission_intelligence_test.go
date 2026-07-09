@@ -111,8 +111,8 @@ func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
 	if _, err := app.admitParticipant("AJ"); err != nil {
 		t.Fatalf("admitParticipant: %v", err)
 	}
-	app.noteMeetingAdmission("AJ")
-	meetingID := app.memory.currentMeetingID()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	if _, appended, err := app.memory.appendBrainWriteUp("brain-flush-1", "## Overview\nThe intel canvas came up repeatedly.", nil); err != nil || !appended {
 		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
 	}
@@ -139,7 +139,7 @@ func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
 
 	// AJ never left, so a successor record opened — it must NOT be titled
 	// after the archived meeting's content.
-	successor, ok := app.meetings.activeRecord()
+	successor, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("mid-occupancy archive left no successor record")
 	}
@@ -523,7 +523,7 @@ func TestMissionSnapshotLiveParticipantsTrackRoomOccupancy(t *testing.T) {
 	}
 
 	app.mu.Lock()
-	app.participantCounts["AJ"] = 1
+	app.roomLive[officeRoomID].participantCounts["AJ"] = 1
 	app.mu.Unlock()
 
 	snapshot = app.missionIntelligenceSnapshot(time.Now())
@@ -639,8 +639,8 @@ func TestMissionInsightTextSurvivesAppendNormalization(t *testing.T) {
 // to (Ball Dogs owned the airtime but lost the title to the most-recent tick).
 func TestDecayedDominantThemePrefersRecurrenceOverLastTickBlip(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	app.noteMeetingAdmission("AJ")
-	record, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no active record after admission")
 	}
@@ -687,7 +687,7 @@ func TestBuildMissionIntelInputStripsMentionsAndResetsAcrossSitting(t *testing.T
 		map[string]string{"generatedAt": time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)}); err != nil || !appended {
 		t.Fatalf("append prior insight: appended=%v err=%v", appended, err)
 	}
-	stale.noteMeetingAdmission("AJ")
+	stale.noteMeetingAdmission(officeRoomID, "AJ")
 	priorInput := stale.buildMissionIntelInput(nil, time.Now())
 	if strings.Contains(priorInput, "Previous mission insight") || strings.Contains(priorInput, "Samsung opportunity") {
 		t.Fatalf("a prior-sitting insight must not prime a fresh sitting: %s", priorInput)
@@ -695,8 +695,8 @@ func TestBuildMissionIntelInputStripsMentionsAndResetsAcrossSitting(t *testing.T
 
 	// in-sitting insight (generatedAt after StartedAt) DOES prime — mentions stripped.
 	live := newIsolatedKanbanBoardApp(t)
-	live.noteMeetingAdmission("AJ")
-	record, _ := live.meetings.activeRecord()
+	live.noteMeetingAdmission(officeRoomID, "AJ")
+	record, _ := live.meetings.activeRecord(officeRoomID)
 	started, _ := time.Parse(time.RFC3339Nano, record.StartedAt)
 	if _, appended, err := live.memory.appendMissionInsight("mi-live",
 		`{"themes":[{"label":"Ball Dogs IP","summary":"licensing","mentions":12}],"openQuestions":[],"alignments":[]}`,

@@ -1013,7 +1013,10 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 
 	// The simulated sidecar: the moment ship_compile files the deck and stamps
 	// its render job, the page JPEGs land as {kind: image} assets — exactly
-	// what the real callback does via persistRenderPageImageAssets.
+	// what the real callback does via persistRenderPageImageAssets. Both pages
+	// land in ONE metadata write (replaceArtifactAssetsOfKind, the callback's
+	// own seam): waitForDeckPageImages proceeds on the FIRST visible image
+	// asset, so per-page appends would race the jury into seeing page one only.
 	go func() {
 		deadline := time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) {
@@ -1023,18 +1026,20 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 					strings.TrimSpace(artifact.Metadata["renderJobId"]) == "" {
 					continue
 				}
+				pages := make([]artifactAsset, 0, 2)
 				for index, page := range [][]byte{[]byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two")} {
 					ref, err := putBlob(page, "image/jpeg")
 					if err != nil {
 						return
 					}
-					_, _ = app.appendArtifactAsset(artifact.ID, artifactAsset{
+					pages = append(pages, artifactAsset{
 						Ref:  ref,
 						Mime: "image/jpeg",
 						Name: fmt.Sprintf("page-%02d.jpg", index+1),
 						Kind: "image",
 					})
 				}
+				_, _ = app.replaceArtifactAssetsOfKind(artifact.ID, "image", pages)
 				return
 			}
 			time.Sleep(5 * time.Millisecond)

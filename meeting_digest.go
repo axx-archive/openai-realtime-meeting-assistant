@@ -108,6 +108,7 @@ func meetingDigestAgent() ambientAgentConfig {
 		artifactKind:      meetingMemoryKindMeetingDigest,
 		cursorMetadataKey: meetingDigestCursorMetadataKey,
 		requestTimeout:    meetingDigestRequestTimeout,
+		roomScoped:        true, // W4 §7.4: T2 digests are per meeting, so per room
 		produce:           (*kanbanBoardApp).produceMeetingDigests,
 	}
 }
@@ -535,6 +536,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			// meeting's snapshotForMeeting/archive embed (upsertDigest never
 			// auto-stamps the LIVE meeting id — Wave 1 contract).
 			"meetingId":                    group.key,
+			"roomId":                       ambientWindowRoomID(group.brains),
 			digestDayMetadataKey:           day,
 			digestSpanStartMetadataKey:     spanStart.UTC().Format(time.RFC3339),
 			digestSpanEndMetadataKey:       spanEnd.UTC().Format(time.RFC3339),
@@ -542,6 +544,13 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			meetingDigestCursorMetadataKey: digestPassCursor(inputs, processed, group),
 			"brainCount":                   strconv.Itoa(len(group.brains)),
 			"generatedAt":                  time.Now().UTC().Format(time.RFC3339),
+		}
+		// §6.4 provenance (inclusion RATIFIED 2026-07-09): the stamp is the
+		// durable external-guest-meeting origin record — the rollups consume
+		// this digest like any other, recall surfaces can display the origin,
+		// and a future re-quarantine is a read-side filter keyed on it.
+		if app.meetingListenOnly(group.key) || app.windowIncludesListenOnly(group.brains) {
+			metadata[listenOnlyMetadataKey] = "true"
 		}
 		entry, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, group.key, string(canonical), metadata)
 		if err != nil {
@@ -788,6 +797,9 @@ func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, 
 	}
 	daySet := map[string]struct{}{}
 	for _, input := range inputs {
+		// §6.4 (RATIFIED 2026-07-09): listen-only sittings shape the day rollup
+		// like any other meeting — the external meeting's memory must reach the
+		// brain. The T2 digest's listenOnly stamp keeps the origin visible.
 		for _, day := range meetingDigestAffectedDays(input) {
 			daySet[day] = struct{}{}
 		}
@@ -929,6 +941,9 @@ func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey 
 		return meetingMemoryEntry{}, false, nil
 	}
 	// material gate: reflect only on a completed day that produced rollups.
+	// §6.4 (RATIFIED 2026-07-09): listen-only sittings count as material and
+	// enter the synthesis window like any other digest — their listenOnly
+	// stamps keep the origin visible to the model and any read-side filter.
 	if len(app.memory.digestsInRange(dayStart, dayEnd)) == 0 {
 		return meetingMemoryEntry{}, false, nil
 	}

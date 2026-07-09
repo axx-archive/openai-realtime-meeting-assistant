@@ -135,7 +135,7 @@ func TestGetMeetingDetailDrillsToVerbatim(t *testing.T) {
 	appendTestTranscript(t, app, "tx-1", "We are kicking off the packaging pilot.")
 	appendTestTranscript(t, app, "tx-2", "We choose vendor Zebra for the pilot.")
 	appendTestTranscript(t, app, "tx-3", "Tyler will draft the pricing sheet.")
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	if meetingID == "" {
 		t.Fatal("expected a minted meeting id")
 	}

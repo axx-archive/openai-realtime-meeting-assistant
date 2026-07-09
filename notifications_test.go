@@ -694,7 +694,7 @@ func TestArchiveMeetingFlushesDeferredNotifications(t *testing.T) {
 func TestIdleMeetingEndFlushesDeferredNotifications(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
-	app.noteMeetingAdmission("AJ")
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	if _, err := app.createNotification("", "info", "reminder queued during the meeting", "", "", "", true); err != nil {
 		t.Fatalf("create deferred notification: %v", err)
 	}

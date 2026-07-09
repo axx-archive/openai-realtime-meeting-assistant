@@ -99,6 +99,7 @@ func researchSuggestionAgent() ambientAgentConfig {
 		artifactKind:      researchSuggestionCursorKind,
 		cursorMetadataKey: researchSuggestionCursorKey,
 		requestTimeout:    researchSuggestionRequestTimeout,
+		roomScoped:        true, // W4 §7.4: per-room brain windows + baselines
 		produce:           (*kanbanBoardApp).produceResearchSuggestions,
 	}
 }
@@ -118,13 +119,24 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 	if len(summaries) == 0 {
 		return meetingMemoryEntry{}, nil
 	}
+	roomID := ambientWindowRoomID(summaries)
+	baselineKey := ambientAgentKey(researchSuggestionAgentName, roomID)
+	windowLast := summaries[len(summaries)-1]
+	// §7.3 layer 1: listen-only brains are excluded from the suggestion window
+	// while the baseline still advances (this agent's own skip-while-advancing
+	// idiom) — a guest-exposed sitting never volunteers a proposal.
+	summaries, _ = app.filterListenOnly(summaries)
+	if len(summaries) == 0 {
+		app.setAmbientAgentBaselineID(baselineKey, windowLast.ID)
+		return meetingMemoryEntry{}, nil
+	}
 
 	known := app.existingResearchTopicStrings(researchSuggestionKnownTopicScan)
 	model := researchSuggestionModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
 		Instructions: researchSuggestionInstructions(),
-		Input:        buildResearchSuggestionInput(summaries, known, app.participantSnapshot(), time.Now().UTC()),
+		Input:        buildResearchSuggestionInput(summaries, known, app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A suggestion is lighter than a board mutation, but the output is still
 		// structured JSON the parse depends on; medium buys reliable shape for a
 		// cheap, infrequent step (the board worker's A2 reasoning about effort).
@@ -162,9 +174,10 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 			continue
 		}
 		if _, _, err := app.proposeCodexTask(map[string]any{
-			"title": title,
-			"mode":  "research",
-			"query": query,
+			"title":          title,
+			"mode":           "research",
+			"query":          query,
+			"origin_room_id": roomID,
 		}, "suggestion_worker"); err != nil {
 			// Log-and-continue: a single rejected suggestion (e.g. an empty field
 			// the model slipped through) must not fail the whole pass and re-feed
@@ -181,7 +194,9 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 	// Successful pass (proposed something or deliberately nothing): advance the
 	// in-memory baseline past this window so it is never reconsidered. This IS
 	// the agent's cursor — see the file header on why no artifact is persisted.
-	app.setAmbientAgentBaselineID(researchSuggestionAgentName, summaries[len(summaries)-1].ID)
+	// W4: the baseline keys on (agent, room) and advances through the ORIGINAL
+	// window's tail so a filtered listen-only trailing brain never re-feeds.
+	app.setAmbientAgentBaselineID(baselineKey, windowLast.ID)
 	return meetingMemoryEntry{}, nil
 }
 

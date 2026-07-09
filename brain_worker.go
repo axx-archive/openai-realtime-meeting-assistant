@@ -57,7 +57,12 @@ func meetingBrainAgent() ambientAgentConfig {
 		artifactKind:      meetingMemoryKindBrain,
 		cursorMetadataKey: "throughTranscriptId",
 		requestTimeout:    meetingBrainRequestTimeout,
-		produce:           (*kanbanBoardApp).produceMeetingBrainWriteUp,
+		// W4 §7.4: per-room cursors — one room's brain pass must never advance
+		// another room's transcript window. §6.5: a guests-only room defers its
+		// scheduled passes until a member is present (or the close flush).
+		roomScoped:           true,
+		defersWhenGuestsOnly: true,
+		produce:              (*kanbanBoardApp).produceMeetingBrainWriteUp,
 	}
 }
 
@@ -71,11 +76,14 @@ func (app *kanbanBoardApp) runMeetingBrainOnce(ctx context.Context, apiKey strin
 }
 
 func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKey string, transcripts []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	// W4: the runner hands each pass ONE room's window; the room rides the
+	// artifact (cursor partitioning) and the downstream nudges.
+	roomID := ambientWindowRoomID(transcripts)
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
 		Instructions:    meetingBrainInstructions(),
-		Input:           buildMeetingBrainInput(transcripts, app.snapshotState(), app.participantSnapshot(), time.Now().UTC()),
+		Input:           buildMeetingBrainInput(transcripts, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: brainMaxOutputTokens(len(transcripts)),
@@ -93,11 +101,19 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	metadata := map[string]string{
 		"source":                     "openai_responses",
 		"model":                      model,
+		"roomId":                     roomID,
 		"fromTranscriptId":           firstTranscript.ID,
 		"throughTranscriptId":        lastTranscript.ID,
 		"fromTranscriptCreatedAt":    firstTranscript.CreatedAt.Format(time.RFC3339Nano),
 		"throughTranscriptCreatedAt": lastTranscript.CreatedAt.Format(time.RFC3339Nano),
 		"transcriptCount":            strconv.Itoa(len(transcripts)),
+	}
+	// §6.4 provenance (inclusion RATIFIED 2026-07-09): a write-up over a
+	// listen-only sitting's transcripts carries the origin stamp — the rollups
+	// consume it like any other material; the stamp keeps the external-guest
+	// origin visible and is the key a re-quarantine filter would use.
+	if app.windowIncludesListenOnly(transcripts) {
+		metadata[listenOnlyMetadataKey] = "true"
 	}
 	id := durableTimestampID("brain", time.Now())
 	entry, appended, err := app.memory.appendBrainWriteUp(id, text, metadata)
@@ -114,12 +130,13 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 
 	// A3 cascade: a fresh write-up just landed — wake every worker that consumes
 	// brains so the board / ledger / mission / narrative reflect it promptly
-	// instead of each waiting for its own floor tick. Each nudge is debounced and
-	// runs under its agent's run lock, so this cannot double-fire a pass.
-	app.nudgeAmbientAgent(meetingBoardAgentName)
-	app.nudgeAmbientAgent(decisionLedgerAgentName)
-	app.nudgeAmbientAgent(missionIntelAgentName)
-	app.nudgeAmbientAgent(narrativeMaintainerAgentName)
+	// instead of each waiting for its own floor tick. Each nudge is debounced,
+	// carries THIS pass's room (W4), and runs under its agent's (agent, room)
+	// run lock, so this cannot double-fire a pass.
+	app.nudgeAmbientAgentForRoom(meetingBoardAgentName, roomID)
+	app.nudgeAmbientAgentForRoom(decisionLedgerAgentName, roomID)
+	app.nudgeAmbientAgentForRoom(missionIntelAgentName, roomID)
+	app.nudgeAmbientAgentForRoom(narrativeMaintainerAgentName, roomID)
 
 	return entry, nil
 }

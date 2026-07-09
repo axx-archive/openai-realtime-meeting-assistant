@@ -200,7 +200,7 @@ func TestMeetingRecapRoomPostReachesOfficeSocket(t *testing.T) {
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 	appendTestTranscript(t, kanbanApp, "recap-office-1", "Boot Barn pilot is on track.")
 
-	if _, _, err := kanbanApp.meetingRecap(map[string]any{"audience": "room"}, ""); err != nil {
+	if _, _, err := kanbanApp.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID); err != nil {
 		t.Fatalf("meetingRecap: %v", err)
 	}
 

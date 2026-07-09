@@ -67,6 +67,7 @@ func decisionLedgerAgent() ambientAgentConfig {
 		artifactKind:      meetingMemoryKindDecisionPass,
 		cursorMetadataKey: "throughBrainId",
 		requestTimeout:    decisionLedgerRequestTimeout,
+		roomScoped:        true, // W4 §7.4: per-room brain windows and pass cursors
 		produce:           (*kanbanBoardApp).produceDecisionLedgerPass,
 	}
 }
@@ -587,6 +588,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			"sourceBrainId": lastBrain.ID,
 			"dedupeKey":     key,
 			"status":        status,
+			"roomId":        ambientWindowRoomID(inputs),
 		}
 		// card 081: stamp the decision with the meeting its source brain write-up
 		// covered rather than whatever meeting is current when this pass fires up
@@ -642,6 +644,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 	passMetadata := map[string]string{
 		"source":           "openai_responses",
 		"model":            model,
+		"roomId":           ambientWindowRoomID(inputs),
 		"fromBrainId":      firstBrain.ID,
 		"throughBrainId":   lastBrain.ID,
 		"brainCount":       strconv.Itoa(len(inputs)),

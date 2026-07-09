@@ -214,7 +214,10 @@ func (app *kanbanBoardApp) appendBrainIntakeContribution(user *userAccount, step
 	text := strings.TrimSpace(message.Text)
 	if text != "" && !brainIntakeIsControlVerb(text) {
 		eventID := "brain-intake-" + message.ID
-		if _, _, err := app.memory.appendAttributedTranscriptEntry(eventID, "", speaker, "", text, baseMeta(), true, ""); err != nil {
+		// Ungated writes (empty expectedMeetingID) are pinned to the OFFICE
+		// room explicitly (multi-room §4.3): intake material must never land
+		// in a guest room's live meeting.
+		if _, _, err := app.memory.appendAttributedTranscriptEntry(officeRoomID, eventID, "", speaker, "", text, baseMeta(), true, ""); err != nil {
 			log.Errorf("Failed to file brain intake answer: %v", err)
 		}
 	}
@@ -235,7 +238,7 @@ func (app *kanbanBoardApp) appendBrainIntakeContribution(user *userAccount, step
 			meta["blobRef"] = ref
 		}
 		eventID := fmt.Sprintf("brain-intake-%s-file-%d", message.ID, index)
-		if _, _, err := app.memory.appendAttributedTranscriptEntry(eventID, "", speaker, "", fileText, meta, true, ""); err != nil {
+		if _, _, err := app.memory.appendAttributedTranscriptEntry(officeRoomID, eventID, "", speaker, "", fileText, meta, true, ""); err != nil {
 			log.Errorf("Failed to file brain intake attachment: %v", err)
 		}
 	}

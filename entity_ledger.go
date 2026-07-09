@@ -794,6 +794,9 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		if !ok {
 			continue
 		}
+		// §6.4 (RATIFIED 2026-07-09): a listen-only sitting's digest feeds the
+		// canonical registry like any other — its facts must be Scout-recallable
+		// company-wide. Origin stays visible on the digest's listenOnly stamp.
 		facts = append(facts, ledgerFactsFromDigest(digest)...)
 	}
 

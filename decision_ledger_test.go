@@ -107,7 +107,7 @@ func TestProduceDecisionLedgerInheritsMeetingIdFromSourceBrain(t *testing.T) {
 	}
 	// A distinct, later meeting is now the active one — this is what the
 	// append-time stamp would use if the decision did not inherit.
-	currentMeeting := app.memory.ensureMeetingID()
+	currentMeeting := app.memory.ensureMeetingID(officeRoomID)
 	if currentMeeting == "" || currentMeeting == "meeting-source" {
 		t.Fatalf("current meeting id=%q, want a distinct non-empty id for the test", currentMeeting)
 	}

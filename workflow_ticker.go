@@ -205,6 +205,14 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 	if codexJobAuthorityForThread(scoutAgentThread{Mode: mode, Query: entry.Metadata["query"]}) == codexJobAuthorityExternalWrite {
 		return "", "", nil, false
 	}
+	// §7.3 layer 2 (W4): the ticker declines proposals whose origin room is in
+	// a listen-only sitting — defense in depth under proposeCodexTask's own
+	// mint-time rejection. Proposals minted pre-guest (legacy rows without an
+	// originRoomId stamp, or an office/full-mode origin) still launch.
+	if originRoom := strings.TrimSpace(entry.Metadata["originRoomId"]); originRoom != "" && app.sittingListenOnly(originRoom) {
+		log.Infof("workflow_ticker_declined_listen_only proposal=%s room=%s", entry.ID, originRoom)
+		return "", "", nil, false
+	}
 
 	actorName := ""
 	actorEmail := ""

@@ -18,7 +18,7 @@ func TestRoomChatPersistsRegardlessOfRecordingToggle(t *testing.T) {
 	app := newKanbanBoardApp()
 	app.setTranscriptRecording(false, "Tom")
 
-	payload, ok := app.recordRoomChatMessage("Tom", "ship the release notes tonight")
+	payload, ok := app.recordRoomChatMessage(officeRoomID, "Tom", "ship the release notes tonight")
 	if !ok {
 		t.Fatal("recordRoomChatMessage ok=false, want true with recording disabled")
 	}
@@ -63,7 +63,7 @@ func TestRoomChatBypassesTranscriptUsefulnessFilter(t *testing.T) {
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 
 	app := newKanbanBoardApp()
-	if _, ok := app.recordRoomChatMessage("Tyler", "ok"); !ok {
+	if _, ok := app.recordRoomChatMessage(officeRoomID, "Tyler", "ok"); !ok {
 		t.Fatal("short typed chat was dropped; transcriptLooksUseful must not filter room chat")
 	}
 
@@ -80,7 +80,7 @@ func TestRoomChatRejectsEmptyAndTrimsOversizeText(t *testing.T) {
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 
 	app := newKanbanBoardApp()
-	if _, ok := app.recordRoomChatMessage("Tim", "   \n\t "); ok {
+	if _, ok := app.recordRoomChatMessage(officeRoomID, "Tim", "   \n\t "); ok {
 		t.Fatal("whitespace-only chat was persisted, want empty-reject")
 	}
 	if entries := app.memory.snapshot(0); len(entries) != 0 {
@@ -88,7 +88,7 @@ func TestRoomChatRejectsEmptyAndTrimsOversizeText(t *testing.T) {
 	}
 
 	oversize := strings.Repeat("é", maxRoomChatMessageRunes+250)
-	payload, ok := app.recordRoomChatMessage("Tim", oversize)
+	payload, ok := app.recordRoomChatMessage(officeRoomID, "Tim", oversize)
 	if !ok {
 		t.Fatal("oversize chat rejected outright, want trim-and-persist")
 	}
@@ -104,7 +104,7 @@ func TestRoomChatHistoryScopesToCurrentMeetingAndCapsEntries(t *testing.T) {
 
 	app := newKanbanBoardApp()
 	for range 3 {
-		if _, ok := app.recordRoomChatMessage("Tom", "note from the previous meeting"); !ok {
+		if _, ok := app.recordRoomChatMessage(officeRoomID, "Tom", "note from the previous meeting"); !ok {
 			t.Fatal("seed previous-meeting chat failed")
 		}
 	}
@@ -112,11 +112,11 @@ func TestRoomChatHistoryScopesToCurrentMeetingAndCapsEntries(t *testing.T) {
 	if _, appended, err := app.memory.appendAttributedTranscript("event-spoken", "item-spoken", "Tyler", "dominant", "Boot Barn spoken update."); err != nil || !appended {
 		t.Fatalf("append spoken transcript: appended=%v err=%v", appended, err)
 	}
-	app.memory.rotateMeetingID()
+	app.memory.rotateMeetingID(officeRoomID)
 
 	total := roomChatHistoryLimit + 5
 	for index := range total {
-		if _, ok := app.recordRoomChatMessage("Tyler", "current meeting message "+strings.Repeat("x", index+1)); !ok {
+		if _, ok := app.recordRoomChatMessage(officeRoomID, "Tyler", "current meeting message "+strings.Repeat("x", index+1)); !ok {
 			t.Fatalf("seed current-meeting chat %d failed", index)
 		}
 	}
@@ -205,10 +205,10 @@ func TestWebsocketRoomChatHistoryReplayOnAdmission(t *testing.T) {
 	writeNativeWebsocketEvent(t, conn, "participant", map[string]any{})
 	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
 
-	if _, ok := kanbanApp.recordRoomChatMessage("Tom", "hello from earlier"); !ok {
+	if _, ok := kanbanApp.recordRoomChatMessage(officeRoomID, "Tom", "hello from earlier"); !ok {
 		t.Fatal("seed chat message failed")
 	}
-	if _, ok := kanbanApp.recordRoomChatMessage("Tim", "second message"); !ok {
+	if _, ok := kanbanApp.recordRoomChatMessage(officeRoomID, "Tim", "second message"); !ok {
 		t.Fatal("seed second chat message failed")
 	}
 

@@ -71,7 +71,7 @@ func TestMeetingMemorySnapshotsOnlyRequestedMeeting(t *testing.T) {
 		t.Fatalf("append old transcript: %v", err)
 	}
 	oldMeetingID := oldEntry.Metadata["meetingId"]
-	store.rotateMeetingID()
+	store.rotateMeetingID(officeRoomID)
 	currentEntry, _, err := store.appendTranscript("event-current", "item-current", "Current meeting decision belongs here.")
 	if err != nil {
 		t.Fatalf("append current transcript: %v", err)
@@ -1162,7 +1162,7 @@ func TestBootResumeSkipsDigestEntries(t *testing.T) {
 	if _, _, err := store.appendEntry(meetingMemoryKindTranscript, "t1", "we are live", nil); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
-	liveMeetingID := store.currentMeetingID()
+	liveMeetingID := store.currentMeetingID(officeRoomID)
 	if liveMeetingID == "" {
 		t.Fatalf("expected a minted meeting id")
 	}
@@ -1180,7 +1180,7 @@ func TestBootResumeSkipsDigestEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := reloaded.currentMeetingID(); got != liveMeetingID {
+	if got := reloaded.currentMeetingID(officeRoomID); got != liveMeetingID {
 		t.Fatalf("boot resumed meeting id %q, want the in-flight meeting %q (digest lines must not clear or redirect it)", got, liveMeetingID)
 	}
 
@@ -1195,7 +1195,7 @@ func TestBootResumeSkipsDigestEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload after archive: %v", err)
 	}
-	if got := closed.currentMeetingID(); got != "" {
+	if got := closed.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("boot resumed %q after archive, want closed meeting (empty id)", got)
 	}
 }

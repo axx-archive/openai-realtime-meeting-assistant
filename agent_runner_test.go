@@ -118,11 +118,11 @@ func TestPeekUnconsumedWindow(t *testing.T) {
 	var produced [][]string
 	agent := newTestAmbientAgent(&produced) // minBatch 2, maxBatch 3
 
-	if _, _, _, ok := app.peekUnconsumedWindow(agent); ok {
+	if _, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID); ok {
 		t.Fatal("empty store should report no window")
 	}
 	appendTestTranscript(t, app, "peek-1", "Boot Barn kickoff.")
-	head, count, age, ok := app.peekUnconsumedWindow(agent)
+	head, count, age, ok := app.peekUnconsumedWindow(agent, officeRoomID)
 	if !ok || head != "peek-1" || count != 1 {
 		t.Fatalf("peek=%q/%d/%v, want peek-1/1/true", head, count, ok)
 	}
@@ -130,7 +130,7 @@ func TestPeekUnconsumedWindow(t *testing.T) {
 		t.Fatalf("age=%v, want >= 0", age)
 	}
 	// The peek must not consume: a real pass still sees the input.
-	if _, _, _, ok := app.peekUnconsumedWindow(agent); !ok {
+	if _, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID); !ok {
 		t.Fatal("peek must not advance the cursor")
 	}
 }
@@ -229,19 +229,19 @@ func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		appendTestTranscript(t, app, fmt.Sprintf("fail-%d", i), fmt.Sprintf("Boot Barn detail %d.", i))
 	}
-	head, _, _, ok := app.peekUnconsumedWindow(agent)
+	head, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID)
 	if !ok || head != "fail-1" {
 		t.Fatalf("peek head=%q ok=%v, want fail-1", head, ok)
 	}
 
 	// Fresh window: full batch, may proceed.
-	if proceed, limit := app.ambientAgentAttemptBudget(agent, head); !proceed || limit != agent.maxBatch() {
+	if proceed, limit := app.ambientAgentAttemptBudget(agent, head, officeRoomID); !proceed || limit != agent.maxBatch() {
 		t.Fatalf("fresh budget=%v/%d, want true/%d", proceed, limit, agent.maxBatch())
 	}
 
 	// One failure arms a backoff that holds off the immediate retry.
-	app.recordAmbientAgentFailure(agent, head)
-	if proceed, _ := app.ambientAgentAttemptBudget(agent, head); proceed {
+	app.recordAmbientAgentFailure(agent, head, officeRoomID)
+	if proceed, _ := app.ambientAgentAttemptBudget(agent, head, officeRoomID); proceed {
 		t.Fatal("expected an armed backoff to hold off the immediate retry")
 	}
 
@@ -249,7 +249,7 @@ func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
 	app.mu.Lock()
 	app.agentFailures[agent.name] = &ambientAgentFailure{windowID: head, attempts: 1, backoffUntil: time.Now().Add(-time.Second)}
 	app.mu.Unlock()
-	if proceed, limit := app.ambientAgentAttemptBudget(agent, head); !proceed || limit != 2 {
+	if proceed, limit := app.ambientAgentAttemptBudget(agent, head, officeRoomID); !proceed || limit != 2 {
 		t.Fatalf("halved budget=%v/%d, want true/2", proceed, limit)
 	}
 
@@ -259,7 +259,7 @@ func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
 	// re-open a fresh record on the now-skipped head).
 	app.clearAmbientAgentFailure(agent.name)
 	for i := 0; i < ambientAgentMaxWindowAttempts; i++ {
-		app.recordAmbientAgentFailure(agent, head)
+		app.recordAmbientAgentFailure(agent, head, officeRoomID)
 	}
 	if base := app.ambientAgentBaselineID(agent.name); base != head {
 		t.Fatalf("baseline=%q, want dead-letter advance to %q", base, head)
@@ -270,7 +270,7 @@ func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
 	if stillTracked {
 		t.Fatal("dead-lettered window should clear its failure record")
 	}
-	if newHead, _, _, ok := app.peekUnconsumedWindow(agent); !ok || newHead == head {
+	if newHead, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID); !ok || newHead == head {
 		t.Fatalf("post-dead-letter head=%q ok=%v, want the poison head skipped", newHead, ok)
 	}
 }

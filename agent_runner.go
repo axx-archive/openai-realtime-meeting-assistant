@@ -90,7 +90,55 @@ type ambientAgentConfig struct {
 	// nudgeMaxAge overrides defaultAmbientNudgeMaxAge for this agent's A3 nudge
 	// staleness floor; zero uses the default.
 	nudgeMaxAge time.Duration
-	produce     func(app *kanbanBoardApp, ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error)
+	// roomScoped partitions the agent's bookkeeping by room (multi-room W4
+	// §7.4): the cursor for (agent, room) is the newest artifact-of-kind
+	// stamped with that roomId (legacy artifacts without roomId are the OFFICE
+	// cursors), inputs are filtered by roomId, and baselines / nudges /
+	// failure-backoff / run locks key on (agent, room) — one room's pass can
+	// never advance another room's window. The goroutine stays a singleton;
+	// each tick iterates the rooms with unconsumed input. False keeps the
+	// company-global single-cursor behavior (day digest, entity ledger,
+	// company digest).
+	roomScoped bool
+	// defersWhenGuestsOnly (§6.5) holds the agent's scheduled/nudge passes for
+	// a room whose live seats are guests only — an unattended guest cannot
+	// drive summarization spend. Nudges accumulate (the ticker floor retries)
+	// and the close-flush chain still runs its one bounded pass.
+	defersWhenGuestsOnly bool
+	produce              func(app *kanbanBoardApp, ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error)
+}
+
+// windowRoomID resolves the room an agent pass runs for into the memory
+// store's filter dimension: room-scoped agents filter by the (normalized)
+// room, company-global agents scan every room ("" disables the filter —
+// exactly the pre-room behavior).
+func (agent ambientAgentConfig) windowRoomID(roomID string) string {
+	if agent.roomScoped {
+		return normalizeRoomID(roomID)
+	}
+	return ""
+}
+
+// ambientAgentKey is the map key for one agent's per-room bookkeeping
+// (baselines, run locks, failures). The office key is the bare agent name so
+// every pre-room cursor, test seam, and boot registration keeps working
+// unchanged; only named rooms extend the key.
+func ambientAgentKey(name string, roomID string) string {
+	roomID = normalizeRoomID(roomID)
+	if roomID == officeRoomID {
+		return name
+	}
+	return name + "@" + roomID
+}
+
+// ambientWindowRoomID derives the room a produce pass is running for from its
+// (room-filtered) input window — absent roomId metadata reads as office, so
+// legacy windows keep their office semantics.
+func ambientWindowRoomID(inputs []meetingMemoryEntry) string {
+	if len(inputs) == 0 {
+		return officeRoomID
+	}
+	return normalizeRoomID(inputs[0].Metadata["roomId"])
 }
 
 func (agent ambientAgentConfig) interval() time.Duration {
@@ -151,9 +199,13 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 
 	cancel := make(chan struct{})
 	done := make(chan struct{})
+	// The startup baseline registers under the OFFICE key (the bare agent
+	// name); named rooms register lazily on first touch via
+	// ensureAmbientAgentRoomBaseline so a room-scoped agent never backfills a
+	// room's pre-boot history (W4 §7.4).
 	baselineID := ""
 	if !boolEnv(agent.backfillEnv) {
-		baselineID = app.memory.latestEntryIDOfKind(agent.inputKind)
+		baselineID = app.memory.latestEntryIDOfKindForRoom(agent.inputKind, agent.windowRoomID(officeRoomID))
 	}
 
 	app.mu.Lock()
@@ -190,11 +242,13 @@ func (app *kanbanBoardApp) runAmbientAgentLoop(agent ambientAgentConfig, apiKey 
 
 	nudge := app.ambientAgentNudgeChannel(agent.name)
 
-	// A3 debounce timer: when a nudge finds inputs queued but still short of
-	// minBatch AND younger than the staleness floor, the loop arms this one-shot
-	// for exactly when the oldest input crosses nudgeAge. Nudges are edge-
-	// triggered on append, so a room that then falls silent sends no further
-	// wake — this timer is what still brains the trailing short exchange.
+	// A3 debounce timer, per room since W4: when a nudge finds a room's inputs
+	// queued but still short of minBatch AND younger than the staleness floor,
+	// the loop tracks that room's deadline in `waiting` and arms this one-shot
+	// for the SOONEST of them. Nudges are edge-triggered on append, so a room
+	// that then falls silent sends no further wake — this timer is what still
+	// brains the trailing short exchange (of every waiting room).
+	waiting := map[string]time.Time{}
 	var stale *time.Timer
 	var staleC <-chan time.Time
 	stopStale := func() {
@@ -205,45 +259,95 @@ func (app *kanbanBoardApp) runAmbientAgentLoop(agent ambientAgentConfig, apiKey 
 		}
 	}
 	defer stopStale()
-
-	// evaluate runs on every nudge / stale-timer wake. It only reads the
-	// in-memory window (no model call) until it decides to fire: a full pass the
-	// moment minBatch has accumulated, a short pass once the oldest input is
-	// stale, else it arms the timer for the remaining wait. Cheap and idempotent,
-	// so a burst of coalesced nudges cannot spin the model.
-	evaluate := func() {
+	rearmStale := func() {
 		stopStale()
-		_, count, oldest, ok := app.peekUnconsumedWindow(agent)
+		var soonest time.Time
+		for _, deadline := range waiting {
+			if soonest.IsZero() || deadline.Before(soonest) {
+				soonest = deadline
+			}
+		}
+		if soonest.IsZero() {
+			return
+		}
+		wait := time.Until(soonest)
+		if wait < 0 {
+			wait = 0
+		}
+		stale = time.NewTimer(wait)
+		staleC = stale.C
+	}
+
+	// evaluate runs on every nudge / stale-timer wake, for one room. It only
+	// reads the in-memory window (no model call) until it decides to fire: a
+	// full pass the moment minBatch has accumulated, a short pass once the
+	// oldest input is stale, else it records the room's deadline. Cheap and
+	// idempotent, so a burst of coalesced nudges cannot spin the model.
+	evaluate := func(roomID string) {
+		_, count, oldest, ok := app.peekUnconsumedWindow(agent, roomID)
 		if !ok {
+			delete(waiting, roomID)
 			return
 		}
 		if count >= agent.minBatch() {
-			app.fireAmbientAgentPass(agent, apiKey, agent.minBatch())
+			delete(waiting, roomID)
+			app.fireAmbientAgentPass(agent, apiKey, agent.minBatch(), roomID)
 			return
 		}
 		if oldest >= agent.nudgeAge() {
-			app.fireAmbientAgentPass(agent, apiKey, ambientNudgeShortBatch)
+			delete(waiting, roomID)
+			app.fireAmbientAgentPass(agent, apiKey, ambientNudgeShortBatch, roomID)
 			return
 		}
-		stale = time.NewTimer(agent.nudgeAge() - oldest)
-		staleC = stale.C
+		waiting[roomID] = time.Now().Add(agent.nudgeAge() - oldest)
 	}
 
 	for {
 		select {
 		case <-ticker.C:
+			// The safety FLOOR sweeps every room with input of the agent's kind
+			// (a single office pass for company-global agents), so the per-room
+			// short-exchange debounce can never strand a room.
+			waiting = map[string]time.Time{}
 			stopStale()
-			app.fireAmbientAgentPass(agent, apiKey, agent.minBatch())
+			for _, roomID := range app.ambientAgentRooms(agent) {
+				app.fireAmbientAgentPass(agent, apiKey, agent.minBatch(), roomID)
+			}
 		case <-nudge:
-			evaluate()
+			for _, roomID := range app.drainAmbientAgentPendingRooms(agent.name) {
+				evaluate(roomID)
+			}
+			rearmStale()
 		case <-staleC:
 			stale = nil
 			staleC = nil
-			evaluate()
+			now := time.Now()
+			for roomID, deadline := range waiting {
+				if !deadline.After(now) {
+					evaluate(roomID)
+				}
+			}
+			rearmStale()
 		case <-cancel:
 			return
 		}
 	}
+}
+
+// ambientAgentRooms lists the rooms one safety-floor tick sweeps: the office
+// always (the pre-room behavior — an empty window no-ops inside the pass)
+// plus, for room-scoped agents, every room holding input of the agent's kind.
+func (app *kanbanBoardApp) ambientAgentRooms(agent ambientAgentConfig) []string {
+	rooms := []string{officeRoomID}
+	if !agent.roomScoped || app == nil || app.memory == nil {
+		return rooms
+	}
+	for _, roomID := range app.memory.roomIDsOfKind(agent.inputKind) {
+		if roomID != officeRoomID {
+			rooms = append(rooms, roomID)
+		}
+	}
+	return rooms
 }
 
 // fireAmbientAgentPass runs one guarded ticker/nudge pass: it peeks the window
@@ -252,34 +356,49 @@ func (app *kanbanBoardApp) runAmbientAgentLoop(agent ambientAgentConfig, apiKey 
 // failure state by the outcome. The archive-flush path deliberately does NOT go
 // through here — a close flush is a one-shot best-effort sweep, not a retrying
 // ticker, so backoff/dead-letter would only get in its way.
-func (app *kanbanBoardApp) fireAmbientAgentPass(agent ambientAgentConfig, apiKey string, minBatch int) {
+func (app *kanbanBoardApp) fireAmbientAgentPass(agent ambientAgentConfig, apiKey string, minBatch int, roomID string) {
 	if minBatch < 1 {
 		minBatch = 1
 	}
-	headID, count, _, ok := app.peekUnconsumedWindow(agent)
+	roomID = normalizeRoomID(roomID)
+	key := ambientAgentKey(agent.name, roomID)
+	// §6.5 guests-only deferral: an unattended guest room accumulates input
+	// (transcription continues) but spends no model budget until a member is
+	// present or the close-flush chain runs its one bounded pass (which calls
+	// runAmbientAgentOnceForRoom directly and is not deferred).
+	if agent.defersWhenGuestsOnly && app.roomGuestsOnly(roomID) {
+		return
+	}
+	headID, count, _, ok := app.peekUnconsumedWindow(agent, roomID)
 	if !ok || count < minBatch {
 		// Nothing ready at this floor: drop any stale failure record so a window
 		// that drained (or was dead-lettered) does not keep a phantom backoff.
-		app.clearAmbientAgentFailure(agent.name)
+		app.clearAmbientAgentFailure(key)
 		return
 	}
-	proceed, limit := app.ambientAgentAttemptBudget(agent, headID)
+	proceed, limit := app.ambientAgentAttemptBudget(agent, headID, roomID)
 	if !proceed {
 		return // still cooling down after a recent failure on this same window
 	}
 	ctx, cancelRequest := context.WithTimeout(context.Background(), agent.requestTimeout)
-	_, err := app.runAmbientAgentOnceLimited(agent, ctx, apiKey, nil, minBatch, limit)
+	_, err := app.runAmbientAgentOnceLimited(agent, ctx, apiKey, nil, minBatch, limit, roomID)
 	cancelRequest()
 	if err != nil {
 		log.Errorf("%s worker failed: %v", agent.name, err)
-		app.recordAmbientAgentFailure(agent, headID)
+		app.recordAmbientAgentFailure(agent, headID, roomID)
 		return
 	}
-	app.clearAmbientAgentFailure(agent.name)
+	app.clearAmbientAgentFailure(key)
 }
 
 func (app *kanbanBoardApp) runAmbientAgentOnce(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int) (meetingMemoryEntry, error) {
-	return app.runAmbientAgentOnceLimited(agent, ctx, apiKey, responder, minBatch, agent.maxBatch())
+	return app.runAmbientAgentOnceLimited(agent, ctx, apiKey, responder, minBatch, agent.maxBatch(), officeRoomID)
+}
+
+// runAmbientAgentOnceForRoom is the W4 room-dimensioned pass entry: the
+// close-flush chain and the room recap force a specific room's window.
+func (app *kanbanBoardApp) runAmbientAgentOnceForRoom(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int, roomID string) (meetingMemoryEntry, error) {
+	return app.runAmbientAgentOnceLimited(agent, ctx, apiKey, responder, minBatch, agent.maxBatch(), roomID)
 }
 
 // runAmbientAgentOnceLimited is runAmbientAgentOnce with an explicit batch
@@ -287,7 +406,7 @@ func (app *kanbanBoardApp) runAmbientAgentOnce(agent ambientAgentConfig, ctx con
 // the blast radius of a poison entry) without touching the agent's configured
 // maxBatch. maxBatch <= 0 (or above the configured ceiling) falls back to the
 // configured maxBatch.
-func (app *kanbanBoardApp) runAmbientAgentOnceLimited(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int, maxBatch int) (meetingMemoryEntry, error) {
+func (app *kanbanBoardApp) runAmbientAgentOnceLimited(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int, maxBatch int, roomID string) (meetingMemoryEntry, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, nil
 	}
@@ -300,18 +419,20 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimited(agent ambientAgentConfig, 
 	if configured := agent.maxBatch(); maxBatch <= 0 || maxBatch > configured {
 		maxBatch = configured
 	}
+	roomID = normalizeRoomID(roomID)
 
-	// One pass at a time per agent: the cursor only advances when produce
-	// appends its artifact at the end of a pass, so overlapping passes (the
-	// ticker loop vs an archive flush, or two concurrent archives) would
-	// consume — and apply — the same input batch twice. The unconsumed window
-	// is read after the lock is held, so a waiting pass sees the cursor the
-	// previous pass advanced.
-	runLock := app.ambientAgentRunLock(agent.name)
+	// One pass at a time per (agent, room): the cursor only advances when
+	// produce appends its artifact at the end of a pass, so overlapping passes
+	// (the ticker loop vs an archive flush, or two concurrent archives) would
+	// consume — and apply — the same input batch twice. Per-room locks mean two
+	// rooms' close flushes neither serialize nor deadlock (W4 §7.4). The
+	// unconsumed window is read after the lock is held, so a waiting pass sees
+	// the cursor the previous pass advanced.
+	runLock := app.ambientAgentRunLock(ambientAgentKey(agent.name, roomID))
 	runLock.Lock()
 	defer runLock.Unlock()
 
-	inputs := app.memory.unconsumedEntriesAfter(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, app.ambientAgentBaselineID(agent.name))
+	inputs := app.memory.unconsumedEntriesAfterForRoom(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID))
 	if len(inputs) < minBatch {
 		return meetingMemoryEntry{}, nil
 	}
@@ -324,6 +445,54 @@ func (app *kanbanBoardApp) ambientAgentBaselineID(name string) string {
 	defer app.mu.Unlock()
 
 	return app.agentBaselineIDs[name]
+}
+
+// ambientAgentWindowBaseline resolves the baseline a window read uses. The
+// OFFICE reads whatever is registered (possibly nothing — startAmbientAgent
+// and the flush/recap ensure calls own office registration, exactly the
+// pre-room contract, so direct test-seam runs stay backfill-visible). Named
+// rooms register lazily on first touch so a room-scoped agent never backfills
+// a room's pre-boot history.
+func (app *kanbanBoardApp) ambientAgentWindowBaseline(agent ambientAgentConfig, roomID string) string {
+	if normalizeRoomID(roomID) == officeRoomID {
+		return app.ambientAgentBaselineID(agent.name)
+	}
+	return app.ensureAmbientAgentRoomBaseline(agent, roomID)
+}
+
+// ensureAmbientAgentRoomBaseline returns the (agent, room) baseline,
+// registering it on first touch: a room-scoped agent meeting a room with
+// pre-boot history baselines at that room's newest input (never backfills); a
+// room born after boot has none and baselines at now. Office registration
+// matches the legacy ensureAmbientAgentBaseline semantics.
+func (app *kanbanBoardApp) ensureAmbientAgentRoomBaseline(agent ambientAgentConfig, roomID string) string {
+	roomID = normalizeRoomID(roomID)
+	key := ambientAgentKey(agent.name, roomID)
+
+	app.mu.Lock()
+	if baseline, registered := app.agentBaselineIDs[key]; registered {
+		app.mu.Unlock()
+		return baseline
+	}
+	app.mu.Unlock()
+
+	baseline := ""
+	if !boolEnv(agent.backfillEnv) {
+		if windowRoom := agent.windowRoomID(roomID); windowRoom == "" {
+			// company-global agent: the boot baseline spans every room.
+			baseline = app.memory.bootBaselineIDOfKind(agent.inputKind)
+		} else {
+			baseline = app.memory.bootBaselineIDOfKindForRoom(agent.inputKind, windowRoom)
+		}
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if registered, ok := app.agentBaselineIDs[key]; ok {
+		return registered
+	}
+	app.setAmbientAgentBaselineIDLocked(key, baseline)
+	return baseline
 }
 
 // ambientAgentRunLock returns the per-agent mutex that serializes whole
@@ -365,19 +534,59 @@ func (app *kanbanBoardApp) ambientAgentNudgeChannel(name string) chan struct{} {
 	return ch
 }
 
-// nudgeAmbientAgent (A3) wakes an agent's runner so it re-evaluates its window
-// immediately instead of waiting for the next safety-floor tick. Non-blocking:
-// a full buffer already carries a pending wake, so a burst collapses to one
-// pass. Safe for an agent that never started (keyless / disabled) — the single
-// buffered slot absorbs the send with no receiver ever draining it.
+// nudgeAmbientAgent (A3) wakes an agent's runner for the OFFICE — every
+// pre-room call site keeps its exact behavior.
 func (app *kanbanBoardApp) nudgeAmbientAgent(name string) {
+	app.nudgeAmbientAgentForRoom(name, officeRoomID)
+}
+
+// nudgeAmbientAgentForRoom (A3 + W4 §7.4) wakes an agent's runner so it
+// re-evaluates the ROOM's window immediately instead of waiting for the next
+// safety-floor tick. The room rides a pending set (never the channel), so a
+// burst across rooms collapses to one wake without losing any room.
+// Non-blocking and safe for an agent that never started (keyless / disabled)
+// — the single buffered slot absorbs the send with no receiver draining it.
+func (app *kanbanBoardApp) nudgeAmbientAgentForRoom(name string, roomID string) {
 	if app == nil {
 		return
 	}
+	roomID = normalizeRoomID(roomID)
+	app.mu.Lock()
+	if app.agentPendingRooms == nil {
+		app.agentPendingRooms = map[string]map[string]struct{}{}
+	}
+	if app.agentPendingRooms[name] == nil {
+		app.agentPendingRooms[name] = map[string]struct{}{}
+	}
+	app.agentPendingRooms[name][roomID] = struct{}{}
+	app.mu.Unlock()
 	select {
 	case app.ambientAgentNudgeChannel(name) <- struct{}{}:
 	default:
 	}
+}
+
+// drainAmbientAgentPendingRooms pops the set of rooms nudged since the last
+// wake. The runner re-reads each room's whole unconsumed window, so draining
+// before evaluating can never lose input.
+func (app *kanbanBoardApp) drainAmbientAgentPendingRooms(name string) []string {
+	if app == nil {
+		return nil
+	}
+	app.mu.Lock()
+	pending := app.agentPendingRooms[name]
+	delete(app.agentPendingRooms, name)
+	app.mu.Unlock()
+	if len(pending) == 0 {
+		// a wake without a recorded room (a legacy direct channel send in a
+		// test) still re-checks the office, the pre-room behavior.
+		return []string{officeRoomID}
+	}
+	rooms := make([]string, 0, len(pending))
+	for roomID := range pending {
+		rooms = append(rooms, roomID)
+	}
+	return rooms
 }
 
 // peekUnconsumedWindow reports the oldest unconsumed input's id (the stable A8
@@ -385,7 +594,7 @@ func (app *kanbanBoardApp) nudgeAmbientAgent(name string) {
 // the batch is ready), and how long the oldest has waited, all WITHOUT advancing
 // any cursor. The A3 nudge path uses it to choose between firing now and arming
 // the staleness timer, and fireAmbientAgentPass uses the head id to key retries.
-func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig) (headID string, count int, oldestAge time.Duration, ok bool) {
+func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig, roomID string) (headID string, count int, oldestAge time.Duration, ok bool) {
 	if app == nil || app.memory == nil {
 		return "", 0, 0, false
 	}
@@ -393,7 +602,8 @@ func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig) (headI
 	if limit < 1 {
 		limit = 1
 	}
-	inputs := app.memory.unconsumedEntriesAfter(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentBaselineID(agent.name))
+	roomID = normalizeRoomID(roomID)
+	inputs := app.memory.unconsumedEntriesAfterForRoom(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID))
 	if len(inputs) == 0 {
 		return "", 0, 0, false
 	}
@@ -407,11 +617,11 @@ func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig) (headI
 // maxBatch; a window still inside its backoff is held off; a window past its
 // backoff runs a batch HALVED once per prior attempt so a poison entry's blast
 // radius shrinks each retry until the head is finally dead-lettered.
-func (app *kanbanBoardApp) ambientAgentAttemptBudget(agent ambientAgentConfig, headID string) (bool, int) {
+func (app *kanbanBoardApp) ambientAgentAttemptBudget(agent ambientAgentConfig, headID string, roomID string) (bool, int) {
 	full := agent.maxBatch()
 
 	app.mu.Lock()
-	fail := app.agentFailures[agent.name]
+	fail := app.agentFailures[ambientAgentKey(agent.name, roomID)]
 	if fail == nil || fail.windowID != headID {
 		app.mu.Unlock()
 		return true, full
@@ -442,21 +652,22 @@ func (app *kanbanBoardApp) ambientAgentAttemptBudget(agent ambientAgentConfig, h
 // at the cap it dead-letters the head — advancing the agent's baseline past it
 // so the next pass tries the remainder instead of re-sending the poison window
 // forever. Only the agent's single loop goroutine touches its own record.
-func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, headID string) {
+func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, headID string, roomID string) {
+	key := ambientAgentKey(agent.name, roomID)
 	app.mu.Lock()
 	if app.agentFailures == nil {
 		app.agentFailures = map[string]*ambientAgentFailure{}
 	}
-	fail := app.agentFailures[agent.name]
+	fail := app.agentFailures[key]
 	if fail == nil || fail.windowID != headID {
 		fail = &ambientAgentFailure{windowID: headID}
-		app.agentFailures[agent.name] = fail
+		app.agentFailures[key] = fail
 	}
 	fail.attempts++
 	attempts := fail.attempts
 	deadLetter := attempts >= ambientAgentMaxWindowAttempts
 	if deadLetter {
-		delete(app.agentFailures, agent.name)
+		delete(app.agentFailures, key)
 	} else {
 		backoff := ambientAgentBackoffBase << (attempts - 1)
 		if backoff > ambientAgentBackoffCap {
@@ -469,8 +680,8 @@ func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, h
 	if deadLetter {
 		// setAmbientAgentBaselineID re-locks app.mu, so it must run after the
 		// unlock above (app.mu is not reentrant).
-		app.setAmbientAgentBaselineID(agent.name, headID)
-		log.Errorf("%s worker dead-lettered input %s after %d failed attempts; advancing the baseline past it", agent.name, headID, attempts)
+		app.setAmbientAgentBaselineID(key, headID)
+		log.Errorf("%s worker dead-lettered input %s after %d failed attempts; advancing the baseline past it", key, headID, attempts)
 	}
 }
 
@@ -485,19 +696,10 @@ func (app *kanbanBoardApp) clearAmbientAgentFailure(name string) {
 // ensureAmbientAgentBaseline registers the startup cursor for an agent whose
 // loop never ran this boot (the flush can fire before startAmbientAgent), so
 // an archive flush starts where the loop would have and cannot backfill
-// history persisted before this process started.
+// history persisted before this process started. Office key; named rooms
+// register lazily through ensureAmbientAgentRoomBaseline.
 func (app *kanbanBoardApp) ensureAmbientAgentBaseline(agent ambientAgentConfig) {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-
-	if _, registered := app.agentBaselineIDs[agent.name]; registered {
-		return
-	}
-	baselineID := ""
-	if !boolEnv(agent.backfillEnv) {
-		baselineID = app.memory.bootBaselineIDOfKind(agent.inputKind)
-	}
-	app.setAmbientAgentBaselineIDLocked(agent.name, baselineID)
+	_ = app.ensureAmbientAgentRoomBaseline(agent, officeRoomID)
 }
 
 func (app *kanbanBoardApp) setAmbientAgentBaselineID(name string, baselineID string) {
@@ -550,8 +752,16 @@ func closeFlushChain() []ambientAgentConfig {
 // rotateMeetingID — a later ambient tick would otherwise consume the
 // pre-archive write-ups and stamp the old meeting's output onto the successor
 // id). Skips silently when no API key is configured or nothing new exists.
+// The explicit archive path is an office seam, and the office sitting's latch
+// rides along so a listen-only office archive still skips the board stage.
 func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
-	app.flushAmbientAgentsForClose("archive")
+	listenOnly := false
+	if app != nil && app.meetings != nil {
+		if record, ok := app.meetings.activeRecord(officeRoomID); ok {
+			listenOnly = record.ListenOnly
+		}
+	}
+	app.flushAmbientAgentsForClose("archive", officeRoomID, listenOnly)
 }
 
 // flushAmbientAgentsForClose is the shared boundary flush for BOTH meeting
@@ -559,8 +769,22 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 // that path previously wrote no final rollup at all, so idle-closed meetings
 // never got a digest and "what did I miss" silently skipped them). Bounded by
 // meetingArchiveFlushTimeout and best-effort throughout: every failure only
-// logs, the caller always proceeds.
-func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
+// logs, the caller always proceeds. W4 §7.4: the flush is ROOM-scoped — each
+// room-scoped stage runs only the closing room's window under its own
+// (agent, room) lock, so two rooms closing concurrently neither serialize nor
+// deadlock; the company-global rollup stages keep their single cursor. A
+// listen-only sitting SKIPS the board stage (mirroring the research-suggestion
+// agent's standing exclusion from this chain) — §7.3 layer 1 at the close seam.
+func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string, roomID string, listenOnly bool) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	app.flushAmbientAgentsForCloseWithResponder(seam, roomID, listenOnly, nil)
+}
+
+// flushAmbientAgentsForCloseWithResponder is the injectable-responder seam the
+// concurrency tests drive; production passes nil (the real OpenAI responder).
+func (app *kanbanBoardApp) flushAmbientAgentsForCloseWithResponder(seam string, roomID string, listenOnly bool, responder openAITextResponder) {
 	if app == nil || app.memory == nil {
 		return
 	}
@@ -570,6 +794,7 @@ func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
 	if strings.TrimSpace(apiKey) == "" {
 		return
 	}
+	roomID = normalizeRoomID(roomID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), meetingArchiveFlushTimeout)
 	defer cancel()
@@ -579,13 +804,18 @@ func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
 		if boolEnv(agent.disabledEnv) || agent.interval() <= 0 {
 			continue
 		}
+		// §7.3: a listen-only sitting builds its record (brain, ledger, digest,
+		// narrative) but never mutates the board at close time.
+		if listenOnly && agent.name == meetingBoardAgentName {
+			continue
+		}
 		// A8: the overall ceiling is a backstop, not a per-call budget — once it
 		// is spent, stop rather than spin failing every remaining pass.
 		if ctx.Err() != nil {
 			log.Errorf("%s flush reached the overall %s ceiling; skipping the remaining passes", seam, meetingArchiveFlushTimeout)
 			break
 		}
-		app.ensureAmbientAgentBaseline(agent)
+		app.ensureAmbientAgentRoomBaseline(agent, roomID)
 		// A8: each pass gets its OWN deadline (bounded by whatever remains of the
 		// overall ceiling) so a slow upstream pass can no longer starve the
 		// mission / narrative / digest passes queued behind it.
@@ -594,7 +824,7 @@ func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
 			passTimeout = meetingArchiveFlushPassTimeout
 		}
 		passCtx, cancelPass := context.WithTimeout(ctx, passTimeout)
-		_, err := app.runAmbientAgentOnce(agent, passCtx, apiKey, nil, 1)
+		_, err := app.runAmbientAgentOnceForRoom(agent, passCtx, apiKey, responder, 1, roomID)
 		cancelPass()
 		if err != nil {
 			log.Errorf("%s %s flush failed: %v", agent.name, seam, err)
@@ -607,8 +837,24 @@ func (app *kanbanBoardApp) flushAmbientAgentsForClose(seam string) {
 // (or, absent that, the artifact's own position) marks where consumption
 // stopped; baselineID additionally skips history at boot when backfill is off.
 func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string) []meetingMemoryEntry {
+	return store.unconsumedEntriesAfterForRoom(inputKind, artifactKind, cursorKey, limit, baselineID, "")
+}
+
+// unconsumedEntriesAfterForRoom is unconsumedEntriesAfter with the W4 room
+// dimension (§7.4 — the make-or-break): a non-empty roomID filters BOTH sides
+// by room, so the cursor for (agent, room) is the newest artifact-of-kind
+// stamped with that roomId — legacy artifacts without a roomId stamp read as
+// office, which is exactly how the office pipeline resumes seamlessly across
+// the deploy — and the inputs are only that room's. One room's pass can never
+// advance another room's window. roomID == "" keeps the company-global
+// single-cursor scan unchanged.
+func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string) []meetingMemoryEntry {
 	if store == nil || limit <= 0 {
 		return nil
+	}
+	roomID = strings.TrimSpace(roomID)
+	matchesRoom := func(entry meetingMemoryEntry) bool {
+		return roomID == "" || normalizeRoomID(entry.Metadata["roomId"]) == roomID
 	}
 
 	store.mu.Lock()
@@ -627,7 +873,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifa
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if entry.Kind != artifactKind {
+		if entry.Kind != artifactKind || !matchesRoom(entry) {
 			continue
 		}
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
@@ -648,7 +894,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifa
 
 	inputs := make([]meetingMemoryEntry, 0, limit)
 	for _, entry := range entries[startIndex:] {
-		if entry.Kind != inputKind {
+		if entry.Kind != inputKind || !matchesRoom(entry) {
 			continue
 		}
 		inputs = append(inputs, entry)
@@ -661,17 +907,28 @@ func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifa
 }
 
 func (store *meetingMemoryStore) latestEntryIDOfKind(kind string) string {
+	return store.latestEntryIDOfKindForRoom(kind, "")
+}
+
+// latestEntryIDOfKindForRoom is the startup-baseline scan with the W4 room
+// filter; roomID == "" spans every room (the company-global agents).
+func (store *meetingMemoryStore) latestEntryIDOfKindForRoom(kind string, roomID string) string {
 	if store == nil {
 		return ""
 	}
+	roomID = strings.TrimSpace(roomID)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	for index := len(store.entries) - 1; index >= 0; index-- {
-		if store.entries[index].Kind == kind {
-			return store.entries[index].ID
+		if store.entries[index].Kind != kind {
+			continue
 		}
+		if roomID != "" && normalizeRoomID(store.entries[index].Metadata["roomId"]) != roomID {
+			continue
+		}
+		return store.entries[index].ID
 	}
 
 	return ""

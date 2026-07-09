@@ -210,7 +210,7 @@ func (app *kanbanBoardApp) grillExchangesSince(baselineID string) []meetingMemor
 	if app == nil || app.memory == nil {
 		return nil
 	}
-	entries := app.memory.snapshotForMeeting(app.memory.currentMeetingID(), 0)
+	entries := app.memory.snapshotForMeeting(app.memory.currentMeetingID(officeRoomID), 0)
 	startIndex := 0
 	baselineID = strings.TrimSpace(baselineID)
 	if baselineID != "" {

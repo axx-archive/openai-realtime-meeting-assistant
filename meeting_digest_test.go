@@ -44,7 +44,7 @@ func TestMeetingDigestWorkerProducesAnchoredImportanceJSON(t *testing.T) {
 
 	appendTestTranscript(t, app, "tx-1", "We choose vendor Zebra for the packaging pilot.")
 	appendTestTranscript(t, app, "tx-2", "Tyler will draft the pricing sheet by Friday.")
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	if meetingID == "" {
 		t.Fatal("expected a minted meeting id after the first transcript")
 	}
@@ -146,7 +146,7 @@ func TestMeetingDigestWorkerNeverConsumesArtifacts(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	appendTestTranscript(t, app, "tx-1", "Boot Barn kickoff planning notes.")
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	oversizeBody := "data:image/png;base64," + strings.Repeat("QUJDRA==", 40000) // ~320KB of the blob class
 	if _, appended, err := app.memory.appendOSArtifact("art-1", oversizeBody, map[string]string{"title": "deck"}); err != nil || !appended {
 		t.Fatalf("append artifact: appended=%v err=%v", appended, err)
@@ -175,7 +175,7 @@ func TestMeetingDigestWorkerRebuildOnlyWhenNewerBrainAndCarriesContinuity(t *tes
 	app := newIsolatedKanbanBoardApp(t)
 
 	appendTestTranscript(t, app, "tx-1", "Boot Barn kickoff planning notes.")
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	appendDigestTestBrain(t, app, "brain-1", meetingID, "## Overview\nFirst window: kickoff planning.", nil)
 
 	calls := 0
@@ -561,7 +561,7 @@ func TestDayDigestTickEmitsReflectionForCompletedDayOnce(t *testing.T) {
 	if strings.TrimSpace(reflection.Metadata["supportingDigests"]) == "" {
 		t.Fatalf("reflection has no supporting-digest anchors: %+v", reflection.Metadata)
 	}
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("day pass minted meeting id %q at idle, want none", got)
 	}
 
@@ -665,7 +665,7 @@ func TestAmbientBookkeepingNeverSteersBootResume(t *testing.T) {
 	if _, appended, err := store.appendAttributedTranscript("tx-1", "tx-1", "Tom", "dominant", "Boot Barn kickoff planning notes for resume."); err != nil || !appended {
 		t.Fatalf("append transcript: appended=%v err=%v", appended, err)
 	}
-	meetingID := store.currentMeetingID()
+	meetingID := store.currentMeetingID(officeRoomID)
 	if meetingID == "" {
 		t.Fatal("expected a minted meeting id")
 	}
@@ -677,7 +677,7 @@ func TestAmbientBookkeepingNeverSteersBootResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload after reflection: %v", err)
 	}
-	if got := reloaded.currentMeetingID(); got != meetingID {
+	if got := reloaded.currentMeetingID(officeRoomID); got != meetingID {
 		t.Fatalf("resume after reflection = %q, want the in-flight meeting %q", got, meetingID)
 	}
 
@@ -688,7 +688,7 @@ func TestAmbientBookkeepingNeverSteersBootResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload after pass artifact: %v", err)
 	}
-	if got := reloaded.currentMeetingID(); got != meetingID {
+	if got := reloaded.currentMeetingID(officeRoomID); got != meetingID {
 		t.Fatalf("resume after pass artifact = %q, want %q", got, meetingID)
 	}
 }

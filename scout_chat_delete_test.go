@@ -192,7 +192,7 @@ func TestRoomChatDeleteEnforcesAuthorshipFromSession(t *testing.T) {
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 
 	app := newKanbanBoardApp()
-	payload, ok := app.recordRoomChatMessageWithMetadata("Tom", "oops, wrong room", map[string]string{
+	payload, ok := app.recordRoomChatMessageWithMetadata(officeRoomID, "Tom", "oops, wrong room", map[string]string{
 		"authorEmail": "tom@shareability.com",
 	})
 	if !ok {
@@ -232,7 +232,7 @@ func TestRoomChatDeleteLegacyEntriesFallBackToSpeakerName(t *testing.T) {
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 
 	app := newKanbanBoardApp()
-	payload, ok := app.recordRoomChatMessage("Tyler", "pre-stamp message")
+	payload, ok := app.recordRoomChatMessage(officeRoomID, "Tyler", "pre-stamp message")
 	if !ok {
 		t.Fatal("seed legacy room chat message failed")
 	}

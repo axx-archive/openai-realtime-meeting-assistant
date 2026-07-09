@@ -323,8 +323,8 @@ func TestActiveNarrativeEntriesCapsAndDedupes(t *testing.T) {
 // snapshot, so title and timeline can never contradict.
 func TestMeetingSegmentsTimelineDominantAndSnapshot(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	app.noteMeetingAdmission("AJ")
-	record, ok := app.meetings.activeRecord()
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	record, ok := app.meetings.activeRecord(officeRoomID)
 	if !ok {
 		t.Fatal("no active record after admission")
 	}

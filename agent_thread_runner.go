@@ -479,13 +479,13 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 		// racing the stampDelivered write below can never slip a card into a
 		// phantom or successor meeting.
 		originMeetingID := strings.TrimSpace(artifact.Metadata["originMeetingId"])
-		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID() {
+		if originMeetingID == "" || originMeetingID != app.memory.currentMeetingID(officeRoomID) {
 			return
 		}
 		if !stampDelivered() {
 			return
 		}
-		payload, ok := app.recordRoomChatMessageWithArtifact(scoutParticipantName, text, artifact.ID, originMeetingID)
+		payload, ok := app.recordRoomChatMessageWithArtifact(officeRoomID, scoutParticipantName, text, artifact.ID, originMeetingID)
 		if !ok {
 			return
 		}

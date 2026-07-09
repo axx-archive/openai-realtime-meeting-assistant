@@ -71,15 +71,26 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 	if query == "" {
 		return nil, false, fmt.Errorf("query is required")
 	}
+	// §7.3 layer 2 (multi-room W4): every proposal stamps its origin room, and
+	// a listen-only origin is REJECTED at this shared seam — the single choke
+	// point both proactive workers (and every future caller) inherit — so the
+	// everyone-notification "confirm to launch" nudge can never fire from a
+	// guest-exposed sitting. Callers log-and-continue; nothing is minted.
+	originRoomID := normalizeRoomID(asString(args["origin_room_id"]))
+	if app.sittingListenOnly(originRoomID) {
+		log.Infof("proposal_suppressed_listen_only room=%s title=%q proposedBy=%s", originRoomID, title, proposedBy)
+		return nil, false, fmt.Errorf("listen-only sitting: proposals are suppressed for room %s", originRoomID)
+	}
 
 	id := durableTimestampID("codex-proposal", time.Now())
 	text := fmt.Sprintf("Scout proposes %s task: %s — %s", assistantToolLabel(mode), title, query)
 	metadata := map[string]string{
-		"title":      title,
-		"mode":       mode,
-		"query":      query,
-		"status":     codexProposalStatusProposed,
-		"proposedBy": proposedBy,
+		"title":        title,
+		"mode":         mode,
+		"query":        query,
+		"status":       codexProposalStatusProposed,
+		"proposedBy":   proposedBy,
+		"originRoomId": originRoomID,
 		// Card 069 governance: system-proposed work is never auto-lane — this
 		// card exists to collect its one-member confirm; a deploy-phrase query
 		// classifies heavy from the start.
@@ -245,7 +256,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 		origin := map[string]string{
 			"originKind":      agentThreadOriginRoom,
 			"originId":        id,
-			"originMeetingId": app.memory.currentMeetingID(),
+			"originMeetingId": app.memory.currentMeetingID(officeRoomID),
 		}
 		topic := firstNonEmptyString(strings.TrimSpace(entry.Metadata["title"]), strings.TrimSpace(entry.Metadata["query"]))
 		if channel, note, ok := app.bestMatchPublicChannel(topic, ""); ok {

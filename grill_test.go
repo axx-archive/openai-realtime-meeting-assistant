@@ -809,12 +809,12 @@ func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	kanbanApp.rememberTranscript(kanbanRealtimeEvent{
+	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "wake-event-1",
 		ItemID:     "wake-item-1",
 		Transcript: "We are scouting locations at a discount.",
 	}, "transcript_lane", "test-model")
-	kanbanApp.rememberTranscript(kanbanRealtimeEvent{
+	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "wake-event-2",
 		ItemID:     "wake-item-2",
 		Transcript: "Hey Scout, pull up the board.",

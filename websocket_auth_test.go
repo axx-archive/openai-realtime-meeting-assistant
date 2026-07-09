@@ -410,6 +410,7 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
 	trackParticipantSessions = map[string]string{}
+	trackRooms = map[string]string{}
 	trackSourceIDs = map[string]string{}
 	trackLayerRIDs = map[string]string{}
 	trackLayerGroups = map[string]string{}

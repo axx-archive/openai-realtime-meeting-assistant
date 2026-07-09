@@ -413,7 +413,7 @@ func TestLedgerStateRebuildsFromLogByFolding(t *testing.T) {
 func TestLedgerEventsAreBookkeepingNotRecall(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	appendTestTranscript(t, app, "tx-1", "Quokka rollout budget planning session.")
-	meetingID := app.memory.currentMeetingID()
+	meetingID := app.memory.currentMeetingID(officeRoomID)
 	if meetingID == "" {
 		t.Fatal("expected a minted meeting id")
 	}
@@ -444,7 +444,7 @@ func TestLedgerEventsAreBookkeepingNotRecall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload store: %v", err)
 	}
-	if got := reloaded.currentMeetingID(); got != meetingID {
+	if got := reloaded.currentMeetingID(officeRoomID); got != meetingID {
 		t.Fatalf("resumed meeting id = %q, want %q (ledger lines must be skipped)", got, meetingID)
 	}
 }

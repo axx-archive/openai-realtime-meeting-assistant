@@ -64,6 +64,7 @@ func meetingBoardAgent() ambientAgentConfig {
 		artifactKind:      meetingMemoryKindBoardUpdate,
 		cursorMetadataKey: "throughBrainId",
 		requestTimeout:    meetingBoardRequestTimeout,
+		roomScoped:        true, // W4 §7.4: per-room brain windows and cursors
 		produce:           (*kanbanBoardApp).produceMeetingBoardUpdate,
 	}
 }
@@ -78,11 +79,27 @@ func (app *kanbanBoardApp) runMeetingBoardOnce(ctx context.Context, apiKey strin
 }
 
 func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	roomID := ambientWindowRoomID(summaries)
+	windowLast := summaries[len(summaries)-1]
+	// §7.3 layer 1 (the primary suppression): brains from listen-only sittings
+	// are EXCLUDED from the analysis window while the cursor still advances
+	// past them. When the whole window is listen-only there is nothing to
+	// analyze — advance the in-memory baseline (the suggestion agent's
+	// skip-while-advancing idiom; deterministic on restart) and stay silent:
+	// no model call, no artifact, no board ops, no proposals.
+	summaries, droppedListenOnly := app.filterListenOnly(summaries)
+	if len(summaries) == 0 {
+		if droppedListenOnly > 0 {
+			app.setAmbientAgentBaselineID(ambientAgentKey(meetingBoardAgentName, roomID), windowLast.ID)
+		}
+		return meetingMemoryEntry{}, nil
+	}
+
 	model := meetingBoardModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
 		Instructions: meetingBoardInstructions(),
-		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshot(), time.Now().UTC()),
+		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A2: the board step emits structured tool calls with exact args — the
 		// work low reasoning effort punishes most (dropped card_ids, invented
 		// statuses). Medium buys reliable argument fidelity for a cheap step.
@@ -98,17 +115,20 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
-	runResult := app.applyMeetingBoardAnalysis(analysis)
+	runResult := app.applyMeetingBoardAnalysisForRoom(analysis, roomID)
 
 	firstSummary := summaries[0]
 	lastSummary := summaries[len(summaries)-1]
 	metadata := map[string]string{
-		"source":                "openai_responses",
-		"model":                 model,
+		"source": "openai_responses",
+		"model":  model,
+		"roomId": roomID,
+		// the cursor advances through the ORIGINAL window's tail — a dropped
+		// listen-only trailing brain must not re-feed this pass forever.
 		"fromBrainId":           firstSummary.ID,
-		"throughBrainId":        lastSummary.ID,
+		"throughBrainId":        windowLast.ID,
 		"fromBrainCreatedAt":    firstSummary.CreatedAt.Format(time.RFC3339Nano),
-		"throughBrainCreatedAt": lastSummary.CreatedAt.Format(time.RFC3339Nano),
+		"throughBrainCreatedAt": windowLast.CreatedAt.Format(time.RFC3339Nano),
 		"brainCount":            strconv.Itoa(len(summaries)),
 		"operationCount":        strconv.Itoa(len(runResult.Applications)),
 		"changedOperationCount": strconv.Itoa(runResult.ChangedCount),
@@ -135,7 +155,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	// shouldRetryBoardWindow) so a permanently-rejected op cannot wedge the
 	// worker. On the give-up pass we fall through and append the artifact whose
 	// summary is reconciled to the real failure (renderMeetingBoardUpdateArtifact).
-	if runResult.ChangedCount == 0 && runResult.ErrorCount > 0 && app.shouldRetryBoardWindow(lastSummary.ID) {
+	if runResult.ChangedCount == 0 && runResult.ErrorCount > 0 && app.shouldRetryBoardWindow(windowLast.ID) {
 		broadcastAssistantEvent("action", "Scout hit errors applying meeting summaries to the board; retrying next pass.", map[string]any{"kind": meetingMemoryKindBoardUpdate})
 		return meetingMemoryEntry{}, nil
 	}
@@ -164,6 +184,18 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 }
 
 func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalysis) meetingBoardRunResult {
+	return app.applyMeetingBoardAnalysisForRoom(analysis, officeRoomID)
+}
+
+// applyMeetingBoardAnalysisForRoom applies one pass's operations for the room
+// whose brains fed it. §7.3 layer 2 (choke-point backstop, grafted from
+// design B): when the source room's sitting is listen-only, every mutation op
+// (create/update/move/tag/date/propose) is REFUSED into the per-operation
+// error rail — belt and suspenders under the window filter, so a mis-filtered
+// window still cannot touch the board or mint a proposal.
+func (app *kanbanBoardApp) applyMeetingBoardAnalysisForRoom(analysis meetingBoardAnalysis, roomID string) meetingBoardRunResult {
+	roomID = normalizeRoomID(roomID)
+	listenOnlySource := app.sittingListenOnly(roomID)
 	result := meetingBoardRunResult{
 		Summary: strings.TrimSpace(analysis.Summary),
 	}
@@ -192,6 +224,12 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 			result.Applications = append(result.Applications, application)
 			continue
 		}
+		if listenOnlySource && toolName != "do_nothing" {
+			application.Error = "refused: listen-only sitting — board mutations and proposals are suppressed"
+			result.ErrorCount++
+			result.Applications = append(result.Applications, application)
+			continue
+		}
 
 		args := operation.Arguments
 		if args == nil {
@@ -199,6 +237,11 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 		}
 		if args == nil {
 			args = map[string]any{}
+		}
+		if toolName == "propose_codex_task" {
+			// §7.3 layer 2: proposals minted by this pass carry their origin
+			// room so proposeCodexTask and the workflow ticker can gate them.
+			args["origin_room_id"] = roomID
 		}
 		if toolName == "create_ticket" {
 			// D4: worker-created cards land as pending Scout drafts a human

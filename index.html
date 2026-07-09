@@ -420,6 +420,25 @@
         display: none;
       }
 
+      /* the guest shell: one room, no OS chrome. The rail, topbar (bell +
+         account menu live there), Scout rail, and board rail never exist for
+         a guest tab — the server allowlists their data away regardless; the
+         stage, meeting bar, and room chat are the whole surface. */
+      #appShell.is-guest .tool-rail,
+      #appShell.is-guest .topbar,
+      #appShell.is-guest .scout-rail,
+      #appShell.is-guest .board-rail {
+        display: none !important;
+      }
+      /* member-only meeting-bar controls — the server drops these ops from
+         guest sockets; the chrome honors the same line */
+      #appShell.is-guest #roomBoardToggle,
+      #appShell.is-guest #recordMeeting,
+      #appShell.is-guest #archiveMeeting,
+      #appShell.is-guest .room-board-panel {
+        display: none !important;
+      }
+
 
       /* ---------- Tool rail (the OS's left edge — flat 60px column, design canon) ---------- */
       .tool-rail {
@@ -15994,6 +16013,80 @@
       .office-home-card__badge[hidden] { display: none; }
       .office-home-card__chevron { color: var(--text-3); flex: none; }
 
+      /* multi-room: the rooms card block. Live dot is EMBER (earned by real
+         occupancy); lock/guest glyphs stay monochrome. */
+      .office-rooms {
+        width: 100%;
+        margin-top: 12px;
+        padding: 13px 16px 11px;
+        border-radius: 16px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-2);
+        text-align: left;
+      }
+      .office-rooms[hidden] { display: none; }
+      .office-rooms__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .office-rooms__title { font: 600 13.5px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); }
+      .office-rooms__new {
+        border: none;
+        background: none;
+        padding: 4px 0;
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .office-rooms__new:hover { color: var(--text-1); }
+      .office-rooms__row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-1); }
+      .office-rooms__row:first-child { border-top: none; }
+      .office-rooms__dot { width: 7px; height: 7px; border-radius: 999px; background: var(--line-2, var(--line-1)); flex: none; }
+      .office-rooms__dot.is-live { background: var(--ember); }
+      .office-rooms__name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+      .office-rooms__label { font: var(--type-caption-medium); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .office-rooms__meta { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+      .office-rooms__meta svg { flex: none; }
+      .office-rooms__open,
+      .office-rooms__more,
+      .office-rooms__submit {
+        flex: none;
+        border: 1px solid var(--line-1);
+        background: var(--surface-3, var(--surface-2));
+        color: var(--text-1);
+        border-radius: 999px;
+        padding: 5px 12px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .office-rooms__open:disabled { opacity: 0.45; cursor: default; }
+      .office-rooms__more { padding: 5px 9px; color: var(--text-2); }
+      .office-rooms__form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line-1); margin-top: 4px; }
+      .office-rooms__form[hidden] { display: none; }
+      .office-rooms__input {
+        flex: 1;
+        min-width: 120px;
+        border: 1px solid var(--line-1);
+        background: var(--surface-1, transparent);
+        color: var(--text-1);
+        border-radius: 10px;
+        padding: 7px 10px;
+        font: var(--type-caption-medium);
+      }
+      .office-rooms__check { display: inline-flex; align-items: center; gap: 5px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-2); }
+      .office-rooms__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 0 10px 17px; }
+      .office-rooms__actions button {
+        border: none;
+        background: none;
+        padding: 2px 0;
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .office-rooms__actions button:hover { color: var(--text-1); }
+      .office-rooms__linkout { flex-basis: 100%; width: 100%; }
+      .office-rooms__passfield { flex: none; width: 130px; }
+
       /* the sheet: a centered dialog on desktop, a full-height rising sheet on
          phone (ux §5.4). Scrim dims the shell; the panel scrolls internally. */
       .bsheet {
@@ -20385,6 +20478,22 @@
                 </button>
               </div>
             </div>
+            <!-- multi-room: rooms live above Morning Brief; rows render from
+                 roomsList (GET /rooms + `rooms` office event) — never from
+                 another room's participants frames. -->
+            <div id="officeRoomsCard" class="office-rooms" hidden>
+              <div class="office-rooms__head">
+                <span class="office-rooms__title">Rooms</span>
+                <button id="officeRoomsNewButton" class="office-rooms__new pressable" type="button">+ New room</button>
+              </div>
+              <div id="officeRoomsList" class="office-rooms__list"></div>
+              <form id="officeRoomsCreateForm" class="office-rooms__form" hidden>
+                <input id="officeRoomsCreateName" class="office-rooms__input" type="text" placeholder="room name" maxlength="80" autocomplete="off">
+                <input id="officeRoomsCreatePasscode" class="office-rooms__input" type="password" placeholder="passcode (optional)" autocomplete="new-password">
+                <label class="office-rooms__check"><input id="officeRoomsCreateGuests" type="checkbox"> allow guests</label>
+                <button class="office-rooms__submit pressable" type="submit">Create</button>
+              </form>
+            </div>
             <button id="officeBriefCard" class="office-home-card" type="button" aria-haspopup="dialog">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M4 9h16"></path><path d="M8 13h8"></path><path d="M8 16h5"></path></svg>
               <span class="office-home-card__text">
@@ -20478,6 +20587,10 @@
             <label id="loginEmailField" class="field login-email-field" hidden>
               <span>work email</span>
               <input id="loginEmail" type="hidden" autocomplete="username" autocapitalize="none" spellcheck="false">
+            </label>
+            <label class="field" id="guestNameField" hidden>
+              <span>your name</span>
+              <input id="guestNameInput" type="text" autocomplete="name" maxlength="40" spellcheck="false" placeholder="how the room should know you">
             </label>
             <label class="field" hidden>
               <span>participant</span>
@@ -21869,6 +21982,30 @@
       /* card 089 — a Web Push tap opens /?bell=<id>; captured on boot and
          consumed by routeBellDeepLink() once loadNotifications() has the entry. */
       let pendingBellNotificationId = ''
+      /* multi-room — the tab's room identity. The room socket dials
+         ?room=<id> and the participant hello carries the passcode, so a
+         signaling reconnect re-seats into the SAME room with the same
+         credential; cleared only in leaveRoom. var: read by the boot render
+         pass (renderRoomLandingState) before the boot block runs. */
+      var activeJoin = { roomId: 'office', passcode: '', guest: false }
+      /* rooms list — hydrated by GET /rooms after the /auth/me await and kept
+         live by the `rooms` office event; counters come ONLY from here, never
+         from another room's participants frames. */
+      var roomsList = []
+      /* /?room=<id> boot param — preselects a room once the list hydrates. */
+      var pendingRoomBootParam = ''
+      /* guest boot — the /g page carries its capability in the URL FRAGMENT
+         (never sent to the server, so never logged); the fragment is
+         replaceState-stripped only AFTER a successful join. bonfire_guest is
+         HttpOnly, so a reloaded/deploy-refreshed guest tab is recognized by
+         the /g path it stays on and resumes via GET /guest/me. var: read by
+         the boot render pass (renderLoginMode). */
+      var guestBootToken = (location.pathname === '/g' || location.pathname.indexOf('/g/') === 0) ? ((location.hash.match(/^#([a-f0-9]{64})$/) || [])[1] || '') : ''
+      var guestMode = Boolean(guestBootToken) || location.pathname === '/g' || location.pathname.indexOf('/g/') === 0 || document.cookie.indexOf('bonfire_guest=') !== -1
+      /* {roomId, roomName, guestName} once /guest/join or /guest/me answers */
+      var guestSession = null
+      /* non-empty flips the gate to the terminal "you've left" card */
+      var guestExitMessage = ''
       /* office event socket — a second websocket on the same endpoint with an
          `office` hello. It follows auth (not room membership) and carries the
          signed-in-safe broadcast set; the room socket (ws) keeps its single
@@ -22023,6 +22160,8 @@
       const loginSignOutButton = document.getElementById('loginSignOut')
       const loginSublineEl = document.querySelector('.login-subline')
       const loginDividerEl = document.querySelector('.login-divider')
+      const guestNameFieldEl = document.getElementById('guestNameField')
+      const guestNameInput = document.getElementById('guestNameInput')
       const loginPresenceEl = document.getElementById('loginPresence')
       const loginPresenceTextEl = document.getElementById('loginPresenceText')
       let loginPresenceTimer = 0
@@ -22786,12 +22925,15 @@
         event.preventDefault()
         if (resetToken) {
           submitPasswordReset()
+        } else if (guestMode) {
+          joinGuestRoom()
         } else if (authedUser) {
           setActiveTool('office')
         } else {
           signInToOffice()
         }
       })
+      guestNameInput.addEventListener('input', validateAccess)
       leaveButton.addEventListener('click', leaveRoom)
       micSelect.addEventListener('change', switchMicrophone)
       muteMicButton.addEventListener('click', toggleLocalMute)
@@ -22862,6 +23004,17 @@
       })
       screenShareButton.addEventListener('click', toggleScreenShare)
       copyRoomLinkButton.addEventListener('click', copyRoomLink)
+      document.getElementById('officeRoomsNewButton')?.addEventListener('click', () => {
+        const form = document.getElementById('officeRoomsCreateForm')
+        if (!form) {
+          return
+        }
+        form.hidden = !form.hidden
+        if (!form.hidden) {
+          document.getElementById('officeRoomsCreateName')?.focus()
+        }
+      })
+      document.getElementById('officeRoomsCreateForm')?.addEventListener('submit', createRoomFromForm)
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
@@ -23323,6 +23476,7 @@
       // the query, and register the service worker that both powers the
       // home-screen install and routes push taps.
       pendingBellNotificationId = new URLSearchParams(window.location.search).get('bell') || ''
+      pendingRoomBootParam = new URLSearchParams(window.location.search).get('room') || ''
       registerBonfireServiceWorker()
       {
         const cachedIdentity = loadCachedIdentity()
@@ -23337,7 +23491,7 @@
       }
       renderLoginMode()
       updateOSAssistantVoiceControls()
-      if (!resetToken) {
+      if (!resetToken && !guestMode) {
         refreshAuthState()
       }
       renderBoard()
@@ -23350,8 +23504,18 @@
       renderBoardPreview()
       setStageMode('gallery')
       updateHearthParticipants()
-      loadParticipantPreview()
-      window.setInterval(loadParticipantPreview, 15000)
+      if (guestMode) {
+        // guest chrome: one room, no OS surfaces, no authed fetches, no
+        // preview poll; a cookie-holding tab (reload, deploy refresh)
+        // resumes its seat without re-presenting the link token
+        appShell.classList.add('is-guest')
+        if (!guestBootToken) {
+          resumeGuestSession()
+        }
+      } else {
+        loadParticipantPreview()
+        window.setInterval(loadParticipantPreview, 15000)
+      }
 
       function selectedParticipantName() {
         return participantNameInput.value.trim()
@@ -23972,6 +24136,11 @@
           return resetPasswordInput.value.length >= 8 &&
             resetPasswordInput.value === resetPasswordConfirmInput.value
         }
+        if (guestMode) {
+          // guest gate: a name (or an already-minted guest session) is the
+          // whole credential — the link token did the admission work
+          return Boolean(guestSession) || guestNameInput.value.trim() !== ''
+        }
         if (authedUser) {
           return true
         }
@@ -24063,6 +24232,19 @@
       }
 
       function validateAccess() {
+        if (guestMode) {
+          // guests never touch the roster select or email plumbing
+          const verified = hasValidAccess()
+          joinButton.disabled = !verified || Boolean(ws || pc)
+          joinAccessButton.disabled = joinButton.disabled
+          accessPanel.classList.toggle('is-verified', verified)
+          accessState.textContent = verified ? 'ready' : 'locked'
+          accessReadyTag.textContent = verified ? 'ready' : 'locked'
+          accessHint.textContent = verified && guestSession?.guestName
+            ? `joining as guest ${String(guestSession.guestName).toLowerCase()}.`
+            : ''
+          return verified
+        }
         const email = (authedUser?.email || loginEmailInput.value).trim()
         participantNameInput.value = authedUser ? participantNameFromAccount(authedUser) : selectedLoginAccountName()
         const verified = hasValidAccess()
@@ -24085,18 +24267,24 @@
         return verified
       }
 
-      /* the login card serves three states: normal sign-in, "continue as"
-         when a session cookie is already live, and the emailed reset flow. */
+      /* the login card serves five states: normal sign-in, "continue as"
+         when a session cookie is already live, the emailed reset flow, the
+         guest name gate (free text, no roster, no password), and the guest
+         terminal "you've left" card. */
       function renderLoginMode() {
-        const mode = resetToken ? 'reset' : authedUser ? 'authed' : 'login'
+        const mode = resetToken ? 'reset' : guestMode ? (guestExitMessage ? 'guest-exit' : 'guest') : authedUser ? 'authed' : 'login'
+        const guestGate = mode === 'guest' || mode === 'guest-exit'
         // a fresh gate starts quiet — stale connection status never greets you
         setLoginStatusPill('')
-        loginAccountFieldEl.hidden = mode === 'reset'
-        if (mode !== 'reset') {
+        loginAccountFieldEl.hidden = mode === 'reset' || guestGate
+        if (mode !== 'reset' && !guestGate) {
           syncLoginAccountSelection({ preserveTypedEmail: Boolean(loginEmailInput.value.trim()) })
         } else {
           loginEmailFieldEl.hidden = true
         }
+        // a resumed guest session already carries its confirmed name, so the
+        // field stays down — straight to the one-tap join
+        guestNameFieldEl.hidden = mode !== 'guest' || Boolean(guestSession)
         passwordFieldEl.hidden = mode !== 'login'
         resetPasswordFieldEl.hidden = mode !== 'reset'
         resetPasswordConfirmFieldEl.hidden = mode !== 'reset'
@@ -24114,11 +24302,17 @@
         }
         if (loginSublineEl) {
           // the normal gate speaks through the tagline alone — the mode
-          // line only appears for the emailed reset flow
-          loginSublineEl.textContent = mode === 'reset' ? 'set a new password' : ''
+          // line appears for the emailed reset flow and the guest states
+          loginSublineEl.textContent = mode === 'reset' ? 'set a new password'
+            : mode === 'guest' ? (guestSession?.roomName ? `you're invited to ${guestSession.roomName}` : 'you were invited to a room')
+            : mode === 'guest-exit' ? guestExitMessage
+            : ''
         }
+        joinAccessButton.hidden = mode === 'guest-exit'
         joinAccessButton.textContent = mode === 'reset'
           ? 'Set new password'
+          : mode === 'guest-exit' ? 'Session ended'
+          : mode === 'guest' ? (guestSession ? `Join ${guestSession.roomName || 'the room'}` : 'Join as a guest')
           : mode === 'authed' ? `Open office as ${authedUser.name}` : 'Enter your office'
         validateAccess()
         syncAuthenticatedShell()
@@ -24165,7 +24359,9 @@
       }
 
       function syncLoginPresencePolling() {
-        const shouldPoll = !authedUser
+        // guests never poll the office presence hint — wrong room, and the
+        // guest gate speaks its own invitation line
+        const shouldPoll = !authedUser && !guestMode
         if (shouldPoll && !loginPresenceTimer) {
           loginPresenceTimer = window.setInterval(loadLoginPresence, 15000)
           loadLoginPresence()
@@ -24177,6 +24373,13 @@
       }
 
       async function refreshAuthState() {
+        if (guestMode) {
+          // a guest tab holds no member session and must never fire authed
+          // fetches (every caller — boot, socket onerror — lands here); the
+          // gate paints from guest state alone
+          renderLoginMode()
+          return
+        }
         try {
           const response = await fetch('/auth/me', { cache: 'no-store' })
           if (response.ok) {
@@ -24207,6 +24410,9 @@
 	        if (authedUser) {
 	          loadScoutChatThreads()
 	          loadParticipantPreview()
+	          // Rooms card hydration lives inside the auth fan-out — behind the
+	          // /auth/me await, so the boot pass never touches it (TDZ law).
+	          loadRoomsList()
 	          // Themes drive the meeting label; load once so it speaks the
 	          // company's language before the intel tool is ever opened.
 	          loadMissionIntelligence()
@@ -24216,6 +24422,69 @@
 	        }
 	        loadNotifications().then(() => { if (typeof routeBellDeepLink === 'function') routeBellDeepLink() })
 	      }
+
+      /* ---------- guest boot ----------
+         A guest tab lives on /g: the fragment carries the one-time link
+         token, the HttpOnly bonfire_guest cookie carries the session. No
+         member surface ever initializes — authedUser stays null, the office
+         socket never opens, and the server allowlist backstops all of it. */
+
+      // cookie-without-token resume (reload, deploy-refresh): the session is
+      // HttpOnly, so /guest/me is the only way to learn who this tab is
+      async function resumeGuestSession() {
+        try {
+          const response = await fetch('/guest/me', { cache: 'no-store' })
+          if (!response.ok) {
+            renderGuestExitState('this guest link is no longer active. ask your host for a fresh one.')
+            return
+          }
+          guestSession = await response.json()
+          if (!guestNameInput.value.trim()) {
+            guestNameInput.value = guestSession.guestName || ''
+          }
+          renderLoginMode()
+        } catch {
+          // network blip — leave the name gate up; join re-validates anyway
+        }
+      }
+
+      async function joinGuestRoom() {
+        if (appShell.classList.contains('is-in-room')) {
+          return
+        }
+        if (!guestSession) {
+          const name = guestNameInput.value.trim()
+          if (!name) {
+            accessHint.textContent = 'enter a name so the room knows who joined.'
+            guestNameInput.focus()
+            return
+          }
+          joinAccessButton.disabled = true
+          accessState.textContent = 'checking'
+          setLog('checking your invite')
+          const result = await postAuthJSON('/guest/join', { token: guestBootToken, name }).catch(() => ({ ok: false, data: {} }))
+          if (!result.ok) {
+            joinAccessButton.disabled = false
+            accessState.textContent = 'locked'
+            accessHint.textContent = result.data?.error || 'that guest link is no longer valid.'
+            return
+          }
+          guestSession = result.data
+          // the fragment held the capability; now that the cookie session
+          // exists the token leaves the URL — reloads resume via /guest/me
+          try { history.replaceState(null, '', location.pathname + location.search) } catch { /* sandboxed */ }
+        }
+        activeJoin = { roomId: guestSession.roomId || 'office', passcode: '', guest: true }
+        renderLoginMode()
+        joinRoom({ guest: true })
+      }
+
+      // terminal: leave/denied/replaced all land here — never the office
+      function renderGuestExitState(message) {
+        guestExitMessage = String(message || guestExitMessage || "you've left the room.")
+        guestSession = null
+        renderLoginMode()
+      }
 
       /* ---------- office event socket ----------
          Opens on auth, never takes a room seat: the server's `office` hello
@@ -24229,7 +24498,9 @@
       }
 
       function ensureOfficeSocket() {
-        if (!authedUser) {
+        if (!authedUser || guestMode) {
+          // guests never hold an office socket — the signed-in event union
+          // (board/memory/notifications) is a member surface
           return
         }
         if (officeWs && (officeWs.readyState === WebSocket.OPEN || officeWs.readyState === WebSocket.CONNECTING)) {
@@ -24601,6 +24872,10 @@
         syncAccountChrome()
         if (authed) {
           setRailHidden(false, { persist: false })
+        } else if (guestMode) {
+          // a guest seat is legitimate signed-out state: keep is-in-room and
+          // the room tool — the guest chrome hides the rail regardless
+          setMobileToolRailOpen(false)
         } else {
           setMobileToolRailOpen(false)
           setRailHidden(false, { persist: false })
@@ -25386,7 +25661,13 @@
           setActiveTool('room')
         } else if (!inRoom) {
           setBoardExpanded(false)
-          setActiveTool('office')
+          if (guestMode) {
+            // terminal — a guest who leaves (or is denied/replaced) gets the
+            // "you've left" card, never the member office
+            renderGuestExitState()
+          } else {
+            setActiveTool('office')
+          }
         }
         syncScoutChatToRoomView(inRoom)
         updateParticipantPreviewText()
@@ -25622,6 +25903,12 @@
       }
 
       function setActiveTool(tool) {
+        if (guestMode) {
+          // guests own exactly one surface: the room. No rail, no office,
+          // no back-stack pushState — the OS shell does not exist here.
+          applyToolState('room')
+          return
+        }
         // navigating tools dismisses the floating notifications window so it
         // never lingers over the next surface
         if (!notificationPanel.hidden) {
@@ -30045,7 +30332,7 @@
         passkeySignInButton.disabled = true
         setConnectionState('connecting', 'connecting…')
 
-        if (!authedUser) {
+        if (!authedUser && !activeJoin.guest) {
           accessState.textContent = 'checking'
           accessHint.textContent = 'signing in.'
           setLog('signing in')
@@ -30080,7 +30367,11 @@
           }
         }
 
-        currentParticipantName = participantNameFromAccount(authedUser)
+        // the server forces the "Guest " prefix + dedupe suffix at admission;
+        // this local guess is corrected by the access_granted seat name
+        currentParticipantName = activeJoin.guest
+          ? `Guest ${guestSession?.guestName || 'guest'}`
+          : participantNameFromAccount(authedUser)
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
         updateHearthParticipants()
@@ -30097,7 +30388,8 @@
       function openRoomWebSocket(options = {}) {
         const reconnect = Boolean(options.reconnect)
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket`)
+        // the room identity rides the dial; a reconnect re-dials the SAME room
+        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket?room=${encodeURIComponent(activeJoin.roomId || 'office')}`)
         ws = socket
         socket.onopen = () => {
           if (ws !== socket) {
@@ -30105,11 +30397,14 @@
           }
           accessState.textContent = reconnect ? 'restoring' : 'checking'
           accessHint.textContent = reconnect ? 'restoring room connection.' : 'checking room access.'
+          // passcode rides the hello, never the URL (it would land in logs);
+          // JSON.stringify drops the undefined so office hellos keep today's shape
           socket.send(JSON.stringify({
             event: 'participant',
             data: JSON.stringify({
               name: currentParticipantName,
-              endpointId: ensureEndpointId()
+              endpointId: ensureEndpointId(),
+              passcode: activeJoin.passcode || undefined
             })
           }))
           // Room-liveness heartbeat: an APP-level frame the server stamps
@@ -30160,7 +30455,9 @@
       }
 
       function roomCanReconnectSignal() {
-        return Boolean(!isLeavingRoom && authedUser && currentParticipantName && localStream)
+        // a guest reconnect re-admits from the bonfire_guest cookie the same
+        // way a member reconnect re-admits from the session cookie
+        return Boolean(!isLeavingRoom && (authedUser || (guestMode && guestSession)) && currentParticipantName && localStream)
       }
 
       function clearSignalingReconnectTimer() {
@@ -33484,6 +33781,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function handleKanbanMessage(message) {
+        // multi-room scoping: room-scoped events carry roomId (memory entries
+        // carry it in metadata; absent == office). A second live room's
+        // roster/meeting/transcript frames must never overwrite this tab's
+        // state — the office socket delivers every room's `meeting` and
+        // `room_chat` on the signed-in union, so the drop happens HERE, not
+        // per-socket. Rooms-list counters come only from the `rooms` event.
+        switch (message.event) {
+          case 'participants':
+          case 'participant_joined':
+          case 'participant_left':
+          case 'participant_track':
+          case 'active_speaker':
+          case 'meeting':
+          case 'memory_transcript':
+          case 'room_chat':
+            if (kanbanEventRoomId(message.data) !== (activeJoin.roomId || 'office')) {
+              return
+            }
+        }
         switch (message.event) {
           case 'server_version':
             noteServerVersion(message.data)
@@ -33680,7 +33996,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'screen_share_stopped':
             handleScreenShareStopped(message.data)
             break
+          case 'rooms':
+            handleRoomsSnapshot(message.data)
+            break
         }
+      }
+
+      function kanbanEventRoomId(payload) {
+        return payload?.roomId || payload?.metadata?.roomId || 'office'
       }
 
       // ---------- Unified push channel consumer (Wave 3) ----------
@@ -35676,6 +35999,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ws.onclose = null
         }
         leaveRoom()
+        if (guestMode) {
+          // terminal card with the server's reason — never the member gate
+          renderGuestExitState(message)
+          return
+        }
         if (wasRealtimeVoice) {
           setVoiceIslandState('error', message)
         }
@@ -35690,6 +36018,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ws.onclose = null
         }
         leaveRoom()
+        if (guestMode) {
+          renderGuestExitState(message || 'this guest session was replaced by a newer join.')
+          return
+        }
         accessPanel.classList.remove('is-verified')
         accessState.textContent = 'replaced'
         accessHint.textContent = message
@@ -35701,7 +36033,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const voiceOnly = Boolean(realtimeVoiceOnlyPending)
         const reconnectingSignal = isSignalReconnecting
         currentParticipantName = name
-        saveCachedIdentity(name)
+        if (!guestMode) {
+          // guest seat names never pollute the member identity cache
+          saveCachedIdentity(name)
+        }
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
         accessState.textContent = 'verified'
@@ -41960,7 +42295,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function copyRoomLink() {
-        const url = window.location.href
+        // canonical internal link, never the address bar — a guest tab's URL
+        // could still carry admission in the fragment (§6.3)
+        const url = `${window.location.origin}/?room=${encodeURIComponent(activeJoin.roomId || 'office')}`
         try {
           await navigator.clipboard.writeText(url)
           flashCopyConfirm(copyRoomLinkButton)
@@ -49424,14 +49761,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateBoardControls()
         // re-sync the board from the office path — the live office socket
         // would otherwise make the fallback skip and leave the board (and
-        // the intel stat tile) empty until reload or the next mutation
-        loadBoardSnapshot({ force: true })
+        // the intel stat tile) empty until reload or the next mutation.
+        // Guests skip it: no board surface, and the fetch would 401.
+        if (!guestMode) {
+          loadBoardSnapshot({ force: true })
+        }
         stopRoomClock()
+        // the ONLY place the tab's room identity resets (reconnects must
+        // re-seat into the same room with the same passcode)
+        activeJoin = { roomId: 'office', passcode: '', guest: false }
+        renderRoomsList()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
         setRoomView(false)
         validateAccess()
-        loadParticipantPreview()
+        if (!guestMode) {
+          loadParticipantPreview()
+        }
         isLeavingRoom = false
         // A deploy that landed mid-call armed a reload; now that the user is out
         // of the room, apply it (fresh HTML + protocol, session preserved).
@@ -49573,17 +49919,303 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function renderRoomLandingState() {
         const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
+        // per-selected-room: a named room's quiet state speaks ITS name and
+        // ITS occupancy (from the rooms snapshot — office /participants
+        // preview says nothing about a named room)
+        const selectedRoom = (activeJoin.roomId || 'office') !== 'office' ? activeJoinRoomRecord() : null
         // design quiet state when nobody is inside; honest occupancy otherwise
-        const seatCount = Math.max(occupiedSeats, (inRoom ? participantsInRoom : participantPreview).length)
+        const seatCount = selectedRoom && !inRoom
+          ? (Number(selectedRoom.participantCount) || 0)
+          : Math.max(occupiedSeats, (inRoom ? participantsInRoom : participantPreview).length)
         if (roomEmptyName) {
           roomEmptyName.textContent = seatCount > 0
-            ? ((topbarProjectEl?.textContent || '').trim().toLowerCase() || meetingDisplayName())
-            : 'the room is quiet.'
+            ? (selectedRoom
+              ? String(selectedRoom.name || '').toLowerCase()
+              : ((topbarProjectEl?.textContent || '').trim().toLowerCase() || meetingDisplayName()))
+            : (selectedRoom ? `${String(selectedRoom.name || '').toLowerCase()} is quiet.` : 'the room is quiet.')
         }
         if (roomEmptyMeta) {
           roomEmptyMeta.textContent = seatCount > 0
             ? `live now · ${seatCount} inside`
             : 'memory starts when the room speaks.'
+        }
+      }
+
+      /* ---------- multi-room: rooms card ---------- */
+      function activeJoinRoomRecord() {
+        const id = activeJoin.roomId || 'office'
+        return roomsList.find(room => room?.id === id) || null
+      }
+
+      function handleRoomsSnapshot(payload) {
+        roomsList = Array.isArray(payload?.rooms) ? payload.rooms : []
+        renderRoomsList()
+        renderRoomLandingState()
+      }
+
+      async function loadRoomsList() {
+        if (!authedUser) {
+          return
+        }
+        try {
+          const response = await fetch('/rooms', { cache: 'no-store' })
+          if (!response.ok) {
+            return
+          }
+          const data = await response.json().catch(() => ({}))
+          roomsList = Array.isArray(data?.rooms) ? data.rooms : []
+        } catch {
+          return
+        }
+        // /?room= preselect — consumed once, only outside a live seat, and
+        // only for a joinable room (archived/unknown falls back to office)
+        if (pendingRoomBootParam) {
+          const target = roomsList.find(room => room?.id === pendingRoomBootParam && !room.archived)
+          pendingRoomBootParam = ''
+          if (target && !appShell.classList.contains('is-in-room')) {
+            activeJoin.roomId = target.id
+            activeJoin.passcode = ''
+          }
+        }
+        renderRoomsList()
+        renderRoomLandingState()
+      }
+
+      function renderRoomsList() {
+        const card = document.getElementById('officeRoomsCard')
+        const list = document.getElementById('officeRoomsList')
+        if (!card || !list) {
+          return
+        }
+        card.hidden = !authedUser
+        if (!authedUser) {
+          return
+        }
+        const rooms = roomsList.filter(room => room && !room.archived)
+        list.replaceChildren(...rooms.map(room => roomsListRow(room)))
+      }
+
+      function roomsListRow(room) {
+        const row = document.createElement('div')
+        row.className = 'office-rooms__row'
+        row.dataset.roomId = room.id
+
+        const dot = document.createElement('span')
+        dot.className = `office-rooms__dot${room.live ? ' is-live' : ''}`
+
+        const nameWrap = document.createElement('span')
+        nameWrap.className = 'office-rooms__name'
+        const label = document.createElement('span')
+        label.className = 'office-rooms__label'
+        label.textContent = room.name || room.id
+        const meta = document.createElement('span')
+        meta.className = 'office-rooms__meta'
+        const bits = []
+        if (room.live) {
+          bits.push(`${Number(room.participantCount) || 0} inside`)
+        }
+        meta.textContent = bits.join(' · ')
+        if (room.passcodeRequired) {
+          meta.insertAdjacentHTML('beforeend', '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="passcode required"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>')
+        }
+        if (room.guestEnabled) {
+          meta.insertAdjacentHTML('beforeend', '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="guests allowed"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>')
+        }
+        nameWrap.append(label, meta)
+
+        const open = document.createElement('button')
+        open.type = 'button'
+        open.className = 'office-rooms__open pressable'
+        open.textContent = 'Open'
+        open.disabled = appShell.classList.contains('is-in-room') && (activeJoin.roomId || 'office') === room.id
+        open.addEventListener('click', () => {
+          if (room.passcodeRequired) {
+            toggleRoomsRowActions(row, room, 'passcode')
+          } else {
+            openRoomFromList(room, '')
+          }
+        })
+
+        const more = document.createElement('button')
+        more.type = 'button'
+        more.className = 'office-rooms__more pressable'
+        more.setAttribute('aria-label', `${room.name || room.id} options`)
+        more.textContent = '⋯'
+        more.addEventListener('click', () => toggleRoomsRowActions(row, room, 'menu'))
+
+        row.append(dot, nameWrap, open, more)
+        return row
+      }
+
+      // one expanded strip at a time, appended right under its row; mode
+      // 'passcode' = inline join gate, 'menu' = invite/passcode/archive
+      function toggleRoomsRowActions(row, room, mode) {
+        const list = row.parentElement
+        if (!list) {
+          return
+        }
+        const existing = list.querySelector('.office-rooms__actions')
+        const wasFor = existing?.dataset.roomId === room.id && existing?.dataset.mode === mode
+        if (existing) {
+          existing.remove()
+        }
+        if (wasFor) {
+          return
+        }
+        const strip = document.createElement('div')
+        strip.className = 'office-rooms__actions'
+        strip.dataset.roomId = room.id
+        strip.dataset.mode = mode
+        if (mode === 'passcode' || mode === 'setpass') {
+          const input = document.createElement('input')
+          input.type = 'password'
+          input.placeholder = mode === 'passcode' ? 'room passcode' : 'new passcode (empty removes)'
+          input.autocomplete = 'off'
+          input.className = 'office-rooms__input office-rooms__passfield'
+          const go = document.createElement('button')
+          go.type = 'button'
+          go.className = 'office-rooms__submit pressable'
+          go.textContent = mode === 'passcode' ? 'Join' : 'Save'
+          const submit = () => {
+            if (mode === 'passcode') {
+              openRoomFromList(room, input.value)
+            } else {
+              setRoomPasscodeFromList(room, input.value)
+              strip.remove()
+            }
+          }
+          go.addEventListener('click', submit)
+          input.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submit()
+            }
+          })
+          strip.append(input, go)
+          row.after(strip)
+          input.focus()
+          return
+        }
+        const invite = document.createElement('button')
+        invite.type = 'button'
+        invite.textContent = 'invite guest'
+        invite.addEventListener('click', () => mintGuestLinkForRoom(room, strip))
+        const pass = document.createElement('button')
+        pass.type = 'button'
+        pass.textContent = room.passcodeRequired ? 'change passcode' : 'set passcode'
+        pass.addEventListener('click', () => toggleRoomsRowActions(row, room, 'setpass'))
+        strip.append(invite, pass)
+        if (room.id !== 'office') {
+          const archive = document.createElement('button')
+          archive.type = 'button'
+          archive.textContent = 'archive'
+          archive.addEventListener('click', () => archiveRoomFromList(room))
+          strip.append(archive)
+        }
+        row.after(strip)
+      }
+
+      function openRoomFromList(room, passcode) {
+        if (!room || room.archived) {
+          return
+        }
+        const targetId = room.id || 'office'
+        if (appShell.classList.contains('is-in-room')) {
+          if ((activeJoin.roomId || 'office') === targetId) {
+            return
+          }
+          // switching rooms = leave then open (one seat per account)
+          leaveRoom()
+        }
+        activeJoin = { roomId: targetId, passcode: passcode || '', guest: false }
+        renderRoomsList()
+        renderRoomLandingState()
+        joinRoom()
+      }
+
+      async function mintGuestLinkForRoom(room, strip) {
+        try {
+          const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/guest-links`, {})
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not mint a guest link')
+          }
+          // the raw token appears exactly once — surface it now or lose it
+          const url = `${window.location.origin}${result.data?.url || ''}`
+          if (strip?.isConnected) {
+            const out = strip.querySelector('.office-rooms__linkout') || document.createElement('input')
+            out.className = 'office-rooms__input office-rooms__linkout'
+            out.readOnly = true
+            out.value = url
+            strip.append(out)
+            out.select()
+          }
+          try {
+            await navigator.clipboard.writeText(url)
+            setLog('guest link copied — shown once, share it now')
+            showToast({ text: 'guest link copied (shown once)', kind: 'note' })
+          } catch {
+            setLog('guest link ready — copy it now, it is shown once')
+          }
+        } catch (error) {
+          setLog(error.message || String(error))
+        }
+      }
+
+      async function setRoomPasscodeFromList(room, passcode) {
+        try {
+          const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/passcode`, { passcode })
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not update the passcode')
+          }
+          setLog(passcode.trim() ? 'room passcode set' : 'room passcode removed')
+          loadRoomsList()
+        } catch (error) {
+          setLog(error.message || String(error))
+        }
+      }
+
+      async function archiveRoomFromList(room) {
+        if (!window.confirm(`Archive “${room.name || room.id}”? It becomes unjoinable; its record is kept.`)) {
+          return
+        }
+        try {
+          const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/archive`, {})
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not archive the room')
+          }
+          loadRoomsList()
+        } catch (error) {
+          setLog(error.message || String(error))
+        }
+      }
+
+      async function createRoomFromForm(event) {
+        event.preventDefault()
+        const nameInput = document.getElementById('officeRoomsCreateName')
+        const passInput = document.getElementById('officeRoomsCreatePasscode')
+        const guestsInput = document.getElementById('officeRoomsCreateGuests')
+        const form = document.getElementById('officeRoomsCreateForm')
+        const name = (nameInput?.value || '').trim()
+        if (!name) {
+          nameInput?.focus()
+          return
+        }
+        try {
+          const result = await postAuthJSON('/rooms', {
+            name,
+            passcode: passInput?.value || '',
+            guestAccess: Boolean(guestsInput?.checked)
+          })
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not create the room')
+          }
+          if (nameInput) nameInput.value = ''
+          if (passInput) passInput.value = ''
+          if (guestsInput) guestsInput.checked = false
+          if (form) form.hidden = true
+          loadRoomsList()
+        } catch (error) {
+          setLog(error.message || String(error))
         }
       }
 

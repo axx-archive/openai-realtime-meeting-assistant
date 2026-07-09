@@ -70,7 +70,7 @@ func TestCompanyDigestIsLedgerStateViewPlusThinNarrative(t *testing.T) {
 	if got := entry.Metadata["meetingId"]; got != "" {
 		t.Fatalf("company digest stamped meetingId %q, want none", got)
 	}
-	if got := app.memory.currentMeetingID(); got != "" {
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
 		t.Fatalf("company digest pass minted a meeting id %q at idle", got)
 	}
 

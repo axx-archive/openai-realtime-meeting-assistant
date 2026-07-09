@@ -73,7 +73,7 @@ func TestAdmitParticipantEnforcesCapacity(t *testing.T) {
 		t.Fatalf("full room error=%q, want capacity detail", err.Error())
 	}
 
-	if count := app.activeParticipantCount(); count != 2 {
+	if count := app.activeParticipantCount(officeRoomID); count != 2 {
 		t.Fatalf("active participants=%d, want 2", count)
 	}
 
@@ -98,7 +98,7 @@ func TestAdmitParticipantAllowsSameNameReconnectWhenRoomFull(t *testing.T) {
 		t.Fatalf("re-admit AJ in full room: %v", err)
 	}
 
-	if count := app.activeParticipantCount(); count != 2 {
+	if count := app.activeParticipantCount(officeRoomID); count != 2 {
 		t.Fatalf("active participants=%d, want unique count 2", count)
 	}
 
@@ -233,6 +233,7 @@ func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
 	previousTrackParticipants := trackParticipants
 	previousTrackParticipantSessions := trackParticipantSessions
 	previousTrackSourceIDs := trackSourceIDs
+	previousTrackRooms := trackRooms
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{
 		ajTrack.ID():  ajTrack,
 		timTrack.ID(): timTrack,
@@ -249,6 +250,8 @@ func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
 		ajTrack.ID():  "aj-camera-source",
 		timTrack.ID(): "tim-mic-source",
 	}
+	// No trackRooms rows at all — legacy office entries (§9).
+	trackRooms = map[string]string{}
 	listLock.Unlock()
 	defer func() {
 		listLock.Lock()
@@ -256,10 +259,11 @@ func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
 		trackParticipants = previousTrackParticipants
 		trackParticipantSessions = previousTrackParticipantSessions
 		trackSourceIDs = previousTrackSourceIDs
+		trackRooms = previousTrackRooms
 		listLock.Unlock()
 	}()
 
-	snapshots := participantTrackSnapshots("AJ")
+	snapshots := participantTrackSnapshots(officeRoomID, "AJ")
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshots=%v, want only Tim's remote track for AJ", snapshots)
 	}
@@ -278,6 +282,9 @@ func TestParticipantTrackSnapshotsReplayExistingRemoteTracks(t *testing.T) {
 	}
 	if snapshot.StreamID != "tim-stream" {
 		t.Fatalf("snapshot streamID=%q, want tim-stream", snapshot.StreamID)
+	}
+	if snapshot.RoomID != officeRoomID {
+		t.Fatalf("snapshot roomID=%q, want office (legacy trackRooms rows are office, §9)", snapshot.RoomID)
 	}
 }
 

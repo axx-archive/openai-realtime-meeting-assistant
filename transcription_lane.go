@@ -44,6 +44,11 @@ type meetingTranscriptionLane struct {
 	app                *kanbanBoardApp
 	apiKey             string
 	transcriptionModel string
+	// roomID scopes everything the lane commits — transcripts, attribution
+	// freezes/pops, segmentation lookups — to ONE room (multi-room W3). The
+	// boot-started office lane carries officeRoomID; named rooms get a lane
+	// per sitting from ensureRoomMedia.
+	roomID string
 
 	input     chan []int16
 	stop      chan struct{}
@@ -77,10 +82,15 @@ func (app *kanbanBoardApp) startTranscriptionLane(apiKey string) {
 }
 
 func newMeetingTranscriptionLane(app *kanbanBoardApp, apiKey string, transcriptionModel string) *meetingTranscriptionLane {
+	return newMeetingTranscriptionLaneForRoom(app, apiKey, transcriptionModel, officeRoomID)
+}
+
+func newMeetingTranscriptionLaneForRoom(app *kanbanBoardApp, apiKey string, transcriptionModel string, roomID string) *meetingTranscriptionLane {
 	return &meetingTranscriptionLane{
 		app:                app,
 		apiKey:             strings.TrimSpace(apiKey),
 		transcriptionModel: strings.TrimSpace(transcriptionModel),
+		roomID:             normalizeRoomID(roomID),
 		input:              make(chan []int16, transcriptionLaneQueueSize),
 		stop:               make(chan struct{}),
 		done:               make(chan struct{}),
@@ -232,7 +242,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	// A6: clear any window orphaned by the previous connection (a commit whose
 	// .completed never arrived before the socket dropped) so it cannot drift this
 	// connection's attribution FIFO.
-	lane.app.resetPendingAttributionWindows()
+	lane.app.resetPendingAttributionWindowsForRoom(lane.roomID)
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -243,7 +253,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				readErr <- err
 				return
 			}
-			if lane.app.handleTranscriptionLaneEvent(raw) {
+			if lane.app.handleTranscriptionLaneEventForRoom(lane.roomID, raw, lane.transcriptionModel) {
 				readErr <- errTranscriptionLaneSessionExpired
 				return
 			}
@@ -266,8 +276,8 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 		select {
 		case <-lane.stop:
 			if pendingAudio {
-				lane.app.noteRealtimeSpeechStopped()
-				lane.app.freezeAttributionWindowAtCommit()
+				lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
+				lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
 				_ = lane.commitPendingTranscriptionAudio(conn, pendingAudioSamples)
 			}
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
@@ -292,13 +302,13 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			// but only once the pending segment holds enough to commit on its own
 			// (guards against fragmenting a single word on a flicker).
 			if pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
-				if speaker := lane.app.activeSpeakerNameForSegmentation(); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
+				if speaker := lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
 					stopTranscriptionTimer(commitTimer)
 					samples := pendingAudioSamples
 					pendingAudio = false
 					pendingAudioSamples = 0
-					lane.app.noteRealtimeSpeechStopped()
-					lane.app.freezeAttributionWindowAtCommit()
+					lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
+					lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
 					if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
 						return err
 					}
@@ -307,8 +317,8 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			if !pendingAudio {
 				pendingAudio = true
 				pendingAudioSamples = 0
-				segmentSpeaker = lane.app.activeSpeakerNameForSegmentation()
-				lane.app.noteRealtimeSpeechStarted()
+				segmentSpeaker = lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID)
+				lane.app.noteRealtimeSpeechStartedForRoom(lane.roomID)
 			}
 			if err := lane.writeJSON(conn, map[string]any{
 				"type":  "input_audio_buffer.append",
@@ -325,8 +335,8 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			pendingAudio = false
 			samples := pendingAudioSamples
 			pendingAudioSamples = 0
-			lane.app.noteRealtimeSpeechStopped()
-			lane.app.freezeAttributionWindowAtCommit()
+			lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
+			lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
 			if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
 				return err
 			}
@@ -457,11 +467,16 @@ func (app *kanbanBoardApp) currentRealtimeModel() string {
 }
 
 func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
+	return app.handleTranscriptionLaneEventForRoom(officeRoomID, raw, app.currentTranscriptionLaneModel())
+}
+
+func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, raw []byte, model string) bool {
 	var event kanbanRealtimeEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		log.Errorf("Failed to parse OpenAI transcription event: %v", err)
 		return false
 	}
+	roomID = normalizeRoomID(roomID)
 
 	switch event.Type {
 	case "session.created", "session.updated":
@@ -479,19 +494,21 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
 			broadcastAssistantEvent("status", "transcript lane hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message, "lane": "transcript"})
 		}
 	case "conversation.item.input_audio_transcription.completed":
-		app.rememberTranscript(event, "transcript_lane", app.currentTranscriptionLaneModel())
+		app.rememberTranscript(roomID, event, "transcript_lane", model)
 	case "conversation.item.input_audio_transcription.failed":
 		// A6: a failed segment yields no transcript to persist, but it still had a
 		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
 		// otherwise the next .completed inherits this dead turn's boundaries and every
 		// later transcript is attributed one turn late for the rest of the sitting.
-		app.popPendingAttributionWindow()
+		app.popPendingAttributionWindowForRoom(roomID)
 	case "input_audio_buffer.speech_started":
-		app.noteRealtimeSpeechStarted()
-		app.clearScoutVoiceArmForNewSpeech()
+		app.noteRealtimeSpeechStartedForRoom(roomID)
+		if roomID == officeRoomID {
+			app.clearScoutVoiceArmForNewSpeech()
+		}
 		broadcastAssistantEvent("audio", "transcript lane detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
-		app.noteRealtimeSpeechStopped()
+		app.noteRealtimeSpeechStoppedForRoom(roomID)
 		broadcastAssistantEvent("audio", "transcript lane detected silence", map[string]any{"eventType": event.Type})
 	}
 
