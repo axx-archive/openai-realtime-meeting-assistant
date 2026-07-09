@@ -82,6 +82,11 @@ type extractedDecision struct {
 	// Package is optional and only honored on a case-insensitive EXACT match
 	// against an existing venture package name (Part B contract).
 	Package string `json:"package"`
+	// Directional (A5) marks a strategic LEAN the team is converging on but has
+	// not firmly committed — recorded on the ledger as status=proposed (visible
+	// on the ledger surface, excluded from every active/firm lane) so directional
+	// convergence is captured WITHOUT polluting the firm-decision discipline.
+	Directional bool `json:"directional"`
 }
 
 type decisionLedgerExtraction struct {
@@ -108,11 +113,15 @@ func parseDecisionLedgerOutput(text string) (decisionLedgerExtraction, bool) {
 func decisionLedgerInstructions() string {
 	return strings.Join([]string{
 		"You are Bonfire's decision ledger.",
-		"From the supplied meeting-brain write-ups, extract only EXPLICIT decisions the team actually made — commitments, choices, approvals, pricing, go/no-go.",
+		"From the supplied meeting-brain write-ups, extract FIRM decisions the team actually made — commitments, choices, approvals, pricing, go/no-go — and, separately, clear DIRECTIONAL alignments.",
 		"Return STRICT JSON only:",
-		`{"decisions":[{"statement":string(<=200 chars, self-contained, present tense),"madeBy":string(a listed participant, or empty when unclear),"context":string(<=160 chars why/when)}]}.`,
+		`{"decisions":[{"statement":string(<=200 chars, self-contained, present tense),"madeBy":string(a listed participant, or empty when unclear),"context":string(<=160 chars why/when),"directional":boolean}]}.`,
+		"A FIRM decision (directional:false or omitted) is settled and acted-on. Keep the strict bar: never record an open question, a proposal still under debate, or a lean as firm.",
+		"A DIRECTIONAL alignment (directional:true) is a strategic lean the team is genuinely converging on but has NOT firmly committed — a working preference or a proposed split.",
+		`Example directional: {"statement":"The team is leaning toward Ball Dogs as the lead IP over the alternatives.","madeBy":"","context":"consensus forming, not finalized","directional":true}.`,
+		"Be CONSERVATIVE with directional: only real convergence, never routine brainstorming or a single offhand remark. When unsure whether something is even directional, omit it.",
 		"Never invent decisions, people, numbers, or dates.",
-		"Exclude open questions, proposals under discussion, and anything already in the ALREADY RECORDED list.",
+		"Exclude anything already in the ALREADY RECORDED list.",
 		`Empty window → {"decisions":[]}.`,
 	}, " ")
 }
@@ -192,6 +201,46 @@ func (app *kanbanBoardApp) activeDecisionEntries(limit int) []meetingMemoryEntry
 	}
 
 	return newest
+}
+
+// proposedDecisionEntries returns up to limit kind=decision entries with status
+// proposed, newest first — the directional-alignment tier (A5) plus any
+// card-069 governance default awaiting ratification.
+func (app *kanbanBoardApp) proposedDecisionEntries(limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || limit <= 0 {
+		return nil
+	}
+	entries := app.memory.entriesOfKind(meetingMemoryKindDecision, 0)
+	newest := make([]meetingMemoryEntry, 0, limit)
+	for index := len(entries) - 1; index >= 0 && len(newest) < limit; index-- {
+		if entries[index].Metadata["status"] != decisionStatusProposed {
+			continue
+		}
+		newest = append(newest, entries[index])
+	}
+
+	return newest
+}
+
+// dedupeKeysFor collects the normalized dedupe keys of a decision entry slice.
+func dedupeKeysFor(entries []meetingMemoryEntry) []string {
+	keys := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		keys = append(keys, firstNonEmptyString(entry.Metadata["dedupeKey"], decisionDedupeKey(entry.Text)))
+	}
+	return keys
+}
+
+// decisionKeyDuplicate reports whether key restates any of keys — an exact match
+// or token-set Jaccard at/above the dedupe threshold.
+func decisionKeyDuplicate(key string, keys []string) bool {
+	keyFields := strings.Fields(key)
+	for _, existingKey := range keys {
+		if key == existingKey || tokenSetJaccard(keyFields, strings.Fields(existingKey)) >= decisionDedupeJaccard {
+			return true
+		}
+	}
+	return false
 }
 
 // markDecisionSuperseded implements the reserved superseded path (§5 / Wave 2
@@ -474,10 +523,13 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           model,
-		Instructions:    decisionLedgerInstructions(),
-		Input:           app.buildDecisionLedgerInput(inputs, time.Now().UTC()),
-		ReasoningEffort: "low",
+		Model:        model,
+		Instructions: decisionLedgerInstructions(),
+		Input:        app.buildDecisionLedgerInput(inputs, time.Now().UTC()),
+		// Effort raise to the doctrine floor (medium): the ledger judges firm vs
+		// directional commitment and emits exact-shape JSON — the discrimination
+		// low reasoning effort punishes most. Mirrors the board worker's raise.
+		ReasoningEffort: "medium",
 		Verbosity:       "low",
 		MaxOutputTokens: 700,
 	})
@@ -496,15 +548,17 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 	firstBrain := inputs[0]
 	lastBrain := inputs[len(inputs)-1]
 
-	// Server-layer dedupe against the newest active decisions: exact key match
-	// or token-set Jaccard >= 0.8 both mean "restatement, skip".
-	existing := app.activeDecisionEntries(decisionDedupeWindow)
-	existingKeys := make([]string, 0, len(existing))
-	for _, entry := range existing {
-		existingKeys = append(existingKeys, firstNonEmptyString(entry.Metadata["dedupeKey"], decisionDedupeKey(entry.Text)))
-	}
+	// Server-layer dedupe (A5): a FIRM decision dedupes only against the newest
+	// ACTIVE decisions — so a directional lean that hardens into a firm decision
+	// is NOT blocked by its own earlier proposed row (a genuine upgrade). A
+	// DIRECTIONAL lean dedupes against active AND proposed, so it is neither
+	// re-proposed every pass nor proposed for something already firm. Exact key
+	// match or token-set Jaccard >= 0.8 both mean "restatement, skip".
+	activeKeys := dedupeKeysFor(app.activeDecisionEntries(decisionDedupeWindow))
+	proposedKeys := dedupeKeysFor(app.proposedDecisionEntries(decisionDedupeWindow))
 
 	appendedCount := 0
+	directionalCount := 0
 	for _, decision := range extraction.Decisions {
 		statement := normalizeMemoryText(decision.Statement)
 		if statement == "" {
@@ -514,17 +568,17 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		if key == "" {
 			continue
 		}
-		duplicate := false
-		for _, existingKey := range existingKeys {
-			if key == existingKey || tokenSetJaccard(strings.Fields(key), strings.Fields(existingKey)) >= decisionDedupeJaccard {
-				duplicate = true
-				break
-			}
+		if decisionKeyDuplicate(key, activeKeys) {
+			continue
 		}
-		if duplicate {
+		if decision.Directional && decisionKeyDuplicate(key, proposedKeys) {
 			continue
 		}
 
+		status := decisionStatusActive
+		if decision.Directional {
+			status = decisionStatusProposed
+		}
 		// Unknown names are blanked, never invented into the roster.
 		madeBy := normalizeTranscriptSpeaker(decision.MadeBy)
 		metadata := map[string]string{
@@ -532,7 +586,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			"context":       normalizeMemoryText(decision.Context),
 			"sourceBrainId": lastBrain.ID,
 			"dedupeKey":     key,
-			"status":        decisionStatusActive,
+			"status":        status,
 		}
 		// card 081: stamp the decision with the meeting its source brain write-up
 		// covered rather than whatever meeting is current when this pass fires up
@@ -551,7 +605,17 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		if !appended {
 			continue
 		}
-		existingKeys = append(existingKeys, key)
+		// Track the new key in the right lane so a later item in the SAME pass
+		// dedupes correctly: a firm row lands in the active lane (blocks a repeat
+		// firm AND a redundant directional), a directional row lands only in the
+		// proposed lane (blocks a repeat directional but still lets it upgrade to
+		// firm later).
+		if decision.Directional {
+			proposedKeys = append(proposedKeys, key)
+			directionalCount++
+		} else {
+			activeKeys = append(activeKeys, key)
+		}
 		appendedCount++
 		// Binder linkage: an exact package-name match files the decision into
 		// its venture package (attachToPackage stamps packageId back onto the
@@ -576,12 +640,13 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		passText = "No decisions in this window"
 	}
 	passMetadata := map[string]string{
-		"source":         "openai_responses",
-		"model":          model,
-		"fromBrainId":    firstBrain.ID,
-		"throughBrainId": lastBrain.ID,
-		"brainCount":     strconv.Itoa(len(inputs)),
-		"decisionCount":  strconv.Itoa(appendedCount),
+		"source":           "openai_responses",
+		"model":            model,
+		"fromBrainId":      firstBrain.ID,
+		"throughBrainId":   lastBrain.ID,
+		"brainCount":       strconv.Itoa(len(inputs)),
+		"decisionCount":    strconv.Itoa(appendedCount),
+		"directionalCount": strconv.Itoa(directionalCount),
 	}
 	passEntry, _, err := app.memory.appendDecisionPass(durableTimestampID("decision-pass", time.Now()), passText, passMetadata)
 	if err != nil {

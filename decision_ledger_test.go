@@ -54,7 +54,7 @@ func TestProduceDecisionLedgerAppendsDecisionsAndAdvancesCursor(t *testing.T) {
 
 	fenced := "```json\n{\"decisions\":[{\"statement\":\"Grill tier is priced at $500 per month.\",\"madeBy\":\"AJ\",\"context\":\"pricing call\"},{\"statement\":\"Tyler owns the rodeo research brief.\",\"madeBy\":\"Somebody Unlisted\",\"context\":\"\"}]}\n```"
 	entry := runDecisionLedgerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		if !strings.Contains(request.Instructions, "STRICT JSON") || !strings.Contains(request.Instructions, "EXPLICIT decisions") {
+		if !strings.Contains(request.Instructions, "STRICT JSON") || !strings.Contains(request.Instructions, "FIRM decisions") {
 			t.Fatalf("instructions=%q, want the strict extraction contract", request.Instructions)
 		}
 		if !strings.Contains(request.Input, "# Participants") || !strings.Contains(request.Input, "brain-1") {
@@ -616,5 +616,83 @@ func TestMissionIntelInputPrefersLedgerDecisions(t *testing.T) {
 	input = app.buildMissionIntelInput(app.memory.entriesOfKind(meetingMemoryKindBrain, 5), time.Now())
 	if !strings.Contains(input, "Ledger decisions replace the keyword scan.") {
 		t.Fatalf("input missing ledger statements: %s", input)
+	}
+}
+
+// A5: the directional-alignment tier records a strategic lean as status
+// proposed (visible, excluded from the active/firm lane) while a firm decision
+// in the same window stays active — the strict firm discipline is not polluted.
+func TestProduceDecisionLedgerDirectionalTier(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-dir", "## Topics\nBall Dogs vs alternatives; grill pricing.", nil); err != nil || !appended {
+		t.Fatalf("append brain: appended=%v err=%v", appended, err)
+	}
+
+	entry := runDecisionLedgerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if !strings.Contains(request.Instructions, "DIRECTIONAL") || !strings.Contains(request.Instructions, "leaning toward Ball Dogs") {
+			t.Fatalf("instructions missing the directional contract + example: %q", request.Instructions)
+		}
+		if request.ReasoningEffort != "medium" {
+			t.Fatalf("reasoning effort=%q, want medium (doctrine floor)", request.ReasoningEffort)
+		}
+		return `{"decisions":[{"statement":"Grill tier is priced at $500 per month.","madeBy":"AJ","context":"pricing call","directional":false},{"statement":"The team is leaning toward Ball Dogs as the lead IP.","madeBy":"","context":"consensus forming","directional":true}]}`, nil
+	})
+	if entry.Metadata["decisionCount"] != "2" || entry.Metadata["directionalCount"] != "1" {
+		t.Fatalf("pass metadata=%v, want 2 decisions incl. 1 directional", entry.Metadata)
+	}
+
+	active := app.activeDecisionEntries(10)
+	if len(active) != 1 || !strings.Contains(active[0].Text, "Grill tier") {
+		t.Fatalf("active decisions=%v, want only the firm grill-pricing decision", active)
+	}
+	proposed := app.proposedDecisionEntries(10)
+	if len(proposed) != 1 || !strings.Contains(proposed[0].Text, "Ball Dogs") {
+		t.Fatalf("proposed decisions=%v, want the directional Ball Dogs lean", proposed)
+	}
+	if proposed[0].Metadata["status"] != decisionStatusProposed {
+		t.Fatalf("directional status=%q, want proposed", proposed[0].Metadata["status"])
+	}
+}
+
+// A5: a directional lean does not re-fire every pass (deduped against the
+// proposed lane), yet the same statement CAN later harden into a firm decision
+// — a firm candidate dedupes only against the active lane, so the upgrade is not
+// blocked by its own earlier proposed row.
+func TestDirectionalDedupesButCanUpgradeToFirm(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	directional := `{"decisions":[{"statement":"The team is leaning toward Ball Dogs as the lead IP.","madeBy":"","context":"forming","directional":true}]}`
+
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-a", "## Topics\nBall Dogs lean.", nil); err != nil || !appended {
+		t.Fatalf("append brain-a: %v", err)
+	}
+	runDecisionLedgerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return directional, nil
+	})
+	if got := app.proposedDecisionEntries(10); len(got) != 1 {
+		t.Fatalf("after first pass proposed=%d, want 1", len(got))
+	}
+
+	// Second pass re-emits the SAME directional: deduped, no new proposed row.
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-b", "## Topics\nStill leaning Ball Dogs.", nil); err != nil || !appended {
+		t.Fatalf("append brain-b: %v", err)
+	}
+	runDecisionLedgerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return directional, nil
+	})
+	if got := app.proposedDecisionEntries(10); len(got) != 1 {
+		t.Fatalf("after re-emit proposed=%d, want the directional lean deduped to 1", len(got))
+	}
+
+	// Third pass: the lean hardens into a FIRM decision. It must land active
+	// despite the existing proposed row of the same statement.
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-c", "## Decisions\nBall Dogs is the lead IP.", nil); err != nil || !appended {
+		t.Fatalf("append brain-c: %v", err)
+	}
+	runDecisionLedgerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"decisions":[{"statement":"The team is leaning toward Ball Dogs as the lead IP.","madeBy":"AJ","context":"finalized","directional":false}]}`, nil
+	})
+	active := app.activeDecisionEntries(10)
+	if len(active) != 1 || !strings.Contains(active[0].Text, "Ball Dogs") {
+		t.Fatalf("active=%v, want the directional lean upgraded to a firm decision", active)
 	}
 }

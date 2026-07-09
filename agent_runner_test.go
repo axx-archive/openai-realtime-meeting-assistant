@@ -90,6 +90,191 @@ func TestAmbientAgentRunnerCursorAndBatchDispatch(t *testing.T) {
 	}
 }
 
+// A3: a burst of nudges before any receiver drains coalesces to a single
+// buffered wake and never blocks (debounce), and firing for an unstarted agent
+// is safe.
+func TestNudgeAmbientAgentDebouncesAndIsNonBlocking(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	for i := 0; i < 200; i++ {
+		app.nudgeAmbientAgent("test agent")
+	}
+	ch := app.ambientAgentNudgeChannel("test agent")
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected one buffered wake after a burst of nudges")
+	}
+	select {
+	case <-ch:
+		t.Fatal("expected the burst to coalesce to a single wake")
+	default:
+	}
+}
+
+// A3: peekUnconsumedWindow reports the oldest-input id, the (min-batch-capped)
+// count, and the oldest input's age without advancing any cursor.
+func TestPeekUnconsumedWindow(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	var produced [][]string
+	agent := newTestAmbientAgent(&produced) // minBatch 2, maxBatch 3
+
+	if _, _, _, ok := app.peekUnconsumedWindow(agent); ok {
+		t.Fatal("empty store should report no window")
+	}
+	appendTestTranscript(t, app, "peek-1", "Boot Barn kickoff.")
+	head, count, age, ok := app.peekUnconsumedWindow(agent)
+	if !ok || head != "peek-1" || count != 1 {
+		t.Fatalf("peek=%q/%d/%v, want peek-1/1/true", head, count, ok)
+	}
+	if age < 0 {
+		t.Fatalf("age=%v, want >= 0", age)
+	}
+	// The peek must not consume: a real pass still sees the input.
+	if _, _, _, ok := app.peekUnconsumedWindow(agent); !ok {
+		t.Fatal("peek must not advance the cursor")
+	}
+}
+
+// nudgeCadenceAgent is a fast, model-free agent whose produce signals a channel,
+// used to observe the A3 event-driven loop firing between safety-floor ticks.
+func nudgeCadenceAgent(name string, minBatch int, nudgeMaxAge time.Duration, fired chan []string) ambientAgentConfig {
+	artifact := name + "_artifact"
+	index := 0
+	return ambientAgentConfig{
+		name:              name,
+		defaultInterval:   time.Hour, // floor far away; only a nudge/stale-timer should fire it
+		intervalEnv:       "NUDGE_CADENCE_INTERVAL",
+		disabledEnv:       "NUDGE_CADENCE_DISABLED",
+		backfillEnv:       "NUDGE_CADENCE_BACKFILL",
+		minBatchEnv:       "NUDGE_CADENCE_MIN",
+		defaultMinBatch:   minBatch,
+		maxBatchEnv:       "NUDGE_CADENCE_MAX",
+		defaultMaxBatch:   5,
+		inputKind:         meetingMemoryKindTranscript,
+		artifactKind:      artifact,
+		cursorMetadataKey: "throughCadenceId",
+		requestTimeout:    time.Second,
+		nudgeMaxAge:       nudgeMaxAge,
+		produce: func(app *kanbanBoardApp, _ context.Context, _ string, inputs []meetingMemoryEntry, _ openAITextResponder) (meetingMemoryEntry, error) {
+			ids := make([]string, 0, len(inputs))
+			for _, in := range inputs {
+				ids = append(ids, in.ID)
+			}
+			index++
+			entry, _, err := app.memory.appendEntry(artifact, fmt.Sprintf("%s-art-%d", name, index), "x", map[string]string{
+				"throughCadenceId": inputs[len(inputs)-1].ID,
+			})
+			fired <- ids
+			return entry, err
+		},
+	}
+}
+
+// A3: a nudge fires a full pass the moment minBatch is ready, without waiting
+// for the far-off safety-floor tick.
+func TestAmbientAgentLoopFiresOnNudge(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	fired := make(chan []string, 4)
+	agent := nudgeCadenceAgent("nudge-fire", 1, 0, fired)
+
+	cancel := make(chan struct{})
+	done := make(chan struct{})
+	go app.runAmbientAgentLoop(agent, "test-key", time.Hour, cancel, done)
+	defer func() { close(cancel); <-done }()
+
+	appendTestTranscript(t, app, "nf-1", "Boot Barn kickoff.")
+	app.nudgeAmbientAgent(agent.name)
+	select {
+	case ids := <-fired:
+		if strings.Join(ids, ",") != "nf-1" {
+			t.Fatalf("fired=%v, want nf-1", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("nudge did not fire a pass before the safety-floor tick")
+	}
+}
+
+// A3: a lone input short of minBatch is not left dark — the staleness timer
+// fires a short pass once the oldest input crosses nudgeMaxAge, even though no
+// further nudge arrives (edge-triggered appends went silent).
+func TestAmbientAgentLoopFiresOnStaleness(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	fired := make(chan []string, 4)
+	agent := nudgeCadenceAgent("nudge-stale", 3, 40*time.Millisecond, fired)
+
+	cancel := make(chan struct{})
+	done := make(chan struct{})
+	go app.runAmbientAgentLoop(agent, "test-key", time.Hour, cancel, done)
+	defer func() { close(cancel); <-done }()
+
+	appendTestTranscript(t, app, "ns-1", "Boot Barn lone remark.")
+	app.nudgeAmbientAgent(agent.name) // below minBatch(3): arms the staleness timer
+	select {
+	case ids := <-fired:
+		if strings.Join(ids, ",") != "ns-1" {
+			t.Fatalf("fired=%v, want the lone ns-1 brained on staleness", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("staleness timer did not fire a short pass for the lone input")
+	}
+}
+
+// A8: consecutive failures on the SAME window back off (no immediate retry),
+// halve the batch each attempt, and finally dead-letter the poison head by
+// advancing the baseline past it.
+func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	var produced [][]string
+	agent := newTestAmbientAgent(&produced) // minBatch 2, maxBatch 3
+	for i := 1; i <= 3; i++ {
+		appendTestTranscript(t, app, fmt.Sprintf("fail-%d", i), fmt.Sprintf("Boot Barn detail %d.", i))
+	}
+	head, _, _, ok := app.peekUnconsumedWindow(agent)
+	if !ok || head != "fail-1" {
+		t.Fatalf("peek head=%q ok=%v, want fail-1", head, ok)
+	}
+
+	// Fresh window: full batch, may proceed.
+	if proceed, limit := app.ambientAgentAttemptBudget(agent, head); !proceed || limit != agent.maxBatch() {
+		t.Fatalf("fresh budget=%v/%d, want true/%d", proceed, limit, agent.maxBatch())
+	}
+
+	// One failure arms a backoff that holds off the immediate retry.
+	app.recordAmbientAgentFailure(agent, head)
+	if proceed, _ := app.ambientAgentAttemptBudget(agent, head); proceed {
+		t.Fatal("expected an armed backoff to hold off the immediate retry")
+	}
+
+	// Past the backoff, one prior attempt halves the batch (maxBatch 3 -> 2).
+	app.mu.Lock()
+	app.agentFailures[agent.name] = &ambientAgentFailure{windowID: head, attempts: 1, backoffUntil: time.Now().Add(-time.Second)}
+	app.mu.Unlock()
+	if proceed, limit := app.ambientAgentAttemptBudget(agent, head); !proceed || limit != 2 {
+		t.Fatalf("halved budget=%v/%d, want true/2", proceed, limit)
+	}
+
+	// Reaching the attempt cap dead-letters the head: baseline advances past it
+	// and the failure record clears. Start from a clean slate so exactly
+	// ambientAgentMaxWindowAttempts failures accrue (a further failure would
+	// re-open a fresh record on the now-skipped head).
+	app.clearAmbientAgentFailure(agent.name)
+	for i := 0; i < ambientAgentMaxWindowAttempts; i++ {
+		app.recordAmbientAgentFailure(agent, head)
+	}
+	if base := app.ambientAgentBaselineID(agent.name); base != head {
+		t.Fatalf("baseline=%q, want dead-letter advance to %q", base, head)
+	}
+	app.mu.Lock()
+	_, stillTracked := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if stillTracked {
+		t.Fatal("dead-lettered window should clear its failure record")
+	}
+	if newHead, _, _, ok := app.peekUnconsumedWindow(agent); !ok || newHead == head {
+		t.Fatalf("post-dead-letter head=%q ok=%v, want the poison head skipped", newHead, ok)
+	}
+}
+
 func TestAmbientAgentRunnerBaselineSkipsHistory(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	var produced [][]string

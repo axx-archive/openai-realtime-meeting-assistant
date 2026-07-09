@@ -13,9 +13,34 @@ const (
 	meetingBrainAgentName             = "meeting brain"
 	defaultMeetingBrainInterval       = 5 * time.Minute
 	defaultMeetingBrainMinTranscripts = 4
-	defaultMeetingBrainMaxTranscripts = 80
+	// defaultMeetingBrainMaxTranscripts (A7) is lowered from 80 so a single dense
+	// window can no longer outgrow the output budget and truncate the mandated
+	// Transcript-reference audit trail mid-word. With the A3 event nudge firing
+	// passes closer to real time, windows are smaller in practice anyway.
+	defaultMeetingBrainMaxTranscripts = 48
 	meetingBrainRequestTimeout        = 90 * time.Second
+	// meetingBrain output-budget scaling (A7): the base covers a small window;
+	// each additional transcript widens the budget so the reference section (the
+	// LAST section the model writes) survives, capped so a large backfill window
+	// can never request an unbounded completion.
+	meetingBrainBaseMaxOutputTokens = 900
+	meetingBrainPerTranscriptTokens = 26
+	meetingBrainMaxOutputTokensCap  = 2400
 )
+
+// brainMaxOutputTokens scales the brain's completion budget with the transcript
+// window size so the trailing "Transcript reference" IDs are not truncated in a
+// dense window (A7).
+func brainMaxOutputTokens(transcriptCount int) int {
+	if transcriptCount < 0 {
+		transcriptCount = 0
+	}
+	tokens := meetingBrainBaseMaxOutputTokens + transcriptCount*meetingBrainPerTranscriptTokens
+	if tokens > meetingBrainMaxOutputTokensCap {
+		tokens = meetingBrainMaxOutputTokensCap
+	}
+	return tokens
+}
 
 func meetingBrainAgent() ambientAgentConfig {
 	return ambientAgentConfig{
@@ -53,7 +78,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		Input:           buildMeetingBrainInput(transcripts, app.snapshotState(), app.participantSnapshot(), time.Now().UTC()),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
-		MaxOutputTokens: 900,
+		MaxOutputTokens: brainMaxOutputTokens(len(transcripts)),
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, err
@@ -86,6 +111,15 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	// does not dedupe by id.
 	broadcastOfficeKanbanEvent("memory", app.memorySnapshotForClients(20))
 	broadcastAssistantEvent("action", "Scout updated the room brain.", map[string]any{"kind": meetingMemoryKindBrain})
+
+	// A3 cascade: a fresh write-up just landed — wake every worker that consumes
+	// brains so the board / ledger / mission / narrative reflect it promptly
+	// instead of each waiting for its own floor tick. Each nudge is debounced and
+	// runs under its agent's run lock, so this cannot double-fire a pass.
+	app.nudgeAmbientAgent(meetingBoardAgentName)
+	app.nudgeAmbientAgent(decisionLedgerAgentName)
+	app.nudgeAmbientAgent(missionIntelAgentName)
+	app.nudgeAmbientAgent(narrativeMaintainerAgentName)
 
 	return entry, nil
 }

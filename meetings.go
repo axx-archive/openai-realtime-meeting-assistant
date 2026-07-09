@@ -8,11 +8,14 @@ package main
 // designs rely on: the record closes exactly when the memory meeting id
 // rotates.
 //
-// Session-end rule (decided 2026-07-06, card 078): a room session ends after
-// the room has been EMPTY for 30 minutes (meetingIdleEndGrace, env
-// MEETING_IDLE_END_GRACE). The idle end closes the record, rotates the memory
-// meeting id, and silently auto-archives a non-empty meeting (no email); the
-// next join always starts a fresh meeting context.
+// Session-end rule (founder decision 2026-07-08, card 078): a session is one
+// SITTING — an empty room for a few minutes (meetingIdleEndGrace default 4m,
+// env MEETING_IDLE_END_GRACE) finalizes the meeting; the next entry mints a
+// fresh id. The idle end closes the record, rotates the memory meeting id, and
+// silently auto-archives a non-empty meeting (no email); the next join always
+// starts a fresh meeting context. Emptiness is judged by
+// activeParticipantCount(), which a liveness sweep drives to zero even when a
+// zombie/backgrounded socket lingers (see sweepStaleParticipantSessions).
 //
 // Persistence is a sidecar JSON store (data/meetings.json, notifications.json
 // pattern) — records mutate continuously (endedAt, auto-title, participants
@@ -90,15 +93,18 @@ func meetingsPath() string {
 }
 
 // meetingIdleEndGrace is how long an empty room stays "in the meeting" before
-// the record closes and the memory meeting id rotates. The 30-minute default
-// IS the session-end rule: empty for 30 minutes = the session is over.
+// the record closes and the memory meeting id rotates. The 4-minute default IS
+// the founder's "a few minutes" session boundary: empty for a few minutes = the
+// sitting is over. The grace still absorbs a brief drop+rejoin (a reconnect
+// re-admits well inside it), while being short enough that the next sitting
+// mints a fresh id instead of accreting onto the last one.
 func meetingIdleEndGrace() time.Duration {
 	if raw := strings.TrimSpace(os.Getenv("MEETING_IDLE_END_GRACE")); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			return parsed
 		}
 	}
-	return 30 * time.Minute
+	return 4 * time.Minute
 }
 
 func loadMeetingStore(path string) (*meetingStore, error) {

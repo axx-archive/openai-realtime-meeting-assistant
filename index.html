@@ -11572,6 +11572,17 @@
         font-family: var(--font-mono);
       }
 
+      /* the sitting's current (dominant-title) segment — the one topic the room
+         is on right now. Ink-only emphasis (a firmer edge + brighter time
+         window); hue stays reserved for earned state, never decoration. */
+      .intel-storyline.is-current {
+        border-color: var(--line-2);
+        background: var(--surface-3);
+      }
+      .intel-storyline.is-current .intel-storyline__updated {
+        color: var(--text-2);
+      }
+
       /* card 069 ratify door: a proposed (default) decision carries one small
          inline action; hue stays ink, the disabled flip is the only state */
       .intel-item__ratify {
@@ -30101,6 +30112,17 @@
               endpointId: ensureEndpointId()
             })
           }))
+          // Room-liveness heartbeat: an APP-level frame the server stamps
+          // liveness on (not the network-layer pong, which a backgrounded tab
+          // keeps answering). This setInterval freezes when the tab is
+          // throttled/frozen, so the server's liveness sweep can then reap the
+          // zombie seat and finalize an empty sitting — the fix for the meeting
+          // id that spanned two sittings. Mirrors office_ping.
+          try { window.clearInterval(socket.__roomHeartbeat) } catch { /* none */ }
+          socket.__roomHeartbeat = window.setInterval(() => {
+            if (ws !== socket) { return }
+            try { socket.send(JSON.stringify({ event: 'room_ping' })) } catch { /* dying socket; onclose reconnects */ }
+          }, 25000)
         }
         socket.onmessage = event => {
           if (ws !== socket) {
@@ -30123,6 +30145,7 @@
             })
         }
         socket.onclose = event => {
+          try { window.clearInterval(socket.__roomHeartbeat) } catch { /* none */ }
           if (ws === socket) {
             ws = undefined
           }
@@ -40213,6 +40236,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        messages.forEach(message => appendScoutChatNode(scoutChatMessageRecordNode(message)))
 	        remountGhostGoalCards()
 	        syncRunlogLiveness()
+	        // reconcile the in-chat research cards this pass just built against
+	        // the known artifacts — otherwise the "view report" / completed state
+	        // stays hidden until an unrelated loadArtifacts fires. No-op (early
+	        // return) when no card carries a thread-artifact id, so an empty
+	        // thread is safe.
+	        syncScoutChatResearchCards()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	      }
 
@@ -44617,24 +44646,49 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (intelStorylinesStamp) intelStorylinesStamp.textContent = ''
           return
         }
+        // Per-sitting topic segments (mission snapshot `segments`, one row per
+        // storyline slug touched THIS meeting) carry the [firstSeen–lastSeen]
+        // range and mark the dominant "current" segment — the SAME segmentation
+        // the topbar title is drawn from, so the timeline and the title can
+        // never contradict. When present, the strip becomes the sitting's topic
+        // timeline: storylines touched this sitting lead, ordered by firstSeenAt.
+        const segments = Array.isArray(intelData?.segments) ? intelData.segments : []
+        const segBySlug = new Map()
+        segments.forEach(seg => {
+          const slug = String(seg?.slug || '').trim()
+          if (slug) segBySlug.set(slug, seg)
+        })
+        const ordered = narratives
+          .map((narrative, index) => ({ narrative, index }))
+          .sort((a, b) => {
+            const sa = segBySlug.get(String(a.narrative?.slug || '').trim())
+            const sb = segBySlug.get(String(b.narrative?.slug || '').trim())
+            if (sa && sb) return (Date.parse(sa.firstSeenAt || '') || 0) - (Date.parse(sb.firstSeenAt || '') || 0)
+            if (sa) return -1
+            if (sb) return 1
+            return a.index - b.index
+          })
         intelStorylinesSection.hidden = false
         if (intelStorylinesStamp) {
           intelStorylinesStamp.textContent = `${narratives.length} active storyline${narratives.length === 1 ? '' : 's'}`
         }
-        intelStorylinesEl.replaceChildren(...narratives.map(narrative => {
+        intelStorylinesEl.replaceChildren(...ordered.map(({ narrative }) => {
+          const slug = String(narrative?.slug || '').trim()
+          const seg = segBySlug.get(slug) || null
+          const isCurrent = !!seg && String(seg.status || '') === 'current'
           const title = String(narrative?.title || narrative?.slug || '').trim() || 'storyline'
           const artifactId = String(narrative?.artifactId || '').trim()
           const card = document.createElement(artifactId ? 'button' : 'div')
-          card.className = 'intel-storyline'
+          card.className = isCurrent ? 'intel-storyline is-current' : 'intel-storyline'
           const titleEl = document.createElement('span')
           titleEl.className = 'intel-storyline__title'
-          titleEl.textContent = title
+          titleEl.textContent = isCurrent ? `${title} · now` : title
           const summary = document.createElement('span')
           summary.className = 'intel-storyline__summary'
           summary.textContent = String(narrative?.summary || '')
           const updated = document.createElement('span')
           updated.className = 'intel-storyline__updated'
-          updated.textContent = intelRelativeTime(narrative?.updatedAt)
+          updated.textContent = seg ? intelSegmentRangeLabel(seg) : intelRelativeTime(narrative?.updatedAt)
           card.append(titleEl, summary, updated)
           if (artifactId) {
             card.type = 'button'
@@ -44642,6 +44696,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           return card
         }))
+      }
+
+      /* intelSegmentRangeLabel renders a per-sitting segment's clock window as
+         "HH:MM–HH:MM" (local, 24h), collapsing to a single stamp when first and
+         last coincide, and falling back to a relative time when the stamps are
+         missing. */
+      function intelSegmentRangeLabel(seg) {
+        const stamp = ms => {
+          const at = new Date(ms)
+          return Number.isNaN(at.valueOf())
+            ? ''
+            : `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+        }
+        const first = stamp(Date.parse(seg?.firstSeenAt || ''))
+        const last = stamp(Date.parse(seg?.lastSeenAt || ''))
+        if (first && last) return first === last ? first : `${first}–${last}`
+        return intelRelativeTime(seg?.lastSeenAt || seg?.firstSeenAt)
       }
 
       /* Decision ledger — kind "decision" entries are Scout-grounding
@@ -49453,9 +49524,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const insightPayload = (intelData?.themes?.insight?.themes ? intelData.themes : null) || latestMissionInsight
         const themes = insightPayload?.insight?.themes
+        // Match the server: the dominant fallback is the FIRST theme (themes
+        // arrive most-salient/most-recurrent-first), NOT the raw max-mentions
+        // reduce — that reduce chased a model-invented, ratcheted count and let a
+        // single last-tick blip steal the title. The server's record.title
+        // (segment-derived) is still the source of truth above; this only runs
+        // for an as-yet-untitled meeting.
         const dominant = Array.isArray(themes) && themes.length
-          ? String(themes.reduce((best, theme) =>
-              (Number(theme?.mentions) || 0) > (Number(best?.mentions) || 0) ? theme : best, themes[0])?.label || '').trim()
+          ? String(themes[0]?.label || '').trim()
           : ''
         // Freshness gate (room-reset rule, card 078): an insight synthesized
         // BEFORE the live record started belongs to the PRIOR session — a

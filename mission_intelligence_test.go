@@ -632,3 +632,82 @@ func TestMissionInsightTextSurvivesAppendNormalization(t *testing.T) {
 		t.Fatalf("persisted mission insight no longer parses: %q", entry.Text)
 	}
 }
+
+// The dominant-title fix (D): a theme that recurred across the sitting keeps
+// the title even when a single last-tick pass surfaces a fresher theme with an
+// inflated mentions integer — the exact shape the old max-mentions reduce lost
+// to (Ball Dogs owned the airtime but lost the title to the most-recent tick).
+func TestDecayedDominantThemePrefersRecurrenceOverLastTickBlip(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission("AJ")
+	record, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no active record after admission")
+	}
+
+	appendInsight := func(id, body string) {
+		if _, appended, err := app.memory.appendMissionInsight(id, body, nil); err != nil || !appended {
+			t.Fatalf("append %s: appended=%v err=%v", id, appended, err)
+		}
+	}
+	appendInsight("mi-1", `{"themes":[{"label":"Ball Dogs","mentions":2}],"openQuestions":[],"alignments":[]}`)
+	appendInsight("mi-2", `{"themes":[{"label":"Ball Dogs","mentions":2}],"openQuestions":[],"alignments":[]}`)
+	// the final (most-recent) pass surfaces a one-off with an inflated count.
+	appendInsight("mi-3", `{"themes":[{"label":"Late blip","mentions":9},{"label":"Ball Dogs","mentions":2}],"openQuestions":[],"alignments":[]}`)
+
+	if got := app.decayedDominantTheme(record, time.Now().UTC()); got != "Ball Dogs" {
+		t.Fatalf("decayedDominantTheme=%q, want the recurring theme to beat a last-tick blip", got)
+	}
+	// with no narrative segments yet, the dominant title falls back to the theme.
+	if got := app.dominantMeetingTitle(record, time.Now().UTC()); got != "Ball Dogs" {
+		t.Fatalf("dominantMeetingTitle=%q, want the decayed-theme fallback", got)
+	}
+}
+
+// The priming ratchet (C): the previous insight primes the next pass WITHOUT
+// its mentions integers (so counts are re-derived from the current window),
+// and the whole block is dropped when the previous insight belongs to a PRIOR
+// sitting (older than record.StartedAt) — the seam the stale Samsung(15) title
+// leaked through.
+func TestBuildMissionIntelInputStripsMentionsAndResetsAcrossSitting(t *testing.T) {
+	if block := sanitizedPreviousInsight(`{"themes":[{"label":"Samsung opportunity","summary":"validation","mentions":15}],"openQuestions":["price?"],"alignments":["ship it"]}`); block == "" ||
+		strings.Contains(block, "15") || strings.Contains(block, "mentions") ||
+		!strings.Contains(block, "Samsung opportunity") || !strings.Contains(block, "price?") || !strings.Contains(block, "ship it") {
+		t.Fatalf("sanitizedPreviousInsight failed to strip counts while keeping continuity: %q", block)
+	}
+	if sanitizedPreviousInsight("not json at all") != "" {
+		t.Fatal("unparseable previous insight must prime nothing")
+	}
+
+	// prior-sitting reset: a stale insight (generatedAt two hours ago) is on
+	// disk when a fresh sitting begins — it must NOT prime the new pass.
+	stale := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := stale.memory.appendMissionInsight("mi-prior",
+		`{"themes":[{"label":"Samsung opportunity","summary":"x","mentions":15}],"openQuestions":[],"alignments":[]}`,
+		map[string]string{"generatedAt": time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)}); err != nil || !appended {
+		t.Fatalf("append prior insight: appended=%v err=%v", appended, err)
+	}
+	stale.noteMeetingAdmission("AJ")
+	priorInput := stale.buildMissionIntelInput(nil, time.Now())
+	if strings.Contains(priorInput, "Previous mission insight") || strings.Contains(priorInput, "Samsung opportunity") {
+		t.Fatalf("a prior-sitting insight must not prime a fresh sitting: %s", priorInput)
+	}
+
+	// in-sitting insight (generatedAt after StartedAt) DOES prime — mentions stripped.
+	live := newIsolatedKanbanBoardApp(t)
+	live.noteMeetingAdmission("AJ")
+	record, _ := live.meetings.activeRecord()
+	started, _ := time.Parse(time.RFC3339Nano, record.StartedAt)
+	if _, appended, err := live.memory.appendMissionInsight("mi-live",
+		`{"themes":[{"label":"Ball Dogs IP","summary":"licensing","mentions":12}],"openQuestions":[],"alignments":[]}`,
+		map[string]string{"generatedAt": started.Add(time.Minute).UTC().Format(time.RFC3339)}); err != nil || !appended {
+		t.Fatalf("append live insight: appended=%v err=%v", appended, err)
+	}
+	liveInput := live.buildMissionIntelInput(nil, time.Now())
+	if !strings.Contains(liveInput, "# Previous mission insight") || !strings.Contains(liveInput, "Ball Dogs IP") {
+		t.Fatalf("an in-sitting insight should prime the next pass: %s", liveInput)
+	}
+	if strings.Contains(liveInput, `"mentions"`) || strings.Contains(liveInput, "licensing\",\"mentions") {
+		t.Fatalf("primed block still carries the raw JSON mentions ratchet: %s", liveInput)
+	}
+}

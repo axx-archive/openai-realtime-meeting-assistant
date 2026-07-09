@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,6 +32,13 @@ const (
 	// missionIntelRefreshCooldown rate-limits the on-demand refresh endpoint
 	// to one accepted attempt per five minutes across all users.
 	missionIntelRefreshCooldown = 5 * time.Minute
+	// dominantTitleDecayTau is the half-life-ish constant for the recency
+	// weighting behind the dominant meeting title. A theme/segment that recurred
+	// across passes keeps a high Σ e^(−Δt/τ) score; a single last-tick blip
+	// decays away — so the title stops chasing whatever topic the most recent
+	// pass happened to surface (the max-mentions/last-tick bug). τ ≈ 25m sits in
+	// the founder's "a few minutes to half an hour" band.
+	dominantTitleDecayTau = 25 * time.Minute
 )
 
 func missionIntelligenceAgent() ambientAgentConfig {
@@ -93,6 +101,7 @@ func missionIntelInstructions() string {
 		"From the supplied meeting-brain write-ups, decisions, and workspace signals, return STRICT JSON only, no markdown fence, matching:",
 		`{"themes":[{"label":string(<=6 words),"summary":string(<=200 chars),"mentions":int,"people":[string]}],"openQuestions":[string],"alignments":[string]}.`,
 		"themes = recurring topics across the window (max 6, most recurrent first).",
+		"Count mentions from the CURRENT window only; never inherit or add to counts from a previous insight.",
 		"openQuestions = unresolved questions or disagreements the team should settle (max 5).",
 		"alignments = points where the team is already in lockstep (max 5).",
 		"Preserve real participant names; never invent people, clients, or decisions.",
@@ -108,9 +117,21 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 	builder.WriteString("# Generated at\n")
 	builder.WriteString(generatedAt.Format(time.RFC3339))
 
+	// Continuity context — the previous insight's themes carried forward, but
+	// WITHOUT the mentions ratchet: (i) the counts are stripped so the model
+	// re-derives salience from THIS window instead of inheriting an inflated
+	// running tally, and (ii) an insight synthesized before the live sitting
+	// started belongs to the PRIOR sitting and is dropped entirely (the seam the
+	// stale Samsung(15) title leaked through — one meeting id can span two
+	// sittings, so we key the reset off record.StartedAt, never the id).
 	if previous := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 1); len(previous) > 0 {
-		builder.WriteString("\n\n# Previous mission insight\n")
-		builder.WriteString(previous[0].Text)
+		prev := previous[0]
+		if app.previousInsightBelongsToSitting(prev) {
+			if block := sanitizedPreviousInsight(prev.Text); block != "" {
+				builder.WriteString("\n\n# Previous mission insight (themes carried forward — recount mentions from THIS window, do not inherit prior counts)\n")
+				builder.WriteString(block)
+			}
+		}
 	}
 
 	// The decision ledger is the source of truth once it has entries; the
@@ -206,36 +227,192 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 
 	broadcastOfficeKanbanEvent("mission_insight", missionInsightEventPayload(entry, insight))
 
-	// server-side auto-title: the dominant synthesized theme names the active
-	// meeting record. setAutoTitle no-ops when the current id has no record
-	// (insight generated between meetings), so a title never lands on the
-	// wrong meeting.
-	if label := dominantMissionTheme(insight); label != "" {
-		if record, changed := app.meetings.setAutoTitle(app.memory.currentMeetingID(), label); changed {
-			app.broadcastMeetingRecord(record)
-		}
-	}
+	// server-side auto-title: recency-weighted salience over the CURRENT sitting
+	// (narrative segments when the maintainer has produced them, decayed mission
+	// themes otherwise) — NOT raw max-mentions, so a single last-tick blip can
+	// never steal the title from a topic that owned the airtime.
+	// refreshDominantTitle no-ops when no meeting is live.
+	app.refreshDominantTitle(time.Now().UTC())
 
 	return entry, nil
 }
 
-// dominantMissionTheme picks the theme with the most mentions; first wins
-// ties (themes arrive most-recurrent-first per missionIntelInstructions) —
-// the same reduce the client's meetingDisplayName runs.
-func dominantMissionTheme(insight missionInsightPayload) string {
-	label := ""
-	best := 0
-	for _, theme := range insight.Themes {
-		trimmed := strings.TrimSpace(theme.Label)
-		if trimmed == "" {
-			continue
-		}
-		if label == "" || theme.Mentions > best {
-			label = trimmed
-			best = theme.Mentions
+// refreshDominantTitle recomputes the active meeting's auto title from
+// already-produced salience — no extra model call. Called from the mission
+// tick (15m) AND every narrative-maintainer pass (10m), so the room title
+// tracks the conversation on a ~10-minute cadence instead of only the final
+// mission tick. Scope keys off record.StartedAt, never the meeting id (one id
+// can span sittings — the load-bearing gotcha).
+func (app *kanbanBoardApp) refreshDominantTitle(now time.Time) {
+	if app == nil || app.meetings == nil {
+		return
+	}
+	record, ok := app.meetings.activeRecord()
+	if !ok {
+		return
+	}
+	label := app.dominantMeetingTitle(record, now)
+	if strings.TrimSpace(label) == "" {
+		return
+	}
+	if updated, changed := app.meetings.setAutoTitle(record.ID, label); changed {
+		app.broadcastMeetingRecord(updated)
+	}
+}
+
+// dominantMeetingTitle is the single source of the room's dominant title: the
+// most-salient narrative segment of the current sitting when segmentation
+// exists (so the title is always a row of the topic timeline and the two can
+// never contradict), falling back to decayed mission-theme salience on cold
+// start before the first narrative pass of the sitting lands.
+func (app *kanbanBoardApp) dominantMeetingTitle(record meetingRecord, now time.Time) string {
+	segments := app.meetingSegments(record, now)
+	if idx := dominantSegmentIndex(segments); idx >= 0 {
+		if title := strings.TrimSpace(segments[idx].Title); title != "" {
+			return title
 		}
 	}
-	return label
+	return app.decayedDominantTheme(record, now)
+}
+
+// decayedDominantTheme scores every mission-insight theme in the current
+// sitting by decayed recurrence — Σ e^(−Δt/τ) over the passes that carried the
+// label — and returns the argmax. Ties break toward the earliest-seen label
+// (themes arrive most-recurrent-first). This replaces the old max-mentions
+// reduce, which lagged (last-tick wins) and rode the model-invented, ratcheted
+// mentions integer.
+func (app *kanbanBoardApp) decayedDominantTheme(record meetingRecord, now time.Time) string {
+	if app == nil || app.memory == nil {
+		return ""
+	}
+	startedAt, ok := parseMeetingStartedAt(record)
+	if !ok {
+		return ""
+	}
+	weights := map[string]float64{}
+	order := make([]string, 0, 8)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 0) {
+		if entry.CreatedAt.Before(startedAt) {
+			continue
+		}
+		insight, _, parsed := parseMissionInsight(entry.Text)
+		if !parsed {
+			continue
+		}
+		decay := decayedWeight(now, entry.CreatedAt)
+		for _, theme := range insight.Themes {
+			label := strings.TrimSpace(theme.Label)
+			if label == "" {
+				continue
+			}
+			if _, seen := weights[label]; !seen {
+				order = append(order, label)
+			}
+			weights[label] += decay
+		}
+	}
+	best := ""
+	bestWeight := 0.0
+	for _, label := range order {
+		if best == "" || weights[label] > bestWeight {
+			best = label
+			bestWeight = weights[label]
+		}
+	}
+	return best
+}
+
+// decayedWeight is one recency-decayed vote: 1.0 at now, falling off with
+// e^(−Δt/τ). Negative Δt (a clock skew where the entry looks newer than now)
+// clamps to the full 1.0 vote rather than amplifying past it.
+func decayedWeight(now time.Time, at time.Time) float64 {
+	dt := now.Sub(at)
+	if dt < 0 {
+		dt = 0
+	}
+	return math.Exp(-dt.Minutes() / dominantTitleDecayTau.Minutes())
+}
+
+// parseMeetingStartedAt is the sitting-boundary anchor every title/segment
+// scope filter keys off — record.StartedAt, never the meeting id's mint time.
+func parseMeetingStartedAt(record meetingRecord) (time.Time, bool) {
+	startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(record.StartedAt))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return startedAt, true
+}
+
+// previousInsightBelongsToSitting reports whether a prior mission insight is
+// safe to prime the next pass with: only when it was generated at/after the
+// live sitting started. An insight older than record.StartedAt belongs to the
+// previous sitting and would leak its themes forward (the priming ratchet).
+// With no active record we cannot prove staleness, so we allow priming.
+func (app *kanbanBoardApp) previousInsightBelongsToSitting(prev meetingMemoryEntry) bool {
+	if app == nil || app.meetings == nil {
+		return true
+	}
+	record, ok := app.meetings.activeRecord()
+	if !ok {
+		return true
+	}
+	startedAt, ok := parseMeetingStartedAt(record)
+	if !ok {
+		return true
+	}
+	generatedAt := prev.CreatedAt
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(prev.Metadata["generatedAt"])); err == nil {
+		generatedAt = parsed
+	}
+	return !generatedAt.Before(startedAt)
+}
+
+// sanitizedPreviousInsight renders the previous insight as continuity context
+// with the mentions integers stripped — labels, summaries, open questions, and
+// alignments only. Unparseable text primes nothing (returns "").
+func sanitizedPreviousInsight(text string) string {
+	insight, _, ok := parseMissionInsight(text)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	if len(insight.Themes) > 0 {
+		b.WriteString("Themes:\n")
+		for _, theme := range insight.Themes {
+			label := strings.TrimSpace(theme.Label)
+			if label == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(label)
+			if summary := strings.TrimSpace(theme.Summary); summary != "" {
+				b.WriteString(": ")
+				b.WriteString(summary)
+			}
+			b.WriteByte('\n')
+		}
+	}
+	if len(insight.OpenQuestions) > 0 {
+		b.WriteString("Open questions:\n")
+		for _, question := range insight.OpenQuestions {
+			if trimmed := strings.TrimSpace(question); trimmed != "" {
+				b.WriteString("- ")
+				b.WriteString(trimmed)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	if len(insight.Alignments) > 0 {
+		b.WriteString("Alignments:\n")
+		for _, alignment := range insight.Alignments {
+			if trimmed := strings.TrimSpace(alignment); trimmed != "" {
+				b.WriteString("- ")
+				b.WriteString(trimmed)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func missionInsightEventPayload(entry meetingMemoryEntry, insight missionInsightPayload) map[string]any {
@@ -490,6 +667,7 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 			"themesAvailable": false,
 			"decisions":       []map[string]any{},
 			"narratives":      []map[string]any{},
+			"segments":        []map[string]any{},
 			"degraded":        degraded,
 		}
 	}
@@ -551,7 +729,12 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		// the rest of this all-users payload. Additive: absent narratives read
 		// back as an empty list.
 		"narratives": app.narrativeSnapshotRows(narrativeStorylineContextLimit),
-		"degraded":   degraded,
+		// Per-sitting topic segments (narrative_maintainer.go), ordered by
+		// firstSeenAt with [firstSeen,lastSeen] and a current/past status. The
+		// dominant-title segment is marked "current" — the SAME segmentation the
+		// server auto-title is drawn from, so timeline and title never diverge.
+		"segments": app.meetingSegmentRows(now),
+		"degraded": degraded,
 	}
 }
 

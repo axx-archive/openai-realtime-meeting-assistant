@@ -316,6 +316,75 @@ func TestActiveNarrativeEntriesCapsAndDedupes(t *testing.T) {
 	}
 }
 
+// The segmented topic-timeline (D/B): narrative dossiers, scoped to the
+// current sitting via record.StartedAt, become one segment per slug — ordered
+// by firstSeenAt, weighted by decayed recurrence. The dominant segment (most
+// recurrent) names the room, and the SAME reduce marks it "current" in the
+// snapshot, so title and timeline can never contradict.
+func TestMeetingSegmentsTimelineDominantAndSnapshot(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission("AJ")
+	record, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no active record after admission")
+	}
+	started, _ := time.Parse(time.RFC3339Nano, record.StartedAt)
+
+	seg := func(id, slug, title string, firstOffset, lastOffset time.Duration) {
+		if _, appended, err := app.memory.appendNarrative(id, "## Storyline\n"+slug, map[string]string{
+			"slug":        slug,
+			"title":       title,
+			"status":      "active line",
+			"firstSeenAt": started.Add(firstOffset).UTC().Format(time.RFC3339Nano),
+			"lastSeenAt":  started.Add(lastOffset).UTC().Format(time.RFC3339Nano),
+		}); err != nil || !appended {
+			t.Fatalf("append %s: appended=%v err=%v", id, appended, err)
+		}
+	}
+	// ball-dogs recurs across two passes (earlier firstSeen); impossible is a
+	// single later pass. A stale prior-sitting dossier must be scoped OUT.
+	seg("n-bd-1", "ball-dogs", "Ball Dogs IP", 1*time.Minute, 3*time.Minute)
+	seg("n-bd-2", "ball-dogs", "Ball Dogs IP", 1*time.Minute, 8*time.Minute)
+	seg("n-im-1", "impossible", "Impossible Films", 10*time.Minute, 12*time.Minute)
+
+	segments := app.meetingSegments(record, time.Now().UTC())
+	if len(segments) != 2 {
+		t.Fatalf("segments=%d, want 2 (one per slug)", len(segments))
+	}
+	// timeline order = firstSeenAt ascending.
+	if segments[0].Slug != "ball-dogs" || segments[1].Slug != "impossible" {
+		t.Fatalf("timeline order=%q,%q want ball-dogs,impossible", segments[0].Slug, segments[1].Slug)
+	}
+	if !segments[0].FirstSeenAt.Equal(started.Add(1 * time.Minute)) {
+		t.Fatalf("ball-dogs firstSeen=%v, want the earliest stamped window", segments[0].FirstSeenAt)
+	}
+	// recurrence → ball-dogs is dominant even though impossible is more recent.
+	if idx := dominantSegmentIndex(segments); idx < 0 || segments[idx].Slug != "ball-dogs" {
+		t.Fatalf("dominant index=%d, want ball-dogs; segments=%+v", idx, segments)
+	}
+	if got := app.dominantMeetingTitle(record, time.Now().UTC()); got != "Ball Dogs IP" {
+		t.Fatalf("dominantMeetingTitle=%q, want the dominant segment's title", got)
+	}
+
+	// snapshot rows mark exactly the dominant slug "current"; the rest "past".
+	rows := app.meetingSegmentRows(time.Now().UTC())
+	if len(rows) != 2 {
+		t.Fatalf("segment rows=%d, want 2", len(rows))
+	}
+	current := ""
+	for _, row := range rows {
+		if row["status"] == "current" {
+			if current != "" {
+				t.Fatalf("more than one current segment: %+v", rows)
+			}
+			current = row["slug"].(string)
+		}
+	}
+	if current != "ball-dogs" {
+		t.Fatalf("current segment=%q, want ball-dogs (matches the dominant title)", current)
+	}
+}
+
 func TestAssistantQueryInputIncludesActiveStorylines(t *testing.T) {
 	storylines := []meetingMemoryEntry{
 		{

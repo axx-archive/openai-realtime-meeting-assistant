@@ -40,12 +40,13 @@ func meetingArchiveFilesOnDisk(t *testing.T) []string {
 	return names
 }
 
-// The session-end rule (card 078): a room session ends after the room has
-// been empty for 30 minutes. The default IS the rule; the env override stays.
-func TestMeetingIdleEndGraceDefaultsToThirtyMinutes(t *testing.T) {
+// The session-end rule (card 078, founder decision 2026-07-08): a sitting ends
+// after the room has been empty for a few minutes. The 4-minute default IS the
+// rule; the env override stays.
+func TestMeetingIdleEndGraceDefaultsToAFewMinutes(t *testing.T) {
 	t.Setenv("MEETING_IDLE_END_GRACE", "")
-	if got := meetingIdleEndGrace(); got != 30*time.Minute {
-		t.Fatalf("meetingIdleEndGrace()=%v, want 30m (the empty-room session-end rule)", got)
+	if got := meetingIdleEndGrace(); got != 4*time.Minute {
+		t.Fatalf("meetingIdleEndGrace()=%v, want 4m (the founder's few-minutes sitting boundary)", got)
 	}
 	t.Setenv("MEETING_IDLE_END_GRACE", "45m")
 	if got := meetingIdleEndGrace(); got != 45*time.Minute {
@@ -470,6 +471,142 @@ func TestRejoinWithinGraceCancelsIdleEnd(t *testing.T) {
 	}
 }
 
+// A zombie/backgrounded socket that never runs its onclose defer keeps
+// activeParticipantCount() above zero, so the empty-room idle end never arms and
+// the meeting id never rotates (the live ~22h/two-sitting accretion). The
+// liveness sweep reaps the stale session, occupancy reaches zero, the sitting
+// finalizes, and the NEXT admission mints a fresh id on a fresh record.
+func TestLivenessSweepReapsZombieThenFinalizesAndMintsFreshID(t *testing.T) {
+	// long grace so the armed timer never fires on its own — we finalize by hand.
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+
+	admitted, err := app.admitParticipant("AJ")
+	if err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	first, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	if app.activeParticipantCount() != 1 {
+		t.Fatalf("activeParticipantCount()=%d after admission, want 1", app.activeParticipantCount())
+	}
+
+	// A fresh liveness stamp is NOT reaped: the participant is really here.
+	app.sweepStaleParticipantSessions()
+	if app.activeParticipantCount() != 1 {
+		t.Fatalf("sweep reaped a live participant (count=%d)", app.activeParticipantCount())
+	}
+	if record, _ := app.meetings.activeRecord(); record.EndedAt != "" {
+		t.Fatal("sweep finalized the meeting with a live participant present")
+	}
+
+	// The socket goes zombie: no clean close ever ran, so the presence stayed
+	// but its liveness stamp is now stale past the timeout.
+	app.mu.Lock()
+	app.participants[admitted] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	app.mu.Unlock()
+
+	app.sweepStaleParticipantSessions()
+	if app.activeParticipantCount() != 0 {
+		t.Fatalf("liveness sweep did not reap the zombie session (count=%d)", app.activeParticipantCount())
+	}
+	app.meetings.mu.Lock()
+	armed := app.meetings.idleTimer != nil
+	app.meetings.mu.Unlock()
+	if !armed {
+		t.Fatal("sweep drove occupancy to zero but did not arm the idle end")
+	}
+
+	// The empty room stays empty past the grace: the sitting finalizes.
+	fireIdleEndNow(app)
+	if _, active := app.meetings.activeRecord(); active {
+		t.Fatal("record still active after the empty-room idle end")
+	}
+	records := app.meetings.recent(1)
+	if len(records) != 1 || records[0].ID != first.ID {
+		t.Fatalf("records=%#v, want the closed first sitting %q", records, first.ID)
+	}
+	closed := records[0]
+	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
+		t.Fatalf("record=%#v, want the first sitting closed with reason idle", closed)
+	}
+	if app.memory.currentMeetingID() != "" {
+		t.Fatalf("memory id=%q after finalize, want it rotated (empty)", app.memory.currentMeetingID())
+	}
+
+	// The next entry is a NEW sitting: a fresh id on a fresh open record.
+	app.noteMeetingAdmission("AJ")
+	second, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no open record after the next sitting's admission")
+	}
+	if second.ID == first.ID {
+		t.Fatalf("second sitting reused id %q; want a freshly minted id", second.ID)
+	}
+	if second.EndedAt != "" {
+		t.Fatalf("second sitting record=%#v, want it open", second)
+	}
+	if !strings.HasPrefix(second.ID, "meeting-") {
+		t.Fatalf("fresh id=%q, want a meeting-... mint", second.ID)
+	}
+}
+
+// A brief drop + rejoin inside the grace must NOT finalize the sitting: the
+// rejoin cancels the armed idle end AND re-stamps liveness, so a sweep that runs
+// right after cannot reap the rejoiner and the same meeting stays open. Also
+// guards against a rejoin double-counting the participant.
+func TestDropRejoinWithinGraceDoesNotFinalize(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("admitParticipant: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	open, ok := app.meetings.activeRecord()
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+
+	// Ungraceful drop: last device leaves, idle end arms.
+	app.forgetParticipant("AJ")
+	app.noteMeetingOccupancy()
+	app.meetings.mu.Lock()
+	armed := app.meetings.idleTimer != nil
+	app.meetings.mu.Unlock()
+	if !armed {
+		t.Fatal("last leave did not arm the idle end")
+	}
+
+	// Rejoin inside the grace: cancels the timer and re-stamps liveness.
+	if _, err := app.admitParticipant("AJ"); err != nil {
+		t.Fatalf("re-admit: %v", err)
+	}
+	app.noteMeetingAdmission("AJ")
+	if app.activeParticipantCount() != 1 {
+		t.Fatalf("rejoin double-counted the participant (count=%d, want 1)", app.activeParticipantCount())
+	}
+
+	// A sweep right after the rejoin must NOT reap the fresh session.
+	app.sweepStaleParticipantSessions()
+	if app.activeParticipantCount() != 1 {
+		t.Fatalf("sweep reaped the rejoiner (count=%d)", app.activeParticipantCount())
+	}
+	record, ok := app.meetings.activeRecord()
+	if !ok || record.ID != open.ID || record.EndedAt != "" {
+		t.Fatalf("record=%#v, want the same sitting %q still open", record, open.ID)
+	}
+	app.meetings.mu.Lock()
+	stillArmed := app.meetings.idleTimer != nil
+	app.meetings.mu.Unlock()
+	if stillArmed {
+		t.Fatal("rejoin left the idle end armed; a later fire could finalize a live sitting")
+	}
+}
+
 func TestArchiveMeetingClosesRecordEmbedsItAndOpensSuccessor(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	if _, err := app.admitParticipant("AJ"); err != nil {
@@ -640,19 +777,7 @@ func TestSetAutoTitleFromMissionInsight(t *testing.T) {
 	app.noteMeetingAdmission("AJ")
 	meetingID := app.memory.currentMeetingID()
 
-	insight := missionInsightPayload{Themes: []missionInsightTheme{
-		{Label: "buyer proof", Mentions: 2},
-		{Label: "Realtime as UI", Mentions: 5},
-		{Label: "late tie", Mentions: 5},
-	}}
-	if got := dominantMissionTheme(insight); got != "Realtime as UI" {
-		t.Fatalf("dominantMissionTheme=%q, want max mentions with first-wins ties", got)
-	}
-	if got := dominantMissionTheme(missionInsightPayload{}); got != "" {
-		t.Fatalf("dominantMissionTheme(empty)=%q, want empty", got)
-	}
-
-	record, changed := app.meetings.setAutoTitle(meetingID, dominantMissionTheme(insight))
+	record, changed := app.meetings.setAutoTitle(meetingID, "Realtime as UI")
 	if !changed {
 		t.Fatal("setAutoTitle did not change the record")
 	}

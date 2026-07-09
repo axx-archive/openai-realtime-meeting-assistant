@@ -80,10 +80,13 @@ func (app *kanbanBoardApp) runMeetingBoardOnce(ctx context.Context, apiKey strin
 func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	model := meetingBoardModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           model,
-		Instructions:    meetingBoardInstructions(),
-		Input:           buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshot(), time.Now().UTC()),
-		ReasoningEffort: "low",
+		Model:        model,
+		Instructions: meetingBoardInstructions(),
+		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshot(), time.Now().UTC()),
+		// A2: the board step emits structured tool calls with exact args — the
+		// work low reasoning effort punishes most (dropped card_ids, invented
+		// statuses). Medium buys reliable argument fidelity for a cheap step.
+		ReasoningEffort: "medium",
 		Verbosity:       "low",
 		MaxOutputTokens: 1200,
 	})
@@ -122,6 +125,19 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	// Memory tool stay grounded in real mutations (D15).
 	if cardIDs := meetingBoardChangedCardIDs(runResult); len(cardIDs) > 0 {
 		metadata["cardIds"] = strings.Join(cardIDs, ",")
+	}
+
+	// A2 write-back resilience: a pass that changed nothing but errored on every
+	// op dropped real commitments the old code still cursored past (the "created
+	// two cards" summary over three failed ops). When that happens, decline to
+	// append the artifact so the cursor stays put and the same window is
+	// re-attempted next pass — bounded to one retry per window (see
+	// shouldRetryBoardWindow) so a permanently-rejected op cannot wedge the
+	// worker. On the give-up pass we fall through and append the artifact whose
+	// summary is reconciled to the real failure (renderMeetingBoardUpdateArtifact).
+	if runResult.ChangedCount == 0 && runResult.ErrorCount > 0 && app.shouldRetryBoardWindow(lastSummary.ID) {
+		broadcastAssistantEvent("action", "Scout hit errors applying meeting summaries to the board; retrying next pass.", map[string]any{"kind": meetingMemoryKindBoardUpdate})
+		return meetingMemoryEntry{}, nil
 	}
 
 	id := durableTimestampID("board-update", time.Now())
@@ -219,6 +235,30 @@ func (app *kanbanBoardApp) applyMeetingBoardAnalysis(analysis meetingBoardAnalys
 	}
 
 	return result
+}
+
+// shouldRetryBoardWindow reports whether a total-failure board pass (nothing
+// changed, at least one op errored) should re-attempt the same brain-summary
+// window next pass instead of advancing the cursor past dropped commitments.
+// It returns true at most once per window boundary, keyed by the through-brain
+// id: the first total failure for a window retries (the fix here is that the
+// re-attempt now benefits from status aliasing + title resolution), a second
+// gives up and lets the reconciled failure artifact advance the cursor, so a
+// permanently rejected op cannot wedge the worker behind a growing backlog.
+func (app *kanbanBoardApp) shouldRetryBoardWindow(throughBrainID string) bool {
+	throughBrainID = strings.TrimSpace(throughBrainID)
+	if throughBrainID == "" {
+		return false
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.boardWorkerRetriedThroughID == throughBrainID {
+		return false
+	}
+	app.boardWorkerRetriedThroughID = throughBrainID
+	return true
 }
 
 // validateMeetingBoardCreateDoctrine enforces the business-card rules of
@@ -328,6 +368,7 @@ func meetingBoardInstructions() string {
 		"Tag every card you create with exactly one category tag — build, fix, workflow, or business — plus topical tags.",
 		"The board has exactly four status columns and status must be one of them, spelled exactly: Backlog, In Progress, Blocked, Done. \"Draft\" is NOT a status — draft is a boolean flag applied automatically to every card you create, so never send Draft, To Do, or Todo as a status; new work belongs in Backlog.",
 		"When updating, moving, or tagging an existing card, pass its card_id exactly as it appears in the board snapshot.",
+		"Required arguments per tool — an operation missing them is dropped: create_ticket needs title, notes, owner, tags, and status; update_ticket, move_ticket, add_tags, and add_key_date each need the target card_id (or, if you lack the id, the card's exact title so it can be resolved) — move_ticket also needs status, add_tags also needs tags, add_key_date also needs label and date; propose_codex_task needs title, mode, and query; do_nothing needs reason.",
 		"The board exists for work that gets BUILT, FIXED, or run as a WORKFLOW (research, decks, design).",
 		"Business cards are never cut silently: they require a named owner and notes stating the concrete next step, and they always stay drafts for human accept/dismiss — that review is the debate.",
 		"Workflow cards must name their deliverable — the exact artifact title — in the notes so a finished agent thread binds to the card and advances it.",
@@ -488,7 +529,18 @@ func extractJSONCandidate(text string) string {
 func renderMeetingBoardUpdateArtifact(summaries []meetingMemoryEntry, result meetingBoardRunResult) string {
 	var builder strings.Builder
 	builder.WriteString("## Summary\n")
-	if result.Summary != "" {
+	if result.ChangedCount == 0 && result.ErrorCount > 0 {
+		// A2: reconcile the headline with execution. The model's summary asserts
+		// success verbatim, so when every operation errored and nothing changed,
+		// override it with the real outcome instead of rendering the rosy claim
+		// (the original finding was a "created two cards" summary over three
+		// failed ops). The model's own words survive as a clearly-unverified note.
+		builder.WriteString(fmt.Sprintf("Scout could not apply these meeting summaries to the board: all %d board operation(s) errored and nothing changed. See Board operations below for the per-operation errors.", result.ErrorCount))
+		if result.Summary != "" {
+			builder.WriteString(" Model summary (unverified): ")
+			builder.WriteString(result.Summary)
+		}
+	} else if result.Summary != "" {
 		builder.WriteString(result.Summary)
 	} else if result.ChangedCount > 0 {
 		builder.WriteString("Applied board updates from meeting summaries.")

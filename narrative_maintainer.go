@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -312,6 +313,11 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	firstBrain := inputs[0]
 	lastBrain := inputs[len(inputs)-1]
 	now := time.Now().UTC()
+	// Segment bookkeeping: stamp the sitting id plus the [firstSeen,lastSeen]
+	// window of the brains that fed this pass, so the per-meeting topic timeline
+	// (meetingSegments) has a real time range to draw without a second pass.
+	windowFirst, windowLast := brainWindowBounds(inputs)
+	meetingID := app.memory.currentMeetingID()
 	var latest meetingMemoryEntry
 	for _, update := range output.Narratives {
 		slug := normalizeNarrativeSlug(update.Slug)
@@ -330,6 +336,15 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			narrativeCursorKey: lastBrain.ID,
 			"brainCount":       strconv.Itoa(len(inputs)),
 			"generatedAt":      now.Format(time.RFC3339),
+		}
+		if strings.TrimSpace(meetingID) != "" {
+			metadata["meetingId"] = meetingID
+		}
+		if !windowFirst.IsZero() {
+			metadata["firstSeenAt"] = windowFirst.Format(time.RFC3339Nano)
+		}
+		if !windowLast.IsZero() {
+			metadata["lastSeenAt"] = windowLast.Format(time.RFC3339Nano)
 		}
 		if hasPredecessor {
 			metadata["previousVersionId"] = predecessor.ID
@@ -357,6 +372,11 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		}
 		broadcastOfficeKanbanEvent("narrative", narrativeSnapshotRow(entry))
 	}
+
+	// Recompute the dominant room title from the freshly-updated segment
+	// salience — no extra model call. This is the ~10-minute re-derive trigger
+	// that keeps the title off the 15-minute mission tick's lag.
+	app.refreshDominantTitle(now)
 
 	if strings.TrimSpace(latest.ID) == "" {
 		// A legitimate "nothing storyline-worthy" pass appends no artifact, so
@@ -485,6 +505,143 @@ func (app *kanbanBoardApp) narrativeSnapshotRows(limit int) []map[string]any {
 	rows := make([]map[string]any, 0, limit)
 	for _, entry := range app.activeNarrativeEntries(limit) {
 		rows = append(rows, narrativeSnapshotRow(entry))
+	}
+	return rows
+}
+
+// meetingSegment is one storyline slug's presence in the CURRENT sitting: its
+// title/status, the [firstSeenAt,lastSeenAt] window derived from the brains
+// that fed it, and a decayed recurrence weight (Σ e^(−Δt/τ) over the versions
+// that carried it). The dominant title is drawn from this same list, so the
+// topbar title is always one of the timeline's rows.
+type meetingSegment struct {
+	Slug          string
+	Title         string
+	Status        string
+	FirstSeenAt   time.Time
+	LastSeenAt    time.Time
+	DecayedWeight float64
+}
+
+// parseSegmentStamp reads a stamped RFC3339Nano segment time, falling back to
+// the version's own creation time when the stamp is missing or malformed.
+func parseSegmentStamp(raw string, fallback time.Time) time.Time {
+	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw)); err == nil {
+		return parsed
+	}
+	return fallback
+}
+
+// meetingSegments derives the per-sitting topic timeline from the narrative
+// dossiers — one segment per slug touched during the sitting, ordered by
+// firstSeenAt. It scans ALL narrative versions (active AND expired, so a
+// storyline that recurred across passes accumulates weight) and scopes them by
+// version CreatedAt >= record.StartedAt — NEVER by meeting id alone, since one
+// id can span two sittings. Cursor-carrier and slugless entries are skipped.
+func (app *kanbanBoardApp) meetingSegments(record meetingRecord, now time.Time) []meetingSegment {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	startedAt, ok := parseMeetingStartedAt(record)
+	if !ok {
+		return nil
+	}
+
+	type accum struct {
+		seg           meetingSegment
+		hasWindow     bool
+		newestVersion time.Time
+	}
+	bySlug := map[string]*accum{}
+	order := make([]string, 0, 8)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindNarrative, 0) {
+		slug := strings.TrimSpace(entry.Metadata["slug"])
+		if slug == "" {
+			continue
+		}
+		if entry.CreatedAt.Before(startedAt) {
+			continue
+		}
+		ac := bySlug[slug]
+		if ac == nil {
+			ac = &accum{seg: meetingSegment{Slug: slug}}
+			bySlug[slug] = ac
+			order = append(order, slug)
+		}
+		ac.seg.DecayedWeight += decayedWeight(now, entry.CreatedAt)
+		first := parseSegmentStamp(entry.Metadata["firstSeenAt"], entry.CreatedAt)
+		last := parseSegmentStamp(entry.Metadata["lastSeenAt"], entry.CreatedAt)
+		if !ac.hasWindow {
+			ac.seg.FirstSeenAt = first
+			ac.seg.LastSeenAt = last
+			ac.hasWindow = true
+		} else {
+			if first.Before(ac.seg.FirstSeenAt) {
+				ac.seg.FirstSeenAt = first
+			}
+			if last.After(ac.seg.LastSeenAt) {
+				ac.seg.LastSeenAt = last
+			}
+		}
+		// title/status track the newest version of the slug in the sitting.
+		if ac.newestVersion.IsZero() || entry.CreatedAt.After(ac.newestVersion) {
+			ac.newestVersion = entry.CreatedAt
+			ac.seg.Title = firstNonEmptyString(strings.TrimSpace(entry.Metadata["title"]), slug)
+			ac.seg.Status = strings.TrimSpace(entry.Metadata["status"])
+		}
+	}
+
+	segments := make([]meetingSegment, 0, len(order))
+	for _, slug := range order {
+		segments = append(segments, bySlug[slug].seg)
+	}
+	sort.SliceStable(segments, func(i, j int) bool {
+		return segments[i].FirstSeenAt.Before(segments[j].FirstSeenAt)
+	})
+	return segments
+}
+
+// dominantSegmentIndex is the argmax decayed-weight segment — the "current"
+// segment that names the room. Strict > keeps the first (earliest-firstSeen)
+// on ties, so the marker is stable. Returns -1 for an empty list. Both the
+// title derivation and the snapshot's current/past status use this ONE reduce,
+// so they can never disagree about which segment is current.
+func dominantSegmentIndex(segments []meetingSegment) int {
+	best := -1
+	for index := range segments {
+		if best < 0 || segments[index].DecayedWeight > segments[best].DecayedWeight {
+			best = index
+		}
+	}
+	return best
+}
+
+// meetingSegmentRows shapes the current sitting's segments for the mission
+// snapshot: identity + [firstSeen,lastSeen] + a current/past status. Empty
+// (never nil) when no meeting is live or no storyline has been segmented yet.
+func (app *kanbanBoardApp) meetingSegmentRows(now time.Time) []map[string]any {
+	rows := []map[string]any{}
+	if app == nil || app.meetings == nil {
+		return rows
+	}
+	record, ok := app.meetings.activeRecord()
+	if !ok {
+		return rows
+	}
+	segments := app.meetingSegments(record, now)
+	dominant := dominantSegmentIndex(segments)
+	for index, segment := range segments {
+		status := "past"
+		if index == dominant {
+			status = "current"
+		}
+		rows = append(rows, map[string]any{
+			"slug":        segment.Slug,
+			"title":       segment.Title,
+			"firstSeenAt": segment.FirstSeenAt.UTC().Format(time.RFC3339Nano),
+			"lastSeenAt":  segment.LastSeenAt.UTC().Format(time.RFC3339Nano),
+			"status":      status,
+		})
 	}
 	return rows
 }

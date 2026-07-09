@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,6 +49,53 @@ func TestMeetingBrainWorkerWritesSummaryForNewTranscripts(t *testing.T) {
 	}
 	if remaining := app.memory.unsummarizedTranscripts(10); len(remaining) != 0 {
 		t.Fatalf("unsummarized transcripts=%d, want 0", len(remaining))
+	}
+}
+
+// A7: the brain's output budget scales with the transcript window so the
+// trailing Transcript-reference section is not truncated mid-word in a dense
+// window, and is capped so a large backfill window cannot request an unbounded
+// completion.
+func TestBrainMaxOutputTokensScalesAndCaps(t *testing.T) {
+	if got := brainMaxOutputTokens(0); got != meetingBrainBaseMaxOutputTokens {
+		t.Fatalf("empty-window budget=%d, want base %d", got, meetingBrainBaseMaxOutputTokens)
+	}
+	if got, want := brainMaxOutputTokens(10), meetingBrainBaseMaxOutputTokens+10*meetingBrainPerTranscriptTokens; got != want {
+		t.Fatalf("scaled budget=%d, want %d", got, want)
+	}
+	if got := brainMaxOutputTokens(1_000_000); got != meetingBrainMaxOutputTokensCap {
+		t.Fatalf("huge-window budget=%d, want cap %d", got, meetingBrainMaxOutputTokensCap)
+	}
+	if got := brainMaxOutputTokens(defaultMeetingBrainMaxTranscripts); got <= meetingBrainBaseMaxOutputTokens {
+		t.Fatalf("full-window budget=%d must exceed the base %d so the reference tail survives", got, meetingBrainBaseMaxOutputTokens)
+	}
+}
+
+// A7: the produce path actually requests the scaled budget for its window.
+func TestMeetingBrainWorkerRequestsScaledOutputBudget(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+	t.Setenv("MEETING_BRAIN_MIN_TRANSCRIPTS", "1")
+
+	app := newKanbanBoardApp()
+	for i := 0; i < 6; i++ {
+		if _, appended, err := app.memory.appendAttributedTranscript(fmt.Sprintf("scale-%d", i), fmt.Sprintf("item-%d", i), "Tom", "dominant", fmt.Sprintf("Boot Barn detail number %d.", i)); err != nil || !appended {
+			t.Fatalf("append transcript %d: appended=%v err=%v", i, appended, err)
+		}
+	}
+
+	var gotBudget int
+	if _, err := app.runMeetingBrainOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		gotBudget = request.MaxOutputTokens
+		return "## Overview\nsix details.", nil
+	}); err != nil {
+		t.Fatalf("runMeetingBrainOnce: %v", err)
+	}
+	if want := brainMaxOutputTokens(6); gotBudget != want {
+		t.Fatalf("MaxOutputTokens=%d, want scaled %d for a 6-transcript window", gotBudget, want)
+	}
+	if gotBudget <= 900 {
+		t.Fatalf("MaxOutputTokens=%d, want the dense window above the old flat 900", gotBudget)
 	}
 }
 

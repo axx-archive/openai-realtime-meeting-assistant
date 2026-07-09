@@ -17,8 +17,13 @@ import (
 )
 
 const (
-	realtimeWebSocketURL               = "wss://api.openai.com/v1/realtime"
-	defaultTranscriptionLaneModel      = "gpt-realtime-whisper"
+	realtimeWebSocketURL = "wss://api.openai.com/v1/realtime"
+	// A4/E2: the authoritative persisted transcript rides this lane, so its model
+	// must accept the domain-vocabulary prompt. gpt-4o-transcribe demonstrably
+	// honours a free-text transcription prompt (the Scout realtime peer already
+	// uses it that way); the prior gpt-realtime-whisper default carried no
+	// vocabulary bias, which is how proper nouns like "Ball Dogs" got mangled.
+	defaultTranscriptionLaneModel      = "gpt-4o-transcribe"
 	transcriptionLaneInputSampleRate   = 24000
 	transcriptionLaneQueueSize         = 256
 	transcriptionLaneWriteTimeout      = 5 * time.Second
@@ -224,6 +229,10 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	if err := lane.writeJSON(conn, transcriptionLaneSessionConfig(lane.transcriptionModel)); err != nil {
 		return fmt.Errorf("configure transcription session: %w", err)
 	}
+	// A6: clear any window orphaned by the previous connection (a commit whose
+	// .completed never arrived before the socket dropped) so it cannot drift this
+	// connection's attribution FIFO.
+	lane.app.resetPendingAttributionWindows()
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -248,12 +257,17 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	defer refreshTimer.Stop()
 	pendingAudio := false
 	pendingAudioSamples := 0
+	// A6: the stable active speaker at the moment this segment opened. A change
+	// mid-segment commits the pending audio early so an interjection lands as its
+	// own attributed turn instead of folding under the opening speaker.
+	segmentSpeaker := ""
 
 	for {
 		select {
 		case <-lane.stop:
 			if pendingAudio {
 				lane.app.noteRealtimeSpeechStopped()
+				lane.app.freezeAttributionWindowAtCommit()
 				_ = lane.commitPendingTranscriptionAudio(conn, pendingAudioSamples)
 			}
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
@@ -274,9 +288,26 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			if len(audio) == 0 {
 				continue
 			}
+			// A6: split on speaker change before appending the new speaker's audio,
+			// but only once the pending segment holds enough to commit on its own
+			// (guards against fragmenting a single word on a flicker).
+			if pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
+				if speaker := lane.app.activeSpeakerNameForSegmentation(); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
+					stopTranscriptionTimer(commitTimer)
+					samples := pendingAudioSamples
+					pendingAudio = false
+					pendingAudioSamples = 0
+					lane.app.noteRealtimeSpeechStopped()
+					lane.app.freezeAttributionWindowAtCommit()
+					if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
+						return err
+					}
+				}
+			}
 			if !pendingAudio {
 				pendingAudio = true
 				pendingAudioSamples = 0
+				segmentSpeaker = lane.app.activeSpeakerNameForSegmentation()
 				lane.app.noteRealtimeSpeechStarted()
 			}
 			if err := lane.writeJSON(conn, map[string]any{
@@ -295,6 +326,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			samples := pendingAudioSamples
 			pendingAudioSamples = 0
 			lane.app.noteRealtimeSpeechStopped()
+			lane.app.freezeAttributionWindowAtCommit()
 			if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
 				return err
 			}
@@ -448,6 +480,12 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		app.rememberTranscript(event, "transcript_lane", app.currentTranscriptionLaneModel())
+	case "conversation.item.input_audio_transcription.failed":
+		// A6: a failed segment yields no transcript to persist, but it still had a
+		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
+		// otherwise the next .completed inherits this dead turn's boundaries and every
+		// later transcript is attributed one turn late for the rest of the sitting.
+		app.popPendingAttributionWindow()
 	case "input_audio_buffer.speech_started":
 		app.noteRealtimeSpeechStarted()
 		app.clearScoutVoiceArmForNewSpeech()
@@ -492,6 +530,13 @@ func transcriptionLaneSessionConfig(model string) map[string]any {
 			"type": "transcription",
 			"audio": map[string]any{
 				"input": map[string]any{
+					// A4: bias the authoritative persisted stream with the same
+					// near-field noise reduction + domain-vocabulary prompt the
+					// Scout realtime peer uses, so the persisted path (not just the
+					// discarded Scout copy) gets the proper-noun corrections.
+					"noise_reduction": map[string]any{
+						"type": "near_field",
+					},
 					"format": map[string]any{
 						"type": "audio/pcm",
 						"rate": transcriptionLaneInputSampleRate,
@@ -499,6 +544,7 @@ func transcriptionLaneSessionConfig(model string) map[string]any {
 					"transcription": map[string]any{
 						"model":    strings.TrimSpace(model),
 						"language": "en",
+						"prompt":   realtimeTranscriptionPrompt(),
 					},
 					"turn_detection": nil,
 				},

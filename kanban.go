@@ -174,12 +174,17 @@ type kanbanRealtimeOutputItem struct {
 }
 
 type kanbanBoardApp struct {
-	mu                sync.Mutex
-	cards             []kanbanCard
-	nextCreatedIndex  int
-	updatedAt         time.Time
-	handledCalls      map[string]struct{}
-	memory            *meetingMemoryStore
+	mu               sync.Mutex
+	cards            []kanbanCard
+	nextCreatedIndex int
+	updatedAt        time.Time
+	handledCalls     map[string]struct{}
+	memory           *meetingMemoryStore
+	// participants maps a present account's canonical name to the last time its
+	// room socket proved liveness (admission, an inbound room frame, or a pong).
+	// The liveness sweep reaps an account whose stamp is stale past
+	// participantLivenessTimeout, the backstop that lets activeParticipantCount()
+	// reach zero when a zombie/backgrounded socket lingers.
 	participants      map[string]time.Time
 	participantCounts map[string]int
 	// participantEndpoints keys live sessions by (participant name -> endpoint
@@ -199,38 +204,52 @@ type kanbanBoardApp struct {
 	restarting                   bool
 	assistantStatus              string
 
-	model                    string
-	pc                       *webrtc.PeerConnection
-	events                   *webrtc.DataChannel
-	inputTrack               *webrtc.TrackLocalStaticSample
-	inputEnc                 *opusEncoder
-	connected                bool
-	forwardedAudioNotice     bool
-	realtimeResponseActive   bool
-	voiceControlActive       bool
-	voiceControlUpdatedAt    time.Time
-	voiceControlUpdatedBy    string
-	scoutVoiceArmedAt        time.Time
-	scoutVoiceArmedUntil     time.Time
-	scoutSpokenResponse      bool
-	scoutSpokenResponseSent  bool
-	scoutLastToolResultAt    time.Time
-	scoutLastToolResultName  string
-	scoutToolCallsInFlight   int
-	transcriptLane           *meetingTranscriptionLane
-	audioActivity            []participantAudioFrame
-	currentSpeechStartedAt   time.Time
-	currentSpeechStoppedAt   time.Time
-	activeSpeakerName        string
-	activeSpeakerCandidate   string
-	activeSpeakerCandidateAt time.Time
-	activeSpeakerPayload     *activeSpeakerPayload
-	proactiveReconnectCancel chan struct{}
-	agentCancels             map[string]chan struct{}
-	agentDones               map[string]chan struct{}
-	agentBaselineIDs         map[string]string
-	agentRunLocks            map[string]*sync.Mutex
-	chatThreadLocks          map[string]*sync.Mutex
+	model                   string
+	pc                      *webrtc.PeerConnection
+	events                  *webrtc.DataChannel
+	inputTrack              *webrtc.TrackLocalStaticSample
+	inputEnc                *opusEncoder
+	connected               bool
+	forwardedAudioNotice    bool
+	realtimeResponseActive  bool
+	voiceControlActive      bool
+	voiceControlUpdatedAt   time.Time
+	voiceControlUpdatedBy   string
+	scoutVoiceArmedAt       time.Time
+	scoutVoiceArmedUntil    time.Time
+	scoutSpokenResponse     bool
+	scoutSpokenResponseSent bool
+	scoutLastToolResultAt   time.Time
+	scoutLastToolResultName string
+	scoutToolCallsInFlight  int
+	transcriptLane          *meetingTranscriptionLane
+	audioActivity           []participantAudioFrame
+	currentSpeechStartedAt  time.Time
+	currentSpeechStoppedAt  time.Time
+	// A6: attribution windows frozen at input_audio_buffer.commit time, in commit
+	// order. speakerForCommittedTranscript pops the front when the matching
+	// transcription.completed lands, so a rapid B-follows-A handoff can no longer
+	// mis-attribute A's committed text to B (whose turn overwrote the shared
+	// currentSpeech* markers while A's completed event was still in flight).
+	pendingAttributionWindows []attributionWindow
+	activeSpeakerName         string
+	activeSpeakerCandidate    string
+	activeSpeakerCandidateAt  time.Time
+	activeSpeakerPayload      *activeSpeakerPayload
+	proactiveReconnectCancel  chan struct{}
+	agentCancels              map[string]chan struct{}
+	agentDones                map[string]chan struct{}
+	agentBaselineIDs          map[string]string
+	agentRunLocks             map[string]*sync.Mutex
+	// agentNudges holds the A3 per-agent buffered(1) wake channels (agent_runner.go):
+	// a transcript append, or the brain-append cascade, signals one so the runner
+	// re-checks its window immediately instead of waiting for the safety-floor tick.
+	agentNudges map[string]chan struct{}
+	// agentFailures holds the A8 per-agent same-window retry state (attempts +
+	// backoff, agent_runner.go) so a permanently-failing window backs off and is
+	// finally skipped instead of re-sent every tick forever.
+	agentFailures   map[string]*ambientAgentFailure
+	chatThreadLocks map[string]*sync.Mutex
 	// agentThreadRunLocks serializes follow-up validate+mark-running per
 	// artifact (agent_thread_followup.go); model calls stay outside.
 	agentThreadRunLocks map[string]*sync.Mutex
@@ -259,7 +278,15 @@ type kanbanBoardApp struct {
 	// revoke) the same way packageMu guards packages: whole-record
 	// last-write-wins inside the lock, broadcasts only after it is released.
 	dealRoomMu sync.Mutex
-	closeOnce  sync.Once
+	// boardWorkerRetriedThroughID bounds the board worker's total-failure retry
+	// (A2): when a pass changes nothing but errors on every op, the runner
+	// declines to advance its cursor so the same brain-summary window is
+	// re-attempted next pass — but only once per window boundary, tracked by the
+	// through-brain id here, so a permanently-rejected op (a doctrine gate the
+	// model keeps re-emitting) can never wedge the cursor behind a growing
+	// backlog. Guarded by mu.
+	boardWorkerRetriedThroughID string
+	closeOnce                   sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -508,6 +535,12 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.startTranscriptionLane(apiKey)
 	app.startMeetingBrainWorker(apiKey)
 	app.startMeetingBoardWorker(apiKey)
+	// Item B: the ambient research-suggestion worker rides the SAME brain stream
+	// as the board worker but with a looser, confirm-first bar — it volunteers a
+	// research proposal (codex_proposals.go) when the room DISCUSSES a workstream
+	// without ever addressing Scout, and launches nothing on its own
+	// (suggestion_agent.go).
+	app.startResearchSuggestionWorker(apiKey)
 	app.startMissionIntelligenceWorker(apiKey)
 	app.startNarrativeMaintainerWorker(apiKey)
 	app.startDecisionLedgerWorker(apiKey)
@@ -767,6 +800,8 @@ func (app *kanbanBoardApp) Close() error {
 		app.agentCancels = nil
 		app.agentDones = nil
 		app.agentBaselineIDs = nil
+		app.agentNudges = nil
+		app.agentFailures = nil
 		app.mu.Unlock()
 		if transcriptLane != nil {
 			transcriptLane.close()
@@ -2486,6 +2521,14 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		if !app.transcriptionLaneConnected() {
 			app.rememberTranscript(event, "scout_realtime", app.currentRealtimeModel())
 		}
+	case "conversation.item.input_audio_transcription.failed":
+		// A6: mirror the .completed gate. When the Scout peer is the persisting
+		// session (lane down), a failed segment still froze a window at its commit;
+		// pop it (discard) so the FIFO stays aligned and later transcripts keep their
+		// correct speaker. When the lane is up it owns the FIFO, so skip here.
+		if !app.transcriptionLaneConnected() {
+			app.popPendingAttributionWindow()
+		}
 	case "conversation.item.input_audio_transcription.delta":
 		if text := canonicalizeBoardText(event.Delta); text != "" {
 			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
@@ -2501,6 +2544,13 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		}
 		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type, "voiceState": "listening"})
 	case "input_audio_buffer.committed":
+		// A6: when the Scout peer is the persisting session (lane down), freeze the
+		// attribution window at commit so its transcription.completed resolves the
+		// speaker from this turn's boundaries, not whatever the next turn overwrote.
+		// When the lane is up it owns persistence + freezing, so skip here.
+		if !app.transcriptionLaneConnected() {
+			app.freezeAttributionWindowAtCommit()
+		}
 		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
 	case "response.created":
 		app.markRealtimeResponseActive(true)
@@ -3601,7 +3651,7 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 		return
 	}
 
-	speaker, confidence := app.speakerForCompletedTranscript(time.Now().UTC())
+	speaker, confidence := app.speakerForCommittedTranscript(time.Now().UTC())
 	entry, appended, err := app.memory.appendAttributedTranscriptWithMetadata(event.EventID, event.ItemID, speaker, confidence, event.Transcript, map[string]string{
 		"source": source,
 		"model":  model,
@@ -3616,6 +3666,11 @@ func (app *kanbanBoardApp) rememberTranscript(event kanbanRealtimeEvent, source 
 
 	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
 	broadcastKanbanEvent("memory_transcript", entry)
+	// A3: wake the meeting-brain worker so it re-checks its window on this fresh
+	// transcript instead of waiting up to a full brain interval. The worker
+	// debounces (a buffered wake) and, once it appends, cascades the nudge to the
+	// board / decision / mission / narrative workers that consume brains.
+	app.nudgeAmbientAgent(meetingBrainAgentName)
 	// Wake-word presence cue (VISUAL only — no auto-arming): a transcript
 	// naming Scout pulses the brand mark / voice island on room clients.
 	// Detection lives only here, so typed room chat never pulses, and the
@@ -3705,6 +3760,10 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(senderName string, te
 
 	broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
 	broadcastKanbanEvent("memory_transcript", entry)
+	// A3: typed room chat is a brain input too — wake the brain worker the same
+	// way spoken transcripts do so a text-only exchange is not left un-brained
+	// until the next floor tick.
+	app.nudgeAmbientAgent(meetingBrainAgentName)
 	return roomChatEventPayload(entry), true
 }
 
@@ -4773,6 +4832,108 @@ func (app *kanbanBoardApp) participantSessionCurrent(name string, sessionID stri
 	return false
 }
 
+// touchParticipantLiveness stamps that a present account's room socket is still
+// alive (a pong on the heartbeat, or an inbound room frame). The liveness sweep
+// reaps only accounts whose stamp goes stale, so every proof of life must land
+// here; a stamp for an absent account is ignored so a late frame can never
+// resurrect a departed participant.
+func (app *kanbanBoardApp) touchParticipantLiveness(name string) {
+	name = canonicalParticipantName(name)
+	if name == "" {
+		return
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.participantCounts[name] <= 0 {
+		return
+	}
+	app.participants[name] = time.Now().UTC()
+}
+
+// participantLivenessReap describes one account the liveness sweep dropped: its
+// canonical name and the session ids its endpoints were holding, so the caller
+// can tear down each half-open socket's peer connection and forwarded tracks
+// (the same cleanup the read loop's onclose defer would have done).
+type participantLivenessReap struct {
+	name       string
+	sessionIDs []string
+}
+
+// reapStaleParticipantSessionsLocked drops every present account whose last
+// liveness stamp is older than timeout and returns what it removed. Callers
+// hold app.mu. Deleting from the ranged map mid-iteration is safe in Go.
+func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, timeout time.Duration) []participantLivenessReap {
+	var reaped []participantLivenessReap
+	for name, lastSeen := range app.participants {
+		if app.participantCounts[name] <= 0 {
+			continue
+		}
+		if now.Sub(lastSeen) <= timeout {
+			continue
+		}
+		sessionIDs := make([]string, 0, len(app.participantEndpoints[name]))
+		for _, sessionID := range app.participantEndpoints[name] {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+		delete(app.participantCounts, name)
+		delete(app.participants, name)
+		delete(app.participantEndpoints, name)
+		delete(app.participantMedia, name)
+		reaped = append(reaped, participantLivenessReap{name: name, sessionIDs: sessionIDs})
+	}
+	return reaped
+}
+
+// sweepStaleParticipantSessions is the periodic backstop to the per-socket
+// read-deadline cleanup: it reaps accounts whose room socket has gone silent
+// past participantLivenessTimeout, so activeParticipantCount() reaches zero even
+// when a wedged read loop never runs its onclose defer or a backgrounded tab
+// keeps a half-open socket nominally open. On any reap it tears down the
+// half-open peer connections, refreshes the roster, and arms the empty-room idle
+// end via noteMeetingOccupancy (a no-op while any live account remains). A brief
+// drop that reconnects re-stamps liveness on admission well inside the timeout,
+// so a rejoiner is never reaped and the sitting never finalizes underneath them.
+func (app *kanbanBoardApp) sweepStaleParticipantSessions() {
+	if app == nil {
+		return
+	}
+	app.mu.Lock()
+	reaped := app.reapStaleParticipantSessionsLocked(time.Now().UTC(), participantLivenessTimeout)
+	app.mu.Unlock()
+	if len(reaped) == 0 {
+		return
+	}
+	for _, entry := range reaped {
+		for _, sessionID := range entry.sessionIDs {
+			unregisterParticipantSession(entry.name, sessionID)
+		}
+		log.Infof("participant_liveness_reap participant=%s sessions=%d; room socket silent past %s", entry.name, len(entry.sessionIDs), participantLivenessTimeout)
+		broadcastKanbanEvent("participant_left", map[string]any{"name": entry.name})
+	}
+	broadcastKanbanEvent("participants", app.roomSnapshot())
+	// occupancy may now be zero: arm the empty-room idle end so the sitting
+	// finalizes and the next entry mints a fresh meeting id.
+	app.noteMeetingOccupancy()
+}
+
+// startParticipantLivenessSweeper launches the backstop sweep on a ticker for
+// the process lifetime. Started once from server boot (main), never from the
+// test constructor, so tests drive sweepStaleParticipantSessions directly.
+func (app *kanbanBoardApp) startParticipantLivenessSweeper() {
+	if app == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(participantLivenessSweepInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			app.sweepStaleParticipantSessions()
+		}
+	}()
+}
+
 func (app *kanbanBoardApp) activeParticipantCount() int {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -4889,6 +5050,11 @@ func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string
 		app.transcriptRecordingEnabled = enabled
 		app.transcriptRecordingUpdatedAt = time.Now().UTC()
 		app.transcriptRecordingUpdatedBy = updatedBy
+		// A6: freeze runs at every commit but the pop (rememberTranscript ->
+		// speakerForCommittedTranscript) is skipped while recording is off. Clear the
+		// FIFO on any recording toggle so a window frozen across the boundary cannot
+		// drift attribution once recording resumes. (Already holding app.mu here.)
+		app.pendingAttributionWindows = nil
 	}
 	if !enabled {
 		app.scoutVoiceArmedAt = time.Time{}

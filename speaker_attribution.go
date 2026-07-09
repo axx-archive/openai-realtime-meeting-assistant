@@ -95,6 +95,19 @@ func (app *kanbanBoardApp) activeSpeakerSnapshot() *activeSpeakerPayload {
 	return &payload
 }
 
+// activeSpeakerNameForSegmentation returns the current stable active speaker's
+// name, or "" when none is confidently held. The lane uses it to break a
+// committed segment on a speaker change (A6) so an interjection isn't folded
+// under the prior speaker; it rides the same stability gate as the active
+// speaker payload, so it won't thrash on momentary crosstalk.
+func (app *kanbanBoardApp) activeSpeakerNameForSegmentation() string {
+	snapshot := app.activeSpeakerSnapshot()
+	if snapshot == nil {
+		return ""
+	}
+	return snapshot.Name
+}
+
 func (app *kanbanBoardApp) noteActiveSpeakerActivityLocked(at time.Time, energyByParticipant map[string]float64) *activeSpeakerPayload {
 	ranked := rankedActiveSpeakerEnergyLocked(app, energyByParticipant)
 	if len(ranked) == 0 {
@@ -171,6 +184,21 @@ func (app *kanbanBoardApp) participantCanBeActiveSpeakerLocked(name string) bool
 	return true
 }
 
+// attributionWindow is a speech-boundary pair frozen at input_audio_buffer.commit
+// time and carried with the committed segment until its transcription.completed
+// event returns (A6). Freezing at commit — rather than reading the mutable
+// shared currentSpeech* markers when completed lands — keeps a rapid speaker
+// handoff from mis-attributing the earlier speaker's text to the later one.
+type attributionWindow struct {
+	startedAt time.Time
+	stoppedAt time.Time
+}
+
+// maxPendingAttributionWindows caps the frozen-window FIFO so a dropped or
+// coalesced completed event can never grow it without bound; the oldest window
+// is discarded past the cap (attribution then falls back to the live markers).
+const maxPendingAttributionWindows = 64
+
 func (app *kanbanBoardApp) noteRealtimeSpeechStarted() {
 	if app == nil {
 		return
@@ -192,6 +220,97 @@ func (app *kanbanBoardApp) noteRealtimeSpeechStopped() {
 	app.mu.Unlock()
 }
 
+// freezeAttributionWindowAtCommit snapshots the current speech-boundary markers
+// into the commit-ordered FIFO and clears them so the next turn starts fresh
+// (A6). Call it exactly once per input_audio_buffer.commit, right after the
+// matching noteRealtimeSpeechStopped, on whichever session persists.
+func (app *kanbanBoardApp) freezeAttributionWindowAtCommit() {
+	if app == nil {
+		return
+	}
+
+	now := time.Now().UTC()
+	app.mu.Lock()
+	startedAt := app.currentSpeechStartedAt
+	stoppedAt := app.currentSpeechStoppedAt
+	if stoppedAt.IsZero() || (!startedAt.IsZero() && stoppedAt.Before(startedAt)) {
+		stoppedAt = now
+	}
+	if startedAt.IsZero() {
+		startedAt = stoppedAt.Add(-speakerAttributionFallbackSpan)
+	}
+	app.pendingAttributionWindows = append(app.pendingAttributionWindows, attributionWindow{
+		startedAt: startedAt,
+		stoppedAt: stoppedAt,
+	})
+	if overflow := len(app.pendingAttributionWindows) - maxPendingAttributionWindows; overflow > 0 {
+		app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[overflow:]...)
+	}
+	app.currentSpeechStartedAt = time.Time{}
+	app.currentSpeechStoppedAt = time.Time{}
+	app.mu.Unlock()
+}
+
+// speakerForCommittedTranscript resolves the speaker for a completed transcript
+// from the window frozen at its commit (A6), popping the FIFO in commit order.
+// When no frozen window is queued (e.g. a completed with no preceding commit
+// hook) it falls back to the legacy live-marker path.
+func (app *kanbanBoardApp) speakerForCommittedTranscript(completedAt time.Time) (string, string) {
+	if app == nil {
+		return "", "unknown"
+	}
+	if completedAt.IsZero() {
+		completedAt = time.Now().UTC()
+	}
+
+	app.mu.Lock()
+	if len(app.pendingAttributionWindows) == 0 {
+		app.mu.Unlock()
+		return app.speakerForCompletedTranscript(completedAt)
+	}
+	window := app.pendingAttributionWindows[0]
+	app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[1:]...)
+	scores := app.attributionScoresLocked(window.startedAt, window.stoppedAt)
+	app.mu.Unlock()
+
+	return dominantTranscriptSpeaker(scores)
+}
+
+// popPendingAttributionWindow discards the FIFO front without resolving a
+// speaker (A6). Call it on a terminal transcription event that produces no
+// persisted transcript — chiefly
+// conversation.item.input_audio_transcription.failed — so a committed segment
+// that never yields a .completed cannot leave its frozen window queued and
+// shift every later transcript's attribution by one turn for the rest of the
+// sitting. Freeze (at commit) and pop must stay symmetric.
+func (app *kanbanBoardApp) popPendingAttributionWindow() {
+	if app == nil {
+		return
+	}
+	app.mu.Lock()
+	if len(app.pendingAttributionWindows) > 0 {
+		app.pendingAttributionWindows = append([]attributionWindow(nil), app.pendingAttributionWindows[1:]...)
+	}
+	app.mu.Unlock()
+}
+
+// resetPendingAttributionWindows drops every queued window (A6). Call it on lane
+// (re)connect and on a recording on/off transition so an orphaned window frozen
+// by a commit whose .completed never arrived (a mid-turn disconnect, or a commit
+// that landed while recording was off) cannot drift the next connection's
+// attribution.
+func (app *kanbanBoardApp) resetPendingAttributionWindows() {
+	if app == nil {
+		return
+	}
+	app.mu.Lock()
+	app.pendingAttributionWindows = nil
+	app.mu.Unlock()
+}
+
+// speakerForCompletedTranscript is the legacy path: it reads (and clears) the
+// mutable shared speech markers. Retained as the fallback for
+// speakerForCommittedTranscript when no window was frozen at commit.
 func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) (string, string) {
 	if app == nil {
 		return "", "unknown"
@@ -209,6 +328,18 @@ func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) 
 	if startedAt.IsZero() {
 		startedAt = stoppedAt.Add(-speakerAttributionFallbackSpan)
 	}
+	scores := app.attributionScoresLocked(startedAt, stoppedAt)
+
+	app.currentSpeechStartedAt = time.Time{}
+	app.currentSpeechStoppedAt = time.Time{}
+	app.mu.Unlock()
+
+	return dominantTranscriptSpeaker(scores)
+}
+
+// attributionScoresLocked sums per-participant audio energy over the padded
+// attribution window. Caller must hold app.mu.
+func (app *kanbanBoardApp) attributionScoresLocked(startedAt, stoppedAt time.Time) map[string]float64 {
 	windowStart := startedAt.Add(-speakerAttributionStartPadding)
 	windowStop := stoppedAt.Add(speakerAttributionStopPadding)
 
@@ -221,12 +352,7 @@ func (app *kanbanBoardApp) speakerForCompletedTranscript(completedAt time.Time) 
 			scores[participant] += energy
 		}
 	}
-
-	app.currentSpeechStartedAt = time.Time{}
-	app.currentSpeechStoppedAt = time.Time{}
-	app.mu.Unlock()
-
-	return dominantTranscriptSpeaker(scores)
+	return scores
 }
 
 func dominantTranscriptSpeaker(scores map[string]float64) (string, string) {

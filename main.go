@@ -517,6 +517,10 @@ func main() {
 	// 6h) that runs independent of any meeting, so it starts at boot rather than
 	// at room join. No-ops without OPENAI_API_KEY, like every ambient worker.
 	kanbanApp.startSlopClassifierWorker(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")))
+	// The liveness sweep backstops the per-socket read-deadline cleanup so a
+	// zombie/backgrounded room socket can never hold occupancy above zero and
+	// keep a finished sitting from finalizing into a fresh meeting id.
+	kanbanApp.startParticipantLivenessSweeper()
 	// Card 069: the DEFAULT approval-governance decision rides the ledger as
 	// PROPOSED from boot (keyless included — this is a store write, not a
 	// worker) so the team can see and ratify it in Mission Intelligence.
@@ -3889,6 +3893,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 		log.Infof("Got message: %s", raw)
 
+		// An inbound room frame is proof of life for the liveness sweep, alongside
+		// the heartbeat pong (no-op until this socket is admitted).
+		kanbanApp.touchParticipantLiveness(currentParticipantName())
+
 		if err := json.Unmarshal(raw, &message); err != nil {
 			log.Errorf("Failed to unmarshal json to message: %v", err)
 
@@ -4059,6 +4067,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := c.WriteJSON(&websocketMessage{Event: "office_pong"}); err != nil {
 				log.Errorf("Failed to send office pong: %v", err)
 			}
+		case "room_ping":
+			// Client room-liveness heartbeat (mirrors office_ping). The read loop
+			// already refreshed this participant's liveness stamp on this inbound
+			// frame above; unlike the network-layer pong it STOPS when the tab is
+			// backgrounded/frozen, so its absence is precisely what lets the
+			// liveness sweep reap a zombie seat and finalize an empty sitting. No
+			// reply is needed — the server side is the only consumer.
 		case "media_ready":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before joining media.")
@@ -4520,6 +4535,22 @@ const (
 	websocketPingInterval = 25 * time.Second
 )
 
+const (
+	// participantLivenessTimeout reaps a room participant whose socket has been
+	// silent (no pong, no inbound room frame) for longer than the read deadline
+	// plus a ping cycle. The per-socket read-deadline defer is the first line of
+	// defense; this is the backstop that guarantees activeParticipantCount()
+	// still reaches zero — so the empty-room idle end can arm and the next
+	// sitting mints a fresh meeting id — even when a read loop is wedged, its
+	// deadline setup failed, or its onclose defer never ran. It is strictly
+	// longer than websocketReadTimeout so the normal clean-close path always
+	// gets first crack, and comfortably longer than one ping round so a present
+	// participant (whose socket keeps ponging) is never reaped between pings.
+	participantLivenessTimeout = websocketReadTimeout + websocketPingInterval
+	// participantLivenessSweepInterval is how often the backstop sweep runs.
+	participantLivenessSweepInterval = websocketPingInterval
+)
+
 func roomWebsocketHeartbeatTimingsValid() bool {
 	return websocketWriteTimeout > 0 &&
 		websocketPingInterval > websocketWriteTimeout &&
@@ -4548,11 +4579,19 @@ func startRoomWebsocketHeartbeat(c *threadSafeWriter, participantName func() str
 		log.Errorf("room_ws_heartbeat_set_deadline_failed session=%s error=%v", sessionID, err)
 	}
 	c.Conn.SetPongHandler(func(string) error {
+		// A network-layer pong keeps the READ DEADLINE alive (the connection is
+		// technically up) but deliberately does NOT refresh the liveness stamp.
+		// A backgrounded/frozen browser tab keeps auto-ponging at the network
+		// layer even while its JS is throttled, so a pong is NOT proof a
+		// participant is really present — that was the ~22h zombie sitting. The
+		// liveness stamp is refreshed only by APP-level frames (the client
+		// room_ping heartbeat + real room activity, stamped per-message in the
+		// read loop), so a truly-gone tab goes stale and the idle-end sweep can
+		// finalize the empty sitting.
 		if err := c.Conn.SetReadDeadline(time.Now().Add(websocketReadTimeout)); err != nil {
 			log.Errorf("room_ws_pong_deadline_failed participant=%s session=%s error=%v", participantName(), sessionID, err)
 			return err
 		}
-
 		return nil
 	})
 

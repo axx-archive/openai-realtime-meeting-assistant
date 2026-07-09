@@ -42,6 +42,37 @@ func TestTranscriptionLaneSessionConfigUsesStreamingTranscription(t *testing.T) 
 	}
 }
 
+func TestTranscriptionLaneSessionConfigBiasesDomainVocabulary(t *testing.T) {
+	// A4/E2: the authoritative persisted lane must carry the domain-vocabulary
+	// prompt + near-field noise reduction, matching the Scout realtime peer.
+	session := transcriptionLaneSessionConfig("gpt-4o-transcribe")
+	input := session["session"].(map[string]any)["audio"].(map[string]any)["input"].(map[string]any)
+
+	noiseReduction, ok := input["noise_reduction"].(map[string]any)
+	if !ok {
+		t.Fatalf("audio.input.noise_reduction missing/typed %T, want map", input["noise_reduction"])
+	}
+	if nrType := noiseReduction["type"]; nrType != "near_field" {
+		t.Fatalf("noise_reduction.type=%v, want near_field", nrType)
+	}
+
+	transcription := input["transcription"].(map[string]any)
+	prompt, ok := transcription["prompt"].(string)
+	if !ok || strings.TrimSpace(prompt) == "" {
+		t.Fatalf("transcription.prompt=%q, want non-empty domain prompt", prompt)
+	}
+	if !strings.Contains(prompt, "Boot Barn") {
+		t.Fatalf("transcription.prompt=%q, want domain vocabulary bias (Boot Barn)", prompt)
+	}
+}
+
+func TestDefaultTranscriptionLaneModelAcceptsPrompt(t *testing.T) {
+	// A4/E2: the default persisted model must be one that honours the prompt.
+	if defaultTranscriptionLaneModel != "gpt-4o-transcribe" {
+		t.Fatalf("defaultTranscriptionLaneModel=%q, want gpt-4o-transcribe (prompt-capable)", defaultTranscriptionLaneModel)
+	}
+}
+
 func TestTranscriptionLaneWebSocketURLUsesTranscriptionIntent(t *testing.T) {
 	got := transcriptionLaneWebSocketURL()
 	if !strings.Contains(got, "intent=transcription") {
