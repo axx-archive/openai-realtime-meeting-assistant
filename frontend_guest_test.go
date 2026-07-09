@@ -209,9 +209,16 @@ func TestIndexGuestLeaveIsTerminal(t *testing.T) {
 	}
 	guardAt := strings.Index(viewBody, "if (guestMode) {")
 	exitAt := strings.Index(viewBody, "renderGuestExitState()")
-	officeAt := strings.Index(viewBody, "setActiveTool('office')")
-	if guardAt == -1 || exitAt == -1 || officeAt == -1 || exitAt < guardAt || officeAt < exitAt {
-		t.Error("setRoomView's leave branch must route guests to renderGuestExitState, with setActiveTool('office') only in the member else")
+	if guardAt == -1 || exitAt == -1 || exitAt < guardAt {
+		t.Error("setRoomView's leave branch must route guests to renderGuestExitState")
+	}
+	// RW4 §3.8: the member else lands on the LOBBY (never the office bounce,
+	// never the guest terminal)
+	if exitAt == -1 || !strings.Contains(viewBody[exitAt:], "setActiveTool('room')") {
+		t.Error("setRoomView's member leave branch must land on the lobby (setActiveTool('room') in the member else)")
+	}
+	if strings.Contains(viewBody, "setActiveTool('office')") {
+		t.Error("setRoomView must not bounce a leaving member to the office — the lobby is the landing (§3.8)")
 	}
 
 	toolBody := functionBody(html, "function setActiveTool(tool)")
@@ -255,7 +262,7 @@ func TestIndexGuestNeverSetsAuthedUser(t *testing.T) {
 	for _, fn := range []string{
 		"async function joinGuestRoom()",
 		"async function resumeGuestSession()",
-		"function renderGuestExitState(message)",
+		"function renderGuestExitState(message, options)",
 	} {
 		body := functionBody(html, fn)
 		if body == "" {

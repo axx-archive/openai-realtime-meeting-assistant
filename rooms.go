@@ -429,6 +429,21 @@ func roomLiveStats(roomID string) (bool, int) {
 	return count > 0, count
 }
 
+// roomGuestLinkActive reports whether the room holds any unexpired, unrevoked
+// guest link — the same predicate as the §7.1 latch's guest-enabled arm
+// (hasActiveGuestLink), computed over the payload's already-cloned record.
+// Powers the client's listen-only badge honestly: the sticky GuestEnabled
+// flag can't say this, since the latch derives from live links.
+func roomGuestLinkActive(room roomRecord) bool {
+	now := time.Now().UTC()
+	for _, link := range room.GuestLinks {
+		if !link.Revoked && link.Expires.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
 // roomListPayload never carries the passcode hash or any link hash (§4.1).
 func roomListPayload(room roomRecord) map[string]any {
 	live, count := roomLiveStats(room.ID)
@@ -439,6 +454,7 @@ func roomListPayload(room roomRecord) map[string]any {
 		"participantCount": count,
 		"passcodeRequired": room.PasscodeHash != "",
 		"guestEnabled":     room.GuestEnabled,
+		"guestLinkActive":  roomGuestLinkActive(room),
 		"createdBy":        room.CreatedBy,
 		"archived":         room.Archived,
 	}
@@ -544,6 +560,11 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		broadcastRoomsSnapshot()
+		// §3.7: occupants are never marooned — the room's sockets hear
+		// room_closed and the sitting ends through the idle-end close chain.
+		// Async: the close-flush can take a while and the archive itself is
+		// already durable (closeRoomForArchive is nil-receiver safe).
+		go kanbanApp.closeRoomForArchive(roomID)
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case action == "guest-links" && r.Method == http.MethodPost:
 		payload := struct {
@@ -733,6 +754,53 @@ func guestJoinHandler(w http.ResponseWriter, r *http.Request) {
 		"roomId":    room.ID,
 		"roomName":  room.Name,
 		"guestName": name,
+	})
+}
+
+// guestLookupHandler is the public POST /guest/lookup {token} (rooms-UX RW2):
+// it names the room on the guest gate before any join ("you're invited to
+// {room}"). The token is already the capability, so this adds no oracle —
+// validation is the same constant-time redeemGuestToken walk as /guest/join,
+// under the same guestjoin rate budget, with one uniform 403 for every dead
+// shape. It mints NOTHING: no session, no cookie, and a successful lookup
+// never clears the attempt window (only a real join earns that), so it can't
+// be used to reset a brute-force budget.
+func guestLookupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	if !authAttemptAllowedForKeys("guestjoin|" + clientIPForRateLimit(r)) {
+		writeAuthError(w, http.StatusTooManyRequests, "too many attempts; try again in a few minutes")
+		return
+	}
+
+	payload := struct {
+		Token string `json:"token"`
+	}{}
+	if err := decodeAuthBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := strings.TrimSpace(payload.Token)
+	if !isGuestTokenShape(token) {
+		writeAuthError(w, http.StatusForbidden, "that guest link is no longer valid")
+		return
+	}
+	room, ok := appRoomStore().redeemGuestToken(token)
+	if !ok {
+		writeAuthError(w, http.StatusForbidden, "that guest link is no longer valid")
+		return
+	}
+	live, count := roomLiveStats(room.ID)
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"roomName":         room.Name,
+		"live":             live,
+		"participantCount": count,
 	})
 }
 

@@ -67,8 +67,8 @@ var sendAccountEmail = func(to, subject, html string) error {
 
 func passwordResetEmailHTML(name, resetURL string) string {
 	return fmt.Sprintf(`<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-<h2>Bonfire password reset</h2>
-<p>Hi %s — someone (hopefully you) asked to reset your Bonfire password.</p>
+<h2>BonfireOS password reset</h2>
+<p>Hi %s — someone (hopefully you) asked to reset your BonfireOS password.</p>
 <p><a href="%s" style="display:inline-block;padding:10px 18px;background:#1a1a1a;color:#fff;border-radius:8px;text-decoration:none">Reset your password</a></p>
 <p>This link works once and expires in 30 minutes. If you didn't ask for it, you can ignore this email — your password is unchanged.</p>
 </div>`, name, resetURL)

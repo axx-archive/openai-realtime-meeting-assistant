@@ -305,6 +305,64 @@ func TestRoomsHandlerCreateListAndActions(t *testing.T) {
 	}
 }
 
+// guestLinkActive on GET /rooms rows is the honest input to the lobby's
+// listen-only badge: true only while an unexpired, unrevoked link lives (the
+// §7.1 latch predicate), never the sticky guestEnabled flag.
+func TestRoomsListGuestLinkActive(t *testing.T) {
+	cookies := setupRoomsTestEnv(t)
+
+	fetchActive := func() map[string]bool {
+		t.Helper()
+		recorder := doRoomsRequest(t, roomsHandler, http.MethodGet, "/rooms", "", cookies)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("list rooms = %d body %s", recorder.Code, recorder.Body.String())
+		}
+		var listed struct {
+			Rooms []struct {
+				ID              string `json:"id"`
+				GuestLinkActive bool   `json:"guestLinkActive"`
+			} `json:"rooms"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("unmarshal list: %v", err)
+		}
+		active := map[string]bool{}
+		for _, room := range listed.Rooms {
+			active[room.ID] = room.GuestLinkActive
+		}
+		return active
+	}
+
+	if active := fetchActive(); active[officeRoomID] {
+		t.Fatal("office must not report guestLinkActive before any link is minted")
+	}
+
+	recorder := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/office/guest-links", `{}`, cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("mint office guest link = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var minted struct {
+		Link struct {
+			ID string `json:"id"`
+		} `json:"link"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &minted); err != nil {
+		t.Fatalf("unmarshal mint response: %v", err)
+	}
+	if active := fetchActive(); !active[officeRoomID] {
+		t.Fatal("office must report guestLinkActive while an unrevoked, unexpired link lives")
+	}
+
+	// GuestEnabled alone must never keep the flag on: revoking the only link
+	// clears it (the next sitting returns to full mode).
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/office/guest-links/revoke", fmt.Sprintf(`{"id":%q}`, minted.Link.ID), cookies).Code; code != http.StatusOK {
+		t.Fatalf("revoke guest link = %d", code)
+	}
+	if active := fetchActive(); active[officeRoomID] {
+		t.Fatal("guestLinkActive must clear once the last link is revoked")
+	}
+}
+
 func TestGuestLinkEndpointsMintListRevoke(t *testing.T) {
 	cookies := setupRoomsTestEnv(t)
 	room, err := appRoomStore().create("Client Room", "", "aj@shareability.com", false)

@@ -366,9 +366,12 @@ var guestWritableKanbanEvents = map[string]bool{
 	"meeting":            true,
 	"room_chat":          true,
 	"room_chat_history":  true,
-	"offer":              true,
-	"answer":             true,
-	"candidate":          true,
+	// §3.7 archive close: guests seated in an archived room are exactly who
+	// must hear that their room is gone.
+	"room_closed": true,
+	"offer":       true,
+	"answer":      true,
+	"candidate":   true,
 }
 
 // guestTopLevelEvents are the raw websocketMessage envelopes a guest writer
@@ -718,6 +721,107 @@ func notifySessionReplacedAndClose(sessionID string) {
 		_ = sendKanbanEvent(writer, "session_replaced", "You joined another room; this seat was released.")
 		_ = writer.Close()
 	}
+}
+
+/* ---------- archive close (rooms UX §3.7) ---------- */
+
+// closeSessionSockets closes every socket a session holds, scanning both the
+// media pool and the admitted-only index under listLock. Unlike
+// notifySessionReplacedAndClose it writes nothing — the room-scoped
+// room_closed broadcast has already told the tab why.
+func closeSessionSockets(sessionID string) {
+	var writers []*threadSafeWriter
+	seen := map[*threadSafeWriter]bool{}
+	listLock.RLock()
+	for i := range peerConnections {
+		if peerConnections[i].sessionID == sessionID && peerConnections[i].websocket != nil && !seen[peerConnections[i].websocket] {
+			seen[peerConnections[i].websocket] = true
+			writers = append(writers, peerConnections[i].websocket)
+		}
+	}
+	for _, state := range activeParticipantConnections {
+		if state.sessionID == sessionID && state.websocket != nil && !seen[state.websocket] {
+			seen[state.websocket] = true
+			writers = append(writers, state.websocket)
+		}
+	}
+	listLock.RUnlock()
+
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
+}
+
+// closeRoomForArchive ends an archived room's live sitting so occupants are
+// never marooned in a half-dead room: every seated socket hears room_closed
+// (on the guest write allowlist — guests are exactly who must be told),
+// presence is forgotten and the sockets/tracks torn down, then the sitting
+// closes through the SAME chain as idle end (deferred-notification flush,
+// close-flush, id rotation, silent auto-archive, media teardown). The office
+// is room zero and never archives; the room store already refused it.
+func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
+	roomID = normalizeRoomID(roomID)
+	if app == nil || roomID == officeRoomID {
+		return
+	}
+
+	broadcastRoomKanbanEvent(roomID, "room_closed", map[string]any{"roomId": roomID})
+
+	type closedSeat struct {
+		name       string
+		sessionIDs []string
+	}
+	var seats []closedSeat
+	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
+	for name := range state.participantCounts {
+		sessionIDs := make([]string, 0, len(state.participantEndpoints[name]))
+		for _, sessionID := range state.participantEndpoints[name] {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+		delete(state.participants, name)
+		delete(state.participantCounts, name)
+		delete(state.participantEndpoints, name)
+		delete(state.participantMedia, name)
+		if isGuestDisplayName(name) {
+			for sessionKey, display := range state.guestSeats {
+				if strings.EqualFold(display, name) {
+					delete(state.guestSeats, sessionKey)
+					delete(state.chatBuckets, sessionKey)
+				}
+			}
+		}
+		seats = append(seats, closedSeat{name: name, sessionIDs: sessionIDs})
+	}
+	app.mu.Unlock()
+
+	for _, seat := range seats {
+		for _, sessionID := range seat.sessionIDs {
+			closeSessionSockets(sessionID)
+			unregisterParticipantSession(seat.name, sessionID)
+		}
+		log.Infof("room_seat_closed participant=%s room=%s sessions=%d; room archived", seat.name, roomID, len(seat.sessionIDs))
+	}
+
+	// The sitting close chain — endMeetingForIdle without the idle generation
+	// gate (an archive is an unconditional close; presence above is already
+	// zero, so no admission can race the record back open on the OLD id — a
+	// post-archive join is refused by the room store regardless).
+	if app.meetings != nil {
+		if record, ok := app.meetings.activeRecord(roomID); ok {
+			if closed, changed := app.meetings.endMeeting(record.ID, time.Now().UTC(), meetingEndedReasonRoomClosed, ""); changed {
+				app.flushDeferredNotifications("meeting_end")
+				app.flushAmbientAgentsForClose("room-archive", roomID, closed.ListenOnly)
+				if app.memory != nil {
+					app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
+				}
+				app.broadcastMeetingRecord(closed)
+				app.autoArchiveIdleMeeting(closed)
+			}
+		}
+	}
+	app.teardownRoomMediaAfterIdle(roomID)
+	broadcastRoomsSnapshot()
 }
 
 /* ---------- rooms-list office event (§4.5) ---------- */

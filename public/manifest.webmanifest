@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Bonfire",
-  "short_name": "Bonfire",
-  "description": "Bonfire — your company as intelligence. Meet, decide, and ship together.",
+  "name": "BonfireOS",
+  "short_name": "BonfireOS",
+  "description": "BonfireOS — your company as intelligence. Meet, decide, and ship together.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5F5F7",

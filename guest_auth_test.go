@@ -274,6 +274,133 @@ func TestGuestJoinCrossOriginRejected(t *testing.T) {
 	}
 }
 
+/* ---------- POST /guest/lookup (rooms-UX RW2) ---------- */
+
+func postGuestLookup(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/guest/lookup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	guestLookupHandler(recorder, req)
+	return recorder
+}
+
+// The lookup names the room for the gate and MINTS NOTHING: no Set-Cookie, no
+// session row, and the token stays redeemable afterwards (lookup never
+// consumes the capability).
+func TestGuestLookupNamesRoomWithoutMinting(t *testing.T) {
+	setupRoomsTestEnv(t)
+	room, token := mintGuestRoomAndToken(t)
+
+	sessionsBefore, _ := os.ReadFile(sessionsFilePath())
+	recorder := postGuestLookup(t, fmt.Sprintf(`{"token":%q}`, token))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("guest lookup = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		RoomName         string `json:"roomName"`
+		Live             bool   `json:"live"`
+		ParticipantCount int    `json:"participantCount"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal lookup response: %v", err)
+	}
+	if payload.RoomName != "Guest Suite" || payload.Live || payload.ParticipantCount != 0 {
+		t.Fatalf("unexpected lookup payload: %+v", payload)
+	}
+	// The lookup names the room but hands out NO identifier a join wouldn't:
+	// the payload carries no roomId (the join response is the id's only door).
+	if strings.Contains(recorder.Body.String(), "roomId") {
+		t.Fatalf("lookup must not carry the room id, got %s", recorder.Body.String())
+	}
+	if cookies := recorder.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("lookup must set no cookie, got %v", cookies)
+	}
+	sessionsAfter, _ := os.ReadFile(sessionsFilePath())
+	if string(sessionsBefore) != string(sessionsAfter) {
+		t.Fatal("lookup must not mint or mutate any session")
+	}
+	if _, ok := appRoomStore().redeemGuestToken(token); !ok {
+		t.Fatal("lookup must not consume the token")
+	}
+	if redeemed, ok := appRoomStore().redeemGuestToken(token); !ok || redeemed.ID != room.ID {
+		t.Fatal("token must stay bound to its room after lookup")
+	}
+}
+
+// Every dead shape — malformed, well-formed-unknown, revoked — answers the
+// SAME uniform 403 body: no oracle distinguishing "not a token" from "was a
+// token", matching /guest/join's constant-time posture.
+func TestGuestLookupRejectsDeadTokensUniformly(t *testing.T) {
+	setupRoomsTestEnv(t)
+	room, token := mintGuestRoomAndToken(t)
+
+	links, err := appRoomStore().listGuestLinks(room.ID)
+	if err != nil || len(links) != 1 {
+		t.Fatalf("expected one link, got %v err=%v", links, err)
+	}
+	if err := appRoomStore().revokeGuestLink(room.ID, links[0].ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	responses := map[string]*httptest.ResponseRecorder{
+		"malformed": postGuestLookup(t, `{"token":"not-a-token"}`),
+		"unknown":   postGuestLookup(t, fmt.Sprintf(`{"token":%q}`, strings.Repeat("0", 64))),
+		"revoked":   postGuestLookup(t, fmt.Sprintf(`{"token":%q}`, token)),
+	}
+	var wantBody string
+	for name, recorder := range responses {
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("%s token = %d, want 403", name, recorder.Code)
+		}
+		if wantBody == "" {
+			wantBody = recorder.Body.String()
+		}
+		if recorder.Body.String() != wantBody {
+			t.Fatalf("%s token body %q differs from %q — dead tokens must be indistinguishable", name, recorder.Body.String(), wantBody)
+		}
+	}
+}
+
+// The lookup rides the SAME guestjoin budget as /guest/join, so it cannot be
+// used as a cheaper brute-force channel — and exhausting it via lookup also
+// closes the join door for that IP.
+func TestGuestLookupRateLimitedUnderGuestJoinBudget(t *testing.T) {
+	setupRoomsTestEnv(t)
+
+	var last *httptest.ResponseRecorder
+	for i := 0; i < loginAttemptLimit+1; i++ {
+		last = postGuestLookup(t, fmt.Sprintf(`{"token":%q}`, strings.Repeat("0", 64)))
+	}
+	if last.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after %d lookups, got %d", loginAttemptLimit+1, last.Code)
+	}
+	if code := postGuestJoin(t, fmt.Sprintf(`{"token":%q,"name":"Priya"}`, strings.Repeat("0", 64))).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("guest join after lookup exhaustion = %d, want 429 (shared budget)", code)
+	}
+}
+
+func TestGuestLookupCrossOriginAndMethodRejected(t *testing.T) {
+	setupRoomsTestEnv(t)
+	_, token := mintGuestRoomAndToken(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/guest/lookup", strings.NewReader(fmt.Sprintf(`{"token":%q}`, token)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	recorder := httptest.NewRecorder()
+	guestLookupHandler(recorder, req)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin guest lookup = %d, want 403", recorder.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/guest/lookup", nil)
+	recorder = httptest.NewRecorder()
+	guestLookupHandler(recorder, req)
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /guest/lookup = %d, want 405", recorder.Code)
+	}
+}
+
 /* ---------- GET /guest/me ---------- */
 
 func TestGuestMeResumesSession(t *testing.T) {

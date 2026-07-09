@@ -642,6 +642,8 @@ func main() {
 	http.HandleFunc("/g", guestPageHandler)
 	http.HandleFunc("/g/", guestPageHandler)
 	http.HandleFunc("/guest/join", guestJoinHandler)
+	// Rooms-UX RW2: token-gated room naming for the guest gate — mints nothing.
+	http.HandleFunc("/guest/lookup", guestLookupHandler)
 	http.HandleFunc("/guest/me", guestMeHandler)
 	http.HandleFunc("/ice-test", iceTestHandler)
 	http.HandleFunc("/public/", publicAssetHandler)
@@ -2514,6 +2516,11 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 
 	participantName = trackParticipants[t.ID()]
 	sessionID = trackParticipantSessions[t.ID()]
+	if trackLocals[t.ID()] != t {
+		// A same-ID republish already replaced this entry; the stale
+		// track's unpublish must not tear down the fresh one.
+		return
+	}
 	delete(trackLocals, t.ID())
 	delete(trackParticipants, t.ID())
 	delete(trackParticipantSessions, t.ID())
@@ -3097,6 +3104,13 @@ func closeParticipantConnections(states []peerConnectionState) {
 		if state.websocket != nil {
 			if _, ok := closedWebsockets[state.websocket]; !ok {
 				closedWebsockets[state.websocket] = struct{}{}
+				// Tell the evicted tab WHY before cutting the socket (the
+				// notifySessionReplacedAndClose pattern). An abrupt close
+				// reads as a network blip, and the client's signaling
+				// reconnect re-dials — evicting THIS admission right back, a
+				// self-sustaining seat duel where both tabs churn forever.
+				// session_replaced makes the losing tab stop cleanly.
+				_ = sendKanbanEvent(state.websocket, "session_replaced", "This browser session was replaced by a newer room join.")
 				_ = state.websocket.Close()
 			}
 		}
@@ -3671,9 +3685,21 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// session wins; a guest session is accepted only for its own room; neither
 	// principal is a cheap pre-upgrade 401 — an unauthenticated socket never
 	// allocates a PeerConnection or chat session.
+	//
+	// EXCEPT when the tab says it is a guest (?as=guest): a /g# tab in a
+	// browser that is ALSO signed in as a member carries both cookies, and
+	// letting the member session win seated that tab as THE MEMBER under the
+	// tab's shared localStorage endpoint id — colliding with the member tab's
+	// own seat, so the two tabs replace-evicted each other in an endless duel
+	// (both deaf in the room while everyone else saw them fine). A guest-mode
+	// dial explicitly NARROWS itself to its guest session; with no live guest
+	// session it fails closed with 401, never falls back to the member.
 	sessionUser := userFromRequest(r)
 	var guest *guestPrincipal
-	if sessionUser == nil {
+	if r.URL.Query().Get("as") == "guest" {
+		sessionUser = nil
+		guest = guestFromRequest(r)
+	} else if sessionUser == nil {
 		guest = guestFromRequest(r)
 	}
 	if sessionUser == nil && guest == nil {
@@ -4417,6 +4443,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
+			signalPeerConnections()
 		case "candidate":
 			if peerConnection == nil {
 				continue

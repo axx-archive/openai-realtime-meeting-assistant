@@ -49,6 +49,9 @@ const (
 	meetingEndedReasonArchive = "archive"
 	meetingEndedReasonIdle    = "idle"
 	meetingEndedReasonRestart = "restart"
+	// room_closed: the room itself was archived out from under the sitting
+	// (rooms UX §3.7) — occupants were told and disconnected server-side.
+	meetingEndedReasonRoomClosed = "room_closed"
 )
 
 const meetingTitleSourceAuto = "auto"

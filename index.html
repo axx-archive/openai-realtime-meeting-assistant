@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#F5F5F7">
-    <meta name="application-name" content="Bonfire">
-    <meta name="apple-mobile-web-app-title" content="Bonfire">
+    <meta name="application-name" content="BonfireOS">
+    <meta name="apple-mobile-web-app-title" content="BonfireOS">
     <!-- iOS home-screen install (card 089): launching standalone is a hard
          requirement for Web Push on iOS 16.4+ — a Safari tab has no
          Notification API. mobile-web-app-capable is the standard equivalent. -->
@@ -435,7 +435,21 @@
       #appShell.is-guest #roomBoardToggle,
       #appShell.is-guest #recordMeeting,
       #appShell.is-guest #archiveMeeting,
+      #appShell.is-guest #inviteToggle,
       #appShell.is-guest .room-board-panel {
+        display: none !important;
+      }
+      /* lobby management (rooms rail: list/create/⋯, badges, passcode gate)
+         is member chrome — a guest tab's /rooms fetch 401s regardless */
+      #appShell.is-guest .lobby__rail,
+      #appShell.is-guest .lobby__badges,
+      #appShell.is-guest .lobby__passgate {
+        display: none !important;
+      }
+      /* RW4 terminal exclusivity: a guest outside the room owns exactly one
+         surface — the gate/terminal card. The lobby stage (the member
+         pre-join landing) must never bleed beneath it (recon-27). */
+      #appShell.is-guest:not(.is-in-room) .hearth-presentation {
         display: none !important;
       }
 
@@ -988,6 +1002,20 @@
       #appShell[data-tool="memory"] .topbar__copy-link,
       #appShell[data-tool="files"] .topbar__copy-link,
       #appShell[data-tool="artifacts"] .topbar__copy-link {
+        display: none;
+      }
+
+      /* in-call room identity — quiet lowercase mono in the old copy-link
+         slot; the stage meta keeps the meeting title/clock */
+      .topbar__room-name {
+        flex: none;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: lowercase;
+        white-space: nowrap;
+      }
+      #appShell:not(.is-in-room) .topbar__room-name {
         display: none;
       }
 
@@ -1675,13 +1703,6 @@
         color: var(--text-1);
       }
 
-      .login-tagline {
-        margin: 0;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
-      }
-
       /* mode line — empty on the normal gate; speaks during the reset flow */
       .login-subline {
         margin: 0;
@@ -1727,6 +1748,16 @@
       }
 
       /* panel glass card — the full recipe, specular top edge included */
+      /* the hidden attribute must actually hide: every gate element with an
+         author display rule needs this override or renderLoginMode's mode
+         logic silently loses (the guest gate grew a co-equal Face ID button,
+         the guest terminal kept the member card above it, and the expired
+         invite kept a live-looking dead join button — verify1 r2-15/22/23) */
+      .login-card[hidden],
+      .login-passkey[hidden],
+      .login-signin[hidden] {
+        display: none;
+      }
       .login-card {
         align-self: stretch;
         display: flex;
@@ -1739,6 +1770,36 @@
         border-radius: var(--r-2xl);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         padding: 24px;
+      }
+
+      /* RW4 guest terminal — same glass card, one message and one door */
+      .guest-exit {
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        background: var(--glass-panel);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--r-2xl);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        padding: 24px;
+        text-align: center;
+      }
+
+      .guest-exit[hidden] { display: none; }
+
+      .guest-exit__title {
+        font: 500 16px/1.4 var(--font-sans);
+        letter-spacing: -0.01em;
+        color: var(--text-1);
+      }
+
+      .guest-exit__ended {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
       }
 
       .field {
@@ -3105,6 +3166,11 @@
         width: fit-content;
         max-width: calc(100vw - 24px);
         margin: 0 auto;
+      }
+
+      /* invite is an in-call act — pre-join the bar only offers Enter */
+      #appShell:not(.is-in-room) #inviteToggle {
+        display: none;
       }
 
       .log {
@@ -5406,7 +5472,10 @@
       /* tab panes enter with the canon rise (bf-tabin .4s) — display flips
          from none on tool switch, so the animation replays per entry. The
          live room keeps its own rise-in choreography; the expanded board
-         keeps its animation kill-switch. */
+         keeps its animation kill-switch. `both`, never bare: the room pane
+         carries the opacity-0 .mount-stagger base, and this rule outranks
+         .is-mounting's mount-rise on the animation shorthand — without a
+         held final frame the lobby vanishes when the 0.4s rise ends. */
       #appShell.is-authed[data-tool="office"] #officeTool,
       #appShell.is-authed[data-tool="chat"] #chatTool,
       #appShell.is-authed[data-tool="artifacts"] #artifactsTool,
@@ -5416,7 +5485,7 @@
       #appShell.is-authed[data-tool="memory"] #memoryTool,
       #appShell.is-authed[data-tool="files"] #filesTool,
       #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
-        animation: bf-tabin 0.4s var(--ease);
+        animation: bf-tabin 0.4s var(--ease) both;
       }
 
       /* tool pages swap the topbar's meeting meta for the tool's own line;
@@ -10006,6 +10075,12 @@
              overflow-y engages instead. */
           max-height: calc(100svh - var(--shell-topbar-height, 0px) - 116px);
         }
+
+        /* the chat column shrinks the stage — the fixed meeting bar
+           re-centers on the shrunken stage, not the viewport (recon-14) */
+        #appShell.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .meeting-bar {
+          right: calc(max(18px, env(safe-area-inset-right)) + clamp(320px, 28vw, 420px));
+        }
       }
 
       /* dock toggle — the unread count rides the button corner as the same
@@ -14093,10 +14168,13 @@
         visibility: hidden;
       }
 
+      /* §3.1 hero hierarchy: the title is the room's NAME at person scale in
+         Google Sans Flex — the lobby's centerpiece must outrank its own rail
+         rows. The koan/occupancy meta reads mono beneath it. */
       .room-empty__title {
-        font: var(--type-label-lg);
-        letter-spacing: var(--track-label-lg);
-        color: rgba(255, 255, 255, 0.45);
+        font: var(--type-title-2);
+        letter-spacing: -0.01em;
+        color: rgba(255, 255, 255, 0.92);
       }
 
       /* the one primary on the black stage — a white pill. The fill/ink are
@@ -14134,6 +14212,507 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: rgba(255, 255, 255, 0.3);
+      }
+
+      /* the koan meta reads as the title's subline — pull it inside the
+         hero's 18px flex gap so name + meta form one typographic unit */
+      .room-empty__title + .room-empty__meta {
+        margin-top: -12px;
+      }
+
+      /* ---------- the lobby (pre-join room tool) ----------
+         Literals, not theme tokens: the stage is always true black in both
+         themes (same rule .room-empty__join declares). Presence is GREEN
+         (--live per law), never ember; listen-only wears --warn. */
+      .lobby__hero {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        max-width: 520px;
+        min-width: 0;
+      }
+      .lobby__badges {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.42);
+      }
+      .lobby__badges[hidden] { display: none; }
+      .lobby__badge { display: inline-flex; align-items: center; gap: 5px; }
+      .lobby__badge svg { flex: none; }
+      .lobby__badge--warn {
+        color: var(--warn);
+        background: var(--warn-soft);
+        padding: 3px 9px;
+        border-radius: var(--r-full);
+      }
+      .lobby__passgate { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+      .lobby__passgate[hidden] { display: none; }
+      .lobby__passrow { display: flex; align-items: center; gap: 8px; }
+      .lobby__passinput {
+        height: 46px;
+        width: 190px;
+        padding: 0 18px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06);
+        color: #fff;
+        font: 500 14px var(--font-sans);
+        outline: none;
+        transition: border-color 0.15s var(--ease);
+      }
+      .lobby__passinput:focus { border-color: rgba(255, 255, 255, 0.42); }
+      .lobby__passinput.is-shake { animation: lobby-shake 300ms var(--ease); }
+      @keyframes lobby-shake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-7px); }
+        40% { transform: translateX(6px); }
+        60% { transform: translateX(-4px); }
+        80% { transform: translateX(3px); }
+      }
+      .lobby__passerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); }
+      .lobby__passerror[hidden] { display: none; }
+      .lobby__joinerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); max-width: 360px; text-align: center; }
+      .lobby__joinerror[hidden] { display: none; }
+      /* RW2 green room — theme tokens for the gate mount; the lobby mount
+         overrides to the stage's white-alpha idiom (the stage is always
+         black, whatever the theme). */
+      .greenroom {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        width: min(100%, 360px);
+      }
+      .greenroom[hidden] { display: none; }
+      .greenroom__tile {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--r-lg);
+        border: 1px solid var(--line-2);
+        background: var(--surface-2);
+        overflow: hidden;
+        cursor: pointer;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-3);
+        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+      }
+      .greenroom__tile:hover { border-color: var(--accent); color: var(--text-2); }
+      .greenroom__video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: none;
+        /* the self-view mirrors like every other local tile */
+        transform: scaleX(-1);
+      }
+      .greenroom__tile[data-state="live"] .greenroom__video { display: block; }
+      .greenroom__tile[data-state="live"] { cursor: default; }
+      .greenroom__hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        padding: 0 16px;
+        text-align: center;
+      }
+      .greenroom__tile[data-state="live"] .greenroom__hint { display: none; }
+      .greenroom__tile[data-state="timeout"] .greenroom__hint svg { display: none; }
+      .greenroom__chips { display: flex; align-items: center; justify-content: center; gap: 8px; }
+      .greenroom__chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: var(--hit-min);
+        padding: 0 var(--sp-3);
+        border-radius: var(--r-full);
+        border: 1px solid var(--line-2);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .greenroom__chip:hover { border-color: var(--accent); }
+      /* off = struck glyph + quiet ink, never a loud state */
+      .greenroom__chip[aria-pressed="false"] { color: var(--text-3); }
+      .greenroom__chip[aria-pressed="false"] svg { opacity: 0.55; }
+      .greenroom__chip[aria-pressed="false"] .greenroom__chip-label { text-decoration: line-through; }
+      .greenroom__looks {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      .greenroom__looks .video-look-chip { min-height: 34px; padding: 0 12px; font: var(--type-label); letter-spacing: var(--track-label); border-radius: var(--r-full); }
+      .greenroom__finetune {
+        border: 0;
+        background: none;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        min-height: 34px;
+        padding: 0 8px;
+      }
+      .greenroom__finetune:hover { color: var(--text-1); }
+      .greenroom__finetune[hidden] { display: none; }
+      /* lobby mount: the stage is black in every theme */
+      .room-empty .greenroom__tile { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.55); }
+      .room-empty .greenroom__tile:hover { border-color: rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.8); }
+      .room-empty .greenroom__chip { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.78); }
+      .room-empty .greenroom__chip[aria-pressed="false"] { color: rgba(255, 255, 255, 0.42); }
+      .room-empty .greenroom__looks .video-look-chip { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.78); }
+      .room-empty .greenroom__looks .video-look-chip.is-selected { background: #fff; border-color: transparent; color: #000; }
+      .room-empty .greenroom__finetune { color: rgba(255, 255, 255, 0.42); }
+      .room-empty .greenroom__finetune:hover { color: rgba(255, 255, 255, 0.8); }
+      /* gate mount: tighter block inside the login card */
+      .greenroom--gate { width: 100%; }
+      .lobby__rail {
+        /* the ⋯ popover portals onto the rail (the rows live inside the
+           .lobby__list scrollbox, whose overflow would clip it) — the rail
+           is its positioning context */
+        position: relative;
+        width: 100%;
+        max-width: 520px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        text-align: left;
+      }
+      .lobby__rail[hidden] { display: none; }
+      .lobby__list {
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        max-height: 32vh;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+      .lobby__row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .lobby__row:first-child { border-top: none; }
+      .lobby__row.is-selected {
+        background: rgba(255, 255, 255, 0.04);
+        box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.55);
+      }
+      .lobby__pick {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 10px 12px;
+        border: 0;
+        background: none;
+        color: #fff;
+        text-align: left;
+        cursor: pointer;
+      }
+      .lobby__dot { width: 7px; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); flex: none; }
+      .lobby__dot.is-live { background: var(--live); }
+      .lobby__name {
+        font: 600 13.5px var(--font-sans);
+        letter-spacing: -0.01em;
+        color: #fff;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lobby__meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.42);
+        flex: none;
+      }
+      .lobby__meta svg { width: 12px; height: 12px; flex: none; }
+      .lobby__meta .lobby__listen { color: var(--warn); }
+      .lobby__more {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 32px;
+        height: 32px;
+        margin-right: 6px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        color: rgba(255, 255, 255, 0.55);
+        font: 600 14px var(--font-sans);
+        cursor: pointer;
+      }
+      .lobby__more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      /* focus on the dark stage: the ink-accent ring washes out over black
+         glass — lobby + green-room controls carry a white ring instead */
+      .lobby__pick:focus-visible,
+      .lobby__more:focus-visible,
+      .lobby__new:focus-visible,
+      .lobby__submit:focus-visible,
+      .greenroom__tile:focus-visible,
+      .greenroom__chip:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.85);
+        outline-offset: 2px;
+        box-shadow: none;
+      }
+      .lobby__new {
+        align-self: flex-start;
+        padding: 8px 14px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: none;
+        color: rgba(255, 255, 255, 0.75);
+        font: 600 12.5px var(--font-sans);
+        cursor: pointer;
+      }
+      .lobby__new:hover { color: #fff; border-color: rgba(255, 255, 255, 0.35); }
+      .lobby__form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .lobby__form[hidden] { display: none; }
+      .lobby__input {
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
+        color: #fff;
+        font: 500 12.5px var(--font-sans);
+        outline: none;
+        min-width: 0;
+        flex: 1 1 140px;
+      }
+      .lobby__input:focus { border-color: rgba(255, 255, 255, 0.42); }
+      .lobby__check {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.6);
+      }
+      .lobby__submit {
+        padding: 8px 14px;
+        border-radius: var(--r-full);
+        border: 0;
+        background: #fff;
+        color: #0E0E10;
+        font: 600 12.5px var(--font-sans);
+        cursor: pointer;
+      }
+
+      /* per-room ⋯ popover — a real glass layer anchored to its row but
+         MOUNTED on the rail: the rows sit inside the .lobby__list scrollbox
+         (overflow-y:auto, ~91px tall with two rooms), which clipped the
+         whole management layer — consent copy, one-time link, revoke — to
+         an unreadable sliver. positionLobbyPopover() sets `top` from the
+         anchor row's rect (flipping above when the viewport would cut it
+         off); one open at a time, dismissed on outside click / Escape /
+         tool switch. */
+      .lobby-pop {
+        position: absolute;
+        top: 0;
+        right: 10px;
+        z-index: 30;
+        max-height: min(60vh, 440px);
+        overflow-y: auto;
+        min-width: 232px;
+        max-width: 300px;
+        padding: 6px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(24, 24, 27, 0.92);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+      }
+      .lobby-pop__item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 10px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        color: rgba(255, 255, 255, 0.85);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: left;
+        cursor: pointer;
+      }
+      .lobby-pop__item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      .lobby-pop__note {
+        padding: 8px 10px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.45);
+      }
+      .lobby-pop__consent { display: flex; flex-direction: column; gap: 10px; padding: 6px; }
+      .lobby-pop__consent-copy {
+        padding: 9px 10px;
+        border-radius: 10px;
+        background: var(--warn-soft);
+        color: var(--warn);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        line-height: 1.5;
+      }
+      .lobby-pop__actions { display: flex; gap: 8px; padding: 0 4px 4px; }
+      .lobby-pop__mint {
+        padding: 7px 12px;
+        border-radius: var(--r-full);
+        border: 0;
+        background: #fff;
+        color: #0E0E10;
+        font: 600 12px var(--font-sans);
+        cursor: pointer;
+      }
+      .lobby-pop__cancel {
+        padding: 7px 12px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: none;
+        color: rgba(255, 255, 255, 0.75);
+        font: 600 12px var(--font-sans);
+        cursor: pointer;
+      }
+      .lobby-pop__minted { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+      .lobby-pop__caption { font: var(--type-label); letter-spacing: var(--track-label); color: rgba(255, 255, 255, 0.5); }
+      .lobby-pop__linkout {
+        width: 100%;
+        height: 32px;
+        padding: 0 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: #fff;
+        font: 500 11.5px var(--font-mono);
+      }
+      .lobby-pop__linkrow {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 8px 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .lobby-pop__linkrow:first-child { border-top: none; }
+      .lobby-pop__linklabel { font: 600 12px var(--font-sans); color: rgba(255, 255, 255, 0.85); }
+      .lobby-pop__linkmeta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.45);
+      }
+      .lobby-pop__revoke {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: rgba(255, 255, 255, 0.7);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .lobby-pop__revoke:hover { color: #fff; }
+
+      /* in-call Invite popover — one shared mint pipeline with the lobby ⋯
+         mount; this glass layer anchors above the meeting bar (a near-full-
+         width sheet on phones). The lobby-pop__* blocks it re-renders
+         (consent / minted / links) style standalone and carry over. */
+      .invite-pop {
+        position: absolute;
+        bottom: calc(100% + 10px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        width: min(360px, calc(100vw - 32px));
+        padding: 6px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(24, 24, 27, 0.92);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+      }
+      .invite-pop__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 10px;
+        border-radius: 10px;
+      }
+      .invite-pop__row:hover { background: rgba(255, 255, 255, 0.05); }
+      .invite-pop__label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.5);
+      }
+      .invite-pop__action {
+        padding: 7px 12px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: none;
+        color: rgba(255, 255, 255, 0.85);
+        font: 600 12px var(--font-sans);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .invite-pop__action:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      @media (max-width: 640px) {
+        /* phone: the popover widens into a bottom sheet riding the dock */
+        .invite-pop { width: calc(100vw - 24px); border-radius: 20px; }
+      }
+
+      /* desktop: hero centered, rooms rail to its right; single column on
+         the phone (rail beneath, full-width). */
+      @media (min-width: 960px) {
+        .room-empty { flex-direction: row; align-items: center; justify-content: center; gap: 56px; }
+        .lobby__hero { flex: 0 1 520px; }
+        .lobby__rail { width: 280px; flex: none; }
+        .lobby__list { max-height: min(56vh, 480px); }
       }
 
       /* pinned-view control: the room defaults to an equal grid; this small
@@ -15528,47 +16107,6 @@
         color: rgba(255, 255, 255, 0.55);
       }
 
-      /* scout caption pill — top-center; present only while the assistant is
-         genuinely connected and the room is actually listening (D11) */
-      .scout-caption {
-        position: absolute;
-        top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 3;
-        display: none;
-        align-items: center;
-        gap: 9px;
-        height: 34px;
-        padding: 0 16px;
-        border-radius: var(--r-full);
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        font: var(--type-label-lg);
-        letter-spacing: var(--track-label-lg);
-        color: rgba(255, 255, 255, 0.75);
-        white-space: nowrap;
-        max-width: min(60vw, 640px);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        transition:
-          background var(--dur-slow) var(--ease),
-          color var(--dur-slow) var(--ease),
-          transform var(--dur-slow) var(--ease),
-          opacity var(--dur-slow) var(--ease);
-      }
-
-      .scout-caption__dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--signal-500);
-        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
-        flex: none;
-      }
-
       /* in-room board panel — dark glass sheet sliding from the right */
       .room-board-panel {
         position: absolute;
@@ -15706,10 +16244,6 @@
 
         #appShell.is-in-room[data-tool="room"] .stage-chrome__meeting,
         #appShell.is-in-room[data-tool="room"] .stage-chrome__occupancy {
-          display: flex;
-        }
-
-        #appShell.is-in-room[data-tool="room"] .scout-caption:not([hidden]) {
           display: flex;
         }
 
@@ -16013,79 +16547,45 @@
       .office-home-card__badge[hidden] { display: none; }
       .office-home-card__chevron { color: var(--text-3); flex: none; }
 
-      /* multi-room: the rooms card block. Live dot is EMBER (earned by real
-         occupancy); lock/guest glyphs stay monochrome. */
-      .office-rooms {
+      /* multi-room: the home live-now strip — only rooms with people
+         inside (green --live dot, per law: presence is green, never ember),
+         else one quiet row. Zero management chrome on home. */
+      .home-live { width: 100%; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+      .home-live[hidden] { display: none; }
+      .home-live__row {
+        display: flex;
         width: 100%;
-        margin-top: 12px;
-        padding: 13px 16px 11px;
+        align-items: center;
+        gap: 11px;
+        padding: 13px 16px;
         border-radius: 16px;
         border: 1px solid var(--line-1);
         background: var(--surface-2);
+        color: var(--text-1);
         text-align: left;
-      }
-      .office-rooms[hidden] { display: none; }
-      .office-rooms__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .office-rooms__title { font: 600 13.5px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); }
-      .office-rooms__new {
-        border: none;
-        background: none;
-        padding: 4px 0;
-        color: var(--text-2);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
         cursor: pointer;
+        transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
       }
-      .office-rooms__new:hover { color: var(--text-1); }
-      .office-rooms__row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-1); }
-      .office-rooms__row:first-child { border-top: none; }
-      .office-rooms__dot { width: 7px; height: 7px; border-radius: 999px; background: var(--line-2, var(--line-1)); flex: none; }
-      .office-rooms__dot.is-live { background: var(--ember); }
-      .office-rooms__name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-      .office-rooms__label { font: var(--type-caption-medium); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .office-rooms__meta { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
-      .office-rooms__meta svg { flex: none; }
-      .office-rooms__open,
-      .office-rooms__more,
-      .office-rooms__submit {
-        flex: none;
-        border: 1px solid var(--line-1);
-        background: var(--surface-3, var(--surface-2));
-        color: var(--text-1);
-        border-radius: 999px;
-        padding: 5px 12px;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        cursor: pointer;
+      .home-live__row:hover { border-color: var(--line-2, var(--line-1)); }
+      .home-live__row:active { transform: scale(0.98); }
+      .home-live__dot { width: 8px; height: 8px; border-radius: 999px; background: var(--line-2, var(--line-1)); flex: none; }
+      .home-live__dot.is-live { background: var(--live); animation: home-live-breathe 2.6s var(--ease) infinite; }
+      @keyframes home-live-breathe {
+        0%, 100% { box-shadow: 0 0 0 0 var(--live-soft); }
+        50% { box-shadow: 0 0 0 5px var(--live-soft); }
       }
-      .office-rooms__open:disabled { opacity: 0.45; cursor: default; }
-      .office-rooms__more { padding: 5px 9px; color: var(--text-2); }
-      .office-rooms__form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line-1); margin-top: 4px; }
-      .office-rooms__form[hidden] { display: none; }
-      .office-rooms__input {
+      @media (prefers-reduced-motion: reduce) { .home-live__dot.is-live { animation: none; } }
+      .home-live__name {
         flex: 1;
-        min-width: 120px;
-        border: 1px solid var(--line-1);
-        background: var(--surface-1, transparent);
-        color: var(--text-1);
-        border-radius: 10px;
-        padding: 7px 10px;
-        font: var(--type-caption-medium);
+        min-width: 0;
+        font: 600 13.5px var(--font-sans);
+        letter-spacing: -0.01em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .office-rooms__check { display: inline-flex; align-items: center; gap: 5px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-2); }
-      .office-rooms__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 0 10px 17px; }
-      .office-rooms__actions button {
-        border: none;
-        background: none;
-        padding: 2px 0;
-        color: var(--text-2);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        cursor: pointer;
-      }
-      .office-rooms__actions button:hover { color: var(--text-1); }
-      .office-rooms__linkout { flex-basis: 100%; width: 100%; }
-      .office-rooms__passfield { flex: none; width: 130px; }
+      .home-live__count { flex: none; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
+      .home-live__chevron { color: var(--text-3); flex: none; }
 
       /* the sheet: a centered dialog on desktop, a full-height rising sheet on
          phone (ux §5.4). Scrim dims the shell; the panel scrolls internally. */
@@ -16627,16 +17127,20 @@
         #appShell.is-in-room .meeting-bar .log,
         #appShell.is-in-room .meeting-bar .device-control,
         #appShell.is-in-room .meeting-bar .controls__divider,
-        #appShell.is-in-room .meeting-bar #copyRoomLink,
         /* the in-room board panel is a desktop surface — the dense dock grid
            keeps its legacy column count below 861px */
         #appShell.is-in-room .meeting-bar #roomBoardToggle {
           display: none;
         }
 
+        /* the dock is dense here — invite folds to its glyph */
+        #appShell.is-in-room .meeting-bar #inviteToggle .invite-label {
+          display: none;
+        }
+
         #appShell.is-in-room .meeting-bar .controls {
           display: grid;
-          grid-template-columns: auto 44px 44px 44px 44px minmax(104px, 0.9fr) minmax(112px, 1fr) minmax(112px, 1fr) 44px;
+          grid-template-columns: auto 44px 44px 44px 44px minmax(104px, 0.9fr) minmax(112px, 1fr) 44px minmax(112px, 1fr) 44px;
           align-items: center;
           gap: 8px;
           width: 100%;
@@ -16878,7 +17382,7 @@
         /* extra id weight — the authed topbar re-shows its pill at (1-3-1) */
         .topbar__meta,
         #appShell #topbarBoard,
-        #appShell #copyRoomLink,
+        #appShell #topbarRoomName,
         #appShell #statusPill {
           display: none;
         }
@@ -17161,28 +17665,6 @@
           display: none;
         }
 
-        /* scout status pill — design mobile recipe */
-        #appShell.is-in-room[data-tool="room"] .scout-caption:not([hidden]) {
-          display: flex;
-          top: 12px;
-          height: 30px;
-          padding: 0 13px;
-          gap: 8px;
-          max-width: 88%;
-          background: rgba(255, 255, 255, 0.09);
-          backdrop-filter: blur(18px);
-          -webkit-backdrop-filter: blur(18px);
-          border-color: rgba(255, 255, 255, 0.1);
-          font: var(--type-label);
-          letter-spacing: var(--track-label);
-          color: rgba(255, 255, 255, 0.78);
-        }
-
-        .scout-caption__dot {
-          width: 6px;
-          height: 6px;
-        }
-
         /* meeting · timer meta rides the hero's top edge */
         #appShell.is-in-room[data-tool="room"] .stage-chrome__meeting {
           display: flex;
@@ -17192,6 +17674,15 @@
           font: var(--type-label);
           letter-spacing: var(--track-label);
           color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* guest hero (recon-25): with the topbar gone the hero climbs to the
+           top edge, so the meta must clear the always-visible pin/flags
+           cluster on the tile's top-right — it rides the top-LEFT instead */
+        #appShell.is-guest.is-in-room[data-tool="room"] .stage-chrome__meeting {
+          top: calc(16px + env(safe-area-inset-top));
+          left: 24px;
+          right: auto;
         }
 
         .hearth-stage {
@@ -17518,6 +18009,7 @@
         #appShell.is-in-room #toggleCamera,
         #appShell.is-in-room #recordMeeting,
         #appShell.is-in-room #roomChatToggle,
+        #appShell.is-in-room #inviteToggle,
         #appShell.is-in-room #archiveMeeting {
           width: 40px;
           min-width: 0;
@@ -17541,6 +18033,7 @@
         #appShell.is-in-room #toggleCamera:active,
         #appShell.is-in-room #recordMeeting:active,
         #appShell.is-in-room #roomChatToggle:active,
+        #appShell.is-in-room #inviteToggle:active,
         #appShell.is-in-room #archiveMeeting:active,
         #appShell.is-in-room #leave:active {
           transform: scale(0.94);
@@ -17562,6 +18055,7 @@
         #toggleCamera .camera-label,
         #recordMeeting .record-label,
         #roomChatToggle .room-chat-toggle__label,
+        #inviteToggle .invite-label,
         #archiveMeeting .archive-label {
           display: none;
         }
@@ -20275,7 +20769,6 @@
         .intel-pulse__bar.is-live { animation: none; }
         .memory-card__body { animation: none; }
         .memory-card__chevron { transition: none; }
-        .scout-caption__dot { animation: none; }
         .login-presence__dot { animation: none; }
         .board-mobile-hint__dot { animation: none; }
         .room-board-panel { animation: none; }
@@ -20288,7 +20781,7 @@
   <body>
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
-        <span id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire">
+        <span id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS">
           <svg viewBox="0 0 64 64">
             <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
           </svg>
@@ -20435,10 +20928,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
           Board
         </button>
-        <button id="copyRoomLink" class="topbar__copy-link" type="button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-          Copy link
-        </button>
+        <!-- the copy-link slot names the ROOM in-call (meeting identity stays
+             on the stage meta); link sharing moved to the meeting bar's
+             Invite popover -->
+        <span id="topbarRoomName" class="topbar__room-name"></span>
         <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
           <span class="pill__dot"></span>
           <span id="statusText">not connected</span>
@@ -20478,22 +20971,13 @@
                 </button>
               </div>
             </div>
-            <!-- multi-room: rooms live above Morning Brief; rows render from
-                 roomsList (GET /rooms + `rooms` office event) — never from
-                 another room's participants frames. -->
-            <div id="officeRoomsCard" class="office-rooms" hidden>
-              <div class="office-rooms__head">
-                <span class="office-rooms__title">Rooms</span>
-                <button id="officeRoomsNewButton" class="office-rooms__new pressable" type="button">+ New room</button>
-              </div>
-              <div id="officeRoomsList" class="office-rooms__list"></div>
-              <form id="officeRoomsCreateForm" class="office-rooms__form" hidden>
-                <input id="officeRoomsCreateName" class="office-rooms__input" type="text" placeholder="room name" maxlength="80" autocomplete="off">
-                <input id="officeRoomsCreatePasscode" class="office-rooms__input" type="password" placeholder="passcode (optional)" autocomplete="new-password">
-                <label class="office-rooms__check"><input id="officeRoomsCreateGuests" type="checkbox"> allow guests</label>
-                <button class="office-rooms__submit pressable" type="submit">Create</button>
-              </form>
-            </div>
+            <!-- multi-room: home carries ONLY the glanceable live-now strip
+                 (rooms with people inside, else one quiet row). The full
+                 list and every management affordance live on the lobby —
+                 the rail's room tool. Rows render from roomsList (GET /rooms
+                 + `rooms` office event) — never from another room's
+                 participants frames. -->
+            <div id="homeLiveNow" class="home-live" hidden></div>
             <button id="officeBriefCard" class="office-home-card" type="button" aria-haspopup="dialog">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M4 9h16"></path><path d="M8 13h8"></path><path d="M8 16h5"></path></svg>
               <span class="office-home-card__text">
@@ -20565,8 +21049,7 @@
             <span class="login-mark" aria-hidden="true">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>
             </span>
-            <h1 class="login-wordmark">bonfire</h1>
-            <p class="login-tagline">a voice-first operating system</p>
+            <h1 class="login-wordmark">bonfireOS</h1>
             <p class="login-subline"></p>
             <span id="accessState" class="access-state" hidden>locked</span>
           </header>
@@ -20629,9 +21112,22 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M9 9h.01"></path><path d="M15 9h.01"></path><path d="M8 14s1.5 2 4 2 4-2 4-2"></path></svg>
               Use Face ID
             </button>
+            <!-- RW2 guest gate: member sign-in demoted to a quiet text link —
+                 Face ID chrome never renders co-equal on the guest gate -->
+            <button id="guestMemberLink" class="login-textlink" type="button" hidden>joining as a member? sign in</button>
             <p id="accessHint" class="access-hint" aria-live="polite"></p>
             <div id="loginStatusRow" class="login-status" hidden><span id="loginStatusPill" class="pill pill--connecting"><span class="pill__dot" aria-hidden="true"></span><span id="loginStatusText">signing in</span></span></div>
           </form>
+          <!-- RW4 guest terminal — the full-screen "you've left {room}." takeover.
+               EXCLUSIVE: the login form (and everything member-shaped in it —
+               Face ID, roster, password) unmounts while this shows. One door:
+               rejoin resumes the 12h cookie seat via GET /guest/me; a 401
+               swaps the door for the honest ended line. -->
+          <div id="guestExitCard" class="guest-exit login-rise login-rise--card" hidden>
+            <p id="guestExitTitle" class="guest-exit__title">you've left the room.</p>
+            <button id="guestRejoin" class="login-signin" type="button">rejoin the room</button>
+            <p id="guestExitEndedLine" class="guest-exit__ended" hidden>this session has ended — ask for a fresh link.</p>
+          </div>
           <p id="loginPresence" class="login-presence login-rise login-rise--foot" hidden>
             <span class="login-presence__dot" aria-hidden="true"></span>
             <span id="loginPresenceText">live now · 1 inside</span>
@@ -20725,14 +21221,10 @@
         </aside>
 
         <section id="presentationTile" class="presentation-tile hearth-presentation mount-stagger" aria-label="Shared workspace">
-          <!-- stage chrome — meeting · timer (left), occupancy (right), and
-               the scout caption pill (center, only while genuinely listening) -->
+          <!-- stage chrome — meeting · timer (left), occupancy (right). The
+               listening pill lives in the topbar ONLY (recon-11 dedupe). -->
           <span id="stageMeetingLabel" class="stage-chrome__meeting" aria-hidden="true"></span>
           <span id="stageOccupancy" class="stage-chrome__occupancy" aria-hidden="true"></span>
-          <div id="scoutCaptionPill" class="scout-caption" hidden role="status" aria-live="polite">
-            <span class="scout-caption__dot" aria-hidden="true"></span>
-            <span id="scoutCaptionText">the room is listening</span>
-          </div>
           <div class="stage-toolbar" aria-label="Pinned view">
             <button id="pinActiveSpeaker" class="stage-tool" type="button" aria-pressed="false" hidden>unpin</button>
           </div>
@@ -20764,13 +21256,74 @@
           </div>
 
           <div id="hearthStage" class="hearth-stage" data-room-layout="grid" data-grid-size="single" aria-label="Room videos">
-            <!-- kit Room — canon empty state; appears only while the stage is
-                 mounted but not yet connected. Join reuses the live join flow
-                 (data-office-tool="room" -> joinRoom()). -->
-            <div id="roomNotConnected" class="room-empty" aria-label="Not connected">
-              <div id="roomEmptyName" class="room-empty__title">the room is quiet.</div>
-              <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>join the room</button>
-              <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
+            <!-- the LOBBY — the pre-join room tool: hero (selected room, one
+                 primary join) + the rooms rail (list, create, ⋯ management).
+                 Selection is browsing, join is consent — a row click never
+                 joins. Guests never see the rail/badges (is-guest CSS +
+                 render guard; /rooms 401s for them regardless). Join reuses
+                 the live join flow (data-join-room -> joinRoom()). -->
+            <div id="roomNotConnected" class="room-empty" aria-label="Room lobby">
+              <div class="lobby__hero">
+                <!-- §3.1 hierarchy: room NAME (person-scale sans), koan meta
+                     in mono directly beneath, then the badge row -->
+                <div id="roomEmptyName" class="room-empty__title">the office</div>
+                <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
+                <div id="lobbyBadges" class="lobby__badges" hidden></div>
+                <!-- RW2 green room — the join seam's AV check. Media only on
+                     EXPLICIT intent (tile tap / cam chip flipping on); the
+                     preview releases fully on join, deselect, tool switch and
+                     gate unmount. Chips persist to localStorage bonfire:joinAV
+                     and carry into the join through the real mute machinery.
+                     One block, two mounts: guest boot re-parents it into the
+                     guest name gate (mountGreenRoomInGuestGate). -->
+                <div id="greenRoom" class="greenroom">
+                  <button id="greenRoomTile" type="button" class="greenroom__tile" data-state="idle" aria-label="check your camera">
+                    <video id="greenRoomVideo" class="greenroom__video" autoplay muted playsinline></video>
+                    <span id="greenRoomHint" class="greenroom__hint">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                      <span id="greenRoomHintText">check your camera</span>
+                    </span>
+                  </button>
+                  <div class="greenroom__chips" role="group" aria-label="Join with mic and camera">
+                    <button id="greenRoomMicChip" type="button" class="greenroom__chip" aria-pressed="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+                      <span class="greenroom__chip-label">mic</span>
+                    </button>
+                    <button id="greenRoomCamChip" type="button" class="greenroom__chip" aria-pressed="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                      <span class="greenroom__chip-label">camera</span>
+                    </button>
+                  </div>
+                  <div id="greenRoomLooks" class="greenroom__looks">
+                    <button type="button" class="video-look-chip pressable" data-look="none" aria-pressed="true">none</button>
+                    <button type="button" class="video-look-chip pressable" data-look="bonfire-warm" aria-pressed="false">warm</button>
+                    <button type="button" class="video-look-chip pressable" data-look="studio" aria-pressed="false">crisp</button>
+                    <button type="button" class="video-look-chip pressable" data-look="mono" aria-pressed="false">mono</button>
+                    <button type="button" class="video-look-chip pressable" data-look="lowlight" aria-pressed="false">low-light</button>
+                    <button type="button" class="video-look-chip pressable" data-look="blur" aria-pressed="false">blur bg</button>
+                    <button id="greenRoomFineTune" type="button" class="greenroom__finetune">fine-tune in settings</button>
+                  </div>
+                </div>
+                <div id="lobbyPasscodeGate" class="lobby__passgate" hidden>
+                  <div class="lobby__passrow">
+                    <input id="lobbyPasscodeInput" class="lobby__passinput" type="password" placeholder="room passcode" autocomplete="off">
+                    <button id="lobbyPasscodeJoin" type="button" class="room-empty__join">join</button>
+                  </div>
+                  <div id="lobbyPasscodeError" class="lobby__passerror" hidden>wrong passcode.</div>
+                </div>
+                <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>join the room</button>
+                <div id="lobbyJoinError" class="lobby__joinerror" hidden></div>
+              </div>
+              <aside id="lobbyRail" class="lobby__rail" hidden aria-label="All rooms">
+                <div id="lobbyRoomsList" class="lobby__list"></div>
+                <button id="lobbyNewRoom" class="lobby__new pressable" type="button">+ new room</button>
+                <form id="lobbyCreateForm" class="lobby__form" hidden>
+                  <input id="lobbyCreateName" class="lobby__input" type="text" placeholder="room name" maxlength="80" autocomplete="off">
+                  <input id="lobbyCreatePasscode" class="lobby__input" type="password" placeholder="passcode (optional)" autocomplete="new-password">
+                  <label class="lobby__check"><input id="lobbyCreateGuests" type="checkbox"> allow guests</label>
+                  <button class="lobby__submit pressable" type="submit">create</button>
+                </form>
+              </aside>
             </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Stage participant">
@@ -21502,6 +22055,17 @@
             <span class="record-dot" aria-hidden="true"></span>
             <span class="record-label">Recording</span>
           </button>
+          <!-- member-only in-call invite — guests never see it (is-guest CSS)
+               and the server 401s the mint endpoint for guest sessions -->
+          <button id="inviteToggle" class="btn btn--ghost" type="button" aria-label="Invite" title="Invite" aria-haspopup="dialog" aria-expanded="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <line x1="19" x2="19" y1="8" y2="14"></line>
+              <line x1="22" x2="16" y1="11" y2="11"></line>
+            </svg>
+            <span class="invite-label">Invite</span>
+          </button>
           <button id="archiveMeeting" class="btn btn--primary" type="button" aria-label="Send notes" title="Send notes" disabled>
             <svg class="archive-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m22 2-7 20-4-9-9-4Z"></path>
@@ -21899,7 +22463,7 @@
             </section>
             <section data-settings-section="notifications" hidden aria-label="Notifications">
               <div class="voice-profile__label">phone notifications</div>
-              <p class="push-settings__intro">Get a buzz on your phone when something needs you — chat mentions, task proposals, agent milestones — even with Bonfire closed.</p>
+              <p class="push-settings__intro">Get a buzz on your phone when something needs you — chat mentions, task proposals, agent milestones — even with BonfireOS closed.</p>
               <label class="wake-word-setting">
                 <input type="checkbox" id="pushMasterToggle">
                 <span class="wake-word-setting__text">
@@ -21912,7 +22476,7 @@
                    install-prompt API, so the only path is Share → Add to Home
                    Screen, then launch standalone. Shown when Notification is
                    unavailable or we're an iOS browser not yet standalone. -->
-              <p class="push-ios-hint" id="pushIosHint" role="status" hidden>On iPhone or iPad: tap the <strong>Share</strong> button and choose <strong>Add to Home Screen</strong>, then open Bonfire from your home screen and enable this here. Push needs iOS 16.4 or later.</p>
+              <p class="push-ios-hint" id="pushIosHint" role="status" hidden>On iPhone or iPad: tap the <strong>Share</strong> button and choose <strong>Add to Home Screen</strong>, then open BonfireOS from your home screen and enable this here. Push needs iOS 16.4 or later.</p>
               <div class="push-kinds" id="pushKinds" hidden>
                 <div class="voice-profile__label">what buzzes</div>
                 <label class="push-setting"><input type="checkbox" data-push-kind="chat"><span>chat mentions &amp; channel posts</span></label>
@@ -21920,7 +22484,7 @@
                 <label class="push-setting"><input type="checkbox" data-push-kind="agent"><span>agent &amp; workflow updates</span></label>
                 <label class="push-setting"><input type="checkbox" data-push-kind="alert"><span>alerts</span></label>
                 <label class="push-setting"><input type="checkbox" data-push-kind="info"><span>everything else</span></label>
-                <label class="push-setting push-setting--away"><input type="checkbox" id="pushOnlyWhenAway"><span>only when I'm away — skip if I'm active in Bonfire on another device</span></label>
+                <label class="push-setting push-setting--away"><input type="checkbox" id="pushOnlyWhenAway"><span>only when I'm away — skip if I'm active in BonfireOS on another device</span></label>
                 <p class="av-saved" id="pushPrefsSaved" hidden>✓ saved</p>
               </div>
             </section>
@@ -21985,15 +22549,43 @@
       /* multi-room — the tab's room identity. The room socket dials
          ?room=<id> and the participant hello carries the passcode, so a
          signaling reconnect re-seats into the SAME room with the same
-         credential; cleared only in leaveRoom. var: read by the boot render
-         pass (renderRoomLandingState) before the boot block runs. */
+         credential; cleared only in leaveRoom. The lobby's "selected room"
+         IS this pre-join — no second selection variable. var: read by the
+         boot render pass (renderLobby) before the boot block runs. */
       var activeJoin = { roomId: 'office', passcode: '', guest: false }
+      /* passcodes verified this session (roomId → passcode), so re-visiting
+         the lobby never re-demands one the server already accepted. var:
+         boot-reachable through renderLobby. */
+      var lobbyPasscodeMemory = {}
+      /* the one open ⋯ popover element; render passes close it. var: same
+         boot-reach rule. */
+      var lobbyPopoverEl = null
+      /* re-anchors the portaled ⋯ popover when its body re-renders (menu →
+         consent → minted → links all change its height, and the flip-above
+         placement depends on it). var: same boot-reach rule. */
+      var lobbyPopoverResize = typeof ResizeObserver === 'function'
+        ? new ResizeObserver(() => positionLobbyPopover())
+        : null
+      /* the in-call Invite popover (meeting bar mount) — closed by the same
+         seams (outside click / Escape / tool switch / leave). var: closed
+         from applyToolState on the boot render pass. */
+      var invitePopoverEl = null
+      /* skip-identical-rebuild signatures for the lobby list + home strip
+         (both re-render on every updateOfficeHome pass). */
+      var lobbyListSignature = ''
+      var homeLiveSignature = ''
+      /* the room the passcode gate last rendered for — a selection change
+         clears the field + error, a re-render of the same room keeps them. */
+      var lobbyPasscodeGateRoomId = ''
       /* rooms list — hydrated by GET /rooms after the /auth/me await and kept
          live by the `rooms` office event; counters come ONLY from here, never
          from another room's participants frames. */
       var roomsList = []
       /* /?room=<id> boot param — preselects a room once the list hydrates. */
       var pendingRoomBootParam = ''
+      /* join intent parked across a stale-build reload (join-time version
+         gate) — the boot block restores it into pendingRoomBootParam. */
+      const staleJoinIntentKey = 'bonfire.staleJoinIntent.v1'
       /* guest boot — the /g page carries its capability in the URL FRAGMENT
          (never sent to the server, so never logged); the fragment is
          replaceState-stripped only AFTER a successful join. bonfire_guest is
@@ -22006,6 +22598,25 @@
       var guestSession = null
       /* non-empty flips the gate to the terminal "you've left" card */
       var guestExitMessage = ''
+      /* RW4 terminal — the room's name survives the session clear so the
+         takeover can say "you've left {room}."; guestExitEnded flips the
+         rejoin door to the honest ended line after a /guest/me 401. var:
+         read by the boot render pass (renderLoginMode). */
+      var guestExitRoomName = ''
+      var guestExitEnded = false
+      /* RW2 — POST /guest/lookup names the room on the gate before any join;
+         'expired' flips the honest dead-invite state (no live join button on
+         a dead link). var: read by the boot render pass (renderLoginMode). */
+      var guestInviteRoomName = ''
+      var guestInviteState = ''
+      /* RW2 join hardening — a media-watchdog failure flips the lobby join
+         button to `try again` with an inline error line; cleared on the next
+         attempt or selection change. var: boot-reachable through
+         syncRoomEntryAffordance. */
+      var roomEntryMediaFailed = false
+      /* RW2 green room — generation counter so a torn-down or superseded
+         preview acquire can never re-light the camera late. */
+      var greenRoomPreviewGen = 0
       /* office event socket — a second websocket on the same endpoint with an
          `office` hello. It follows auth (not room membership) and carries the
          signed-in-safe broadcast set; the room socket (ws) keeps its single
@@ -22130,7 +22741,8 @@
       const videoLookSavedHint = document.getElementById('videoLookSaved')
       const videoLookBatteryNote = document.getElementById('videoLookBatteryNote')
       const screenShareButton = document.getElementById('screenShare')
-      const copyRoomLinkButton = document.getElementById('copyRoomLink')
+      const inviteToggleButton = document.getElementById('inviteToggle')
+      const topbarRoomNameEl = document.getElementById('topbarRoomName')
       const recordMeetingButton = document.getElementById('recordMeeting')
       const recordMeetingLabel = recordMeetingButton.querySelector('.record-label')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
@@ -22375,11 +22987,9 @@
       const pipMute = document.getElementById('pipMute')
       const pipCamera = document.getElementById('pipCamera')
       const pipReturn = document.getElementById('pipReturn')
-      // room stage chrome + in-room board panel + scout caption pill
+      // room stage chrome + in-room board panel
       const stageMeetingLabel = document.getElementById('stageMeetingLabel')
       const stageOccupancy = document.getElementById('stageOccupancy')
-      const scoutCaptionPill = document.getElementById('scoutCaptionPill')
-      const scoutCaptionText = document.getElementById('scoutCaptionText')
       const roomBoardToggleButton = document.getElementById('roomBoardToggle')
       const roomBoardPanel = document.getElementById('roomBoardPanel')
       const roomBoardPanelList = document.getElementById('roomBoardPanelList')
@@ -22430,6 +23040,22 @@
       const roomEmptyName = document.getElementById('roomEmptyName')
       const roomEmptyMeta = document.getElementById('roomEmptyMeta')
       const roomEmptyJoinButton = document.getElementById('roomEmptyJoin')
+      // RW2 green room + join hardening handles
+      const greenRoomEl = document.getElementById('greenRoom')
+      const greenRoomTileEl = document.getElementById('greenRoomTile')
+      const greenRoomVideoEl = document.getElementById('greenRoomVideo')
+      const greenRoomHintTextEl = document.getElementById('greenRoomHintText')
+      const greenRoomMicChipEl = document.getElementById('greenRoomMicChip')
+      const greenRoomCamChipEl = document.getElementById('greenRoomCamChip')
+      const greenRoomFineTuneEl = document.getElementById('greenRoomFineTune')
+      const lobbyJoinErrorEl = document.getElementById('lobbyJoinError')
+      const guestMemberLinkEl = document.getElementById('guestMemberLink')
+      // RW4 guest terminal takeover — the form unmounts while the card shows
+      const loginFormEl = document.getElementById('loginForm')
+      const guestExitCardEl = document.getElementById('guestExitCard')
+      const guestExitTitleEl = document.getElementById('guestExitTitle')
+      const guestRejoinButton = document.getElementById('guestRejoin')
+      const guestExitEndedLineEl = document.getElementById('guestExitEndedLine')
       const officeAgenda = document.getElementById('officeAgenda')
       const officeRecentThreads = document.getElementById('officeRecentThreads')
       const officeAgentSummary = document.getElementById('officeAgentSummary')
@@ -22656,6 +23282,11 @@
       let signalingReconnectStartedAt = 0
       let isSignalReconnecting = false
       let lastSignalReconnectReason = ''
+      // seat-duel breaker: grant stamp + count of grants cut within seconds,
+      // so a session being replace-evicted over and over stops honestly
+      // instead of re-dialing (and re-evicting the other side) forever
+      let roomSessionGrantedAt = 0
+      let rapidSeatLossCount = 0
       let signalChain = Promise.resolve()
       let lastIceRestartRequestAt = 0
       let iceRestartAttempts = 0
@@ -22714,6 +23345,11 @@
       let previewLookPipeline = null
       let previewLookStream = null
       let previewLookRawTrack = null
+      /* RW2 — the <video> the shared preview pipeline currently drives:
+         the settings picker's own element by default, the green-room tile
+         when the lobby/gate holds the preview. var: boot-reachable through
+         the guest gate's render pass. */
+      var previewLookTargetEl = null
       let voiceFocusDiagnostics = {
         updatedAt: 0,
         inputRms: 0,
@@ -22985,6 +23621,45 @@
       videoLookChips.forEach(chip => {
         chip.addEventListener('click', () => setVideoLook(chip.dataset.look))
       })
+      // RW2 green room — the ONLY two seams that may light the preview
+      // camera: the tile tap and the cam chip flipping on. Both are explicit
+      // taps; nothing on a boot or render path acquires media.
+      if (greenRoomTileEl) {
+        greenRoomTileEl.addEventListener('click', () => {
+          if (greenRoomPreviewLive()) {
+            return
+          }
+          const prefs = loadJoinAVPreferences()
+          if (!prefs.cam) {
+            prefs.cam = true
+            saveJoinAVPreferences(prefs)
+            renderGreenRoom()
+          }
+          greenRoomAcquirePreview()
+        })
+      }
+      if (greenRoomMicChipEl) {
+        greenRoomMicChipEl.addEventListener('click', () => toggleGreenRoomChip('mic'))
+      }
+      if (greenRoomCamChipEl) {
+        greenRoomCamChipEl.addEventListener('click', () => toggleGreenRoomChip('cam'))
+      }
+      if (greenRoomFineTuneEl) {
+        greenRoomFineTuneEl.addEventListener('click', () => {
+          // the settings preview takes the camera over cleanly
+          stopGreenRoomPreview()
+          openSettings({ section: 'devices', restoreFocusTo: greenRoomFineTuneEl, allowLocked: true })
+        })
+      }
+      if (guestMemberLinkEl) {
+        guestMemberLinkEl.addEventListener('click', () => {
+          // demoted member door: the plain origin serves the member gate
+          window.location.assign('/')
+        })
+      }
+      if (guestRejoinButton) {
+        guestRejoinButton.addEventListener('click', rejoinGuestRoom)
+      }
       if (videoLookBrightness) {
         videoLookBrightness.addEventListener('input', () => setVideoLookBrightness(Number(videoLookBrightness.value)))
       }
@@ -23003,18 +23678,59 @@
         })
       })
       screenShareButton.addEventListener('click', toggleScreenShare)
-      copyRoomLinkButton.addEventListener('click', copyRoomLink)
-      document.getElementById('officeRoomsNewButton')?.addEventListener('click', () => {
-        const form = document.getElementById('officeRoomsCreateForm')
+      inviteToggleButton.addEventListener('click', toggleInvitePopover)
+      document.getElementById('lobbyNewRoom')?.addEventListener('click', () => {
+        const form = document.getElementById('lobbyCreateForm')
         if (!form) {
           return
         }
         form.hidden = !form.hidden
         if (!form.hidden) {
-          document.getElementById('officeRoomsCreateName')?.focus()
+          document.getElementById('lobbyCreateName')?.focus()
         }
       })
-      document.getElementById('officeRoomsCreateForm')?.addEventListener('submit', createRoomFromForm)
+      document.getElementById('lobbyCreateForm')?.addEventListener('submit', createRoomFromForm)
+      document.getElementById('lobbyPasscodeJoin')?.addEventListener('click', submitLobbyPasscode)
+      document.getElementById('lobbyPasscodeInput')?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          submitLobbyPasscode()
+        }
+      })
+      // the portaled ⋯ popover stays glued to its anchor row while the list
+      // scrolls under it / the window reflows
+      document.getElementById('lobbyRoomsList')?.addEventListener('scroll', () => positionLobbyPopover(), { passive: true })
+      window.addEventListener('resize', () => positionLobbyPopover())
+      // lobby dismissal seams: the ⋯ popover, the Invite popover, and the
+      // create form close on outside click and on Escape (tool switch closes
+      // via applyToolState)
+      document.addEventListener('pointerdown', event => {
+        if (lobbyPopoverEl && !lobbyPopoverEl.contains(event.target) && !event.target.closest?.('.lobby__more')) {
+          closeLobbyPopover()
+        }
+        if (invitePopoverEl && !invitePopoverEl.contains(event.target) && !event.target.closest?.('#inviteToggle')) {
+          closeInvitePopover()
+        }
+        const lobbyForm = document.getElementById('lobbyCreateForm')
+        if (lobbyForm && !lobbyForm.hidden && !lobbyForm.contains(event.target) && event.target.id !== 'lobbyNewRoom') {
+          lobbyForm.hidden = true
+        }
+      }, true)
+      document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') {
+          return
+        }
+        if (lobbyPopoverEl) {
+          closeLobbyPopover()
+        }
+        if (invitePopoverEl) {
+          closeInvitePopover()
+        }
+        const lobbyForm = document.getElementById('lobbyCreateForm')
+        if (lobbyForm && !lobbyForm.hidden) {
+          lobbyForm.hidden = true
+        }
+      })
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
@@ -23477,6 +24193,13 @@
       // home-screen install and routes push taps.
       pendingBellNotificationId = new URLSearchParams(window.location.search).get('bell') || ''
       pendingRoomBootParam = new URLSearchParams(window.location.search).get('room') || ''
+      try {
+        const staleJoinIntent = window.sessionStorage?.getItem(staleJoinIntentKey) || ''
+        if (staleJoinIntent) {
+          window.sessionStorage.removeItem(staleJoinIntentKey)
+          pendingRoomBootParam = pendingRoomBootParam || staleJoinIntent
+        }
+      } catch { /* private mode */ }
       registerBonfireServiceWorker()
       {
         const cachedIdentity = loadCachedIdentity()
@@ -23509,9 +24232,33 @@
         // preview poll; a cookie-holding tab (reload, deploy refresh)
         // resumes its seat without re-presenting the link token
         appShell.classList.add('is-guest')
+        // the gate is name + AV check + join on one screen (RW2): the shared
+        // green-room block re-parents into the login card for this tab
+        mountGreenRoomInGuestGate()
         if (!guestBootToken) {
           resumeGuestSession()
+        } else {
+          // a fresh invite names its room before any join — and a dead token
+          // gets the honest expired state instead of a dead join button
+          lookupGuestInvite()
         }
+        // recon-27: re-navigating a /g#token URL in-tab must return to the
+        // gate — the fragment is the capability, so a hash arrival re-runs
+        // the boot parse (and clears any terminal/expired state) instead of
+        // doing nothing
+        window.addEventListener('hashchange', () => {
+          const token = (location.hash.match(/^#([a-f0-9]{64})$/) || [])[1] || ''
+          if (!token) {
+            return
+          }
+          guestBootToken = token
+          guestExitMessage = ''
+          guestExitEnded = false
+          guestInviteState = ''
+          guestInviteRoomName = ''
+          lookupGuestInvite()
+          renderLoginMode()
+        })
       } else {
         loadParticipantPreview()
         window.setInterval(loadParticipantPreview, 15000)
@@ -24276,6 +25023,21 @@
         const guestGate = mode === 'guest' || mode === 'guest-exit'
         // a fresh gate starts quiet — stale connection status never greets you
         setLoginStatusPill('')
+        // RW4 terminal exclusivity: the takeover replaces the login form
+        // wholesale — no Face ID, no roster, no dead join pill beneath it
+        if (loginFormEl) {
+          loginFormEl.hidden = mode === 'guest-exit'
+        }
+        if (guestExitCardEl) {
+          guestExitCardEl.hidden = mode !== 'guest-exit'
+          if (mode === 'guest-exit') {
+            guestExitTitleEl.textContent = guestExitMessage
+            // one door: rejoin via /guest/me — or the honest ended line
+            guestRejoinButton.hidden = guestExitEnded
+            guestRejoinButton.disabled = false
+            guestExitEndedLineEl.hidden = !guestExitEnded
+          }
+        }
         loginAccountFieldEl.hidden = mode === 'reset' || guestGate
         if (mode !== 'reset' && !guestGate) {
           syncLoginAccountSelection({ preserveTypedEmail: Boolean(loginEmailInput.value.trim()) })
@@ -24285,6 +25047,12 @@
         // a resumed guest session already carries its confirmed name, so the
         // field stays down — straight to the one-tap join
         guestNameFieldEl.hidden = mode !== 'guest' || Boolean(guestSession)
+        // RW2: a dead invite (no resumable session) is an honest terminal —
+        // no name field, no live join button, just the expired line
+        const guestInviteExpired = mode === 'guest' && guestInviteState === 'expired' && !guestSession
+        if (guestInviteExpired) {
+          guestNameFieldEl.hidden = true
+        }
         passwordFieldEl.hidden = mode !== 'login'
         resetPasswordFieldEl.hidden = mode !== 'reset'
         resetPasswordConfirmFieldEl.hidden = mode !== 'reset'
@@ -24302,19 +25070,28 @@
         }
         if (loginSublineEl) {
           // the normal gate speaks through the tagline alone — the mode
-          // line appears for the emailed reset flow and the guest states
+          // line appears for the emailed reset flow and the guest gate
+          // (the guest-exit takeover carries its own message in the card)
           loginSublineEl.textContent = mode === 'reset' ? 'set a new password'
-            : mode === 'guest' ? (guestSession?.roomName ? `you're invited to ${guestSession.roomName}` : 'you were invited to a room')
-            : mode === 'guest-exit' ? guestExitMessage
+            : mode === 'guest' ? (guestInviteExpired
+              ? 'this invite has expired or been revoked.'
+              : (guestSession?.roomName || guestInviteRoomName)
+                ? `you're invited to ${guestSession?.roomName || guestInviteRoomName}`
+                : 'you were invited to a room')
             : ''
         }
-        joinAccessButton.hidden = mode === 'guest-exit'
+        joinAccessButton.hidden = mode === 'guest-exit' || guestInviteExpired
+        if (guestMemberLinkEl) {
+          // the demoted member door lives on the guest gate only
+          guestMemberLinkEl.hidden = mode !== 'guest'
+        }
+        // guest-exit renders no join pill at all (the takeover owns the card)
         joinAccessButton.textContent = mode === 'reset'
           ? 'Set new password'
-          : mode === 'guest-exit' ? 'Session ended'
           : mode === 'guest' ? (guestSession ? `Join ${guestSession.roomName || 'the room'}` : 'Join as a guest')
           : mode === 'authed' ? `Open office as ${authedUser.name}` : 'Enter your office'
         validateAccess()
+        renderGreenRoom()
         syncAuthenticatedShell()
         // the office event socket follows auth, not room membership: every
         // path that flips authedUser funnels through renderLoginMode
@@ -24448,6 +25225,35 @@
         }
       }
 
+      // RW2 — POST /guest/lookup {token} names the room on the gate ("you're
+      // invited to {room}"). Token holders only; the server answers one
+      // uniform 403 for every dead shape, in which case a live cookie session
+      // may still resume the seat (the link died AFTER a successful join).
+      async function lookupGuestInvite() {
+        try {
+          const result = await postAuthJSON('/guest/lookup', { token: guestBootToken })
+          if (result.ok) {
+            guestInviteRoomName = String(result.data?.roomName || '')
+            guestInviteState = 'named'
+            renderLoginMode()
+            return
+          }
+          const resumed = await fetch('/guest/me', { cache: 'no-store' }).catch(() => null)
+          if (resumed?.ok) {
+            guestSession = await resumed.json()
+            if (!guestNameInput.value.trim()) {
+              guestNameInput.value = guestSession.guestName || ''
+            }
+            renderLoginMode()
+            return
+          }
+          guestInviteState = 'expired'
+          renderLoginMode()
+        } catch {
+          // network blip — the gate stays usable; join re-validates anyway
+        }
+      }
+
       async function joinGuestRoom() {
         if (appShell.classList.contains('is-in-room')) {
           return
@@ -24479,11 +25285,52 @@
         joinRoom({ guest: true })
       }
 
-      // terminal: leave/denied/replaced all land here — never the office
-      function renderGuestExitState(message) {
-        guestExitMessage = String(message || guestExitMessage || "you've left the room.")
+      // terminal: leave/denied/replaced/room-closed all land here — never
+      // the office. The room's name survives the session clear so the
+      // takeover can say whose door just shut.
+      function renderGuestExitState(message, options) {
+        // gate unmount: the terminal card never keeps a hot preview camera
+        stopGreenRoomPreview()
+        guestExitRoomName = guestSession?.roomName || guestExitRoomName
+        guestExitMessage = String(message || guestExitMessage || `you've left ${guestExitRoomName || 'the room'}.`)
+        // a room_closed ejection is PERMANENT — the terminal must not offer
+        // a rejoin door that can only degrade to the expired-session line
+        // (ended: true skips straight to the honest no-rejoin copy). An
+        // argless re-render keeps the current verdict; a fresh message
+        // without the flag re-opens the door (leave/replace are rejoinable).
+        guestExitEnded = Boolean(options?.ended) || (guestExitEnded && !message)
         guestSession = null
         renderLoginMode()
+      }
+
+      // RW4 — the terminal's one door: re-run the /guest/me resume (the 12h
+      // cookie seat needs no retyped name), land back on the gate's green
+      // room + one-tap join. A 401 means the session truly ended: the door
+      // swaps for the honest mono line instead of a dead button.
+      async function rejoinGuestRoom() {
+        if (guestRejoinButton) {
+          guestRejoinButton.disabled = true
+        }
+        try {
+          const response = await fetch('/guest/me', { cache: 'no-store' })
+          if (!response.ok) {
+            guestExitEnded = true
+            renderLoginMode()
+            return
+          }
+          guestSession = await response.json()
+          if (!guestNameInput.value.trim()) {
+            guestNameInput.value = guestSession.guestName || ''
+          }
+          guestExitMessage = ''
+          guestExitEnded = false
+          renderLoginMode()
+        } catch {
+          // network blip — the door stays open for another try
+          if (guestRejoinButton) {
+            guestRejoinButton.disabled = false
+          }
+        }
       }
 
       /* ---------- office event socket ----------
@@ -24942,6 +25789,9 @@
           saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
 	          loadScoutChatThreads()
+	          // fresh sign-in hydrates the lobby + home strip immediately —
+	          // never an empty rooms surface until reload
+	          loadRoomsList()
 	          // Pre-existing unread items must badge the bell before the panel
 	          // is ever opened.
 	          loadNotifications()
@@ -25009,6 +25859,9 @@
 	          saveCachedIdentity(authedUser.name)
 	          setActiveTool('office')
 	          loadScoutChatThreads()
+	          // fresh sign-in hydrates the lobby + home strip immediately —
+	          // never an empty rooms surface until reload
+	          loadRoomsList()
 	          // Pre-existing unread items must badge the bell before the panel
 	          // is ever opened.
 	          loadNotifications()
@@ -25248,7 +26101,7 @@
           return
         }
         try {
-          const response = await fetch('/participants', { cache: 'no-store' })
+          const response = await fetch(`/participants?room=${encodeURIComponent(activeJoin.roomId || 'office')}`, { cache: 'no-store' })
           if (!response.ok) {
             return
           }
@@ -25617,7 +26470,7 @@
       function updateParticipantPreviewText() {
         // keep the room prejoin empty state in sync with the roster
         if (appShell.dataset.tool === 'office') {
-          renderRoomLandingState()
+          renderLobby()
         }
         if (!waitingParticipants) {
           return
@@ -25666,7 +26519,11 @@
             // "you've left" card, never the member office
             renderGuestExitState()
           } else {
-            setActiveTool('office')
+            // §3.8: stepping out lands members on the LOBBY with the just-left
+            // room still selected — the old office bounce read as a glitch.
+            // (setRoomView(false) only ever runs from leaveRoom; sign-out
+            // still lands on the office via syncAuthenticatedShell.)
+            setActiveTool('room')
           }
         }
         syncScoutChatToRoomView(inRoom)
@@ -25676,9 +26533,10 @@
         syncAuthenticatedShell()
         syncVoiceIslandVisibility()
         syncToolTopbar()
-        syncScoutCaption()
         if (!inRoom) {
           setRoomBoardPanel(false)
+          // a minted one-time token never outlives the seat
+          closeInvitePopover()
         }
       }
 
@@ -25692,13 +26550,21 @@
         if (tool !== 'board') {
           lastNonBoardTool = tool
         }
+        // a tool switch dismisses the lobby's ⋯ popover and the in-call
+        // Invite popover — neither may linger (or hold a minted token) over
+        // the next surface
+        closeLobbyPopover()
+        closeInvitePopover()
+        if (tool !== 'room') {
+          // never keep a hot preview camera on a surface the user left
+          stopGreenRoomPreview()
+        }
         toolButtons.forEach(button => {
           button.setAttribute('aria-pressed', button.dataset.tool === tool ? 'true' : 'false')
         })
         syncToolTopbar()
         applyStatusPillForTool()
         renderPipMeeting()
-        syncScoutCaption()
         syncChatThreadPolling()
         if (tool === 'office') {
           updateOfficeHome()
@@ -25730,6 +26596,8 @@
         }
         if (tool === 'room') {
           stopPrivateRealtimeVoiceForRoom()
+          // room-tool activation renders the lobby (hero + rooms rail)
+          renderLobby()
         } else {
           syncVoiceIslandVisibility()
         }
@@ -25767,7 +26635,12 @@
           case 'office':
             return headerDateLabel()
           case 'room':
-            return appShell.classList.contains('is-in-room') ? roomListeningLabel() : 'not connected'
+            // spec 5 item 13: exactly ONE "the room is listening" pill in-call
+            // — the topbar status pill owns the listening state, so the
+            // subtitle names the ROOM instead of mirroring the pill
+            return appShell.classList.contains('is-in-room')
+              ? (String(activeJoinRoomRecord()?.name || guestSession?.roomName || '').toLowerCase() || 'the office')
+              : 'not connected'
           case 'chat':
             return chatThreadIsChannel(selectedScoutChatThread())
               ? 'public channel · everyone in the office'
@@ -30256,7 +31129,7 @@
         } else if (action === 'undo-delete') {
           undoDeleteButton.disabled || undoDeleteButton.click()
         } else if (action === 'copy-link') {
-          copyRoomLinkButton.click()
+          copyRoomLink()
         } else if (action === 'back') {
           setBoardExpanded(false)
         }
@@ -30268,7 +31141,19 @@
         appShell.classList.toggle('is-room-entering', roomEntryInProgress)
         if (roomEmptyJoinButton) {
           roomEmptyJoinButton.disabled = roomEntryInProgress
-          roomEmptyJoinButton.textContent = roomEntryInProgress ? 'connecting…' : 'join the room'
+          // a media-watchdog failure reads `try again` until the next attempt
+          roomEmptyJoinButton.textContent = roomEntryInProgress ? 'connecting…'
+            : roomEntryMediaFailed ? 'try again'
+            : 'join the room'
+        }
+        // the lobby passcode gate's join reads busy the same way — it is the
+        // primary whenever the gate replaces the plain join button
+        const lobbyGateJoin = document.getElementById('lobbyPasscodeJoin')
+        if (lobbyGateJoin) {
+          lobbyGateJoin.disabled = roomEntryInProgress
+          lobbyGateJoin.textContent = roomEntryInProgress ? 'connecting…'
+            : roomEntryMediaFailed ? 'try again'
+            : 'join'
         }
       }
 
@@ -30298,10 +31183,17 @@
         }
         const voiceOnly = Boolean(options.voiceOnly)
         stopPrivateRealtimeVoiceForRoom()
+        clearLobbyJoinError()
         roomEntryInProgress = true
         roomEntryStartedAt = Date.now()
         syncRoomEntryAffordance()
         syncOSAssistantAvailability()
+        if (await joinBlockedByStaleBuild()) {
+          // the intent is parked and the tab reloads — seat on fresh JS instead
+          setRoomEntryInProgress(false)
+          syncOSAssistantAvailability()
+          return
+        }
         if (voiceOnly) {
           setRealtimeVoiceMode('room')
           realtimeVoiceOnlyPending = true
@@ -30375,6 +31267,36 @@
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', currentParticipantName)
         updateHearthParticipants()
+
+        // RW2 join hardening: media is acquired BEFORE the websocket dials,
+        // so a wedged getUserMedia can never hold a phantom seat — the seat
+        // is only taken after media resolves. The green-room preview releases
+        // first so it never fights the join for the device.
+        stopGreenRoomPreview()
+        if (!localStream?.getTracks?.().some(liveTrack)) {
+          setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
+          let captureStream
+          try {
+            captureStream = await joinMediaWithWatchdog(voiceOnly)
+            isMicMuted = false
+            isCameraOff = voiceOnly
+            localStream = await createLocalMediaStream(captureStream)
+          } catch (error) {
+            captureStream?.getTracks?.().forEach(track => { try { track.stop() } catch (_) {} })
+            failRoomEntryForMedia(error, { voiceOnly })
+            return
+          }
+        }
+        // bonfire:joinAV carry — read AFTER media resolves, applied through
+        // the real mute machinery so the meeting bar reflects it. Tracks are
+        // still acquired when off (fast unmute mid-call, the shipped model).
+        const joinAV = loadJoinAVPreferences()
+        if (!voiceOnly && !joinAV.cam) {
+          setLocalCameraOff(true)
+        }
+        if (!joinAV.mic) {
+          setLocalMute(true)
+        }
         setLog('checking room access')
 
         try {
@@ -30385,13 +31307,98 @@
         }
       }
 
+      // The 12s join-media watchdog (RW2): getUserMedia either answers or the
+      // join fails honestly — no more is-room-entering forever. A capture that
+      // resolves AFTER the timeout is stopped on arrival, never left hot.
+      function joinMediaWithWatchdog(voiceOnly) {
+        return new Promise((resolve, reject) => {
+          let settled = false
+          const watchdog = window.setTimeout(() => {
+            settled = true
+            reject(new Error("couldn't reach your camera or microphone — check permissions and try again."))
+          }, 12000)
+          const acquiring = voiceOnly ? getPreferredAudioOnlyUserMedia() : getPreferredUserMedia()
+          acquiring.then(stream => {
+            if (settled) {
+              stream.getTracks().forEach(track => { try { track.stop() } catch (_) {} })
+              return
+            }
+            settled = true
+            window.clearTimeout(watchdog)
+            resolve(stream)
+          }, error => {
+            if (settled) {
+              return
+            }
+            settled = true
+            window.clearTimeout(watchdog)
+            reject(error)
+          })
+        })
+      }
+
+      // Honest lobby failure state: the entry flag clears (never a stuck
+      // is-room-entering shell), the join button flips to `try again`, and the
+      // reason prints where the user is looking — the lobby hero for members,
+      // the gate hint for guests.
+      function failRoomEntryForMedia(error, options = {}) {
+        const message = "couldn't reach your camera or microphone — check permissions and try again."
+        console.warn('Join media acquisition failed', error)
+        reportClientMediaError('join_media_acquire', error)
+        setConnectionState('idle', 'not connected')
+        roomEntryMediaFailed = true
+        setRoomEntryInProgress(false)
+        syncOSAssistantAvailability()
+        joinButton.disabled = false
+        joinAccessButton.disabled = false
+        updatePasskeyButton()
+        if (options.voiceOnly) {
+          setRealtimeVoiceMode('idle')
+          realtimeVoiceOnlyPending = false
+          realtimeVoiceStartedRoom = false
+          setVoiceIslandState('error', message)
+        }
+        showLobbyJoinError(message)
+        if (guestMode) {
+          accessState.textContent = 'locked'
+          accessHint.textContent = message
+        }
+        setLog(message)
+      }
+
+      function showLobbyJoinError(message) {
+        if (!lobbyJoinErrorEl) {
+          return
+        }
+        lobbyJoinErrorEl.textContent = String(message || '')
+        lobbyJoinErrorEl.hidden = !lobbyJoinErrorEl.textContent
+      }
+
+      function clearLobbyJoinError() {
+        roomEntryMediaFailed = false
+        if (lobbyJoinErrorEl) {
+          lobbyJoinErrorEl.textContent = ''
+          lobbyJoinErrorEl.hidden = true
+        }
+        syncRoomEntryAffordance()
+      }
+
       function openRoomWebSocket(options = {}) {
         const reconnect = Boolean(options.reconnect)
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-        // the room identity rides the dial; a reconnect re-dials the SAME room
-        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket?room=${encodeURIComponent(activeJoin.roomId || 'office')}`)
+        // the room identity rides the dial; a reconnect re-dials the SAME room.
+        // A guest tab dials as=guest so the server seats it on its GUEST
+        // session even when this browser also holds a member session — the
+        // member cookie must never silently take the seat under the tab's
+        // shared endpoint id (that collision made two same-browser tabs evict
+        // each other in an endless seat duel).
+        const socket = new WebSocket(`${scheme}://${window.location.host}/websocket?room=${encodeURIComponent(activeJoin.roomId || 'office')}${guestMode ? '&as=guest' : ''}`)
         ws = socket
         socket.onopen = () => {
+          // handshake truth for onclose: a socket that NEVER opened was
+          // refused by the server (403 on an archived room / revoked access),
+          // not interrupted — the close handler must not reconnect-churn it
+          socket.__everOpened = true
           if (ws !== socket) {
             return
           }
@@ -30444,7 +31451,7 @@
           if (ws === socket) {
             ws = undefined
           }
-          handleRoomWebSocketClose(event, { reconnect })
+          handleRoomWebSocketClose(event, { reconnect, opened: Boolean(socket.__everOpened) })
         }
         socket.onerror = () => {
           setLog(reconnect ? 'room signal reconnect failed' : 'websocket error')
@@ -30477,6 +31484,44 @@
 
       function handleRoomWebSocketClose(event, options = {}) {
         if (isLeavingRoom) {
+          return
+        }
+        // Seat-duel breaker: a socket that keeps being granted and then cut
+        // within seconds is being replace-evicted by another live session
+        // (another tab holding this browser's endpoint id). Reconnecting only
+        // evicts the other side back — after three rapid grant→cut cycles,
+        // give up honestly instead of churning deaf forever. (The server now
+        // also sends session_replaced before the cut; this is the client-side
+        // belt for a duel against anything that still cuts silently.)
+        if (roomSessionGrantedAt && Date.now() - roomSessionGrantedAt < 2000) {
+          rapidSeatLossCount += 1
+        } else {
+          rapidSeatLossCount = 0
+        }
+        roomSessionGrantedAt = 0
+        if (rapidSeatLossCount >= 3) {
+          rapidSeatLossCount = 0
+          logRoomRecovery('seat_duel_detected', { code: event?.code })
+          failSignalingReconnect('this seat was taken over by another session in this browser')
+          return
+        }
+        // §3.1 never-a-silent-close: an INITIAL dial the server refused (the
+        // socket never opened — an archived room, revoked access, a dead
+        // server) must not enter the reconnect churn; six silent 403s later
+        // failSignalingReconnect's setLog is invisible from the lobby. Fail
+        // fast where the user is looking — the lobby hero error line for
+        // members, the gate hint for guests — and refresh the snapshot so a
+        // closed room's selection falls back to the office.
+        if (!options.reconnect && !options.opened) {
+          const refusedMessage = "the room didn't let you in — it may have been closed."
+          logRoomRecovery('initial_dial_refused', { code: event?.code })
+          leaveRoom()
+          showLobbyJoinError(refusedMessage)
+          if (guestMode) {
+            accessState.textContent = 'locked'
+            accessHint.textContent = refusedMessage
+          }
+          setLog(refusedMessage)
           return
         }
         if (!roomCanReconnectSignal()) {
@@ -30526,9 +31571,6 @@
         setLog(lastSignalReconnectReason)
         accessState.textContent = 'restoring'
         accessHint.textContent = 'keeping your mic and camera while the room reconnects.'
-        // D11 — the socket is down, so the caption pill must drop with it
-        // (no fake "the room is listening" during the reconnect window)
-        syncScoutCaption()
         logRoomRecovery('signal_reconnect_start', { reason: lastSignalReconnectReason })
       }
 
@@ -30599,6 +31641,10 @@
         leaveRoom()
         setConnectionState('offline', 'room offline')
         setLog('room connection lost; join again when ready')
+        // the give-up lands the member back on the LOBBY (leaveRoom above) —
+        // the reason must print there too, not only in the invisible meeting
+        // bar log (§3.1 never a silent close)
+        showLobbyJoinError('room connection was lost — join again when ready.')
         accessState.textContent = 'offline'
         accessHint.textContent = 'room connection was lost — join again when ready.'
       }
@@ -30783,16 +31829,24 @@
         }
 
         const voiceOnly = Boolean(options.voiceOnly)
-        const canReuseLocalMedia = Boolean((options.reuseLocalMedia || isSignalReconnecting) && localStream?.getTracks?.().some(liveTrack))
-        setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
+        // RW2: joinRoom acquires media BEFORE the dial, so a fresh grant (like
+        // a reconnect grant) reuses the live pre-acquired stream; the acquire
+        // branch survives only as a safety net for a grant whose tracks died
+        // mid-flight. options.reuseLocalMedia keeps the reconnect seam's shape.
+        const canReuseLocalMedia = Boolean(localStream?.getTracks?.().some(liveTrack))
         if (!canReuseLocalMedia) {
+          setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
           isMicMuted = false
           isCameraOff = voiceOnly
           const captureStream = voiceOnly ? await getPreferredAudioOnlyUserMedia() : await getPreferredUserMedia()
           localStream = await createLocalMediaStream(captureStream)
         }
+        // honest mute derivation: the joinAV carry and mid-call mutes both
+        // live in track.enabled — never force-unmute on a (re)connect
         isMicMuted = localStream.getAudioTracks().length === 0
+          || localStream.getAudioTracks().every(track => !track.enabled)
         isCameraOff = voiceOnly || localStream.getVideoTracks().length === 0
+          || localStream.getVideoTracks().every(track => !track.enabled)
         setVideoElementStream(localVideo, localStream, { local: true, force: true })
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
@@ -30860,7 +31914,6 @@
         canEditBoard = true
         updateRoomRecordingControls()
         updateBoardControls()
-        syncScoutCaption()
         ws.send(JSON.stringify({ event: 'media_ready', data: '{}' }))
         publishParticipantMediaState()
         startRoomClock()
@@ -31379,6 +32432,7 @@
         const payload = {
           sentAt: new Date().toISOString(),
           laggy: Boolean(laggy),
+          client: { version: buildVersionGuard.booted },
           browser: {
             safari: safariBrowser,
             userAgent: String(navigator.userAgent || '').slice(0, 180),
@@ -32005,10 +33059,21 @@
       // pipeline so there is zero preview/reality gap. When you are already in a room
       // we clone the raw camera so the preview never fights the outbound capture for
       // the device; otherwise we acquire a preview-only camera and release it on close.
-      async function startVideoLookPreview() {
-        if (!videoLookPreview || previewLookStream || previewLookPipeline) {
+      // RW2 generalization: an optional target <video> lets the green room reuse the
+      // whole pipeline; no argument keeps the settings preview behavior unchanged.
+      // One preview at a time — retargeting releases the previous surface first.
+      async function startVideoLookPreview(targetEl) {
+        const target = targetEl || videoLookPreview
+        if (!target) {
           return
         }
+        if (previewLookStream || previewLookPipeline || previewLookRawTrack) {
+          if (previewLookTargetEl === target) {
+            return
+          }
+          stopVideoLookPreview()
+        }
+        previewLookTargetEl = target
         let rawTrack = null
         try {
           const liveRaw = localVideoLookRawTrack && liveTrack(localVideoLookRawTrack)
@@ -32033,7 +33098,7 @@
       }
 
       async function applyLookToPreview() {
-        if (!videoLookPreview || !previewLookRawTrack) {
+        if (!previewLookTargetEl || !previewLookRawTrack) {
           return
         }
         const { look, intensity } = videoLookSettingsValue()
@@ -32063,7 +33128,7 @@
                 previewLookPipeline.setLook(look, intensity, videoLookAdjust)
               }
               if (processed) {
-                videoLookPreview.srcObject = new MediaStream([processed])
+                previewLookTargetEl.srcObject = new MediaStream([processed])
               } else {
                 // tier collapsed to none between the check and start — CSS fallback.
                 stopPreviewPipelineOnly()
@@ -32071,7 +33136,7 @@
                 return
               }
             }
-            videoLookPreview.style.filter = 'none'
+            previewLookTargetEl.style.filter = 'none'
             playPreviewElement()
             return
           } catch (error) {
@@ -32083,19 +33148,22 @@
       }
 
       function showPreviewWithCssFilter(mod, look, intensity) {
-        if (!videoLookPreview || !previewLookRawTrack) {
+        if (!previewLookTargetEl || !previewLookRawTrack) {
           return
         }
         stopPreviewPipelineOnly()
-        videoLookPreview.srcObject = new MediaStream([previewLookRawTrack])
-        videoLookPreview.style.filter = mod ? mod.cssFilterForLook(look, intensity) : 'none'
+        previewLookTargetEl.srcObject = new MediaStream([previewLookRawTrack])
+        previewLookTargetEl.style.filter = mod ? mod.cssFilterForLook(look, intensity) : 'none'
         playPreviewElement()
       }
 
       function playPreviewElement() {
-        videoLookPreview.muted = true
-        videoLookPreview.playsInline = true
-        videoLookPreview.play?.().catch(() => {})
+        if (!previewLookTargetEl) {
+          return
+        }
+        previewLookTargetEl.muted = true
+        previewLookTargetEl.playsInline = true
+        previewLookTargetEl.play?.().catch(() => {})
       }
 
       function stopPreviewPipelineOnly() {
@@ -32107,9 +33175,9 @@
 
       function stopVideoLookPreview() {
         stopPreviewPipelineOnly()
-        if (videoLookPreview) {
-          videoLookPreview.srcObject = null
-          videoLookPreview.style.filter = 'none'
+        if (previewLookTargetEl) {
+          previewLookTargetEl.srcObject = null
+          previewLookTargetEl.style.filter = 'none'
         }
         if (previewLookStream) {
           previewLookStream.getTracks().forEach(track => { try { track.stop() } catch (_) {} })
@@ -32121,6 +33189,7 @@
           try { previewLookRawTrack.stop() } catch (_) {}
           previewLookRawTrack = null
         }
+        previewLookTargetEl = null
       }
 
       // Render the look picker: chips reflect the saved look, sliders ARE the presets
@@ -32971,9 +34040,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const inRoom = roomMediaActive()
           topbarRoomPill.className = 'topbar__meta-item'
           topbarRoomPill.dataset.state = inRoom ? 'room' : 'waiting'
+          // the count includes THIS seat — never `in room · 0` while seated
           topbarRoomState.textContent = inRoom
-            ? `in room · ${Math.max(occupiedSeats, participantsInRoom.length)}`
+            ? `in room · ${Math.max(1, occupiedSeats, participantsInRoom.length)}`
             : 'waiting room'
+        }
+        // in-call the topbar names the ROOM (meeting identity stays on the
+        // stage meta) — activeJoinRoomRecord() with the office fallback
+        if (topbarRoomNameEl) {
+          topbarRoomNameEl.textContent = roomMediaActive()
+            ? (String(activeJoinRoomRecord()?.name || '').toLowerCase() || 'the office')
+            : ''
         }
 
         // stage chrome — the room carries its own meeting · timer + occupancy
@@ -32982,7 +34059,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           stageMeetingLabel.textContent = roomStartedAt ? `${project} · ${elapsed}` : project
         }
         if (stageOccupancy) {
-          stageOccupancy.textContent = `in room · ${Math.max(occupiedSeats, participantsInRoom.length)}`
+          stageOccupancy.textContent = `in room · ${Math.max(roomMediaActive() ? 1 : 0, occupiedSeats, participantsInRoom.length)}`
         }
 
         // the header live pill ticks with the same clock
@@ -33587,19 +34664,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderBoard(changes)
         updateBoardControls()
         renderRoomBoardPanel()
-        // real board activity feeds the room caption pill (D11)
-        for (const cardId of changes.fresh) {
-          const freshCard = cards.find(card => card.id === cardId)
-          if (freshCard?.title) {
-            pushScoutCaption(`new card · ${freshCard.title}`)
-          }
-        }
-        for (const cardId of changes.drafted ?? []) {
-          const draftCard = cards.find(card => card.id === cardId)
-          if (draftCard?.title) {
-            pushScoutCaption(`card drafted · ${draftCard.title}`)
-          }
-        }
         changes.toasts.forEach(showToast)
         changes.commentPreviews.forEach(showCommentPreview)
       }
@@ -33729,7 +34793,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         buildVersionGuard.scheduled = true
         try { window.sessionStorage?.setItem(reloadedForVersionKey, version) } catch { /* private mode */ }
-        showToast({ text: 'Bonfire updated — refreshing…', kind: 'note' })
+        showToast({ text: 'BonfireOS updated — refreshing…', kind: 'note' })
         window.setTimeout(() => {
           try { window.location.reload() } catch { /* navigation blocked */ }
         }, 2200)
@@ -33745,6 +34809,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         buildVersionGuard.pending = ''
         hideUpdateBanner()
         scheduleBuildReload(version)
+      }
+
+      // Join-time staleness gate: the office socket's build push can lose the
+      // wake→tap-join race, seating a tab on old JS against a new server. Ask
+      // /healthz right before seating; on a mismatch park the join intent and
+      // reload now instead. Fails open — any fetch error/timeout joins as
+      // today — and leaves the in-call deferral doctrine untouched.
+      async function joinBlockedByStaleBuild() {
+        if (!buildVersionGuard.booted) {
+          return false
+        }
+        let version = ''
+        try {
+          const controller = new AbortController()
+          const timer = window.setTimeout(() => controller.abort(), 1500)
+          const response = await fetch('/healthz', { cache: 'no-store', signal: controller.signal })
+          window.clearTimeout(timer)
+          if (!response.ok) {
+            return false
+          }
+          version = String((await response.json())?.version || '').trim()
+        } catch {
+          return false
+        }
+        if (!version || version === buildVersionGuard.booted) {
+          return false
+        }
+        // A still-propagating deploy already reloaded this tab for that build
+        // once — joining stale beats a reload loop.
+        let already = ''
+        try { already = window.sessionStorage?.getItem(reloadedForVersionKey) || '' } catch { already = '' }
+        if (already === version) {
+          return false
+        }
+        try { window.sessionStorage?.setItem(staleJoinIntentKey, activeJoin.roomId || 'office') } catch { /* private mode */ }
+        scheduleBuildReload(version)
+        return true
       }
 
       function showUpdateBanner() {
@@ -33796,6 +34897,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'meeting':
           case 'memory_transcript':
           case 'room_chat':
+          case 'room_closed':
             if (kanbanEventRoomId(message.data) !== (activeJoin.roomId || 'office')) {
               return
             }
@@ -33980,6 +35082,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             break
           case 'session_replaced':
             handleSessionReplaced(String(message.data || 'this browser session was replaced.'))
+            break
+          case 'room_closed':
+            handleRoomClosed()
             break
           case 'media_disconnected':
             handleMediaDisconnected(String(message.data || 'media connection ended.'))
@@ -34815,15 +35920,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           createdAt: event?.createdAt || new Date().toISOString()
         })
 
-        // real scout activity rides the room caption pill (D11)
-        if (event?.kind === 'query') {
-          const explicit = text.match(/^([A-Z][A-Za-z]+)\s*:/)
-          const who = participantDisplayNameInRoom(explicit?.[1]) || 'the room'
-          pushScoutCaption(`answering ${who} · ${text.replace(/^([A-Z][A-Za-z]+)\s*:\s*/, '')}`)
-        } else if (event?.kind === 'answer') {
-          pushScoutCaption(`noted · ${scoutVoice(text)}`)
-        }
-
         if (event?.kind === 'status') {
           handleStatusMessage(text)
         } else {
@@ -35419,6 +36515,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             }
             freezeState.lastRepairAt = now
           }
+          const attachedTrack = video?.srcObject?.getVideoTracks?.().find(liveTrack)
+          if (attachedTrack && attachedTrack.id === videoTrack.id
+              && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+            // The right track is already attached and the element has rendered
+            // frames — keep the recovery signaling (PLI via the track refresh)
+            // without a dispose+recreate that blinks the tile.
+            requestParticipantTrackRefresh(reason || 'stalled remote video')
+            continue
+          }
           const keys = remoteKeysForTile(tile)
           const stream = remoteVideoStreamForTrack(video?.srcObject || new MediaStream([videoTrack]), videoTrack)
           disposeRemoteTile(tile)
@@ -35998,10 +37103,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (ws) {
           ws.onclose = null
         }
+        // a passcode denial belongs on the lobby gate (shake + inline error),
+        // never a silent close or the sign-in panel — the member IS signed
+        // in. Captured before leaveRoom resets the room identity.
+        const passcodeDenied = !guestMode && /passcode/i.test(String(message || ''))
+        const deniedRoomId = activeJoin.roomId || 'office'
         leaveRoom()
         if (guestMode) {
           // terminal card with the server's reason — never the member gate
           renderGuestExitState(message)
+          return
+        }
+        if (passcodeDenied) {
+          activeJoin.roomId = deniedRoomId
+          delete lobbyPasscodeMemory[deniedRoomId]
+          // the denial lands on the LOBBY with the denied room still selected
+          // (leaveRoom now preserves both, but this seam must not depend on it)
+          setActiveTool('room')
+          renderLobby()
+          showLobbyPasscodeError(message)
           return
         }
         if (wasRealtimeVoice) {
@@ -36028,14 +37148,69 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         setLog(message)
       }
 
+      // §3.7 archive close — the seated room was archived out from under this
+      // tab. The seat is already dead server-side; members step back into the
+      // lobby with a calm dismissible notice (the multi-device chip idiom),
+      // guests get the terminal card with the same message.
+      function handleRoomClosed() {
+        if (ws) {
+          ws.onclose = null
+        }
+        leaveRoom()
+        if (guestMode) {
+          // ended: a closed room can never be rejoined — the terminal skips
+          // the rejoin door instead of offering a button that only degrades
+          renderGuestExitState('this room was closed.', { ended: true })
+          return
+        }
+        // the closed room is gone from the list — selection falls back to
+        // the office instead of pointing at a door that no longer exists
+        activeJoin = { roomId: 'office', passcode: '', guest: false }
+        setActiveTool('room')
+        renderLobby()
+        showRoomClosedNotice()
+      }
+
+      let roomClosedChip = null
+      function showRoomClosedNotice() {
+        if (!roomClosedChip) {
+          const chip = document.createElement('div')
+          chip.className = 'multi-device-chip room-closed-chip'
+          chip.setAttribute('role', 'status')
+          const label = document.createElement('span')
+          label.className = 'multi-device-chip__label'
+          label.textContent = 'this room was closed.'
+          const dismiss = document.createElement('button')
+          dismiss.type = 'button'
+          dismiss.className = 'multi-device-chip__dismiss'
+          dismiss.setAttribute('aria-label', 'dismiss')
+          dismiss.textContent = '×'
+          dismiss.addEventListener('click', () => {
+            chip.hidden = true
+          })
+          chip.append(label, dismiss)
+          document.body.appendChild(chip)
+          roomClosedChip = chip
+        }
+        roomClosedChip.hidden = false
+      }
+
       async function handleAccessGranted(participant) {
         const name = participant?.name || currentParticipantName || 'participant'
         const voiceOnly = Boolean(realtimeVoiceOnlyPending)
         const reconnectingSignal = isSignalReconnecting
         currentParticipantName = name
+        // seat-duel breaker stamp: a close arriving within seconds of this
+        // grant counts as a replace-eviction, not a network blip
+        roomSessionGrantedAt = Date.now()
         if (!guestMode) {
           // guest seat names never pollute the member identity cache
           saveCachedIdentity(name)
+        }
+        if (!guestMode && activeJoin.passcode) {
+          // the server accepted this passcode — the lobby gate stays down
+          // for the rest of the session (selection re-arms it via memory)
+          lobbyPasscodeMemory[activeJoin.roomId || 'office'] = activeJoin.passcode
         }
         localVideoLabel.textContent = 'you'
         localVideo.closest('.video-tile')?.setAttribute('data-participant', name)
@@ -42296,11 +43471,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       async function copyRoomLink() {
         // canonical internal link, never the address bar — a guest tab's URL
-        // could still carry admission in the fragment (§6.3)
+        // could still carry admission in the fragment (§6.3). The Invite
+        // popover's teammates row is the caller and owns the confirm state.
         const url = `${window.location.origin}/?room=${encodeURIComponent(activeJoin.roomId || 'office')}`
         try {
           await navigator.clipboard.writeText(url)
-          flashCopyConfirm(copyRoomLinkButton)
           setLog('room link copied')
         } catch {
           const input = document.createElement('input')
@@ -42312,7 +43487,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           input.select()
           document.execCommand('copy')
           input.remove()
-          flashCopyConfirm(copyRoomLinkButton)
           setLog('room link copied')
         }
       }
@@ -42385,8 +43559,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setRoomListeningConnectionState()
         }
         renderAssistantMessages()
-        // the caption pill never fakes listening — it follows the real state
-        syncScoutCaption()
         // the phone header sub mirrors listening / not listening
         syncToolTopbar()
       }
@@ -43156,69 +44328,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          Present only while the assistant is genuinely connected: in the room,
          socket open, and the room actually listening. Real scout activity
          rotates through; "the room is listening" is the ambient fallback. */
-      let scoutCaptionEvents = []
-      let scoutCaptionTimer = 0
-      let scoutCaptionIndex = 0
-
-      function scoutCaptionLive() {
-        return appShell.classList.contains('is-in-room')
-          && (appShell.dataset.tool || 'office') === 'room'
-          && ws?.readyState === WebSocket.OPEN
-          && roomRecordingEnabled
-      }
-
-      function shortScoutCaption(text) {
-        const line = String(text || '').replace(/\s+/g, ' ').trim()
-        return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line
-      }
-
-      function pushScoutCaption(text) {
-        const line = shortScoutCaption(text)
-        if (!line) {
-          return
-        }
-        scoutCaptionEvents.push({ text: line, at: Date.now() })
-        if (scoutCaptionEvents.length > 6) {
-          scoutCaptionEvents = scoutCaptionEvents.slice(-6)
-        }
-        if (scoutCaptionLive() && scoutCaptionText) {
-          scoutCaptionText.textContent = line
-        }
-      }
-
-      function rotateScoutCaption() {
-        if (!scoutCaptionText) {
-          return
-        }
-        const now = Date.now()
-        scoutCaptionEvents = scoutCaptionEvents.filter(entry => now - entry.at < 30000)
-        const pool = ['the room is listening', ...scoutCaptionEvents.map(entry => entry.text)]
-        scoutCaptionIndex = (scoutCaptionIndex + 1) % pool.length
-        scoutCaptionText.textContent = pool[scoutCaptionIndex]
-      }
-
-      function syncScoutCaption() {
-        if (!scoutCaptionPill) {
-          return
-        }
-        const live = scoutCaptionLive()
-        scoutCaptionPill.hidden = !live
-        if (!live) {
-          if (scoutCaptionTimer) {
-            window.clearInterval(scoutCaptionTimer)
-            scoutCaptionTimer = 0
-          }
-          return
-        }
-        if (!scoutCaptionTimer) {
-          scoutCaptionIndex = 0
-          if (scoutCaptionText) {
-            scoutCaptionText.textContent = 'the room is listening'
-          }
-          scoutCaptionTimer = window.setInterval(rotateScoutCaption, 3400)
-        }
-      }
-
       /* the phone stage is hero + strip (design mobile §5a): the hero class
          follows the pinned participant, then the audible active speaker, and
          stays put through pauses so the stage never flickers empty. The class
@@ -43238,6 +44347,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else if (!mobileRoomHeroName || !names.includes(mobileRoomHeroName)) {
           const remote = names.find(name => name && name !== currentParticipantName)
           mobileRoomHeroName = remote || names[0] || ''
+        }
+        if (guestMode && mobileRoomHeroName === currentParticipantName) {
+          // §3.5: a guest headlines the party they joined — the first remote
+          // tile holds the hero slot and self rides the strip (self-hero only
+          // while alone), even when the guest is the one speaking
+          const remote = names.find(name => name && name !== currentParticipantName)
+          if (remote) {
+            mobileRoomHeroName = remote
+          }
         }
         tiles.forEach((tile, index) => {
           const name = tile.dataset.participant || ''
@@ -44217,6 +45335,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (currentTracks.includes(track)) {
           return false
         }
+        if (currentTracks.some(current => current.id === track.id && liveTrack(current) && !current.muted)
+            && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+          // Same forwarded track by id, the attached copy is still healthy, and
+          // the element is rendering — a forced re-attach would only blink the
+          // tile. An ended/muted attachment falls through to the re-attach so a
+          // same-id republish cannot strand the tile on a dead track.
+          return false
+        }
         const stream = new MediaStream([track])
         setVideoElementStream(video, stream, { force: true })
         playRemoteMedia(video)
@@ -44278,7 +45404,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             if (!name || name === 'participant' || !participantDisplayNameInRoom(name)) {
               remoteTileRemovers.get(tile)?.(track)
             }
-          }, 1600)
+          }, 3000)
         }
         track.addEventListener('mute', onMute)
         track.addEventListener('unmute', clearStall)
@@ -49643,8 +50769,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (isLeavingRoom) {
           return
         }
+        // §3.8: the lobby keeps the just-left room selected — rejoin is one
+        // click and the selection is never yanked back to the office
+        const leftRoomId = activeJoin.roomId || 'office'
         cancelVideoTilePointerDrag()
         isLeavingRoom = true
+        roomSessionGrantedAt = 0
+        rapidSeatLossCount = 0
         participantEndpointCounts = {}
         hideMultiDeviceHandoffChip()
         stopScreenShare().catch(() => {})
@@ -49748,6 +50879,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         iceRestartAttempts = 0
         iceRestartRecoveryStartedAt = 0
         participantsInRoom = []
+        // the sitting's occupancy dies with the seat — a stale occupiedSeats
+        // (last in-call presence payload) fed every post-leave surface a
+        // phantom "live now · n inside" until the next preview fetch landed
+        occupiedSeats = 0
+        participantPreview = []
         currentParticipantName = ''
         canEditBoard = false
         canUndoDelete = false
@@ -49768,15 +50904,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         stopRoomClock()
         // the ONLY place the tab's room identity resets (reconnects must
-        // re-seat into the same room with the same passcode)
-        activeJoin = { roomId: 'office', passcode: '', guest: false }
-        renderRoomsList()
+        // re-seat into the same room with the same passcode) — §3.8: it
+        // resets to the room just left, not the office (a server-accepted
+        // passcode is latched in lobbyPasscodeMemory, so the gate stays down)
+        activeJoin = { roomId: leftRoomId, passcode: '', guest: false }
+        renderHomeLiveNow()
         setConnectionState('idle', 'not connected')
         setLog('team meeting')
         setRoomView(false)
         validateAccess()
         if (!guestMode) {
           loadParticipantPreview()
+          // the lobby hero + rail render from the rooms snapshot; refresh it
+          // now so the just-left room's count drops without waiting for the
+          // next ambient `rooms` event
+          loadRoomsList()
         }
         isLeavingRoom = false
         // A deploy that landed mid-call armed a reload; now that the user is out
@@ -49821,7 +50963,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function updateOfficeHome() {
         renderOfficeGreeting()
-        renderRoomLandingState()
+        renderHomeLiveNow()
+        renderLobby()
       }
 
       function officeGreetingWord() {
@@ -49913,44 +51056,333 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (topbarProjectEl) {
           topbarProjectEl.textContent = meetingDisplayName()
         }
-        renderRoomLandingState()
+        renderLobby()
         renderPipMeeting()
       }
 
-      function renderRoomLandingState() {
+      function renderLobby() {
         const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
-        // per-selected-room: a named room's quiet state speaks ITS name and
-        // ITS occupancy (from the rooms snapshot — office /participants
-        // preview says nothing about a named room)
-        const selectedRoom = (activeJoin.roomId || 'office') !== 'office' ? activeJoinRoomRecord() : null
-        // design quiet state when nobody is inside; honest occupancy otherwise
-        const seatCount = selectedRoom && !inRoom
-          ? (Number(selectedRoom.participantCount) || 0)
-          : Math.max(occupiedSeats, (inRoom ? participantsInRoom : participantPreview).length)
+        // pre-join the hero speaks the ROOMS SNAPSHOT — the same source the
+        // rail rows read, for EVERY room including the office. The in-call
+        // counters (occupiedSeats / the office participants preview) and
+        // the topbar meeting label are sitting-scoped and go stale the
+        // moment the seat drops: after a leave or a room_closed bounce they
+        // held the dead sitting's title ("meeting · jul 9") and occupancy
+        // ("live now · 1 inside" over an empty office) until a row click
+        // forced a re-derive (verify2 stale-hero, the recon-09/11 family).
+        const selectedRoom = inRoom ? null : activeJoinRoomRecord()
+        const seatCount = inRoom
+          ? Math.max(occupiedSeats, participantsInRoom.length)
+          : (selectedRoom?.live ? Number(selectedRoom.participantCount) || 0 : 0)
         if (roomEmptyName) {
-          roomEmptyName.textContent = seatCount > 0
-            ? (selectedRoom
-              ? String(selectedRoom.name || '').toLowerCase()
-              : ((topbarProjectEl?.textContent || '').trim().toLowerCase() || meetingDisplayName()))
-            : (selectedRoom ? `${String(selectedRoom.name || '').toLowerCase()} is quiet.` : 'the room is quiet.')
+          // §3.1 hero hierarchy: the title is the room's NAME (person-scale
+          // sans); the quiet koan lives in the mono meta beneath it, never up
+          // here — two stacked mono koans left the hero with no hierarchy.
+          // In-call the sitting's title takes over (seat-scoped by design).
+          const roomName = String(selectedRoom?.name || '').toLowerCase()
+          roomEmptyName.textContent = inRoom
+            ? ((topbarProjectEl?.textContent || '').trim().toLowerCase() || meetingDisplayName())
+            : (roomName || 'the office')
         }
         if (roomEmptyMeta) {
           roomEmptyMeta.textContent = seatCount > 0
             ? `live now · ${seatCount} inside`
             : 'memory starts when the room speaks.'
         }
+        renderLobbyBadges()
+        renderLobbyPasscodeGate()
+        renderLobbyRoomsList()
+        renderGreenRoom()
       }
 
-      /* ---------- multi-room: rooms card ---------- */
+      // hero badge row — lock/guests at legible size, plus the office
+      // listen-only badge while any office guest link lives (guestLinkActive
+      // on GET /rooms rows: link-derived, never the sticky guestEnabled flag)
+      function renderLobbyBadges() {
+        const badges = document.getElementById('lobbyBadges')
+        if (!badges) {
+          return
+        }
+        const record = activeJoinRoomRecord()
+        badges.replaceChildren()
+        if (!record || !authedUser || guestMode) {
+          badges.hidden = true
+          return
+        }
+        if (record.passcodeRequired) {
+          badges.append(lobbyBadgeChip('passcode', lobbyLockGlyph()))
+        }
+        if (record.guestEnabled) {
+          badges.append(lobbyBadgeChip('guests', lobbyGuestGlyph()))
+        }
+        if (record.id === 'office' && record.guestLinkActive) {
+          const warn = lobbyBadgeChip('listen-only · guest link live', '')
+          warn.classList.add('lobby__badge--warn')
+          badges.append(warn)
+        }
+        badges.hidden = !badges.childElementCount
+      }
+
+      function lobbyBadgeChip(text, glyph) {
+        const chip = document.createElement('span')
+        chip.className = 'lobby__badge'
+        if (glyph) {
+          chip.insertAdjacentHTML('beforeend', glyph)
+        }
+        chip.append(text)
+        return chip
+      }
+
+      function lobbyLockGlyph() {
+        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="passcode required"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>'
+      }
+
+      function lobbyGuestGlyph() {
+        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="guests allowed"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>'
+      }
+
+      // the inline passcode gate sits where the join button would be; a
+      // wrong passcode lands HERE (handleAccessDenied → shake + inline
+      // `wrong passcode.`), never a silent close
+      function renderLobbyPasscodeGate() {
+        const gate = document.getElementById('lobbyPasscodeGate')
+        if (!gate) {
+          return
+        }
+        const record = activeJoinRoomRecord()
+        const inRoom = appShell.classList.contains('is-in-room')
+        const needsGate = Boolean(!inRoom && !guestMode && authedUser && record?.passcodeRequired && !lobbyPasscodeMemory[record.id])
+        gate.hidden = !needsGate
+        if (roomEmptyJoinButton) {
+          roomEmptyJoinButton.hidden = needsGate
+        }
+        // a selection change clears the field + error; a same-room re-render
+        // (rooms snapshot landing) keeps what the user typed
+        const gateRoomId = needsGate ? record.id : ''
+        if (gateRoomId !== lobbyPasscodeGateRoomId) {
+          lobbyPasscodeGateRoomId = gateRoomId
+          const input = document.getElementById('lobbyPasscodeInput')
+          const error = document.getElementById('lobbyPasscodeError')
+          if (input) {
+            input.value = ''
+          }
+          if (error) {
+            error.hidden = true
+          }
+        }
+      }
+
+      function submitLobbyPasscode() {
+        const input = document.getElementById('lobbyPasscodeInput')
+        const error = document.getElementById('lobbyPasscodeError')
+        const value = input?.value || ''
+        if (!value.trim()) {
+          input?.focus()
+          return
+        }
+        if (error) {
+          error.hidden = true
+        }
+        activeJoin.passcode = value
+        joinRoom()
+      }
+
+      function showLobbyPasscodeError(message) {
+        const gate = document.getElementById('lobbyPasscodeGate')
+        const input = document.getElementById('lobbyPasscodeInput')
+        const error = document.getElementById('lobbyPasscodeError')
+        if (!gate || gate.hidden) {
+          setLog(String(message || 'wrong passcode.'))
+          return
+        }
+        if (error) {
+          error.textContent = /wrong/i.test(String(message || ''))
+            ? 'wrong passcode.'
+            : String(message || 'wrong passcode.').toLowerCase()
+          error.hidden = false
+        }
+        if (input) {
+          input.value = ''
+          input.classList.remove('is-shake')
+          // restart the 300ms shake even on back-to-back denials
+          void input.offsetWidth
+          input.classList.add('is-shake')
+          setTimeout(() => input.classList.remove('is-shake'), 320)
+          input.focus()
+        }
+      }
+
+      /* ---------- RW2 green room: preview tile + joinAV chips ----------
+         Camera policy: browsing never lights the camera — acquisition
+         happens ONLY inside the tile-tap and cam-chip-on handlers. One
+         block, two mounts (lobby hero / guest gate); the preview rides the
+         real look pipeline, retargeted at the green-room tile. */
+      function loadJoinAVPreferences() {
+        try {
+          const saved = JSON.parse(window.localStorage?.getItem('bonfire:joinAV') || 'null')
+          if (saved && typeof saved === 'object') {
+            return { mic: saved.mic !== false, cam: saved.cam !== false }
+          }
+        } catch { /* corrupted record falls back to on/on */ }
+        return { mic: true, cam: true }
+      }
+
+      function saveJoinAVPreferences(prefs) {
+        try {
+          window.localStorage?.setItem('bonfire:joinAV', JSON.stringify({ mic: prefs.mic !== false, cam: prefs.cam !== false }))
+        } catch { /* private mode: session-only behavior */ }
+      }
+
+      function greenRoomPreviewLive() {
+        return Boolean(previewLookTargetEl && previewLookTargetEl === greenRoomVideoEl && previewLookRawTrack)
+      }
+
+      function setGreenRoomTileState(state) {
+        if (!greenRoomTileEl) {
+          return
+        }
+        greenRoomTileEl.dataset.state = state
+        if (greenRoomHintTextEl) {
+          greenRoomHintTextEl.textContent = state === 'starting' ? 'starting camera…'
+            : state === 'off' ? 'camera off'
+            : state === 'timeout' ? "camera didn't answer — you can join with it off."
+            : 'check your camera'
+        }
+      }
+
+      function renderGreenRoom() {
+        if (!greenRoomEl) {
+          return
+        }
+        const prefs = loadJoinAVPreferences()
+        greenRoomMicChipEl?.setAttribute('aria-pressed', String(prefs.mic))
+        greenRoomCamChipEl?.setAttribute('aria-pressed', String(prefs.cam))
+        if (greenRoomFineTuneEl) {
+          // the full settings picker is member chrome
+          greenRoomFineTuneEl.hidden = guestMode
+        }
+        if (guestMode) {
+          // gate mount: never on the terminal card or a dead invite
+          greenRoomEl.hidden = Boolean(guestExitMessage) || (guestInviteState === 'expired' && !guestSession)
+        }
+        if (!greenRoomPreviewLive()) {
+          const state = greenRoomTileEl?.dataset.state || 'idle'
+          if (state !== 'timeout' && state !== 'starting') {
+            setGreenRoomTileState(prefs.cam ? 'idle' : 'off')
+          }
+        }
+      }
+
+      async function greenRoomAcquirePreview() {
+        // EXPLICIT INTENT ONLY — the two call sites are the tile tap and the
+        // cam chip flipping on; no render or boot path may reach here.
+        if (greenRoomPreviewLive()) {
+          return
+        }
+        const gen = ++greenRoomPreviewGen
+        setGreenRoomTileState('starting')
+        let timedOut = false
+        const watchdog = window.setTimeout(() => {
+          // 8s preview watchdog: honest copy, and the cam chip flips off so
+          // the join carries the working configuration
+          timedOut = true
+          if (gen === greenRoomPreviewGen) {
+            const prefs = loadJoinAVPreferences()
+            prefs.cam = false
+            saveJoinAVPreferences(prefs)
+            setGreenRoomTileState('timeout')
+            renderGreenRoom()
+          }
+        }, 8000)
+        await startVideoLookPreview(greenRoomVideoEl)
+        window.clearTimeout(watchdog)
+        if (gen !== greenRoomPreviewGen || timedOut) {
+          // superseded or late — a camera that answered after teardown/timeout
+          // never stays hot
+          if (previewLookTargetEl === greenRoomVideoEl) {
+            stopVideoLookPreview()
+          }
+          return
+        }
+        if (previewLookRawTrack) {
+          setGreenRoomTileState('live')
+        } else {
+          const prefs = loadJoinAVPreferences()
+          prefs.cam = false
+          saveJoinAVPreferences(prefs)
+          setGreenRoomTileState('timeout')
+          renderGreenRoom()
+        }
+      }
+
+      function stopGreenRoomPreview(nextState) {
+        greenRoomPreviewGen++
+        if (previewLookTargetEl && previewLookTargetEl === greenRoomVideoEl) {
+          stopVideoLookPreview()
+        }
+        if (greenRoomTileEl) {
+          setGreenRoomTileState(nextState || (loadJoinAVPreferences().cam ? 'idle' : 'off'))
+        }
+      }
+
+      function toggleGreenRoomChip(kind) {
+        const prefs = loadJoinAVPreferences()
+        prefs[kind] = !prefs[kind]
+        saveJoinAVPreferences(prefs)
+        renderGreenRoom()
+        if (kind === 'cam') {
+          if (prefs.cam) {
+            greenRoomAcquirePreview()
+          } else {
+            stopGreenRoomPreview('off')
+          }
+        }
+      }
+
+      // guest boot re-parents the ONE green-room block into the name gate —
+      // guests never see the lobby, members never see the gate
+      function mountGreenRoomInGuestGate() {
+        if (!greenRoomEl || !joinAccessButton?.parentElement) {
+          return
+        }
+        greenRoomEl.classList.add('greenroom--gate')
+        joinAccessButton.parentElement.insertBefore(greenRoomEl, joinAccessButton)
+      }
+
+      /* ---------- multi-room: the lobby list + home live-now strip ---------- */
       function activeJoinRoomRecord() {
         const id = activeJoin.roomId || 'office'
-        return roomsList.find(room => room?.id === id) || null
+        const record = roomsList.find(room => room?.id === id) || null
+        // an archived record never fronts the hero — GET /rooms keeps the
+        // row (archived: true) but the door it names is closed
+        return record && !record.archived ? record : null
+      }
+
+      // §3.7 archive-lands-sane, the ARCHIVER's own lobby included: when the
+      // selected room vanishes from a fresh snapshot (archived by this tab's
+      // ⋯ menu or by any other session), the hero must not keep a ghost door
+      // whose join button can only 403 in silence. Selection falls back to
+      // the office — the same rule handleRoomClosed applies for seated
+      // members. Seated/entering tabs are exempt: their activeJoin is the
+      // seat itself and the room_closed seam owns that path.
+      function reconcileLobbySelection() {
+        if (guestMode || !roomsList.length) {
+          return
+        }
+        if (appShell.classList.contains('is-in-room') || appShell.classList.contains('is-room-entering')) {
+          return
+        }
+        if (activeJoinRoomRecord()) {
+          return
+        }
+        activeJoin = { roomId: 'office', passcode: '', guest: false }
       }
 
       function handleRoomsSnapshot(payload) {
         roomsList = Array.isArray(payload?.rooms) ? payload.rooms : []
-        renderRoomsList()
-        renderRoomLandingState()
+        reconcileLobbySelection()
+        renderHomeLiveNow()
+        renderLobby()
       }
 
       async function loadRoomsList() {
@@ -49977,188 +51409,577 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             activeJoin.passcode = ''
           }
         }
-        renderRoomsList()
-        renderRoomLandingState()
+        reconcileLobbySelection()
+        renderHomeLiveNow()
+        renderLobby()
       }
 
-      function renderRoomsList() {
-        const card = document.getElementById('officeRoomsCard')
-        const list = document.getElementById('officeRoomsList')
-        if (!card || !list) {
+      // selection is browsing, join is consent: a lobby/home row click only
+      // re-points the hero (activeJoin), it NEVER joins or lights a camera
+      function selectLobbyRoom(roomId) {
+        if (appShell.classList.contains('is-in-room')) {
           return
         }
-        card.hidden = !authedUser
-        if (!authedUser) {
+        // deselect releases the preview camera and clears a stale failure line
+        stopGreenRoomPreview()
+        clearLobbyJoinError()
+        activeJoin.roomId = roomId || 'office'
+        // a session-verified passcode rides along so join stays one click
+        activeJoin.passcode = lobbyPasscodeMemory[activeJoin.roomId] || ''
+        renderLobby()
+      }
+
+      function renderLobbyRoomsList() {
+        const rail = document.getElementById('lobbyRail')
+        const list = document.getElementById('lobbyRoomsList')
+        if (!rail || !list) {
+          return
+        }
+        rail.hidden = !authedUser || guestMode
+        if (rail.hidden) {
           return
         }
         const rooms = roomsList.filter(room => room && !room.archived)
-        list.replaceChildren(...rooms.map(room => roomsListRow(room)))
+        const selectedId = activeJoin.roomId || 'office'
+        // skip identical rebuilds: this runs on every updateOfficeHome pass,
+        // and a rebuild would close the ⋯ popover mid-use
+        const signature = JSON.stringify([selectedId, rooms.map(room => [room.id, room.name, room.live, room.participantCount, room.passcodeRequired, room.guestEnabled, room.guestLinkActive])])
+        if (signature === lobbyListSignature) {
+          return
+        }
+        lobbyListSignature = signature
+        // an open popover survives the rebuild — it lives on the rail (not
+        // in the rows), so it only needs re-anchoring to its room's fresh
+        // row; closing it here would discard a just-minted one-time token
+        // (the mint itself refreshes the list for the badge state). A room
+        // that left the list closes it (positionLobbyPopover's missing-row
+        // branch).
+        list.replaceChildren(...rooms.map(room => lobbyRoomRow(room, selectedId)))
+        if (lobbyPopoverEl) {
+          positionLobbyPopover()
+        }
       }
 
-      function roomsListRow(room) {
+      function lobbyRoomRow(room, selectedId) {
         const row = document.createElement('div')
-        row.className = 'office-rooms__row'
+        row.className = `lobby__row${room.id === selectedId ? ' is-selected' : ''}`
         row.dataset.roomId = room.id
+        if (room.id === selectedId) {
+          row.setAttribute('aria-current', 'true')
+        }
+
+        const pick = document.createElement('button')
+        pick.type = 'button'
+        pick.className = 'lobby__pick'
+        pick.addEventListener('click', () => selectLobbyRoom(room.id))
 
         const dot = document.createElement('span')
-        dot.className = `office-rooms__dot${room.live ? ' is-live' : ''}`
-
-        const nameWrap = document.createElement('span')
-        nameWrap.className = 'office-rooms__name'
-        const label = document.createElement('span')
-        label.className = 'office-rooms__label'
-        label.textContent = room.name || room.id
+        dot.className = `lobby__dot${room.live ? ' is-live' : ''}`
+        const name = document.createElement('span')
+        name.className = 'lobby__name'
+        name.textContent = room.name || room.id
         const meta = document.createElement('span')
-        meta.className = 'office-rooms__meta'
-        const bits = []
+        meta.className = 'lobby__meta'
         if (room.live) {
-          bits.push(`${Number(room.participantCount) || 0} inside`)
+          meta.append(`${Number(room.participantCount) || 0} inside`)
         }
-        meta.textContent = bits.join(' · ')
         if (room.passcodeRequired) {
-          meta.insertAdjacentHTML('beforeend', '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="passcode required"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>')
+          meta.insertAdjacentHTML('beforeend', lobbyLockGlyph())
         }
         if (room.guestEnabled) {
-          meta.insertAdjacentHTML('beforeend', '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="guests allowed"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>')
+          meta.insertAdjacentHTML('beforeend', lobbyGuestGlyph())
         }
-        nameWrap.append(label, meta)
-
-        const open = document.createElement('button')
-        open.type = 'button'
-        open.className = 'office-rooms__open pressable'
-        open.textContent = 'Open'
-        open.disabled = appShell.classList.contains('is-in-room') && (activeJoin.roomId || 'office') === room.id
-        open.addEventListener('click', () => {
-          if (room.passcodeRequired) {
-            toggleRoomsRowActions(row, room, 'passcode')
-          } else {
-            openRoomFromList(room, '')
-          }
-        })
+        if (room.id === 'office' && room.guestLinkActive) {
+          const listen = document.createElement('span')
+          listen.className = 'lobby__listen'
+          listen.textContent = 'listen-only'
+          meta.append(listen)
+        }
+        pick.append(dot, name, meta)
 
         const more = document.createElement('button')
         more.type = 'button'
-        more.className = 'office-rooms__more pressable'
+        more.className = 'lobby__more'
         more.setAttribute('aria-label', `${room.name || room.id} options`)
+        more.setAttribute('aria-haspopup', 'menu')
         more.textContent = '⋯'
-        more.addEventListener('click', () => toggleRoomsRowActions(row, room, 'menu'))
+        more.addEventListener('click', () => openLobbyPopover(row, room))
 
-        row.append(dot, nameWrap, open, more)
+        row.append(pick, more)
         return row
       }
 
-      // one expanded strip at a time, appended right under its row; mode
-      // 'passcode' = inline join gate, 'menu' = invite/passcode/archive
-      function toggleRoomsRowActions(row, room, mode) {
-        const list = row.parentElement
-        if (!list) {
+      /* ---------- ⋯ popover: invite / guest links / passcode / archive ----------
+         One open at a time; dismissed on outside click, Escape (document
+         listeners in the wiring block) and tool switch (applyToolState). */
+      function closeLobbyPopover() {
+        if (!lobbyPopoverEl) {
           return
         }
-        const existing = list.querySelector('.office-rooms__actions')
-        const wasFor = existing?.dataset.roomId === room.id && existing?.dataset.mode === mode
-        if (existing) {
-          existing.remove()
-        }
-        if (wasFor) {
+        // the one-time /g# token never lingers in the DOM past dismissal
+        lobbyPopoverEl.querySelectorAll('input').forEach(input => { input.value = '' })
+        lobbyPopoverResize?.disconnect()
+        lobbyPopoverEl.remove()
+        lobbyPopoverEl = null
+      }
+
+      function openLobbyPopover(row, room) {
+        if (lobbyPopoverEl?.dataset.roomId === room.id) {
+          closeLobbyPopover()
           return
         }
-        const strip = document.createElement('div')
-        strip.className = 'office-rooms__actions'
-        strip.dataset.roomId = room.id
-        strip.dataset.mode = mode
-        if (mode === 'passcode' || mode === 'setpass') {
-          const input = document.createElement('input')
-          input.type = 'password'
-          input.placeholder = mode === 'passcode' ? 'room passcode' : 'new passcode (empty removes)'
-          input.autocomplete = 'off'
-          input.className = 'office-rooms__input office-rooms__passfield'
-          const go = document.createElement('button')
-          go.type = 'button'
-          go.className = 'office-rooms__submit pressable'
-          go.textContent = mode === 'passcode' ? 'Join' : 'Save'
-          const submit = () => {
-            if (mode === 'passcode') {
-              openRoomFromList(room, input.value)
+        closeLobbyPopover()
+        const rail = document.getElementById('lobbyRail')
+        if (!rail) {
+          return
+        }
+        const pop = document.createElement('div')
+        pop.className = 'lobby-pop'
+        pop.dataset.roomId = room.id
+        lobbyPopoverEl = pop
+        renderLobbyPopMenu(pop, room)
+        // PORTAL: mount on the rail, never inside the row — the rows live in
+        // the .lobby__list scrollbox (overflow-y:auto, ~91px tall with two
+        // rooms) which clipped the whole management layer to a sliver: the
+        // office consent copy unreadable, the one-time link uncopyable.
+        rail.append(pop)
+        positionLobbyPopover()
+        lobbyPopoverResize?.observe(pop)
+      }
+
+      // glues the portaled popover to its anchor row: below the row when it
+      // fits, flipped above when the viewport would cut it off (the consent
+      // interstitial and links panel are tall). Runs on open, on body
+      // re-render (ResizeObserver), on list scroll, and on window resize.
+      function positionLobbyPopover() {
+        const pop = lobbyPopoverEl
+        const rail = document.getElementById('lobbyRail')
+        const list = document.getElementById('lobbyRoomsList')
+        if (!pop || !rail || !list || !pop.isConnected) {
+          return
+        }
+        const row = list.querySelector(`.lobby__row[data-room-id="${CSS.escape(pop.dataset.roomId || '')}"]`)
+        if (!row) {
+          // the anchor room left the list (archived elsewhere) — no orphan
+          closeLobbyPopover()
+          return
+        }
+        const railRect = rail.getBoundingClientRect()
+        const rowRect = row.getBoundingClientRect()
+        const popHeight = pop.offsetHeight
+        const viewportBottom = window.innerHeight - 12
+        let top = rowRect.bottom - 6
+        if (top + popHeight > viewportBottom) {
+          const flipped = rowRect.top + 6 - popHeight
+          top = flipped >= 12 ? flipped : Math.max(12, viewportBottom - popHeight)
+        }
+        pop.style.top = `${Math.round(top - railRect.top)}px`
+      }
+
+      function lobbyPopItem(label, onClick) {
+        const item = document.createElement('button')
+        item.type = 'button'
+        item.className = 'lobby-pop__item'
+        item.textContent = label
+        item.addEventListener('click', onClick)
+        return item
+      }
+
+      function renderLobbyPopMenu(pop, room) {
+        pop.replaceChildren(
+          lobbyPopItem('invite a guest', () => {
+            // office mints only through the listen-only consent step (the
+            // latch is a lasting side effect on office intelligence); other
+            // rooms mint directly
+            if (room.id === 'office') {
+              renderLobbyPopOfficeConsent(pop, room)
             } else {
-              setRoomPasscodeFromList(room, input.value)
-              strip.remove()
+              renderLobbyPopMinted(pop, room)
             }
-          }
-          go.addEventListener('click', submit)
-          input.addEventListener('keydown', event => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              submit()
-            }
-          })
-          strip.append(input, go)
-          row.after(strip)
-          input.focus()
-          return
-        }
-        const invite = document.createElement('button')
-        invite.type = 'button'
-        invite.textContent = 'invite guest'
-        invite.addEventListener('click', () => mintGuestLinkForRoom(room, strip))
-        const pass = document.createElement('button')
-        pass.type = 'button'
-        pass.textContent = room.passcodeRequired ? 'change passcode' : 'set passcode'
-        pass.addEventListener('click', () => toggleRoomsRowActions(row, room, 'setpass'))
-        strip.append(invite, pass)
+          }),
+          lobbyPopItem(`guest links${room.guestLinkActive ? ' · live' : ''}`, () => renderLobbyPopLinks(pop, room)),
+          lobbyPopItem(room.passcodeRequired ? 'change passcode' : 'set passcode', () => renderLobbyPopPasscode(pop, room))
+        )
         if (room.id !== 'office') {
-          const archive = document.createElement('button')
-          archive.type = 'button'
-          archive.textContent = 'archive'
-          archive.addEventListener('click', () => archiveRoomFromList(room))
-          strip.append(archive)
+          pop.append(lobbyPopItem('archive', () => {
+            closeLobbyPopover()
+            archiveRoomFromList(room)
+          }))
         }
-        row.after(strip)
       }
 
-      function openRoomFromList(room, passcode) {
-        if (!room || room.archived) {
+      // one consent voice for both mint mounts (lobby ⋯ + in-call Invite)
+      function officeMintConsentCopy() {
+        return "inviting a guest quiets scout. while any office guest link lives, office sittings are listen-only — the record still builds (transcripts, memory, digests), but scout won't speak or act on its own. this lasts until every office link expires or is revoked."
+      }
+
+      // a shared mint body may render inside either popover — "dismissed"
+      // means neither mount still hosts it (the one-time token is then lost
+      // by design)
+      function mintPopDismissed(pop) {
+        return lobbyPopoverEl !== pop && invitePopoverEl !== pop
+      }
+
+      function renderLobbyPopOfficeConsent(pop, room) {
+        const wrap = document.createElement('div')
+        wrap.className = 'lobby-pop__consent'
+        const copy = document.createElement('p')
+        copy.className = 'lobby-pop__consent-copy'
+        copy.textContent = officeMintConsentCopy()
+        const actions = document.createElement('div')
+        actions.className = 'lobby-pop__actions'
+        const mint = document.createElement('button')
+        mint.type = 'button'
+        mint.className = 'lobby-pop__mint'
+        mint.textContent = 'mint the link'
+        mint.addEventListener('click', () => renderLobbyPopMinted(pop, room))
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.className = 'lobby-pop__cancel'
+        cancel.textContent = 'cancel'
+        cancel.addEventListener('click', () => renderLobbyPopMenu(pop, room))
+        actions.append(mint, cancel)
+        wrap.append(copy, actions)
+        pop.replaceChildren(wrap)
+      }
+
+      async function renderLobbyPopMinted(pop, room) {
+        let url = ''
+        try {
+          url = await mintGuestLinkForRoom(room)
+        } catch (error) {
+          const note = document.createElement('div')
+          note.className = 'lobby-pop__note'
+          note.textContent = String(error?.message || error)
+          pop.replaceChildren(note)
           return
         }
-        const targetId = room.id || 'office'
-        if (appShell.classList.contains('is-in-room')) {
-          if ((activeJoin.roomId || 'office') === targetId) {
-            return
-          }
-          // switching rooms = leave then open (one seat per account)
-          leaveRoom()
+        if (mintPopDismissed(pop)) {
+          // dismissed while minting — the one-time token is lost by design
+          return
         }
-        activeJoin = { roomId: targetId, passcode: passcode || '', guest: false }
-        renderRoomsList()
-        renderRoomLandingState()
-        joinRoom()
-      }
-
-      async function mintGuestLinkForRoom(room, strip) {
-        try {
-          const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/guest-links`, {})
-          if (!result.ok) {
-            throw new Error(result.data?.error || 'could not mint a guest link')
-          }
-          // the raw token appears exactly once — surface it now or lose it
-          const url = `${window.location.origin}${result.data?.url || ''}`
-          if (strip?.isConnected) {
-            const out = strip.querySelector('.office-rooms__linkout') || document.createElement('input')
-            out.className = 'office-rooms__input office-rooms__linkout'
-            out.readOnly = true
-            out.value = url
-            strip.append(out)
+        const wrap = document.createElement('div')
+        wrap.className = 'lobby-pop__minted'
+        const caption = document.createElement('div')
+        caption.className = 'lobby-pop__caption'
+        caption.textContent = 'shown once · expires in 7 days'
+        const out = document.createElement('input')
+        out.className = 'lobby-pop__linkout'
+        out.readOnly = true
+        out.value = url
+        const actions = document.createElement('div')
+        actions.className = 'lobby-pop__actions'
+        const copyButton = document.createElement('button')
+        copyButton.type = 'button'
+        copyButton.className = 'lobby-pop__mint'
+        copyButton.textContent = 'copy'
+        copyButton.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(out.value)
+            copyButton.textContent = 'copied'
+            setTimeout(() => { copyButton.textContent = 'copy' }, 1500)
+          } catch {
             out.select()
           }
-          try {
-            await navigator.clipboard.writeText(url)
-            setLog('guest link copied — shown once, share it now')
-            showToast({ text: 'guest link copied (shown once)', kind: 'note' })
-          } catch {
-            setLog('guest link ready — copy it now, it is shown once')
-          }
-        } catch (error) {
-          setLog(error.message || String(error))
+        })
+        const manage = document.createElement('button')
+        manage.type = 'button'
+        manage.className = 'lobby-pop__cancel'
+        manage.textContent = 'manage links'
+        manage.addEventListener('click', () => renderLobbyPopLinks(pop, room))
+        actions.append(copyButton, manage)
+        wrap.append(caption, out, actions)
+        pop.replaceChildren(wrap)
+        out.select()
+      }
+
+      async function mintGuestLinkForRoom(room) {
+        const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/guest-links`, {})
+        if (!result.ok) {
+          throw new Error(result.data?.error || 'could not mint a guest link')
         }
+        // the raw token appears exactly once — the caller surfaces it now or
+        // it is lost; the badge state (guestLinkActive) refreshes behind
+        loadRoomsList()
+        return `${window.location.origin}${result.data?.url || ''}`
+      }
+
+      function lobbyRelTime(value) {
+        const ms = Date.parse(value || '')
+        if (!Number.isFinite(ms)) {
+          return ''
+        }
+        const minutes = Math.round(Math.abs(ms - Date.now()) / 60000)
+        const label = minutes < 60
+          ? `${Math.max(1, minutes)}m`
+          : minutes < 1440
+            ? `${Math.round(minutes / 60)}h`
+            : `${Math.round(minutes / 1440)}d`
+        return ms >= Date.now() ? `in ${label}` : `${label} ago`
+      }
+
+      async function renderLobbyPopLinks(pop, room) {
+        const note = document.createElement('div')
+        note.className = 'lobby-pop__note'
+        note.textContent = 'loading…'
+        pop.replaceChildren(note)
+        let links = []
+        try {
+          const response = await fetch(`/rooms/${encodeURIComponent(room.id)}/guest-links`, { cache: 'no-store' })
+          if (!response.ok) {
+            throw new Error('could not load guest links')
+          }
+          const data = await response.json().catch(() => ({}))
+          links = Array.isArray(data?.links) ? data.links : []
+        } catch (error) {
+          note.textContent = String(error?.message || error)
+          return
+        }
+        if (mintPopDismissed(pop)) {
+          return
+        }
+        pop.replaceChildren()
+        if (!links.length) {
+          const empty = document.createElement('div')
+          empty.className = 'lobby-pop__note'
+          empty.textContent = 'no guest links yet.'
+          pop.append(empty)
+        }
+        for (const link of links) {
+          const row = document.createElement('div')
+          row.className = 'lobby-pop__linkrow'
+          const label = document.createElement('span')
+          label.className = 'lobby-pop__linklabel'
+          label.textContent = link.label || `link ${String(link.id || '').slice(0, 8)}`
+          const meta = document.createElement('span')
+          meta.className = 'lobby-pop__linkmeta'
+          const stamps = document.createElement('span')
+          stamps.textContent = link.revoked
+            ? 'revoked'
+            : `created ${lobbyRelTime(link.createdAt)} · expires ${lobbyRelTime(link.expires)}`
+          meta.append(stamps)
+          if (!link.revoked) {
+            const revoke = document.createElement('button')
+            revoke.type = 'button'
+            revoke.className = 'lobby-pop__revoke'
+            revoke.textContent = 'revoke'
+            revoke.addEventListener('click', async () => {
+              try {
+                const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/guest-links/revoke`, { id: link.id })
+                if (!result.ok) {
+                  throw new Error(result.data?.error || 'could not revoke the link')
+                }
+              } catch (error) {
+                setLog(String(error?.message || error))
+                return
+              }
+              loadRoomsList()
+              renderLobbyPopLinks(pop, room)
+            })
+            meta.append(revoke)
+          }
+          row.append(label, meta)
+          pop.append(row)
+        }
+        const foot = document.createElement('div')
+        foot.className = 'lobby-pop__note'
+        foot.textContent = 'revoking stops new joins; guests already inside stay until they leave.'
+        pop.append(foot)
+      }
+
+      function renderLobbyPopPasscode(pop, room) {
+        const wrap = document.createElement('div')
+        wrap.className = 'lobby-pop__minted'
+        const input = document.createElement('input')
+        input.type = 'password'
+        input.placeholder = 'new passcode (empty removes)'
+        input.autocomplete = 'off'
+        input.className = 'lobby-pop__linkout'
+        const actions = document.createElement('div')
+        actions.className = 'lobby-pop__actions'
+        const save = document.createElement('button')
+        save.type = 'button'
+        save.className = 'lobby-pop__mint'
+        save.textContent = 'save'
+        save.addEventListener('click', () => {
+          setRoomPasscodeFromList(room, input.value)
+          closeLobbyPopover()
+        })
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.className = 'lobby-pop__cancel'
+        cancel.textContent = 'cancel'
+        cancel.addEventListener('click', () => renderLobbyPopMenu(pop, room))
+        actions.append(save, cancel)
+        wrap.append(input, actions)
+        pop.replaceChildren(wrap)
+        input.focus()
+      }
+
+      /* ---------- in-call Invite (member meeting bar) ----------
+         The same mint pipeline as the lobby ⋯ mount (consent copy, one-time
+         display, guest-links panel) behind one Invite button. Members only:
+         is-guest CSS hides the trigger and the server 401s the endpoints
+         for guest sessions regardless. */
+      function inviteRoomRecord() {
+        const id = activeJoin.roomId || 'office'
+        return activeJoinRoomRecord() || { id, name: id === 'office' ? 'the office' : id }
+      }
+
+      function closeInvitePopover() {
+        if (!invitePopoverEl) {
+          return
+        }
+        // the one-time /g# token never lingers in the DOM past dismissal
+        invitePopoverEl.querySelectorAll('input').forEach(input => { input.value = '' })
+        invitePopoverEl.remove()
+        invitePopoverEl = null
+        inviteToggleButton?.setAttribute('aria-expanded', 'false')
+      }
+
+      function toggleInvitePopover() {
+        if (invitePopoverEl) {
+          closeInvitePopover()
+          return
+        }
+        if (guestMode || !appShell.classList.contains('is-in-room')) {
+          return
+        }
+        const bar = inviteToggleButton?.closest('.meeting-bar')
+        if (!bar) {
+          return
+        }
+        const pop = document.createElement('div')
+        pop.className = 'invite-pop'
+        invitePopoverEl = pop
+        renderInvitePopMenu(pop, inviteRoomRecord())
+        bar.append(pop)
+        inviteToggleButton.setAttribute('aria-expanded', 'true')
+      }
+
+      function invitePopRow(label, action, onClick) {
+        const row = document.createElement('div')
+        row.className = 'invite-pop__row'
+        const tag = document.createElement('span')
+        tag.className = 'invite-pop__label'
+        tag.textContent = label
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'invite-pop__action'
+        button.textContent = action
+        button.addEventListener('click', onClick)
+        row.append(tag, button)
+        return row
+      }
+
+      function renderInvitePopMenu(pop, room) {
+        const teammates = invitePopRow('for teammates', 'copy room link', async () => {
+          await copyRoomLink()
+          const tag = teammates.querySelector('.invite-pop__label')
+          if (tag) {
+            tag.textContent = 'copied'
+            setTimeout(() => { tag.textContent = 'for teammates' }, 1500)
+          }
+        })
+        const guests = invitePopRow('for guests', 'mint guest link', () => {
+          // office mints only through the listen-only consent step (the
+          // latch is a lasting side effect on office intelligence); other
+          // rooms mint directly
+          if (room.id === 'office') {
+            renderInvitePopConsent(pop, room)
+          } else {
+            renderLobbyPopMinted(pop, room)
+          }
+        })
+        pop.replaceChildren(teammates, guests)
+      }
+
+      function renderInvitePopConsent(pop, room) {
+        const wrap = document.createElement('div')
+        wrap.className = 'lobby-pop__consent'
+        const copy = document.createElement('p')
+        copy.className = 'lobby-pop__consent-copy'
+        copy.textContent = officeMintConsentCopy()
+        const actions = document.createElement('div')
+        actions.className = 'lobby-pop__actions'
+        const mint = document.createElement('button')
+        mint.type = 'button'
+        mint.className = 'lobby-pop__mint'
+        mint.textContent = 'mint the link'
+        mint.addEventListener('click', () => renderLobbyPopMinted(pop, room))
+        const cancel = document.createElement('button')
+        cancel.type = 'button'
+        cancel.className = 'lobby-pop__cancel'
+        cancel.textContent = 'cancel'
+        cancel.addEventListener('click', () => renderInvitePopMenu(pop, room))
+        actions.append(mint, cancel)
+        wrap.append(copy, actions)
+        pop.replaceChildren(wrap)
+      }
+
+      /* ---------- home live-now strip: only rooms with people inside ---------- */
+      function renderHomeLiveNow() {
+        const strip = document.getElementById('homeLiveNow')
+        if (!strip) {
+          return
+        }
+        const stripHidden = !authedUser || guestMode
+        const live = stripHidden ? [] : roomsList.filter(room => room && !room.archived && room.live).slice(0, 4)
+        const signature = JSON.stringify([stripHidden, live.map(room => [room.id, room.name, room.participantCount])])
+        if (signature === homeLiveSignature) {
+          return
+        }
+        homeLiveSignature = signature
+        strip.hidden = stripHidden
+        if (stripHidden) {
+          strip.replaceChildren()
+          return
+        }
+        strip.replaceChildren(...(live.length ? live.map(room => homeLiveNowRow(room)) : [homeLiveNowQuietRow()]))
+      }
+
+      function homeLiveNowRow(room) {
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'home-live__row pressable'
+        const dot = document.createElement('span')
+        dot.className = 'home-live__dot is-live'
+        const name = document.createElement('span')
+        name.className = 'home-live__name'
+        name.textContent = room.name || room.id
+        const count = document.createElement('span')
+        count.className = 'home-live__count'
+        count.textContent = `${Number(room.participantCount) || 0} inside`
+        row.append(dot, name, count)
+        row.insertAdjacentHTML('beforeend', homeLiveChevron())
+        // deep-link: land on the lobby with this room selected — never join
+        row.addEventListener('click', () => {
+          selectLobbyRoom(room.id)
+          setActiveTool('room')
+        })
+        return row
+      }
+
+      function homeLiveNowQuietRow() {
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'home-live__row pressable'
+        const dot = document.createElement('span')
+        dot.className = 'home-live__dot'
+        const name = document.createElement('span')
+        name.className = 'home-live__name'
+        name.textContent = 'rooms'
+        const count = document.createElement('span')
+        count.className = 'home-live__count'
+        count.textContent = 'all quiet'
+        row.append(dot, name, count)
+        row.insertAdjacentHTML('beforeend', homeLiveChevron())
+        row.addEventListener('click', () => setActiveTool('room'))
+        return row
+      }
+
+      function homeLiveChevron() {
+        return '<svg class="home-live__chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
       }
 
       async function setRoomPasscodeFromList(room, passcode) {
@@ -50175,13 +51996,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function archiveRoomFromList(room) {
-        if (!window.confirm(`Archive “${room.name || room.id}”? It becomes unjoinable; its record is kept.`)) {
+        // §3.7: the confirm names the humans — archiving an occupied room
+        // disconnects them (the server broadcasts room_closed and ends the
+        // sitting through the close chain)
+        const inside = Number(room.participantCount) || 0
+        const label = room.name || room.id
+        const prompt = inside > 0
+          ? `archive “${label}”? ${inside} ${inside === 1 ? 'person is' : 'people are'} inside — they'll be disconnected. its record is kept.`
+          : `Archive “${label}”? It becomes unjoinable; its record is kept.`
+        if (!window.confirm(prompt)) {
           return
         }
         try {
           const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/archive`, {})
           if (!result.ok) {
             throw new Error(result.data?.error || 'could not archive the room')
+          }
+          // the archiver's own hero falls back NOW — the ghost door (a live
+          // join button over a room that can only 403) must not survive even
+          // the one in-flight snapshot fetch below
+          if ((activeJoin.roomId || 'office') === room.id && !appShell.classList.contains('is-in-room')) {
+            activeJoin = { roomId: 'office', passcode: '', guest: false }
+            clearLobbyJoinError()
+            renderLobby()
           }
           loadRoomsList()
         } catch (error) {
@@ -50191,10 +52028,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       async function createRoomFromForm(event) {
         event.preventDefault()
-        const nameInput = document.getElementById('officeRoomsCreateName')
-        const passInput = document.getElementById('officeRoomsCreatePasscode')
-        const guestsInput = document.getElementById('officeRoomsCreateGuests')
-        const form = document.getElementById('officeRoomsCreateForm')
+        const nameInput = document.getElementById('lobbyCreateName')
+        const passInput = document.getElementById('lobbyCreatePasscode')
+        const guestsInput = document.getElementById('lobbyCreateGuests')
+        const form = document.getElementById('lobbyCreateForm')
         const name = (nameInput?.value || '').trim()
         if (!name) {
           nameInput?.focus()
@@ -50646,6 +52483,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         } else {
           shell.classList.add('is-mounting')
           window.setTimeout(() => sessionStorage.setItem('bonfire_mounted', '1'), 900)
+          // The cascade is one-shot: once the longest mount-rise has finished
+          // (500ms delay + 520ms run), converge on the fast-mount state.
+          // Leaving .is-mounting on for the tab's life let any
+          // higher-specificity animation rule (the room tool pane's bf-tabin)
+          // take the shorthand from mount-rise and then drop the element back
+          // to the .mount-stagger opacity-0 base when it ended — a fully
+          // invisible lobby until reload took the fast-mount branch.
+          window.setTimeout(() => {
+            shell.classList.remove('is-mounting')
+            shell.classList.add('is-fast-mount')
+          }, 1100)
         }
       })()
 

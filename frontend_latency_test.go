@@ -385,7 +385,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 0px;",
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button"`,
@@ -719,7 +719,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Bonfire"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS"`,
 		"top: 50%;",
 		"inset: 0 auto 0 0;",
 		"border-right: 1px solid var(--line-1);",

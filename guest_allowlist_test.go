@@ -109,6 +109,15 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 			}},
 		"/guest/join": {handler: guestJoinHandler, method: http.MethodPost, path: "/guest/join",
 			body: fmt.Sprintf(`{"token":%q,"name":"Priya"}`, deadToken), allowed: []int{http.StatusForbidden}},
+		// RW2: the gate's room-naming lookup — token-gated public, same
+		// uniform 403 for dead tokens, mints no session and sets no cookie.
+		"/guest/lookup": {handler: guestLookupHandler, method: http.MethodPost, path: "/guest/lookup",
+			body: fmt.Sprintf(`{"token":%q}`, deadToken), allowed: []int{http.StatusForbidden},
+			check: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				if len(rec.Result().Cookies()) != 0 {
+					t.Errorf("/guest/lookup must never set a cookie, got %v", rec.Result().Cookies())
+				}
+			}},
 		"/guest/me": {handler: guestMeHandler, method: http.MethodGet, path: "/guest/me", allowed: []int{http.StatusOK}},
 		// The guest principal passes the pre-upgrade gate (room forced from
 		// the session); only the missing websocket handshake fails, proving
