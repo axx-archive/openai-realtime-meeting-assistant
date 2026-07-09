@@ -41801,6 +41801,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!cards || !cards.length) {
           return
         }
+        // Boot races /artifacts: the thread can render before the artifact
+        // list lands, so a goal run's ref falls through isGoalArtifact and
+        // mounts this legacy card. Once the landed entry proves goal, re-run
+        // the same render pass the thread-click path uses — the goalcard
+        // mounts and this NodeList is detached, so return before touching it.
+        const needsGoalUpgrade = [...cards].some(card => {
+          const entry = artifactEntries.find(candidate => String(candidate?.id || '') === card.dataset.threadArtifactId)
+          return entry && isGoalArtifact(entry)
+        })
+        if (needsGoalUpgrade) {
+          const stick = scoutChatIsNearBottom()
+          const scrollTop = scoutChatThread.scrollTop
+          renderActiveScoutThread()
+          if (!stick) {
+            scoutChatThread.scrollTop = scrollTop
+          }
+          return
+        }
         cards.forEach(card => {
           const id = card.dataset.threadArtifactId
           const entry = artifactEntries.find(candidate => String(candidate?.id || '') === id)
