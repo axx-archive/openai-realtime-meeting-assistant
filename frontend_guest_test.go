@@ -304,3 +304,130 @@ func TestIndexGuestNameGate(t *testing.T) {
 		t.Error("the name field must show only for the un-joined guest gate (a resumed session is name-confirmed)")
 	}
 }
+
+// Canon Surface 2 column (state 1): the guest gate is-guest-scoped so the
+// member sign-in gate is untouched — a 440px column, a 44px app icon (r-lg), a
+// headline wordmark, the invite line (type-label/text-3), and ONE glass panel
+// at 16px gap. The static markup order is icon → wordmark → invite line →
+// glass card, and inside the card the name field precedes the join button
+// precedes the escape-hatch link (the green room re-parents between them).
+func TestIndexGuestGateCanonColumn(t *testing.T) {
+	html := readIndexHTMLForGuest(t)
+
+	if body := cssRuleBody(html, "#appShell.is-guest .access-panel"); !strings.Contains(body, "width: min(440px") {
+		t.Error("the guest gate column must widen to the canon max-width 440")
+	}
+	if body := cssRuleBody(html, "#appShell.is-guest .login-mark"); !strings.Contains(body, "width: 44px") || !strings.Contains(body, "border-radius: var(--r-lg)") {
+		t.Error("the guest gate app icon must be 44px at r-lg (canon)")
+	}
+	if body := cssRuleBody(html, "#appShell.is-guest .login-wordmark"); !strings.Contains(body, "font: var(--type-headline)") {
+		t.Error("the guest gate wordmark must use the headline type token")
+	}
+	if body := cssRuleBody(html, "#appShell.is-guest .login-subline"); !strings.Contains(body, "font: var(--type-label)") || !strings.Contains(body, "color: var(--text-3)") {
+		t.Error("the invite line must be type-label / text-3 (canon)")
+	}
+	if !strings.Contains(html, "#appShell.is-guest .login-card { gap: 16px; }") {
+		t.Error("the guest glass panel must use the canon 16px gap")
+	}
+
+	// canon guest green-room sizing (Surface 2), scoped to the gate mount
+	for _, want := range []string{
+		".greenroom--gate .greenroom__ctl { width: 48px; height: 48px; }",
+		".greenroom--gate .greenroom__micbadge { width: 24px; height: 24px; }",
+		".greenroom--gate .greenroom__avatar { width: 56px; height: 56px; }",
+		".greenroom--gate .greenroom__filters { width: 270px; right: 58px; }",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("guest green-room sizing missing %q", want)
+		}
+	}
+
+	// static markup order: icon → wordmark → invite line → glass card
+	markAt := strings.Index(html, `class="login-mark"`)
+	wordAt := strings.Index(html, `class="login-wordmark"`)
+	sublineAt := strings.Index(html, `class="login-subline"`)
+	cardAt := strings.Index(html, `id="loginForm"`)
+	if !(markAt != -1 && markAt < wordAt && wordAt < sublineAt && sublineAt < cardAt) {
+		t.Error("the gate column order must be app icon → wordmark → invite line → glass panel")
+	}
+	// inside the card: name field → join button → escape-hatch link
+	nameAt := strings.Index(html, `id="guestNameField"`)
+	joinAt := strings.Index(html, `id="joinAccess"`)
+	escapeAt := strings.Index(html, `id="guestMemberLink"`)
+	if !(nameAt != -1 && nameAt < joinAt && joinAt < escapeAt) {
+		t.Error("the glass panel order must be name field → join button → escape-hatch link")
+	}
+	if !strings.Contains(html, "joining as a member? sign in") {
+		t.Error("the canon escape-hatch link copy is missing")
+	}
+}
+
+// Canon states 2/6/7: the preview avatar initials track the typed name live
+// (fallback "guest"); the join button reads "join as a guest" → "joining…"
+// (disabled, opacity .7 via the --joining class) → "you're in" (the --joined
+// secondary + check handoff frame); and the "fine-tune in settings" line stays
+// off the guest popover.
+func TestIndexGuestGateInitialsAndJoinCopy(t *testing.T) {
+	html := readIndexHTMLForGuest(t)
+
+	// name → initials: the shared initials source reads the gate field first
+	initialsBody := functionBody(html, "function greenRoomAvatarInitials()")
+	if !strings.Contains(initialsBody, "guestNameInput.value.trim() || currentParticipantName || guestSession?.guestName || 'guest'") {
+		t.Error("greenRoomAvatarInitials must derive guest initials from the typed name (fallback \"guest\")")
+	}
+	// the input listener repaints the preview avatar on every keystroke
+	listenAt := strings.Index(html, "guestNameInput.addEventListener('input'")
+	if listenAt == -1 {
+		t.Fatal("the guest name input listener is missing")
+	}
+	listener := html[listenAt:]
+	if len(listener) > 400 {
+		listener = listener[:400]
+	}
+	if !strings.Contains(listener, "greenRoomAvatarEl.textContent = greenRoomAvatarInitials()") {
+		t.Error("typing a guest name must live-update the preview avatar initials (canon state 2)")
+	}
+
+	// join button label sequence (states 1/6/7)
+	modeBody := functionBody(html, "function renderLoginMode()")
+	if !strings.Contains(modeBody, "guestSession ? `join ${guestSession.roomName || 'the room'}` : 'join as a guest'") {
+		t.Error("the idle guest join button must read the canon lowercase \"join as a guest\"")
+	}
+	if !strings.Contains(modeBody, `joinAccessButton.textContent = "you're in"`) || !strings.Contains(modeBody, "joinAccessButton.classList.add('login-signin--joined')") {
+		t.Error("the connected handoff frame must render \"you're in\" with the secondary --joined class")
+	}
+	if !strings.Contains(modeBody, "joinAccessButton.classList.remove('login-signin--joining', 'login-signin--joined')") {
+		t.Error("renderLoginMode must clear the transient join-frame classes before re-applying them")
+	}
+	joinBody := functionBody(html, "async function joinGuestRoom()")
+	if !strings.Contains(joinBody, "joinAccessButton.textContent = 'joining…'") || !strings.Contains(joinBody, "joinAccessButton.classList.add('login-signin--joining')") {
+		t.Error("joinGuestRoom must flip the button to the canon \"joining…\" frame")
+	}
+	// canon state 6 holds "joining…" through the media + dial phase, not just
+	// the /guest/join POST: both the entry-flag seam and any mid-entry
+	// renderLoginMode re-render must keep the busy frame.
+	affordanceBody := functionBody(html, "function syncRoomEntryAffordance()")
+	if !strings.Contains(affordanceBody, "appShell.classList.contains('is-guest')") || !strings.Contains(affordanceBody, "joinAccessButton.textContent = 'joining…'") {
+		t.Error("syncRoomEntryAffordance must hold the guest gate button in the \"joining…\" frame while roomEntryInProgress")
+	}
+	if !strings.Contains(modeBody, "} else if (roomEntryInProgress) {") {
+		t.Error("a renderLoginMode re-render mid-entry must not drop the guest button back to the idle label")
+	}
+	if !strings.Contains(joinBody, "joinAccessButton.classList.remove('login-signin--joining')") {
+		t.Error("a failed join must restore the button out of the joining frame")
+	}
+	// the joining frame carries the canon .7 opacity; the connected frame is
+	// the secondary look and beats [disabled]
+	if !strings.Contains(html, ".login-signin--joining { opacity: 0.7; }") {
+		t.Error("the joining frame must dim to opacity .7 (canon)")
+	}
+	if !strings.Contains(html, ".login-signin.login-signin--joined {") {
+		t.Error("the connected frame must override [disabled] via the compound .login-signin.login-signin--joined selector")
+	}
+
+	// the full settings escape hatch stays off the guest popover
+	renderBody := functionBody(html, "function renderGreenRoom()")
+	if !strings.Contains(renderBody, "greenRoomFineTuneEl.hidden = guestMode") {
+		t.Error("the \"fine-tune in settings\" line must be hidden on the guest popover")
+	}
+}

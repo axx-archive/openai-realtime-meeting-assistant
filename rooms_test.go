@@ -119,6 +119,48 @@ func TestRoomStorePasscodeSetClearAndArchive(t *testing.T) {
 	}
 }
 
+func TestRoomStoreArchiveRestoreRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rooms.json")
+	store := newRoomStore(path)
+	room, err := store.create("Ops Room", "", "aj@shareability.com", false)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+
+	if err := store.archive(room.ID); err != nil {
+		t.Fatalf("archive room: %v", err)
+	}
+	if archived, _ := store.byID(room.ID); !archived.Archived {
+		t.Fatal("expected room to be archived before restore")
+	}
+
+	if err := store.restore(room.ID); err != nil {
+		t.Fatalf("restore room: %v", err)
+	}
+	if restored, _ := store.byID(room.ID); restored.Archived {
+		t.Fatal("restore must clear the archived flag")
+	}
+
+	// The cleared flag is durable: a fresh store reads the room back live.
+	reloaded := newRoomStore(path)
+	if again, ok := reloaded.byID(room.ID); !ok || again.Archived {
+		t.Fatalf("restored state must survive a store reload, got ok=%v room=%+v", ok, again)
+	}
+	// Restoring a live (never-archived) room is a harmless no-op success,
+	// mirroring archive's set-unconditionally idempotence.
+	if err := reloaded.restore(room.ID); err != nil {
+		t.Fatalf("restoring an already-live room should be a no-op success, got %v", err)
+	}
+
+	// The office is always live: it can neither be archived nor restored.
+	if err := store.restore(officeRoomID); err == nil {
+		t.Fatal("the office must never be restorable")
+	}
+	if err := store.restore("room-doesnotexist"); err != errRoomNotFound {
+		t.Fatalf("expected errRoomNotFound restoring unknown room, got %v", err)
+	}
+}
+
 func TestGuestLinkMintRedeemRevokeExpiry(t *testing.T) {
 	store := newRoomStore(filepath.Join(t.TempDir(), "rooms.json"))
 	room, err := store.create("Guest Room", "", "aj@shareability.com", false)
@@ -302,6 +344,91 @@ func TestRoomsHandlerCreateListAndActions(t *testing.T) {
 	}
 	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/room-missing/archive", "", cookies).Code; code != http.StatusNotFound {
 		t.Fatalf("archive missing room = %d, want 404", code)
+	}
+}
+
+func TestRoomsHandlerArchiveRestore(t *testing.T) {
+	cookies := setupRoomsTestEnv(t)
+
+	recorder := doRoomsRequest(t, roomsHandler, http.MethodPost, "/rooms", `{"name":"Ops Room"}`, cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("create room = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var created struct {
+		Room struct {
+			ID string `json:"id"`
+		} `json:"room"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	// archivedFlag reads the created room's archived bit off GET /rooms, the
+	// same wire the lobby reads.
+	archivedFlag := func() bool {
+		t.Helper()
+		rec := doRoomsRequest(t, roomsHandler, http.MethodGet, "/rooms", "", cookies)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list rooms = %d body %s", rec.Code, rec.Body.String())
+		}
+		var listed struct {
+			Rooms []struct {
+				ID       string `json:"id"`
+				Archived bool   `json:"archived"`
+			} `json:"rooms"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("unmarshal list: %v", err)
+		}
+		for _, room := range listed.Rooms {
+			if room.ID == created.Room.ID {
+				return room.Archived
+			}
+		}
+		t.Fatalf("created room %q missing from GET /rooms", created.Room.ID)
+		return false
+	}
+
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/"+created.Room.ID+"/archive", "", cookies).Code; code != http.StatusOK {
+		t.Fatalf("archive room = %d", code)
+	}
+	if !archivedFlag() {
+		t.Fatal("GET /rooms must report archived:true after archive")
+	}
+
+	recorder = doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/"+created.Room.ID+"/restore", "", cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("restore room = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var restored struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &restored); err != nil {
+		t.Fatalf("unmarshal restore response: %v", err)
+	}
+	if !restored.OK {
+		t.Fatalf("restore response should be {ok:true}, got %s", recorder.Body.String())
+	}
+	if archivedFlag() {
+		t.Fatal("GET /rooms must report archived:false after restore")
+	}
+
+	// A restored room is fully live again: it still accepts a passcode set.
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/"+created.Room.ID+"/passcode", `{"passcode":"s3cret!"}`, cookies).Code; code != http.StatusOK {
+		t.Fatalf("set passcode after restore = %d", code)
+	}
+
+	// The office is always live (400); an unknown room 404s.
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/office/restore", "", cookies).Code; code != http.StatusBadRequest {
+		t.Fatalf("restore office = %d, want 400", code)
+	}
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/room-missing/restore", "", cookies).Code; code != http.StatusNotFound {
+		t.Fatalf("restore missing room = %d, want 404", code)
+	}
+
+	// Restore is a member-only verb: a signed-out caller is rejected.
+	if code := doRoomsRequest(t, roomActionHandler, http.MethodPost, "/rooms/"+created.Room.ID+"/restore", "", nil).Code; code != http.StatusUnauthorized {
+		t.Fatalf("restore signed-out = %d, want 401", code)
 	}
 }
 

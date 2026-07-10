@@ -764,6 +764,12 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 	if app == nil || roomID == officeRoomID {
 		return
 	}
+	// This runs async after the archive response; a restore may have landed in
+	// the gap. Restore is an undo — if the room is live again, leave the
+	// sitting and its occupants alone.
+	if room, ok := appRoomStore().byID(roomID); ok && !room.Archived {
+		return
+	}
 
 	broadcastRoomKanbanEvent(roomID, "room_closed", map[string]any{"roomId": roomID})
 

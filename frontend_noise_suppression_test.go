@@ -141,7 +141,8 @@ func TestIndexMigratesAudioSettingsToV8(t *testing.T) {
 		"const audioSettingsSchemaVersion = 8",
 		"function normalizeVideoSettings(",
 		"const defaultVideoSettings = {",
-		"look: 'none',",
+		// canon default filter is "crisp" (studio); a persisted look overrides it
+		"look: 'studio',",
 		// Tolerant v7→v8 migration: read nested audio if present, else flat.
 		"const audioSource = saved?.audio && typeof saved.audio === 'object' ? saved.audio : saved",
 		"const savedVersion = Number(saved?.version) || 0",

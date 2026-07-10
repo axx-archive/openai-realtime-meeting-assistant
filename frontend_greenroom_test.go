@@ -55,7 +55,10 @@ func TestIndexGreenRoomMarkupAndSharedMount(t *testing.T) {
 		`id="greenRoomVideo"`,
 		`id="greenRoomMicChip"`,
 		`id="greenRoomCamChip"`,
+		`id="greenRoomFiltersBtn"`,
+		`id="greenRoomFilters"`,
 		`id="greenRoomLooks"`,
+		`id="greenRoomBlur"`,
 		`id="greenRoomFineTune"`,
 		`id="lobbyJoinError"`,
 		"check your camera",
@@ -64,18 +67,29 @@ func TestIndexGreenRoomMarkupAndSharedMount(t *testing.T) {
 			t.Errorf("green-room markup missing %s", want)
 		}
 	}
-	// the compact looks row drives the SAME persisted look state as settings:
-	// its chips carry the shared class + data-look values, so the existing
-	// videoLookChips wiring and render pass pick them up with zero new plumbing
+	// canon: the five filter swatches live in the #greenRoomLooks group inside
+	// the filters popover, driving the SAME persisted look state as settings —
+	// they carry the shared video-look-chip class + data-look values, so the
+	// existing videoLookChips wiring and render pass pick them up with zero new
+	// plumbing. The slice runs to the blur switch (the popover is one block).
 	looksAt := strings.Index(html, `id="greenRoomLooks"`)
-	looksBlock := html[looksAt : looksAt+1400]
-	for _, look := range []string{`data-look="none"`, `data-look="bonfire-warm"`, `data-look="blur"`} {
+	blurAt := strings.Index(html, `id="greenRoomBlur"`)
+	if looksAt == -1 || blurAt == -1 || blurAt < looksAt {
+		t.Fatal("the filters popover must place the blur switch after the look swatches")
+	}
+	looksBlock := html[looksAt:blurAt]
+	for _, look := range []string{`data-look="none"`, `data-look="bonfire-warm"`, `data-look="studio"`, `data-look="mono"`, `data-look="lowlight"`} {
 		if !strings.Contains(looksBlock, look) {
-			t.Errorf("green-room looks row missing chip %s", look)
+			t.Errorf("green-room filter swatches missing %s", look)
 		}
 	}
 	if !strings.Contains(looksBlock, "video-look-chip") {
-		t.Error("green-room look chips must share the video-look-chip class (one wiring, one render pass)")
+		t.Error("green-room filter swatches must share the video-look-chip class (one wiring, one render pass)")
+	}
+	// blur is the canon "blur background" switch, mapping onto the data-look="blur"
+	// pipeline through a checkbox (not a swatch)
+	if !strings.Contains(html, `id="greenRoomBlur" type="checkbox" data-look="blur"`) {
+		t.Error("the blur background switch must map to the data-look=\"blur\" pipeline")
 	}
 	// the self-preview mirrors like every local tile
 	if !strings.Contains(html, ".greenroom__video") || !strings.Contains(html, "transform: scaleX(-1)") {
@@ -333,5 +347,111 @@ func TestIndexGreenRoomGuestGateLookupAndDemotedMemberDoor(t *testing.T) {
 	}
 	if !strings.Contains(modeBody, "guestMemberLinkEl.hidden = mode !== 'guest'") {
 		t.Error("the member door must render on the guest gate only")
+	}
+}
+
+// Canon filters popover (states 4–7): the filters button toggles a 280px
+// popover holding the five swatches (shared look wiring) + a blur switch; it
+// dismisses on outside click / Escape and closes on every preview-teardown
+// seam. The default filter is crisp (studio) unless a look is persisted.
+func TestIndexGreenRoomFiltersPopover(t *testing.T) {
+	html := readIndexHTMLForGreenRoom(t)
+
+	// canon states 5/6: the selected look previews on the pre-tap avatar layer
+	// (live video is graded by the look pipeline itself, so the CSS filter is
+	// scoped to the avatar — never .greenroom__video, which would double-apply)
+	if !strings.Contains(html, "greenRoomTileEl.dataset.look = currentLook") {
+		t.Error("renderGreenRoom must stamp the tile with the current look")
+	}
+	lookBody := functionBody(html, "function setVideoLook(look)")
+	if !strings.Contains(lookBody, "renderGreenRoom()") {
+		t.Error("a chip pick must re-render the green room so the tile look stamp stays live")
+	}
+	if !strings.Contains(html, `.greenroom__tile[data-look="mono"] .greenroom__avatar { filter: grayscale(1); }`) {
+		t.Error("the pre-tap avatar layer must carry the canon look filters")
+	}
+	if strings.Contains(html, `[data-look="mono"] .greenroom__video`) {
+		t.Error("look CSS must not touch .greenroom__video — the pipeline already grades live video")
+	}
+
+	// the filters button carries the open ring while its popover is shown
+	if !strings.Contains(html, ".greenroom__filtersbtn[aria-expanded=\"true\"]") {
+		t.Error("the filters button must show an open ring while the popover is open")
+	}
+	if !strings.Contains(html, "box-shadow: 0 0 0 3px var(--accent-soft)") {
+		t.Error("the open filters ring must use the canon accent-soft ring")
+	}
+
+	// toggle wiring + aria-expanded
+	if !strings.Contains(html, "greenRoomFiltersBtnEl.addEventListener('click', () => toggleGreenRoomFilters())") {
+		t.Error("the filters button must be wired to toggleGreenRoomFilters")
+	}
+	toggleBody := functionBody(html, "function toggleGreenRoomFilters()")
+	if !strings.Contains(toggleBody, "greenRoomFiltersEl.hidden = !open") || !strings.Contains(toggleBody, "aria-expanded") {
+		t.Error("toggleGreenRoomFilters must flip the popover + aria-expanded")
+	}
+
+	// dismissal: outside click (in the document pointerdown listener, excluding
+	// the toggle button) and Escape
+	if !strings.Contains(html, "greenRoomFiltersEl && !greenRoomFiltersEl.hidden") {
+		t.Error("a document pointerdown must close the filters popover on outside click")
+	}
+	if !strings.Contains(html, "event.target.closest?.('#greenRoomFiltersBtn')") {
+		t.Error("the outside-click closer must exclude the filters button itself")
+	}
+	escapeAt := strings.Index(html, "if (event.key !== 'Escape') {")
+	if escapeAt == -1 || !strings.Contains(html[escapeAt:escapeAt+700], "closeGreenRoomFilters()") {
+		t.Error("Escape must dismiss the filters popover")
+	}
+	// every preview-teardown seam closes the popover (join/deselect/tool switch)
+	if !strings.Contains(functionBody(html, "function stopGreenRoomPreview(nextState)"), "closeGreenRoomFilters()") {
+		t.Error("stopGreenRoomPreview must close the filters popover")
+	}
+
+	// the blur switch maps onto the single-look pipeline (on → 'blur', off →
+	// the last non-blur filter) — never an independent effect
+	if !strings.Contains(html, "greenRoomBlurEl.addEventListener('change', toggleGreenRoomBlur)") {
+		t.Error("the blur switch must be wired to toggleGreenRoomBlur")
+	}
+	blurBody := functionBody(html, "function toggleGreenRoomBlur()")
+	if !strings.Contains(blurBody, "setVideoLook('blur')") || !strings.Contains(blurBody, "setVideoLook(greenRoomLastFilterLook") {
+		t.Error("toggleGreenRoomBlur must set look 'blur' on and restore the last filter off")
+	}
+	// the blur switch stays honest with the persisted look on every look change
+	if !strings.Contains(functionBody(html, "function renderVideoLookSettings()"), "greenRoomBlurEl.checked = look === 'blur'") {
+		t.Error("renderVideoLookSettings must keep the blur switch in sync with the persisted look")
+	}
+
+	// canon default filter is crisp (studio) — a persisted look overrides it
+	if !strings.Contains(html, "look: 'studio',") {
+		t.Error("the canon default filter must be crisp (studio) in defaultVideoSettings")
+	}
+}
+
+// The tile shows canon status: a centered avatar pre-tap, a breathing "preview"
+// dot while live, "camera is off" when the cam chip is off, and a micOff badge
+// when muted.
+func TestIndexGreenRoomTileStatusCanon(t *testing.T) {
+	html := readIndexHTMLForGreenRoom(t)
+
+	for _, want := range []string{`id="greenRoomAvatar"`, `id="greenRoomStatusText"`, `id="greenRoomMicBadge"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the tile is missing canon element %s", want)
+		}
+	}
+	setBody := functionBody(html, "function setGreenRoomTileState(state)")
+	if !strings.Contains(setBody, "state === 'off' ? 'camera is off' : 'preview'") {
+		t.Error("the bottom-left status must read `preview` (live) / `camera is off` (cam off)")
+	}
+	renderBody := functionBody(html, "function renderGreenRoom()")
+	if !strings.Contains(renderBody, "greenRoomMicBadgeEl.hidden = prefs.mic") {
+		t.Error("the micOff badge must show only while muted")
+	}
+	if !strings.Contains(renderBody, "greenRoomAvatarEl.textContent = greenRoomAvatarInitials()") {
+		t.Error("the pre-tap tile must show the joiner's avatar initials")
+	}
+	// the live dot breathes (honoring reduced motion)
+	if !strings.Contains(html, ".greenroom__tile[data-state=\"live\"] .greenroom__livedot { animation: bf-breathe") {
+		t.Error("the live preview dot must breathe")
 	}
 }

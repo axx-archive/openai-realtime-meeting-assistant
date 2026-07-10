@@ -251,6 +251,26 @@ func (s *roomStore) archive(id string) error {
 	return nil
 }
 
+// restore reverses archive: it clears the Archived flag so the room is joinable
+// again. It only re-opens joinability — no sitting is auto-started, so there is
+// no close-chain counterpart. Mirrors archive's shape: the office is never
+// archived, so restoring it is invalid; restoring a live (never-archived) room
+// is an idempotent no-op success, matching archive's set-unconditionally style.
+func (s *roomStore) restore(id string) error {
+	if id == officeRoomID {
+		return errors.New("the office is always live and cannot be restored")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index, ok := s.roomByIDLocked(id)
+	if !ok {
+		return errRoomNotFound
+	}
+	s.rooms[index].Archived = false
+	s.persistLocked()
+	return nil
+}
+
 func (s *roomStore) mintGuestLink(roomID, label, createdBy string, ttl time.Duration) (string, guestLinkRecord, error) {
 	if ttl <= 0 {
 		ttl = guestLinkDefaultTTL
@@ -565,6 +585,16 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 		// Async: the close-flush can take a while and the archive itself is
 		// already durable (closeRoomForArchive is nil-receiver safe).
 		go kanbanApp.closeRoomForArchive(roomID)
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case action == "restore" && r.Method == http.MethodPost:
+		if err := appRoomStore().restore(roomID); err != nil {
+			writeRoomActionError(w, err)
+			return
+		}
+		// Restore only re-opens joinability: no sitting is auto-started, so
+		// there is no close-chain counterpart to archive's closeRoomForArchive.
+		// The rooms card on every office tab drops the archived badge live.
+		broadcastRoomsSnapshot()
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case action == "guest-links" && r.Method == http.MethodPost:
 		payload := struct {

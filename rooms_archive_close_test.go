@@ -68,6 +68,42 @@ func TestCloseRoomForArchiveEndsSittingAndForgetsSeats(t *testing.T) {
 	}
 }
 
+// Restore is an undo. The close chain runs async after the archive response,
+// so a restore can land in the gap — when it does, the close must no-op:
+// occupants keep their seats and the sitting stays open.
+func TestCloseRoomForArchiveNoopsAfterRestore(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("BONFIRE_ROOMS_PATH", filepath.Join(t.TempDir(), "rooms.json"))
+	app := newIsolatedKanbanBoardApp(t)
+
+	room, err := appRoomStore().create("war room", "", "aj@shareability.com", false)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, _, err := app.admitParticipantSessionEndpointInRoom(room.ID, "AJ", "sess-1", "ep-1"); err != nil {
+		t.Fatalf("admit participant: %v", err)
+	}
+	app.noteMeetingAdmission(room.ID, "AJ")
+	if _, ok := app.meetings.activeRecord(room.ID); !ok {
+		t.Fatal("admission did not open a meeting record")
+	}
+
+	if err := appRoomStore().archive(room.ID); err != nil {
+		t.Fatalf("archive room: %v", err)
+	}
+	if err := appRoomStore().restore(room.ID); err != nil {
+		t.Fatalf("restore room: %v", err)
+	}
+	app.closeRoomForArchive(room.ID)
+
+	if _, ok := app.meetings.activeRecord(room.ID); !ok {
+		t.Fatal("close chain must no-op after a restore — the sitting was ended")
+	}
+	if got := app.activeParticipantCount(room.ID); got != 1 {
+		t.Fatalf("close chain after restore forgot seats: %d occupied, want 1", got)
+	}
+}
+
 // The office is room zero: the store already refuses to archive it, and the
 // close seam must refuse to end its sitting even if called directly.
 func TestCloseRoomForArchiveRefusesOffice(t *testing.T) {

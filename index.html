@@ -1937,6 +1937,51 @@
         cursor: not-allowed;
       }
 
+      /* ---------- Guest join gate — canon Surface 2 (states 1–7) ----------
+         The guest tab reuses the login-card shell but conforms to the guest
+         join canon column: a 44px app icon, a headline wordmark, the invite
+         line, then ONE glass panel (name → green room → join → escape hatch).
+         Scoped to is-guest so the member sign-in gate is untouched. */
+      #appShell.is-guest .access-panel {
+        width: min(440px, calc(100vw - 40px));
+        gap: 18px;
+      }
+      #appShell.is-guest .login-head { gap: 12px; }
+      #appShell.is-guest .login-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: var(--r-lg);
+      }
+      #appShell.is-guest .login-wordmark {
+        font: var(--type-headline);
+        letter-spacing: var(--track-headline);
+      }
+      #appShell.is-guest .login-subline {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      #appShell.is-guest .login-card { gap: 16px; }
+
+      /* canon guest join button frames (states 1/6/7): idle "join as a guest"
+         → "joining…" (disabled, opacity .7) → connected "you're in" (a
+         secondary + check handoff frame; the stage mount hides the gate). */
+      .login-signin--joining { opacity: 0.7; }
+      .login-signin.login-signin--joined {
+        background: var(--surface-3);
+        color: var(--text-1);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      .login-signin.login-signin--joined::before {
+        content: "";
+        width: 15px;
+        height: 15px;
+        flex: none;
+        background: currentColor;
+        -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>") center / contain no-repeat;
+        mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>") center / contain no-repeat;
+      }
+
       /* connection status stays out of sight until it means something —
          it appears only while signing in or after a failed attempt */
       .login-status {
@@ -14229,8 +14274,41 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 12px;
+        width: 100%;
+        min-width: 0;
+      }
+      /* canon: ONE shared glass panel holding the switcher + the 440px center
+         column. Below 880 it stacks (center on top, switcher under, max-width
+         440); at ≥880 it becomes a row with the switcher flipped left. The
+         stage is always black, so the panel wears the white-alpha glass idiom
+         rather than the light surface tokens. */
+      .lobby__panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 32px;
+        width: 100%;
+        max-width: 480px;
+        padding: 20px;
+        border-radius: var(--r-2xl);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.04);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .lobby__panel { animation: bf-rise-in 480ms var(--ease) both; }
+      }
+      .lobby__center {
+        order: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         gap: 18px;
-        max-width: 520px;
+        width: 100%;
+        max-width: 440px;
         min-width: 0;
       }
       .lobby__badges {
@@ -14282,22 +14360,24 @@
       .lobby__joinerror[hidden] { display: none; }
       /* RW2 green room — theme tokens for the gate mount; the lobby mount
          overrides to the stage's white-alpha idiom (the stage is always
-         black, whatever the theme). */
-      .greenroom {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 10px;
-        width: min(100%, 360px);
-      }
+         black, whatever the theme). Canon: a 16/10 preview tile with a
+         vertical 52px control stack (mic / cam / filters) to its right. */
+      .greenroom { width: 100%; }
       .greenroom[hidden] { display: none; }
+      .greenroom__previewrow {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        width: 100%;
+      }
       .greenroom__tile {
         position: relative;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        border-radius: var(--r-lg);
+        flex: 1;
+        min-width: 0;
+        aspect-ratio: 16 / 10;
+        border-radius: var(--r-xl);
         border: 1px solid var(--line-2);
-        background: var(--surface-2);
+        background: var(--bg-stage);
         overflow: hidden;
         cursor: pointer;
         padding: 0;
@@ -14320,82 +14400,286 @@
       }
       .greenroom__tile[data-state="live"] .greenroom__video { display: block; }
       .greenroom__tile[data-state="live"] { cursor: default; }
+      /* centered avatar pre-tap (member/guest initials); hidden once live */
+      .greenroom__avatar {
+        position: absolute;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 60px;
+        height: 60px;
+        border-radius: var(--r-full);
+        background: rgba(255, 255, 255, 0.10);
+        color: rgba(255, 255, 255, 0.85);
+        font: 600 20px var(--font-sans);
+        letter-spacing: 0;
+      }
+      .greenroom__tile[data-state="live"] .greenroom__avatar { display: none; }
+      /* canon states 5/6: the selected look previews on the pre-tap avatar layer
+         too (live video is graded by the look pipeline itself — no CSS double-
+         apply on .greenroom__video). */
+      .greenroom__avatar { transition: filter var(--dur-med) var(--ease); }
+      .greenroom__tile[data-look="bonfire-warm"] .greenroom__avatar { filter: sepia(0.22) saturate(1.2); }
+      .greenroom__tile[data-look="studio"] .greenroom__avatar { filter: contrast(1.1) saturate(1.08); }
+      .greenroom__tile[data-look="mono"] .greenroom__avatar { filter: grayscale(1); }
+      .greenroom__tile[data-look="lowlight"] .greenroom__avatar { filter: brightness(0.78) contrast(1.05); }
       .greenroom__hint {
+        position: relative;
+        z-index: 1;
         display: inline-flex;
         align-items: center;
         gap: 7px;
+        margin-top: 78px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
         padding: 0 16px;
         text-align: center;
       }
       .greenroom__tile[data-state="live"] .greenroom__hint { display: none; }
+      .greenroom__tile[data-state="off"] .greenroom__hint { display: none; }
       .greenroom__tile[data-state="timeout"] .greenroom__hint svg { display: none; }
-      .greenroom__chips { display: flex; align-items: center; justify-content: center; gap: 8px; }
-      .greenroom__chip {
+      /* bottom-left status: breathing dot + "preview" while live, "camera is
+         off" when the cam chip is off */
+      .greenroom__status {
+        position: absolute;
+        left: 12px;
+        bottom: 11px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+      }
+      .greenroom__tile[data-state="live"] .greenroom__status,
+      .greenroom__tile[data-state="off"] .greenroom__status { display: inline-flex; }
+      .greenroom__livedot {
+        width: 6px;
+        height: 6px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        flex: none;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .greenroom__tile[data-state="live"] .greenroom__livedot { animation: bf-breathe var(--dur-breathe) var(--ease) infinite; }
+      }
+      .greenroom__tile[data-state="off"] .greenroom__livedot { display: none; }
+      .greenroom__statustext {
+        font: var(--type-caption-medium);
+        color: #fff;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      }
+      .greenroom__tile[data-state="off"] .greenroom__statustext { color: rgba(255, 255, 255, 0.55); text-shadow: none; }
+      /* mic-off badge, top-right */
+      .greenroom__micbadge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        min-height: var(--hit-min);
-        padding: 0 var(--sp-3);
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.5);
+        color: var(--danger);
+      }
+      .greenroom__micbadge[hidden] { display: none; }
+      /* the vertical control stack — 52px icon buttons */
+      .greenroom__stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        flex: none;
+      }
+      .greenroom__ctl {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 52px;
+        height: 52px;
+        flex: none;
         border-radius: var(--r-full);
         border: 1px solid var(--line-2);
         background: var(--surface-2);
-        color: var(--text-2);
-        font: var(--type-body-medium);
-        letter-spacing: var(--track-text);
+        color: var(--text-1);
         cursor: pointer;
-        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
       }
-      .greenroom__chip:hover { border-color: var(--accent); }
-      /* off = struck glyph + quiet ink, never a loud state */
-      .greenroom__chip[aria-pressed="false"] { color: var(--text-3); }
-      .greenroom__chip[aria-pressed="false"] svg { opacity: 0.55; }
-      .greenroom__chip[aria-pressed="false"] .greenroom__chip-label { text-decoration: line-through; }
-      .greenroom__looks {
+      .greenroom__ctl:hover { border-color: var(--accent); }
+      /* off = quiet ink, never a loud state */
+      .greenroom__ctl[aria-pressed="false"] { color: var(--text-3); }
+      .greenroom__ctl[aria-pressed="false"] svg { opacity: 0.55; }
+      /* the filters button carries the open ring while its popover is shown */
+      .greenroom__filterswrap { position: relative; }
+      .greenroom__filtersbtn[aria-expanded="true"] {
+        box-shadow: 0 0 0 3px var(--accent-soft);
+        border-color: var(--accent);
+      }
+      /* filters popover — 280px, anchored to the right of the button */
+      .greenroom__filters {
+        position: absolute;
+        top: 0;
+        right: 62px;
+        z-index: 70;
+        width: 280px;
+        max-width: calc(100vw - 32px);
+        padding: 16px;
         display: flex;
-        flex-wrap: wrap;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 6px;
+        gap: 12px;
+        border-radius: var(--r-xl);
+        border: 1px solid var(--line-1);
+        background: var(--surface-1);
+        box-shadow: var(--shadow-2, 0 18px 44px rgba(0, 0, 0, 0.4));
       }
-      .greenroom__looks .video-look-chip { min-height: 34px; padding: 0 12px; font: var(--type-label); letter-spacing: var(--track-label); border-radius: var(--r-full); }
+      .greenroom__filters[hidden] { display: none; }
+      .greenroom__filters-label {
+        align-self: flex-start;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .greenroom__swatches {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .greenroom__swatch {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: pointer;
+      }
+      .greenroom__swatch.is-selected { background: none; border-color: transparent; }
+      .greenroom__swatch-fill {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--r-full);
+        background: linear-gradient(135deg, #d69b7a 0%, #7d94b0 100%);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+        transition: box-shadow var(--dur-fast) var(--ease);
+      }
+      .greenroom__swatch[data-look="bonfire-warm"] .greenroom__swatch-fill { filter: sepia(0.22) saturate(1.2); }
+      .greenroom__swatch[data-look="studio"] .greenroom__swatch-fill { filter: contrast(1.1) saturate(1.08); }
+      .greenroom__swatch[data-look="mono"] .greenroom__swatch-fill { filter: grayscale(1); }
+      .greenroom__swatch[data-look="lowlight"] .greenroom__swatch-fill { filter: brightness(0.78) contrast(1.05); }
+      .greenroom__swatch.is-selected .greenroom__swatch-fill { box-shadow: 0 0 0 2px var(--text-1); }
+      .greenroom__swatch-label {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+      .greenroom__swatch.is-selected .greenroom__swatch-label { color: var(--text-1); }
+      .greenroom__filters-divider { height: 1px; width: 100%; background: var(--line-1); }
+      .greenroom__blur {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        cursor: pointer;
+      }
+      .greenroom__blur-label { font: var(--type-body-medium); color: var(--text-1); }
+      .greenroom__switch { position: relative; display: inline-flex; flex: none; }
+      .greenroom__switch input {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .greenroom__switch-track {
+        display: inline-flex;
+        align-items: center;
+        width: 40px;
+        height: 24px;
+        padding: 2px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        border: 1px solid var(--line-2);
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+      .greenroom__switch-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: var(--r-full);
+        background: var(--text-2);
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .greenroom__switch input:checked + .greenroom__switch-track { background: var(--accent); border-color: transparent; }
+      .greenroom__switch input:checked + .greenroom__switch-track .greenroom__switch-thumb { transform: translateX(16px); background: var(--on-accent, #fff); }
+      .greenroom__switch input:focus-visible + .greenroom__switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
       .greenroom__finetune {
+        align-self: flex-start;
         border: 0;
         background: none;
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         cursor: pointer;
-        min-height: 34px;
-        padding: 0 8px;
+        min-height: 30px;
+        padding: 0;
       }
       .greenroom__finetune:hover { color: var(--text-1); }
       .greenroom__finetune[hidden] { display: none; }
-      /* lobby mount: the stage is black in every theme */
+      /* lobby mount: the stage is black in every theme, so the tile + controls
+         wear the white-alpha idiom and the popover the dark-glass idiom */
       .room-empty .greenroom__tile { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.55); }
       .room-empty .greenroom__tile:hover { border-color: rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.8); }
-      .room-empty .greenroom__chip { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.78); }
-      .room-empty .greenroom__chip[aria-pressed="false"] { color: rgba(255, 255, 255, 0.42); }
-      .room-empty .greenroom__looks .video-look-chip { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.78); }
-      .room-empty .greenroom__looks .video-look-chip.is-selected { background: #fff; border-color: transparent; color: #000; }
+      .room-empty .greenroom__ctl { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.85); }
+      .room-empty .greenroom__ctl:hover { border-color: rgba(255, 255, 255, 0.35); }
+      .room-empty .greenroom__ctl[aria-pressed="false"] { color: rgba(255, 255, 255, 0.42); }
+      .room-empty .greenroom__filtersbtn[aria-expanded="true"] { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.55); }
+      .room-empty .greenroom__filters {
+        background: rgba(24, 24, 27, 0.95);
+        border-color: rgba(255, 255, 255, 0.12);
+        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+      }
+      .room-empty .greenroom__filters-label,
+      .room-empty .greenroom__swatch-label { color: rgba(255, 255, 255, 0.5); }
+      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-fill { box-shadow: 0 0 0 2px #fff; }
+      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-label { color: #fff; }
+      .room-empty .greenroom__filters-divider { background: rgba(255, 255, 255, 0.12); }
+      .room-empty .greenroom__blur-label { color: rgba(255, 255, 255, 0.85); }
+      .room-empty .greenroom__switch-track { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.16); }
+      .room-empty .greenroom__switch-thumb { background: rgba(255, 255, 255, 0.7); }
       .room-empty .greenroom__finetune { color: rgba(255, 255, 255, 0.42); }
       .room-empty .greenroom__finetune:hover { color: rgba(255, 255, 255, 0.8); }
-      /* gate mount: tighter block inside the login card */
+      /* gate mount: tighter block inside the login card. Canon guest sizing
+         (Surface 2): 48px control buttons, a 24px micOff badge, a 56px avatar,
+         and a 270px filters popover anchored at right:58px. */
       .greenroom--gate { width: 100%; }
+      .greenroom--gate .greenroom__ctl { width: 48px; height: 48px; }
+      .greenroom--gate .greenroom__micbadge { width: 24px; height: 24px; }
+      .greenroom--gate .greenroom__avatar { width: 56px; height: 56px; }
+      .greenroom--gate .greenroom__filters { width: 270px; right: 58px; }
       .lobby__rail {
         /* the ⋯ popover portals onto the rail (the rows live inside the
            .lobby__list scrollbox, whose overflow would clip it) — the rail
-           is its positioning context */
+           is its positioning context. order:2 keeps it under the preview when
+           stacked; the ≥880 rule flips it to the visual left (order:1). */
+        order: 2;
         position: relative;
         width: 100%;
-        max-width: 520px;
+        max-width: 440px;
         display: flex;
         flex-direction: column;
         gap: 8px;
         text-align: left;
       }
       .lobby__rail[hidden] { display: none; }
+      .lobby__rail-label {
+        padding: 4px 6px 4px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: rgba(255, 255, 255, 0.5);
+      }
       .lobby__list {
         display: flex;
         flex-direction: column;
@@ -14479,57 +14763,163 @@
       .lobby__more:focus-visible,
       .lobby__new:focus-visible,
       .lobby__submit:focus-visible,
+      .lobby__formcancel:focus-visible,
+      .lobby__archived-toggle:focus-visible,
       .greenroom__tile:focus-visible,
-      .greenroom__chip:focus-visible {
+      .greenroom__ctl:focus-visible {
         outline: 2px solid rgba(255, 255, 255, 0.85);
         outline-offset: 2px;
         box-shadow: none;
       }
+      /* canon "new room" — a full-width dashed affordance beneath the list */
       .lobby__new {
-        align-self: flex-start;
-        padding: 8px 14px;
-        border-radius: var(--r-full);
-        border: 1px solid rgba(255, 255, 255, 0.16);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 36px;
+        margin-top: 2px;
+        padding: 0 14px;
+        border-radius: var(--r-md);
+        border: 1px dashed rgba(255, 255, 255, 0.22);
         background: none;
         color: rgba(255, 255, 255, 0.75);
-        font: 600 12.5px var(--font-sans);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
         cursor: pointer;
       }
-      .lobby__new:hover { color: #fff; border-color: rgba(255, 255, 255, 0.35); }
+      .lobby__new svg { flex: none; }
+      .lobby__new:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+      /* archived rooms fold under a toggle row (chevron + "N archived") */
+      .lobby__archived-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 6px;
+        border: 0;
+        background: none;
+        color: rgba(255, 255, 255, 0.5);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .lobby__archived-toggle[hidden] { display: none; }
+      .lobby__archived-toggle svg { flex: none; transition: transform var(--dur-fast) var(--ease); }
+      .lobby__archived-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+      .lobby__archived { display: flex; flex-direction: column; gap: 2px; }
+      .lobby__archived[hidden] { display: none; }
+      .lobby__archived-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 40px;
+        padding: 0 8px;
+      }
+      .lobby__archived-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: var(--type-body);
+        color: rgba(255, 255, 255, 0.42);
+      }
+      .lobby__restore {
+        flex: none;
+        border: 0;
+        background: none;
+        color: rgba(255, 255, 255, 0.72);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .lobby__restore:hover { color: #fff; }
+      .lobby__restore:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
+      /* canon create form — border-top separated, stacked inputs, a Switch for
+         allow-guests, and a ghost cancel beside the primary create */
       .lobby__form {
         display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 8px;
-        padding: 12px;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.05);
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 6px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
       }
       .lobby__form[hidden] { display: none; }
       .lobby__input {
-        height: 34px;
+        height: 38px;
         padding: 0 12px;
-        border-radius: 10px;
+        border-radius: var(--r-md);
         border: 1px solid rgba(255, 255, 255, 0.16);
         background: rgba(255, 255, 255, 0.06);
         color: #fff;
         font: 500 12.5px var(--font-sans);
         outline: none;
         min-width: 0;
-        flex: 1 1 140px;
+        width: 100%;
       }
       .lobby__input:focus { border-color: rgba(255, 255, 255, 0.42); }
-      .lobby__check {
+      .lobby__switch {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        font: var(--type-body-medium);
+        color: rgba(255, 255, 255, 0.78);
+      }
+      .lobby__switch input {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 40px;
+        height: 24px;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .lobby__switch-track {
+        position: relative;
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.6);
+        width: 40px;
+        height: 24px;
+        padding: 2px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
+      .lobby__switch-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: var(--r-full);
+        background: rgba(255, 255, 255, 0.7);
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+      .lobby__switch input:checked ~ .lobby__switch-track { background: var(--accent); border-color: transparent; }
+      .lobby__switch input:checked ~ .lobby__switch-track .lobby__switch-thumb { transform: translateX(16px); background: #fff; }
+      .lobby__switch input:focus-visible ~ .lobby__switch-track { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
+      .lobby__switch-label { font: var(--type-body-medium); }
+      .lobby__formactions { display: flex; gap: 8px; }
+      .lobby__formcancel {
+        flex: 1;
+        min-width: 0;
+        height: 38px;
+        border-radius: var(--r-full);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: none;
+        color: rgba(255, 255, 255, 0.75);
+        font: 600 12.5px var(--font-sans);
+        cursor: pointer;
+      }
+      .lobby__formcancel:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
       .lobby__submit {
-        padding: 8px 14px;
+        flex: 1;
+        min-width: 0;
+        height: 38px;
         border-radius: var(--r-full);
         border: 0;
         background: #fff;
@@ -14580,6 +14970,9 @@
         cursor: pointer;
       }
       .lobby-pop__item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      .lobby-pop__item--danger { color: var(--danger); }
+      .lobby-pop__item--danger:hover { background: var(--danger-soft); color: var(--danger); }
+      .lobby-pop__divider { display: block; height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.12); }
       .lobby-pop__note {
         padding: 8px 10px;
         font: var(--type-label);
@@ -14706,13 +15099,21 @@
         .invite-pop { width: calc(100vw - 24px); border-radius: 20px; }
       }
 
-      /* desktop: hero centered, rooms rail to its right; single column on
-         the phone (rail beneath, full-width). */
-      @media (min-width: 960px) {
-        .room-empty { flex-direction: row; align-items: center; justify-content: center; gap: 56px; }
-        .lobby__hero { flex: 0 1 520px; }
-        .lobby__rail { width: 280px; flex: none; }
-        .lobby__list { max-height: min(56vh, 480px); }
+      /* desktop (≥880): the one glass panel becomes a row — the switcher
+         flips to the visual left (order:1, 260px), the center column holds at
+         440px. Below 880 the panel stays a column (center on top, switcher
+         under). */
+      @media (min-width: 880px) {
+        .lobby__panel {
+          flex-direction: row;
+          align-items: stretch;
+          gap: 24px;
+          max-width: none;
+          width: auto;
+        }
+        .lobby__center { order: 2; flex: none; width: 440px; }
+        .lobby__rail { order: 1; width: 260px; flex: none; max-width: none; }
+        .lobby__list { max-height: min(52vh, 440px); }
       }
 
       /* pinned-view control: the room defaults to an equal grid; this small
@@ -21263,67 +21664,119 @@
                  render guard; /rooms 401s for them regardless). Join reuses
                  the live join flow (data-join-room -> joinRoom()). -->
             <div id="roomNotConnected" class="room-empty" aria-label="Room lobby">
-              <div class="lobby__hero">
-                <!-- §3.1 hierarchy: room NAME (person-scale sans), koan meta
-                     in mono directly beneath, then the badge row -->
-                <div id="roomEmptyName" class="room-empty__title">the office</div>
-                <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
-                <div id="lobbyBadges" class="lobby__badges" hidden></div>
-                <!-- RW2 green room — the join seam's AV check. Media only on
-                     EXPLICIT intent (tile tap / cam chip flipping on); the
-                     preview releases fully on join, deselect, tool switch and
-                     gate unmount. Chips persist to localStorage bonfire:joinAV
-                     and carry into the join through the real mute machinery.
-                     One block, two mounts: guest boot re-parents it into the
-                     guest name gate (mountGreenRoomInGuestGate). -->
-                <div id="greenRoom" class="greenroom">
-                  <button id="greenRoomTile" type="button" class="greenroom__tile" data-state="idle" aria-label="check your camera">
-                    <video id="greenRoomVideo" class="greenroom__video" autoplay muted playsinline></video>
-                    <span id="greenRoomHint" class="greenroom__hint">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                      <span id="greenRoomHintText">check your camera</span>
-                    </span>
+              <!-- canon Surface 1 — one shared glass panel: the room switcher
+                   (order:1, left ≥880) beside the 440px center column
+                   (order:2). Below 880 they stack, switcher under the preview.
+                   Source order keeps the center column (green room) before the
+                   rail; CSS `order` flips the rail visually left on desktop. -->
+              <div class="lobby__panel">
+                <div class="lobby__center">
+                  <div class="lobby__hero">
+                    <!-- §3.1 hierarchy: room NAME (person-scale sans), koan meta
+                         in mono directly beneath, then the badge row -->
+                    <div id="roomEmptyName" class="room-empty__title">the office</div>
+                    <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
+                    <div id="lobbyBadges" class="lobby__badges" hidden></div>
+                  </div>
+                  <!-- RW2 green room — the join seam's AV check. Media only on
+                       EXPLICIT intent (tile tap / cam chip flipping on); the
+                       preview releases fully on join, deselect, tool switch and
+                       gate unmount. Chips persist to localStorage bonfire:joinAV
+                       and carry into the join through the real mute machinery.
+                       One block, two mounts: guest boot re-parents it into the
+                       guest name gate (mountGreenRoomInGuestGate). Canon layout:
+                       16/10 tile + a vertical 52px control stack (mic / cam /
+                       filters) to its right; the filters popover holds the five
+                       swatches + the blur switch. -->
+                  <div id="greenRoom" class="greenroom">
+                    <div class="greenroom__previewrow">
+                      <button id="greenRoomTile" type="button" class="greenroom__tile" data-state="idle" aria-label="check your camera">
+                        <video id="greenRoomVideo" class="greenroom__video" autoplay muted playsinline></video>
+                        <span id="greenRoomAvatar" class="greenroom__avatar" aria-hidden="true"></span>
+                        <span id="greenRoomHint" class="greenroom__hint">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                          <span id="greenRoomHintText">check your camera</span>
+                        </span>
+                        <span class="greenroom__status" aria-hidden="true">
+                          <span class="greenroom__livedot"></span>
+                          <span id="greenRoomStatusText" class="greenroom__statustext">preview</span>
+                        </span>
+                        <span id="greenRoomMicBadge" class="greenroom__micbadge" hidden aria-hidden="true">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+                        </span>
+                      </button>
+                      <div class="greenroom__stack">
+                        <button id="greenRoomMicChip" type="button" class="greenroom__ctl" aria-pressed="true" aria-label="mute microphone">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+                        </button>
+                        <button id="greenRoomCamChip" type="button" class="greenroom__ctl" aria-pressed="true" aria-label="turn camera off">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                        </button>
+                        <div class="greenroom__filterswrap">
+                          <button id="greenRoomFiltersBtn" type="button" class="greenroom__ctl greenroom__filtersbtn" aria-label="video filters" aria-haspopup="true" aria-expanded="false">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                          </button>
+                          <!-- filters popover: five swatches (canon CSS filters) +
+                               the blur switch. The swatches keep the shared
+                               video-look-chip[data-look] wiring; blur maps to the
+                               data-look="blur" pipeline through the switch. -->
+                          <div id="greenRoomFilters" class="greenroom__filters" hidden>
+                            <span class="greenroom__filters-label">video filter</span>
+                            <div id="greenRoomLooks" class="greenroom__swatches">
+                              <button type="button" class="video-look-chip greenroom__swatch" data-look="none" aria-pressed="true" aria-label="no filter"><span class="greenroom__swatch-fill"></span><span class="greenroom__swatch-label">none</span></button>
+                              <button type="button" class="video-look-chip greenroom__swatch" data-look="bonfire-warm" aria-pressed="false" aria-label="warm filter"><span class="greenroom__swatch-fill"></span><span class="greenroom__swatch-label">warm</span></button>
+                              <button type="button" class="video-look-chip greenroom__swatch" data-look="studio" aria-pressed="false" aria-label="crisp filter"><span class="greenroom__swatch-fill"></span><span class="greenroom__swatch-label">crisp</span></button>
+                              <button type="button" class="video-look-chip greenroom__swatch" data-look="mono" aria-pressed="false" aria-label="mono filter"><span class="greenroom__swatch-fill"></span><span class="greenroom__swatch-label">mono</span></button>
+                              <button type="button" class="video-look-chip greenroom__swatch" data-look="lowlight" aria-pressed="false" aria-label="low-light filter"><span class="greenroom__swatch-fill"></span><span class="greenroom__swatch-label">low-light</span></button>
+                            </div>
+                            <span class="greenroom__filters-divider"></span>
+                            <label class="greenroom__blur">
+                              <span class="greenroom__blur-label">blur background</span>
+                              <span class="greenroom__switch">
+                                <input id="greenRoomBlur" type="checkbox" data-look="blur">
+                                <span class="greenroom__switch-track"><span class="greenroom__switch-thumb"></span></span>
+                              </span>
+                            </label>
+                            <button id="greenRoomFineTune" type="button" class="greenroom__finetune">fine-tune in settings</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="lobbyPasscodeGate" class="lobby__passgate" hidden>
+                    <div class="lobby__passrow">
+                      <input id="lobbyPasscodeInput" class="lobby__passinput" type="password" placeholder="room passcode" autocomplete="off">
+                      <button id="lobbyPasscodeJoin" type="button" class="room-empty__join">join</button>
+                    </div>
+                    <div id="lobbyPasscodeError" class="lobby__passerror" hidden>wrong passcode.</div>
+                  </div>
+                  <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>join</button>
+                  <div id="lobbyJoinError" class="lobby__joinerror" hidden></div>
+                </div>
+                <aside id="lobbyRail" class="lobby__rail" hidden aria-label="All rooms">
+                  <span class="lobby__rail-label">open rooms</span>
+                  <div id="lobbyRoomsList" class="lobby__list"></div>
+                  <button id="lobbyArchivedToggle" class="lobby__archived-toggle" type="button" aria-expanded="false" hidden></button>
+                  <div id="lobbyArchivedList" class="lobby__archived" hidden></div>
+                  <button id="lobbyNewRoom" class="lobby__new pressable" type="button">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    new room
                   </button>
-                  <div class="greenroom__chips" role="group" aria-label="Join with mic and camera">
-                    <button id="greenRoomMicChip" type="button" class="greenroom__chip" aria-pressed="true">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
-                      <span class="greenroom__chip-label">mic</span>
-                    </button>
-                    <button id="greenRoomCamChip" type="button" class="greenroom__chip" aria-pressed="true">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                      <span class="greenroom__chip-label">camera</span>
-                    </button>
-                  </div>
-                  <div id="greenRoomLooks" class="greenroom__looks">
-                    <button type="button" class="video-look-chip pressable" data-look="none" aria-pressed="true">none</button>
-                    <button type="button" class="video-look-chip pressable" data-look="bonfire-warm" aria-pressed="false">warm</button>
-                    <button type="button" class="video-look-chip pressable" data-look="studio" aria-pressed="false">crisp</button>
-                    <button type="button" class="video-look-chip pressable" data-look="mono" aria-pressed="false">mono</button>
-                    <button type="button" class="video-look-chip pressable" data-look="lowlight" aria-pressed="false">low-light</button>
-                    <button type="button" class="video-look-chip pressable" data-look="blur" aria-pressed="false">blur bg</button>
-                    <button id="greenRoomFineTune" type="button" class="greenroom__finetune">fine-tune in settings</button>
-                  </div>
-                </div>
-                <div id="lobbyPasscodeGate" class="lobby__passgate" hidden>
-                  <div class="lobby__passrow">
-                    <input id="lobbyPasscodeInput" class="lobby__passinput" type="password" placeholder="room passcode" autocomplete="off">
-                    <button id="lobbyPasscodeJoin" type="button" class="room-empty__join">join</button>
-                  </div>
-                  <div id="lobbyPasscodeError" class="lobby__passerror" hidden>wrong passcode.</div>
-                </div>
-                <button id="roomEmptyJoin" type="button" class="room-empty__join" data-join-room>join the room</button>
-                <div id="lobbyJoinError" class="lobby__joinerror" hidden></div>
+                  <form id="lobbyCreateForm" class="lobby__form" hidden>
+                    <input id="lobbyCreateName" class="lobby__input" type="text" placeholder="room name" maxlength="80" autocomplete="off">
+                    <input id="lobbyCreatePasscode" class="lobby__input" type="password" placeholder="passcode (optional)" autocomplete="new-password">
+                    <label class="lobby__switch">
+                      <input id="lobbyCreateGuests" type="checkbox">
+                      <span class="lobby__switch-track"><span class="lobby__switch-thumb"></span></span>
+                      <span class="lobby__switch-label">allow guests</span>
+                    </label>
+                    <div class="lobby__formactions">
+                      <button id="lobbyCreateCancel" class="lobby__formcancel pressable" type="button">cancel</button>
+                      <button class="lobby__submit pressable" type="submit">create</button>
+                    </div>
+                  </form>
+                </aside>
               </div>
-              <aside id="lobbyRail" class="lobby__rail" hidden aria-label="All rooms">
-                <div id="lobbyRoomsList" class="lobby__list"></div>
-                <button id="lobbyNewRoom" class="lobby__new pressable" type="button">+ new room</button>
-                <form id="lobbyCreateForm" class="lobby__form" hidden>
-                  <input id="lobbyCreateName" class="lobby__input" type="text" placeholder="room name" maxlength="80" autocomplete="off">
-                  <input id="lobbyCreatePasscode" class="lobby__input" type="password" placeholder="passcode (optional)" autocomplete="new-password">
-                  <label class="lobby__check"><input id="lobbyCreateGuests" type="checkbox"> allow guests</label>
-                  <button class="lobby__submit pressable" type="submit">create</button>
-                </form>
-              </aside>
             </div>
             <div class="hearth-center">
               <article id="activeSpeakerTile" class="hearth-speaker" aria-label="Stage participant">
@@ -22574,6 +23027,13 @@
          (both re-render on every updateOfficeHome pass). */
       var lobbyListSignature = ''
       var homeLiveSignature = ''
+      /* the archived-rooms fold in the switcher — closed by default, opened by
+         the "N archived" toggle. Read by renderLobbyRoomsList on the boot
+         render pass, so it is a var initialized before boot. */
+      var lobbyShowArchived = false
+      /* the last non-blur filter, so toggling the blur switch off restores the
+         filter that was active before it. */
+      var greenRoomLastFilterLook = 'studio'
       /* the room the passcode gate last rendered for — a selection change
          clears the field + error, a re-render of the same room keeps them. */
       var lobbyPasscodeGateRoomId = ''
@@ -23044,9 +23504,15 @@
       const greenRoomEl = document.getElementById('greenRoom')
       const greenRoomTileEl = document.getElementById('greenRoomTile')
       const greenRoomVideoEl = document.getElementById('greenRoomVideo')
+      const greenRoomAvatarEl = document.getElementById('greenRoomAvatar')
       const greenRoomHintTextEl = document.getElementById('greenRoomHintText')
+      const greenRoomStatusTextEl = document.getElementById('greenRoomStatusText')
+      const greenRoomMicBadgeEl = document.getElementById('greenRoomMicBadge')
       const greenRoomMicChipEl = document.getElementById('greenRoomMicChip')
       const greenRoomCamChipEl = document.getElementById('greenRoomCamChip')
+      const greenRoomFiltersBtnEl = document.getElementById('greenRoomFiltersBtn')
+      const greenRoomFiltersEl = document.getElementById('greenRoomFilters')
+      const greenRoomBlurEl = document.getElementById('greenRoomBlur')
       const greenRoomFineTuneEl = document.getElementById('greenRoomFineTune')
       const lobbyJoinErrorEl = document.getElementById('lobbyJoinError')
       const guestMemberLinkEl = document.getElementById('guestMemberLink')
@@ -23438,7 +23904,10 @@
       // sub-record is schema-only this wave — Wave 13 wires the looks pipeline onto it.
       const audioSettingsSchemaVersion = 8
       const defaultVideoSettings = {
-        look: 'none',
+        // canon default filter is "crisp" (studio) — a persisted look in the v8
+        // record overrides it. Applies to the green-room filters popover and the
+        // settings look picker (one shared v8 video sub-record).
+        look: 'studio',
         lookIntensity: 1,
         preferredCamera: null
       }
@@ -23569,7 +24038,13 @@
           signInToOffice()
         }
       })
-      guestNameInput.addEventListener('input', validateAccess)
+      guestNameInput.addEventListener('input', () => {
+        validateAccess()
+        // canon state 2: the preview avatar initials track the typed name live
+        if (greenRoomAvatarEl) {
+          greenRoomAvatarEl.textContent = greenRoomAvatarInitials()
+        }
+      })
       leaveButton.addEventListener('click', leaveRoom)
       micSelect.addEventListener('change', switchMicrophone)
       muteMicButton.addEventListener('click', toggleLocalMute)
@@ -23644,9 +24119,16 @@
       if (greenRoomCamChipEl) {
         greenRoomCamChipEl.addEventListener('click', () => toggleGreenRoomChip('cam'))
       }
+      if (greenRoomFiltersBtnEl) {
+        greenRoomFiltersBtnEl.addEventListener('click', () => toggleGreenRoomFilters())
+      }
+      if (greenRoomBlurEl) {
+        greenRoomBlurEl.addEventListener('change', toggleGreenRoomBlur)
+      }
       if (greenRoomFineTuneEl) {
         greenRoomFineTuneEl.addEventListener('click', () => {
           // the settings preview takes the camera over cleanly
+          closeGreenRoomFilters()
           stopGreenRoomPreview()
           openSettings({ section: 'devices', restoreFocusTo: greenRoomFineTuneEl, allowLocked: true })
         })
@@ -23684,12 +24166,21 @@
         if (!form) {
           return
         }
-        form.hidden = !form.hidden
-        if (!form.hidden) {
-          document.getElementById('lobbyCreateName')?.focus()
+        if (form.hidden) {
+          startCreateRoom()
+        } else {
+          cancelCreateRoom()
         }
       })
+      document.getElementById('lobbyCreateCancel')?.addEventListener('click', cancelCreateRoom)
       document.getElementById('lobbyCreateForm')?.addEventListener('submit', createRoomFromForm)
+      document.getElementById('lobbyArchivedToggle')?.addEventListener('click', () => {
+        lobbyShowArchived = !lobbyShowArchived
+        // force the archived fold to re-render (the toggle isn't in the list
+        // signature, so break it to guarantee a rebuild)
+        lobbyListSignature = ''
+        renderLobbyRoomsList()
+      })
       document.getElementById('lobbyPasscodeJoin')?.addEventListener('click', submitLobbyPasscode)
       document.getElementById('lobbyPasscodeInput')?.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
@@ -23711,9 +24202,16 @@
         if (invitePopoverEl && !invitePopoverEl.contains(event.target) && !event.target.closest?.('#inviteToggle')) {
           closeInvitePopover()
         }
+        // the green-room filters popover closes on outside click too (the
+        // filters button toggles it, so exclude the button itself)
+        if (greenRoomFiltersEl && !greenRoomFiltersEl.hidden
+          && !greenRoomFiltersEl.contains(event.target)
+          && !event.target.closest?.('#greenRoomFiltersBtn')) {
+          closeGreenRoomFilters()
+        }
         const lobbyForm = document.getElementById('lobbyCreateForm')
-        if (lobbyForm && !lobbyForm.hidden && !lobbyForm.contains(event.target) && event.target.id !== 'lobbyNewRoom') {
-          lobbyForm.hidden = true
+        if (lobbyForm && !lobbyForm.hidden && !lobbyForm.contains(event.target) && event.target.id !== 'lobbyNewRoom' && !event.target.closest?.('#lobbyNewRoom')) {
+          cancelCreateRoom()
         }
       }, true)
       document.addEventListener('keydown', event => {
@@ -23726,9 +24224,12 @@
         if (invitePopoverEl) {
           closeInvitePopover()
         }
+        if (greenRoomFiltersEl && !greenRoomFiltersEl.hidden) {
+          closeGreenRoomFilters()
+        }
         const lobbyForm = document.getElementById('lobbyCreateForm')
         if (lobbyForm && !lobbyForm.hidden) {
-          lobbyForm.hidden = true
+          cancelCreateRoom()
         }
       })
       toolButtons.forEach(button => {
@@ -25085,11 +25586,32 @@
           // the demoted member door lives on the guest gate only
           guestMemberLinkEl.hidden = mode !== 'guest'
         }
-        // guest-exit renders no join pill at all (the takeover owns the card)
-        joinAccessButton.textContent = mode === 'reset'
-          ? 'Set new password'
-          : mode === 'guest' ? (guestSession ? `Join ${guestSession.roomName || 'the room'}` : 'Join as a guest')
-          : mode === 'authed' ? `Open office as ${authedUser.name}` : 'Enter your office'
+        // guest-exit renders no join pill at all (the takeover owns the card).
+        // Any transient guest-join frame class is cleared here; the mode logic
+        // below re-applies the connected frame when it holds.
+        joinAccessButton.classList.remove('login-signin--joining', 'login-signin--joined')
+        if (mode === 'reset') {
+          joinAccessButton.textContent = 'Set new password'
+        } else if (mode === 'guest') {
+          // canon guest join copy (states 1/6/7): idle "join as a guest" →
+          // "joining…" (set by joinGuestRoom) → connected "you're in" (a
+          // secondary + check handoff frame; the stage mount hides the gate)
+          if (appShell.classList.contains('is-in-room')) {
+            joinAccessButton.textContent = "you're in"
+            joinAccessButton.classList.add('login-signin--joined')
+          } else if (roomEntryInProgress) {
+            // a re-render mid-entry (rooms snapshot, session land) must not
+            // drop the busy frame back to the idle label
+            joinAccessButton.textContent = 'joining…'
+            joinAccessButton.classList.add('login-signin--joining')
+          } else {
+            joinAccessButton.textContent = guestSession ? `join ${guestSession.roomName || 'the room'}` : 'join as a guest'
+          }
+        } else if (mode === 'authed') {
+          joinAccessButton.textContent = `Open office as ${authedUser.name}`
+        } else {
+          joinAccessButton.textContent = 'Enter your office'
+        }
         validateAccess()
         renderGreenRoom()
         syncAuthenticatedShell()
@@ -25266,11 +25788,17 @@
             return
           }
           joinAccessButton.disabled = true
+          // canon state 6: the join button reads "joining…" (disabled, .7) while
+          // the invite is validated; the hidden accessState pill stays as-is
+          joinAccessButton.textContent = 'joining…'
+          joinAccessButton.classList.add('login-signin--joining')
           accessState.textContent = 'checking'
           setLog('checking your invite')
           const result = await postAuthJSON('/guest/join', { token: guestBootToken, name }).catch(() => ({ ok: false, data: {} }))
           if (!result.ok) {
             joinAccessButton.disabled = false
+            joinAccessButton.textContent = 'join as a guest'
+            joinAccessButton.classList.remove('login-signin--joining')
             accessState.textContent = 'locked'
             accessHint.textContent = result.data?.error || 'that guest link is no longer valid.'
             return
@@ -31141,19 +31669,34 @@
         appShell.classList.toggle('is-room-entering', roomEntryInProgress)
         if (roomEmptyJoinButton) {
           roomEmptyJoinButton.disabled = roomEntryInProgress
-          // a media-watchdog failure reads `try again` until the next attempt
-          roomEmptyJoinButton.textContent = roomEntryInProgress ? 'connecting…'
+          // canon: the button reads `join` → `joining…` (the topbar pill keeps
+          // the `connecting…` → `the room is listening` progression); a media-
+          // watchdog failure reads `try again` until the next attempt
+          roomEmptyJoinButton.textContent = roomEntryInProgress ? 'joining…'
             : roomEntryMediaFailed ? 'try again'
-            : 'join the room'
+            : 'join'
         }
         // the lobby passcode gate's join reads busy the same way — it is the
         // primary whenever the gate replaces the plain join button
         const lobbyGateJoin = document.getElementById('lobbyPasscodeJoin')
         if (lobbyGateJoin) {
           lobbyGateJoin.disabled = roomEntryInProgress
-          lobbyGateJoin.textContent = roomEntryInProgress ? 'connecting…'
+          lobbyGateJoin.textContent = roomEntryInProgress ? 'joining…'
             : roomEntryMediaFailed ? 'try again'
             : 'join'
+        }
+        // the guest gate's join rides the same seam: canon state 6 holds
+        // "joining…" through media + dial, not just the /guest/join POST
+        if (joinAccessButton && appShell.classList.contains('is-guest') && !appShell.classList.contains('is-in-room')) {
+          if (roomEntryInProgress) {
+            joinAccessButton.textContent = 'joining…'
+            joinAccessButton.classList.add('login-signin--joining')
+            joinAccessButton.disabled = true
+          } else {
+            joinAccessButton.classList.remove('login-signin--joining')
+            joinAccessButton.textContent = guestSession ? `join ${guestSession.roomName || 'the room'}` : 'join as a guest'
+            validateAccess()
+          }
         }
       }
 
@@ -33007,11 +33550,19 @@
         // Picking a chip is picking a recipe: clear any slider fine-tuning so the
         // look starts from its preset, then the sliders re-expose that preset.
         videoLookAdjust = {}
+        // remember the last non-blur filter so the green-room blur switch can
+        // restore it when toggled off
+        if (look !== 'blur') {
+          greenRoomLastFilterLook = look
+        }
         const next = normalizeVideoSettings({ ...audioSettings.video, look })
         audioSettings = { ...audioSettings, video: next }
         saveAudioSettings()
         applyLiveVideoLookChange()
         applyLookToPreview()
+        // the green-room tile previews the look on its pre-tap avatar layer
+        // (canon states 5/6), so a chip pick re-renders it immediately
+        renderGreenRoom()
       }
 
       function setVideoLookIntensity(value) {
@@ -33202,6 +33753,11 @@
           chip.classList.toggle('is-selected', selected)
           chip.setAttribute('aria-pressed', String(selected))
         })
+        // the green-room filters popover's blur switch is not a chip — keep it
+        // honest with the persisted look on every look change
+        if (greenRoomBlurEl) {
+          greenRoomBlurEl.checked = look === 'blur'
+        }
         const preset = videoLookPresetUniforms(look)
         if (videoLookBrightness) {
           videoLookBrightness.value = String(Math.round((0.5 + (preset.uBrightness || 0) * 2.5) * 100))
@@ -51244,10 +51800,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         greenRoomTileEl.dataset.state = state
         if (greenRoomHintTextEl) {
           greenRoomHintTextEl.textContent = state === 'starting' ? 'starting camera…'
-            : state === 'off' ? 'camera off'
             : state === 'timeout' ? "camera didn't answer — you can join with it off."
             : 'check your camera'
         }
+        // canon bottom-left status: breathing "preview" while live, the quiet
+        // "camera is off" caption when the cam chip is off
+        if (greenRoomStatusTextEl) {
+          greenRoomStatusTextEl.textContent = state === 'off' ? 'camera is off' : 'preview'
+        }
+      }
+
+      // the pre-tap avatar mirrors the joiner's initials (member name / guest
+      // name gate value), fallback "guest"
+      function greenRoomAvatarInitials() {
+        // canon state 2: the gate's name field drives the preview initials live
+        // (before any session exists); fallback "guest"
+        const source = guestMode
+          ? (guestNameInput.value.trim() || currentParticipantName || guestSession?.guestName || 'guest')
+          : (currentParticipantName || authedUser?.name || authedUser?.email || 'you')
+        return initialsForName(source) || 'G'
       }
 
       function renderGreenRoom() {
@@ -51257,6 +51828,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const prefs = loadJoinAVPreferences()
         greenRoomMicChipEl?.setAttribute('aria-pressed', String(prefs.mic))
         greenRoomCamChipEl?.setAttribute('aria-pressed', String(prefs.cam))
+        greenRoomMicChipEl?.setAttribute('aria-label', prefs.mic ? 'mute microphone' : 'unmute microphone')
+        greenRoomCamChipEl?.setAttribute('aria-label', prefs.cam ? 'turn camera off' : 'turn camera on')
+        // micOff badge on the tile when muted; centered avatar initials pre-tap
+        if (greenRoomMicBadgeEl) {
+          greenRoomMicBadgeEl.hidden = prefs.mic
+        }
+        if (greenRoomAvatarEl) {
+          greenRoomAvatarEl.textContent = greenRoomAvatarInitials()
+        }
+        // keep the filters popover honest with the persisted look without
+        // waiting for a settings render: sync the swatch selection + blur switch
+        const currentLook = videoLookSettingsValue().look
+        if (greenRoomTileEl) {
+          // canon states 5/6: the look previews on the pre-tap avatar layer
+          greenRoomTileEl.dataset.look = currentLook
+        }
+        if (greenRoomFiltersEl) {
+          greenRoomFiltersEl.querySelectorAll('.greenroom__swatch').forEach(swatch => {
+            const selected = swatch.dataset.look === currentLook
+            swatch.classList.toggle('is-selected', selected)
+            swatch.setAttribute('aria-pressed', String(selected))
+          })
+        }
+        if (greenRoomBlurEl) {
+          greenRoomBlurEl.checked = currentLook === 'blur'
+        }
         if (greenRoomFineTuneEl) {
           // the full settings picker is member chrome
           greenRoomFineTuneEl.hidden = guestMode
@@ -51270,6 +51867,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (state !== 'timeout' && state !== 'starting') {
             setGreenRoomTileState(prefs.cam ? 'idle' : 'off')
           }
+        }
+      }
+
+      /* ---------- filters popover: swatches (shared look wiring) + blur ---------- */
+      function closeGreenRoomFilters() {
+        if (!greenRoomFiltersEl || greenRoomFiltersEl.hidden) {
+          return
+        }
+        greenRoomFiltersEl.hidden = true
+        greenRoomFiltersBtnEl?.setAttribute('aria-expanded', 'false')
+      }
+
+      function toggleGreenRoomFilters() {
+        if (!greenRoomFiltersEl) {
+          return
+        }
+        const open = greenRoomFiltersEl.hidden
+        greenRoomFiltersEl.hidden = !open
+        greenRoomFiltersBtnEl?.setAttribute('aria-expanded', String(open))
+      }
+
+      // the blur switch maps onto the single-look pipeline: on → look 'blur',
+      // off → the last non-blur filter (default crisp). The five swatches keep
+      // the shared video-look-chip[data-look] click wiring.
+      function toggleGreenRoomBlur() {
+        if (!greenRoomBlurEl) {
+          return
+        }
+        if (greenRoomBlurEl.checked) {
+          setVideoLook('blur')
+        } else {
+          setVideoLook(greenRoomLastFilterLook || 'studio')
         }
       }
 
@@ -51317,6 +51946,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function stopGreenRoomPreview(nextState) {
         greenRoomPreviewGen++
+        closeGreenRoomFilters()
         if (previewLookTargetEl && previewLookTargetEl === greenRoomVideoEl) {
           stopVideoLookPreview()
         }
@@ -51440,10 +52070,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         const rooms = roomsList.filter(room => room && !room.archived)
+        const archived = roomsList.filter(room => room && room.archived)
         const selectedId = activeJoin.roomId || 'office'
         // skip identical rebuilds: this runs on every updateOfficeHome pass,
-        // and a rebuild would close the ⋯ popover mid-use
-        const signature = JSON.stringify([selectedId, rooms.map(room => [room.id, room.name, room.live, room.participantCount, room.passcodeRequired, room.guestEnabled, room.guestLinkActive])])
+        // and a rebuild would close the ⋯ popover mid-use. The archived fold
+        // (count + open state) rides the signature so restore/archive land.
+        const signature = JSON.stringify([
+          selectedId,
+          lobbyShowArchived,
+          rooms.map(room => [room.id, room.name, room.live, room.participantCount, room.passcodeRequired, room.guestEnabled, room.guestLinkActive]),
+          archived.map(room => [room.id, room.name])
+        ])
         if (signature === lobbyListSignature) {
           return
         }
@@ -51455,9 +52092,58 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // that left the list closes it (positionLobbyPopover's missing-row
         // branch).
         list.replaceChildren(...rooms.map(room => lobbyRoomRow(room, selectedId)))
+        renderLobbyArchived(archived)
         if (lobbyPopoverEl) {
           positionLobbyPopover()
         }
+      }
+
+      // the archived fold: a "N archived" toggle row and, when open, a restore
+      // row per archived room. GET /rooms returns archived rows, so the client
+      // no longer filters them away — it files them here.
+      function renderLobbyArchived(archived) {
+        const toggle = document.getElementById('lobbyArchivedToggle')
+        const list = document.getElementById('lobbyArchivedList')
+        if (!toggle || !list) {
+          return
+        }
+        if (!archived.length) {
+          toggle.hidden = true
+          list.hidden = true
+          list.replaceChildren()
+          lobbyShowArchived = false
+          return
+        }
+        toggle.hidden = false
+        toggle.setAttribute('aria-expanded', String(lobbyShowArchived))
+        toggle.replaceChildren()
+        toggle.insertAdjacentHTML('beforeend', lobbyChevronGlyph())
+        toggle.append(`${archived.length} archived`)
+        list.hidden = !lobbyShowArchived
+        if (!lobbyShowArchived) {
+          list.replaceChildren()
+          return
+        }
+        list.replaceChildren(...archived.map(room => lobbyArchivedRow(room)))
+      }
+
+      function lobbyArchivedRow(room) {
+        const row = document.createElement('div')
+        row.className = 'lobby__archived-row'
+        const name = document.createElement('span')
+        name.className = 'lobby__archived-name'
+        name.textContent = room.name || room.id
+        const restore = document.createElement('button')
+        restore.type = 'button'
+        restore.className = 'lobby__restore'
+        restore.textContent = 'restore'
+        restore.addEventListener('click', () => restoreRoomFromList(room))
+        row.append(name, restore)
+        return row
+      }
+
+      function lobbyChevronGlyph() {
+        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>'
       }
 
       function lobbyRoomRow(room, selectedId) {
@@ -51586,26 +52272,93 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderLobbyPopMenu(pop, room) {
+        // canon menu: invite a guest / guest links / set passcode / divider /
+        // archive room (danger, non-office only)
         pop.replaceChildren(
           lobbyPopItem('invite a guest', () => {
-            // office mints only through the listen-only consent step (the
-            // latch is a lasting side effect on office intelligence); other
-            // rooms mint directly
+            // "invite a guest" is a quick action: mint + copy + toast. Office
+            // mints only through the listen-only consent step first (the latch
+            // is a lasting side effect on office intelligence); other rooms
+            // copy directly.
             if (room.id === 'office') {
               renderLobbyPopOfficeConsent(pop, room)
             } else {
-              renderLobbyPopMinted(pop, room)
+              quickInviteGuest(pop, room)
             }
           }),
-          lobbyPopItem(`guest links${room.guestLinkActive ? ' · live' : ''}`, () => renderLobbyPopLinks(pop, room)),
-          lobbyPopItem(room.passcodeRequired ? 'change passcode' : 'set passcode', () => renderLobbyPopPasscode(pop, room))
+          lobbyPopItem('guest links', () => renderLobbyPopLinks(pop, room)),
+          lobbyPopItem('set passcode', () => renderLobbyPopPasscode(pop, room))
         )
         if (room.id !== 'office') {
-          pop.append(lobbyPopItem('archive', () => {
+          const divider = document.createElement('span')
+          divider.className = 'lobby-pop__divider'
+          pop.append(divider)
+          const archive = lobbyPopItem('archive room', () => {
             closeLobbyPopover()
             archiveRoomFromList(room)
-          }))
+          })
+          archive.classList.add('lobby-pop__item--danger')
+          pop.append(archive)
         }
+      }
+
+      // quick invite: mint a fresh /g# link, copy it (the click is a user
+      // gesture, so clipboard.writeText is allowed), toast, and dismiss. If the
+      // clipboard is blocked, keep the popover open on the already-minted link
+      // so the one-time token is never lost.
+      async function quickInviteGuest(pop, room) {
+        const name = room.name || room.id
+        let url = ''
+        try {
+          url = await mintGuestLinkForRoom(room)
+        } catch (error) {
+          setLog(String(error?.message || error))
+          return
+        }
+        if (mintPopDismissed(pop)) {
+          return
+        }
+        try {
+          await navigator.clipboard.writeText(url)
+        } catch {
+          renderLobbyPopPreminted(pop, url)
+          return
+        }
+        closeLobbyPopover()
+        showToast(`invite link copied · ${name}`)
+      }
+
+      // clipboard-blocked fallback: show the already-minted /g# link readonly
+      // with a manual copy button (no re-mint — the token is single-use)
+      function renderLobbyPopPreminted(pop, url) {
+        const wrap = document.createElement('div')
+        wrap.className = 'lobby-pop__minted'
+        const caption = document.createElement('div')
+        caption.className = 'lobby-pop__caption'
+        caption.textContent = 'copy this link — shown once'
+        const out = document.createElement('input')
+        out.className = 'lobby-pop__linkout'
+        out.readOnly = true
+        out.value = url
+        const actions = document.createElement('div')
+        actions.className = 'lobby-pop__actions'
+        const copyButton = document.createElement('button')
+        copyButton.type = 'button'
+        copyButton.className = 'lobby-pop__mint'
+        copyButton.textContent = 'copy'
+        copyButton.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(out.value)
+            copyButton.textContent = 'copied'
+            setTimeout(() => { copyButton.textContent = 'copy' }, 1500)
+          } catch {
+            out.select()
+          }
+        })
+        actions.append(copyButton)
+        wrap.append(caption, out, actions)
+        pop.replaceChildren(wrap)
+        out.select()
       }
 
       // one consent voice for both mint mounts (lobby ⋯ + in-call Invite)
@@ -51632,7 +52385,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         mint.type = 'button'
         mint.className = 'lobby-pop__mint'
         mint.textContent = 'mint the link'
-        mint.addEventListener('click', () => renderLobbyPopMinted(pop, room))
+        // office quick-invite: consent gates first, then the same mint + copy +
+        // toast the other rooms get
+        mint.addEventListener('click', () => quickInviteGuest(pop, room))
         const cancel = document.createElement('button')
         cancel.type = 'button'
         cancel.className = 'lobby-pop__cancel'
@@ -51739,6 +52494,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         pop.replaceChildren()
+        // the management panel keeps the one-time VISIBLE mint (DECOMP item 5):
+        // office routes through the listen-only consent first, other rooms show
+        // the one-time link panel directly
+        const mintRow = lobbyPopItem('mint a link', () => {
+          if (room.id === 'office') {
+            renderLobbyPopOfficeConsent(pop, room)
+          } else {
+            renderLobbyPopMinted(pop, room)
+          }
+        })
+        pop.append(mintRow)
         if (!links.length) {
           const empty = document.createElement('div')
           empty.className = 'lobby-pop__note'
@@ -51787,12 +52553,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         pop.append(foot)
       }
 
+      // "set passcode" swaps the menu body in place with an input + cancel/save
+      // (canon); saving toasts "passcode set"
       function renderLobbyPopPasscode(pop, room) {
         const wrap = document.createElement('div')
         wrap.className = 'lobby-pop__minted'
         const input = document.createElement('input')
         input.type = 'password'
-        input.placeholder = 'new passcode (empty removes)'
+        input.placeholder = 'passcode'
         input.autocomplete = 'off'
         input.className = 'lobby-pop__linkout'
         const actions = document.createElement('div')
@@ -51988,7 +52756,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!result.ok) {
             throw new Error(result.data?.error || 'could not update the passcode')
           }
-          setLog(passcode.trim() ? 'room passcode set' : 'room passcode removed')
+          showToast(passcode.trim() ? 'passcode set' : 'passcode removed')
           loadRoomsList()
         } catch (error) {
           setLog(error.message || String(error))
@@ -51996,16 +52764,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function archiveRoomFromList(room) {
-        // §3.7: the confirm names the humans — archiving an occupied room
-        // disconnects them (the server broadcasts room_closed and ends the
-        // sitting through the close chain)
+        // §3.7 + DECOMP item 4: an OCCUPIED room keeps its confirm — the humans
+        // are named and the disconnect consequence stated before the
+        // irreversible click (the server broadcasts room_closed and ends the
+        // sitting through the close chain). An EMPTY room archives directly;
+        // restore is the undo.
         const inside = Number(room.participantCount) || 0
         const label = room.name || room.id
-        const prompt = inside > 0
-          ? `archive “${label}”? ${inside} ${inside === 1 ? 'person is' : 'people are'} inside — they'll be disconnected. its record is kept.`
-          : `Archive “${label}”? It becomes unjoinable; its record is kept.`
-        if (!window.confirm(prompt)) {
-          return
+        if (inside > 0) {
+          const prompt = `archive “${label}”? ${inside} ${inside === 1 ? 'person is' : 'people are'} inside — they'll be disconnected. its record is kept.`
+          if (!window.confirm(prompt)) {
+            return
+          }
         }
         try {
           const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/archive`, {})
@@ -52021,9 +52791,50 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             renderLobby()
           }
           loadRoomsList()
+          showToast(`archived · ${label}`)
         } catch (error) {
           setLog(error.message || String(error))
         }
+      }
+
+      // restore reverses archive: POST /rooms/{id}/restore re-opens joinability;
+      // the archived fold drops the row and the switcher regains it live
+      async function restoreRoomFromList(room) {
+        const label = room.name || room.id
+        try {
+          const result = await postAuthJSON(`/rooms/${encodeURIComponent(room.id)}/restore`, {})
+          if (!result.ok) {
+            throw new Error(result.data?.error || 'could not restore the room')
+          }
+          loadRoomsList()
+          showToast(`restored · ${label}`)
+        } catch (error) {
+          setLog(error.message || String(error))
+        }
+      }
+
+      // the "new room" dashed button reveals / hides the inline create form
+      function startCreateRoom() {
+        const form = document.getElementById('lobbyCreateForm')
+        if (!form) {
+          return
+        }
+        form.hidden = false
+        document.getElementById('lobbyCreateName')?.focus()
+      }
+
+      function cancelCreateRoom() {
+        const form = document.getElementById('lobbyCreateForm')
+        if (!form || form.hidden) {
+          return
+        }
+        form.hidden = true
+        const nameInput = document.getElementById('lobbyCreateName')
+        const passInput = document.getElementById('lobbyCreatePasscode')
+        const guestsInput = document.getElementById('lobbyCreateGuests')
+        if (nameInput) nameInput.value = ''
+        if (passInput) passInput.value = ''
+        if (guestsInput) guestsInput.checked = false
       }
 
       async function createRoomFromForm(event) {
@@ -52031,8 +52842,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const nameInput = document.getElementById('lobbyCreateName')
         const passInput = document.getElementById('lobbyCreatePasscode')
         const guestsInput = document.getElementById('lobbyCreateGuests')
-        const form = document.getElementById('lobbyCreateForm')
         const name = (nameInput?.value || '').trim()
+        const passcode = passInput?.value || ''
         if (!name) {
           nameInput?.focus()
           return
@@ -52040,17 +52851,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           const result = await postAuthJSON('/rooms', {
             name,
-            passcode: passInput?.value || '',
+            passcode,
             guestAccess: Boolean(guestsInput?.checked)
           })
           if (!result.ok) {
             throw new Error(result.data?.error || 'could not create the room')
           }
-          if (nameInput) nameInput.value = ''
-          if (passInput) passInput.value = ''
-          if (guestsInput) guestsInput.checked = false
-          if (form) form.hidden = true
+          // auto-select the new room and reset the connection state to idle
+          // (selection is browsing, join is consent); a passcode the creator
+          // just set rides along so their own join stays one click
+          const newId = result.data?.room?.id
+          if (newId) {
+            stopGreenRoomPreview()
+            clearLobbyJoinError()
+            if (passcode.trim()) {
+              lobbyPasscodeMemory[newId] = passcode
+            }
+            activeJoin.roomId = newId
+            activeJoin.passcode = passcode
+          }
+          cancelCreateRoom()
           loadRoomsList()
+          renderLobby()
+          showToast('room created')
         } catch (error) {
           setLog(error.message || String(error))
         }

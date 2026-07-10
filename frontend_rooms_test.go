@@ -328,8 +328,8 @@ func TestIndexRoomsLobbyMarkupAndActions(t *testing.T) {
 	if !strings.Contains(createBody, "guestAccess: Boolean(guestsInput?.checked)") {
 		t.Error("the + new room form must carry the allow-guests toggle")
 	}
-	if !strings.Contains(createBody, "form.hidden = true") {
-		t.Error("the + new room form must dismiss on success")
+	if !strings.Contains(createBody, "cancelCreateRoom()") {
+		t.Error("the + new room form must dismiss + reset on success (cancelCreateRoom)")
 	}
 }
 
@@ -603,9 +603,10 @@ func TestIndexRoomsLobbyPopoverEscapesListClip(t *testing.T) {
 	}
 }
 
-// D4: office minting is allowed but NEVER silent — the consent interstitial
-// states the listen-only consequence before the mint; cancel mints nothing;
-// non-office rooms mint without the interstitial.
+// D4 + DECOMP item 5: "invite a guest" is a quick action (mint + copy + toast),
+// but office minting is allowed and NEVER silent — the consent interstitial
+// states the listen-only consequence BEFORE the mint; cancel mints nothing;
+// non-office rooms quick-invite without the interstitial.
 func TestIndexRoomsLobbyOfficeConsent(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
@@ -616,15 +617,30 @@ func TestIndexRoomsLobbyOfficeConsent(t *testing.T) {
 	if menuBody == "" {
 		t.Fatal("could not extract renderLobbyPopMenu body")
 	}
+	// invite-a-guest routes office through the consent step; other rooms
+	// quick-invite (mint + copy + toast) directly
 	officeGateAt := strings.Index(menuBody, "room.id === 'office'")
 	consentAt := strings.Index(menuBody, "renderLobbyPopOfficeConsent(pop, room)")
-	mintAt := strings.Index(menuBody, "renderLobbyPopMinted(pop, room)")
-	if officeGateAt == -1 || consentAt == -1 || mintAt == -1 || !(officeGateAt < consentAt && consentAt < mintAt) {
-		t.Error("invite-a-guest must route office through the consent step BEFORE any mint")
+	quickAt := strings.Index(menuBody, "quickInviteGuest(pop, room)")
+	if officeGateAt == -1 || consentAt == -1 || quickAt == -1 || !(officeGateAt < consentAt && consentAt < quickAt) {
+		t.Error("invite-a-guest must route office through the consent step; other rooms quick-invite directly")
 	}
 	consentBody := functionBody(html, "function renderLobbyPopOfficeConsent(pop, room)")
 	if !strings.Contains(consentBody, "'mint the link'") || !strings.Contains(consentBody, "'cancel'") {
 		t.Error("the consent step must offer mint-the-link / cancel")
+	}
+	// the office consent's mint proceeds through the SAME quick-invite (copy +
+	// toast) the other rooms get — never a silent mint
+	if !strings.Contains(consentBody, "quickInviteGuest(pop, room)") {
+		t.Error("the office consent's mint-the-link must proceed through the shared quick-invite (copy + toast)")
+	}
+	// quick invite copies the minted link and toasts the canon string
+	quickBody := functionBody(html, "async function quickInviteGuest(pop, room)")
+	if !strings.Contains(quickBody, "navigator.clipboard.writeText(url)") {
+		t.Error("quickInviteGuest must copy the minted /g# link to the clipboard")
+	}
+	if !strings.Contains(quickBody, "showToast(`invite link copied · ${name}`)") {
+		t.Error("quickInviteGuest must toast `invite link copied · {name}`")
 	}
 	// office shows no archive row (room zero is permanent)
 	if !strings.Contains(menuBody, "room.id !== 'office'") {
@@ -935,5 +951,216 @@ func TestIndexRoomsLobbyHeroTitleTypography(t *testing.T) {
 	}
 	if strings.Contains(lobbyBody, "is quiet.") {
 		t.Error("the quiet koan must not ride the hero title — it belongs to the mono meta beneath")
+	}
+}
+
+/* ---------- canon conformance (design states 1–21) ---------- */
+
+// Canon layout: ONE shared glass panel holds the room switcher (order:1, left,
+// 260px at ≥880) beside the 440px center column (order:2); below 880 they stack
+// (center on top, switcher under). The switcher carries the "open rooms" label.
+func TestIndexRoomsLobbyCanonPanelLayout(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	// markup: the panel wraps center + rail, source order center-first (so the
+	// green room stays before the rail) with the rail flipped left via CSS order
+	if !strings.Contains(html, `<div class="lobby__panel">`) {
+		t.Error("the lobby must render inside one shared glass panel (.lobby__panel)")
+	}
+	panelAt := strings.Index(html, `<div class="lobby__panel">`)
+	centerAt := strings.Index(html, `<div class="lobby__center">`)
+	railAt := strings.Index(html, `id="lobbyRail"`)
+	if panelAt == -1 || centerAt == -1 || railAt == -1 || !(panelAt < centerAt && centerAt < railAt) {
+		t.Error("panel source order must be panel → center column → rail")
+	}
+	if !strings.Contains(html, `<span class="lobby__rail-label">open rooms</span>`) {
+		t.Error("the switcher must carry the canon `open rooms` label")
+	}
+
+	// CSS: the center column is order:1 by default (mobile, on top); the ≥880
+	// rule flips the rail to order:1 (visual left, 260px) and holds the center
+	// at 440px
+	centerCSSAt := strings.Index(html, ".lobby__center {")
+	if centerCSSAt == -1 {
+		t.Fatal(".lobby__center rule missing")
+	}
+	centerCSS := html[centerCSSAt : centerCSSAt+strings.Index(html[centerCSSAt:], "}")]
+	if !strings.Contains(centerCSS, "order: 1") {
+		t.Error(".lobby__center must default to order:1 (center on top when stacked)")
+	}
+	deskAt := strings.Index(html, "@media (min-width: 880px) {")
+	if deskAt == -1 {
+		t.Fatal("the canon lobby breakpoint is 880px")
+	}
+	desk := html[deskAt : deskAt+600]
+	if !strings.Contains(desk, ".lobby__center { order: 2; flex: none; width: 440px; }") {
+		t.Error("≥880 the center column must be order:2 at 440px")
+	}
+	if !strings.Contains(desk, ".lobby__rail { order: 1; width: 260px;") {
+		t.Error("≥880 the switcher must flip to order:1 at 260px (visual left)")
+	}
+}
+
+// Canon create form: an inline form under the "new room" dashed button with a
+// Switch for allow-guests and a ghost cancel beside the primary create; on
+// success it auto-selects the new room, resets the connection, and toasts.
+func TestIndexRoomsLobbyCanonCreateForm(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	if !strings.Contains(html, `id="lobbyCreateCancel"`) {
+		t.Error("the create form must carry a ghost cancel button")
+	}
+	// the allow-guests control is a Switch (styled checkbox) still read by .checked
+	if !strings.Contains(html, `<label class="lobby__switch">`) || !strings.Contains(html, `<input id="lobbyCreateGuests" type="checkbox">`) {
+		t.Error("allow-guests must render as a Switch (checkbox styled as a switch)")
+	}
+	// the dashed new-room button reveals the form (startCreateRoom), cancel hides
+	// + clears it (cancelCreateRoom)
+	if !strings.Contains(html, "document.getElementById('lobbyCreateCancel')?.addEventListener('click', cancelCreateRoom)") {
+		t.Error("the cancel button must be wired to cancelCreateRoom")
+	}
+	startBody := functionBody(html, "function startCreateRoom()")
+	if !strings.Contains(startBody, "form.hidden = false") {
+		t.Error("startCreateRoom must reveal the create form")
+	}
+	cancelBody := functionBody(html, "function cancelCreateRoom()")
+	if !strings.Contains(cancelBody, "form.hidden = true") || !strings.Contains(cancelBody, "guestsInput.checked = false") {
+		t.Error("cancelCreateRoom must hide + clear the form")
+	}
+
+	createBody := functionBody(html, "async function createRoomFromForm(event)")
+	if !strings.Contains(createBody, "result.data?.room?.id") {
+		t.Error("createRoomFromForm must read the new room id from the POST /rooms response")
+	}
+	if !strings.Contains(createBody, "activeJoin.roomId = newId") {
+		t.Error("createRoomFromForm must auto-select the new room")
+	}
+	if !strings.Contains(createBody, "showToast('room created')") {
+		t.Error("createRoomFromForm must toast `room created`")
+	}
+	if !strings.Contains(createBody, "stopGreenRoomPreview()") {
+		t.Error("auto-selecting the new room must reset to idle (release the preview)")
+	}
+}
+
+// Canon archived fold + restore: GET /rooms returns archived rows, so the client
+// no longer filters them away — it files them under an "N archived" toggle with a
+// restore action (POST /rooms/{id}/restore → toast "restored · {name}").
+func TestIndexRoomsLobbyCanonArchivedFoldAndRestore(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	for _, want := range []string{`id="lobbyArchivedToggle"`, `id="lobbyArchivedList"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the archived fold markup is missing %s", want)
+		}
+	}
+	// lobbyShowArchived is read on the boot render pass → must be a var
+	if regexp.MustCompile(`(?m)^\s*(let|const)\s+lobbyShowArchived\b`).MatchString(html) {
+		t.Fatal("lobbyShowArchived must be var-declared (boot-order TDZ rule)")
+	}
+	if !regexp.MustCompile(`(?m)^\s*var\s+lobbyShowArchived\b`).MatchString(html) {
+		t.Fatal("lobbyShowArchived var declaration is missing")
+	}
+
+	// the list renderer separates live rooms from archived and files the archived
+	listBody := functionBody(html, "function renderLobbyRoomsList()")
+	if !strings.Contains(listBody, "roomsList.filter(room => room && room.archived)") {
+		t.Error("renderLobbyRoomsList must collect archived rooms into the fold (not drop them)")
+	}
+	if !strings.Contains(listBody, "renderLobbyArchived(archived)") {
+		t.Error("renderLobbyRoomsList must render the archived fold")
+	}
+	foldBody := functionBody(html, "function renderLobbyArchived(archived)")
+	if foldBody == "" {
+		t.Fatal("renderLobbyArchived missing")
+	}
+	if !strings.Contains(foldBody, "archived.length") || !strings.Contains(foldBody, "lobbyShowArchived") {
+		t.Error("the archived fold must key on the archived count + the open toggle")
+	}
+
+	restoreBody := functionBody(html, "async function restoreRoomFromList(room)")
+	if restoreBody == "" {
+		t.Fatal("restoreRoomFromList missing")
+	}
+	if !strings.Contains(restoreBody, "/restore`, {}") {
+		t.Error("restore must POST to /rooms/{id}/restore")
+	}
+	if !strings.Contains(restoreBody, "showToast(`restored · ${label}`)") {
+		t.Error("restore must toast `restored · {name}`")
+	}
+	if !strings.Contains(restoreBody, "loadRoomsList()") {
+		t.Error("restore must refresh the rooms snapshot")
+	}
+}
+
+// Canon archive: an EMPTY room archives directly (no confirm) with toast
+// "archived · {name}"; the occupied-room confirm is preserved (see
+// TestIndexArchiveConfirmNamesOccupants).
+func TestIndexRoomsLobbyCanonArchiveToast(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	body := functionBody(html, "async function archiveRoomFromList(room)")
+	if body == "" {
+		t.Fatal("archiveRoomFromList missing")
+	}
+	// the confirm is gated on occupancy — empty rooms skip it
+	if !strings.Contains(body, "if (inside > 0) {") {
+		t.Error("only an OCCUPIED room may prompt window.confirm; an empty room archives directly")
+	}
+	if !strings.Contains(body, "showToast(`archived · ${label}`)") {
+		t.Error("archive must toast `archived · {name}`")
+	}
+}
+
+// Canon "set passcode": the menu body swaps to an input (placeholder "passcode")
+// + cancel/save; saving toasts "passcode set".
+func TestIndexRoomsLobbyCanonPasscodeToast(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	passBody := functionBody(html, "function renderLobbyPopPasscode(pop, room)")
+	if !strings.Contains(passBody, "input.placeholder = 'passcode'") {
+		t.Error("the passcode editor input must use the canon placeholder `passcode`")
+	}
+	setBody := functionBody(html, "async function setRoomPasscodeFromList(room, passcode)")
+	if !strings.Contains(setBody, "showToast(passcode.trim() ? 'passcode set'") {
+		t.Error("saving a passcode must toast `passcode set`")
+	}
+	// canon menu labels exactly (no `· live` suffix, no `change passcode`)
+	menuBody := functionBody(html, "function renderLobbyPopMenu(pop, room)")
+	for _, label := range []string{"'invite a guest'", "'guest links'", "'set passcode'", "'archive room'"} {
+		if !strings.Contains(menuBody, label) {
+			t.Errorf("the ⋯ menu must carry the canon label %s", label)
+		}
+	}
+	if strings.Contains(menuBody, "change passcode") || strings.Contains(menuBody, "guest links · live") {
+		t.Error("the ⋯ menu labels must match canon exactly (no `change passcode` / `guest links · live`)")
+	}
+	// archive room is the danger item
+	if !strings.Contains(menuBody, "archive.classList.add('lobby-pop__item--danger')") {
+		t.Error("`archive room` must be the danger-styled item")
+	}
+}
+
+// Canon join button copy: `join` → `joining…` (the topbar pill keeps
+// `connecting…` → `the room is listening`), `try again` after a media failure.
+func TestIndexRoomsLobbyCanonJoinLabel(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	body := functionBody(html, "function syncRoomEntryAffordance()")
+	if body == "" {
+		t.Fatal("syncRoomEntryAffordance missing")
+	}
+	if !strings.Contains(body, "roomEntryInProgress ? 'joining…'") {
+		t.Error("the join button must read `joining…` while an entry is in flight (canon)")
+	}
+	if strings.Contains(body, "'join the room'") {
+		t.Error("the canon join button copy is `join`, not `join the room`")
+	}
+	if !strings.Contains(body, ": 'join'") {
+		t.Error("the idle join button must read `join`")
+	}
+	// the markup initial label is `join`
+	if !strings.Contains(html, `data-join-room>join</button>`) {
+		t.Error("the join button initial markup label must be `join`")
 	}
 }
