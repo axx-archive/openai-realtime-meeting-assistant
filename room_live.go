@@ -49,6 +49,19 @@ const (
 	guestTelemetryBucketBurst   = 3.0
 	guestTelemetryBucketRefill  = 5 * time.Second
 
+	// 2026-07-10 keyframe-spiral incident: the MEMBER request_participant_tracks
+	// path had NO rate limit — 193 repair messages in ~4 minutes, each running
+	// sendParticipantTrackSnapshots plus a GLOBAL signal walk ending in a
+	// keyframe dispatch to every publisher, which sustained the egress-melting
+	// spiral. Members get a generous bucket (they are authenticated and their
+	// client's legit repair cadence is ~1 per 6s): the burst absorbs a
+	// just-joined member's first snapshot request plus a reconnect flurry, and
+	// the refill still lets steady-state self-heal through while capping a
+	// repair storm. Keyed by the per-socket participant session id; dropped in
+	// the session cleanup seam.
+	memberMediaRepairBucketBurst  = 4.0
+	memberMediaRepairBucketRefill = 5 * time.Second
+
 	// §6.5 transcription ceiling for guest-enabled rooms, member-extendable by
 	// flipping recording back on.
 	defaultGuestTranscriptionCapMinutes = 120
@@ -105,6 +118,11 @@ type roomLiveState struct {
 	chatBuckets       map[string]*guestChatBucket
 	mediaStateBuckets map[string]*guestChatBucket
 	telemetryBuckets  map[string]*guestChatBucket
+	// memberRepairBuckets caps MEMBER request_participant_tracks per
+	// participant session (2026-07-10 keyframe-spiral incident). Same bucket
+	// shape, keyed by the per-socket participant session id instead of a guest
+	// session key.
+	memberRepairBuckets map[string]*guestChatBucket
 }
 
 // guestChatBucket is a plain token bucket (tokens + last-refill stamp) reused
@@ -127,6 +145,7 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		chatBuckets:          map[string]*guestChatBucket{},
 		mediaStateBuckets:    map[string]*guestChatBucket{},
 		telemetryBuckets:     map[string]*guestChatBucket{},
+		memberRepairBuckets:  map[string]*guestChatBucket{},
 	}
 }
 
@@ -293,10 +312,12 @@ func chargeGuestBucket(bucket *guestChatBucket, burst float64, refill time.Durat
 	return true
 }
 
-// allowGuestBucket charges the guest session's bucket in the map returned by
-// pick (created full on first use) and reports whether the action proceeds.
-// Callers hold no lock; app.mu is taken here. Every call site is guest-only, so
-// authenticated members never reach these buckets and are never throttled.
+// allowGuestBucket charges the session's bucket in the map returned by pick
+// (created full on first use) and reports whether the action proceeds.
+// Callers hold no lock; app.mu is taken here. Despite the name it is the
+// shared machinery for every §6.5 per-session bucket: the guest buckets key
+// on the guest session key, and the member repair bucket (2026-07-10
+// keyframe-spiral incident) keys on the per-socket participant session id.
 func (app *kanbanBoardApp) allowGuestBucket(roomID string, sessionKey string, pick func(*roomLiveState) map[string]*guestChatBucket, burst float64, refill time.Duration, now time.Time) bool {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -332,6 +353,25 @@ func (app *kanbanBoardApp) allowGuestTelemetryEvent(roomID string, sessionKey st
 	return app.allowGuestBucket(roomID, sessionKey,
 		func(s *roomLiveState) map[string]*guestChatBucket { return s.telemetryBuckets },
 		guestTelemetryBucketBurst, guestTelemetryBucketRefill, now)
+}
+
+// allowMemberMediaRepair charges a MEMBER's request_participant_tracks bucket
+// (burst 4, refill 1 per 5s — 2026-07-10 keyframe-spiral incident). The burst
+// starts full, so a just-joined member's first snapshot request always
+// succeeds; only a sustained repair storm is dropped.
+func (app *kanbanBoardApp) allowMemberMediaRepair(roomID string, participantSessionID string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, participantSessionID,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.memberRepairBuckets },
+		memberMediaRepairBucketBurst, memberMediaRepairBucketRefill, now)
+}
+
+// dropMemberMediaRepairBucket releases a member socket's repair bucket when
+// its session is cleaned up — the key is unique per socket, so without this
+// the map grows one entry per connection for the life of the room.
+func (app *kanbanBoardApp) dropMemberMediaRepairBucket(roomID string, participantSessionID string) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	delete(app.roomLiveLocked(roomID).memberRepairBuckets, participantSessionID)
 }
 
 /* ---------- §6.1 pre-upgrade guest socket caps ---------- */

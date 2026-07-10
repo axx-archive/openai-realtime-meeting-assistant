@@ -736,10 +736,12 @@ func main() {
 		}
 	})
 
-	// request a keyframe every 3 seconds
+	// request a keyframe every 3 seconds, and on the same tick sweep publisher
+	// tracks for silently-stalled uplinks (2026-07-10 silent-uplink incident).
 	go func() {
 		for range time.NewTicker(time.Second * 3).C {
 			dispatchKeyFrame()
+			sweepPublisherSilence()
 		}
 	}()
 
@@ -2998,6 +3000,21 @@ func sanitizeLogField(s string) string {
 	return b.String()
 }
 
+// participantTrackRefreshReason extracts the client-supplied reason from a
+// request_participant_tracks payload ({"reason": "..."}) and scrubs it for
+// single-line logging (2026-07-10 incident: 193 member repair requests were
+// completely invisible in server forensics; the reason strings — "frozen
+// remote video", "media quality monitor", … — are exactly what the next
+// diagnosis needs, but they are attacker-shaped input so they go through
+// sanitizeLogField). Garbage payloads degrade to "".
+func participantTrackRefreshReason(data string) string {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		return ""
+	}
+	return stringFromPayload(payload, "reason")
+}
+
 func boolFromPayload(payload map[string]any, key string) bool {
 	value, _ := payload[key].(bool)
 	return value
@@ -3552,8 +3569,22 @@ func preferSourceTrackCodec(transceiver *webrtc.RTPTransceiver, trackLocal *webr
 	}})
 }
 
-// dispatchKeyFrame sends a keyframe to all PeerConnections, used everytime a new user joins the call.
+// dispatchKeyFrame asks every publisher for a keyframe — run after signal
+// walks (so a new subscriber's first frame arrives promptly) and by the
+// periodic 3s ticker.
+//
+// 2026-07-10 keyframe-spiral incident: this used to PLI EVERY publisher
+// unconditionally, BYPASSING subscriberKeyframeThrottle. 193 client repair
+// messages in ~4 minutes each ran a signal walk whose deferred dispatch PLI'd
+// all five publishers, so they pumped keyframe-heavy bursts (~3.2MB/interval)
+// until the droplet's egress saturated and everyone lost media. Each PLI now
+// spends the SAME per-source budget as forwarded subscriber PLIs (the key is
+// forwardedRemoteTrackID, identical to the requestSourceKeyframe key): a
+// source the throttle has never seen — a just-published track — still gets
+// its keyframe immediately, while a storm of walks costs each publisher at
+// most one keyframe per subscriberKeyframeInterval.
 func dispatchKeyFrame() {
+	now := time.Now()
 	listLock.RLock()
 	defer listLock.RUnlock()
 
@@ -3562,17 +3593,33 @@ func dispatchKeyFrame() {
 			continue
 		}
 		for _, receiver := range peerConnections[i].peerConnection.GetReceivers() {
-			if receiver.Track() == nil {
+			track := receiver.Track()
+			if track == nil {
+				continue
+			}
+			if !allowSignalWalkKeyframe(forwardedRemoteTrackID(track), now) {
 				continue
 			}
 
 			_ = peerConnections[i].peerConnection.WriteRTCP([]rtcp.Packet{
 				&rtcp.PictureLossIndication{
-					MediaSSRC: uint32(receiver.Track().SSRC()),
+					MediaSSRC: uint32(track.SSRC()),
 				},
 			})
 		}
 	}
+}
+
+// allowSignalWalkKeyframe gates one signal-walk PLI through the shared
+// per-source keyframe throttle. Suppressions feed the room_keyframe_throttled
+// accounting so a walk storm stays visible in the logs it starves.
+func allowSignalWalkKeyframe(sourceKey string, now time.Time) bool {
+	if subscriberKeyframeThrottle.allow(sourceKey, now) {
+		return true
+	}
+	noteThrottledKeyframeRequestDrop(sourceKey, "signal_walk", "server")
+
+	return false
 }
 
 // keyframeRequestThrottle coalesces subscriber keyframe requests per forwarded
@@ -3611,11 +3658,19 @@ func (t *keyframeRequestThrottle) forget(sourceKey string) {
 	delete(t.last, sourceKey)
 }
 
-// subscriberKeyframeInterval caps forwarded keyframe requests at roughly one
-// per source per second. Frequent enough that a frozen tile recovers within a
-// second; slow enough that a burst of PLIs from many subscribers costs the
-// publisher a single encode.
-const subscriberKeyframeInterval = time.Second
+// subscriberKeyframeInterval caps keyframe requests toward a publisher at
+// roughly one per source per 2.5s — the shared budget for forwarded
+// subscriber PLIs AND the signal-walk dispatch. A first request for a source
+// always passes (empty throttle entry), so a first-seen frozen source
+// recovers immediately; a source served within the last 2.5s has its PLI
+// dropped and is retried on the next 3s signal-walk tick, so recovery for an
+// already-throttled source is bounded at <=3s, not immediate. The floor only
+// caps SUSTAINED re-requests. It was 1s
+// until the 2026-07-10 spiral, where a lossy mobile subscriber sustained ~1
+// forwarded keyframe per source per 1-2s and the resulting keyframe-heavy
+// fanout saturated egress — 2.5s keeps recovery snappy while a storm costs
+// each publisher at most ~24 keyframes a minute.
+const subscriberKeyframeInterval = 2500 * time.Millisecond
 
 var subscriberKeyframeThrottle = newKeyframeRequestThrottle(subscriberKeyframeInterval)
 
@@ -3624,6 +3679,12 @@ var subscriberKeyframeThrottle = newKeyframeRequestThrottle(subscriberKeyframeIn
 // diagnosis. Every suppressed request is counted; the log line is emitted at
 // most once per interval so a PLI storm stays cheap.
 const keyframeThrottleDropLogInterval = time.Second
+
+// memberMediaRepairLogInterval rate-limits the S2 member repair log lines
+// (accepted + dropped) to one per session per interval with a suppressed
+// count, so the observability fix can't itself become a log storm during the
+// exact incident it exists to expose.
+const memberMediaRepairLogInterval = 10 * time.Second
 
 var (
 	keyframeThrottleDrops        atomic.Int64
@@ -3639,6 +3700,217 @@ func noteThrottledKeyframeRequestDrop(forwardedTrackID string, subscriberName st
 	}
 	log.Infof("room_keyframe_throttled track_id=%s requested_by=%s session=%s dropped_total=%d",
 		forwardedTrackID, subscriberName, subscriberSession, total)
+}
+
+// Per-publisher-track silence watchdog — 2026-07-10 silent-uplink incident.
+// Tim's Safari outbound AUDIO sender stopped producing RTP for 7+ minutes while
+// his PeerConnection stayed healthy; the read pump (ReadRTP has no deadline) saw
+// zero signal and the track looked alive until EOF at leave. Only client
+// telemetry caught it. The watchdog makes a stalled uplink visible server-side:
+// the read pump stamps last-RTP time per packet (atomic, hot path) and a
+// periodic sweep flags any track whose PeerConnection is Connected yet whose
+// last RTP is older than the threshold — logging it (rate-limited) and, for
+// VIDEO, sending one PLI through the EXISTING keyframe throttle (a stalled video
+// uplink sometimes restarts on PLI; audio has no PLI, so it is log-only).
+const (
+	// publisherSilenceThreshold is the age past which a track's inbound RTP is
+	// considered stalled. 5s clears ordinary jitter/DTX gaps while catching a
+	// real stall within a sweep of crossing it.
+	publisherSilenceThreshold = 5 * time.Second
+	// publisherSilenceLogInterval rate-limits the repeat "still silent" log per
+	// track so a minutes-long stall (the incident was 7+ min) cannot become its
+	// own log storm; onset and recovery always log.
+	publisherSilenceLogInterval = 30 * time.Second
+	// publisherSilenceNudgeRequester tags the watchdog's PLIs in the existing
+	// room_keyframe_forwarded/throttled accounting.
+	publisherSilenceNudgeRequester = "silence_watchdog"
+)
+
+// publisherSilenceAction is the sweep's verdict for one watched track.
+type publisherSilenceAction int
+
+const (
+	publisherSilenceNone      publisherSilenceAction = iota // healthy, or never produced RTP
+	publisherSilenceOnset                                   // just crossed the threshold
+	publisherSilenceOngoing                                 // still silent, past a log interval
+	publisherSilenceRecovered                               // RTP resumed after a silent period
+)
+
+// publisherSilenceObservation carries what the sweep should log/do for a track.
+type publisherSilenceObservation struct {
+	action   publisherSilenceAction
+	silentMs int64
+	repeat   int // suppressed observations since onset (Ongoing only)
+}
+
+// publisherTrackWatch tracks one publisher media track's inbound-RTP liveness.
+// lastRTPNanos is written by the read-pump goroutine (per packet, atomically)
+// and read by the sweep; every other field is set once at register time
+// (published to the sweep through the registry mutex) EXCEPT the silence-state
+// fields below, which are touched ONLY by the single sweep goroutine and so
+// need no lock of their own.
+type publisherTrackWatch struct {
+	lastRTPNanos atomic.Int64 // unix nanos of the last RTP read; 0 = none yet
+
+	sourceKey   string // forwardedRemoteTrackID — the PLI/throttle key
+	participant string
+	session     string
+	kind        webrtc.RTPCodecType
+	pc          *webrtc.PeerConnection
+
+	// sweep-goroutine-owned silence state
+	silent          bool
+	silentSinceNs   int64 // last-RTP time at the moment silence was declared
+	lastSilentLogNs int64 // nanos of the last emitted silent log (rate limit)
+	silentRepeat    int   // silent sweeps observed since onset
+}
+
+// evaluate advances the watch's silence state for a sweep at nowNs and reports
+// what to log/do. Callers must invoke it only from the single sweep goroutine.
+func (w *publisherTrackWatch) evaluate(nowNs int64) publisherSilenceObservation {
+	last := w.lastRTPNanos.Load()
+	if last == 0 {
+		// No RTP ever seen — a join-muted track, not the "was producing then
+		// stopped" stall this watchdog exists to catch.
+		return publisherSilenceObservation{action: publisherSilenceNone}
+	}
+	age := nowNs - last
+	if age < int64(publisherSilenceThreshold) {
+		if w.silent {
+			// RTP resumed. The silent gap runs from the last pre-silence packet
+			// (silentSinceNs) to the newest packet (last); the small overcount
+			// from post-resume packets arriving before this sweep is bounded by
+			// the sweep interval and fine for observability.
+			silentMs := (last - w.silentSinceNs) / int64(time.Millisecond)
+			w.resetSilenceState()
+			return publisherSilenceObservation{action: publisherSilenceRecovered, silentMs: silentMs}
+		}
+		return publisherSilenceObservation{action: publisherSilenceNone}
+	}
+	if !w.silent {
+		w.silent = true
+		w.silentSinceNs = last
+		w.lastSilentLogNs = nowNs
+		w.silentRepeat = 0
+		return publisherSilenceObservation{action: publisherSilenceOnset, silentMs: age / int64(time.Millisecond)}
+	}
+	w.silentRepeat++
+	if nowNs-w.lastSilentLogNs < int64(publisherSilenceLogInterval) {
+		return publisherSilenceObservation{action: publisherSilenceNone}
+	}
+	w.lastSilentLogNs = nowNs
+	return publisherSilenceObservation{action: publisherSilenceOngoing, silentMs: age / int64(time.Millisecond), repeat: w.silentRepeat}
+}
+
+func (w *publisherTrackWatch) resetSilenceState() {
+	w.silent = false
+	w.silentSinceNs = 0
+	w.lastSilentLogNs = 0
+	w.silentRepeat = 0
+}
+
+// nudgeIfVideo asks a silently-stalled VIDEO publisher for a keyframe through
+// the SAME per-source throttle as every other PLI, so the watchdog can never
+// outspend the keyframe budget (2026-07-10 spiral). Audio has no PLI equivalent.
+func (w *publisherTrackWatch) nudgeIfVideo() {
+	if w.kind != webrtc.RTPCodecTypeVideo {
+		return
+	}
+	requestSourceKeyframe(w.sourceKey, publisherSilenceNudgeRequester, w.session)
+}
+
+// publisherSilenceRegistry holds the live per-track watches. The map is guarded
+// by mu; each watch's silence state is owned by the sweep goroutine.
+type publisherSilenceRegistry struct {
+	mu     sync.Mutex
+	tracks map[string]*publisherTrackWatch
+}
+
+func newPublisherSilenceRegistry() *publisherSilenceRegistry {
+	return &publisherSilenceRegistry{tracks: map[string]*publisherTrackWatch{}}
+}
+
+func (r *publisherSilenceRegistry) register(sourceKey string, participant string, session string, kind webrtc.RTPCodecType, pc *webrtc.PeerConnection) *publisherTrackWatch {
+	w := &publisherTrackWatch{
+		sourceKey:   sourceKey,
+		participant: participant,
+		session:     session,
+		kind:        kind,
+		pc:          pc,
+	}
+	r.mu.Lock()
+	r.tracks[sourceKey] = w
+	r.mu.Unlock()
+
+	return w
+}
+
+// forget drops a watch, but only if the registry still holds THIS exact watch —
+// a same-key republish (same stream/track/SSRC) may have replaced it, and the
+// stale reader's teardown must not evict the fresh entry (mirrors removeTrack).
+func (r *publisherSilenceRegistry) forget(w *publisherTrackWatch) {
+	if w == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.tracks[w.sourceKey] == w {
+		delete(r.tracks, w.sourceKey)
+	}
+	r.mu.Unlock()
+}
+
+func (r *publisherSilenceRegistry) snapshot() []*publisherTrackWatch {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.tracks) == 0 {
+		return nil
+	}
+	out := make([]*publisherTrackWatch, 0, len(r.tracks))
+	for _, w := range r.tracks {
+		out = append(out, w)
+	}
+
+	return out
+}
+
+func (r *publisherSilenceRegistry) size() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return len(r.tracks)
+}
+
+var publisherSilence = newPublisherSilenceRegistry()
+
+// sweepPublisherSilence runs on the 3s keyframe ticker. For each watched track
+// whose PeerConnection is Connected (a stall while the transport itself is down
+// is explained by the transport, not a silent uplink), it advances the silence
+// state and logs/nudges accordingly.
+func sweepPublisherSilence() {
+	nowNs := time.Now().UnixNano()
+	for _, w := range publisherSilence.snapshot() {
+		if w.pc == nil || w.pc.ConnectionState() != webrtc.PeerConnectionStateConnected {
+			// Reset so a reconnect starts clean and RTP resuming afterward does
+			// not fire a phantom "recovered".
+			w.resetSilenceState()
+			continue
+		}
+		obs := w.evaluate(nowNs)
+		switch obs.action {
+		case publisherSilenceOnset:
+			log.Infof("room_publisher_silent participant=%s session=%s kind=%s track_id=%s silent_ms=%d repeat=0",
+				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs)
+			w.nudgeIfVideo()
+		case publisherSilenceOngoing:
+			log.Infof("room_publisher_silent participant=%s session=%s kind=%s track_id=%s silent_ms=%d repeat=%d",
+				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs, obs.repeat)
+			w.nudgeIfVideo()
+		case publisherSilenceRecovered:
+			log.Infof("room_publisher_recovered participant=%s session=%s kind=%s track_id=%s silent_ms=%d",
+				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs)
+		case publisherSilenceNone:
+		}
+	}
 }
 
 // forwardSubscriberRTCP drains RTCP from a subscriber-facing RTPSender and
@@ -3938,6 +4210,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	participantAccepted := false
 	officeAccepted := false
 	mediaJoined := false
+	// Per-socket rate-limited logging for member request_participant_tracks
+	// (S2, 2026-07-10 incident): only this read-loop goroutine touches these.
+	memberRepairLogAt := time.Time{}
+	memberRepairLogsSuppressed := 0
+	memberRepairDropLogAt := time.Time{}
+	memberRepairDropsSuppressed := 0
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
 	var cleanupOnce sync.Once
@@ -3958,6 +4236,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if participantAcceptedState.Load() {
 				name := currentParticipantName()
 				unregisterParticipantSession(name, participantSessionID)
+				if guest == nil {
+					// Member repair buckets key on this per-socket session id —
+					// release it or the room's map grows one entry per connection.
+					kanbanApp.dropMemberMediaRepairBucket(connRoomID, participantSessionID)
+				}
 				if removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID); removed {
 					// participant_left means a PERSON left. When one of an
 					// account's two devices drops but another stays connected,
@@ -4119,6 +4402,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			signalPeerConnections()
 			defer removeTrack(trackLocal)
 
+			// Silence watchdog: watch this publisher track for a stalled uplink
+			// (RTP stops while the PeerConnection stays Connected). The read loop
+			// below stamps lastRTPNanos per packet; the 3s sweep flags a stall.
+			silenceWatch := publisherSilence.register(forwardedTrackID, trackParticipantName, trackParticipantSessionID, t.Kind(), pc)
+			defer publisherSilence.forget(silenceWatch)
+
 			audioDecoder, audioChannels, err := newRoomAudioDecoder(t)
 			if err != nil {
 				log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
@@ -4150,6 +4439,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
 					return
 				}
+				// Hot-path silence stamp: one atomic store of the receive time —
+				// the sweep reads it to detect a stalled uplink. Kept branch-free
+				// and dwarfed by the per-packet decode/forward already below.
+				silenceWatch.lastRTPNanos.Store(time.Now().UnixNano())
 				if !announcedRTPDetails {
 					announcedRTPDetails = true
 					log.Infof("room_ontrack_first_rtp participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d marker=%t payload_type=%d payload_bytes=%d extension_profile=0x%x extension_ids=%s",
@@ -4596,11 +4889,42 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			// §6.5 hardening: replays room track snapshots + runs a global
-			// peer-sync walk, so token-bucket guests (members unbucketed) to keep
-			// a guest-link holder from forcing that fan-out at socket line rate.
+			// peer-sync walk, so token-bucket guests to keep a guest-link holder
+			// from forcing that fan-out at socket line rate.
 			if guest != nil && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
 				log.Infof("guest_media_repair_rate_limited session=%s room=%s", participantSessionID, connRoomID)
 				continue
+			}
+			// 2026-07-10 keyframe-spiral incident: members were unbucketed AND
+			// unlogged — 193 repair messages in ~4 minutes each ran the global
+			// walk below and were invisible in forensics. Members now spend a
+			// generous per-session bucket (burst 4 covers a just-joined member's
+			// first snapshot request; refill 1 per 5s clears the client's ~6s
+			// legit repair cadence). On limit: drop silently toward the client,
+			// with a rate-limited drop log. Accepted requests are logged at most
+			// once per 10s per session with a suppressed-count so a repair storm
+			// can't become a log storm.
+			if guest == nil {
+				repairNow := time.Now()
+				reason := participantTrackRefreshReason(message.Data)
+				if !kanbanApp.allowMemberMediaRepair(connRoomID, participantSessionID, repairNow) {
+					memberRepairDropsSuppressed++
+					if repairNow.Sub(memberRepairDropLogAt) >= memberMediaRepairLogInterval {
+						log.Infof("member_media_repair_rate_limited session=%s room=%s participant=%s reason=%q dropped=%d",
+							participantSessionID, connRoomID, currentParticipantName(), reason, memberRepairDropsSuppressed)
+						memberRepairDropLogAt = repairNow
+						memberRepairDropsSuppressed = 0
+					}
+					continue
+				}
+				if repairNow.Sub(memberRepairLogAt) >= memberMediaRepairLogInterval {
+					log.Infof("member_media_repair session=%s room=%s participant=%s reason=%q suppressed=%d",
+						participantSessionID, connRoomID, currentParticipantName(), reason, memberRepairLogsSuppressed)
+					memberRepairLogAt = repairNow
+					memberRepairLogsSuppressed = 0
+				} else {
+					memberRepairLogsSuppressed++
+				}
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
 			signalPeerConnections()

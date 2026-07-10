@@ -101,22 +101,59 @@ func TestIndexStaleTileEscalationSingleShotAndCooldown(t *testing.T) {
 		// forced past the 900ms throttle so it provably sends (finding 2)
 		"if (frozenMs < remoteVideoStaleEscalationRefreshMs) {",
 		"if (!state.escalatedTrackRefresh) {",
+		// finding 5: only burn the one-shot flag when the forced send actually
+		// cleared the 4s floor and went out
+		"if (forceParticipantTrackRefresh('stale tile escalation')) {",
 		"state.escalatedTrackRefresh = true",
-		"forceParticipantTrackRefresh('stale tile escalation')",
-		// rung 2: single-shot per episode (per track), capped + cooled per
-		// connection (finding 3)
+		// rung 2: single-shot per episode (per track); the cap + cooldown now
+		// live in the shared budgeted-restart helper (finding 3), which the
+		// congestion-breaker probe also draws on
 		"if (frozenMs < remoteVideoStaleEscalationIceRestartMs || state.escalatedIceRestart) {",
-		"if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {",
-		"if (remoteVideoEscalationLastIceRestartAt && now - remoteVideoEscalationLastIceRestartAt < remoteVideoStaleEscalationIceCooldownMs) {",
+		"if (!requestBudgetedIceRestart('stale tile escalation', now)) {",
 		"state.escalatedIceRestart = true",
-		"remoteVideoEscalationIceRestartCount++",
-		"remoteVideoEscalationLastIceRestartAt = now",
-		"event: 'restart_ice'",
-		"data: JSON.stringify({ reason: 'stale tile escalation' })",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("escalateStaleRemoteVideoTile is missing %q", want)
 		}
+	}
+
+	// finding 5: the flag must be set INSIDE the forced-send success branch, so
+	// a floored (dropped) send leaves escalatedTrackRefresh false and rung 1
+	// retries next tick instead of silently no-op'ing forever
+	forceGuardAt := strings.Index(body, "if (forceParticipantTrackRefresh('stale tile escalation')) {")
+	flagSetAt := strings.Index(body, "state.escalatedTrackRefresh = true")
+	if forceGuardAt == -1 || flagSetAt == -1 || flagSetAt < forceGuardAt {
+		t.Error("rung 1 must set escalatedTrackRefresh only after the forced send confirms it went out (finding 5)")
+	}
+
+	// the per-connection ICE budget (cap 2, 60s cooldown) lives in the shared
+	// helper that both rung 2 and the congestion-breaker second-stage probe
+	// call — one budget, so a stuck-open breaker and a transport stall cannot
+	// double-spend restarts
+	helper := functionBody(html, "function requestBudgetedIceRestart(reason, now)")
+	if helper == "" {
+		t.Fatal("requestBudgetedIceRestart is missing")
+	}
+	for _, want := range []string{
+		"if (!ws || ws.readyState !== WebSocket.OPEN) {",
+		"if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {",
+		"if (remoteVideoEscalationLastIceRestartAt && now - remoteVideoEscalationLastIceRestartAt < remoteVideoStaleEscalationIceCooldownMs) {",
+		"remoteVideoEscalationIceRestartCount++",
+		"remoteVideoEscalationLastIceRestartAt = now",
+		"event: 'restart_ice'",
+		"data: JSON.stringify({ reason })",
+		"return true",
+		"return false",
+	} {
+		if !strings.Contains(helper, want) {
+			t.Errorf("requestBudgetedIceRestart is missing %q", want)
+		}
+	}
+	// the budget is spent (count++/stamp) only after the cap + cooldown gates
+	capGateAt := strings.Index(helper, "if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {")
+	spendAt := strings.Index(helper, "remoteVideoEscalationIceRestartCount++")
+	if capGateAt == -1 || spendAt == -1 || spendAt < capGateAt {
+		t.Error("requestBudgetedIceRestart must check the cap before spending the budget")
 	}
 
 	// rung 1 returns before rung 2 — one rung per tick, never both at once
@@ -225,8 +262,11 @@ func TestIndexParticipantTrackRefreshForceBypass(t *testing.T) {
 	if !strings.Contains(forced, "sendParticipantTrackRefresh(reason)") {
 		t.Error("forceParticipantTrackRefresh must share the send that stamps lastParticipantTrackRefreshAt")
 	}
+	// (2026-07-10 spiral: the shared send now reads the clock once for the 4s
+	// global floor and stamps that same `now` — see
+	// TestIndexParticipantTrackRefreshGlobalFloor for the floor pins)
 	send := functionBody(html, "function sendParticipantTrackRefresh(reason)")
-	if !strings.Contains(send, "lastParticipantTrackRefreshAt = performance.now()") {
+	if !strings.Contains(send, "lastParticipantTrackRefreshAt = now") {
 		t.Error("the shared send must stamp lastParticipantTrackRefreshAt so forced sends still throttle")
 	}
 	// rung 1 is the forced caller

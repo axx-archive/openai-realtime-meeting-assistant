@@ -23893,6 +23893,53 @@
       // when a fresh session peer's freeze watch starts.
       let remoteVideoEscalationIceRestartCount = 0
       let remoteVideoEscalationLastIceRestartAt = 0
+      // 2026-07-10 PLI/keyframe spiral (StationTenn): one lossy mobile
+      // subscriber melted the room — congestion froze EVERY remote tile at
+      // once and this client's per-tile repair machinery (193
+      // request_participant_tracks in ~4min, each ending in a server-side
+      // keyframe walk of EVERY publisher) amplified the spiral. Congestion is
+      // a ROOM condition, not a dead binding: when 2+ remote tiles (or >50%
+      // of a bigger room) are sick simultaneously, this circuit breaker opens
+      // and the escalation ladder + congestion repair sends go quiet until
+      // tiles start advancing frames again.
+      const roomCongestionBreakerMinSickTiles = 2
+      const roomCongestionBreakerSickFraction = 0.5
+      let roomCongestionBreakerOpen = false
+      // Half-open probe cycle (2026-07-10 gate finding): a stuck-open breaker
+      // must not suppress the multi-tile wedge cure forever. Once the breaker
+      // has been open continuously for the probe interval, allow ONE forced
+      // request_participant_tracks (still through the 4s floor) as a half-open
+      // probe; if it is STILL open a full interval later, allow the single
+      // budgeted restart_ice (per-connection cap 2 + 60s cooldown) as a
+      // second-stage probe, then repeat the cycle. A breaker close (frames
+      // advancing) resets the probe state. Damping holds: ~one probe / 20s
+      // (stage 0 → forced track refresh, stage 1 → budgeted ICE restart).
+      const roomCongestionBreakerProbeMs = 20000
+      let roomCongestionBreakerLastProbeAt = 0
+      let roomCongestionBreakerProbeStage = 0
+      // The deaf/byte-stall branch HOLDS the last decoded frame through
+      // transient congestion instead of blinking video↔avatar at the 2s stall
+      // threshold (the spiral's user-visible "flashing"). The avatar covers
+      // the tile only after a LONG outage, aligned with the escalation
+      // ladder's rung-1 threshold.
+      const remoteVideoDeafAvatarHoldMs = 12000
+      // The frames-stalled-while-bytes-flow path marks a tile sick at the 2s
+      // stall threshold (census + health), but the server's per-source
+      // keyframe floor is now 2.5s, so swapping the avatar in at 2s would
+      // self-blink against the keyframe that is already on the way. Hold the
+      // last frame until 4s before covering it (2026-07-10 gate finding 4).
+      const remoteVideoFrozenAvatarSwapMs = 4000
+      // Global send floor for request_participant_tracks: no two sends from
+      // this client within 4s regardless of reason or force flag — the member
+      // path has no server-side rate limit. Join-time track adoption stays
+      // instant via a short post-join burst window armed on a fresh session
+      // peer and on a remote participant joining; inside that window the 4s
+      // floor is lifted but sends are still paced at >=2s so this client's
+      // burst (max ~5 in 10s) fits the server request bucket (burst 4 + 1/5s).
+      const participantTrackRefreshFloorMs = 4000
+      const participantTrackRefreshJoinBurstMs = 10000
+      const participantTrackRefreshJoinBurstFloorMs = 2000
+      let participantTrackRefreshJoinBurstUntil = 0
       let roomStateRefreshTimer = 0
       let roomAudioUnlockRetryTimer = 0
       let lastRoomAudioUnlockNoticeAt = 0
@@ -36607,6 +36654,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function handleParticipantJoined(participant) {
         const name = participant?.name || 'participant'
+        // a joiner's tracks land unlabeled — their first-attach refresh
+        // requests bypass the 4s send floor so adoption stays instant
+        armParticipantTrackRefreshJoinBurst()
         removeRemoteParticipantMediaByName(name)
         addAssistantMessage({
           kind: 'status',
@@ -36855,8 +36905,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return !shownTracks.some(track => frozenRemoteVideoTrackIds.has(track.id))
       }
 
+      // Congestion-repair reasons that go quiet while the room-sickness
+      // breaker is open: these are the repair sends that amplified the
+      // 2026-07-10 spiral (the media-quality pass routes through here with
+      // its own reason, and its inner passes fall back to the last two).
+      const congestionSuppressedRepairReasons = new Set([
+        'frozen remote video',
+        'media quality monitor',
+        'stalled remote video',
+        'remote media health'
+      ])
+
       function requestParticipantTrackRefresh(reason = '') {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        if (roomCongestionBreakerOpen && congestionSuppressedRepairReasons.has(reason)) {
           return
         }
         const now = performance.now()
@@ -36873,17 +36937,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // clock so a forced send still throttles the next unforced one.
       function forceParticipantTrackRefresh(reason = '') {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
-          return
+          return false
         }
-        sendParticipantTrackRefresh(reason)
+        return sendParticipantTrackRefresh(reason)
       }
 
+      // Returns whether a request_participant_tracks frame actually went out
+      // (finding 5): a caller that burns a one-shot escalation flag must only
+      // do so when its send cleared the floor, or the rung silently no-ops.
       function sendParticipantTrackRefresh(reason) {
-        lastParticipantTrackRefreshAt = performance.now()
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return false
+        }
+        // Global send floor (2026-07-10 spiral): minimum 4s between ANY two
+        // request_participant_tracks sends — reason and force flag included —
+        // because the member path has no server-side rate limit and each send
+        // ends in a keyframe request to EVERY publisher. Inside the post-join
+        // burst window the 4s floor is lifted so join-time adoption stays
+        // instant, but sends are still paced at >=2s (finding 6) so the burst
+        // fits the server request bucket; the bare 900ms throttle would let
+        // ~11 through in 10s against a ~6 budget.
+        const now = performance.now()
+        const floorMs = now < participantTrackRefreshJoinBurstUntil
+          ? participantTrackRefreshJoinBurstFloorMs
+          : participantTrackRefreshFloorMs
+        if (now - lastParticipantTrackRefreshAt < floorMs) {
+          return false
+        }
+        lastParticipantTrackRefreshAt = now
         ws.send(JSON.stringify({
           event: 'request_participant_tracks',
           data: JSON.stringify({ reason })
         }))
+        return true
+      }
+
+      function armParticipantTrackRefreshJoinBurst() {
+        participantTrackRefreshJoinBurstUntil = performance.now() + participantTrackRefreshJoinBurstMs
       }
 
       function pruneStaleUnidentifiedRemoteVideoTiles() {
@@ -37105,6 +37195,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function refreshStalledRemoteVideoTiles(reason = '') {
+        // 2026-07-10 spiral: while the room-sickness breaker is open, tile
+        // dispose+recreate churn and the repair sends it drives are
+        // congestion fuel — hold every tile on its last frame and let the
+        // freeze watch close the breaker when frames advance again.
+        if (roomCongestionBreakerOpen) {
+          return false
+        }
         let refreshed = false
         const now = performance.now()
         for (const tile of remoteTiles()) {
@@ -46043,10 +46140,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             tile.classList.remove('is-video-stalled')
           }
         }
+        const tileHasRenderedFrame = () => {
+          const video = tile.querySelector('video')
+          return Boolean(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+            && video.videoWidth > 0 && video.videoHeight > 0)
+        }
         const onMute = () => {
           if (stallTimer) {
             return
           }
+          // 2026-07-10 gate finding 3: match the deaf branch's hold policy. A
+          // tile that has ALREADY rendered frames holds its last frame through
+          // a transient mute and only swaps to the avatar after the long-outage
+          // hold (12s) — no 2s/3s blink. A fresh attach that has NEVER rendered
+          // a frame keeps the 3s swap (an avatar beats a black rectangle).
+          const holdMs = tileHasRenderedFrame() ? remoteVideoDeafAvatarHoldMs : 3000
           stallTimer = window.setTimeout(() => {
             stallTimer = 0
             if (!track.muted || !tileStillShowsTrack()) {
@@ -46057,7 +46165,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             if (!name || name === 'participant' || !participantDisplayNameInRoom(name)) {
               remoteTileRemovers.get(tile)?.(track)
             }
-          }, 3000)
+          }, holdMs)
         }
         track.addEventListener('mute', onMute)
         track.addEventListener('unmute', clearStall)
@@ -46087,6 +46195,102 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         remoteVideoFreezeStates.clear()
         frozenRemoteVideoTrackIds.clear()
+        roomCongestionBreakerOpen = false
+        roomCongestionBreakerLastProbeAt = 0
+        roomCongestionBreakerProbeStage = 0
+      }
+
+      // Room-sickness census over the freeze watch's own per-track state.
+      // Only FRAME-CAPABLE tiles vote (2026-07-10 gate finding 2): a tile that
+      // shows a freeze-watch-tracked video track AND whose participant is not
+      // roster-declared camera-off. Audio-only participants and camera-off
+      // tiles are excluded from BOTH the sick numerator and the tracked
+      // denominator, so a 1:1 or camera-off room can still surface its single
+      // dead binding (the ladder's 1:1 exception keys off trackedTiles === 1).
+      // A voting tile is SICK when its track is marked frozen/deaf, ADVANCING
+      // when it decoded a frame within the stall window.
+      function remoteVideoCongestionCensus(now) {
+        let sickTiles = 0
+        let advancingTiles = 0
+        let trackedTiles = 0
+        for (const tile of remoteTiles()) {
+          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          const tracked = shownTracks.find(track => remoteVideoFreezeStates.has(track.id))
+          if (!tracked) {
+            continue
+          }
+          const name = remoteTileName(tile)
+          if (name && name !== 'participant' && participantMediaStates.has(name)
+              && participantMediaState(name).cameraOff) {
+            continue
+          }
+          trackedTiles++
+          if (frozenRemoteVideoTrackIds.has(tracked.id)) {
+            sickTiles++
+            continue
+          }
+          const state = remoteVideoFreezeStates.get(tracked.id)
+          if (state && now - state.lastAdvanceAt < remoteVideoFreezeStallMs) {
+            advancingTiles++
+          }
+        }
+        return { sickTiles, advancingTiles, trackedTiles }
+      }
+
+      // Circuit breaker (2026-07-10 spiral): 2+ sick remote tiles — or more
+      // than half the room when more than 3 are tracked — is CONGESTION, not
+      // a dead binding. While open, the escalation ladder and the congestion
+      // repair sends stay quiet so this client cannot amplify the spiral;
+      // tiles hold their last frame and recovery clears them the moment
+      // frames advance. One console line marks each transition.
+      function updateRoomCongestionBreaker(now) {
+        const { sickTiles, trackedTiles } = remoteVideoCongestionCensus(now)
+        const open = sickTiles >= roomCongestionBreakerMinSickTiles
+          && (trackedTiles <= 3 || sickTiles > trackedTiles * roomCongestionBreakerSickFraction)
+        if (open !== roomCongestionBreakerOpen) {
+          roomCongestionBreakerOpen = open
+          // A transition resets the probe cycle either way: on open the first
+          // probe is one full interval out; on close (frames advancing) the
+          // stuck-open escape hatch is no longer needed.
+          roomCongestionBreakerLastProbeAt = now
+          roomCongestionBreakerProbeStage = 0
+          logRoomRecovery(open ? 'room_congestion_breaker_open' : 'room_congestion_breaker_closed', {
+            sickTiles,
+            trackedTiles
+          })
+        }
+        if (roomCongestionBreakerOpen) {
+          maybeProbeRoomCongestionBreaker(now)
+        }
+      }
+
+      // Half-open probe (2026-07-10 gate finding 1): while the breaker stays
+      // open it suppresses the ladder and the congestion repair sends, so a
+      // TRULY stuck room (a real multi-tile wedge that only the cure can clear)
+      // would never recover. Every probe interval the breaker is still open,
+      // let ONE cure request through: stage 0 forces a request_participant_tracks
+      // (still through the 4s floor), stage 1 fires the single budgeted
+      // restart_ice (per-connection cap 2 + 60s cooldown). Then the cycle
+      // repeats. This is ~one send per 20s while open — the storm damping still
+      // holds (vs the 193-in-4-min incident) but the wedge cure is restored.
+      function maybeProbeRoomCongestionBreaker(now) {
+        if (now - roomCongestionBreakerLastProbeAt < roomCongestionBreakerProbeMs) {
+          return
+        }
+        roomCongestionBreakerLastProbeAt = now
+        if (roomCongestionBreakerProbeStage === 0) {
+          roomCongestionBreakerProbeStage = 1
+          logRoomRecovery('room_congestion_breaker_probe', { stage: 'track_refresh' })
+          forceParticipantTrackRefresh('congestion breaker probe')
+          return
+        }
+        roomCongestionBreakerProbeStage = 0
+        if (requestBudgetedIceRestart('congestion breaker probe', now)) {
+          logRoomRecovery('room_congestion_breaker_probe', {
+            stage: 'ice_restart',
+            attempt: remoteVideoEscalationIceRestartCount
+          })
+        }
       }
 
       function startRemoteVideoFreezeWatch(sessionPeer) {
@@ -46097,6 +46301,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // fresh transport → fresh per-connection ICE-restart budget (finding 3)
         remoteVideoEscalationIceRestartCount = 0
         remoteVideoEscalationLastIceRestartAt = 0
+        // fresh session peer → roster/first-attach requests bypass the 4s
+        // send floor for a short burst so track adoption stays instant
+        armParticipantTrackRefreshJoinBurst()
         remoteVideoFreezeTimer = window.setInterval(() => {
           pollRemoteVideoFreezeStats(sessionPeer).catch(error => {
             console.warn('Could not read remote video freeze stats', error)
@@ -46138,6 +46345,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             frozenRemoteVideoTrackIds.delete(trackId)
           }
         }
+        updateRoomCongestionBreaker(performance.now())
       }
 
       function noteRemoteVideoFreezeSample(track, inbound, now) {
@@ -46198,7 +46406,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const frozenMs = now - state.lastAdvanceAt
             if (frozenMs >= remoteVideoFreezeStallMs) {
               frozenRemoteVideoTrackIds.add(track.id)
-              deafTile.classList.add('is-video-stalled')
+              // 2026-07-10 spiral regression (C1): a byte-stall is usually
+              // transient congestion — HOLD the last decoded frame instead of
+              // blinking video↔avatar at 2s (the sick marker above still
+              // feeds the breaker and the health snapshot). The avatar covers
+              // the tile only after a LONG outage, aligned with the ladder's
+              // rung-1 threshold; the frames-advanced branch clears it the
+              // moment the feed recovers.
+              if (frozenMs >= remoteVideoDeafAvatarHoldMs) {
+                deafTile.classList.add('is-video-stalled')
+              }
               // Stamp lastRepairAt on the same 6s cadence the frozen path uses
               // so the shared 4s/8s repair passes stay throttled (no
               // dispose+recreate flicker) while the ladder does the healing.
@@ -46239,7 +46456,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         frozenRemoteVideoTrackIds.add(track.id)
         const tile = remoteTileShowingTrack(track)
-        if (tile) {
+        // Sick-marking lands at the 2s stall threshold above (census + health
+        // need the signal), but the avatar swap waits for 4s: the server's
+        // per-source keyframe floor is now 2.5s, so covering the tile at 2s
+        // would self-blink against the keyframe already on the way
+        // (2026-07-10 gate finding 4).
+        if (tile && frozenMs >= remoteVideoFrozenAvatarSwapMs) {
           tile.classList.add('is-video-stalled')
         }
         // Drive the repair (and its telemetry) on the per-track cadence only.
@@ -46247,8 +46469,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // so no repair path can dispose+recreate this tile faster than
         // remoteVideoFreezeRepairIntervalMs. Stamp after the rebuild attempt so
         // the log/track-refresh stay throttled even when the tile is still
-        // inside its 3.5s creation grace and refresh no-ops.
-        if (now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
+        // inside its 3.5s creation grace and refresh no-ops. While the
+        // congestion breaker is open the repair block is suppressed entirely
+        // (2026-07-10 spiral): whole-room freezes are congestion, and these
+        // sends were fuel — the unstamped clock lets repair resume on the
+        // first pass after the breaker closes.
+        if (!roomCongestionBreakerOpen && now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
           logRoomRecovery('remote_video_frozen', {
             participant: tile ? remoteTileName(tile) : '',
             frozenMs: Math.round(frozenMs),
@@ -46305,46 +46531,79 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           return
         }
+        // 2026-07-10 spiral: whole-room sickness is CONGESTION — escalating
+        // per-tile repairs amplifies it, so both rungs stay quiet while the
+        // breaker is open (the breaker's own half-open probe restores the wedge
+        // cure for a genuinely stuck room).
+        if (roomCongestionBreakerOpen) {
+          return
+        }
+        // Fire only on the true dead-BINDING signature: exactly ONE frame-
+        // capable tile is sick AND either another frame-capable tile is
+        // advancing frames (proving the transport healthy — the "Tom" cure) OR
+        // the sick tile is the ONLY frame-capable remote tile (a 1:1 or
+        // camera-off room, where the breaker can never open, so the ladder is
+        // the sole cure — 2026-07-10 gate finding 2).
+        const { sickTiles, advancingTiles, trackedTiles } = remoteVideoCongestionCensus(now)
+        if (sickTiles !== 1 || (advancingTiles < 1 && trackedTiles !== 1)) {
+          return
+        }
         if (frozenMs < remoteVideoStaleEscalationRefreshMs) {
           return
         }
         if (!state.escalatedTrackRefresh) {
-          state.escalatedTrackRefresh = true
-          logRoomRecovery('stale_tile_escalation_track_refresh', {
-            participant: remoteTileName(remoteTileShowingTrack(track)),
-            frozenMs: Math.round(frozenMs)
-          })
-          // force past the 900ms throttle: the 6s repair cadence fires the same
-          // request on this tick, so an unforced send would be swallowed while
-          // this one-shot flag still burns (finding 2)
-          forceParticipantTrackRefresh('stale tile escalation')
+          // Force past the 900ms throttle: the 6s repair cadence fires the same
+          // request on this tick, so an unforced send would be swallowed
+          // (finding 2). Only burn the one-shot flag when the floored send
+          // actually went out (finding 5) — otherwise the rung silently no-ops
+          // and never retries once the flag is set.
+          if (forceParticipantTrackRefresh('stale tile escalation')) {
+            state.escalatedTrackRefresh = true
+            logRoomRecovery('stale_tile_escalation_track_refresh', {
+              participant: remoteTileName(remoteTileShowingTrack(track)),
+              frozenMs: Math.round(frozenMs)
+            })
+          }
           return
         }
         if (frozenMs < remoteVideoStaleEscalationIceRestartMs || state.escalatedIceRestart) {
           return
         }
-        // restart_ice renegotiates the WHOLE transport, so the cap and cooldown
-        // are per-CONNECTION (finding 3): when a transport-wide stall makes
-        // every frozen tile cross 24s in one stats pass, only ONE restart fires
-        // per cooldown window. state.escalatedIceRestart above still single-shots
-        // each track per freeze episode.
-        if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {
-          return
-        }
-        // truthiness first: performance.now() runs from page load, so a bare
-        // subtraction against the 0 seed would block rung 2 for the page's
-        // first 60s
-        if (remoteVideoEscalationLastIceRestartAt && now - remoteVideoEscalationLastIceRestartAt < remoteVideoStaleEscalationIceCooldownMs) {
+        // restart_ice renegotiates the WHOLE transport, so its cap + cooldown
+        // are per-CONNECTION (finding 3) and shared with the breaker probe:
+        // when a transport-wide stall makes every frozen tile cross 24s in one
+        // pass, only ONE restart fires per cooldown window. Single-shot this
+        // track's episode only when the budgeted restart actually fired.
+        if (!requestBudgetedIceRestart('stale tile escalation', now)) {
           return
         }
         state.escalatedIceRestart = true
-        remoteVideoEscalationIceRestartCount++
-        remoteVideoEscalationLastIceRestartAt = now
         logRoomRecovery('stale_tile_escalation_ice_restart', {
           participant: remoteTileName(remoteTileShowingTrack(track)),
           frozenMs: Math.round(frozenMs),
           attempt: remoteVideoEscalationIceRestartCount
         })
+      }
+
+      // One budgeted transport ICE restart — the escalation ladder's rung 2 and
+      // the congestion breaker's second-stage probe both draw on the SAME
+      // per-connection budget (cap 2, 60s cooldown) so a transport-wide stall
+      // or a stuck-open breaker fires at most one restart per cooldown window.
+      // Returns whether it fired.
+      function requestBudgetedIceRestart(reason, now) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return false
+        }
+        if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {
+          return false
+        }
+        // truthiness first: performance.now() runs from page load, so a bare
+        // subtraction against the 0 seed would block the first restart for 60s
+        if (remoteVideoEscalationLastIceRestartAt && now - remoteVideoEscalationLastIceRestartAt < remoteVideoStaleEscalationIceCooldownMs) {
+          return false
+        }
+        remoteVideoEscalationIceRestartCount++
+        remoteVideoEscalationLastIceRestartAt = now
         try {
           pc?.restartIce?.()
         } catch (error) {
@@ -46352,8 +46611,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         ws.send(JSON.stringify({
           event: 'restart_ice',
-          data: JSON.stringify({ reason: 'stale tile escalation' })
+          data: JSON.stringify({ reason })
         }))
+        return true
       }
 
       function remoteTileShowingTrack(track) {

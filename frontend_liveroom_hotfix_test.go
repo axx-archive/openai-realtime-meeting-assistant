@@ -94,8 +94,12 @@ func TestIndexRepairLoopDampening(t *testing.T) {
 		"if (currentTracks.some(current => current.id === track.id && liveTrack(current) && !current.muted)",
 		// frozen-video repair: keep the PLI/track-refresh, skip the rebuild
 		"if (attachedTrack && attachedTrack.id === videoTrack.id",
-		// mute cover raised 1600 -> 3000 so short congestion gaps stop blinking
-		"remoteTileRemovers.get(tile)?.(track)\n            }\n          }, 3000)",
+		// mute cover: a fresh (never-rendered) attach still swaps at 3s, but a
+		// tile that has ALREADY rendered now holds its last frame until the 12s
+		// long-outage hold, chosen via holdMs (2026-07-10 gate finding 3 — the
+		// bare 3s literal blinked rendered tiles through 1-2s congestion gaps).
+		// See TestIndexMuteWatcherHoldsRenderedFrame for the policy pins.
+		"remoteTileRemovers.get(tile)?.(track)\n            }\n          }, holdMs)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html is missing %q", want)
