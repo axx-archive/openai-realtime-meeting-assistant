@@ -545,12 +545,33 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			"brainCount":                   strconv.Itoa(len(group.brains)),
 			"generatedAt":                  time.Now().UTC().Format(time.RFC3339),
 		}
+		// Server-authored coverage stamps (kanban-card-107): compare the CAPTURED
+		// span to the room-occupancy sitting so every reader can state, honestly,
+		// that a digest describes what was captured — not necessarily the whole
+		// meeting. Pure Go; the model never sees or writes these. A legacy
+		// synthetic key or an absent directory record degrades to "unknown".
+		record, hasRecord := app.meetingDirectoryRecord(group.key)
+		resolvable := hasRecord && !isLegacyMeetingKey(group.key)
+		var sittingStart time.Time
+		if resolvable {
+			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(record.StartedAt)); err == nil {
+				sittingStart = parsed
+				metadata[digestSittingStartedAtMetadataKey] = record.StartedAt
+			}
+			if ended := strings.TrimSpace(record.EndedAt); ended != "" {
+				metadata[digestSittingEndedAtMetadataKey] = ended
+			}
+		}
+		coverage := app.memory.transcriptCoverageForMeeting(group.key)
+		metadata[digestCoverageMetadataKey] = meetingCoverageLabel(resolvable, sittingStart, spanStart, coverage.MaxInternalGap)
 		// §6.4 provenance (inclusion RATIFIED 2026-07-09): the stamp is the
 		// durable external-guest-meeting origin record — the rollups consume
 		// this digest like any other, recall surfaces can display the origin,
 		// and a future re-quarantine is a read-side filter keyed on it.
 		if app.meetingListenOnly(group.key) || app.windowIncludesListenOnly(group.brains) {
 			metadata[listenOnlyMetadataKey] = "true"
+			// A listen-only sitting may have been underway before capture began.
+			metadata[externalMayPredateCaptureMetadataKey] = "true"
 		}
 		entry, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, group.key, string(canonical), metadata)
 		if err != nil {

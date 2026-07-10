@@ -1209,6 +1209,7 @@ func assistantQueryInstructions() string {
 		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates when the user explicitly asks about board, card, task, status, owner, or due-date information.",
 		"Do not volunteer board status for ambiguous follow-ups or strategy questions just because board context is present.",
 		"Use memory only for past discussion, decisions, transcript recall, or archived meeting questions.",
+		"A per-meeting digest describes a CAPTURED window, not necessarily the whole meeting — when its header carries coverage=partial_late_start/partial_gaps/unknown or listenOnly=true, state that plainly instead of implying full visibility; a partial_gaps stretch may be quiet time rather than a capture failure, so describe it as possibly-missing, not as proof capture broke. Day- and company-level digests carry no coverage header — do not infer one.",
 		"If the board contains a relevant card, do not say you cannot see the current status.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
@@ -1334,6 +1335,7 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 			builder.WriteString(" meeting=")
 			builder.WriteString(meetingID)
 		}
+		writeDigestCoverageHeaderFields(&builder, entry, location)
 		builder.WriteString("\n")
 		for _, line := range strings.Split(entry.Text, "\n") {
 			builder.WriteString("  ")
@@ -2029,13 +2031,54 @@ func memoryQuestionInstructions() string {
 		"You are Scout, the Bonfire meeting assistant.",
 		"Answer the user's recall question using only the supplied memory context.",
 		"meeting_digest, day_digest, and company_digest entries are structured JSON rollups — the organized summary layer.",
+		"A per-meeting digest describes a CAPTURED window, not necessarily the whole meeting — when its header carries coverage=partial_late_start/partial_gaps/unknown or listenOnly=true, say so plainly and never imply you saw the entire meeting; a partial_gaps stretch may just be quiet time rather than a capture failure, so present it as possibly-missing, not as proof capture broke. Day- and company-level digests carry no coverage header — do not infer one.",
 		"For briefing questions (what did I miss, what happened over a range) lead with the digests' highest-importance facts: decisions and blockers first, then action items, open questions, and topics; each fact's importance (1-5, 5 highest) and at timestamp are already computed — organize by them, and group multi-day answers day by day.",
 		"ledger_state entries are the canonical current-state registry: for status questions answer from those records — their status/owner/validity fields are authoritative over anything the raw transcript implies — and cite their anchors for the verbatim exchange.",
+		"When a ledger_state record lists several meetings (meetings=…), cite the cross-meeting arc — e.g. \"discussed across 3 meetings since <since>\" — rather than treating it as a one-off mention.",
 		"Use the brain write-ups for synthesis and the transcript entries as source-of-truth references.",
 		"Preserve speaker attribution. When useful, name who said what and include dates or transcript IDs.",
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"Keep the answer concise and useful. Use bullets for highlights.",
 	}, " ")
+}
+
+// digestCoverageHeaderLayout is the compact local timestamp used for the
+// span= field on a digest context header (the entry line already carries a
+// full RFC3339 time=, so minute precision is enough here).
+const digestCoverageHeaderLayout = "2006-01-02 15:04"
+
+// writeDigestCoverageHeaderFields appends the server-authored coverage fields
+// to a digest-kind entry's context header, so the answering model reads the
+// CAPTURED window and its completeness instead of assuming a digest saw the
+// whole meeting. span= is emitted for any digest tier that stamped a window.
+// coverage=/listenOnly=, however, are stamped ONLY by the per-meeting digest
+// producer (meeting_digest.go): the day_digest and company_digest folds carry no
+// such stamp, so emitting the fields for them would print a misleading
+// coverage=unknown on a perfectly good rollup and make recall hedge for no
+// reason. A per-meeting digest missing its stamp still degrades to
+// coverage=unknown (never fabricated). No-op for non-digest kinds.
+func writeDigestCoverageHeaderFields(builder *strings.Builder, entry meetingMemoryEntry, location *time.Location) {
+	if !isMeetingDigestKind(entry.Kind) {
+		return
+	}
+	if start, end, ok := parseDigestSpanMetadata(entry); ok {
+		builder.WriteString(" span=")
+		builder.WriteString(start.In(location).Format(digestCoverageHeaderLayout))
+		builder.WriteString("..")
+		builder.WriteString(end.In(location).Format(digestCoverageHeaderLayout))
+	}
+	if entry.Kind != meetingMemoryKindMeetingDigest {
+		return
+	}
+	label := strings.TrimSpace(entry.Metadata[digestCoverageMetadataKey])
+	if label == "" {
+		label = coverageLabelUnknown
+	}
+	builder.WriteString(" coverage=")
+	builder.WriteString(label)
+	if strings.EqualFold(strings.TrimSpace(entry.Metadata[listenOnlyMetadataKey]), "true") {
+		builder.WriteString(" listenOnly=true")
+	}
 }
 
 func buildMemoryQuestionInput(query string, entries []meetingMemoryEntry, now time.Time) string {
@@ -2061,6 +2104,7 @@ func buildMemoryQuestionInput(query string, entries []meetingMemoryEntry, now ti
 			builder.WriteString(" meeting=")
 			builder.WriteString(meetingID)
 		}
+		writeDigestCoverageHeaderFields(&builder, entry, location)
 		builder.WriteString("\n")
 		for _, line := range strings.Split(entry.Text, "\n") {
 			builder.WriteString("  ")

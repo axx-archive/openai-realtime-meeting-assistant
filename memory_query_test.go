@@ -1203,3 +1203,99 @@ func TestLedgerStatusAnswerDeterministicFallback(t *testing.T) {
 		}
 	}
 }
+
+/* ---------- coverage honesty in answer seams (kanban-card-107) ---------- */
+
+func TestDigestEntryHeadersCarryCoverage(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	now := time.Now()
+	digest := meetingMemoryEntry{
+		ID:        "digest-1",
+		Kind:      meetingMemoryKindMeetingDigest,
+		Text:      `{"title":"Pilot"}`,
+		CreatedAt: now,
+		Metadata: map[string]string{
+			"meetingId":                "meeting-a",
+			digestSpanStartMetadataKey: "2026-07-06T17:00:00Z",
+			digestSpanEndMetadataKey:   "2026-07-06T17:30:00Z",
+			digestCoverageMetadataKey:  coverageLabelPartialLateStart,
+			listenOnlyMetadataKey:      "true",
+		},
+	}
+	inputs := map[string]string{
+		"memoryQuestion": buildMemoryQuestionInput("what did I miss", []meetingMemoryEntry{digest}, now),
+		"assistantQuery": buildAssistantQueryInput("what did I miss", nil, []meetingMemoryEntry{digest}, nil, nil, nil, now, false),
+	}
+	for name, input := range inputs {
+		for _, want := range []string{
+			"coverage=partial_late_start",
+			"listenOnly=true",
+			"span=2026-07-06 10:00..2026-07-06 10:30",
+		} {
+			if !strings.Contains(input, want) {
+				t.Fatalf("%s input missing %q:\n%s", name, want, input)
+			}
+		}
+	}
+
+	// A legacy digest without the stamp degrades to coverage=unknown, never omitted.
+	legacy := meetingMemoryEntry{
+		ID:        "digest-legacy",
+		Kind:      meetingMemoryKindMeetingDigest,
+		CreatedAt: now,
+		Metadata:  map[string]string{"meetingId": "meeting-b"},
+	}
+	if input := buildMemoryQuestionInput("q", []meetingMemoryEntry{legacy}, now); !strings.Contains(input, "coverage=unknown") {
+		t.Fatalf("legacy digest header must degrade to coverage=unknown:\n%s", input)
+	}
+	// A non-digest entry never gets coverage fields.
+	transcript := meetingMemoryEntry{ID: "tx-1", Kind: meetingMemoryKindTranscript, CreatedAt: now, Metadata: map[string]string{"meetingId": "meeting-b"}}
+	if input := buildMemoryQuestionInput("q", []meetingMemoryEntry{transcript}, now); strings.Contains(input, "coverage=") {
+		t.Fatalf("transcript header must not carry coverage fields:\n%s", input)
+	}
+}
+
+// Finding A: day_digest and company_digest folds carry no coverage stamp, so
+// their context headers must NOT print coverage=unknown (which would make recall
+// hedge on a perfectly good rollup). span= may still ride when they stamp one.
+func TestDayAndCompanyDigestHeadersOmitCoverage(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	now := time.Now()
+	for _, kind := range []string{meetingMemoryKindDayDigest, meetingMemoryKindCompanyDigest} {
+		entry := meetingMemoryEntry{
+			ID:        "digest-" + kind,
+			Kind:      kind,
+			Text:      `{"summary":"rollup"}`,
+			CreatedAt: now,
+			Metadata: map[string]string{
+				// no coverage/listenOnly stamp — these folds never author one,
+				// but they may carry a span window.
+				digestSpanStartMetadataKey: "2026-07-06T17:00:00Z",
+				digestSpanEndMetadataKey:   "2026-07-06T17:30:00Z",
+			},
+		}
+		input := buildMemoryQuestionInput("q", []meetingMemoryEntry{entry}, now)
+		if strings.Contains(input, "coverage=") {
+			t.Fatalf("%s header must not carry a coverage field:\n%s", kind, input)
+		}
+		if strings.Contains(input, "listenOnly=") {
+			t.Fatalf("%s header must not carry a listenOnly field:\n%s", kind, input)
+		}
+		if !strings.Contains(input, "span=2026-07-06 10:00..2026-07-06 10:30") {
+			t.Fatalf("%s header should still carry its span window:\n%s", kind, input)
+		}
+	}
+}
+
+func TestCoverageAndLedgerInstructionsPresent(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	mem := memoryQuestionInstructions()
+	for _, want := range []string{"CAPTURED window", "cross-meeting arc"} {
+		if !strings.Contains(mem, want) {
+			t.Fatalf("memoryQuestionInstructions missing %q", want)
+		}
+	}
+	if !strings.Contains(assistantQueryInstructions(), "CAPTURED window") {
+		t.Fatal("assistantQueryInstructions missing the coverage-honesty sentence")
+	}
+}

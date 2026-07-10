@@ -9,9 +9,17 @@ import (
 //
 // This completes the outbound HEVC packetization the meeting board's
 // "Finish RTP HEVC Packetizer" item calls for: NAL-unit fragmentation,
-// aggregation, and marker-bit handling. Pion ships an H.265 *depacketizer*
-// (codecs.H265*Packet, parse side) but no payloader, so the send-side logic
-// below is the missing piece.
+// aggregation, and marker-bit handling.
+//
+// Pion v1.8.23 does ship an H.265 payloader (codecs.H265Payloader in
+// codecs/h265_packet.go, alongside the H265*Packet depacketizers); this local
+// one is kept deliberately because it differs where RFC 7798 conformance
+// matters for our streams:
+//   - it ORs the Aggregation Packet header's F bit across the aggregated units
+//     (RFC 7798 §4.4.2); upstream leaves that F bit clear.
+//   - it hard-omits DONL/DOND, correct only when sprop-max-don-diff == 0 (our
+//     single-session, in-order case); upstream gates DONL behind an AddDONL flag.
+//   - it carries RFC-pinning round-trip tests (see hevc_packetizer_test.go).
 //
 // H265Payloader implements the github.com/pion/rtp/codecs.Payloader interface
 // (Payload(mtu uint16, payload []byte) [][]byte), so it can be plugged straight

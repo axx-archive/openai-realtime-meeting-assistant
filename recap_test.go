@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // meeting_recap forces one brain pass (minBatch=1 — a single unconsumed
@@ -217,4 +218,89 @@ func TestMeetingRecapToolContract(t *testing.T) {
 func jsonMarshalForTest(value any) (string, error) {
 	raw, err := json.Marshal(value)
 	return string(raw), err
+}
+
+// A recap for a meeting whose capture began well after the sitting started
+// leads with a short capture-began caveat (kanban-card-107) so it never implies
+// full coverage — while still delivering the fresh brain body.
+func TestMeetingRecapPrefixesCaptureNoteOnLateStart(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		return "## Overview\nThe pilot is on track for Friday.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	appendTestTranscript(t, app, "recap-tx-1", "Pilot update.")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	// The sitting opened 20m before the (now) first captured transcript.
+	if _, ok := app.meetings.startMeeting(officeRoomID, meetingID, time.Now().Add(-20*time.Minute).UTC(), []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a record")
+	}
+
+	result, _, err := app.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID)
+	if err != nil {
+		t.Fatalf("meetingRecap: %v", err)
+	}
+	recap := asString(result["recap"])
+	if !strings.Contains(recap, "Capture began") || !strings.Contains(recap, "captured portion only") {
+		t.Fatalf("recap missing the capture-began caveat:\n%s", recap)
+	}
+	if !strings.Contains(recap, "pilot is on track") {
+		t.Fatalf("recap missing the brain body:\n%s", recap)
+	}
+}
+
+// Finding C: a recap whose capture had a long internal gap (but opened on time)
+// leads with a NEUTRAL caveat — it names the gap as possibly-quiet-or-uncaptured
+// with its duration, never asserting capture failed. Exercises meetingCapturePrefix
+// directly (the live path is correct for the current sitting).
+func TestMeetingCapturePrefixGapWordingIsNeutral(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := "meeting-20260706-101500-000000002"
+	t0 := time.Date(2026, 7, 6, 17, 0, 0, 0, time.UTC)
+	// Sitting opens exactly when capture begins (NOT late), then a >threshold gap.
+	if _, ok := app.meetings.startMeeting(officeRoomID, meetingID, t0, []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a record")
+	}
+	seed := func(id string, at time.Time) {
+		app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
+			ID: id, Kind: meetingMemoryKindTranscript, Text: "line " + id,
+			CreatedAt: at, Metadata: map[string]string{"meetingId": meetingID},
+		})
+	}
+	seed("g-1", t0)
+	seed("g-2", t0.Add(time.Minute))
+	seed("g-3", t0.Add(time.Minute+coverageGapThreshold+2*time.Minute))
+
+	prefix := app.meetingCapturePrefix(meetingID)
+	if prefix == "" {
+		t.Fatal("expected a gap caveat prefix")
+	}
+	for _, want := range []string{"no captured transcript", "quiet spell or a capture gap", "captured portion only"} {
+		if !strings.Contains(prefix, want) {
+			t.Fatalf("gap prefix = %q, missing %q", prefix, want)
+		}
+	}
+	lower := strings.ToLower(prefix)
+	if strings.Contains(lower, "capture failed") || strings.Contains(lower, "outage") {
+		t.Fatalf("gap prefix must not assert a capture failure: %q", prefix)
+	}
+	// A sitting that opens with capture and has no long gap gets no caveat.
+	clean := "meeting-20260706-101500-000000003"
+	if _, ok := app.meetings.startMeeting(officeRoomID, clean, t0, []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a record")
+	}
+	app.memory.entries = append(app.memory.entries,
+		meetingMemoryEntry{ID: "c-1", Kind: meetingMemoryKindTranscript, Text: "a", CreatedAt: t0, Metadata: map[string]string{"meetingId": clean}},
+		meetingMemoryEntry{ID: "c-2", Kind: meetingMemoryKindTranscript, Text: "b", CreatedAt: t0.Add(2 * time.Minute), Metadata: map[string]string{"meetingId": clean}},
+	)
+	if prefix := app.meetingCapturePrefix(clean); prefix != "" {
+		t.Fatalf("clean coverage should produce no caveat, got %q", prefix)
+	}
 }

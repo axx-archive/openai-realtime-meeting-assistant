@@ -399,8 +399,11 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	if channelRow.BrainStatus != fileBrainStatusStored || !channelRow.Previewable {
 		t.Fatalf("channel row=%+v, want stored (no text yet) + inline pdf preview", channelRow)
 	}
-	if privateRow.BrainStatus != fileBrainStatusIngested {
-		t.Fatalf("private row=%+v, want ingested (derived text rides model context)", privateRow)
+	// card-103 folded fix: a PRIVATE thread attachment's derived text rides only
+	// that 1:1's context, never company recall — so it earns the honest
+	// thread-scoped badge, not the company-wide "ingested".
+	if privateRow.BrainStatus != fileBrainStatusThread {
+		t.Fatalf("private row=%+v, want thread-scoped badge (private text never enters company recall)", privateRow)
 	}
 	if !strings.HasPrefix(privateRow.DownloadURL, "/artifacts/blob?ref=") || privateRow.UploaderEmail != "aj@shareability.com" {
 		t.Fatalf("private row=%+v, want blob download + uploader stamp", privateRow)
@@ -411,6 +414,35 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	teammateRows := app.assistantFilesForUser("tom@shareability.com")
 	if len(teammateRows) != 1 || teammateRows[0].Name != "onesheet.pdf" {
 		t.Fatalf("teammate rows=%+v, want only the channel file", teammateRows)
+	}
+
+	// The other side of the folded fix: a PUBLIC channel attachment WITH derived
+	// text keeps the company-wide "ingested" badge — only private threads scope
+	// down to "in this chat".
+	if _, err := app.commitScoutChatThreadMessages("tom@shareability.com", channel.ID, scoutChatMessageRecord{
+		ID:          "msg-channel-2",
+		Kind:        "message",
+		Role:        "user",
+		Text:        "notes",
+		CreatedAt:   time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		AuthorName:  "Tom",
+		AuthorEmail: "tom@shareability.com",
+		Files: []scoutChatFileAttachment{
+			{Name: "notes.pdf", Kind: "pdf", Size: 20, Ref: ref, Mime: "application/pdf", Text: "channel derived facts"},
+		},
+	}); err != nil {
+		t.Fatalf("commit second channel message: %v", err)
+	}
+	notesFound := false
+	notesStatus := ""
+	for _, row := range app.assistantFilesForUser("tom@shareability.com") {
+		if row.Name == "notes.pdf" {
+			notesFound = true
+			notesStatus = row.BrainStatus
+		}
+	}
+	if !notesFound || notesStatus != fileBrainStatusIngested {
+		t.Fatalf("public channel row with text: found=%v status=%q, want ingested (company recall)", notesFound, notesStatus)
 	}
 }
 
@@ -425,31 +457,44 @@ func TestAssistantFilesListsDeliverablesAndFolders(t *testing.T) {
 
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 
-	// A finished research run files as a deliverable row...
+	// card-110 contract: a finished research run files as a deliverable row only
+	// once it has been explicitly saved (savedToFiles=true)...
 	report, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Samsung ambient teardown", "# Samsung ambient teardown\n\nFindings ride here.", "AJ", map[string]string{
 		"source":       "scout_thread",
 		"status":       "complete",
 		"threadStatus": "complete",
 		"updatedBy":    "Scout",
+		"savedToFiles": "true",
 	})
 	if err != nil {
 		t.Fatalf("create report artifact: %v", err)
 	}
-	// ...an html_deck maps onto the deck mime...
+	// ...an explicitly saved html_deck maps onto the deck mime...
 	deck, _, err := kanbanApp.createOSArtifactWithMetadata("design", "StationTenn deck", "<!DOCTYPE html><html><body>deck</body></html>", "AJ", map[string]string{
 		"source":       "scout_thread",
 		"status":       "complete",
 		"threadStatus": "complete",
 		"type":         "html_deck",
+		"savedToFiles": "true",
 	})
 	if err != nil {
 		t.Fatalf("create deck artifact: %v", err)
 	}
-	// ...while an error scaffold and a hand-saved draft never do.
+	// ...while a qualifying-but-never-saved deliverable, an error scaffold, and a
+	// hand-saved draft all stay off the surface.
+	unsaved, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Unsaved teardown", "# Unsaved\n\nNot filed yet.", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("create unsaved deliverable: %v", err)
+	}
 	failed, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Broken run", "Scaffold body.", "AJ", map[string]string{
 		"source":       "scout_thread",
 		"status":       "error",
 		"threadStatus": "error",
+		"savedToFiles": "true",
 	})
 	if err != nil {
 		t.Fatalf("create error scaffold: %v", err)
@@ -505,7 +550,10 @@ func TestAssistantFilesListsDeliverablesAndFolders(t *testing.T) {
 		rowsByID[row.ID] = row
 	}
 	if _, present := rowsByID[failed.ID]; present {
-		t.Fatal("error scaffold must never file as a deliverable")
+		t.Fatal("error scaffold must never file as a deliverable, even stamped savedToFiles")
+	}
+	if _, present := rowsByID[unsaved.ID]; present {
+		t.Fatal("a qualifying deliverable stays off the surface until explicitly saved (card-110)")
 	}
 	if _, present := rowsByID[draft.ID]; present {
 		t.Fatal("a hand-saved draft has no deliverable provenance")
@@ -593,5 +641,300 @@ func TestSweepUnreferencedBlobsKeepsFileEntryRefs(t *testing.T) {
 	}
 	if _, _, err := getBlob(keepRef); err != nil {
 		t.Fatalf("drive upload blob deleted by sweep: %v", err)
+	}
+}
+
+// fileRowVisible reports whether a row id surfaces on a viewer's Files list.
+func fileRowVisible(app *kanbanBoardApp, viewer string, id string) bool {
+	for _, row := range app.assistantFilesForUser(viewer) {
+		if row.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func postFileSave(t *testing.T, cookies []*http.Cookie, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/assistant/files/save", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFileSaveHandler(recorder, req)
+	return recorder
+}
+
+// TestAssistantFileSaveHandler pins the explicit-save door (card-110): the same
+// gate stack as the other files mutations, honest statuses for unknown /
+// non-deliverable ids, and a happy path that stamps + files + surfaces the row.
+func TestAssistantFileSaveHandler(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+
+	// Method gate.
+	rec := httptest.NewRecorder()
+	assistantFileSaveHandler(rec, httptest.NewRequest(http.MethodGet, "/assistant/files/save", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("save GET status=%d, want 405", rec.Code)
+	}
+	// Cross-origin gate.
+	cross := httptest.NewRequest(http.MethodPost, "/assistant/files/save", strings.NewReader(`{}`))
+	cross.Header.Set("Origin", "https://evil.example")
+	rec = httptest.NewRecorder()
+	assistantFileSaveHandler(rec, cross)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin save status=%d, want 403", rec.Code)
+	}
+	// Session gate.
+	rec = httptest.NewRecorder()
+	assistantFileSaveHandler(rec, httptest.NewRequest(http.MethodPost, "/assistant/files/save", strings.NewReader(`{}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out save status=%d, want 401", rec.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	report, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Samsung teardown", "# body", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("create report: %v", err)
+	}
+	if fileRowVisible(kanbanApp, "aj@shareability.com", report.ID) {
+		t.Fatal("a deliverable must be invisible before it is saved")
+	}
+
+	// Missing artifactId → 400.
+	if rec := postFileSave(t, cookies, `{}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("save empty status=%d, want 400", rec.Code)
+	}
+	// Unknown artifact → 404.
+	if rec := postFileSave(t, cookies, `{"artifactId":"nope"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("save unknown status=%d, want 404", rec.Code)
+	}
+	// A hand-saved note (no deliverable provenance) → 400.
+	note, _, err := kanbanApp.createOSArtifactWithMetadata("artifacts", "Note", "just a note", "AJ", nil)
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if rec := postFileSave(t, cookies, fmt.Sprintf(`{"artifactId":%q}`, note.ID)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("save non-deliverable status=%d, want 400", rec.Code)
+	}
+
+	// Happy path with a destination folder → 200, stamped + filed, now visible.
+	folder, err := createFileFolder("Diligence", "AJ")
+	if err != nil {
+		t.Fatalf("createFileFolder: %v", err)
+	}
+	rec = postFileSave(t, cookies, fmt.Sprintf(`{"artifactId":%q,"folderId":%q}`, report.ID, folder.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save happy status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var savePayload struct {
+		OK   bool                `json:"ok"`
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &savePayload); err != nil {
+		t.Fatalf("decode save response: %v", err)
+	}
+	if !savePayload.OK || savePayload.File.ArtifactID != report.ID || savePayload.File.FolderID != folder.ID {
+		t.Fatalf("save payload=%+v, want the saved row filed under the folder", savePayload.File)
+	}
+	saved, ok := kanbanApp.osArtifactByID(report.ID)
+	if !ok || !strings.EqualFold(saved.Metadata["savedToFiles"], "true") {
+		t.Fatalf("report savedToFiles=%q, want true", saved.Metadata["savedToFiles"])
+	}
+	if strings.TrimSpace(saved.Metadata["savedToFilesBy"]) == "" || strings.TrimSpace(saved.Metadata["savedToFilesAt"]) == "" {
+		t.Fatalf("save must stamp who/when, got by=%q at=%q", saved.Metadata["savedToFilesBy"], saved.Metadata["savedToFilesAt"])
+	}
+	if !fileRowVisible(kanbanApp, "aj@shareability.com", report.ID) {
+		t.Fatal("a saved deliverable must surface on the Files list")
+	}
+}
+
+// TestGrandfatherSavedToFilesMigrationIdempotent pins the run-once backfill: the
+// FIRST boot stamps pre-gate-qualifying deliverables while never touching
+// scaffolds or an explicit unsave, records a persisted marker, and a SECOND boot
+// is a no-op EVEN WITH a new qualifying unstamped deliverable added between boots
+// (gate finding A: the marker, not an inference, gates the migration — a post-gate
+// creation belongs to the explicit-save policy and must never be grandfathered).
+func TestGrandfatherSavedToFilesMigrationIdempotent(t *testing.T) {
+	previousApp := kanbanApp
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	// Seed legacy content into the store BEFORE the app boots: grandfather runs
+	// inside newKanbanBoardApp, so the entries under test must already be on disk
+	// for the boot-time migration to see (and stamp) them.
+	dir := t.TempDir()
+	memPath := filepath.Join(dir, "memory.jsonl")
+	t.Setenv("MEETING_MEMORY_PATH", memPath)
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed, err := newMeetingMemoryStore(memPath)
+	if err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	qualifying, _, err := seed.appendOSArtifact("legacy-qualifying", "# body", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("seed qualifying: %v", err)
+	}
+	scaffold, _, err := seed.appendOSArtifact("legacy-scaffold", "scaffold", map[string]string{
+		"source":       "scout_thread",
+		"status":       "error",
+		"threadStatus": "error",
+	})
+	if err != nil {
+		t.Fatalf("seed scaffold: %v", err)
+	}
+	unsaved, _, err := seed.appendOSArtifact("legacy-unsaved", "# body", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+		"savedToFiles": "false",
+	})
+	if err != nil {
+		t.Fatalf("seed unsaved: %v", err)
+	}
+
+	// First boot: the constructor runs grandfatherSavedToFilesAtBoot exactly once.
+	kanbanApp = newKanbanBoardApp()
+	app := kanbanApp
+
+	if got, _ := app.osArtifactByID(qualifying.ID); !strings.EqualFold(got.Metadata["savedToFiles"], "true") {
+		t.Fatalf("qualifying deliverable savedToFiles=%q, want true", got.Metadata["savedToFiles"])
+	}
+	if s, _ := app.osArtifactByID(scaffold.ID); strings.TrimSpace(s.Metadata["savedToFiles"]) != "" {
+		t.Fatalf("error scaffold must never be grandfathered, got %q", s.Metadata["savedToFiles"])
+	}
+	if u, _ := app.osArtifactByID(unsaved.ID); !strings.EqualFold(u.Metadata["savedToFiles"], "false") {
+		t.Fatalf("an explicit unsave must be preserved, got %q", u.Metadata["savedToFiles"])
+	}
+	if _, ok := app.memory.entryByKindAndID(savedToFilesGrandfatherMarkerKind, savedToFilesGrandfatherMarkerID); !ok {
+		t.Fatal("run-once marker must be recorded after the first boot")
+	}
+
+	// A NEW qualifying unstamped deliverable created AFTER the migration ran — a
+	// post-gate creation the explicit-save policy owns.
+	fresh, _, err := app.createOSArtifactWithMetadata("research", "Post-gate brief", "# body", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("create post-gate deliverable: %v", err)
+	}
+
+	// Second boot: the marker gates the migration, so the post-gate deliverable is
+	// NOT grandfathered and the earlier decisions are unchanged.
+	app.grandfatherSavedToFilesAtBoot()
+	if got, _ := app.osArtifactByID(fresh.ID); strings.TrimSpace(got.Metadata["savedToFiles"]) != "" {
+		t.Fatalf("post-gate deliverable must NOT be grandfathered on a second boot, got %q", got.Metadata["savedToFiles"])
+	}
+	if got, _ := app.osArtifactByID(qualifying.ID); !strings.EqualFold(got.Metadata["savedToFiles"], "true") {
+		t.Fatalf("second boot changed a stamped deliverable: %q", got.Metadata["savedToFiles"])
+	}
+	if u, _ := app.osArtifactByID(unsaved.ID); !strings.EqualFold(u.Metadata["savedToFiles"], "false") {
+		t.Fatalf("second boot resurrected an explicit unsave: %q", u.Metadata["savedToFiles"])
+	}
+	if markers := app.memory.entriesOfKind(savedToFilesGrandfatherMarkerKind, 0); len(markers) != 1 {
+		t.Fatalf("exactly one run-once marker expected, got %d", len(markers))
+	}
+	// The marker is bookkeeping, not knowledge: it must stay out of the memory
+	// snapshot / client timeline (relevance=expired → memoryEntryHiddenFromRecall).
+	for _, entry := range app.memorySnapshot(0) {
+		if entry.Kind == savedToFilesGrandfatherMarkerKind {
+			t.Fatal("run-once marker leaked into the memory snapshot")
+		}
+	}
+	// Mint-free note: the marker pre-stamps meetingId="none" so a boot-time
+	// append never opens a phantom office sitting. Not asserted here — the seed
+	// entries themselves carry live meeting ids that boot resumes; the property
+	// is pinned by TestCompanyDigestIsLedgerStateViewPlusThinNarrative,
+	// TestDayDigestTickEmitsReflectionForCompletedDayOnce, and
+	// TestMultiRoomAcceptanceFlow, which boot clean stores and assert no idle mint.
+}
+
+// TestSaveToFilesToolFilesDeliverables pins the Scout seam: it matches INTEL
+// deliverables by title fragment, stamps + files only the matches, and leaves
+// unrelated deliverables untouched.
+func TestSaveToFilesToolFilesDeliverables(t *testing.T) {
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	app := kanbanApp
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+
+	report, _, err := app.createOSArtifactWithMetadata("research", "Samsung TV Plus teardown", "# body", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("create report: %v", err)
+	}
+	other, _, err := app.createOSArtifactWithMetadata("research", "Unrelated brief", "# body", "AJ", map[string]string{
+		"source":       "scout_thread",
+		"status":       "complete",
+		"threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+
+	result, changed, err := app.saveToFilesTool(map[string]any{
+		"fileNames":  stringsToAny([]string{"samsung"}),
+		"folderName": "Diligence",
+	}, "aj@shareability.com")
+	if err != nil {
+		t.Fatalf("saveToFilesTool: %v", err)
+	}
+	if changed {
+		t.Fatal("save_to_files is not a board mutation")
+	}
+	if saved, _ := result["saved"].([]string); len(saved) != 1 || !strings.Contains(saved[0], "Samsung") {
+		t.Fatalf("saved=%v, want the Samsung report", result["saved"])
+	}
+	if created, _ := result["created"].(bool); !created {
+		t.Fatal("folder Diligence should be created on demand")
+	}
+
+	if got, _ := app.osArtifactByID(report.ID); !strings.EqualFold(got.Metadata["savedToFiles"], "true") {
+		t.Fatalf("report savedToFiles=%q, want true", got.Metadata["savedToFiles"])
+	}
+	if o, _ := app.osArtifactByID(other.ID); strings.TrimSpace(o.Metadata["savedToFiles"]) != "" {
+		t.Fatalf("unrelated deliverable must be untouched, got %q", o.Metadata["savedToFiles"])
+	}
+
+	// folderId is decorated at list time (the HTTP handler step), so decorate
+	// before reading it.
+	rows := app.assistantFilesForUser("aj@shareability.com")
+	decorateAssistantFileFolders(rows)
+	var row assistantFileRecord
+	found := false
+	for _, r := range rows {
+		if r.ID == report.ID {
+			row = r
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a saved deliverable must surface on the Files list")
+	}
+	folders := listFileFolders()
+	if len(folders) != 1 || row.FolderID != folders[0].ID {
+		t.Fatalf("row folderId=%q, want the Diligence folder %+v", row.FolderID, folders)
 	}
 }

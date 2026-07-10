@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 const (
@@ -61,6 +63,35 @@ const (
 	// the session cleanup seam.
 	memberMediaRepairBucketBurst  = 4.0
 	memberMediaRepairBucketRefill = 5 * time.Second
+
+	// card-003 W4 ICE-restart hardening: restart_ice was the last media-inbound
+	// event left unbucketed after the keyframe-spiral damping wave — each one
+	// forces a full ICERestart renegotiation plus a dispatchKeyFrame walk, so a
+	// socket-line-rate flood re-melts the room the same way the repair storm
+	// did. The bucket is shared by members and guests (one pair of consts wired
+	// through allowMemberIceRestart + allowGuestIceRestart).
+	//
+	// Sizing MUST clear the client's OWN bounded recovery ladder or a member
+	// that would have healed on a throttled rung is ejected instead. That
+	// ladder (index.html: iceRestartThrottleMs 3500, maxIceRestartAttempts 5,
+	// backoff [0,1,2,4,8]s, recursive re-arm) fires restart_ice at
+	// t ≈ 0 / 3.5 / 7 / 11 / 19s — the 5th rung landing ~1s before the 20s
+	// connectionRecovery eject. The budgeted stale-tile ladder (2/60s) draws
+	// from this SAME per-session bucket, so a stale-tile restart can spend a
+	// token just before an outage. Burst 4 / refill 1 per 5s (the
+	// memberMediaRepair refill class) admits all five rungs with headroom:
+	// pre-charge tokens run 4, 3.7, 3.4, 3.2, 3.8 cold, and identically after a
+	// pre-spend at t=-5s because the 5s gap refills a full token and fully
+	// repays it — always ≥ 1.
+	//
+	// The OLD burst 2 / refill 1 per 15s was arithmetically self-refuting: five
+	// rungs need five tokens but only ~3.27 are ever available (burst 2 + ~1.27
+	// refilled by t=19s), so rungs 3 (0.467) and 4 (0.733) were SILENTLY denied
+	// and only the t≈19s rung slipped through — ~1s before the eject — ejecting
+	// members who had already healed. A genuine flood at socket line rate
+	// (100s/sec) is still capped to ~burst + 12/min.
+	iceRestartBucketBurst  = 4.0
+	iceRestartBucketRefill = 5 * time.Second
 
 	// §6.5 transcription ceiling for guest-enabled rooms, member-extendable by
 	// flipping recording back on.
@@ -123,6 +154,14 @@ type roomLiveState struct {
 	// shape, keyed by the per-socket participant session id instead of a guest
 	// session key.
 	memberRepairBuckets map[string]*guestChatBucket
+	// memberIceRestartBuckets / guestIceRestartBuckets cap restart_ice per
+	// principal (card-003 W4). The member bucket keys on the per-socket
+	// participant session id and is released in the same seams as
+	// memberRepairBuckets (session cleanup + liveness reap); the guest bucket
+	// keys on the guest session key and rides the guest seat like the other
+	// guest buckets.
+	memberIceRestartBuckets map[string]*guestChatBucket
+	guestIceRestartBuckets  map[string]*guestChatBucket
 }
 
 // guestChatBucket is a plain token bucket (tokens + last-refill stamp) reused
@@ -134,18 +173,20 @@ type guestChatBucket struct {
 
 func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 	return &roomLiveState{
-		id:                   normalizeRoomID(roomID),
-		participants:         map[string]time.Time{},
-		participantCounts:    map[string]int{},
-		participantEndpoints: map[string]map[string]string{},
-		participantMedia:     map[string]participantMediaState{},
-		guestSeats:           map[string]string{},
-		recordingEnabled:     true,
-		recordingUpdatedAt:   now,
-		chatBuckets:          map[string]*guestChatBucket{},
-		mediaStateBuckets:    map[string]*guestChatBucket{},
-		telemetryBuckets:     map[string]*guestChatBucket{},
-		memberRepairBuckets:  map[string]*guestChatBucket{},
+		id:                      normalizeRoomID(roomID),
+		participants:            map[string]time.Time{},
+		participantCounts:       map[string]int{},
+		participantEndpoints:    map[string]map[string]string{},
+		participantMedia:        map[string]participantMediaState{},
+		guestSeats:              map[string]string{},
+		recordingEnabled:        true,
+		recordingUpdatedAt:      now,
+		chatBuckets:             map[string]*guestChatBucket{},
+		mediaStateBuckets:       map[string]*guestChatBucket{},
+		telemetryBuckets:        map[string]*guestChatBucket{},
+		memberRepairBuckets:     map[string]*guestChatBucket{},
+		memberIceRestartBuckets: map[string]*guestChatBucket{},
+		guestIceRestartBuckets:  map[string]*guestChatBucket{},
 	}
 }
 
@@ -290,6 +331,7 @@ func (app *kanbanBoardApp) releaseGuestSeatIfGone(roomID string, sessionKey stri
 	delete(state.chatBuckets, sessionKey)
 	delete(state.mediaStateBuckets, sessionKey)
 	delete(state.telemetryBuckets, sessionKey)
+	delete(state.guestIceRestartBuckets, sessionKey)
 }
 
 /* ---------- §6.5 guest token buckets ---------- */
@@ -372,6 +414,36 @@ func (app *kanbanBoardApp) dropMemberMediaRepairBucket(roomID string, participan
 	app.mu.Lock()
 	defer app.mu.Unlock()
 	delete(app.roomLiveLocked(roomID).memberRepairBuckets, participantSessionID)
+}
+
+// allowMemberIceRestart charges a MEMBER's restart_ice bucket (burst 4, refill
+// 1 per 5s — card-003 W4). restart_ice renegotiates the whole transport and
+// walks a keyframe dispatch, but the sizing still admits every rung of the
+// client's bounded 5-attempt restart ladder (t ≈ 0/3.5/7/11/19s) even when a
+// budgeted stale-tile restart spent a token just before the outage — see the
+// iceRestartBucket const comment for the rung-by-rung math.
+func (app *kanbanBoardApp) allowMemberIceRestart(roomID string, participantSessionID string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, participantSessionID,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.memberIceRestartBuckets },
+		iceRestartBucketBurst, iceRestartBucketRefill, now)
+}
+
+// allowGuestIceRestart charges a GUEST's restart_ice bucket, keyed on the guest
+// session key like the other guest buckets (burst 4, refill 1 per 5s — same
+// shared sizing as the member bucket, which clears the client restart ladder).
+func (app *kanbanBoardApp) allowGuestIceRestart(roomID string, sessionKey string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, sessionKey,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.guestIceRestartBuckets },
+		iceRestartBucketBurst, iceRestartBucketRefill, now)
+}
+
+// dropMemberIceRestartBucket releases a member socket's restart_ice bucket when
+// its session is cleaned up — same per-socket key lifetime as
+// dropMemberMediaRepairBucket, or the map grows one entry per connection.
+func (app *kanbanBoardApp) dropMemberIceRestartBucket(roomID string, participantSessionID string) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	delete(app.roomLiveLocked(roomID).memberIceRestartBuckets, participantSessionID)
 }
 
 /* ---------- §6.1 pre-upgrade guest socket caps ---------- */
@@ -872,6 +944,65 @@ func closeSessionSockets(sessionID string) {
 	}
 }
 
+// closeSessionMedia tears down every transport a session still holds — its
+// websockets AND its *webrtc.PeerConnections — scanning both the media pool and
+// the admitted-only index under listLock, deduped exactly like
+// closeSessionSockets / closeParticipantConnections. The liveness sweep needs
+// this because unregisterParticipantSession only clears map/slice bookkeeping;
+// it never closes the peer connection. In the sweep's own failure modes (a
+// wedged read loop, a deadline setup that failed, an onclose defer that never
+// ran) the PeerConnection, its ICE/DTLS/SRTP transports, and the OnTrack /
+// forwardSubscriberRTCP goroutines pumping it would otherwise leak. pc.Close()
+// synchronously releases those transports and errors every ReadRTP/ReadRTCP, so
+// the media pumps exit and run their defers (publisherSilence.forget, mixer
+// removeTrack). Like closeSessionSockets it writes nothing to the sockets — the
+// reap's participant_left broadcast already told the room why.
+func closeSessionMedia(sessionID string) {
+	var writers []*threadSafeWriter
+	var peerConns []*webrtc.PeerConnection
+	seenWriters := map[*threadSafeWriter]bool{}
+	seenPeers := map[*webrtc.PeerConnection]bool{}
+	listLock.RLock()
+	for i := range peerConnections {
+		if peerConnections[i].sessionID != sessionID {
+			continue
+		}
+		if peerConnections[i].websocket != nil && !seenWriters[peerConnections[i].websocket] {
+			seenWriters[peerConnections[i].websocket] = true
+			writers = append(writers, peerConnections[i].websocket)
+		}
+		if peerConnections[i].peerConnection != nil && !seenPeers[peerConnections[i].peerConnection] {
+			seenPeers[peerConnections[i].peerConnection] = true
+			peerConns = append(peerConns, peerConnections[i].peerConnection)
+		}
+	}
+	for _, state := range activeParticipantConnections {
+		if state.sessionID != sessionID {
+			continue
+		}
+		if state.websocket != nil && !seenWriters[state.websocket] {
+			seenWriters[state.websocket] = true
+			writers = append(writers, state.websocket)
+		}
+		if state.peerConnection != nil && !seenPeers[state.peerConnection] {
+			seenPeers[state.peerConnection] = true
+			peerConns = append(peerConns, state.peerConnection)
+		}
+	}
+	listLock.RUnlock()
+
+	for _, writer := range writers {
+		if err := writer.Close(); err != nil {
+			log.Errorf("Failed to close reaped session websocket session=%s: %v", sessionID, err)
+		}
+	}
+	for _, peerConnection := range peerConns {
+		if err := peerConnection.Close(); err != nil {
+			log.Errorf("Failed to close reaped session PeerConnection session=%s: %v", sessionID, err)
+		}
+	}
+}
+
 // closeRoomForArchive ends an archived room's live sitting so occupants are
 // never marooned in a half-dead room: every seated socket hears room_closed
 // (on the guest write allowlist — guests are exactly who must be told),
@@ -916,6 +1047,7 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 					delete(state.chatBuckets, sessionKey)
 					delete(state.mediaStateBuckets, sessionKey)
 					delete(state.telemetryBuckets, sessionKey)
+					delete(state.guestIceRestartBuckets, sessionKey)
 				}
 			}
 		}

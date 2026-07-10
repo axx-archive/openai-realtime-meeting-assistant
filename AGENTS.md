@@ -16,6 +16,20 @@ Pushing to GitHub does not automatically update the running app because the VPS 
 - Compose service: `meetingassist`
 - Caddy service: `caddy`
 
+## Production Data Location (read this before touching "the board" or any prod data)
+
+Live production data — `kanban-board.json` (the real Kanban board), `meeting-memory.jsonl`,
+`users.json`, `rooms.json`, `sessions.json`, `archives/` — lives ONLY in the docker named
+volume `digitalocean_meeting_data`, mounted at `/app/data` inside the containers:
+
+- On the droplet: `/var/lib/docker/volumes/digitalocean_meeting_data/_data/`
+
+⚠️ `/opt/meetingassist/data/` on the droplet is a STALE rsync artifact (see the
+`README-NOT-LIVE-DATA.md` inside it). Its `kanban-board.json` holds only the 5 seeded demo
+WebRTC cards from `initialKanbanBoardCards` in `kanban.go` — it is NOT the live board.
+The local repo's `data/` directory is likewise seed/dev data, never production state.
+Deploy rsyncs must keep excluding `data/`.
+
 ## Deploy Flow
 
 When asked to deploy this repo to the VPS:

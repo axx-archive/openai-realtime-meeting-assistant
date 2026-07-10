@@ -823,6 +823,10 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 
 			var turnText strings.Builder
 			var toolResults []json.RawMessage
+			// RW1 (kanban-card-108): true if any tool this turn mutated the board,
+			// so the fan-out fires once per assistant turn (below) instead of per
+			// tool — an agent-thread board edit reaches live clients without a reload.
+			boardChanged := false
 			for _, rawBlock := range response.Content {
 				block := decodeAnthropicBlock(rawBlock)
 				switch block.Type {
@@ -846,10 +850,28 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						// dismisses — never as instant board cards.
 						args["draft"] = true
 					}
-					result, _, toolErr := r.app.applyToolCallArgs(block.Name, args)
+					result, changed, toolErr := r.app.applyToolCallArgs(block.Name, args)
+					if changed {
+						boardChanged = true
+					}
 					content, isError := anthropicToolResultContent(result, toolErr)
 					toolResults = append(toolResults, anthropicToolResultBlock(block.ID, content, isError))
 				}
+			}
+			// RW1 (kanban-card-108): fan the board out ONCE per assistant turn when
+			// any orchestrator tool mutated it, so agent-thread board edits land on
+			// live office/room clients without a manual reload. Batched per turn (not
+			// per tool) to avoid snapshot spam; broadcasting from this worker
+			// goroutine mirrors board_worker.go ~175. The board/undo snapshots are
+			// idempotent, so a non-board changed tool's extra snapshot is harmless.
+			// refreshRealtimeBoardContext completes broadcastManualBoardMutation's
+			// trio (gate finding C): without it this is the only board-mutating seam
+			// that leaves the office Realtime voice session's board context stale.
+			// It is nil-safe on r.app and a no-op when no Realtime session is live.
+			if boardChanged {
+				broadcastSignedInKanbanEvent("board", r.app.snapshotState())
+				broadcastSignedInKanbanEvent("undo_available", r.app.canUndoDelete())
+				r.app.refreshRealtimeBoardContext("agent thread board edit")
 			}
 			if summary := strings.TrimSpace(turnText.String()); summary != "" {
 				finalText = summary

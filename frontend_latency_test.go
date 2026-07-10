@@ -52,7 +52,7 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"setTrackContentHint(track, cameraContentHint)",
 		"setTrackContentHint(screenTrack, screenShareContentHint)",
 		"function loadRTCConfiguration()",
-		"fetch('/client-config', { cache: 'no-store' })",
+		"fetch('/client-config', { cache: 'no-store'",
 		"pc = new RTCPeerConnection(rtcConfiguration)",
 		"const forcedSafariMediaPath = new URLSearchParams(window.location.search).get('forceSafariMedia') === '1'",
 		"const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)",
@@ -148,7 +148,10 @@ func TestIndexWave14PolishMarkers(t *testing.T) {
 		{"async function reconcileAudioDeviceChange()", []string{"offerDeviceSwitch", "recoverLocalMicrophone"}},
 		{"function offerDeviceSwitch(device)", []string{"deviceOfferChipTargetId = device.deviceId", "ensureDeviceOfferChip()"}},
 		{"async function restoreAudioAfterVisibility()", []string{"audioContext.resume", "recoverLocalMicrophone"}},
-		{"function handleMediaDisconnected(detail)", []string{"mediaDisconnectRecoveryTried", "requestIceRestart"}},
+		// card-003 W4 gap 4: a server-closed PC re-dials through the signaling
+		// reconnect seam (rebuilds the PC) rather than firing a futile
+		// restart_ice — see TestIndexMediaDisconnectRedialsInsteadOfRestart.
+		{"function handleMediaDisconnected(detail)", []string{"mediaDisconnectRecoveryTried", "scheduleSignalingReconnect"}},
 		// bounded mic-ended recovery (rtc §5: never an unbounded rebuild loop)
 		{"async function handleLocalAudioEnded()", []string{"maxLocalAudioRecoveryAttempts", "microphone unavailable — pick another in settings"}},
 		// wake-word arming safety invariant: gated on a live ROOM voice session

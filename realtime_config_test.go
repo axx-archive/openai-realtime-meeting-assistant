@@ -136,6 +136,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		// Files organization is requester-scoped (organize_files resolves the
 		// caller's own file view), so private dashboard voice carries it.
 		"organize_files": true,
+		// Explicit-save gate (card-110): save a finished deliverable onto the
+		// Files surface; attribution carries the requester.
+		"save_to_files": true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)

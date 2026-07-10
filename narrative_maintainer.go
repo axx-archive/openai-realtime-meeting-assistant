@@ -344,6 +344,21 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		if strings.TrimSpace(meetingID) != "" {
 			metadata["meetingId"] = meetingID
 		}
+		// Cross-call narrative arc (kanban-card-107): accumulate a capped,
+		// de-duped union of every meeting this dossier has spanned (the
+		// entity-ledger meetingIds precedent, cap ledgerMeetingIDCap) instead of
+		// overwriting to the latest sitting — so a storyline discussed across
+		// many meetings keeps its full provenance for later recall.
+		var meetingIDs []string
+		if hasPredecessor {
+			meetingIDs = splitNarrativeMeetingIDs(predecessor.Metadata["meetingIds"])
+		}
+		if id := strings.TrimSpace(meetingID); id != "" {
+			meetingIDs, _ = appendUniqueCapped(meetingIDs, id, ledgerMeetingIDCap)
+		}
+		if len(meetingIDs) > 0 {
+			metadata["meetingIds"] = strings.Join(meetingIDs, ",")
+		}
 		if !windowFirst.IsZero() {
 			metadata["firstSeenAt"] = windowFirst.Format(time.RFC3339Nano)
 		}
@@ -483,6 +498,23 @@ func (app *kanbanBoardApp) activeNarrativeBySlug(slug string) (meetingMemoryEntr
 	}
 
 	return meetingMemoryEntry{}, false
+}
+
+// splitNarrativeMeetingIDs parses a dossier's stored comma-joined meetingIds
+// provenance list back into a slice, dropping blanks. Empty input yields nil.
+func splitNarrativeMeetingIDs(joined string) []string {
+	joined = strings.TrimSpace(joined)
+	if joined == "" {
+		return nil
+	}
+	parts := strings.Split(joined, ",")
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	return ids
 }
 
 // narrativeStatusLine is the one-line status a storyline shows outside its

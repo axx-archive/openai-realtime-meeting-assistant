@@ -24,6 +24,7 @@ package main
 // on the GET payload).
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +38,12 @@ import (
 	"time"
 )
 
+var (
+	errFileSaveArtifactID     = errors.New("artifactId is required")
+	errFileSaveNotFound       = errors.New("artifact not found")
+	errFileSaveNotDeliverable = errors.New("only a finished deliverable can be saved to Files")
+)
+
 const (
 	// meetingMemoryKindFile is one uploaded file per entry. Like kind
 	// decision it is deliberately NOT a UI-state kind: entry.Text carries the
@@ -48,6 +55,11 @@ const (
 
 	fileBrainStatusIngested = "ingested"
 	fileBrainStatusStored   = "stored"
+	// fileBrainStatusThread is the honest middle badge for a PRIVATE chat
+	// attachment: Scout read its derived text, but that text rides only the
+	// owning 1:1 thread's context and never enters company-wide recall — so it
+	// is neither company "ingested" nor bytes-only "stored".
+	fileBrainStatusThread = "thread"
 
 	// assistantFilesListLimit caps the list response; the newest uploads win.
 	assistantFilesListLimit = 400
@@ -166,6 +178,10 @@ func fileRecordFromEntry(entry meetingMemoryEntry) assistantFileRecord {
 // the badge.
 func fileRecordsFromThread(thread scoutChatThreadRecord) []assistantFileRecord {
 	var rows []assistantFileRecord
+	// A public-channel attachment's derived text is company-visible recall; a
+	// private thread's text stays scoped to that 1:1, so its badge is honest
+	// about never reaching company recall (card-103 folded fix).
+	threadPrivate := scoutChatThreadVisibility(thread) == scoutChatVisibilityPrivate
 	for _, message := range thread.Messages {
 		for index, file := range message.Files {
 			ref := strings.TrimSpace(file.Ref)
@@ -177,6 +193,9 @@ func fileRecordsFromThread(thread scoutChatThreadRecord) []assistantFileRecord {
 			brainStatus := fileBrainStatusStored
 			if hasText {
 				brainStatus = fileBrainStatusIngested
+				if threadPrivate {
+					brainStatus = fileBrainStatusThread
+				}
 			}
 			fileMime := strings.TrimSpace(file.Mime)
 			rows = append(rows, assistantFileRecord{
@@ -199,34 +218,56 @@ func fileRecordsFromThread(thread scoutChatThreadRecord) []assistantFileRecord {
 	return rows
 }
 
-// fileDeliverableRecord adapts a finished agent work product (os_artifact)
-// into a Files row. Only real deliverables qualify: provenance must be an
-// agent-thread run (source scout_thread — including goal writer children) or
-// the goal engine's own stamps (goalPlan on the parent, goalDeliverable on a
-// flagged child), the status must be terminally good (complete/published —
-// running scaffolds and error/needs_attention bodies never file), and
-// UI-state-ish artifacts (taste profiles, the house-style doc, quarantined
-// entries) stay out. The row carries ArtifactID so the client opens the
-// artifact stage instead of downloading bytes.
-func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool) {
+// deliverableRecordQualifies reports whether an os_artifact entry is a real,
+// terminal, non-UI-state deliverable — the provenance/status/kind checks that
+// PREDATE the explicit-save gate. Provenance must be an agent-thread run
+// (source scout_thread — including goal writer children) or the goal engine's
+// own stamps (goalPlan on the parent, goalDeliverable on a flagged child); the
+// status must be terminally good (complete/published — running scaffolds and
+// error/needs_attention bodies never qualify); and UI-state-ish artifacts
+// (taste profiles, the house-style doc, quarantined entries) stay out. The
+// grandfather migration stamps exactly the entries that pass this, and
+// fileDeliverableRecord layers the savedToFiles gate on top.
+func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
 	metadata := entry.Metadata
 	if metadata == nil {
-		return assistantFileRecord{}, false
+		return false
 	}
 	if strings.TrimSpace(metadata["source"]) != "scout_thread" &&
 		strings.TrimSpace(metadata["goalPlan"]) == "" &&
 		!strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") {
-		return assistantFileRecord{}, false
+		return false
 	}
 	if strings.TrimSpace(metadata[tasteProfileArtifactTypeKey]) != "" {
-		return assistantFileRecord{}, false
+		return false
 	}
 	if memoryEntryHiddenFromRecall(entry) {
-		return assistantFileRecord{}, false
+		return false
 	}
 	switch agentThreadStatusValue(entry) {
 	case artifactStatusComplete, artifactStatusPublished:
+		return true
 	default:
+		return false
+	}
+}
+
+// fileDeliverableRecord adapts a finished agent work product (os_artifact)
+// into a Files row. Only real deliverables qualify (deliverableRecordQualifies)
+// AND only once explicitly saved (the savedToFiles gate below). The row carries
+// ArtifactID so the client opens the artifact stage instead of downloading
+// bytes.
+func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool) {
+	if !deliverableRecordQualifies(entry) {
+		return assistantFileRecord{}, false
+	}
+	metadata := entry.Metadata
+	// Explicit-save gate (kanban-card-110): a qualifying deliverable is only a
+	// Files-surface row once a user (or Scout on the user's behalf, via
+	// /assistant/files/save or save_to_files) has explicitly saved it. Existing
+	// prod content is preserved by grandfatherSavedToFilesAtBoot, which stamps
+	// every entry that passed the PRE-gate rules once at startup.
+	if !strings.EqualFold(strings.TrimSpace(metadata["savedToFiles"]), "true") {
 		return assistantFileRecord{}, false
 	}
 
@@ -292,6 +333,84 @@ func fileRecordTime(row assistantFileRecord) time.Time {
 		return parsed
 	}
 	return time.Time{}
+}
+
+// savedToFilesGrandfatherMarkerKind / savedToFilesGrandfatherMarkerID identify
+// the run-once marker for grandfatherSavedToFilesAtBoot: a boot looks it up by
+// (kind, id) and skips the migration when present. The id's v1 suffix versions
+// the migration — a future re-grandfather uses a new id. The marker is a
+// persisted-but-hidden bookkeeping record: it is stamped relevance=expired so
+// the single memoryEntryHiddenFromRecall gate keeps it out of Scout's recall,
+// the model context, the memory snapshot, AND the client timeline in one move
+// (adding a bespoke kind to each of those filter lists would reach well past
+// this file). expired is NOT quarantined and carries no expiresAt, so the sole
+// hard-delete sweep (sweepExpiredQuarantine, quarantined-only) never reaps it —
+// the marker rides the memory volume for the life of the store.
+const (
+	savedToFilesGrandfatherMarkerKind = "migration_marker"
+	savedToFilesGrandfatherMarkerID   = "migration-saved-to-files-grandfather-v1"
+)
+
+// grandfatherSavedToFilesAtBoot is a run-ONCE startup backfill (kanban-card-110):
+// the explicit-save gate would otherwise disappear every deliverable already
+// living on the Files surface, so on the FIRST boot after the gate ships we stamp
+// savedToFiles=true on each os_artifact that qualified under the PRE-gate rules
+// (deliverableRecordQualifies). A persisted marker (gate finding A) makes this
+// exactly-once per store: without it the migration re-stamps savedToFiles=true on
+// EVERY redeploy, silently resurrecting deliverables the team deliberately left
+// unsaved after the gate. A second boot is a no-op EVEN IF new qualifying
+// unstamped deliverables now exist — those are post-gate creations the
+// explicit-save policy owns.
+func (app *kanbanBoardApp) grandfatherSavedToFilesAtBoot() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	if _, done := app.memory.entryByKindAndID(savedToFilesGrandfatherMarkerKind, savedToFilesGrandfatherMarkerID); done {
+		return
+	}
+
+	// Read pass: collect every pre-gate-qualifying deliverable that carries no
+	// savedToFiles decision yet. A prior stamp (either "true" or a user's explicit
+	// "false" unsave) is a decision already made — never resurrect an unsaved one.
+	targetIDs := make([]string, 0)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		if strings.TrimSpace(entry.Metadata["savedToFiles"]) != "" {
+			continue
+		}
+		if !deliverableRecordQualifies(entry) {
+			continue
+		}
+		targetIDs = append(targetIDs, entry.ID)
+	}
+
+	// Single batched stamp+rewrite (gate finding B): one lock, one fsync'd JSONL
+	// rewrite for all N deliverables rather than N full re-encodes at boot.
+	stamped, err := app.memory.updateOSArtifactsMetadataBatch(targetIDs, map[string]string{"savedToFiles": "true"})
+	if err != nil {
+		// Leave the marker unwritten so the next boot retries the backfill.
+		log.Errorf("grandfather savedToFiles batch stamp failed: %v", err)
+		return
+	}
+
+	// Record the marker LAST: a crash between the stamp and the marker re-runs the
+	// migration next boot, which is idempotent for the already-stamped set —
+	// strictly safer than recording first and skipping the backfill entirely.
+	// meetingId is pre-stamped ("none"): appendEntry lazily MINTS the office
+	// meeting id when that field is empty (appendEntryForMeeting), and a
+	// boot-time marker must never open a phantom office sitting.
+	if _, _, err := app.memory.appendEntry(
+		savedToFilesGrandfatherMarkerKind,
+		savedToFilesGrandfatherMarkerID,
+		fmt.Sprintf("Files savedToFiles grandfather migration ran; stamped %d deliverable(s).", stamped),
+		map[string]string{"migration": savedToFilesGrandfatherMarkerID, relevanceMetadataKey: relevanceExpired, "meetingId": "none"},
+	); err != nil {
+		log.Errorf("grandfather savedToFiles marker append failed: %v", err)
+		return
+	}
+
+	if stamped > 0 {
+		log.Infof("Files grandfather migration stamped %d existing deliverable(s) savedToFiles=true", stamped)
+	}
 }
 
 // assistantFilesHandler serves GET /assistant/files — the Files surface list.
@@ -450,6 +569,108 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := fileRecordFromEntry(entry)
+	broadcastSignedInKanbanEvent("file", row)
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"file": row,
+	})
+}
+
+// saveDeliverableToFiles is the explicit-save choke point (kanban-card-110):
+// it stamps a qualifying deliverable savedToFiles=true (plus who/when) so it
+// surfaces on the Files list, optionally filing it under a folder in the same
+// call. Both the HTTP door (/assistant/files/save) and Scout's save_to_files
+// tool route through it. The gate is the full deliverable qualification —
+// which subsumes the UI-state exclusion — so a successful save always surfaces
+// the row instead of silently stamping a never-visible entry.
+func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID string, actor string) (assistantFileRecord, error) {
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return assistantFileRecord{}, errFileSaveArtifactID
+	}
+	if app == nil || app.memory == nil {
+		return assistantFileRecord{}, fmt.Errorf("files are unavailable")
+	}
+	entry, ok := app.osArtifactByID(artifactID)
+	if !ok {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	if !deliverableRecordQualifies(entry) {
+		return assistantFileRecord{}, errFileSaveNotDeliverable
+	}
+	// File under the folder first so a bad folderId aborts before the stamp —
+	// no half-saved state.
+	folderID = strings.TrimSpace(folderID)
+	if folderID != "" {
+		if err := moveFileToFolder(artifactID, folderID); err != nil {
+			return assistantFileRecord{}, err
+		}
+	}
+	updated, _, err := app.memory.updateOSArtifactMetadata(artifactID, map[string]string{
+		"savedToFiles":   "true",
+		"savedToFilesBy": strings.TrimSpace(actor),
+		"savedToFilesAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	row, _ := fileDeliverableRecord(updated)
+	if folderID != "" {
+		row.FolderID = folderID
+	}
+	return row, nil
+}
+
+// fileSaveErrorStatus maps saveDeliverableToFiles errors onto honest statuses.
+func fileSaveErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, errFileSaveArtifactID), errors.Is(err, errFileSaveNotDeliverable):
+		return http.StatusBadRequest
+	case errors.Is(err, errFileSaveNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, errFileFolderNotFound), errors.Is(err, errFileFolderDuplicate):
+		return fileFolderErrorStatus(err)
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// assistantFileSaveHandler serves POST /assistant/files/save — the explicit
+// save door (kanban-card-110). Same gate stack as assistantFileMoveHandler
+// (method, origin, session, app, MaxBytesReader); body {artifactId, folderId?}.
+func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
+		return
+	}
+
+	payload := struct {
+		ArtifactID string `json:"artifactId"`
+		FolderID   string `json:"folderId"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read save request")
+		return
+	}
+	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+	row, err := kanbanApp.saveDeliverableToFiles(payload.ArtifactID, payload.FolderID, actor)
+	if err != nil {
+		writeAuthError(w, fileSaveErrorStatus(err), err.Error())
+		return
+	}
 	broadcastSignedInKanbanEvent("file", row)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,

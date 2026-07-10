@@ -97,6 +97,11 @@ type crossMeetingBriefingResult struct {
 	Source           string
 	// OmittedMeetings counts in-range meetings the map-reduce cap skipped.
 	OmittedMeetings int
+	// MeetingCoverage maps a meeting id to the server-stamped coverage read of
+	// its contributing digest (kanban-card-107) — how completely the captured
+	// span covered the sitting. Rendering and the tool payload consult it so a
+	// briefing never implies it saw a whole meeting it only partly captured.
+	MeetingCoverage map[string]meetingCoverageSummary
 }
 
 func (briefing crossMeetingBriefingResult) empty() bool {
@@ -106,6 +111,42 @@ func (briefing crossMeetingBriefingResult) empty() bool {
 		}
 	}
 	return true
+}
+
+// coverageSummaryLine is a one-line coverage roll-up across the meetings that
+// contributed to the briefing, pinned onto the tool payload so a caller can
+// state up front how complete the captured picture is. Degrades to an explicit
+// "coverage unknown" when nothing carried a coverage stamp.
+func (briefing crossMeetingBriefingResult) coverageSummaryLine() string {
+	var full, partial, unknown, listenOnly int
+	for _, summary := range briefing.MeetingCoverage {
+		switch summary.Label {
+		case coverageLabelFull:
+			full++
+		case coverageLabelUnknown:
+			unknown++
+		default:
+			partial++
+		}
+		if summary.ListenOnly {
+			listenOnly++
+		}
+	}
+	total := full + partial + unknown
+	if total == 0 {
+		return "coverage unknown for this range"
+	}
+	parts := []string{fmt.Sprintf("%d of %d meetings fully captured", full, total)}
+	if partial > 0 {
+		parts = append(parts, fmt.Sprintf("%d partial", partial))
+	}
+	if unknown > 0 {
+		parts = append(parts, fmt.Sprintf("%d unknown", unknown))
+	}
+	if listenOnly > 0 {
+		parts = append(parts, fmt.Sprintf("%d listen-only", listenOnly))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // localDaysInRange enumerates the local calendar days [start, end) touch,
@@ -168,6 +209,13 @@ func (app *kanbanBoardApp) composeBriefingFromDigests(rangeStart time.Time, rang
 		RangeEnd:        rangeEnd,
 		Source:          source,
 		OmittedMeetings: omittedMeetings,
+		MeetingCoverage: map[string]meetingCoverageSummary{},
+	}
+	// Coverage is read straight off each contributing digest's server stamps, so
+	// the briefing shows the captured window and caveats partial/unknown/listen-
+	// only meetings without recomputing anything.
+	for key, digest := range meetingDigests {
+		result.MeetingCoverage[key] = meetingCoverageFromDigest(digest)
 	}
 	ledgerByDay := app.activeDecisionTextsByDay(rangeStart, rangeEnd)
 	digestedMeetings := map[string]struct{}{}
@@ -269,6 +317,53 @@ func briefingFactLine(text string, by string, status string, owner string, impor
 	return builder.String()
 }
 
+// briefingCapturedSuffix renders the compact "· captured HH:MM–HH:MM (partial)"
+// caption a briefing day-header appends after a meeting, sourced from the
+// digest coverage stamps. Empty when no captured span is known (map-reduce or
+// legacy digests), so those headers stay exactly as before. The captured window
+// itself is always honest; only partial/listen-only add a caveat.
+func briefingCapturedSuffix(summary meetingCoverageSummary) string {
+	if summary.SpanStart.IsZero() || summary.SpanEnd.IsZero() {
+		return ""
+	}
+	location := meetingTimeLocation()
+	var builder strings.Builder
+	fmt.Fprintf(&builder, " · captured %s–%s", summary.SpanStart.In(location).Format("15:04"), summary.SpanEnd.In(location).Format("15:04"))
+	switch summary.Label {
+	case coverageLabelPartialLateStart:
+		builder.WriteString(" (partial — capture began late)")
+	case coverageLabelPartialGaps:
+		builder.WriteString(" (partial — a quiet or uncaptured stretch)")
+	}
+	if summary.ListenOnly {
+		builder.WriteString(" (listen-only)")
+	}
+	return builder.String()
+}
+
+// coverageDetailNote is the neutral, human-readable coverage caveat handed to
+// get_meeting_detail callers. It never asserts a capture failure: a partial_gaps
+// stretch is described as possibly-quiet-or-uncaptured, and full coverage returns
+// no note at all (the empty string). listen-only is additive.
+func coverageDetailNote(summary meetingCoverageSummary) string {
+	var parts []string
+	switch summary.Label {
+	case coverageLabelPartialLateStart:
+		parts = append(parts, "capture began after the meeting was already underway, so the opening is not captured")
+	case coverageLabelPartialGaps:
+		parts = append(parts, "there is a stretch with no captured transcript — a quiet spell or a capture gap")
+	case coverageLabelUnknown:
+		parts = append(parts, "how completely this captured the meeting is unknown")
+	}
+	if summary.ListenOnly {
+		parts = append(parts, "this was a listen-only sitting that may have been underway before capture began")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "This reflects the captured portion only: " + strings.Join(parts, "; ") + "."
+}
+
 func writeBriefingSection(builder *strings.Builder, heading string, lines []string, limit int) {
 	if len(lines) == 0 {
 		return
@@ -310,11 +405,11 @@ func renderCrossMeetingBriefing(briefing crossMeetingBriefingResult) string {
 		if day.HasFold && len(day.Fold.Meetings) > 0 {
 			names := make([]string, 0, len(day.Fold.Meetings))
 			for _, meeting := range day.Fold.Meetings {
+				label := meeting.MeetingID
 				if title := strings.TrimSpace(meeting.Title); title != "" {
-					names = append(names, fmt.Sprintf("%s (%s)", title, meeting.MeetingID))
-				} else {
-					names = append(names, meeting.MeetingID)
+					label = fmt.Sprintf("%s (%s)", title, meeting.MeetingID)
 				}
+				names = append(names, label+briefingCapturedSuffix(briefing.MeetingCoverage[meeting.MeetingID]))
 			}
 			builder.WriteString(" — " + strings.Join(names, ", "))
 		}
@@ -484,6 +579,7 @@ func (app *kanbanBoardApp) crossMeetingBriefingTool(args map[string]any) (map[st
 			"briefing": "Nothing was captured in meeting memory for that range.",
 			"days":     0,
 			"source":   briefing.Source,
+			"coverage": briefing.coverageSummaryLine(),
 		}, false, nil
 	}
 	return map[string]any{
@@ -493,6 +589,7 @@ func (app *kanbanBoardApp) crossMeetingBriefingTool(args map[string]any) (map[st
 		"days":     len(briefing.Days),
 		"meetings": briefing.DigestedMeetings,
 		"source":   briefing.Source,
+		"coverage": briefing.coverageSummaryLine(),
 	}, false, nil
 }
 
@@ -543,6 +640,23 @@ func (app *kanbanBoardApp) getMeetingDetail(args map[string]any) (map[string]any
 				result["ended"] = record.EndedAt
 			}
 		}
+		// Coverage honesty (kanban-card-107): how completely the digest window
+		// covered the sitting, preferring the durable server-authored stamp
+		// (meetingCoverageDetail). The machine label rides as coverage=; a neutral
+		// human note rides alongside so the model relays partial coverage without
+		// asserting capture failed (a gap can be quiet time).
+		coverage := app.meetingCoverageDetail(meetingID)
+		result["coverage"] = coverage.Label
+		if note := coverageDetailNote(coverage); note != "" {
+			result["coverageNote"] = note
+		}
+		if coverage.ListenOnly {
+			result[externalMayPredateCaptureMetadataKey] = true
+		}
+		if !coverage.SpanStart.IsZero() && !coverage.SpanEnd.IsZero() {
+			location := meetingTimeLocation()
+			result["captured"] = fmt.Sprintf("%s–%s", coverage.SpanStart.In(location).Format("15:04"), coverage.SpanEnd.In(location).Format("15:04"))
+		}
 		if digest, ok := app.memory.latestDigestPerMeeting()[meetingID]; ok {
 			result["digest"] = digest.Text
 			found = true
@@ -569,6 +683,55 @@ func (app *kanbanBoardApp) getMeetingDetail(args map[string]any) (map[string]any
 		return nil, false, fmt.Errorf("no meeting memory found for %s", firstNonEmptyString(meetingID, anchor))
 	}
 	return result, false, nil
+}
+
+// meetingCoverageDetail resolves how completely the stored digest window covers
+// a past meeting's room-occupancy sitting. It PREFERS the coverage label the
+// per-meeting digest producer stamped (digestCoverageMetadataKey), because that
+// stamp was computed while the raw transcripts were still intact — and raw
+// transcript entries are deletable by design (slop-quarantine 30-day expiry,
+// user chat deletes). Recomputing live from transcriptCoverageForMeeting would
+// drift an aged meeting to partial_gaps/unknown as its lines age out, even
+// though nothing about the meeting changed. The live recompute is therefore used
+// ONLY as a legacy fallback when a digest carries no coverage stamp at all.
+// Legacy synthetic keys, meetings with no directory record, and meetings with no
+// captured span degrade to an explicit "unknown" — never a fabricated "full".
+func (app *kanbanBoardApp) meetingCoverageDetail(meetingID string) meetingCoverageSummary {
+	summary := meetingCoverageSummary{Label: coverageLabelUnknown}
+	if app == nil || app.memory == nil {
+		return summary
+	}
+	stamped := ""
+	if digest, ok := app.memory.latestDigestPerMeeting()[meetingID]; ok {
+		if start, end, spanOK := parseDigestSpanMetadata(digest); spanOK {
+			summary.SpanStart, summary.SpanEnd = start, end
+		}
+		if strings.EqualFold(strings.TrimSpace(digest.Metadata[listenOnlyMetadataKey]), "true") {
+			summary.ListenOnly = true
+		}
+		stamped = strings.TrimSpace(digest.Metadata[digestCoverageMetadataKey])
+	}
+	record, hasRecord := app.meetingDirectoryRecord(meetingID)
+	if record.ListenOnly {
+		summary.ListenOnly = true
+	}
+	// Prefer the durable server-authored stamp over a live recompute.
+	if stamped != "" {
+		summary.Label = stamped
+		return summary
+	}
+	// Legacy fallback: no stamp exists, so recompute from whatever transcript
+	// evidence survives (best effort).
+	resolvable := hasRecord && !isLegacyMeetingKey(meetingID)
+	var sittingStart time.Time
+	if resolvable {
+		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(record.StartedAt)); err == nil {
+			sittingStart = parsed
+		}
+	}
+	coverage := app.memory.transcriptCoverageForMeeting(meetingID)
+	summary.Label = meetingCoverageLabel(resolvable, sittingStart, summary.SpanStart, coverage.MaxInternalGap)
+	return summary
 }
 
 // meetingDirectoryRecord resolves one meetings-directory record by id.

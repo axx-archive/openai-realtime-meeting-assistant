@@ -1525,3 +1525,100 @@ func TestAnthropicFableRunnerTurnProgressNotes(t *testing.T) {
 		})
 	}
 }
+
+// TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn pins RW1
+// (kanban-card-108): an agent-thread orchestrator turn that mutates the board
+// fans a board + undo_available snapshot out to live office/room sockets once
+// per turn, while a read-only tool turn broadcasts nothing. Pre-fix the runner's
+// tool loop never broadcast, so agent-thread board edits needed a manual reload.
+func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
+	sendOfficeHello(t, conn)
+	// Drain the ordered office replay (ends with codex_proposals, after the
+	// replayed board + undo_available) so later reads observe only the runner's
+	// own broadcasts.
+	waitForKanbanEvent(t, conn, "codex_proposals", 5*time.Second)
+
+	// The runner acts on its own isolated app (temp board persistence); its
+	// per-turn broadcast rides the global signed-in fan-out to the office socket.
+	app := newIsolatedKanbanBoardApp(t)
+	newRunner := func(responder anthropicMessagesResponder) *anthropicFableRunner {
+		runner := newAnthropicFableRunner(app)
+		runner.responder = responder
+		runner.apiKey = func() string { return "test-key" }
+		runner.maxTurns = 6
+		return runner
+	}
+
+	// A board-mutating tool turn (create_ticket) must broadcast board + undo.
+	mutating := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if len(request.Messages) == 1 {
+			return anthropicMessagesResponse{
+				StopReason: "tool_use",
+				Content: []json.RawMessage{
+					mockAnthropicToolUseBlock("toolu_mut", "create_ticket", map[string]any{"title": "RW1AgentThreadProbe"}),
+				},
+			}, nil
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Done")}}, nil
+	}
+	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card"}))
+	if err != nil {
+		t.Fatalf("RunJob mutating: %v", err)
+	}
+	collectProgress(out)
+
+	board := waitForKanbanEvent(t, conn, "board", 5*time.Second)
+	if !strings.Contains(string(board), "RW1AgentThreadProbe") {
+		t.Fatalf("office board snapshot missing the orchestrated card: %s", board)
+	}
+	waitForKanbanEvent(t, conn, "undo_available", 5*time.Second)
+
+	// A read-only tool turn (control_app) must broadcast nothing. A memory marker
+	// over the signed-in fan-out bounds the negative check: ordered delivery on
+	// one socket means a leaked board/undo would arrive before the marker.
+	readOnly := func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		if len(request.Messages) == 1 {
+			return anthropicMessagesResponse{
+				StopReason: "tool_use",
+				Content: []json.RawMessage{
+					mockAnthropicToolUseBlock("toolu_ro", "control_app", map[string]any{"tool": "research"}),
+				},
+			}, nil
+		}
+		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Reviewed")}}, nil
+	}
+	out, err = newRunner(readOnly).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-ro", Mode: "workflow", Query: "open research"}))
+	if err != nil {
+		t.Fatalf("RunJob read-only: %v", err)
+	}
+	collectProgress(out)
+
+	broadcastSignedInKanbanEvent("memory", []map[string]any{{"id": "rw1-readonly-marker", "kind": "brain"}})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read websocket draining after read-only turn: %v", err)
+		}
+		if message.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+			t.Fatalf("decode kanban envelope: %v", err)
+		}
+		if inner.Event == "board" || inner.Event == "undo_available" {
+			t.Fatalf("read-only orchestrator turn leaked a %q broadcast", inner.Event)
+		}
+		if inner.Event == "memory" {
+			break
+		}
+	}
+}

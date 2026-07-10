@@ -658,6 +658,7 @@ func main() {
 	http.HandleFunc("/assistant/tools", assistantToolsHandler)
 	http.HandleFunc("/assistant/notifications", assistantNotificationsHandler)
 	http.HandleFunc("/assistant/notifications/read", assistantNotificationsReadHandler)
+	http.HandleFunc("/assistant/notifications/clear", assistantNotificationsClearHandler)
 	http.HandleFunc("/assistant/push/config", assistantPushConfigHandler)
 	http.HandleFunc("/assistant/push/subscribe", assistantPushSubscribeHandler)
 	http.HandleFunc("/assistant/push/unsubscribe", assistantPushUnsubscribeHandler)
@@ -669,6 +670,7 @@ func main() {
 	http.HandleFunc("/assistant/files/upload", assistantFileUploadHandler)
 	http.HandleFunc("/assistant/files/folders", assistantFileFoldersHandler)
 	http.HandleFunc("/assistant/files/move", assistantFileMoveHandler)
+	http.HandleFunc("/assistant/files/save", assistantFileSaveHandler)
 	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
@@ -1943,6 +1945,21 @@ func assistantRealtimeToolHandler(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Private Realtime tool %q failed for %s: %v", payload.Name, user.Email, err)
 	}
 
+	// RW1 (kanban-card-108): a private-dashboard Scout-voice board mutation has
+	// to reach every signed-in client the way the room-voice path (the
+	// applyToolCallArgs caller at kanban.go ~2861) and manual ws edits
+	// (broadcastManualBoardMutation) already do — otherwise the office board only
+	// picks up the change on a manual browser reload. The board/undo snapshots are
+	// idempotent, so the harmless extra snapshot from a non-board changed tool
+	// (create_package etc.) is sanctioned by the fan-out doctrine; changed is
+	// never true on the error path. refreshRealtimeBoardContext refreshes only the
+	// OFFICE realtime session (safe — the private session is browser-owned).
+	if changed {
+		broadcastSignedInKanbanEvent("board", kanbanApp.snapshotState())
+		broadcastSignedInKanbanEvent("undo_available", kanbanApp.canUndoDelete())
+		kanbanApp.refreshRealtimeBoardContext(payload.Name)
+	}
+
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":       ok,
 		"changed":  changed,
@@ -2297,9 +2314,23 @@ func serverICEServersFromEnv() []webrtc.ICEServer {
 	}}
 }
 
-func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error) {
-	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+// Room RTP codecs. stableRoomMediaEngine registers exactly this set, and
+// preferSourceTrackCodec references the video primary+RTX pairs so a
+// subscriber-facing SetCodecPreferences advertises the identical payload types
+// the engine negotiated. A single definition keeps the two sites from drifting:
+// SetCodecPreferences rejects any codec whose parameters don't match a
+// registered one, and silently drops an RTX codec whose apt payload type has no
+// primary alongside it in the list.
+//
+// RTX repair codecs (RFC 4588) are what let a subscriber recover a lost packet
+// via NACK instead of a full keyframe. Without an apt codec registered, pion
+// strips RTX from browser offers (publisher uplink loss is PLI-only — every
+// prod track logged has_rtx=false) and never allocates repair SSRCs on its own
+// senders, so the NACK responder would retransmit on the media SSRC instead of
+// a proper repair stream. TrackRemote.ReadRTP unwraps inbound RTX transparently,
+// so the forwarding pump needs no changes.
+var (
+	roomOpusCodec = webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeOpus,
 			ClockRate:   48000,
@@ -2307,10 +2338,8 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 			SDPFmtpLine: "minptime=10;useinbandfec=1",
 		},
 		PayloadType: 111,
-	}, webrtc.RTPCodecTypeAudio); err != nil {
-		return nil, nil, fmt.Errorf("register opus codec: %w", err)
 	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+	roomH264Codec = webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     webrtc.MimeTypeH264,
 			ClockRate:    90000,
@@ -2318,44 +2347,48 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
 		},
 		PayloadType: 102,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, nil, fmt.Errorf("register h264 codec: %w", err)
 	}
-	// RTX repair codec (RFC 4588) for H264, payload type matching pion's
-	// defaults. Without an apt codec registered, pion strips RTX from browser
-	// offers (publisher uplink loss is PLI-only — every prod track logged
-	// has_rtx=false) and never allocates repair SSRCs on its own senders, so
-	// the NACK responder retransmits on the media SSRC instead of a proper
-	// repair stream. TrackRemote.ReadRTP unwraps inbound RTX transparently,
-	// so the forwarding pump needs no changes.
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+	roomH264RTXCodec = webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeRTX,
 			ClockRate:   90000,
 			SDPFmtpLine: "apt=102",
 		},
 		PayloadType: 103,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, nil, fmt.Errorf("register h264 rtx codec: %w", err)
 	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+	roomVP8Codec = webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     webrtc.MimeTypeVP8,
 			ClockRate:    90000,
 			RTCPFeedback: []webrtc.RTCPFeedback{{Type: "nack"}, {Type: "nack", Parameter: "pli"}, {Type: "goog-remb"}},
 		},
 		PayloadType: 96,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
 	}
-	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+	roomVP8RTXCodec = webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeRTX,
 			ClockRate:   90000,
 			SDPFmtpLine: "apt=96",
 		},
 		PayloadType: 97,
-	}, webrtc.RTPCodecTypeVideo); err != nil {
+	}
+)
+
+func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error) {
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterCodec(roomOpusCodec, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, nil, fmt.Errorf("register opus codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(roomH264Codec, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register h264 codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(roomH264RTXCodec, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register h264 rtx codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(roomVP8Codec, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(roomVP8RTXCodec, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, nil, fmt.Errorf("register vp8 rtx codec: %w", err)
 	}
 
@@ -2755,12 +2788,17 @@ func browserRTCConfigurationFromEnv() map[string]any {
 func nativeRoomClientConfig() map[string]any {
 	return map[string]any{
 		"rtcConfiguration": browserRTCConfigurationFromEnv(),
-		"protocolVersion":  nativeClientProtocolV1,
-		"auth":             "cookie",
-		"calendar":         calendarCapabilities(),
-		"websocketPath":    "/websocket",
-		"signalingRole":    "server-offer",
-		"supportedLayers":  []string{string(layerTierLow), string(layerTierMedium), string(layerTierHigh)},
+		// How long the ICE servers' TURN credentials stay valid (card-003 W4
+		// gap 2). 0 when creds are static or absent; non-zero on the HMAC mint
+		// path so the client refreshes this config before an ICE restart or
+		// reconnect re-dials with expired relay creds.
+		"turnCredentialTTLSeconds": turnCredentialTTLSecondsForClient(),
+		"protocolVersion":          nativeClientProtocolV1,
+		"auth":                     "cookie",
+		"calendar":                 calendarCapabilities(),
+		"websocketPath":            "/websocket",
+		"signalingRole":            "server-offer",
+		"supportedLayers":          []string{string(layerTierLow), string(layerTierMedium), string(layerTierHigh)},
 		"nativeHints": map[string]any{
 			"participantEvent":    "participant",
 			"mediaReadyEvent":     "media_ready",
@@ -2801,12 +2839,7 @@ func turnCredentialsFromEnv() (string, string) {
 		return username, credential
 	}
 
-	ttlSeconds := int64(12 * 60 * 60)
-	if rawTTL := strings.TrimSpace(os.Getenv("MEETING_TURN_TTL_SECONDS")); rawTTL != "" {
-		if parsedTTL, err := strconv.ParseInt(rawTTL, 10, 64); err == nil && parsedTTL >= 300 && parsedTTL <= 7*24*60*60 {
-			ttlSeconds = parsedTTL
-		}
-	}
+	ttlSeconds := resolvedTurnTTLSeconds()
 	userPrefix := strings.TrimSpace(os.Getenv("MEETING_TURN_USER_PREFIX"))
 	if userPrefix == "" {
 		userPrefix = "bonfire"
@@ -2817,6 +2850,34 @@ func turnCredentialsFromEnv() (string, string) {
 	_, _ = mac.Write([]byte(username))
 	credential = base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return username, credential
+}
+
+// resolvedTurnTTLSeconds returns the lifetime of an HMAC-minted TURN credential:
+// the 12h default or a MEETING_TURN_TTL_SECONDS override clamped to [5m, 7d].
+func resolvedTurnTTLSeconds() int64 {
+	ttlSeconds := int64(12 * 60 * 60)
+	if rawTTL := strings.TrimSpace(os.Getenv("MEETING_TURN_TTL_SECONDS")); rawTTL != "" {
+		if parsedTTL, err := strconv.ParseInt(rawTTL, 10, 64); err == nil && parsedTTL >= 300 && parsedTTL <= 7*24*60*60 {
+			ttlSeconds = parsedTTL
+		}
+	}
+	return ttlSeconds
+}
+
+// turnCredentialTTLSecondsForClient reports how long the browser's minted TURN
+// credentials stay valid so a long-lived session can refresh /client-config
+// before they expire (card-003 W4 gap 2). It is non-zero ONLY on the HMAC-secret
+// mint path: static MEETING_TURN_USERNAME/CREDENTIAL creds don't expire (0 =
+// never refresh), and it is 0 when no TURN secret is configured.
+func turnCredentialTTLSecondsForClient() int64 {
+	if strings.TrimSpace(os.Getenv("MEETING_TURN_USERNAME")) != "" &&
+		strings.TrimSpace(os.Getenv("MEETING_TURN_CREDENTIAL")) != "" {
+		return 0
+	}
+	if strings.TrimSpace(os.Getenv("MEETING_TURN_SECRET")) == "" {
+		return 0
+	}
+	return resolvedTurnTTLSeconds()
 }
 
 func splitEnvList(name string) []string {
@@ -3230,6 +3291,15 @@ func prunePeerConnectionPool(peerConnection *webrtc.PeerConnection) bool {
 	return removed
 }
 
+// peerConnectionPoolSize reports the current fan-out pool depth under listLock,
+// for the liveness-reap observability line — a pool that never shrinks after a
+// reap is the leak this cleanup exists to close.
+func peerConnectionPoolSize() int {
+	listLock.RLock()
+	defer listLock.RUnlock()
+	return len(peerConnections)
+}
+
 func closeParticipantConnections(states []peerConnectionState) {
 	closedPeerConnections := map[*webrtc.PeerConnection]struct{}{}
 	closedWebsockets := map[*threadSafeWriter]struct{}{}
@@ -3237,7 +3307,9 @@ func closeParticipantConnections(states []peerConnectionState) {
 		if state.peerConnection != nil {
 			if _, ok := closedPeerConnections[state.peerConnection]; !ok {
 				closedPeerConnections[state.peerConnection] = struct{}{}
-				_ = state.peerConnection.Close()
+				if err := state.peerConnection.Close(); err != nil {
+					log.Errorf("Failed to close replaced-session PeerConnection: %v", err)
+				}
 			}
 		}
 		if state.websocket != nil {
@@ -3344,7 +3416,9 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 							_ = sendKanbanEvent(stuckWebsocket, "media_disconnected", "media negotiation stalled; rejoin the room.")
 							_ = stuckWebsocket.Close()
 						}
-						_ = stuckPeerConnection.Close()
+						if err := stuckPeerConnection.Close(); err != nil {
+							log.Errorf("Failed to close negotiation-stuck PeerConnection: %v", err)
+						}
 					}()
 					peer.nonStableSince = time.Time{}
 					peer.offerResent = false
@@ -3555,6 +3629,14 @@ func resendPendingOffer(peer *peerConnectionState) {
 	}
 }
 
+// preferSourceTrackCodec restricts a subscriber-facing sender to the codec the
+// forwarded source is actually publishing and — for video — also advertises that
+// codec's RTX repair codec, so the offered m-line carries the rtx codec and an
+// a=ssrc-group:FID and SFU→subscriber retransmissions negotiate. Preferring only
+// the primary codec (as this used to) made SetCodecPreferences filter RTX out of
+// the offer: the ready NACK responder then had no repair stream to send on and
+// downstream loss recovery fell back to full keyframes. Audio and any codec the
+// engine doesn't pair with RTX keep the single-codec preference unchanged.
 func preferSourceTrackCodec(transceiver *webrtc.RTPTransceiver, trackLocal *webrtc.TrackLocalStaticRTP) error {
 	if transceiver == nil || trackLocal == nil {
 		return nil
@@ -3564,9 +3646,31 @@ func preferSourceTrackCodec(transceiver *webrtc.RTPTransceiver, trackLocal *webr
 		return nil
 	}
 
-	return transceiver.SetCodecPreferences([]webrtc.RTPCodecParameters{{
-		RTPCodecCapability: codec,
-	}})
+	preferences := []webrtc.RTPCodecParameters{{RTPCodecCapability: codec}}
+	if primary, rtx, ok := roomVideoCodecPairFor(codec.MimeType); ok {
+		// Use the engine's registered parameters (payload types included) so
+		// SetCodecPreferences matches exactly and, critically, keeps the RTX
+		// codec attached to its primary (its apt payload type must be present
+		// in the same list or the RTX entry is dropped).
+		preferences = []webrtc.RTPCodecParameters{primary, rtx}
+	}
+
+	return transceiver.SetCodecPreferences(preferences)
+}
+
+// roomVideoCodecPairFor returns the registered primary and RTX repair codec
+// parameters for a forwarded video mime type. ok is false for audio and any
+// codec the room media engine does not pair with RTX, so the caller keeps its
+// single-codec preference.
+func roomVideoCodecPairFor(mimeType string) (primary, rtx webrtc.RTPCodecParameters, ok bool) {
+	switch {
+	case strings.EqualFold(mimeType, webrtc.MimeTypeH264):
+		return roomH264Codec, roomH264RTXCodec, true
+	case strings.EqualFold(mimeType, webrtc.MimeTypeVP8):
+		return roomVP8Codec, roomVP8RTXCodec, true
+	default:
+		return webrtc.RTPCodecParameters{}, webrtc.RTPCodecParameters{}, false
+	}
 }
 
 // dispatchKeyFrame asks every publisher for a keyframe — run after signal
@@ -4216,6 +4320,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	memberRepairLogsSuppressed := 0
 	memberRepairDropLogAt := time.Time{}
 	memberRepairDropsSuppressed := 0
+	// Per-socket rate-limited logging for restart_ice denials (card-003 W4):
+	// only this read-loop goroutine touches these. Accepted restarts already
+	// log unconditionally below (and are now bucket-capped, so they can't
+	// storm) — only the drops need the 10s throttle.
+	iceRestartDropLogAt := time.Time{}
+	iceRestartDropsSuppressed := 0
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
 	var cleanupOnce sync.Once
@@ -4237,9 +4347,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				name := currentParticipantName()
 				unregisterParticipantSession(name, participantSessionID)
 				if guest == nil {
-					// Member repair buckets key on this per-socket session id —
-					// release it or the room's map grows one entry per connection.
+					// Member repair + ice-restart buckets key on this per-socket
+					// session id — release them or the room's maps grow one entry
+					// per connection.
 					kanbanApp.dropMemberMediaRepairBucket(connRoomID, participantSessionID)
+					kanbanApp.dropMemberIceRestartBucket(connRoomID, participantSessionID)
 				}
 				if removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID); removed {
 					// participant_left means a PERSON left. When one of an
@@ -4297,7 +4409,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	var peerConnection *webrtc.PeerConnection
 	defer func() {
 		if peerConnection != nil {
-			_ = peerConnection.Close()
+			if err := peerConnection.Close(); err != nil {
+				log.Errorf("Failed to close read-loop PeerConnection session=%s: %v", participantSessionID, err)
+			}
 		}
 	}()
 	cancelICERecovery := func() {}
@@ -4997,6 +5111,30 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			signalPeerConnections()
 		case "restart_ice":
 			if !participantAccepted || !mediaJoined || peerConnection == nil {
+				continue
+			}
+			// card-003 W4: restart_ice forces a full ICERestart renegotiation
+			// plus a dispatchKeyFrame walk and was the last media-inbound event
+			// left unbucketed after the keyframe-spiral damping wave. Token-bucket
+			// per principal (burst 2, refill 1 per 15s) — the client's ladder is
+			// at most 1 per 3.5s / 2 per 60s, so this never throttles legitimate
+			// recovery but caps a socket-line-rate storm. On deny, drop silently
+			// toward the client with a rate-limited drop log.
+			iceRestartNow := time.Now()
+			iceRestartAllowed := true
+			if guest != nil {
+				iceRestartAllowed = kanbanApp.allowGuestIceRestart(connRoomID, guest.SessionKey, iceRestartNow)
+			} else {
+				iceRestartAllowed = kanbanApp.allowMemberIceRestart(connRoomID, participantSessionID, iceRestartNow)
+			}
+			if !iceRestartAllowed {
+				iceRestartDropsSuppressed++
+				if iceRestartNow.Sub(iceRestartDropLogAt) >= memberMediaRepairLogInterval {
+					log.Infof("restart_ice_rate_limited session=%s room=%s participant=%s dropped=%d",
+						participantSessionID, connRoomID, currentParticipantName(), iceRestartDropsSuppressed)
+					iceRestartDropLogAt = iceRestartNow
+					iceRestartDropsSuppressed = 0
+				}
 				continue
 			}
 			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()

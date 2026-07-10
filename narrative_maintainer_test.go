@@ -414,3 +414,43 @@ func TestAssistantQueryInputIncludesActiveStorylines(t *testing.T) {
 		t.Fatal("empty storylines must not emit the section header")
 	}
 }
+
+// A dossier discussed across several sittings accumulates a de-duped union of
+// every meeting it has spanned (kanban-card-107) instead of overwriting to the
+// latest sitting's single meetingId.
+func TestNarrativeMaintainerAccumulatesMeetingIds(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung pitch.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+	meetingA := app.memory.currentMeetingID(officeRoomID)
+	v1 := runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"narratives":[{"slug":"samsung","title":"Samsung","status":"pitch","body":"## Storyline\nSamsung."}]}`, nil
+	})
+	if got := v1.Metadata["meetingIds"]; got != meetingA {
+		t.Fatalf("pass 1 meetingIds=%q, want %q", got, meetingA)
+	}
+
+	// Rotate to a fresh sitting; the same dossier updates.
+	app.memory.rotateMeetingID(officeRoomID)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-2", "## Overview\nSamsung counter.", nil); err != nil || !appended {
+		t.Fatalf("append brain-2: appended=%v err=%v", appended, err)
+	}
+	meetingB := app.memory.currentMeetingID(officeRoomID)
+	if meetingB == "" || meetingB == meetingA {
+		t.Fatalf("expected a fresh meeting id after rotate, got %q (was %q)", meetingB, meetingA)
+	}
+	v2 := runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"narratives":[{"slug":"samsung","title":"Samsung","status":"counter","body":"## Storyline\nSamsung counter."}]}`, nil
+	})
+	ids := splitNarrativeMeetingIDs(v2.Metadata["meetingIds"])
+	if len(ids) != 2 || ids[0] != meetingA || ids[1] != meetingB {
+		t.Fatalf("pass 2 meetingIds=%v, want the union [%s %s] (not an overwrite)", ids, meetingA, meetingB)
+	}
+	// The single meetingId still tracks the current sitting (snapshotForMeeting scope).
+	if v2.Metadata["meetingId"] != meetingB {
+		t.Fatalf("meetingId=%q, want the current sitting %q", v2.Metadata["meetingId"], meetingB)
+	}
+}

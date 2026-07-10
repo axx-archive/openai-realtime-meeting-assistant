@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,6 +70,12 @@ type notificationRecord struct {
 	DeliverAfter string   `json:"deliverAfter,omitempty"`
 	CreatedAt    string   `json:"createdAt"`
 	ReadBy       []string `json:"readBy,omitempty"`
+	// ClearedBy tracks which accounts have dismissed this notification from
+	// their bell. Cleared records are filtered out of every viewer list (the
+	// GET page and the websocket admission backlog) without being deleted —
+	// the store stays a single shared log, so a broadcast one account cleared
+	// still reaches everyone else. The roster is bounded by the 500-record cap.
+	ClearedBy []string `json:"clearedBy,omitempty"`
 }
 
 type notificationStoreState struct {
@@ -301,6 +308,21 @@ func notificationReadBy(record notificationRecord, viewerEmail string) bool {
 	return false
 }
 
+// notificationClearedBy reports whether the viewer has dismissed this record
+// from their bell. Cleared records stay in the shared store but drop out of the
+// viewer's list and unread backlog.
+func notificationClearedBy(record notificationRecord, viewerEmail string) bool {
+	if viewerEmail == "" {
+		return false
+	}
+	for _, clearer := range record.ClearedBy {
+		if normalizeAccountEmail(clearer) == viewerEmail {
+			return true
+		}
+	}
+	return false
+}
+
 // notificationReadFor is the viewer-facing read state: a settled proposal
 // nudge reads as acknowledged for every account — once someone acted, the
 // call to action is moot for everyone — otherwise the ReadBy roster decides.
@@ -371,6 +393,11 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 		if !notificationVisibleTo(record, viewerEmail) {
 			continue
 		}
+		// A record the viewer cleared is hidden from both the GET page and the
+		// websocket admission backlog — this one filter covers both callers.
+		if notificationClearedBy(record, viewerEmail) {
+			continue
+		}
 		if unreadOnly && notificationReadFor(record, viewerEmail) {
 			continue
 		}
@@ -412,6 +439,10 @@ func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text st
 		if record.ProposalID != proposalID {
 			continue
 		}
+		// Rewrite in place: only the settled fields change. The existing
+		// ClearedBy roster rides through untouched, so a record an account
+		// cleared after it settled stays cleared for them — the re-broadcast
+		// below never resurrects it in their bell on the next list/backlog sync.
 		record.Text = text
 		record.ResolvedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		if artifactID != "" {
@@ -488,6 +519,72 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 		return marked, persistErr
 	}
 	return marked, nil
+}
+
+// clearNotifications dismisses notifications from the viewer's bell by stamping
+// them onto ClearedBy, persists once, and returns how many records changed. A
+// nil/empty ids slice clears everything the viewer can currently see; a
+// populated slice clears only those ids. Like markNotificationsRead it stamps
+// only the viewer (the shared record survives for everyone else) and refuses a
+// sticky pending-proposal nudge — that call to action only leaves the bell when
+// the proposal itself is acted on, never on a generic clear.
+func (app *kanbanBoardApp) clearNotifications(viewerEmail string, ids []string) (int, error) {
+	if app == nil {
+		return 0, fmt.Errorf("notifications are unavailable")
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	if viewerEmail == "" {
+		return 0, nil
+	}
+	// nil/empty ids means "clear all visible"; a populated set scopes the clear.
+	var wanted map[string]struct{}
+	if len(ids) > 0 {
+		wanted = map[string]struct{}{}
+		for _, id := range ids {
+			if id = strings.TrimSpace(id); id != "" {
+				wanted[id] = struct{}{}
+			}
+		}
+		if len(wanted) == 0 {
+			return 0, nil
+		}
+	}
+
+	app.mu.Lock()
+	cleared := 0
+	for index := range app.notifications {
+		record := &app.notifications[index]
+		if wanted != nil {
+			if _, ok := wanted[record.ID]; !ok {
+				continue
+			}
+		}
+		// Only records the viewer can actually see are clearable, and a queued
+		// deferred record has not been delivered yet — clearing it before the
+		// flush would swallow it silently.
+		if !notificationVisibleTo(*record, viewerEmail) || record.DeliverAfter != "" {
+			continue
+		}
+		if notificationClearedBy(*record, viewerEmail) {
+			continue
+		}
+		if record.ProposalID != "" && record.ResolvedAt == "" && app.proposalAwaitingAction(record.ProposalID) {
+			// Sticky until acted on: the nudge only leaves the bell when the
+			// proposal is confirmed or dismissed, never on a clear sweep.
+			continue
+		}
+		record.ClearedBy = append(record.ClearedBy, viewerEmail)
+		cleared++
+	}
+	var persistErr error
+	if cleared > 0 {
+		persistErr = app.persistNotificationsLocked()
+	}
+	app.mu.Unlock()
+	if persistErr != nil {
+		return cleared, persistErr
+	}
+	return cleared, nil
 }
 
 // notifyAgentThreadCreator posts a durable notification for agent-thread
@@ -642,4 +739,42 @@ func assistantNotificationsReadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "marked": marked})
+}
+
+// assistantNotificationsClearHandler serves POST /assistant/notifications/clear
+// with the same gate stack as the read handler. An absent or empty ids array
+// clears everything the viewer can currently see; a populated array scopes the
+// clear to those ids.
+func assistantNotificationsClearHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "notifications are unavailable")
+		return
+	}
+
+	payload := struct {
+		IDs []string `json:"ids"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil && err != io.EOF {
+		writeAuthError(w, http.StatusBadRequest, "could not read notification ids")
+		return
+	}
+	cleared, err := kanbanApp.clearNotifications(user.Email, payload.IDs)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared})
 }

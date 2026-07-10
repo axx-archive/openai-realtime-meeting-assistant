@@ -9926,9 +9926,10 @@
         display: none;
       }
 
-      /* the privacy caveat under the private composer — private means from
-         teammates, not from the system: these threads still feed transcripts
-         into the company brain. Channels hide it (they're public anyway). */
+      /* the privacy caveat under the private composer — "private" means hidden
+         from teammates, not from the system: the thread stays OUT of the company
+         brain (the "Feed the brain" chip is the only opt-in door). Channels hide
+         it (they're public anyway). */
       .scout-chat-brain-note {
         flex: none;
         margin: -6px 16px 12px;
@@ -10768,6 +10769,14 @@
         text-decoration: underline;
       }
 
+      /* in a tile foot the thread chip sits beside the brain badge + kebab;
+         give it shrink permission (it already ellipsizes) so a long thread
+         title cannot overrun the tile edge */
+      .file-tile .files-row__thread {
+        flex: 0 1 auto;
+        min-width: 0;
+      }
+
       /* kit brain badge: 'in the brain' = live-soft green (the file's text
          rides model context), 'stored' = quiet grey (only bytes are held) */
       .files-badge {
@@ -10804,6 +10813,13 @@
         opacity: 1;
       }
 
+      /* 'in this chat' = a private-thread attachment scout read for that 1:1
+         only; readable but never company recall, so it reads stronger than
+         bytes-only 'stored' yet stays ink, not the company-brain green */
+      .files-badge--thread {
+        color: var(--text-2);
+      }
+
       /* kit Files grid — responsive tiles (segmented grid view) */
       .files-grid {
         display: grid;
@@ -10815,6 +10831,7 @@
         position: relative; /* anchors the move-to menu */
         display: block;
         width: 100%;
+        min-width: 0; /* grid items default to min-width:auto — let long names shrink, not blow the track out */
         text-align: left;
         background: var(--surface-2);
         border: 1px solid var(--line-1);
@@ -10841,13 +10858,22 @@
       }
 
       .file-tile__name {
+        display: block;
+        color: var(--text-1);
+        font: 500 13.5px/1.35 var(--font-sans);
+        text-decoration: none;
+      }
+
+      /* Safari hardening: -webkit-line-clamp on a <button> is inconsistent in
+         WebKit, so the 2-line clamp lives on this inner label span (fileTileNode
+         wraps the name in it). overflow-wrap:anywhere breaks a long unbroken
+         token into the clamp instead of overflowing the tile. */
+      .file-tile__name-label {
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        color: var(--text-1);
-        font: 500 13.5px/1.35 var(--font-sans);
-        text-decoration: none;
+        overflow-wrap: anywhere;
         text-wrap: pretty;
       }
 
@@ -21990,7 +22016,7 @@
               </button>
             </form>
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
-            <p id="scoutChatBrainNote" class="scout-chat-brain-note">private from teammates · recorded to the company brain</p>
+            <p id="scoutChatBrainNote" class="scout-chat-brain-note">private · not shared with the company brain — use "Feed the brain" to teach the office</p>
           </div>
         </section>
 
@@ -22677,6 +22703,7 @@
         <span class="notification-panel__title">notifications</span>
         <span class="notification-panel__actions">
           <button id="notificationMarkAll" class="btn btn--text notification-panel__mark" type="button">mark all read</button>
+          <button id="notificationClearAll" class="btn btn--text notification-panel__mark" type="button">clear all</button>
           <button id="notificationClose" class="btn btn--ghost notification-panel__close" type="button" aria-label="Close notifications">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
           </button>
@@ -23435,6 +23462,7 @@
       const notificationList = document.getElementById('notificationList')
       const notificationEmpty = document.getElementById('notificationEmpty')
       const notificationMarkAll = document.getElementById('notificationMarkAll')
+      const notificationClearAll = document.getElementById('notificationClearAll')
       const notificationClose = document.getElementById('notificationClose')
       const proposalDeck = document.getElementById('proposalDeck')
       const proposalDeckList = document.getElementById('proposalDeckList')
@@ -23790,6 +23818,22 @@
       let iceRestartRecoveryStartedAt = 0
       let isLeavingRoom = false
       let clientConfigPromise = null
+      // card-003 W4 gap 2: the client memoizes /client-config once per page
+      // load, but a session that outlives the TURN credential TTL loses relay
+      // candidates on its next ICE restart / reconnect re-dial. Age-stamp the
+      // memoized config and its advertised TTL so a stale one can be refetched
+      // before it is reused for a restart.
+      let clientConfigLoadedAt = 0
+      let clientConfigTtlSeconds = 0
+      const clientConfigMaxAgeCapMs = 60 * 60 * 1000
+      // The last /client-config payload we accepted as usable. A non-ok / empty /
+      // aborted refetch must fall back to this synchronously rather than poison
+      // the memo with a bare {} (which would strip TURN off every later re-dial).
+      let lastGoodClientConfig = null
+      // A config refetch fires exactly when the network is lossy (an ICE restart
+      // is in flight), so it must never hang past this — the restart proceeds on
+      // the previous config the moment the refresh times out.
+      const clientConfigFetchTimeoutMs = 3000
       let lastParticipantTrackRefreshAt = 0
       const remoteElements = new Map()
       const remoteStreamsByParticipant = new Map()
@@ -24679,6 +24723,7 @@
       notificationBell.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden))
       notificationClose.addEventListener('click', () => setNotificationPanelOpen(false))
       notificationMarkAll.addEventListener('click', markAllNotificationsRead)
+      notificationClearAll.addEventListener('click', clearAllNotifications)
       document.querySelectorAll('[data-scout-query]').forEach(button => {
         button.addEventListener('click', () => {
           assistantInput.value = button.dataset.scoutQuery || ''
@@ -24694,6 +24739,16 @@
           restoreAudioAfterVisibility().catch(error => {
             console.warn('Could not restore audio after visibility change', error)
           })
+        }
+      })
+      // card-003 W4 gap 5: a network handoff (Wi-Fi <-> cellular, VPN flip)
+      // silently invalidates the room's ICE candidates; the browser fires
+      // 'online' once a new interface is up. If the peer is already
+      // disconnected/failed, proactively kick the bounded ICE-restart ladder
+      // instead of waiting for the connection-state watchdog to notice.
+      window.addEventListener('online', () => {
+        if (pc && ['disconnected', 'failed'].includes(pc.connectionState)) {
+          requestIceRestart('network change')
         }
       })
       window.addEventListener('pointerdown', unlockRoomAudioPlayback, { passive: true })
@@ -27494,11 +27549,30 @@
           setActiveTool('artifacts')
           return
         }
-        if (entry?.id) {
+        const id = String(entry?.id || '').trim()
+        if (id) {
           beaconArtifactOpen(entry.id)
-          selectArtifact(entry.id)
+          if (artifactEntries.some(candidate => candidate.id === id)) {
+            selectArtifact(id)
+          } else {
+            // out-of-window deep-link: the id isn't in the newest-100 light
+            // list, so a bare selectArtifact would be snapped back to the
+            // newest by ensureSelectedArtifact. Fetch the one artifact by id,
+            // insert it, then select it once it lands (mirrors
+            // fetchGoalArtifactById; loadArtifacts preserves it thereafter).
+            fetchArtifactByIdAndSelect(id)
+          }
         }
         setActiveTool('artifacts')
+        // the artifact library workspace starts folded behind "Open library" —
+        // unfold it and bring it into view (mirrors openPackageArtifact) so the
+        // data-room escape hatch lands the deliverable in front of the reader,
+        // not on the bare Mission Intelligence canvas with the fold closed. The
+        // scroll rides a frame so it runs after the tool switch relayout.
+        setIntelLibraryOpen(true)
+        requestAnimationFrame(() => {
+          intelLibrary?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
       }
 
       /* ---------- §7 the artifact stage: active work opens IN the chat ----------
@@ -27862,6 +27936,10 @@
           })
           if (pdfControl) headActions.appendChild(pdfControl)
         }
+        // Explicit-save gate (card-110): a finished deliverable no longer files
+        // itself onto Files — it offers a Save-to-Files action from the stage.
+        const saveToFilesControl = artifactSaveToFilesControl(entry)
+        if (saveToFilesControl) headActions.appendChild(saveToFilesControl)
         const pdfAssets = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
         if (deckContext) {
@@ -27939,23 +28017,29 @@
           const tool = String(action.tool || '').trim()
           const artifactId = String(action.artifactId || '').trim()
           if (type === 'open_tool' && TOOL_IDS.includes(tool)) {
-            if (artifactId) {
-              selectedArtifactId = artifactId
-              selectedArtifactChanged = true
-            }
             if (agentToolIds.includes(tool) || tool === 'workflow') {
               if (artifactId) {
+                selectedArtifactId = artifactId
+                selectedArtifactChanged = true
                 setActiveTool('chat')
               } else {
                 promptScoutForWork(tool)
               }
+            } else if (tool === 'artifacts' && artifactId) {
+              // deep-link into the data room through the shared opener so the
+              // library unfolds and the deliverable is selected + scrolled into
+              // view (fetched by id when it's out of the newest-100 window)
+              openAgentArtifact({ id: artifactId })
             } else {
+              if (artifactId) {
+                selectedArtifactId = artifactId
+                selectedArtifactChanged = true
+              }
               setActiveTool(tool)
             }
           } else if (type === 'select_artifact' && artifactId) {
             beaconArtifactOpen(artifactId)
-            selectedArtifactId = artifactId
-            selectedArtifactChanged = true
+            openAgentArtifact({ id: artifactId })
           } else if (type === 'assistant_mode') {
             const mode = String(action.mode || '').trim()
             if (['chat', 'artifacts', 'workflow', ...agentToolIds].includes(mode)) {
@@ -28778,6 +28862,71 @@
         const pdfs = artifactAssetEntries(entry).filter(asset =>
           String(asset.kind || '').toLowerCase() === 'pdf' || String(asset.mime || '').toLowerCase() === 'application/pdf')
         return pdfs.length ? pdfs[pdfs.length - 1] : null
+      }
+
+      /* ---------- Save to Files (explicit-save gate, card-110) ----------
+         Deliverables no longer file themselves onto the Files surface; the
+         stage offers a Save-to-Files action for the ones that qualify (real,
+         terminal deliverables — the client mirror of the server's
+         deliverableRecordQualifies gate). POST /assistant/files/save stamps
+         savedToFiles=true; the control renders a settled "Saved to Files"
+         state when the entry is already saved. */
+      function artifactQualifiesForFiles(entry) {
+        const meta = entry?.metadata || {}
+        const provenance = String(meta.source || '').trim() === 'scout_thread'
+          || String(meta.goalPlan || '').trim() !== ''
+          || String(meta.goalDeliverable || '').trim().toLowerCase() === 'true'
+        if (!provenance) return false
+        const status = (typeof artifactStatusValue === 'function' ? artifactStatusValue(entry) : String(meta.status || '')).toLowerCase()
+        return status === 'complete' || status === 'published'
+      }
+
+      function artifactSaveToFilesControl(entry) {
+        const artifactId = String(entry?.id || '').trim()
+        if (!artifactId || !artifactQualifiesForFiles(entry)) return null
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'artifact-stage__pdf-btn'
+        const settleSaved = () => {
+          button.textContent = 'Saved to Files'
+          button.disabled = true
+          button.dataset.state = 'saved'
+          button.title = 'This deliverable is saved on the Files surface'
+        }
+        if (String(entry?.metadata?.savedToFiles || '').trim().toLowerCase() === 'true') {
+          settleSaved()
+          return button
+        }
+        button.textContent = 'Save to Files'
+        button.title = 'Save this deliverable to the Files surface'
+        button.addEventListener('click', async () => {
+          button.disabled = true
+          button.dataset.state = 'saving'
+          button.textContent = 'Saving…'
+          try {
+            const response = await fetch('/assistant/files/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId })
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              throw new Error(payload.error || 'could not save to Files')
+            }
+            if (entry.metadata && typeof entry.metadata === 'object') {
+              entry.metadata.savedToFiles = 'true'
+            }
+            settleSaved()
+            showToast({ text: 'Saved to Files', kind: 'done' })
+            if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+          } catch (error) {
+            button.disabled = false
+            delete button.dataset.state
+            button.textContent = 'Save to Files'
+            showToast({ text: error.message || 'could not save to Files', kind: 'error' })
+          }
+        })
+        return button
       }
 
       /* ---------- Download PDF (founder ask 2026-07-07) ----------
@@ -32443,22 +32592,122 @@
         }
       }
 
+      // Abort a /client-config refetch that hangs — it fires precisely when the
+      // network is lossy (an ICE restart is under way), so an unbounded await
+      // would let the 20s reconnect eject fire before any restart_ice is sent.
+      // AbortSignal.timeout isn't in older Safari, so fall back to a controller.
+      function clientConfigAbortSignal() {
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+          return AbortSignal.timeout(clientConfigFetchTimeoutMs)
+        }
+        if (typeof AbortController === 'function') {
+          const controller = new AbortController()
+          window.setTimeout(() => controller.abort(), clientConfigFetchTimeoutMs)
+          return controller.signal
+        }
+        return undefined
+      }
+
+      // A payload is usable only when it carries relay candidates (iceServers) or
+      // is a genuine server envelope — a real /client-config always stamps
+      // protocolVersion / websocketPath / auth even in keyless mode (empty
+      // rtcConfiguration). A non-ok / aborted fetch yields a bare {} with none of
+      // these; accepting it would (a) age-stamp ttlSeconds=0, freezing
+      // clientConfigIsStale() false forever, and (b) feed setConfiguration({}),
+      // wiping live STUN/TURN. So only such a payload may overwrite the memo.
+      function clientConfigIsUsable(config) {
+        if (!config || typeof config !== 'object') {
+          return false
+        }
+        const iceServers = config.rtcConfiguration?.iceServers
+        if (Array.isArray(iceServers) && iceServers.length > 0) {
+          return true
+        }
+        return config.protocolVersion != null || config.websocketPath != null || config.auth != null
+      }
+
+      // Single timeout-guarded fetch of /client-config. A usable payload refreshes
+      // the memoized stamps + last-good config; a non-ok / empty / aborted fetch
+      // keeps the previous good config and its staleness stamp (so a later restart
+      // retries the refresh) and reports the miss so the memo isn't poisoned.
+      async function fetchClientConfigOnce() {
+        const requestedAt = Date.now()
+        let config = null
+        try {
+          const response = await fetch('/client-config', { cache: 'no-store', signal: clientConfigAbortSignal() })
+          if (response.ok) {
+            config = await response.json()
+          }
+        } catch (error) {
+          console.warn('Could not load browser media config', error)
+        }
+        if (clientConfigIsUsable(config)) {
+          // age-stamp the memoized config so a session outliving the TURN
+          // credential TTL can refresh it before an ICE restart (gap 2)
+          clientConfigLoadedAt = requestedAt
+          clientConfigTtlSeconds = Number(config?.turnCredentialTTLSeconds) || 0
+          lastGoodClientConfig = config
+          return { config, usable: true }
+        }
+        return { config: lastGoodClientConfig || {}, usable: false }
+      }
+
       async function loadClientConfig() {
         if (!clientConfigPromise) {
-          clientConfigPromise = fetch('/client-config', { cache: 'no-store' })
-            .then(response => response.ok ? response.json() : {})
-            .catch(error => {
-              console.warn('Could not load browser media config', error)
-              return {}
-            })
+          clientConfigPromise = fetchClientConfigOnce()
         }
-        return clientConfigPromise
+        const pending = clientConfigPromise
+        const result = await pending
+        if (!result.usable && clientConfigPromise === pending) {
+          // Never leave a failed refresh memoized as a poisoned {} — drop the memo
+          // (only if it's still this attempt, so a concurrent good load survives)
+          // so the next load re-fetches. Callers still get the previous good
+          // config synchronously, so a re-dial / restart never runs with zero
+          // iceServers while the credentials are merely briefly unreachable.
+          clientConfigPromise = null
+        }
+        return result.config
+      }
+
+      // A memoized config is stale once it is older than half its TURN
+      // credential TTL (capped at 1h) — refresh well before the creds expire so
+      // an ICE restart / reconnect never re-dials with dead relay credentials.
+      // TTL 0 (static or absent TURN creds) never goes stale.
+      function clientConfigIsStale(now = Date.now()) {
+        if (!clientConfigPromise || clientConfigTtlSeconds <= 0) {
+          return false
+        }
+        const maxAgeMs = Math.min(clientConfigTtlSeconds * 500, clientConfigMaxAgeCapMs)
+        return now - clientConfigLoadedAt >= maxAgeMs
+      }
+
+      // Returns the memoized config, refetching first when it has aged past half
+      // its TURN credential TTL (gap 2).
+      async function loadFreshClientConfig() {
+        if (clientConfigIsStale()) {
+          clientConfigPromise = null
+        }
+        return loadClientConfig()
+      }
+
+      function rtcConfigurationFrom(config) {
+        const rtcConfiguration = config?.rtcConfiguration
+        return rtcConfiguration && typeof rtcConfiguration === 'object' ? rtcConfiguration : {}
+      }
+
+      function rtcConfigurationHasIceServers(rtcConfiguration) {
+        return Array.isArray(rtcConfiguration?.iceServers) && rtcConfiguration.iceServers.length > 0
       }
 
       async function loadRTCConfiguration() {
-        const config = await loadClientConfig()
-        const rtcConfiguration = config?.rtcConfiguration
-        return rtcConfiguration && typeof rtcConfiguration === 'object' ? rtcConfiguration : {}
+        return rtcConfigurationFrom(await loadClientConfig())
+      }
+
+      // Like loadRTCConfiguration but refreshes stale TURN credentials first, so
+      // a (re)dial or an ICE restart on a long-lived session gets live relay
+      // candidates (gap 2).
+      async function freshRTCConfiguration() {
+        return rtcConfigurationFrom(await loadFreshClientConfig())
       }
 
       async function beginMediaSession(options = {}) {
@@ -32494,7 +32743,11 @@
         await refreshAudioInputDevices()
         updateHearthParticipants()
 
-        const rtcConfiguration = await loadRTCConfiguration()
+        // Every (re)dial builds its PC here, including the signaling-reconnect
+        // re-dial — refresh TURN credentials when the memoized config has aged
+        // past half its TTL so a long-lived session never rebuilds the peer with
+        // dead relay candidates (gap 2). Fresh sessions hit the cache untouched.
+        const rtcConfiguration = await freshRTCConfiguration()
         pc = new RTCPeerConnection(rtcConfiguration)
         const sessionPeer = pc
         pc.ontrack = addRemoteTrack
@@ -32601,9 +32854,33 @@
           return
         }
         mediaDisconnectRecoveryTried = true
+        // media_disconnected means the SERVER tore down our peer connection
+        // (negotiation watchdog / failed-cleanup). A client restart_ice is
+        // futile here: the server has no PC to answer the renegotiation, so the
+        // ICE-restart ladder would stall until the 20s eject. Re-dial through
+        // the signaling-reconnect seam instead — it rebuilds a fresh PC on a new
+        // socket session (the server replaces this endpoint's stale seat). Fall
+        // back to a clean leave if there is no media/identity to rebuild from.
+        if (!roomCanReconnectSignal()) {
+          setLog(detail)
+          leaveRoom()
+          return
+        }
         setConnectionState('connecting', 'reconnecting — hold on')
         setLog('reconnecting — hold on')
-        requestIceRestart('server media disconnect')
+        // Retire the stale-but-open socket first and silence its onclose, so the
+        // fresh dial is the ONLY thing driving reconnect — otherwise its delayed
+        // server-close would re-enter the reconnect path and tear down the
+        // rebuilt peer.
+        const staleSocket = ws
+        ws = undefined
+        try { window.clearInterval(staleSocket.__roomHeartbeat) } catch { /* none */ }
+        staleSocket.onclose = null
+        staleSocket.onmessage = null
+        staleSocket.onerror = null
+        try { staleSocket.close() } catch { /* already closing */ }
+        prepareRoomForSignalingReconnect('server media disconnect')
+        scheduleSignalingReconnect('server media disconnect')
       }
 
       function scheduleConnectionRecovery(sessionPeer) {
@@ -32640,7 +32917,7 @@
         iceRestartRetryTimer = window.setTimeout(() => performIceRestart(reason, nextAttempt), delay)
       }
 
-      function performIceRestart(reason, attempt) {
+      async function performIceRestart(reason, attempt) {
         iceRestartRetryTimer = 0
         if (!pc) {
           return
@@ -32653,6 +32930,29 @@
         const now = Date.now()
         lastIceRestartRequestAt = now
         iceRestartAttempts = attempt
+        // gap 2: a session can outlive its TURN credential TTL, so refresh the
+        // ICE config and re-apply it before the restart — otherwise the restart
+        // re-gathers against dead relay creds and loses its TURN candidates.
+        const restartPeer = pc
+        const rtcConfiguration = await freshRTCConfiguration()
+        // the reconnect seam may have torn down (and replaced) the peer while we
+        // awaited the config — abandon this stale attempt if so
+        if (pc !== restartPeer || !ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        try {
+          // Safari can throw on setConfiguration mid-negotiation; restart anyway.
+          // Never wipe live STUN/TURN off the peer: only re-apply the refreshed
+          // config when it still carries relay candidates, or when the live peer
+          // had none either. A refresh that failed already falls back to the last
+          // good config, so this guard only bites a genuinely empty keyless config.
+          const liveHasIceServers = rtcConfigurationHasIceServers(restartPeer.getConfiguration?.())
+          if (!liveHasIceServers || rtcConfigurationHasIceServers(rtcConfiguration)) {
+            pc.setConfiguration?.(rtcConfiguration)
+          }
+        } catch (error) {
+          console.warn('Could not apply refreshed ICE configuration before restart', error)
+        }
         try {
           pc.restartIce?.()
         } catch (error) {
@@ -39685,6 +39985,49 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           .finally(() => { goalArtifactFetchesInFlight.delete(want) })
       }
 
+      // the deep-link twin of fetchGoalArtifactById: an artifact opened from a
+      // notification row, the stage escape hatch, or an assistant action may
+      // name an id the newest-100 light list dropped. selectArtifact alone
+      // can't show it — ensureSelectedArtifact snaps the selection back to the
+      // newest when the id is absent — so fetch the single artifact by id,
+      // insert it into the window, THEN select. loadArtifacts preserves the
+      // selected out-of-window entry across its wholesale refresh.
+      const deepLinkArtifactFetchesInFlight = new Set()
+      // The deep-link whose selection is still owed. A fetch that lands must not
+      // steal the selection from a newer user pick (or a newer deep-link) made
+      // while it was in flight — so we only select when this is still the active
+      // deep-link and the selection hasn't moved since the call began.
+      let pendingDeepLinkArtifactId = ''
+      function fetchArtifactByIdAndSelect(id) {
+        const want = String(id || '').trim()
+        if (!want || !authedUser || deepLinkArtifactFetchesInFlight.has(want)) return
+        deepLinkArtifactFetchesInFlight.add(want)
+        pendingDeepLinkArtifactId = want
+        const selectedAtCall = selectedArtifactId
+        fetch(`/artifacts?id=${encodeURIComponent(want)}`, { cache: 'no-store' })
+          .then(response => response.ok ? response.json() : null)
+          .then(payload => {
+            const artifact = Array.isArray(payload?.artifacts) ? payload.artifacts[0] : null
+            if (!artifact?.id) return
+            // Decide before addArtifactEntry (its ensureSelectedArtifact can re-home
+            // the selection): this deep-link still owns the selection only while it
+            // is the active deep-link and the user hasn't picked a different
+            // artifact since the fetch began.
+            const stillOwnsSelection = pendingDeepLinkArtifactId === want && selectedArtifactId === selectedAtCall
+            addArtifactEntry(artifact, { select: false })
+            if (stillOwnsSelection) {
+              selectArtifact(artifact.id)
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            deepLinkArtifactFetchesInFlight.delete(want)
+            if (pendingDeepLinkArtifactId === want) {
+              pendingDeepLinkArtifactId = ''
+            }
+          })
+      }
+
       function upsertGoalCardNode(artifact) {
         if (!scoutChatThread || !isGoalArtifact(artifact)) {
           return null
@@ -40907,7 +41250,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         text.textContent = entry.text
         const meta = document.createElement('span')
         meta.className = 'notification-item__meta'
-        meta.textContent = `${entry.kind} · ${scoutChatTimeLabel(entry.createdAt)}`
+        // Consistent order (kind, then relative time); alert is the only kind
+        // that earns a leading glyph so a real alert stays scannable — a
+        // monochrome marker, never a hue (the notification mono-canon).
+        const kindGlyph = entry.kind === 'alert' ? '! ' : ''
+        meta.textContent = `${kindGlyph}${entry.kind} · ${scoutChatTimeLabel(entry.createdAt)}`
         body.append(text, meta)
 
         item.append(dot, body)
@@ -41312,6 +41659,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // the sweep skips them, and the server refuses their receipts too,
         // so a bypass could never stick.
         markNotificationsRead(notificationEntries.filter(entry => !entry.read && !entry.proposalId).map(entry => entry.id))
+      }
+
+      function clearAllNotifications() {
+        // A pending proposal nudge is a live call to action — the sweep leaves
+        // it in place (the server refuses to clear it too), so it survives the
+        // wipe just like mark-all-read skips it.
+        const survivors = notificationEntries.filter(entry => entry.proposalId && !entry.read)
+        if (survivors.length === notificationEntries.length) {
+          return
+        }
+        notificationEntries = survivors
+        renderNotifications()
+        // No body means "clear all visible" — the server applies the same
+        // sticky-nudge skip, so the two views can never diverge.
+        fetch('/assistant/notifications/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }).then(res => {
+          // A non-OK clear (401/500) resolves but cleared nothing server-side —
+          // re-sync so the bell can't sit falsely empty against a server that
+          // still holds the list.
+          if (!res.ok) {
+            loadNotifications()
+          }
+        }).catch(() => {
+          // A failed clear re-syncs the authoritative per-viewer list.
+          loadNotifications()
+        })
       }
 
       function chatThreadForArtifactId(artifactId) {
@@ -42226,8 +42601,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            : 'private · only you and Scout'
 	        }
 	        if (scoutChatBrainNote) {
-	          // private means from teammates, not from the system — these
-	          // threads still feed the company brain; channels are public anyway
+	          // "private" means hidden from teammates, not from the system — the
+	          // thread stays OUT of the company brain (the "Feed the brain" chip is
+	          // the only opt-in door); channels are public anyway, so it's moot there
 	          scoutChatBrainNote.hidden = isChannel
 	        }
 	        // card 070: keep the composer destination guard in lockstep with the head
@@ -48056,7 +48432,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return
           }
           const payload = await response.json()
-          artifactEntries = Array.isArray(payload?.artifacts) ? payload.artifacts : []
+          const fresh = Array.isArray(payload?.artifacts) ? payload.artifacts : []
+          // preserve an explicitly-selected artifact that fell out of the
+          // newest-100 window: a reader (or a deep-link opened by id) parked on
+          // an older deliverable must not have it vanish when this wholesale
+          // refresh lands. The fresh copy wins whenever the id is present.
+          if (selectedArtifactId && !fresh.some(entry => entry.id === selectedArtifactId)) {
+            const kept = artifactEntries.find(entry => entry.id === selectedArtifactId)
+            if (kept) fresh.push(kept)
+          }
+          artifactEntries = fresh
           ensureSelectedArtifact()
           renderArtifacts()
           syncScoutChatResearchCards()
@@ -48993,12 +49378,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function fileBrainBadgeNode(file) {
         const badge = document.createElement('span')
-        const ingested = String(file?.brainStatus || '') === 'ingested'
-        badge.className = ingested ? 'files-badge files-badge--ingested' : 'files-badge'
-        badge.textContent = ingested ? 'in the brain' : 'stored'
-        badge.title = ingested
-          ? 'scout read this file — its contents answer memory questions'
-          : 'bytes are stored; the contents were not readable for the brain'
+        const status = String(file?.brainStatus || '')
+        if (status === 'ingested') {
+          badge.className = 'files-badge files-badge--ingested'
+          badge.textContent = 'in the brain'
+          badge.title = 'scout read this file — its contents answer memory questions'
+        } else if (status === 'thread') {
+          // private-thread attachment: scout read it for that chat, but the text
+          // never entered company-wide recall
+          badge.className = 'files-badge files-badge--thread'
+          badge.textContent = 'in this chat'
+          badge.title = 'scout read this file inside its private chat — it does not answer company-wide memory questions'
+        } else {
+          badge.className = 'files-badge'
+          badge.textContent = 'stored'
+          badge.title = 'bytes are stored; the contents were not readable for the brain'
+        }
         return badge
       }
 
@@ -49436,12 +49831,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const name = String(file?.name || 'file')
         const downloadUrl = String(file?.downloadUrl || '')
+        // the 2-line clamp lives on an inner label span (Safari hardening — a
+        // clamped <button> is inconsistent in WebKit)
+        const tileNameLabel = () => {
+          const label = document.createElement('span')
+          label.className = 'file-tile__name-label'
+          label.textContent = name
+          return label
+        }
         if (file?.origin === 'deliverable' && file?.artifactId) {
           // a deliverable opens in the artifact stage — never a download
           const open = document.createElement('button')
           open.type = 'button'
           open.className = 'file-tile__name'
-          open.textContent = name
+          open.appendChild(tileNameLabel())
           open.addEventListener('click', () => openArtifactStage(file.artifactId, name))
           tile.appendChild(open)
         } else if (downloadUrl) {
@@ -49454,12 +49857,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!file?.previewable) {
             link.setAttribute('download', name)
           }
-          link.textContent = name
+          link.appendChild(tileNameLabel())
           tile.appendChild(link)
         } else {
           const label = document.createElement('span')
           label.className = 'file-tile__name'
-          label.textContent = name
+          label.appendChild(tileNameLabel())
           tile.appendChild(label)
         }
 
@@ -49543,15 +49946,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         body.appendChild(meta)
 
-        const badge = document.createElement('span')
-        const ingested = String(file?.brainStatus || '') === 'ingested'
-        badge.className = ingested ? 'files-badge files-badge--ingested' : 'files-badge'
-        badge.textContent = ingested ? 'in the brain' : 'stored'
-        badge.title = ingested
-          ? 'scout read this file — its contents answer memory questions'
-          : 'bytes are stored; the contents were not readable for the brain'
-
-        row.append(icon, body, badge)
+        // one badge renderer, three honest states (in the brain / in this chat /
+        // stored) — see fileBrainBadgeNode
+        row.append(icon, body, fileBrainBadgeNode(file))
         const kebab = fileMoveKebabNode(file)
         if (kebab) {
           row.appendChild(kebab)

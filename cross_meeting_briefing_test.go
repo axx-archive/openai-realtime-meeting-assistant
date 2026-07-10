@@ -112,7 +112,9 @@ func TestCrossMeetingBriefingGroupsByDayAndMeeting(t *testing.T) {
 
 	text := renderCrossMeetingBriefing(briefing)
 	for _, want := range []string{
-		"## 2026-06-01 — Packaging pilot (meeting-a), Design sync (meeting-b)",
+		// day header now carries the per-meeting captured span (no coverage
+		// stamp on these fixtures, so no partial/listen-only caveat).
+		"## 2026-06-01 — Packaging pilot (meeting-a) · captured 10:00–12:00, Design sync (meeting-b) · captured 12:30–14:00",
 		"[!5] Choose vendor Zebra (attributed to AJ; status decided; meeting-a)",
 		"[!4] Draft pricing sheet (owner Tyler; status open; meeting-a)",
 		"## 2026-06-02",
@@ -323,5 +325,137 @@ func TestRangedFallbackKeepsKeywordLastResort(t *testing.T) {
 	}
 	if answer == "" {
 		t.Fatal("last-resort answer must not be empty")
+	}
+}
+
+/* ---------- coverage honesty (kanban-card-107) ---------- */
+
+func TestCrossMeetingBriefingCoverageSuffixAndSummary(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+	location := meetingTimeLocation()
+
+	digest := `{"meetingId":"meeting-a","title":"Pilot","day":"2026-06-01",` +
+		`"decisions":[{"d":"Ship it","status":"decided","at":"2026-06-01T18:00:00Z","importance":5}]}`
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-a", digest, map[string]string{
+		"meetingId":                "meeting-a",
+		digestDayMetadataKey:       "2026-06-01",
+		digestSpanStartMetadataKey: "2026-06-01T17:05:00Z",
+		digestSpanEndMetadataKey:   "2026-06-01T17:50:00Z",
+		digestCoverageMetadataKey:  coverageLabelPartialLateStart,
+	}); err != nil {
+		t.Fatalf("upsertDigest: %v", err)
+	}
+
+	rangeStart := time.Date(2026, 6, 1, 0, 0, 0, 0, location)
+	briefing := app.composeCrossMeetingBriefing(rangeStart.UTC(), rangeStart.AddDate(0, 0, 1).UTC())
+	if text := renderCrossMeetingBriefing(briefing); !strings.Contains(text, "captured 10:05–10:50 (partial — capture began late)") {
+		t.Fatalf("briefing day-header missing the partial captured suffix:\n%s", text)
+	}
+	if summary := briefing.coverageSummaryLine(); !strings.Contains(summary, "0 of 1 meetings fully captured") || !strings.Contains(summary, "1 partial") {
+		t.Fatalf("coverage summary = %q, want a partial roll-up", summary)
+	}
+
+	result, _, err := app.crossMeetingBriefingTool(map[string]any{"start_day": "2026-06-01", "end_day": "2026-06-01"})
+	if err != nil {
+		t.Fatalf("crossMeetingBriefingTool: %v", err)
+	}
+	if !strings.Contains(asString(result["coverage"]), "partial") {
+		t.Fatalf("tool coverage field = %v, want the partial roll-up", result["coverage"])
+	}
+}
+
+func TestGetMeetingDetailReportsCoverage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "tx-1", "Kicking off the pilot.")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	// sitting opened 15m before the captured span → partial (late start).
+	if _, ok := app.meetings.startMeeting(officeRoomID, meetingID, time.Date(2026, 7, 6, 16, 40, 0, 0, time.UTC), []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a record")
+	}
+	digest := `{"meetingId":"` + meetingID + `","title":"Pilot"}`
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, digest, map[string]string{
+		"meetingId":                meetingID,
+		digestSpanStartMetadataKey: "2026-07-06T16:55:00Z",
+		digestSpanEndMetadataKey:   "2026-07-06T17:30:00Z",
+	}); err != nil {
+		t.Fatalf("upsertDigest: %v", err)
+	}
+
+	result, _, err := app.getMeetingDetail(map[string]any{"meeting_id": meetingID})
+	if err != nil {
+		t.Fatalf("getMeetingDetail: %v", err)
+	}
+	if got := asString(result["coverage"]); got != coverageLabelPartialLateStart {
+		t.Fatalf("coverage = %q, want %q", got, coverageLabelPartialLateStart)
+	}
+	if result["captured"] == nil {
+		t.Fatalf("captured window missing: %+v", result)
+	}
+	// The legacy-recompute path (no stamp) still emits a neutral human note.
+	if note := asString(result["coverageNote"]); !strings.Contains(note, "captured portion only") {
+		t.Fatalf("coverageNote = %q, want the neutral captured-portion note", note)
+	}
+}
+
+// Finding C: partial_gaps must render as neutral quiet-or-uncaptured wording in
+// both the briefing suffix and the get_meeting_detail note — never as an assertion
+// that capture failed.
+func TestCoverageGapPhrasingIsNeutral(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	gapped := meetingCoverageSummary{
+		Label:     coverageLabelPartialGaps,
+		SpanStart: time.Date(2026, 6, 1, 17, 5, 0, 0, time.UTC),
+		SpanEnd:   time.Date(2026, 6, 1, 17, 50, 0, 0, time.UTC),
+	}
+	suffix := briefingCapturedSuffix(gapped)
+	if !strings.Contains(suffix, "quiet or uncaptured") {
+		t.Fatalf("gap suffix = %q, want neutral quiet-or-uncaptured wording", suffix)
+	}
+	if strings.Contains(suffix, "— gaps)") {
+		t.Fatalf("gap suffix must drop the old bare-gaps wording: %q", suffix)
+	}
+	note := coverageDetailNote(gapped)
+	if !strings.Contains(note, "quiet spell or a capture gap") {
+		t.Fatalf("gap note = %q, want neutral quiet-or-gap wording", note)
+	}
+	if coverageDetailNote(meetingCoverageSummary{Label: coverageLabelFull}) != "" {
+		t.Fatal("full coverage must produce no note")
+	}
+	if note := coverageDetailNote(meetingCoverageSummary{Label: coverageLabelFull, ListenOnly: true}); !strings.Contains(note, "listen-only") {
+		t.Fatalf("listen-only note = %q, want the listen-only caveat", note)
+	}
+}
+
+// Finding B: meetingCoverageDetail must PREFER the digest's server-authored
+// coverage stamp over a live recompute, because raw transcripts are deletable
+// (slop-quarantine expiry, chat deletes) and a live recompute would drift an
+// aged meeting away from the truth. Here the stamp says "full" while the live
+// evidence (a 15m-late span vs the sitting start, and zero surviving
+// transcripts) would otherwise recompute to partial/unknown — the stamp wins.
+func TestMeetingCoverageDetailPrefersStampOverLiveRecompute(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := "meeting-20260706-101500-000000001"
+	if _, ok := app.meetings.startMeeting(officeRoomID, meetingID, time.Date(2026, 7, 6, 16, 40, 0, 0, time.UTC), []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a record")
+	}
+	digest := `{"meetingId":"` + meetingID + `","title":"Pilot"}`
+	// span opens 15m after the sitting start (a live recompute would call this
+	// partial_late_start) but the producer stamped it full — the stamp is the
+	// durable truth computed while transcripts were intact.
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, digest, map[string]string{
+		"meetingId":                meetingID,
+		digestSpanStartMetadataKey: "2026-07-06T16:55:00Z",
+		digestSpanEndMetadataKey:   "2026-07-06T17:30:00Z",
+		digestCoverageMetadataKey:  coverageLabelFull,
+	}); err != nil {
+		t.Fatalf("upsertDigest: %v", err)
+	}
+	summary := app.meetingCoverageDetail(meetingID)
+	if summary.Label != coverageLabelFull {
+		t.Fatalf("coverage = %q, want the stamped %q (not a live recompute)", summary.Label, coverageLabelFull)
+	}
+	if summary.SpanStart.IsZero() || summary.SpanEnd.IsZero() {
+		t.Fatalf("captured window should still come from the digest span: %+v", summary)
 	}
 }

@@ -873,6 +873,82 @@ func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpd
 	return cloneMemoryEntry(entry), true, nil
 }
 
+// updateOSArtifactsMetadataBatch merges the SAME metadataUpdates onto many
+// artifacts under ONE lock with a SINGLE rewrite, the boot-migration variant of
+// updateOSArtifactMetadata (which rewrites the whole JSONL per call — N stamps
+// were N full re-encodes on the 2-vCPU box). It follows updateOSArtifactMetadata
+// exactly: only os_artifact entries, a bookkeeping stamp that never touches
+// Text/title/updatedBy, a no-op update skipped per entry, and a rollback of the
+// in-memory entries if the rewrite fails. The rewrite is fsync'd (syncToDisk),
+// the digest-supersession precedent for a routine full-file rewrite whose loss
+// on a crash-after-rename would truncate the log. Returns the count changed.
+func (store *meetingMemoryStore) updateOSArtifactsMetadataBatch(ids []string, metadataUpdates map[string]string) (int, error) {
+	if store == nil {
+		return 0, fmt.Errorf("memory store is unavailable")
+	}
+	if len(ids) == 0 || len(metadataUpdates) == 0 {
+		return 0, nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	indexByID := make(map[string]int, len(store.entries))
+	for candidateIndex, entry := range store.entries {
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			indexByID[entry.ID] = candidateIndex
+		}
+	}
+
+	type rollback struct {
+		index int
+		prior meetingMemoryEntry
+	}
+	applied := make([]rollback, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		index, ok := indexByID[id]
+		if !ok {
+			continue
+		}
+		previousEntry := store.entries[index]
+		entry := cloneMemoryEntry(previousEntry)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]string{}
+		}
+		changed := false
+		for key, value := range metadataUpdates {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if entry.Metadata[key] != value {
+				entry.Metadata[key] = value
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		store.entries[index] = entry
+		applied = append(applied, rollback{index: index, prior: previousEntry})
+	}
+	if len(applied) == 0 {
+		return 0, nil
+	}
+	if err := store.rewriteLocked(true); err != nil {
+		for _, stale := range applied {
+			store.entries[stale.index] = stale.prior
+		}
+		return 0, err
+	}
+	return len(applied), nil
+}
+
 func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
@@ -1234,6 +1310,66 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 	return cloneMemoryEntries(tailMemoryEntries(entries, limit))
 }
 
+// transcriptCoverage is the deterministic read of how continuously ONE
+// meeting's raw transcript was captured: when the first/last captured line
+// landed, how many there were, and the largest silent stretch between two
+// consecutive lines. Every field derives from stored kind=transcript entries,
+// so the model can never fabricate it. Zero values (Count == 0) mean nothing
+// was captured for the meeting.
+//
+// This is THE shared coverage primitive: the meeting-digest producer stamps a
+// coverage label from it (meetingCoverageLabel), the recap prefix reads it, and
+// a future "recording degraded" badge is expected to read it too — keep the
+// signature stable and side-effect free.
+type transcriptCoverage struct {
+	FirstAt        time.Time     // earliest captured transcript line
+	LastAt         time.Time     // latest captured transcript line
+	Count          int           // number of captured transcript lines
+	MaxInternalGap time.Duration // largest gap between two consecutive lines
+}
+
+// transcriptCoverageForMeeting computes the transcriptCoverage read for a
+// meeting id over the store's kind=transcript entries. It scans raw entries
+// (not visibleEntriesLocked) on purpose: coverage is about what the recorder
+// captured, independent of recall visibility.
+func (store *meetingMemoryStore) transcriptCoverageForMeeting(meetingID string) transcriptCoverage {
+	var coverage transcriptCoverage
+	if store == nil {
+		return coverage
+	}
+	meetingID = strings.TrimSpace(meetingID)
+	if meetingID == "" {
+		return coverage
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	times := make([]time.Time, 0, 64)
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindTranscript {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
+			continue
+		}
+		times = append(times, entry.CreatedAt)
+	}
+	if len(times) == 0 {
+		return coverage
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
+	coverage.Count = len(times)
+	coverage.FirstAt = times[0]
+	coverage.LastAt = times[len(times)-1]
+	for index := 1; index < len(times); index++ {
+		if gap := times[index].Sub(times[index-1]); gap > coverage.MaxInternalGap {
+			coverage.MaxInternalGap = gap
+		}
+	}
+	return coverage
+}
+
 // entriesOfKind returns the newest entries of one kind, oldest first.
 func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meetingMemoryEntry {
 	if store == nil {
@@ -1355,12 +1491,122 @@ const (
 	// meeting_digest covers (RFC3339); digestsInRange overlap-matches on them.
 	digestSpanStartMetadataKey = "spanStart"
 	digestSpanEndMetadataKey   = "spanEnd"
+	// digestSittingStartedAtMetadataKey/digestSittingEndedAtMetadataKey stamp the
+	// room-occupancy sitting bounds (the meetings-directory StartedAt/EndedAt)
+	// onto a meeting_digest so a reader can compare the CAPTURED span to the
+	// sitting it belongs to (kanban-card-107). NEVER a real-world calendar time.
+	digestSittingStartedAtMetadataKey = "sittingStartedAt"
+	digestSittingEndedAtMetadataKey   = "sittingEndedAt"
+	// digestCoverageMetadataKey holds the Go-computed coverage classification
+	// (one of the coverageLabel* values). Server-authored — the model never sees
+	// or writes it, so it can never inflate a partial capture to "full".
+	digestCoverageMetadataKey = "coverage"
+	// externalMayPredateCaptureMetadataKey flags a listen-only sitting whose real
+	// external meeting may have already been underway before Bonfire began
+	// capturing — the honest caveat for a guest/listen-only digest.
+	externalMayPredateCaptureMetadataKey = "externalMayPredateCapture"
 	// companyDigestKey is the fixed digestKey of the latest-only company fold.
 	companyDigestKey = "company"
 	// dayBucketLayout is the canonical day-key format shared by dayBucket,
 	// the day-digest producer, and digestsInRange.
 	dayBucketLayout = "2006-01-02"
 )
+
+// Coverage classification (kanban-card-107): how completely a captured
+// meeting_digest window covers the room-occupancy sitting it belongs to.
+// Server-computed in Go so the model can never overstate visibility.
+const (
+	coverageLabelFull             = "full"               // covers the sitting start and has no large gap
+	coverageLabelPartialLateStart = "partial_late_start" // capture began well after the sitting started
+	coverageLabelPartialGaps      = "partial_gaps"       // a long stretch mid-sitting with no captured transcript (quiet OR a capture gap)
+	coverageLabelUnknown          = "unknown"            // legacy synthetic key, no directory record, or no captured span
+
+	// coverageStartTolerance: a digest whose captured window opens within this
+	// of the sitting start still counts as covering the start — it absorbs the
+	// first-brain-batch latency between admission and the first summarized line.
+	coverageStartTolerance = 2 * time.Minute
+	// coverageGapThreshold: the largest stretch between two consecutive captured
+	// transcript lines tolerated before coverage reads as gapped. Transcripts land
+	// only on speech or room-chat, so a gap this long means EITHER a genuinely
+	// quiet stretch OR a capture failure — the two are indistinguishable from the
+	// timeline alone. partial_gaps is therefore a conservative flag ("something
+	// here may be missing"), never proof of an outage, and every reader phrases it
+	// that way. Kept generously wide (10m) so an ordinary lull — a demo, a silent
+	// read-through, a side conversation off-mic — does not get flagged.
+	coverageGapThreshold = 10 * time.Minute
+)
+
+// isLegacyMeetingKey reports the synthetic per-day digest keys minted for the
+// pre-scoping null-meetingId history (digestKeyForBrain). Those have no
+// directory record, so their coverage is always unknown.
+func isLegacyMeetingKey(key string) bool {
+	return strings.HasPrefix(strings.TrimSpace(key), "meeting-legacy-")
+}
+
+// meetingCoverageLabel classifies how completely a captured digest window
+// covers its meeting's room-occupancy sitting, computed entirely in Go.
+// resolvable is false for legacy synthetic keys and meetings with no directory
+// record (or an unparseable start); those — and any meeting with no captured
+// span — are always coverageLabelUnknown, never a fabricated "full". Late start
+// is reported before gaps: a missing opening is the more fundamental hole.
+func meetingCoverageLabel(resolvable bool, sittingStart, spanStart time.Time, maxInternalGap time.Duration) string {
+	if !resolvable || sittingStart.IsZero() || spanStart.IsZero() {
+		return coverageLabelUnknown
+	}
+	if spanStart.Sub(sittingStart) > coverageStartTolerance {
+		return coverageLabelPartialLateStart
+	}
+	if maxInternalGap > coverageGapThreshold {
+		return coverageLabelPartialGaps
+	}
+	return coverageLabelFull
+}
+
+// meetingCoverageSummary is the read-side coverage view for one meeting shared
+// by the cross-meeting briefing, get_meeting_detail, and the digest context
+// headers. Label is one of the coverageLabel* values; SpanStart/SpanEnd are the
+// captured window (zero when no digest span is stamped).
+type meetingCoverageSummary struct {
+	Label      string
+	SpanStart  time.Time
+	SpanEnd    time.Time
+	ListenOnly bool
+}
+
+// partial reports a coverage summary the reader should caveat (partial or
+// unknown, or listen-only) — anything but a clean, fully-covered capture.
+func (summary meetingCoverageSummary) partial() bool {
+	return summary.Label != coverageLabelFull || summary.ListenOnly
+}
+
+// parseDigestSpanMetadata reads a digest's stamped [spanStart, spanEnd] window,
+// reporting ok=false when either bound is absent/unparseable (a legacy digest).
+func parseDigestSpanMetadata(entry meetingMemoryEntry) (time.Time, time.Time, bool) {
+	start, startErr := time.Parse(time.RFC3339, strings.TrimSpace(entry.Metadata[digestSpanStartMetadataKey]))
+	end, endErr := time.Parse(time.RFC3339, strings.TrimSpace(entry.Metadata[digestSpanEndMetadataKey]))
+	if startErr != nil || endErr != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	return start, end, true
+}
+
+// meetingCoverageFromDigest reads the coverage summary a producer already
+// stamped onto a meeting_digest entry (the sub-wave-1 stamps). A legacy digest
+// missing the coverage stamp degrades to coverageLabelUnknown — never a
+// fabricated read.
+func meetingCoverageFromDigest(entry meetingMemoryEntry) meetingCoverageSummary {
+	summary := meetingCoverageSummary{
+		Label:      strings.TrimSpace(entry.Metadata[digestCoverageMetadataKey]),
+		ListenOnly: strings.EqualFold(strings.TrimSpace(entry.Metadata[listenOnlyMetadataKey]), "true"),
+	}
+	if summary.Label == "" {
+		summary.Label = coverageLabelUnknown
+	}
+	if start, end, ok := parseDigestSpanMetadata(entry); ok {
+		summary.SpanStart, summary.SpanEnd = start, end
+	}
+	return summary
+}
 
 // isMeetingDigestKind reports the three digest tiers. They are recall-eligible
 // knowledge (never UI-state), exempt from the prompt-body cap, and hidden from

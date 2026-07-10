@@ -5,8 +5,12 @@ package main
 // feed carries scrollable slack under both deck shapes, on desktop and
 // tablet), the in-room chat rail stays clamped to the viewport so its
 // composer never slides under the fixed meeting dock, and the private
-// composer carries a persistent caveat that private threads still feed the
-// company brain — hidden on public channels.
+// composer carries a persistent caveat telling the TRUE contract: private
+// threads stay OUT of the company brain (the "Feed the brain" chip is the
+// only opt-in door) — the note is hidden on public channels. The server-side
+// proof of that contract lives in TestPrivateChatBrainContract
+// (private_chat_brain_contract_test.go): private thread messages never reach
+// store.search, contextEntriesForQuery, the brain window, or meeting memory.
 
 import (
 	"os"
@@ -51,8 +55,9 @@ func TestIndexPipMeetingClearsChatFeed(t *testing.T) {
 func TestIndexPrivateChatCarriesBrainNote(t *testing.T) {
 	html := readIndexForPipPrivacy(t)
 	for _, want := range []string{
-		// the persistent caveat under the private composer
-		`<p id="scoutChatBrainNote" class="scout-chat-brain-note">private from teammates · recorded to the company brain</p>`,
+		// the persistent caveat under the private composer — now tells the TRUE
+		// contract (private threads are excluded from the company brain)
+		`<p id="scoutChatBrainNote" class="scout-chat-brain-note">private · not shared with the company brain — use "Feed the brain" to teach the office</p>`,
 		".scout-chat-brain-note {",
 		".scout-chat-brain-note[hidden] {",
 		"const scoutChatBrainNote = document.getElementById('scoutChatBrainNote')",

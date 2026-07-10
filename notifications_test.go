@@ -724,3 +724,261 @@ func TestNotificationForViewerCarriesThreadID(t *testing.T) {
 		t.Fatalf("viewer payload threadId=%v, want scout-chat-123", payload["threadId"])
 	}
 }
+
+// clearNotifications is per-viewer: clearing dismisses records from the
+// clearer's bell (list + unread backlog) without deleting the shared record,
+// so a broadcast one account cleared still reaches everyone else. The stamp
+// survives a reload, an ids-subset clear scopes to the named ids, and the
+// viewer projection never leaks the clearedBy roster.
+func TestClearNotificationsScopedToViewer(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	broadcast, err := app.createNotification("", "info", "all-hands broadcast", "", "", "", false)
+	if err != nil {
+		t.Fatalf("create broadcast: %v", err)
+	}
+	if _, err := app.createNotification("tom@shareability.com", "task", "just for Tom", "", "", "", false); err != nil {
+		t.Fatalf("create targeted: %v", err)
+	}
+
+	// Tom sees both before clearing.
+	if list := app.notificationsForUser("tom@shareability.com", notificationListLimit); len(list) != 2 {
+		t.Fatalf("tom pre-clear list=%#v, want both records", list)
+	}
+
+	// Tom clears all (nil ids): both his visible records get stamped.
+	cleared, err := app.clearNotifications("tom@shareability.com", nil)
+	if err != nil {
+		t.Fatalf("clearNotifications: %v", err)
+	}
+	if cleared != 2 {
+		t.Fatalf("cleared=%d, want 2", cleared)
+	}
+
+	// Tom's GET list AND unread backlog are empty after the clear — the one
+	// filter covers both callers.
+	if list := app.notificationsForUser("tom@shareability.com", notificationListLimit); len(list) != 0 {
+		t.Fatalf("tom list after clear=%#v, want empty", list)
+	}
+	if unread := app.unreadNotificationsFor("tom@shareability.com", notificationListLimit); len(unread) != 0 {
+		t.Fatalf("tom unread after clear=%#v, want empty", unread)
+	}
+
+	// AJ is unaffected: the shared broadcast survives for him.
+	ajList := app.notificationsForUser("aj@shareability.com", notificationListLimit)
+	if len(ajList) != 1 || ajList[0]["id"] != broadcast.ID {
+		t.Fatalf("aj list=%#v, want the broadcast still visible", ajList)
+	}
+	if _, leaked := ajList[0]["clearedBy"]; leaked {
+		t.Fatal("viewer projection must not expose the clearedBy roster")
+	}
+
+	// Idempotent: a second clear finds nothing new.
+	if again, err := app.clearNotifications("tom@shareability.com", nil); err != nil || again != 0 {
+		t.Fatalf("second clear=(%d,%v), want (0,nil)", again, err)
+	}
+
+	// ids-subset clear scopes to the named ids only.
+	ajFirst, err := app.createNotification("aj@shareability.com", "info", "first for aj", "", "", "", false)
+	if err != nil {
+		t.Fatalf("create ajFirst: %v", err)
+	}
+	ajSecond, err := app.createNotification("aj@shareability.com", "info", "second for aj", "", "", "", false)
+	if err != nil {
+		t.Fatalf("create ajSecond: %v", err)
+	}
+	subset, err := app.clearNotifications("aj@shareability.com", []string{ajFirst.ID})
+	if err != nil {
+		t.Fatalf("subset clear: %v", err)
+	}
+	if subset != 1 {
+		t.Fatalf("subset cleared=%d, want only ajFirst", subset)
+	}
+	afterSubset := app.notificationsForUser("aj@shareability.com", notificationListLimit)
+	if len(afterSubset) != 2 || afterSubset[0]["id"] != ajSecond.ID || afterSubset[1]["id"] != broadcast.ID {
+		t.Fatalf("aj list after subset=%#v, want ajSecond then broadcast (ajFirst cleared)", afterSubset)
+	}
+
+	// Cleared state survives a reload from data/notifications.json.
+	reloaded := newKanbanBoardApp()
+	if list := reloaded.notificationsForUser("tom@shareability.com", notificationListLimit); len(list) != 0 {
+		t.Fatalf("tom list after reload=%#v, want still cleared", list)
+	}
+	reloadedAJ := reloaded.notificationsForUser("aj@shareability.com", notificationListLimit)
+	if len(reloadedAJ) != 2 || reloadedAJ[0]["id"] != ajSecond.ID || reloadedAJ[1]["id"] != broadcast.ID {
+		t.Fatalf("aj list after reload=%#v, want ajSecond then broadcast (ajFirst still cleared)", reloadedAJ)
+	}
+}
+
+// A pending proposal nudge is a live call to action: clearNotifications reuses
+// the mark-read sticky guard so a clear sweep skips it, yet it still settles on
+// proposal action, and a record cleared AFTER it settles stays cleared through
+// the settle re-broadcast (TASK 1.5 — the in-place rewrite rides ClearedBy).
+func TestClearNotificationsSkipsStickyNudgeAndPreservesSettleClear(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title": "Sticky clear audit",
+		"mode":  "research",
+		"query": "Research the sticky clear and draft a brief.",
+	})
+	if err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+	proposalID := asString(result["proposal"].(map[string]any)["id"])
+
+	// The pending nudge is sticky: Tom's clear-all skips it and it survives.
+	if cleared, err := app.clearNotifications("tom@shareability.com", nil); err != nil || cleared != 0 {
+		t.Fatalf("clear over a pending nudge=(%d,%v), want (0,nil) — it must survive", cleared, err)
+	}
+	tomList := app.notificationsForUser("tom@shareability.com", notificationListLimit)
+	if len(tomList) != 1 || tomList[0]["proposalId"] != proposalID {
+		t.Fatalf("tom list=%#v, want the surviving pending nudge", tomList)
+	}
+
+	// It still settles on proposal action, then reads as acknowledged for all.
+	if _, _, err := app.resolveCodexProposal(proposalID, "dismiss", "AJ", "aj@shareability.com"); err != nil {
+		t.Fatalf("dismiss proposal: %v", err)
+	}
+	settled := app.notificationsForUser("tom@shareability.com", notificationListLimit)
+	if len(settled) != 1 || settled[0]["proposalId"] != proposalID || settled[0]["read"] != true {
+		t.Fatalf("tom settled list=%#v, want the settled nudge read for every account", settled)
+	}
+
+	// Now settled (not sticky), Tom can clear it — and it stays cleared.
+	if cleared, err := app.clearNotifications("tom@shareability.com", nil); err != nil || cleared != 1 {
+		t.Fatalf("clear over the settled nudge=(%d,%v), want (1,nil)", cleared, err)
+	}
+	if list := app.notificationsForUser("tom@shareability.com", notificationListLimit); len(list) != 0 {
+		t.Fatalf("tom list after clearing the settled nudge=%#v, want empty", list)
+	}
+
+	// TASK 1.5 direct pin: a non-sticky linked record (its proposal is not
+	// pending) is clearable BEFORE a settle rewrite. Clearing it then settling
+	// it must keep the stamp — settleProposalNotification rewrites in place and
+	// never resurrects the record for the account that cleared it.
+	linked, err := app.createLinkedNotification("", "agent", "linked run nudge", "", "", "", "prop-detached", false)
+	if err != nil {
+		t.Fatalf("create linked nudge: %v", err)
+	}
+	if n, err := app.clearNotifications("tom@shareability.com", []string{linked.ID}); err != nil || n != 1 {
+		t.Fatalf("clear detached linked nudge=(%d,%v), want (1,nil)", n, err)
+	}
+	app.settleProposalNotification("prop-detached", "linked run finished", "aj@shareability.com", "os-artifact-linked-1")
+	if list := app.notificationsForUser("tom@shareability.com", notificationListLimit); len(list) != 0 {
+		t.Fatalf("tom list after settle=%#v, want the cleared record to stay hidden through the rewrite", list)
+	}
+	if unread := app.unreadNotificationsFor("tom@shareability.com", notificationListLimit); len(unread) != 0 {
+		t.Fatalf("tom unread after settle=%#v, want empty", unread)
+	}
+	// AJ never cleared it, so he still sees the settled outcome.
+	found := false
+	for _, item := range app.notificationsForUser("aj@shareability.com", notificationListLimit) {
+		if item["id"] == linked.ID {
+			found = true
+			if !strings.Contains(asString(item["text"]), "linked run finished") {
+				t.Fatalf("aj settled text=%q, want the rewritten outcome", asString(item["text"]))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("aj list must still carry the settled linked record he never cleared")
+	}
+}
+
+// The clear endpoint clones the read handler's gate stack: method-first (GET is
+// 405), origin, then session (unauth is 401). An authenticated POST with NO
+// body clears everything the viewer can see (absent body = clear all).
+func TestNotificationClearEndpointGates(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	// Unauthenticated POST is rejected before touching the store.
+	rec := httptest.NewRecorder()
+	assistantNotificationsClearHandler(rec, httptest.NewRequest(http.MethodPost, "/assistant/notifications/clear", strings.NewReader(`{"ids":["x"]}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth clear status=%d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	// GET is not allowed on the clear route (method check runs first).
+	rec = httptest.NewRecorder()
+	assistantNotificationsClearHandler(rec, httptest.NewRequest(http.MethodGet, "/assistant/notifications/clear", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET clear status=%d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+
+	if _, err := kanbanApp.createNotification("", "info", "team-wide", "", "", "", false); err != nil {
+		t.Fatalf("create broadcast: %v", err)
+	}
+	// Absent body: the decoder hits io.EOF, which the handler treats as
+	// "clear all visible" rather than a bad request.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/assistant/notifications/clear", nil)
+	for _, cookie := range loginAs(t, "tom@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	assistantNotificationsClearHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("no-body clear status=%d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusOK)
+	}
+	var out struct {
+		Cleared int `json:"cleared"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode clear response: %v", err)
+	}
+	if out.Cleared != 1 {
+		t.Fatalf("cleared=%d, want 1 (the broadcast)", out.Cleared)
+	}
+	if unread := kanbanApp.unreadNotificationsFor("tom@shareability.com", notificationListLimit); len(unread) != 0 {
+		t.Fatalf("tom unread after endpoint clear=%#v, want empty", unread)
+	}
+}
+
+// Frontend wiring guard for the clear-all control: the button anchor sits
+// beside the pinned mark-all-read anchor and is wired to clearAllNotifications,
+// which POSTs the clear endpoint, skips sticky pending-proposal nudges, and
+// re-syncs the authoritative list on a failed clear — including a non-OK
+// response (401/500) that resolves but cleared nothing server-side.
+func TestIndexNotificationClearAll(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	if !strings.Contains(html, `id="notificationClearAll"`) {
+		t.Fatal("index.html missing the clear-all button anchor")
+	}
+	// mark-all-read stays a pinned anchor beside it.
+	if !strings.Contains(html, `id="notificationMarkAll"`) {
+		t.Fatal("clear-all must not displace the mark-all-read anchor")
+	}
+	if !strings.Contains(html, "notificationClearAll.addEventListener('click', clearAllNotifications)") {
+		t.Fatal("clear-all button must be wired to clearAllNotifications")
+	}
+
+	clearBody := functionBody(html, "function clearAllNotifications()")
+	if clearBody == "" {
+		t.Fatal("clearAllNotifications must be defined")
+	}
+	if !strings.Contains(clearBody, "/assistant/notifications/clear") {
+		t.Fatal("clearAllNotifications must POST the clear endpoint")
+	}
+	if !strings.Contains(clearBody, "entry.proposalId && !entry.read") {
+		t.Fatal("clearAllNotifications must skip sticky pending-proposal nudges")
+	}
+	if !strings.Contains(clearBody, "loadNotifications()") {
+		t.Fatal("clearAllNotifications must re-sync the authoritative list on a failed clear")
+	}
+	// a non-OK response resolves (not rejects), so the .then must inspect res.ok
+	// and re-sync too — otherwise the bell sits falsely empty on a 401/500.
+	if !strings.Contains(clearBody, "res.ok") {
+		t.Fatal("clearAllNotifications must re-sync on a non-OK clear response, not only on a rejected fetch")
+	}
+}

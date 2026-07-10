@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -407,6 +410,59 @@ func TestPrivateThreadPostDoesNotReachOtherUsersRoomSocket(t *testing.T) {
 	if !strings.Contains(string(raw), public.ID) {
 		t.Fatalf("room socket missed the public marker: %s", raw)
 	}
+}
+
+// TestPrivateVoiceBoardMutationReachesOfficeSocket pins RW1 (kanban-card-108):
+// a private-dashboard Scout-voice board mutation (POST /assistant/realtime-tool)
+// must fan the board + undo_available snapshots out to an office-only socket, so
+// the board refreshes live instead of only on a manual browser reload. Pre-fix
+// applyPrivateRealtimeVoiceTool mutated the board but never broadcast.
+func TestPrivateVoiceBoardMutationReachesOfficeSocket(t *testing.T) {
+	// Isolate board persistence: the handler mutates the global kanbanApp, so
+	// without this the create would land in the real board.json.
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+
+	server := newIsolatedWebsocketServer(t)
+	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
+	sendOfficeHello(t, conn)
+	// Drain the ordered office replay (it ends with codex_proposals, after the
+	// replayed board + undo_available) so the reads below observe only the
+	// mutation's fresh broadcast.
+	waitForKanbanEvent(t, conn, "codex_proposals", 5*time.Second)
+
+	token, err := userSessionStore().create("aj@shareability.com")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-tool",
+		strings.NewReader(`{"name":"create_ticket","arguments":{"title":"RW1BoardLiveRefreshProbe"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	recorder := httptest.NewRecorder()
+
+	assistantRealtimeToolHandler(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+	var payload struct {
+		OK      bool `json:"ok"`
+		Changed bool `json:"changed"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.OK || !payload.Changed {
+		t.Fatalf("payload=%+v, want ok+changed for create_ticket", payload)
+	}
+
+	// The private-voice mutation must reach the office-only socket: the board
+	// snapshot carrying the new card, then the undo_available flag.
+	board := waitForKanbanEvent(t, conn, "board", 5*time.Second)
+	if !strings.Contains(string(board), "RW1BoardLiveRefreshProbe") {
+		t.Fatalf("office board snapshot missing the new card: %s", board)
+	}
+	waitForKanbanEvent(t, conn, "undo_available", 5*time.Second)
 }
 
 // TestOfficePingAnsweredWithPongOnSameSocket pins the office liveness probe:

@@ -60,8 +60,9 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 		log.Errorf("meeting recap brain pass failed: %v", err)
 	}
 
+	meetingID := app.memory.currentMeetingID(roomID)
 	recapText := ""
-	for _, entry := range app.memory.snapshotForMeeting(app.memory.currentMeetingID(roomID), 0) {
+	for _, entry := range app.memory.snapshotForMeeting(meetingID, 0) {
 		if entry.Kind == meetingMemoryKindBrain {
 			recapText = strings.TrimSpace(entry.Text)
 		}
@@ -70,6 +71,13 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 		return nil, false, fmt.Errorf("nothing has been captured this meeting yet")
 	}
 	headline := meetingRecapHeadline(recapText)
+	// Coverage honesty (kanban-card-107): if capture began well after the
+	// sitting started or had a long gap, lead the recap with a short caveat so
+	// it never implies it covers a meeting it only partly captured.
+	if prefix := app.meetingCapturePrefix(meetingID); prefix != "" {
+		recapText = prefix + recapText
+		headline = prefix + headline
+	}
 
 	if audience == notificationAudienceMe {
 		// Catch-me-up: the recap lands in the requester's bell only.
@@ -112,6 +120,44 @@ func (app *kanbanBoardApp) catchMeUp(args map[string]any, requesterEmail string,
 		forced[key] = value
 	}
 	return app.meetingRecap(forced, requesterEmail, roomID)
+}
+
+// meetingCapturePrefix returns a short honesty note to lead a recap when the
+// captured transcript began well after the room-occupancy sitting started
+// (coverageStartTolerance) or had a long stretch with no captured lines
+// (coverageGapThreshold) — so a recap never implies it covers a meeting it only
+// partly captured. Empty when coverage is clean or unknowable. This is a LIVE
+// recompute rather than a stamp read, and that is correct here: the recap always
+// targets the CURRENT sitting (currentMeetingID), whose transcripts are minutes
+// old and cannot yet have aged out — so it never suffers the aged-transcript
+// drift that meetingCoverageDetail guards against for PAST meetings. A gap can be
+// a quiet spell as easily as a capture failure, so the note says so plainly and
+// never asserts capture broke. The stamped time is the moment CAPTURE began,
+// never a fabricated real-world meeting start.
+func (app *kanbanBoardApp) meetingCapturePrefix(meetingID string) string {
+	if app == nil || app.memory == nil || strings.TrimSpace(meetingID) == "" {
+		return ""
+	}
+	coverage := app.memory.transcriptCoverageForMeeting(meetingID)
+	if coverage.Count == 0 {
+		return ""
+	}
+	lateStart := false
+	if record, ok := app.meetingDirectoryRecord(meetingID); ok && !isLegacyMeetingKey(meetingID) {
+		if start, err := time.Parse(time.RFC3339, strings.TrimSpace(record.StartedAt)); err == nil {
+			lateStart = coverage.FirstAt.Sub(start) > coverageStartTolerance
+		}
+	}
+	gapped := coverage.MaxInternalGap > coverageGapThreshold
+	if !lateStart && !gapped {
+		return ""
+	}
+	began := coverage.FirstAt.In(meetingTimeLocation()).Format("15:04")
+	if lateStart {
+		return fmt.Sprintf("(Capture began %s — this recap covers the captured portion only.)\n\n", began)
+	}
+	gapMin := int(coverage.MaxInternalGap.Minutes())
+	return fmt.Sprintf("(There was a %d-minute stretch with no captured transcript — a quiet spell or a capture gap; this recap covers the captured portion only.)\n\n", gapMin)
 }
 
 // meetingRecapHeadline extracts the first substantive paragraph of a brain
