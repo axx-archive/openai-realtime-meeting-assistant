@@ -1,8 +1,9 @@
 package main
 
 // Multi-room W5 (§8.1/§8.2) + rooms-UX RW1 (docs/plans/rooms-ux-2026-07-09.md):
-// the rail's room tool is the LOBBY (hero + rooms rail + create + ⋯ popover
-// with invite/links/passcode/archive), home keeps only the live-now strip,
+// the rail's room tool is the LOBBY (green-room preview + join beside the
+// rooms rail card: list, create, ⋮ popover with invite/links/passcode/
+// archive), home keeps only the live-now strip,
 // and the wire shape stays pinned: ws ?room= dial, passcode-in-hello, roomId
 // scoping in the kanban router, TDZ-safe state placement (activeJoin is var,
 // initialized before the boot render pass).
@@ -265,10 +266,10 @@ func TestIndexRoomsBootParamPreselect(t *testing.T) {
 
 /* ---------- RW1: the lobby (room tool) ---------- */
 
-// The room tool's pre-join surface IS the lobby: hero (badges + passcode
-// gate + one primary join) plus the rooms rail (list, + new room form, ⋯
-// per-row management). All of it lives inside the stage's roomNotConnected
-// block — home carries none of it.
+// The room tool's pre-join surface IS the lobby: the center column (green
+// room + badges + passcode gate + one primary join) beside the rooms rail
+// card (list, + new room form, ⋮ per-row management). All of it lives inside
+// the stage's roomNotConnected block — home carries none of it.
 func TestIndexRoomsLobbyMarkupAndActions(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
@@ -333,9 +334,9 @@ func TestIndexRoomsLobbyMarkupAndActions(t *testing.T) {
 	}
 }
 
-// The lobby hero speaks the SELECTED room: a named room's quiet state uses
-// its own name and its occupancy from the rooms snapshot, never the office
-// /participants preview.
+// The lobby speaks the SELECTED room through its badge row + passcode gate
+// (mock canon: no hero) — and renderLobby stays the ONE seam that re-renders
+// every lobby piece on a rooms snapshot change.
 func TestIndexRoomsLobbyHeroPerRoom(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
@@ -343,15 +344,8 @@ func TestIndexRoomsLobbyHeroPerRoom(t *testing.T) {
 	if body == "" {
 		t.Fatal("could not extract renderLobby body")
 	}
-	if !strings.Contains(body, "activeJoinRoomRecord()") {
-		t.Error("renderLobby must resolve the selected room record")
-	}
-	if !strings.Contains(body, "Number(selectedRoom.participantCount) || 0") {
-		t.Error("a named room's occupancy must come from the rooms snapshot, not the office participant preview")
-	}
-	// the hero renders badges, the passcode gate, and the rooms rail in the
-	// same pass — one seam for every rooms re-render
-	for _, call := range []string{"renderLobbyBadges()", "renderLobbyPasscodeGate()", "renderLobbyRoomsList()"} {
+	// one seam for every rooms re-render: badges, gate, rail, green room
+	for _, call := range []string{"renderLobbyBadges()", "renderLobbyPasscodeGate()", "renderLobbyRoomsList()", "renderGreenRoom()"} {
 		if !strings.Contains(body, call) {
 			t.Errorf("renderLobby must call %s", call)
 		}
@@ -367,35 +361,24 @@ func TestIndexRoomsLobbyHeroPerRoom(t *testing.T) {
 }
 
 // Post-leave honesty (verify2 stale-hero, recon-09/11 family): pre-join the
-// hero derives title AND occupancy from the rooms snapshot for EVERY room
-// including the office — never from the sitting-scoped in-call counters
-// (occupiedSeats/participantPreview) or the topbar meeting label, which go
-// stale the moment the seat drops ("meeting · jul 9" + "live now · 1 inside"
-// after leaving an empty office). leaveRoom also zeroes the dead sitting's
-// counters and refreshes the snapshot.
-func TestIndexRoomsLobbyHeroSnapshotTruthAfterLeave(t *testing.T) {
+// The lobby speaks the ROOMS SNAPSHOT only — the sitting-scoped in-call
+// counters (occupiedSeats/participantPreview) and the topbar meeting label
+// go stale the moment the seat drops ("meeting · jul 9" + "live now · 1
+// inside" after leaving an empty office), so renderLobby never reads them
+// (occupancy lives in the rail rows' "N inside" meta, snapshot-fed).
+// leaveRoom also zeroes the dead sitting's counters and refreshes the
+// snapshot.
+func TestIndexRoomsLobbySnapshotTruthAfterLeave(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
 	body := functionBody(html, "function renderLobby()")
 	if body == "" {
 		t.Fatal("could not extract renderLobby body")
 	}
-	// the ONLY non-snapshot occupancy read sits inside the inRoom branch;
-	// pre-join reads selectedRoom.live/participantCount from the snapshot
-	if !strings.Contains(body, "selectedRoom?.live ? Number(selectedRoom.participantCount) || 0 : 0") {
-		t.Error("pre-join hero occupancy must come from the rooms snapshot (live + participantCount)")
-	}
-	if strings.Contains(body, "participantPreview") {
-		t.Error("renderLobby must not read participantPreview — it is sitting-scoped and stale after a leave")
-	}
-	if !strings.Contains(body, "const selectedRoom = inRoom ? null : activeJoinRoomRecord()") {
-		t.Error("pre-join the hero must resolve EVERY room (office included) from the snapshot record")
-	}
-	// the meeting label may only title the hero while actually seated
-	labelAt := strings.Index(body, "topbarProjectEl?.textContent")
-	inRoomAt := strings.Index(body, "roomEmptyName.textContent = inRoom")
-	if labelAt == -1 || inRoomAt == -1 || labelAt < inRoomAt {
-		t.Error("the topbar meeting label may only title the hero inside the inRoom branch")
+	for _, banned := range []string{"participantPreview", "occupiedSeats", "topbarProjectEl"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("renderLobby must not read %s — sitting-scoped, stale after a leave", banned)
+		}
 	}
 
 	leaveBody := functionBody(html, "function leaveRoom()")
@@ -913,52 +896,41 @@ func TestIndexRoomsInitialDialRefusedFailsFast(t *testing.T) {
 	}
 }
 
-// Gate-fix (§3.1 typography): the hero title is the room's NAME at person
-// scale in Google Sans Flex; the koan meta reads mono directly beneath it.
-// Two stacked mono koans left the lobby's centerpiece with no hierarchy —
-// weaker than its own rail rows.
-func TestIndexRoomsLobbyHeroTitleTypography(t *testing.T) {
+// Mock canon (2026-07-09): the panel carries NO hero chrome — no room title,
+// no koan meta. The selected rail row is the room's identity; the center
+// column reads preview → badges → passcode gate → join, and the primary
+// join spans the full column width.
+func TestIndexRoomsLobbyPanelHasNoHeroChrome(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
-	// CSS: person-scale sans, not the 13px mono label token
-	titleCSSAt := strings.Index(html, ".room-empty__title {")
-	if titleCSSAt == -1 {
-		t.Fatal(".room-empty__title rule missing")
-	}
-	titleCSS := html[titleCSSAt:]
-	if end := strings.Index(titleCSS, "}"); end != -1 {
-		titleCSS = titleCSS[:end]
-	}
-	if !strings.Contains(titleCSS, "var(--type-title-2)") {
-		t.Error(".room-empty__title must use the person-scale sans token (--type-title-2), not a mono label token")
-	}
-	if strings.Contains(titleCSS, "--type-label") {
-		t.Error(".room-empty__title must not fall back to a mono label token")
+	for _, banned := range []string{`id="roomEmptyName"`, `id="roomEmptyMeta"`, "room-empty__title", "lobby__hero"} {
+		if strings.Contains(html, banned) {
+			t.Errorf("the lobby panel must carry no hero chrome — found %s", banned)
+		}
 	}
 
-	// markup order: name, then the mono koan meta directly beneath, then badges
-	nameAt := strings.Index(html, `id="roomEmptyName"`)
-	metaAt := strings.Index(html, `id="roomEmptyMeta"`)
+	// center column order: green room → badges → passcode gate → join
+	greenAt := strings.Index(html, `id="greenRoom"`)
 	badgesAt := strings.Index(html, `id="lobbyBadges"`)
-	if nameAt == -1 || metaAt == -1 || badgesAt == -1 || !(nameAt < metaAt && metaAt < badgesAt) {
-		t.Error("hero order must be title → koan meta → badges (the meta reads beneath the name, not at the hero foot)")
+	gateAt := strings.Index(html, `id="lobbyPasscodeGate"`)
+	joinAt := strings.Index(html, `id="roomEmptyJoin"`)
+	if greenAt == -1 || badgesAt == -1 || gateAt == -1 || joinAt == -1 ||
+		!(greenAt < badgesAt && badgesAt < gateAt && gateAt < joinAt) {
+		t.Error("center column order must be preview → badges → passcode gate → join")
 	}
 
-	// the renderer titles with the NAME — the quiet koan never rides the title
-	lobbyBody := functionBody(html, "function renderLobby()")
-	if !strings.Contains(lobbyBody, ": (roomName || 'the office')") {
-		t.Error("pre-join the hero title must be the room's name (office fallback)")
-	}
-	if strings.Contains(lobbyBody, "is quiet.") {
-		t.Error("the quiet koan must not ride the hero title — it belongs to the mono meta beneath")
+	// the one primary spans the whole center column (mock canon)
+	if !strings.Contains(html, ".lobby__center > .room-empty__join { width: 100%; }") {
+		t.Error("the lobby join must span the full center column")
 	}
 }
 
 /* ---------- canon conformance (design states 1–21) ---------- */
 
-// Canon layout: ONE shared glass panel holds the room switcher (order:1, left,
-// 260px at ≥880) beside the 440px center column (order:2); below 880 they stack
-// (center on top, switcher under). The switcher carries the "open rooms" label.
+// Canon layout: ONE shared glass panel holds the room switcher card (order:1,
+// left, 280px at ≥880) beside the 480px center column (order:2); below 880
+// they stack (center on top, switcher under). The switcher carries the
+// "open rooms" label.
 func TestIndexRoomsLobbyCanonPanelLayout(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
@@ -978,8 +950,8 @@ func TestIndexRoomsLobbyCanonPanelLayout(t *testing.T) {
 	}
 
 	// CSS: the center column is order:1 by default (mobile, on top); the ≥880
-	// rule flips the rail to order:1 (visual left, 260px) and holds the center
-	// at 440px
+	// rule flips the rail to order:1 (visual left, 280px) and holds the center
+	// at 480px
 	centerCSSAt := strings.Index(html, ".lobby__center {")
 	if centerCSSAt == -1 {
 		t.Fatal(".lobby__center rule missing")
@@ -993,11 +965,11 @@ func TestIndexRoomsLobbyCanonPanelLayout(t *testing.T) {
 		t.Fatal("the canon lobby breakpoint is 880px")
 	}
 	desk := html[deskAt : deskAt+600]
-	if !strings.Contains(desk, ".lobby__center { order: 2; flex: none; width: 440px; }") {
-		t.Error("≥880 the center column must be order:2 at 440px")
+	if !strings.Contains(desk, ".lobby__center { order: 2; flex: none; width: 480px; }") {
+		t.Error("≥880 the center column must be order:2 at 480px")
 	}
-	if !strings.Contains(desk, ".lobby__rail { order: 1; width: 260px;") {
-		t.Error("≥880 the switcher must flip to order:1 at 260px (visual left)")
+	if !strings.Contains(desk, ".lobby__rail { order: 1; width: 280px;") {
+		t.Error("≥880 the switcher must flip to order:1 at 280px (visual left)")
 	}
 }
 

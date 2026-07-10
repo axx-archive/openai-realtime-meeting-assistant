@@ -40,7 +40,7 @@ func joinRoomSource(t *testing.T, html string) string {
 }
 
 // The green-room block: one component, two mounts. It renders inside the
-// lobby hero, and the guest boot re-parents it into the name gate.
+// lobby's center column, and the guest boot re-parents it into the name gate.
 func TestIndexGreenRoomMarkupAndSharedMount(t *testing.T) {
 	html := readIndexHTMLForGreenRoom(t)
 
@@ -48,7 +48,7 @@ func TestIndexGreenRoomMarkupAndSharedMount(t *testing.T) {
 	blockAt := strings.Index(html, `id="greenRoom"`)
 	railAt := strings.Index(html, `id="lobbyRail"`)
 	if heroAt == -1 || blockAt == -1 || railAt == -1 || !(heroAt < blockAt && blockAt < railAt) {
-		t.Error("the green-room block must render inside the lobby hero (before the rooms rail)")
+		t.Error("the green-room block must render inside the lobby panel (before the rooms rail)")
 	}
 	for _, want := range []string{
 		`id="greenRoomTile"`,

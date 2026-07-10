@@ -14213,24 +14213,16 @@
         visibility: hidden;
       }
 
-      /* §3.1 hero hierarchy: the title is the room's NAME at person scale in
-         Google Sans Flex — the lobby's centerpiece must outrank its own rail
-         rows. The koan/occupancy meta reads mono beneath it. */
-      .room-empty__title {
-        font: var(--type-title-2);
-        letter-spacing: -0.01em;
-        color: rgba(255, 255, 255, 0.92);
-      }
-
-      /* the one primary on the black stage — a white pill. The fill/ink are
-         theme-invariant literals because the stage is always true-black in
-         both themes (same rule the control dock declares for its literals). */
+      /* the one primary on the black stage — white, theme-invariant literals
+         because the stage is always true-black in both themes (same rule the
+         control dock declares for its literals). Mock canon: the lobby join
+         is a full-width rounded rect spanning the whole center column. */
       .room-empty__join {
-        height: 46px;
-        min-height: 46px;
+        height: 50px;
+        min-height: 50px;
         padding: 0 26px;
         border: 0;
-        border-radius: var(--r-full);
+        border-radius: 14px;
         background: #fff;
         color: #0E0E10;
         font: 600 14px var(--font-sans);
@@ -14238,9 +14230,10 @@
         cursor: pointer;
         transition: transform 0.12s var(--ease), background 0.12s var(--ease);
       }
+      .lobby__center > .room-empty__join { width: 100%; }
 
       .room-empty__join:active {
-        transform: scale(0.97);
+        transform: scale(0.96);
       }
 
       /* mid-entry the pill stays put but reads busy — it never vanishes and
@@ -14253,50 +14246,29 @@
         transform: none;
       }
 
-      .room-empty__meta {
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.3);
-      }
-
-      /* the koan meta reads as the title's subline — pull it inside the
-         hero's 18px flex gap so name + meta form one typographic unit */
-      .room-empty__title + .room-empty__meta {
-        margin-top: -12px;
-      }
-
       /* ---------- the lobby (pre-join room tool) ----------
          Literals, not theme tokens: the stage is always true black in both
          themes (same rule .room-empty__join declares). Presence is GREEN
          (--live per law), never ember; listen-only wears --warn. */
-      .lobby__hero {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        width: 100%;
-        min-width: 0;
-      }
-      /* canon: ONE shared glass panel holding the switcher + the 440px center
-         column. Below 880 it stacks (center on top, switcher under, max-width
-         440); at ≥880 it becomes a row with the switcher flipped left. The
-         stage is always black, so the panel wears the white-alpha glass idiom
-         rather than the light surface tokens. */
+      /* mock canon: ONE shared glass panel holding the switcher card + the
+         center column (preview + join) — no hero chrome. Below 880 it stacks
+         (center on top, switcher under, max-width 480); at ≥880 it becomes a
+         row with the switcher flipped left. The stage is always black, so the
+         panel wears the white-alpha glass idiom rather than surface tokens. */
       .lobby__panel {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 32px;
+        gap: 24px;
         width: 100%;
-        max-width: 480px;
-        padding: 20px;
+        max-width: 520px;
+        padding: 24px;
         border-radius: var(--r-2xl);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.028));
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
-        box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       }
       @media (prefers-reduced-motion: no-preference) {
         .lobby__panel { animation: bf-rise-in 480ms var(--ease) both; }
@@ -14306,9 +14278,9 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 18px;
+        gap: 20px;
         width: 100%;
-        max-width: 440px;
+        max-width: 480px;
         min-width: 0;
       }
       .lobby__badges {
@@ -14330,14 +14302,15 @@
         padding: 3px 9px;
         border-radius: var(--r-full);
       }
-      .lobby__passgate { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+      .lobby__passgate { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
       .lobby__passgate[hidden] { display: none; }
-      .lobby__passrow { display: flex; align-items: center; gap: 8px; }
+      .lobby__passrow { display: flex; align-items: center; gap: 8px; width: 100%; }
       .lobby__passinput {
-        height: 46px;
-        width: 190px;
+        height: 50px;
+        flex: 1;
+        min-width: 0;
         padding: 0 18px;
-        border-radius: var(--r-full);
+        border-radius: 14px;
         border: 1px solid rgba(255, 255, 255, 0.18);
         background: rgba(255, 255, 255, 0.06);
         color: #fff;
@@ -14406,12 +14379,12 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 60px;
-        height: 60px;
+        width: 64px;
+        height: 64px;
         border-radius: var(--r-full);
         background: rgba(255, 255, 255, 0.10);
         color: rgba(255, 255, 255, 0.85);
-        font: 600 20px var(--font-sans);
+        font: 600 21px var(--font-sans);
         letter-spacing: 0;
       }
       .greenroom__tile[data-state="live"] .greenroom__avatar { display: none; }
@@ -14435,21 +14408,28 @@
         padding: 0 16px;
         text-align: center;
       }
+      /* mock canon: the idle tile is CLEAN — avatar + the bottom-left
+         "· preview" tag carry the affordance (tile keeps cursor + aria-label);
+         the center hint only appears for starting/timeout feedback */
+      .greenroom__tile[data-state="idle"] .greenroom__hint { display: none; }
       .greenroom__tile[data-state="live"] .greenroom__hint { display: none; }
       .greenroom__tile[data-state="off"] .greenroom__hint { display: none; }
       .greenroom__tile[data-state="timeout"] .greenroom__hint svg { display: none; }
-      /* bottom-left status: breathing dot + "preview" while live, "camera is
-         off" when the cam chip is off */
+      /* bottom-left status: quiet "preview" tag while idle, breathing green
+         dot + "preview" while live, "camera is off" when the cam chip is off;
+         hidden while the center hint speaks (starting/timeout) */
       .greenroom__status {
         position: absolute;
         left: 12px;
         bottom: 11px;
-        display: none;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
       }
-      .greenroom__tile[data-state="live"] .greenroom__status,
-      .greenroom__tile[data-state="off"] .greenroom__status { display: inline-flex; }
+      .greenroom__tile[data-state="starting"] .greenroom__status,
+      .greenroom__tile[data-state="timeout"] .greenroom__status { display: none; }
+      .greenroom__tile[data-state="idle"] .greenroom__livedot { background: rgba(255, 255, 255, 0.35); }
+      .greenroom__tile[data-state="idle"] .greenroom__statustext { color: rgba(255, 255, 255, 0.55); text-shadow: none; }
       .greenroom__livedot {
         width: 6px;
         height: 6px;
@@ -14482,15 +14462,17 @@
         color: var(--danger);
       }
       .greenroom__micbadge[hidden] { display: none; }
-      /* the vertical control stack — 52px icon buttons */
+      /* the vertical control stack — 52px icon buttons; mic/cam carry a tiny
+         state dot beneath (mock canon): green while armed, quiet while off */
       .greenroom__stack {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 10px;
+        gap: 16px;
         flex: none;
       }
       .greenroom__ctl {
+        position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -14508,6 +14490,24 @@
       /* off = quiet ink, never a loud state */
       .greenroom__ctl[aria-pressed="false"] { color: var(--text-3); }
       .greenroom__ctl[aria-pressed="false"] svg { opacity: 0.55; }
+      /* the mic/cam state dots (presence is GREEN per law, never ember) */
+      #greenRoomMicChip::after,
+      #greenRoomCamChip::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: -11px;
+        transform: translateX(-50%);
+        width: 4px;
+        height: 4px;
+        border-radius: var(--r-full);
+        background: var(--live);
+        transition: background var(--dur-fast) var(--ease);
+      }
+      #greenRoomMicChip[aria-pressed="false"]::after,
+      #greenRoomCamChip[aria-pressed="false"]::after {
+        background: rgba(255, 255, 255, 0.22);
+      }
       /* the filters button carries the open ring while its popover is shown */
       .greenroom__filterswrap { position: relative; }
       .greenroom__filtersbtn[aria-expanded="true"] {
@@ -14630,7 +14630,8 @@
       .greenroom__finetune[hidden] { display: none; }
       /* lobby mount: the stage is black in every theme, so the tile + controls
          wear the white-alpha idiom and the popover the dark-glass idiom */
-      .room-empty .greenroom__tile { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.55); }
+      /* mock canon: the preview reads as a dark stage inset, not a raised chip */
+      .room-empty .greenroom__tile { background: rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
       .room-empty .greenroom__tile:hover { border-color: rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.8); }
       .room-empty .greenroom__ctl { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.85); }
       .room-empty .greenroom__ctl:hover { border-color: rgba(255, 255, 255, 0.35); }
@@ -14660,48 +14661,54 @@
       .greenroom--gate .greenroom__avatar { width: 56px; height: 56px; }
       .greenroom--gate .greenroom__filters { width: 270px; right: 58px; }
       .lobby__rail {
-        /* the ⋯ popover portals onto the rail (the rows live inside the
-           .lobby__list scrollbox, whose overflow would clip it) — the rail
-           is its positioning context. order:2 keeps it under the preview when
-           stacked; the ≥880 rule flips it to the visual left (order:1). */
+        /* mock canon: the switcher is an INSET RAISED CARD inside the panel —
+           its own surface, border and shadow — holding the label, the rows
+           and the dashed "+ new room". The ⋯ popover portals onto the rail
+           (the rows live inside the .lobby__list scrollbox, whose overflow
+           would clip it) — the rail is its positioning context. order:2
+           keeps it under the preview when stacked; the ≥880 rule flips it to
+           the visual left (order:1). */
         order: 2;
         position: relative;
         width: 100%;
-        max-width: 440px;
+        max-width: 480px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
+        padding: 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.035);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
         text-align: left;
       }
       .lobby__rail[hidden] { display: none; }
       .lobby__rail-label {
-        padding: 4px 6px 4px;
+        padding: 2px 8px 6px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(255, 255, 255, 0.45);
       }
+      /* the rows list is quiet — the rail card is the surface; rows are
+         rounded and only light up on hover/selection (no separators) */
       .lobby__list {
         display: flex;
         flex-direction: column;
+        gap: 2px;
         overflow-y: auto;
         max-height: 32vh;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
       }
       .lobby__row {
         position: relative;
         display: flex;
         align-items: center;
         gap: 4px;
-        border-top: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 12px;
+        transition: background var(--dur-fast) var(--ease);
       }
-      .lobby__row:first-child { border-top: none; }
+      .lobby__row:hover { background: rgba(255, 255, 255, 0.04); }
       .lobby__row.is-selected {
-        background: rgba(255, 255, 255, 0.04);
-        box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.55);
+        background: rgba(255, 255, 255, 0.08);
       }
       .lobby__pick {
         flex: 1;
@@ -14777,10 +14784,10 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
-        height: 36px;
-        margin-top: 2px;
+        height: 42px;
+        margin-top: 4px;
         padding: 0 14px;
-        border-radius: var(--r-md);
+        border-radius: 12px;
         border: 1px dashed rgba(255, 255, 255, 0.22);
         background: none;
         color: rgba(255, 255, 255, 0.75);
@@ -15099,20 +15106,21 @@
         .invite-pop { width: calc(100vw - 24px); border-radius: 20px; }
       }
 
-      /* desktop (≥880): the one glass panel becomes a row — the switcher
-         flips to the visual left (order:1, 260px), the center column holds at
-         440px. Below 880 the panel stays a column (center on top, switcher
-         under). */
+      /* desktop (≥880): the one glass panel becomes a row — the switcher card
+         flips to the visual left (order:1, 280px), the center column holds at
+         480px. Both top-align (the card hugs its content, mock canon). Below
+         880 the panel stays a column (center on top, switcher under). */
       @media (min-width: 880px) {
         .lobby__panel {
           flex-direction: row;
-          align-items: stretch;
-          gap: 24px;
+          align-items: flex-start;
+          gap: 28px;
           max-width: none;
           width: auto;
+          padding: 28px;
         }
-        .lobby__center { order: 2; flex: none; width: 440px; }
-        .lobby__rail { order: 1; width: 260px; flex: none; max-width: none; }
+        .lobby__center { order: 2; flex: none; width: 480px; }
+        .lobby__rail { order: 1; width: 280px; flex: none; max-width: none; }
         .lobby__list { max-height: min(52vh, 440px); }
       }
 
@@ -21671,13 +21679,9 @@
                    rail; CSS `order` flips the rail visually left on desktop. -->
               <div class="lobby__panel">
                 <div class="lobby__center">
-                  <div class="lobby__hero">
-                    <!-- §3.1 hierarchy: room NAME (person-scale sans), koan meta
-                         in mono directly beneath, then the badge row -->
-                    <div id="roomEmptyName" class="room-empty__title">the office</div>
-                    <div id="roomEmptyMeta" class="room-empty__meta">memory starts when the room speaks.</div>
-                    <div id="lobbyBadges" class="lobby__badges" hidden></div>
-                  </div>
+                  <!-- mock canon (2026-07-09): NO hero chrome inside the panel —
+                       the selected rail row carries the room's identity; the
+                       center column is preview + (badges when live) + join. -->
                   <!-- RW2 green room — the join seam's AV check. Media only on
                        EXPLICIT intent (tile tap / cam chip flipping on); the
                        preview releases fully on join, deselect, tool switch and
@@ -21743,6 +21747,7 @@
                       </div>
                     </div>
                   </div>
+                  <div id="lobbyBadges" class="lobby__badges" hidden></div>
                   <div id="lobbyPasscodeGate" class="lobby__passgate" hidden>
                     <div class="lobby__passrow">
                       <input id="lobbyPasscodeInput" class="lobby__passinput" type="password" placeholder="room passcode" autocomplete="off">
@@ -23497,8 +23502,6 @@
       const officeRoomAvatars = document.getElementById('officeRoomAvatars')
       const officeRoomInvited = document.getElementById('officeRoomInvited')
       const officeRoomJoin = document.getElementById('officeRoomJoin')
-      const roomEmptyName = document.getElementById('roomEmptyName')
-      const roomEmptyMeta = document.getElementById('roomEmptyMeta')
       const roomEmptyJoinButton = document.getElementById('roomEmptyJoin')
       // RW2 green room + join hardening handles
       const greenRoomEl = document.getElementById('greenRoom')
@@ -27165,10 +27168,12 @@
           case 'room':
             // spec 5 item 13: exactly ONE "the room is listening" pill in-call
             // — the topbar status pill owns the listening state, so the
-            // subtitle names the ROOM instead of mirroring the pill
+            // subtitle names the ROOM instead of mirroring the pill. Pre-join
+            // it says NOTHING: the status pill already reads "not connected"
+            // (mock canon — the heading stands alone).
             return appShell.classList.contains('is-in-room')
               ? (String(activeJoinRoomRecord()?.name || guestSession?.roomName || '').toLowerCase() || 'the office')
-              : 'not connected'
+              : ''
           case 'chat':
             return chatThreadIsChannel(selectedScoutChatThread())
               ? 'public channel · everyone in the office'
@@ -27246,7 +27251,7 @@
         const phone = phoneLayoutQuery.matches
         const toolTitles = {
           office: 'BonfireOS',
-          room: 'Room',
+          room: 'Rooms',
           chat: 'Chat',
           artifacts: 'Intelligence',
           research: 'Research',
@@ -51617,34 +51622,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderLobby() {
-        const inRoom = roomMediaActive() && appShell.classList.contains('is-in-room')
-        // pre-join the hero speaks the ROOMS SNAPSHOT — the same source the
-        // rail rows read, for EVERY room including the office. The in-call
-        // counters (occupiedSeats / the office participants preview) and
-        // the topbar meeting label are sitting-scoped and go stale the
-        // moment the seat drops: after a leave or a room_closed bounce they
-        // held the dead sitting's title ("meeting · jul 9") and occupancy
-        // ("live now · 1 inside" over an empty office) until a row click
-        // forced a re-derive (verify2 stale-hero, the recon-09/11 family).
-        const selectedRoom = inRoom ? null : activeJoinRoomRecord()
-        const seatCount = inRoom
-          ? Math.max(occupiedSeats, participantsInRoom.length)
-          : (selectedRoom?.live ? Number(selectedRoom.participantCount) || 0 : 0)
-        if (roomEmptyName) {
-          // §3.1 hero hierarchy: the title is the room's NAME (person-scale
-          // sans); the quiet koan lives in the mono meta beneath it, never up
-          // here — two stacked mono koans left the hero with no hierarchy.
-          // In-call the sitting's title takes over (seat-scoped by design).
-          const roomName = String(selectedRoom?.name || '').toLowerCase()
-          roomEmptyName.textContent = inRoom
-            ? ((topbarProjectEl?.textContent || '').trim().toLowerCase() || meetingDisplayName())
-            : (roomName || 'the office')
-        }
-        if (roomEmptyMeta) {
-          roomEmptyMeta.textContent = seatCount > 0
-            ? `live now · ${seatCount} inside`
-            : 'memory starts when the room speaks.'
-        }
+        // mock canon: no hero chrome — the selected rail row carries the
+        // room's identity and its occupancy ("N inside" row meta), all read
+        // from the ROOMS SNAPSHOT. The sitting-scoped in-call counters never
+        // touch the lobby (verify2 stale-hero, the recon-09/11 family).
         renderLobbyBadges()
         renderLobbyPasscodeGate()
         renderLobbyRoomsList()
@@ -52188,7 +52169,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         more.className = 'lobby__more'
         more.setAttribute('aria-label', `${room.name || room.id} options`)
         more.setAttribute('aria-haspopup', 'menu')
-        more.textContent = '⋯'
+        more.textContent = '⋮'
         more.addEventListener('click', () => openLobbyPopover(row, room))
 
         row.append(pick, more)
