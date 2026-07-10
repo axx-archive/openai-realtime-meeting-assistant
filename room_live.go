@@ -33,6 +33,22 @@ const (
 	guestChatBucketBurst  = 5.0
 	guestChatBucketRefill = 3 * time.Second
 
+	// §6.5 hardening (2026-07-10 incident): the media roster/self-heal and
+	// telemetry inbound events became guest-reachable, so a hostile guest-link
+	// holder could spam them at socket line rate. They get the same per-guest
+	// token-bucket treatment as chat.
+	//   - state/repair (participant_media_state + request_participant_tracks):
+	//     each accepted event fans out a room-wide roster broadcast or a global
+	//     peer-sync walk (amplification × room size), so the ceiling is
+	//     chat-tight.
+	//   - telemetry (media_quality + media_error): log-only writes; the legit
+	//     client emits every ~4-12s, so a smaller burst with a slower refill
+	//     clears real traffic while still capping a flood.
+	guestMediaStateBucketBurst  = 5.0
+	guestMediaStateBucketRefill = 3 * time.Second
+	guestTelemetryBucketBurst   = 3.0
+	guestTelemetryBucketRefill  = 5 * time.Second
+
 	// §6.5 transcription ceiling for guest-enabled rooms, member-extendable by
 	// flipping recording back on.
 	defaultGuestTranscriptionCapMinutes = 120
@@ -82,10 +98,17 @@ type roomLiveState struct {
 	mediaGen uint64
 	capTimer *time.Timer
 
-	// §6.5 per-guest-session chat token buckets.
-	chatBuckets map[string]*guestChatBucket
+	// §6.5 per-guest-session token buckets. chatBuckets caps room chat;
+	// mediaStateBuckets and telemetryBuckets cap the guest-reachable media
+	// inbound events (2026-07-10 incident hardening). All three share the plain
+	// guestChatBucket shape.
+	chatBuckets       map[string]*guestChatBucket
+	mediaStateBuckets map[string]*guestChatBucket
+	telemetryBuckets  map[string]*guestChatBucket
 }
 
+// guestChatBucket is a plain token bucket (tokens + last-refill stamp) reused
+// by every §6.5 per-guest-session limit, not just chat.
 type guestChatBucket struct {
 	tokens float64
 	last   time.Time
@@ -102,6 +125,8 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		recordingEnabled:     true,
 		recordingUpdatedAt:   now,
 		chatBuckets:          map[string]*guestChatBucket{},
+		mediaStateBuckets:    map[string]*guestChatBucket{},
+		telemetryBuckets:     map[string]*guestChatBucket{},
 	}
 }
 
@@ -244,25 +269,20 @@ func (app *kanbanBoardApp) releaseGuestSeatIfGone(roomID string, sessionKey stri
 	}
 	delete(state.guestSeats, sessionKey)
 	delete(state.chatBuckets, sessionKey)
+	delete(state.mediaStateBuckets, sessionKey)
+	delete(state.telemetryBuckets, sessionKey)
 }
 
-/* ---------- §6.5 guest chat token bucket ---------- */
+/* ---------- §6.5 guest token buckets ---------- */
 
-// allowGuestRoomChat charges one token from the guest session's bucket
-// (burst 5, refill 1 per 3s) and reports whether the message may proceed.
-func (app *kanbanBoardApp) allowGuestRoomChat(roomID string, sessionKey string, now time.Time) bool {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-	state := app.roomLiveLocked(roomID)
-	bucket := state.chatBuckets[sessionKey]
-	if bucket == nil {
-		bucket = &guestChatBucket{tokens: guestChatBucketBurst, last: now}
-		state.chatBuckets[sessionKey] = bucket
-	}
+// chargeGuestBucket applies elapsed-time refill (capped at burst) then charges
+// one token, reporting whether the action may proceed. It is the single
+// refill/charge rule behind every §6.5 guest bucket so the limits can't drift.
+func chargeGuestBucket(bucket *guestChatBucket, burst float64, refill time.Duration, now time.Time) bool {
 	if elapsed := now.Sub(bucket.last); elapsed > 0 {
-		bucket.tokens += float64(elapsed) / float64(guestChatBucketRefill)
-		if bucket.tokens > guestChatBucketBurst {
-			bucket.tokens = guestChatBucketBurst
+		bucket.tokens += float64(elapsed) / float64(refill)
+		if bucket.tokens > burst {
+			bucket.tokens = burst
 		}
 	}
 	bucket.last = now
@@ -271,6 +291,47 @@ func (app *kanbanBoardApp) allowGuestRoomChat(roomID string, sessionKey string, 
 	}
 	bucket.tokens--
 	return true
+}
+
+// allowGuestBucket charges the guest session's bucket in the map returned by
+// pick (created full on first use) and reports whether the action proceeds.
+// Callers hold no lock; app.mu is taken here. Every call site is guest-only, so
+// authenticated members never reach these buckets and are never throttled.
+func (app *kanbanBoardApp) allowGuestBucket(roomID string, sessionKey string, pick func(*roomLiveState) map[string]*guestChatBucket, burst float64, refill time.Duration, now time.Time) bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	buckets := pick(app.roomLiveLocked(roomID))
+	bucket := buckets[sessionKey]
+	if bucket == nil {
+		bucket = &guestChatBucket{tokens: burst, last: now}
+		buckets[sessionKey] = bucket
+	}
+	return chargeGuestBucket(bucket, burst, refill, now)
+}
+
+// allowGuestRoomChat charges the §6.5 chat bucket (burst 5, refill 1 per 3s)
+// and reports whether the message may proceed.
+func (app *kanbanBoardApp) allowGuestRoomChat(roomID string, sessionKey string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, sessionKey,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.chatBuckets },
+		guestChatBucketBurst, guestChatBucketRefill, now)
+}
+
+// allowGuestMediaStateEvent charges the state/repair bucket shared by
+// participant_media_state and request_participant_tracks — the two inbound
+// events that fan out a room-wide roster broadcast / a global peer-sync walk.
+func (app *kanbanBoardApp) allowGuestMediaStateEvent(roomID string, sessionKey string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, sessionKey,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.mediaStateBuckets },
+		guestMediaStateBucketBurst, guestMediaStateBucketRefill, now)
+}
+
+// allowGuestTelemetryEvent charges the telemetry bucket shared by media_quality
+// and media_error — otherwise unbounded log writes.
+func (app *kanbanBoardApp) allowGuestTelemetryEvent(roomID string, sessionKey string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, sessionKey,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.telemetryBuckets },
+		guestTelemetryBucketBurst, guestTelemetryBucketRefill, now)
 }
 
 /* ---------- §6.1 pre-upgrade guest socket caps ---------- */
@@ -369,9 +430,14 @@ var guestWritableKanbanEvents = map[string]bool{
 	// §3.7 archive close: guests seated in an archived room are exactly who
 	// must hear that their room is gone.
 	"room_closed": true,
-	"offer":       true,
-	"answer":      true,
-	"candidate":   true,
+	// Room-scoped share presence (2026-07-10 incident, defect b): guests
+	// already see the sharer through the participants snapshot; without the
+	// start/stop events their tile only recovered via the roster fallback.
+	"screen_share_started": true,
+	"screen_share_stopped": true,
+	"offer":                true,
+	"answer":               true,
+	"candidate":            true,
 }
 
 // guestTopLevelEvents are the raw websocketMessage envelopes a guest writer
@@ -411,6 +477,20 @@ var guestInboundEvents = map[string]bool{
 	"select_layer": true,
 	"room_ping":    true,
 	"room_chat":    true,
+	// Media roster + self-heal parity (2026-07-10 incident, defect a). All
+	// four handlers are participantAccepted-gated (unadmitted sends get
+	// access_denied or are ignored) and none touches the PeerConnection, so
+	// a pre-admission guest socket cannot panic or mutate room state:
+	//  - participant_media_state writes only the sender's OWN roster row
+	//    (name is the server-minted seat, never the payload);
+	//  - request_participant_tracks replays room-fenced track snapshots the
+	//    guest is already entitled to and triggers the same resignal members
+	//    get (the frozen-tile self-heal);
+	//  - media_quality/media_error are log-only telemetry, no state writes.
+	"participant_media_state":    true,
+	"request_participant_tracks": true,
+	"media_quality":              true,
+	"media_error":                true,
 }
 
 /* ---------- lazy media lifecycle (§4.4) ---------- */
@@ -794,6 +874,8 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 				if strings.EqualFold(display, name) {
 					delete(state.guestSeats, sessionKey)
 					delete(state.chatBuckets, sessionKey)
+					delete(state.mediaStateBuckets, sessionKey)
+					delete(state.telemetryBuckets, sessionKey)
 				}
 			}
 		}

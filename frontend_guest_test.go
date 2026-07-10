@@ -172,7 +172,12 @@ func TestIndexGuestOfficeSocketGuardExcludesGuestMode(t *testing.T) {
 
 // The is-guest chrome axis: rail, topbar (bell + account menu live there),
 // Scout rail, and board rail never exist for a guest tab. The stage, meeting
-// bar, and room chat panel are the whole surface.
+// bar, and room chat panel are the whole surface — and because #roomChatPanel
+// is a CHILD of .scout-rail, the rail hide carries exactly ONE exception: the
+// room-chat-open reveal (see frontend_guest_chat_test.go), which re-shows the
+// rail as a chat-only host while the Scout panel stays pinned hidden. A naive
+// unhide of the rail chrome breaks this pin; a naive blanket hide breaks
+// guest room chat (the 2026-07-10 invisible-chat incident).
 func TestIndexGuestChromeCSSHidesShellRegions(t *testing.T) {
 	html := readIndexHTMLForGuest(t)
 
@@ -190,6 +195,10 @@ func TestIndexGuestChromeCSSHidesShellRegions(t *testing.T) {
 		if !strings.Contains(block, "display: none") {
 			t.Errorf("the is-guest rule for %s must display: none", region)
 		}
+	}
+	// the one sanctioned exception: room chat re-shows the rail when open
+	if !strings.Contains(html, "#appShell.is-guest.is-room-chat-open") {
+		t.Error("the rail hide must carry the room-chat-open reveal exception (guest room chat lives inside .scout-rail)")
 	}
 	// the boot block stamps the axis
 	if !strings.Contains(html, "appShell.classList.add('is-guest')") {

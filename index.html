@@ -430,6 +430,18 @@
       #appShell.is-guest .board-rail {
         display: none !important;
       }
+      /* the ONE exception to the rail hide: room chat IS part of the guest
+         surface, but #roomChatPanel lives inside .scout-rail, so opening chat
+         re-shows the rail as a chat-only host (mirroring the member reveal's
+         scoping — the mobile sheet keeps its own display rules). !important
+         because the hide above is !important; specificity alone never wins.
+         The Scout panel stays pinned gone regardless of the chat swap rule. */
+      #appShell.is-guest.is-room-chat-open.is-in-room[data-tool="room"]:not(.is-board-expanded) .scout-rail {
+        display: grid !important;
+      }
+      #appShell.is-guest .scout-rail .scout-panel {
+        display: none !important;
+      }
       /* member-only meeting-bar controls — the server drops these ops from
          guest sockets; the chrome honors the same line */
       #appShell.is-guest #roomBoardToggle,
@@ -3577,6 +3589,15 @@
       }
       .btn:active { transform: scale(var(--press-scale)); }
       .btn[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* aria-disabled keeps a control clickable (so a tap can explain why it
+         cannot act — e.g. screen share on iOS Safari) while reading as
+         disabled. */
+      .btn[aria-disabled="true"] {
         opacity: 0.4;
         cursor: not-allowed;
         transform: none;
@@ -16401,6 +16422,12 @@
         cursor: not-allowed;
       }
 
+      .board-dock-icon[aria-disabled="true"],
+      .board-dock-btn[aria-disabled="true"] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
       .board-dock-btn {
         display: inline-flex;
         align-items: center;
@@ -23851,6 +23878,21 @@
       const frozenRemoteVideoTrackIds = new Set()
       const remoteVideoFreezeStallMs = 2000
       const remoteVideoFreezeRepairIntervalMs = 6000
+      // Stale-tile escalation ladder (2026-07-10 permanent-freeze incident):
+      // rung thresholds ride the freeze watch's frozenMs clock — track rebind
+      // at 12s (the PLI/repair cadence had ~2 shots by then), ONE restart_ice
+      // at 24s, cooled 60s and capped per track binding so it can never flap.
+      const remoteVideoStaleEscalationRefreshMs = 12000
+      const remoteVideoStaleEscalationIceRestartMs = 24000
+      const remoteVideoStaleEscalationIceCooldownMs = 60000
+      const remoteVideoStaleEscalationMaxIceRestarts = 2
+      // restart_ice renegotiates the WHOLE transport, so the ICE-restart rung's
+      // cap and cooldown live per-CONNECTION (not per-track): a transport-wide
+      // stall makes every frozen tile cross 24s in one stats pass, and only ONE
+      // restart may fire per cooldown window (no burst, no offer glare). Reset
+      // when a fresh session peer's freeze watch starts.
+      let remoteVideoEscalationIceRestartCount = 0
+      let remoteVideoEscalationLastIceRestartAt = 0
       let roomStateRefreshTimer = 0
       let roomAudioUnlockRetryTimer = 0
       let lastRoomAudioUnlockNoticeAt = 0
@@ -24163,6 +24205,7 @@
         })
       })
       screenShareButton.addEventListener('click', toggleScreenShare)
+      applyScreenShareSupportState()
       inviteToggleButton.addEventListener('click', toggleInvitePopover)
       document.getElementById('lobbyNewRoom')?.addEventListener('click', () => {
         const form = document.getElementById('lobbyCreateForm')
@@ -32453,7 +32496,10 @@
         }
 
         leaveButton.disabled = false
-        screenShareButton.disabled = !screenShareSupported
+        // ungate the share control on join, but leave the unsupported case to
+        // the aria-disabled helper so an iOS Safari tap can still explain why
+        screenShareButton.disabled = false
+        applyScreenShareSupportState()
         recordMeetingButton.disabled = false
         archiveMeetingButton.disabled = false
         if (roomBoardToggleButton) {
@@ -36817,7 +36863,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (now - lastParticipantTrackRefreshAt < 900) {
           return
         }
-        lastParticipantTrackRefreshAt = now
+        sendParticipantTrackRefresh(reason)
+      }
+
+      // The stale-tile escalation rung bypasses the 900ms throttle above: the
+      // 6s repair cadence fires this same request on the same tick, so a
+      // throttled send would be swallowed while rung 1 still burns its one-shot
+      // escalatedTrackRefresh flag (rung 1 would be a no-op). Stamps the shared
+      // clock so a forced send still throttles the next unforced one.
+      function forceParticipantTrackRefresh(reason = '') {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        sendParticipantTrackRefresh(reason)
+      }
+
+      function sendParticipantTrackRefresh(reason) {
+        lastParticipantTrackRefreshAt = performance.now()
         ws.send(JSON.stringify({
           event: 'request_participant_tracks',
           data: JSON.stringify({ reason })
@@ -44192,7 +44254,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         if (!screenShareSupported) {
-          const message = 'screen sharing is not available in this browser.'
+          const message = 'screen sharing is not available in this browser. iOS Safari does not support it.'
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
           return
@@ -44227,6 +44289,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           screenShareStream?.getTracks().forEach(track => track.stop())
           screenShareStream = undefined
           setLog(error.message || String(error))
+          // getDisplayMedia rejects with NotAllowedError (and sometimes
+          // AbortError) when the user dismisses the picker — not reliably
+          // distinguishable from a real permission block, and someone who hit
+          // cancel does not need a toast. Surface only genuine capture failures
+          // (device busy, no source, unsupported) the same way the join guards
+          // do; keep the detail in setLog and keep cancel silent.
+          const name = error?.name || ''
+          if (name !== 'NotAllowedError' && name !== 'AbortError') {
+            const message = 'could not start screen sharing. please try again.'
+            addAssistantMessage({ kind: 'error', text: message })
+          }
+        }
+      }
+
+      // iOS Safari has no navigator.mediaDevices.getDisplayMedia. Keep the
+      // share control VISIBLE but aria-disabled (never natively disabled): a
+      // native `disabled` button swallows the click, so the tap would be a
+      // silent no-op — aria-disabled reads as disabled to AT and the eye while
+      // still firing the click handler, whose guard raises the unsupported
+      // toast. Mirror onto the board-dock forwarder.
+      function applyScreenShareSupportState() {
+        for (const control of [screenShareButton, boardDockShare]) {
+          if (!control) {
+            continue
+          }
+          if (screenShareSupported) {
+            control.removeAttribute('aria-disabled')
+          } else {
+            control.setAttribute('aria-disabled', 'true')
+          }
         }
       }
 
@@ -46002,6 +46094,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!sessionPeer?.getReceivers) {
           return
         }
+        // fresh transport → fresh per-connection ICE-restart budget (finding 3)
+        remoteVideoEscalationIceRestartCount = 0
+        remoteVideoEscalationLastIceRestartAt = 0
         remoteVideoFreezeTimer = window.setInterval(() => {
           pollRemoteVideoFreezeStats(sessionPeer).catch(error => {
             console.warn('Could not read remote video freeze stats', error)
@@ -46055,6 +46150,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             bytesReceived,
             lastAdvanceAt: now,
             lastRepairAt: 0,
+            escalatedTrackRefresh: false,
+            escalatedIceRestart: false,
             freezeCount: Number(inbound.freezeCount) || 0,
             totalFreezesDuration: Number(inbound.totalFreezesDuration) || 0
           })
@@ -46069,6 +46166,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (framesAdvanced) {
           state.lastAdvanceAt = now
           state.lastRepairAt = 0
+          // per-episode rungs re-arm on recovery; the ICE-restart cap and
+          // cooldown live per-CONNECTION and persist across a single track's
+          // recovery (anti-flap)
+          state.escalatedTrackRefresh = false
+          state.escalatedIceRestart = false
           if (frozenRemoteVideoTrackIds.delete(track.id)) {
             const tile = remoteTileShowingTrack(track)
             if (tile && !track.muted) {
@@ -46079,6 +46181,39 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             })
           }
           return
+        }
+        // Deaf-subscription escalation (2026-07-10 incident's OWN class):
+        // inbound RTP can stop ENTIRELY on one subscription — Chrome then marks
+        // the remote track muted — and the tile strands on its last decoded
+        // frame with NO recovery until a full rejoin. That class never reaches
+        // the freeze path below (which needs bytes still arriving), so route it
+        // into the SAME ladder — but ONLY when the roster (trustworthy for
+        // guests too now) says the participant's camera is ON and a real
+        // rendered gallery tile is stranded. A genuine camera-off / peer-drop /
+        // renegotiation, or an unknown roster, falls through to the quiet
+        // early-returns below (anti-flap).
+        if (track.muted || !bytesAdvanced) {
+          const deafTile = deafSubscriptionRemoteTile(track, framesDecoded)
+          if (deafTile) {
+            const frozenMs = now - state.lastAdvanceAt
+            if (frozenMs >= remoteVideoFreezeStallMs) {
+              frozenRemoteVideoTrackIds.add(track.id)
+              deafTile.classList.add('is-video-stalled')
+              // Stamp lastRepairAt on the same 6s cadence the frozen path uses
+              // so the shared 4s/8s repair passes stay throttled (no
+              // dispose+recreate flicker) while the ladder does the healing.
+              if (now - state.lastRepairAt >= remoteVideoFreezeRepairIntervalMs) {
+                logRoomRecovery('remote_video_deaf', {
+                  participant: remoteTileName(deafTile),
+                  frozenMs: Math.round(frozenMs),
+                  freezeCount: state.freezeCount
+                })
+                state.lastRepairAt = now
+              }
+              escalateStaleRemoteVideoTile(track, state, frozenMs, now)
+            }
+            return
+          }
         }
         // A track that goes muted (peer dropped / slept / mid-renegotiation)
         // stops advancing bytes too and belongs to the mute watcher, not the
@@ -46124,6 +46259,101 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           requestParticipantTrackRefresh('frozen remote video')
           state.lastRepairAt = now
         }
+        escalateStaleRemoteVideoTile(track, state, frozenMs, now)
+      }
+
+      // A deaf subscription: inbound bytes stopped (the track is muted, or the
+      // byte counter stalled) yet the participant is still ON camera per the
+      // roster, and a real rendered gallery tile is stranded on its last frame.
+      // Returns that tile, or null when this is instead a legitimate quiet stop
+      // (camera off, peer gone, mid-renegotiation) or the roster is unknown —
+      // in which case the caller keeps the old early-return so we never flap a
+      // tile whose media really did go away.
+      function deafSubscriptionRemoteTile(track, framesDecoded) {
+        // a never-decoded fresh track has not rendered — it is not "deaf", it
+        // is still inside its creation grace with the normal repair passes
+        if (framesDecoded <= 0) {
+          return null
+        }
+        const tile = remoteTileShowingTrack(track)
+        if (!tile) {
+          return null
+        }
+        const name = remoteTileName(tile)
+        if (!name || name === 'participant' || !participantMediaStates.has(name)) {
+          return null
+        }
+        if (participantMediaState(name).cameraOff) {
+          return null
+        }
+        return tile
+      }
+
+      /* Stale-tile escalation ladder (2026-07-10): a subscription can freeze
+         PERMANENTLY — PLIs forward, keyframes flow, renegotiations answer (a
+         fresh subscriber decodes the same trackLocal fine), yet this
+         subscriber never recovers until a full rejoin. The freeze watch's 6s
+         PLI/track-refresh cadence cannot cure that class, so a still-frozen
+         tile climbs two bounded rungs on the SAME frozenMs clock (the
+         2026-07-06 flicker lesson: never a competing repair loop): a
+         server-side track rebind (request_participant_tracks) at 12s, then
+         ONE restart_ice (full transport renegotiation) at 24s — single-shot
+         per freeze episode, capped per track binding, cooled 60s. Both events
+         are guest-allowlisted server-side, so the ladder cures members AND
+         guests. */
+      function escalateStaleRemoteVideoTile(track, state, frozenMs, now) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          return
+        }
+        if (frozenMs < remoteVideoStaleEscalationRefreshMs) {
+          return
+        }
+        if (!state.escalatedTrackRefresh) {
+          state.escalatedTrackRefresh = true
+          logRoomRecovery('stale_tile_escalation_track_refresh', {
+            participant: remoteTileName(remoteTileShowingTrack(track)),
+            frozenMs: Math.round(frozenMs)
+          })
+          // force past the 900ms throttle: the 6s repair cadence fires the same
+          // request on this tick, so an unforced send would be swallowed while
+          // this one-shot flag still burns (finding 2)
+          forceParticipantTrackRefresh('stale tile escalation')
+          return
+        }
+        if (frozenMs < remoteVideoStaleEscalationIceRestartMs || state.escalatedIceRestart) {
+          return
+        }
+        // restart_ice renegotiates the WHOLE transport, so the cap and cooldown
+        // are per-CONNECTION (finding 3): when a transport-wide stall makes
+        // every frozen tile cross 24s in one stats pass, only ONE restart fires
+        // per cooldown window. state.escalatedIceRestart above still single-shots
+        // each track per freeze episode.
+        if (remoteVideoEscalationIceRestartCount >= remoteVideoStaleEscalationMaxIceRestarts) {
+          return
+        }
+        // truthiness first: performance.now() runs from page load, so a bare
+        // subtraction against the 0 seed would block rung 2 for the page's
+        // first 60s
+        if (remoteVideoEscalationLastIceRestartAt && now - remoteVideoEscalationLastIceRestartAt < remoteVideoStaleEscalationIceCooldownMs) {
+          return
+        }
+        state.escalatedIceRestart = true
+        remoteVideoEscalationIceRestartCount++
+        remoteVideoEscalationLastIceRestartAt = now
+        logRoomRecovery('stale_tile_escalation_ice_restart', {
+          participant: remoteTileName(remoteTileShowingTrack(track)),
+          frozenMs: Math.round(frozenMs),
+          attempt: remoteVideoEscalationIceRestartCount
+        })
+        try {
+          pc?.restartIce?.()
+        } catch (error) {
+          console.warn('Could not locally restart ICE for a stale tile', error)
+        }
+        ws.send(JSON.stringify({
+          event: 'restart_ice',
+          data: JSON.stringify({ reason: 'stale tile escalation' })
+        }))
       }
 
       function remoteTileShowingTrack(track) {

@@ -31,6 +31,7 @@ import (
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -427,6 +428,72 @@ func rtcpFeedbackSummary(feedback []webrtc.RTCPFeedback) string {
 	}
 
 	return strings.Join(parts, ",")
+}
+
+// Identity/transport-scoped SDES header extension URIs (RFC 8843 §9, RFC
+// 8852). Their ids AND values are meaningful only on the transport they were
+// negotiated on: the MID/RID bytes name the PUBLISHER's m-lines, and the ids
+// may map to entirely different URIs on a subscriber's transport.
+const (
+	sdesMidExtensionURI                 = "urn:ietf:params:rtp-hdrext:sdes:mid"
+	sdesRTPStreamIDExtensionURI         = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id"
+	sdesRepairedRTPStreamIDExtensionURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
+)
+
+// transportScopedRTPExtensionIDs resolves which extension ids the PUBLISHER's
+// transport negotiated for the identity/transport-scoped SDES URIs — the ids
+// the forward path must strip before fan-out.
+func transportScopedRTPExtensionIDs(receiver *webrtc.RTPReceiver) []uint8 {
+	if receiver == nil {
+		return nil
+	}
+	return transportScopedRTPExtensionIDsFromParameters(receiver.GetParameters())
+}
+
+func transportScopedRTPExtensionIDsFromParameters(parameters webrtc.RTPParameters) []uint8 {
+	var ids []uint8
+	for _, extension := range parameters.HeaderExtensions {
+		switch extension.URI {
+		case sdesMidExtensionURI, sdesRTPStreamIDExtensionURI, sdesRepairedRTPStreamIDExtensionURI:
+			ids = append(ids, uint8(extension.ID))
+		}
+	}
+	return ids
+}
+
+// stripTransportScopedRTPExtensions deletes the publisher's identity/
+// transport-scoped header extensions from a packet before fan-out. RTP header
+// extension ids are negotiated PER TRANSPORT (RFC 8285 §6): forwarding the
+// publisher's raw MID/RID bytes to subscribers — whose demux resolves the same
+// id against THEIR OWN negotiation — is spec-incorrect and can confuse
+// subscriber-side demux after m-line churn (the permanent per-subscriber
+// freeze class in the 2026-07-10 incident). Everything else is preserved:
+// commit 0a46b50 deliberately keeps media-scoped extensions (video
+// orientation/rotation, congestion metadata like abs-send-time/TWCC,
+// audio-level) because a strip-everything forward made phone video look
+// unstable to subscribers.
+func stripTransportScopedRTPExtensions(packet *rtp.Packet, ids []uint8) {
+	if packet == nil || !packet.Header.Extension || len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		if packet.Header.GetExtension(id) != nil {
+			_ = packet.Header.DelExtension(id)
+		}
+	}
+	if len(packet.Header.Extensions) == 0 {
+		// Never marshal a zero-length extension block.
+		packet.Header.Extension = false
+		packet.Header.ExtensionProfile = 0
+	}
+}
+
+// forwardPublisherRTP is the single write seam from a publisher's inbound RTP
+// to the room's fan-out track: strip the transport-scoped extensions, keep the
+// media-scoped ones, write.
+func forwardPublisherRTP(trackLocal *webrtc.TrackLocalStaticRTP, packet *rtp.Packet, stripExtensionIDs []uint8) error {
+	stripTransportScopedRTPExtensions(packet, stripExtensionIDs)
+	return trackLocal.WriteRTP(packet)
 }
 
 func rtpExtensionIDSummary(ids []uint8) string {
@@ -2252,6 +2319,23 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, nil, fmt.Errorf("register h264 codec: %w", err)
 	}
+	// RTX repair codec (RFC 4588) for H264, payload type matching pion's
+	// defaults. Without an apt codec registered, pion strips RTX from browser
+	// offers (publisher uplink loss is PLI-only — every prod track logged
+	// has_rtx=false) and never allocates repair SSRCs on its own senders, so
+	// the NACK responder retransmits on the media SSRC instead of a proper
+	// repair stream. TrackRemote.ReadRTP unwraps inbound RTX transparently,
+	// so the forwarding pump needs no changes.
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeRTX,
+			ClockRate:   90000,
+			SDPFmtpLine: "apt=102",
+		},
+		PayloadType: 103,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register h264 rtx codec: %w", err)
+	}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     webrtc.MimeTypeVP8,
@@ -2261,6 +2345,16 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 		PayloadType: 96,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, nil, fmt.Errorf("register vp8 codec: %w", err)
+	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeRTX,
+			ClockRate:   90000,
+			SDPFmtpLine: "apt=96",
+		},
+		PayloadType: 97,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register vp8 rtx codec: %w", err)
 	}
 
 	registry := &interceptor.Registry{}
@@ -2871,9 +2965,37 @@ func arrayLenFromPayload(payload map[string]any, key string) int {
 	return len(value)
 }
 
+// stringFromPayload extracts a string field from a decoded client report and
+// scrubs it for logging. These helpers feed ONLY the media-quality/error log
+// lines (one fmt.Printf key=value line per report), and guests can now reach
+// those seams (§5.4), so an attacker-controlled value must not be able to forge
+// a log line or bury one. sanitizeLogField does the neutralizing; printable
+// content survives so the existing log-grep recipes keep matching.
 func stringFromPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
-	return value
+	return sanitizeLogField(value)
+}
+
+// sanitizeLogField neutralizes a client-supplied string for single-line
+// key=value logging: CR/LF and other control characters — which could forge a
+// new log line and poison incident forensics (the 2026-07-10 diagnosis leaned
+// on exactly these logs) — are dropped, and the result is capped so one field
+// can't bury a line. Ordinary printable text passes through unchanged.
+func sanitizeLogField(s string) string {
+	const maxRunes = 256
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r == '\t' || r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+		count++
+		if count >= maxRunes {
+			break
+		}
+	}
+	return b.String()
 }
 
 func boolFromPayload(payload map[string]any, key string) bool {
@@ -3497,6 +3619,28 @@ const subscriberKeyframeInterval = time.Second
 
 var subscriberKeyframeThrottle = newKeyframeRequestThrottle(subscriberKeyframeInterval)
 
+// Throttled subscriber keyframe requests used to be dropped SILENTLY, which
+// hid the forward path's behavior during the 2026-07-10 frozen-tile
+// diagnosis. Every suppressed request is counted; the log line is emitted at
+// most once per interval so a PLI storm stays cheap.
+const keyframeThrottleDropLogInterval = time.Second
+
+var (
+	keyframeThrottleDrops        atomic.Int64
+	keyframeThrottleDropLogStamp atomic.Int64 // unix nanos of the last drop log
+)
+
+func noteThrottledKeyframeRequestDrop(forwardedTrackID string, subscriberName string, subscriberSession string) {
+	total := keyframeThrottleDrops.Add(1)
+	now := time.Now().UnixNano()
+	last := keyframeThrottleDropLogStamp.Load()
+	if now-last < int64(keyframeThrottleDropLogInterval) || !keyframeThrottleDropLogStamp.CompareAndSwap(last, now) {
+		return
+	}
+	log.Infof("room_keyframe_throttled track_id=%s requested_by=%s session=%s dropped_total=%d",
+		forwardedTrackID, subscriberName, subscriberSession, total)
+}
+
 // forwardSubscriberRTCP drains RTCP from a subscriber-facing RTPSender and
 // forwards keyframe requests (PLI/FIR) to the publisher of the forwarded
 // track. Without this read loop the sender's inbound RTCP is never consumed,
@@ -3541,7 +3685,9 @@ func rtcpHasKeyframeRequest(packets []rtcp.Packet) bool {
 // requests cost one keyframe.
 func requestSourceKeyframe(forwardedTrackID string, subscriberName string, subscriberSession string) {
 	if !subscriberKeyframeThrottle.allow(forwardedTrackID, time.Now()) {
-		return // another subscriber already asked within the window
+		// another subscriber already asked within the window
+		noteThrottledKeyframeRequestDrop(forwardedTrackID, subscriberName, subscriberSession)
+		return
 	}
 
 	publisherConnection, sourceSSRC, ok := publisherKeyframeTarget(forwardedTrackID)
@@ -3941,10 +4087,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 		})
 
-		pc.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		pc.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackParticipantName := currentParticipantName()
 			trackParticipantSessionID := participantSessionID
 			forwardedTrackID := forwardedRemoteTrackID(t)
+			// The ids THIS publisher negotiated for sdes:mid/rid/repaired-rid;
+			// forwardPublisherRTP strips them per packet (transport-scoped,
+			// never valid on a subscriber's transport).
+			stripExtensionIDs := transportScopedRTPExtensionIDs(receiver)
 			codec := t.Codec()
 			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
 				trackParticipantName, trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
@@ -4029,10 +4179,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					}
 				}
 
-				// Preserve RTP header extensions from the publisher. Mobile browsers
-				// can carry video orientation/rotation and congestion metadata there;
-				// stripping them makes phone video look unstable to subscribers.
-				if err = trackLocal.WriteRTP(packet); err != nil {
+				// Preserve RTP header extensions from the publisher when they are
+				// media-scoped (mobile browsers carry video orientation/rotation and
+				// congestion metadata there; stripping them makes phone video look
+				// unstable to subscribers — 0a46b50) while dropping the
+				// TRANSPORT-scoped SDES ids, which are only meaningful on the
+				// publisher's own transport (see stripTransportScopedRTPExtensions).
+				if err = forwardPublisherRTP(trackLocal, packet, stripExtensionIDs); err != nil {
 					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
 						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
 					return
@@ -4442,6 +4595,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before requesting media labels.")
 				continue
 			}
+			// §6.5 hardening: replays room track snapshots + runs a global
+			// peer-sync walk, so token-bucket guests (members unbucketed) to keep
+			// a guest-link holder from forcing that fan-out at socket line rate.
+			if guest != nil && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_media_repair_rate_limited session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
 			signalPeerConnections()
 		case "candidate":
@@ -4754,6 +4914,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")
 				continue
 			}
+			// §6.5 hardening: each accepted update fans a room-wide participants
+			// broadcast (amplification × room size); token-bucket guests, members
+			// unbucketed.
+			if guest != nil && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_media_state_rate_limited session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
 			payload := struct {
 				MicMuted      bool `json:"micMuted"`
 				CameraOff     bool `json:"cameraOff"`
@@ -4790,9 +4957,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted {
 				continue
 			}
+			// §6.5 hardening: unbounded log write; token-bucket guests (members
+			// unbucketed). The legit client emits every ~4-12s.
+			if guest != nil && !kanbanApp.allowGuestTelemetryEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_media_telemetry_rate_limited event=media_quality session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
 			logClientMediaQualityReport(message.Data, currentParticipantName(), participantSessionID)
 		case "media_error":
 			if !participantAccepted {
+				continue
+			}
+			if guest != nil && !kanbanApp.allowGuestTelemetryEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_media_telemetry_rate_limited event=media_error session=%s room=%s", participantSessionID, connRoomID)
 				continue
 			}
 			logClientMediaErrorReport(message.Data, currentParticipantName(), participantSessionID)

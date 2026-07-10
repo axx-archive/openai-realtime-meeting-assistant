@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
 )
 
 // registeredHTTPRoutes parses main.go's http.HandleFunc registrations — the
@@ -404,6 +405,210 @@ func TestGuestFanOutLeakSweepAcrossBroadcastSeams(t *testing.T) {
 	if dropped := guestEventsDropped.Load() - droppedBefore; dropped < 5 {
 		t.Fatalf("write-time allowlist counted %d drops, want at least the 5 mis-routes", dropped)
 	}
+}
+
+/* ---------- guest inbound/writable allowlist gaps (2026-07-10 incident) ---------- */
+
+// waitForGuestInRoomPool blocks until a guest socket for the room appears in
+// the media fan-out pool — room broadcasts only reach media-joined sockets.
+func waitForGuestInRoomPool(t *testing.T, roomID string) {
+	t.Helper()
+	registration := time.Now().Add(5 * time.Second)
+	for {
+		pooled := false
+		listLock.RLock()
+		for _, state := range peerConnections {
+			if state.websocket != nil && state.websocket.guest && normalizeRoomID(state.roomID) == roomID {
+				pooled = true
+			}
+		}
+		listLock.RUnlock()
+		if pooled {
+			return
+		}
+		if time.Now().After(registration) {
+			t.Fatal("guest socket never entered the room fan-out pool")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestGuestParticipantMediaStateReachesRoomRoster pins defect (a) of the
+// 2026-07-10 "Impossible Moments" incident: a guest's cam/mic state must land
+// in the room roster (what teammates render) instead of being dropped by the
+// inbound allowlist — live, Guest Bruce's tile stayed a zero-state black box
+// because participant_media_state never reached setParticipantMediaStateInRoom.
+func TestGuestParticipantMediaStateReachesRoomRoster(t *testing.T) {
+	resetGuestSocketCapsForTest(t)
+	resetAuthRateLimitersForTest()
+	server := newIsolatedWebsocketServer(t)
+	roomID, guestToken := mintGuestRoomAndSession(t, "Bruce")
+	conn := admitGuestSocket(t, server, guestToken)
+
+	// Enter the media pool first (like a real guest publishing state): the
+	// participants rebroadcast below reaches media-joined sockets.
+	if err := conn.WriteJSON(map[string]string{"event": "media_ready", "data": `{}`}); err != nil {
+		t.Fatalf("guest media_ready: %v", err)
+	}
+	waitForGuestInRoomPool(t, roomID)
+
+	if err := conn.WriteJSON(map[string]string{"event": "participant_media_state", "data": `{"micMuted":true,"cameraOff":true}`}); err != nil {
+		t.Fatalf("send guest media state: %v", err)
+	}
+
+	// Teammates render the roster snapshot every participants broadcast
+	// carries, so the pin is on the server-side roster state.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := kanbanApp.roomSnapshotForRoom(roomID)
+		states, _ := snapshot["mediaStates"].(map[string]participantMediaState)
+		if state, ok := states["Guest Bruce"]; ok && state.MicMuted && state.CameraOff {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("guest media state never reached the room roster (mediaStates=%v)", states)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// The handler also rebroadcasts the refreshed roster to the room; the
+	// guest's own socket (participants is allowlisted) proves delivery.
+	sawUpdate := time.Now().Add(5 * time.Second)
+	for {
+		data := waitForKanbanEvent(t, conn, "participants", 5*time.Second)
+		if strings.Contains(string(data), `"micMuted":true`) && strings.Contains(string(data), `"cameraOff":true`) {
+			break
+		}
+		if time.Now().After(sawUpdate) {
+			t.Fatal("participants rebroadcast after the guest media-state update never arrived")
+		}
+	}
+}
+
+// TestGuestRequestParticipantTracksRepliesWithRoomSnapshots pins the guest
+// tile self-heal: request_participant_tracks from an admitted guest must
+// replay the room's track snapshots and resignal, exactly like a member
+// (main.go request_participant_tracks case). Live, five retries were dropped
+// by the inbound allowlist while a frozen tile stayed frozen.
+func TestGuestRequestParticipantTracksRepliesWithRoomSnapshots(t *testing.T) {
+	resetGuestSocketCapsForTest(t)
+	resetAuthRateLimitersForTest()
+	server := newIsolatedWebsocketServer(t)
+	roomID, guestToken := mintGuestRoomAndSession(t, "Bruce")
+	conn := admitGuestSocket(t, server, guestToken)
+
+	// Seed a member-published track in the guest's room (the isolated server
+	// already snapshotted + cleared the peer state globals).
+	memberTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "aj-video", "aj-stream")
+	if err != nil {
+		t.Fatalf("create member track: %v", err)
+	}
+	listLock.Lock()
+	trackLocals[memberTrack.ID()] = memberTrack
+	trackParticipants[memberTrack.ID()] = "AJ"
+	trackParticipantSessions[memberTrack.ID()] = "aj-1"
+	trackSourceIDs[memberTrack.ID()] = "aj-camera-source"
+	trackRooms[memberTrack.ID()] = roomID
+	listLock.Unlock()
+
+	if err := conn.WriteJSON(map[string]string{"event": "request_participant_tracks", "data": `{}`}); err != nil {
+		t.Fatalf("send request_participant_tracks: %v", err)
+	}
+	data := waitForKanbanEvent(t, conn, "participant_track", 5*time.Second)
+	if !strings.Contains(string(data), `"name":"AJ"`) || !strings.Contains(string(data), memberTrack.ID()) {
+		t.Fatalf("participant_track replay %s does not name AJ's room track", data)
+	}
+}
+
+// TestGuestPreAdmissionMediaEventsAreSafe pins the admission-safety contract
+// for the newly allowlisted inbound events: sent BEFORE the guest hello (no
+// seat, no PeerConnection) they must not panic the handler and must not
+// mutate room state — the gated handlers answer access_denied (or ignore
+// telemetry) and the socket must still admit normally afterwards.
+func TestGuestPreAdmissionMediaEventsAreSafe(t *testing.T) {
+	resetGuestSocketCapsForTest(t)
+	resetAuthRateLimitersForTest()
+	server := newIsolatedWebsocketServer(t)
+	roomID, guestToken := mintGuestRoomAndSession(t, "Bruce")
+
+	conn, _, err := dialGuestWebsocket(t, server, guestToken)
+	if err != nil {
+		t.Fatalf("guest dial: %v", err)
+	}
+
+	// Telemetry first (no reply), then the two access_denied-answering events
+	// as ordering barriers: once both denials arrive, all four were processed.
+	for _, event := range []string{"media_quality", "media_error", "participant_media_state", "request_participant_tracks"} {
+		if err := conn.WriteJSON(map[string]string{"event": event, "data": `{"micMuted":true}`}); err != nil {
+			t.Fatalf("send pre-admission %s: %v", event, err)
+		}
+	}
+	denials := 0
+	for denials < 2 {
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		var message websocketMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read waiting for pre-admission denials (%d/2): %v", denials, err)
+		}
+		if message.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(message.Data), &inner); err != nil {
+			t.Fatalf("decode kanban envelope: %v", err)
+		}
+		switch inner.Event {
+		case "access_denied":
+			denials++
+		case "access_granted":
+			t.Fatal("pre-admission media event was answered with a grant")
+		}
+	}
+
+	// No seat, no media state, no liveness entry appeared.
+	snapshot := kanbanApp.roomSnapshotForRoom(roomID)
+	if occupied, _ := snapshot["occupiedSeats"].(int); occupied != 0 {
+		t.Fatalf("pre-admission events mutated occupancy: %v", snapshot)
+	}
+	if states, _ := snapshot["mediaStates"].(map[string]participantMediaState); len(states) != 0 {
+		t.Fatalf("pre-admission events mutated media state: %v", states)
+	}
+
+	// The handler survived (no panic): the same socket still admits.
+	if err := conn.WriteJSON(map[string]string{"event": "participant", "data": `{}`}); err != nil {
+		t.Fatalf("guest hello after pre-admission events: %v", err)
+	}
+	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
+}
+
+// TestScreenShareEventsReachGuestSockets pins defect (b): the room-scoped
+// screen_share_started/stopped broadcasts must pass the write-time guest
+// allowlist — live they were guest_event_dropped and the guest only recovered
+// via the roster fallback.
+func TestScreenShareEventsReachGuestSockets(t *testing.T) {
+	resetGuestSocketCapsForTest(t)
+	resetAuthRateLimitersForTest()
+	server := newIsolatedWebsocketServer(t)
+	roomID, guestToken := mintGuestRoomAndSession(t, "Bruce")
+	conn := admitGuestSocket(t, server, guestToken)
+
+	// Room broadcasts reach media-joined sockets only; enter the pool and wait
+	// for registration before firing (the leak-sweep recipe).
+	if err := conn.WriteJSON(map[string]string{"event": "media_ready", "data": `{}`}); err != nil {
+		t.Fatalf("guest media_ready: %v", err)
+	}
+	waitForGuestInRoomPool(t, roomID)
+
+	broadcastRoomKanbanEvent(roomID, "screen_share_started", map[string]any{"name": "AJ", "roomId": roomID})
+	if data := waitForKanbanEvent(t, conn, "screen_share_started", 5*time.Second); !strings.Contains(string(data), `"name":"AJ"`) {
+		t.Fatalf("screen_share_started payload %s does not name the sharer", data)
+	}
+	broadcastRoomKanbanEvent(roomID, "screen_share_stopped", map[string]any{"name": "AJ", "roomId": roomID})
+	waitForKanbanEvent(t, conn, "screen_share_stopped", 5*time.Second)
 }
 
 /* ---------- §6.1 DoS-cap battery under concurrency ---------- */
