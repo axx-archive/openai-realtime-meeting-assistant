@@ -728,7 +728,7 @@ func TestIndexRoomsLobbyMountCascadeReleases(t *testing.T) {
 		t.Fatal("index.html missing the room tab-pane entry rule")
 	}
 	paneRule := html[paneRuleAt : paneRuleAt+strings.Index(html[paneRuleAt:], "}")]
-	if !strings.Contains(paneRule, "animation: bf-tabin 0.4s var(--ease) both") {
+	if !strings.Contains(paneRule, "animation: bf-tabin var(--dur-med) var(--ease) both") {
 		t.Error("the room pane's bf-tabin must hold its final frame (both) — over the opacity-0 .mount-stagger base a bare fill blanks the lobby when the rise ends")
 	}
 

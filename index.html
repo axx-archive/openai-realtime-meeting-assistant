@@ -361,7 +361,7 @@
         text-rendering: optimizeLegibility;
         -webkit-tap-highlight-color: transparent;
         overflow-x: clip;
-        transition: background-color 0.4s var(--ease), color 0.4s var(--ease);
+        transition: background-color var(--dur-slow) var(--ease), color var(--dur-slow) var(--ease);
       }
 
       /* quiet scrollbars (kit base.css) */
@@ -562,12 +562,14 @@
           opacity var(--dur-fast) var(--ease),
           translate var(--dur-fast) var(--ease);
       }
-      /* hover reveals after a beat so a fast mouse-through doesn't flicker
-         every chip; keyboard focus reveals instantly (a11y needs feedback now) */
-      .tool-rail__tool:hover .tool-rail__label {
-        opacity: 1;
-        translate: 0 -50%;
-        transition-delay: 350ms;
+      @media (hover: hover) and (pointer: fine) {
+        /* hover reveals after a beat so a fast mouse-through doesn't flicker
+           every chip; keyboard focus reveals instantly (a11y needs feedback now) */
+        .tool-rail__tool:hover .tool-rail__label {
+          opacity: 1;
+          translate: 0 -50%;
+          transition-delay: 350ms;
+        }
       }
       .tool-rail__tool:focus-visible .tool-rail__label {
         opacity: 1;
@@ -579,8 +581,10 @@
       .tool-rail__tool[data-tool="office"] .tool-rail__label {
         text-transform: none;
       }
-      .tool-rail__tool:hover {
-        transform: scale(1.08);
+      @media (hover: hover) and (pointer: fine) {
+        .tool-rail__tool:hover {
+          transform: scale(1.08);
+        }
       }
       /* inactive tools warm toward ink on hover; active/disabled keep their own color */
       .tool-rail__tool:not([aria-pressed="true"]):not([disabled]):hover {
@@ -919,8 +923,10 @@
         cursor: pointer;
         transition: transform var(--dur-fast) var(--ease);
       }
-      .topbar-live:hover {
-        transform: scale(1.03);
+      @media (hover: hover) and (pointer: fine) {
+        .topbar-live:hover {
+          transform: scale(1.03);
+        }
       }
       .topbar-live:active {
         transform: scale(var(--press-scale));
@@ -1347,7 +1353,7 @@
         aspect-ratio: 16 / 10;
         cursor: grab;
         user-select: none;
-        transition: box-shadow 0.3s var(--ease), transform 0.3s var(--ease), opacity var(--dur-med) var(--ease);
+        transition: box-shadow var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease), opacity var(--dur-med) var(--ease);
       }
 
       /* tile hairline stays a white literal — the stage is theme-invariant */
@@ -1938,9 +1944,9 @@
         color: var(--on-accent);
         font: 600 14px var(--font-sans);
         transition:
-          transform .12s var(--ease),
-          background .12s var(--ease),
-          opacity .12s var(--ease);
+          transform var(--dur-fast) var(--ease),
+          background var(--dur-fast) var(--ease),
+          opacity var(--dur-fast) var(--ease);
       }
       .login-signin:hover:not([disabled]) { background: var(--accent-hover); }
       .login-signin:active:not([disabled]) {
@@ -2043,9 +2049,9 @@
         color: var(--text-1);
         font: 500 14px var(--font-sans);
         transition:
-          background .12s var(--ease),
-          opacity .12s var(--ease),
-          transform .12s var(--ease);
+          background var(--dur-fast) var(--ease),
+          opacity var(--dur-fast) var(--ease),
+          transform var(--dur-fast) var(--ease);
       }
       .login-passkey:hover:not([disabled]) { background: var(--surface-3); }
       .login-passkey:active:not([disabled]) { transform: scale(0.97); }
@@ -2359,15 +2365,17 @@
         /* KC5 — clip any overflowing footer content to the rounded edge so a
            long tag set (KC2) can never spill past the card corner */
         overflow: hidden;
-        transition: transform .2s var(--ease),
-                    box-shadow .2s var(--ease),
+        transition: transform var(--dur-med) var(--ease),
+                    box-shadow var(--dur-med) var(--ease),
                     background var(--dur-fast) var(--ease),
                     border-color var(--dur-fast) var(--ease);
       }
 
-      .card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 28px rgba(14, 14, 16, 0.10);
+      @media (hover: hover) and (pointer: fine) {
+        .card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 28px rgba(14, 14, 16, 0.10);
+        }
       }
       .card:focus-visible {
         outline: 2px solid var(--accent);
@@ -2775,7 +2783,7 @@
         background: var(--surface-2);
         border: 1px solid var(--line-1);
         overflow: hidden;
-        transition: box-shadow 0.2s var(--ease);
+        transition: box-shadow var(--dur-med) var(--ease);
       }
 
       .memory-card:hover {
@@ -2838,7 +2846,7 @@
       .memory-card__chevron {
         flex: none;
         color: var(--text-3);
-        transition: transform 0.25s var(--ease);
+        transition: transform var(--dur-med) var(--ease);
       }
 
       .memory-card.is-expanded .memory-card__chevron {
@@ -2847,7 +2855,7 @@
 
       .memory-card__body {
         padding: 0 18px 16px;
-        animation: bf-tabin 0.3s var(--ease);
+        animation: bf-tabin var(--dur-med) var(--ease);
       }
 
       .memory-card__rule {
@@ -3406,13 +3414,15 @@
           filter var(--dur-fast) var(--ease),
           transform var(--dur-fast) var(--ease);
       }
-      .controls .btn--ghost:hover:not([disabled]),
-      .controls .btn--primary:hover:not([disabled]) {
-        border-color: transparent;
-        background: rgba(255, 255, 255, 0.12);
-        color: #fff;
-        filter: none;
-        transform: scale(1.07);
+      @media (hover: hover) and (pointer: fine) {
+        .controls .btn--ghost:hover:not([disabled]),
+        .controls .btn--primary:hover:not([disabled]) {
+          border-color: transparent;
+          background: rgba(255, 255, 255, 0.12);
+          color: #fff;
+          filter: none;
+          transform: scale(1.07);
+        }
       }
       .controls .btn:active:not([disabled]),
       .controls .btn--ghost:active:not([disabled]),
@@ -3641,9 +3651,11 @@
           filter var(--dur-fast) var(--ease),
           transform var(--dur-fast) var(--ease);
       }
-      .controls .btn--danger:hover:not([disabled]) {
-        filter: none;
-        transform: scale(1.07);
+      @media (hover: hover) and (pointer: fine) {
+        .controls .btn--danger:hover:not([disabled]) {
+          filter: none;
+          transform: scale(1.07);
+        }
       }
       .btn--danger:hover:not([disabled]) { filter: brightness(1.14); }
       .btn--danger svg { display: block; }
@@ -5276,8 +5288,8 @@
       }
 
       @keyframes assistant-message-in {
-        0%   { opacity: 0; transform: translate3d(0, 6px, 0); }
-        100% { opacity: 1; transform: translate3d(0, 0, 0); }
+        0%   { opacity: 0; }
+        100% { opacity: 1; }
       }
 
       @keyframes comment-preview-open {
@@ -5546,7 +5558,7 @@
          keeps its animation kill-switch. `both`, never bare: the room pane
          carries the opacity-0 .mount-stagger base, and this rule outranks
          .is-mounting's mount-rise on the animation shorthand — without a
-         held final frame the lobby vanishes when the 0.4s rise ends. */
+         held final frame the lobby vanishes when the rise ends. */
       #appShell.is-authed[data-tool="office"] #officeTool,
       #appShell.is-authed[data-tool="chat"] #chatTool,
       #appShell.is-authed[data-tool="artifacts"] #artifactsTool,
@@ -5556,7 +5568,7 @@
       #appShell.is-authed[data-tool="memory"] #memoryTool,
       #appShell.is-authed[data-tool="files"] #filesTool,
       #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
-        animation: bf-tabin 0.4s var(--ease) both;
+        animation: bf-tabin var(--dur-med) var(--ease) both;
       }
 
       /* tool pages swap the topbar's meeting meta for the tool's own line;
@@ -5746,7 +5758,7 @@
         border-radius: 99px;
         transform-origin: bottom;
         opacity: 0.5;
-        transition: opacity 0.3s var(--ease);
+        transition: opacity var(--dur-slow) var(--ease);
       }
 
       .office-launch__line {
@@ -5886,10 +5898,12 @@
           transform var(--dur-fast) var(--ease);
       }
 
-      .office-app-card:hover {
-        border-color: var(--line-2);
-        background: var(--glass-panel);
-        transform: translateY(-1px);
+      @media (hover: hover) and (pointer: fine) {
+        .office-app-card:hover {
+          border-color: var(--line-2);
+          background: var(--glass-panel);
+          transform: translateY(-1px);
+        }
       }
 
       .office-app-card:active {
@@ -6111,11 +6125,13 @@
           transform var(--dur-fast) var(--ease);
       }
 
-      .office-agent-card:hover {
-        background: var(--glass-panel);
-        border-color: var(--line-2);
-        box-shadow: var(--shadow-2);
-        transform: translateY(-1px);
+      @media (hover: hover) and (pointer: fine) {
+        .office-agent-card:hover {
+          background: var(--glass-panel);
+          border-color: var(--line-2);
+          box-shadow: var(--shadow-2);
+          transform: translateY(-1px);
+        }
       }
 
       .office-agent-card:active {
@@ -6383,9 +6399,11 @@
         display: none !important;
       }
 
-      .os-assistant__toggle:hover {
-        border-color: var(--line-2);
-        transform: translateY(-1px);
+      @media (hover: hover) and (pointer: fine) {
+        .os-assistant__toggle:hover {
+          border-color: var(--line-2);
+          transform: translateY(-1px);
+        }
       }
 
       .os-assistant__toggle:active {
@@ -8053,7 +8071,7 @@
         font: var(--type-label-lg);
         letter-spacing: var(--track-label);
         cursor: pointer;
-        transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
       }
       .scout-chat-brain-chip:hover {
         border-color: var(--accent);
@@ -9728,8 +9746,10 @@
         transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
-      .scout-chat-send:hover:not([disabled]) {
-        transform: scale(1.08);
+      @media (hover: hover) and (pointer: fine) {
+        .scout-chat-send:hover:not([disabled]) {
+          transform: scale(1.08);
+        }
       }
 
       .scout-chat-send:active {
@@ -10229,6 +10249,7 @@
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         animation: bf-islandin var(--dur-med) var(--ease);
+        transform-origin: left center;
       }
 
       .notification-panel[hidden] {
@@ -14305,7 +14326,7 @@
         font: 600 14px var(--font-sans);
         letter-spacing: 0;
         cursor: pointer;
-        transition: transform 0.12s var(--ease), background 0.12s var(--ease);
+        transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
       }
       .lobby__center > .room-empty__join { width: 100%; }
 
@@ -14392,7 +14413,7 @@
         color: var(--lob-ink);
         font: 500 14px var(--font-sans);
         outline: none;
-        transition: border-color 0.15s var(--ease);
+        transition: border-color var(--dur-fast) var(--ease);
       }
       .lobby__passinput:focus { border-color: rgba(var(--lob-fg), 0.42); }
       .lobby__passinput.is-shake { animation: lobby-shake 300ms var(--ease); }
@@ -16275,7 +16296,7 @@
         align-items: center;
         gap: 7px;
         box-shadow: none;
-        transition: transform .12s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       /* NC2 — disabled reads as intentional (signed out), never as a broken
@@ -16285,12 +16306,14 @@
         cursor: default;
       }
 
-      #newCard:hover:not([disabled]) {
-        background: var(--accent-hover);
-        border-color: transparent;
-        color: var(--on-accent);
-        filter: none;
-        transform: scale(1.03);
+      @media (hover: hover) and (pointer: fine) {
+        #newCard:hover:not([disabled]) {
+          background: var(--accent-hover);
+          border-color: transparent;
+          color: var(--on-accent);
+          filter: none;
+          transform: scale(1.03);
+        }
       }
 
       #newCard:active:not([disabled]) {
@@ -16350,26 +16373,38 @@
         border-radius: var(--r-md);
         background: var(--ink-900);
         color: #FFFFFF;
-        transition: width var(--dur-med) var(--ease), transform var(--dur-med) var(--ease), box-shadow var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease);
+        transition: transform var(--dur-med) var(--ease), box-shadow var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease);
       }
 
       .board-video-tile.is-speaker {
-        width: 96px;
+        transform: scale(1.23);
         border-color: var(--live);
         box-shadow: var(--glow-live);
+        z-index: 1;
       }
 
-      .board-video-tile:hover,
+      @media (hover: hover) and (pointer: fine) {
+        .board-video-tile:hover {
+          transform: translateY(-4px) scale(1.79);
+          border-color: var(--line-2);
+          outline: none;
+          z-index: 2;
+        }
+      }
       .board-video-tile:focus-visible {
-        width: 140px;
-        transform: translateY(-4px);
+        transform: translateY(-4px) scale(1.79);
         border-color: var(--line-2);
         outline: none;
         z-index: 2;
       }
-      .board-video-tile.is-speaker:hover,
+      @media (hover: hover) and (pointer: fine) {
+        .board-video-tile.is-speaker:hover {
+          transform: translateY(-4px) scale(2.05);
+          border-color: var(--live);
+        }
+      }
       .board-video-tile.is-speaker:focus-visible {
-        width: 160px;
+        transform: translateY(-4px) scale(2.05);
         border-color: var(--live);
       }
 
@@ -16878,7 +16913,7 @@
         background: transparent;
         color: var(--text-2);
         flex: none;
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       .topbar__back:active {
@@ -16897,7 +16932,7 @@
         background: transparent;
         color: var(--text-2);
         flex: none;
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       .topbar__bell:active {
@@ -16921,7 +16956,7 @@
         border-radius: var(--r-full);
         background: transparent;
         flex: none;
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       .topbar__mobile-account:active {
@@ -16947,7 +16982,7 @@
         background: var(--surface-2);
         color: var(--text-1);
         text-align: left;
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       .office-intel-card:hover { border-color: var(--line-2, var(--line-1)); }
@@ -17013,7 +17048,7 @@
         background: var(--surface-2);
         color: var(--text-1);
         text-align: left;
-        transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
       .office-home-card:hover { border-color: var(--line-2, var(--line-1)); }
       .office-home-card:active { transform: scale(0.98); }
@@ -17057,7 +17092,7 @@
         color: var(--text-1);
         text-align: left;
         cursor: pointer;
-        transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
       .home-live__row:hover { border-color: var(--line-2, var(--line-1)); }
       .home-live__row:active { transform: scale(0.98); }
@@ -17104,7 +17139,7 @@
         background: var(--surface-1, var(--surface-2));
         box-shadow: var(--shadow-3);
         overflow: hidden;
-        animation: bf-sheetin 220ms var(--ease);
+        animation: bf-sheetin var(--dur-med) var(--ease);
       }
       .bsheet__head {
         display: flex;
@@ -17268,7 +17303,7 @@
         background: transparent;
         color: var(--text-2);
         flex: none;
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       /* P2-3: the 30px chevron is below --hit-min — extend the tappable area to
@@ -17433,7 +17468,7 @@
         background: var(--danger-soft);
         color: var(--danger);
         font: 600 13.5px var(--font-sans);
-        transition: transform 0.15s var(--ease);
+        transition: transform var(--dur-fast) var(--ease);
       }
 
       .settings-sheet-signout:active {
@@ -18936,7 +18971,7 @@
           padding: 30px 0 26px;
           gap: 18px;
           border-radius: 24px;
-          transition: background 0.3s var(--ease);
+          transition: background var(--dur-slow) var(--ease);
         }
 
         .office-launch__island:active {
@@ -19348,12 +19383,11 @@
         }
 
         .board-video-tile:hover {
-          width: 78px;
           transform: none;
         }
 
         .board-video-tile.is-speaker:hover {
-          width: 96px;
+          transform: scale(1.23);
         }
 
         .card:hover,
@@ -19509,10 +19543,10 @@
         cursor: pointer;
         /* one unified card-hover recipe (ux §3.2.6): translateY + shadow-2 */
         transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-        animation: bf-popin var(--dur-med) var(--ease-spring) both;
-        animation-delay: var(--palette-stagger, 0ms);
       }
-      .palette__tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--line-2); }
+      @media (hover: hover) and (pointer: fine) {
+        .palette__tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--line-2); }
+      }
       .palette__tile:active:not([disabled]) { transform: scale(var(--press-scale)); }
       .palette__tile:focus-visible {
         outline: 2px solid var(--accent);
@@ -21263,6 +21297,9 @@
         .memory-card__body { animation: none; }
         .memory-card__chevron { transition: none; }
         .login-presence__dot { animation: none; }
+        .research-ring__pulse,
+        .research-overall__dot,
+        .scout-chat-research__step.is-active .scout-chat-research__step-dot { animation: none; }
         .board-mobile-hint__dot { animation: none; }
         .room-board-panel { animation: none; }
         .video-tile.is-active-speaker:not(.is-dragging) { transform: none; }
@@ -39652,23 +39689,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const label = bfEl('div', 'palette__group-label', paletteQuery ? `filtering · /${paletteQuery}` : 'type to filter, ↓ to pick')
           paletteBodyEl.appendChild(label)
         }
-        let shown = 0
-        const stagger = (tile) => { tile.style.setProperty('--palette-stagger', `${Math.min(shown, 8) * 40}ms`); shown += 1 }
-
         if (!tokens.length) {
           const recentIds = paletteRecentIds()
           const recentTools = recentIds.map(paletteToolById).filter(Boolean)
           if (recentTools.length) {
             paletteBodyEl.appendChild(bfEl('div', 'palette__group-label', 'Recent'))
             const grid = bfEl('div', 'palette__grid')
-            for (const tool of recentTools) { const tile = paletteMakeTile(tool, tokens); stagger(tile); grid.appendChild(tile) }
+            for (const tool of recentTools) { const tile = paletteMakeTile(tool, tokens); grid.appendChild(tile) }
             paletteBodyEl.appendChild(grid)
           }
           for (const group of (assistantToolsCache || [])) {
             if (!group.tools?.length) continue
             paletteBodyEl.appendChild(bfEl('div', 'palette__group-label', group.label))
             const grid = bfEl('div', 'palette__grid')
-            for (const tool of group.tools) { const tile = paletteMakeTile({ ...tool, groupLabel: group.label }, tokens); stagger(tile); grid.appendChild(tile) }
+            for (const tool of group.tools) { const tile = paletteMakeTile({ ...tool, groupLabel: group.label }, tokens); grid.appendChild(tile) }
             paletteBodyEl.appendChild(grid)
           }
         } else {
@@ -39680,7 +39714,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return
           }
           const grid = bfEl('div', 'palette__grid')
-          for (const entry of ranked) { const tile = paletteMakeTile(entry.tool, tokens); stagger(tile); grid.appendChild(tile) }
+          for (const entry of ranked) { const tile = paletteMakeTile(entry.tool, tokens); grid.appendChild(tile) }
           paletteBodyEl.appendChild(grid)
         }
       }
