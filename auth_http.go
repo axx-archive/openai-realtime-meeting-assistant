@@ -397,6 +397,8 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		handleAuthMe(w, r)
 	case r.URL.Path == "/auth/profile" && r.Method == http.MethodPost:
 		handleAuthProfile(w, r)
+	case r.URL.Path == "/auth/theme" && r.Method == http.MethodPost:
+		handleAuthTheme(w, r)
 	case r.URL.Path == "/auth/change-password" && r.Method == http.MethodPost:
 		handleAuthChangePassword(w, r)
 	case r.URL.Path == "/auth/reset/request" && r.Method == http.MethodPost:
@@ -427,7 +429,39 @@ func identityPayload(user *userAccount) map[string]any {
 		"avatarDataURL": user.AvatarDataURL,
 		"passkeys":      len(user.Credentials),
 		"hasPasskeys":   len(user.Credentials) > 0,
+		"themePref":     user.ThemePref,
 	}
+}
+
+// handleAuthTheme persists the account-level theme preference ("light" |
+// "dark" | "system") so it follows the user across devices; /auth/me carries
+// it back via identityPayload for the client's session-bootstrap re-apply.
+func handleAuthTheme(w http.ResponseWriter, r *http.Request) {
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+
+	payload := struct {
+		Theme string `json:"theme"`
+	}{}
+	if err := decodeAuthBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	theme := strings.TrimSpace(strings.ToLower(payload.Theme))
+	if theme != "light" && theme != "dark" && theme != "system" {
+		writeAuthError(w, http.StatusBadRequest, "theme must be light, dark, or system")
+		return
+	}
+
+	updated, err := accountStore().updateThemePref(user.Email, theme)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "could not save theme")
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, identityPayload(updated))
 }
 
 func handleAuthLogin(w http.ResponseWriter, r *http.Request) {

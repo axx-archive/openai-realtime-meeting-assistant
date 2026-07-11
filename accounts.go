@@ -51,6 +51,10 @@ type userAccount struct {
 	Credentials       []webauthn.Credential `json:"credentials,omitempty"`
 	PasskeyAddedAt    map[string]time.Time  `json:"passkeyAddedAt,omitempty"`
 	PasswordChangedAt time.Time             `json:"passwordChangedAt"`
+	// ThemePref follows the user across devices: "light" | "dark" | "system";
+	// empty means no account-level choice (client falls back to its device
+	// storage, then the light product default — founder call 2026-07-10).
+	ThemePref string `json:"themePref,omitempty"`
 }
 
 // WebAuthnID implements webauthn.User with a stable random handle so passkeys
@@ -311,6 +315,24 @@ func (s *userAccountStore) updateProfile(email, name, avatarDataURL string) (*us
 	if err := s.persistLocked(); err != nil {
 		user.Name = previousName
 		user.AvatarDataURL = previousAvatarDataURL
+		return nil, err
+	}
+	return user, nil
+}
+
+// updateThemePref persists the account-level theme choice with the same
+// mutate-persist-rollback discipline updateProfile uses.
+func (s *userAccountStore) updateThemePref(email, theme string) (*userAccount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[normalizeAccountEmail(email)]
+	if !ok {
+		return nil, errors.New("no such account")
+	}
+	previous := user.ThemePref
+	user.ThemePref = theme
+	if err := s.persistLocked(); err != nil {
+		user.ThemePref = previous
 		return nil, err
 	}
 	return user, nil

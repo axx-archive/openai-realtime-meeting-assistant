@@ -504,3 +504,84 @@ func TestLoginRateLimited(t *testing.T) {
 		t.Fatalf("expected 429 after %d attempts, got %d", loginAttemptLimit+1, last.Code)
 	}
 }
+
+// TestAuthThemePreferenceRoundTrip pins the account-level theme persistence
+// (founder call 2026-07-10): POST /auth/theme stores light|dark|system on the
+// user record, /auth/me carries it back for the session-bootstrap re-apply,
+// the value survives a store reload, and the endpoint is auth- and
+// value-gated.
+func TestAuthThemePreferenceRoundTrip(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	// unauth → 401
+	recorder := postAuthJSON(t, "/auth/theme", `{"theme":"dark"}`, nil)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 unauth, got %d", recorder.Code)
+	}
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	// bad value → 400
+	recorder = postAuthJSON(t, "/auth/theme", `{"theme":"blue"}`, cookies)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad theme, got %d", recorder.Code)
+	}
+
+	// happy path stores + echoes via identityPayload
+	recorder = postAuthJSON(t, "/auth/theme", `{"theme":"dark"}`, cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var saved struct {
+		ThemePref string `json:"themePref"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &saved); err != nil {
+		t.Fatalf("unmarshal /auth/theme: %v", err)
+	}
+	if saved.ThemePref != "dark" {
+		t.Fatalf("themePref = %q, want dark", saved.ThemePref)
+	}
+
+	// /auth/me carries it
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	me := httptest.NewRecorder()
+	authHandler(me, req)
+	if me.Code != http.StatusOK {
+		t.Fatalf("/auth/me status %d", me.Code)
+	}
+	var identity struct {
+		ThemePref string `json:"themePref"`
+	}
+	if err := json.Unmarshal(me.Body.Bytes(), &identity); err != nil {
+		t.Fatalf("unmarshal /auth/me: %v", err)
+	}
+	if identity.ThemePref != "dark" {
+		t.Fatalf("/auth/me themePref = %q, want dark", identity.ThemePref)
+	}
+
+	// survives a store reload (fresh store instance over the same file), and
+	// other record fields are intact
+	reloaded, err := newUserAccountStore(usersFilePath())
+	if err != nil {
+		t.Fatalf("reload account store: %v", err)
+	}
+	user := reloaded.findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("aj account missing after reload")
+	}
+	if user.ThemePref != "dark" {
+		t.Fatalf("reloaded themePref = %q, want dark", user.ThemePref)
+	}
+	if user.Name != "AJ" || len(user.PasswordHash) == 0 {
+		t.Fatalf("reload corrupted other fields: name=%q hashLen=%d", user.Name, len(user.PasswordHash))
+	}
+
+	// "system" is a legal stored value
+	recorder = postAuthJSON(t, "/auth/theme", `{"theme":"system"}`, cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 for system, got %d", recorder.Code)
+	}
+}

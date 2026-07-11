@@ -26,12 +26,17 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
     <script>
-      /* pre-paint theme: stored choice wins, else system preference. */
+      /* pre-paint theme: stored choice wins (the signed-in account preference
+         re-applies after session bootstrap), else LIGHT — the product default
+         (founder call 2026-07-10); OS dark preference is deliberately not
+         consulted. */
       (() => {
         let theme = null
         try { theme = window.localStorage?.getItem('bonfire.theme.v1') } catch (err) { theme = null }
-        if (theme !== 'light' && theme !== 'dark') {
+        if (theme === 'system') {
           theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        } else if (theme !== 'light' && theme !== 'dark') {
+          theme = 'light'
         }
         if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
         const meta = document.querySelector('meta[name="theme-color"]')
@@ -14221,6 +14226,30 @@
          the stage is mounted but no live connection is up; reuses the live
          join flow. Visibility is debounced (see the show rule below) so
          connect/reconnect churn can never flash the join pill on/off. */
+      /* lobby theming (founder call 2026-07-10, supersedes the always-black
+         lobby canon from the fidelity pass): the PRE-JOIN lobby follows the
+         app theme; the IN-CALL stage and the preview tile stay true black in
+         both themes (video is the imagery). One ink-channel token pair drives
+         the whole white-alpha idiom — white on black in dark, ink on paper in
+         light — so every rule below stays single-sourced. */
+      .room-empty {
+        --lob-fg: 17, 17, 20;            /* ink channel (r,g,b) on light paper */
+        --lob-ink: var(--text-1);
+        --lob-panel-shadow: 0 24px 60px rgba(0, 0, 0, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        --lob-rail-shadow: 0 12px 28px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        --lob-join-bg: #111114;
+        --lob-join-ink: #fff;
+        --lob-pop-bg: rgba(252, 252, 250, 0.94);
+      }
+      [data-theme="dark"] .room-empty {
+        --lob-fg: 255, 255, 255;
+        --lob-ink: #fff;
+        --lob-panel-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        --lob-rail-shadow: 0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        --lob-join-bg: #fff;
+        --lob-join-ink: #0E0E10;
+        --lob-pop-bg: rgba(24, 24, 27, 0.92);
+      }
       .room-empty {
         display: flex;
         position: absolute;
@@ -14232,7 +14261,9 @@
         gap: 18px;
         padding: 24px;
         text-align: center;
-        background: var(--bg-stage);
+        /* --bg-app: paper in light, true black in dark — the lobby ground
+           follows the theme while the in-call stage keeps --bg-stage black */
+        background: var(--bg-app);
         border-radius: 0;
         visibility: hidden;
         opacity: 0;
@@ -14260,18 +14291,17 @@
         visibility: hidden;
       }
 
-      /* the one primary on the black stage — white, theme-invariant literals
-         because the stage is always true-black in both themes (same rule the
-         control dock declares for its literals). Mock canon: the lobby join
-         is a full-width rounded rect spanning the whole center column. */
+      /* the one primary on the lobby ground — ink-on-paper in light, white-on-
+         black in dark (lobby token pair). Mock canon: the lobby join is a
+         full-width rounded rect spanning the whole center column. */
       .room-empty__join {
         height: 50px;
         min-height: 50px;
         padding: 0 26px;
         border: 0;
         border-radius: 14px;
-        background: #fff;
-        color: #0E0E10;
+        background: var(--lob-join-bg);
+        color: var(--lob-join-ink);
         font: 600 14px var(--font-sans);
         letter-spacing: 0;
         cursor: pointer;
@@ -14294,14 +14324,13 @@
       }
 
       /* ---------- the lobby (pre-join room tool) ----------
-         Literals, not theme tokens: the stage is always true black in both
-         themes (same rule .room-empty__join declares). Presence is GREEN
-         (--live per law), never ember; listen-only wears --warn. */
+         The glass idiom rides the --lob-fg ink channel (white in dark, ink in
+         light — see the .room-empty token pair). Presence is GREEN (--live per
+         law), never ember; listen-only wears --warn. */
       /* mock canon: ONE shared glass panel holding the switcher card + the
          center column (preview + join) — no hero chrome. Below 880 it stacks
          (center on top, switcher under, max-width 480); at ≥880 it becomes a
-         row with the switcher flipped left. The stage is always black, so the
-         panel wears the white-alpha glass idiom rather than surface tokens. */
+         row with the switcher flipped left. */
       .lobby__panel {
         display: flex;
         flex-direction: column;
@@ -14311,11 +14340,11 @@
         max-width: 520px;
         padding: 24px;
         border-radius: var(--r-2xl);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.028));
+        border: 1px solid rgba(var(--lob-fg), 0.09);
+        background: linear-gradient(180deg, rgba(var(--lob-fg), 0.05), rgba(var(--lob-fg), 0.028));
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        box-shadow: var(--lob-panel-shadow);
       }
       @media (prefers-reduced-motion: no-preference) {
         .lobby__panel { animation: bf-rise-in 480ms var(--ease) both; }
@@ -14338,7 +14367,7 @@
         gap: 10px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.42);
+        color: rgba(var(--lob-fg), 0.42);
       }
       .lobby__badges[hidden] { display: none; }
       .lobby__badge { display: inline-flex; align-items: center; gap: 5px; }
@@ -14358,14 +14387,14 @@
         min-width: 0;
         padding: 0 18px;
         border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        background: rgba(255, 255, 255, 0.06);
-        color: #fff;
+        border: 1px solid rgba(var(--lob-fg), 0.18);
+        background: rgba(var(--lob-fg), 0.06);
+        color: var(--lob-ink);
         font: 500 14px var(--font-sans);
         outline: none;
         transition: border-color 0.15s var(--ease);
       }
-      .lobby__passinput:focus { border-color: rgba(255, 255, 255, 0.42); }
+      .lobby__passinput:focus { border-color: rgba(var(--lob-fg), 0.42); }
       .lobby__passinput.is-shake { animation: lobby-shake 300ms var(--ease); }
       @keyframes lobby-shake {
         0%, 100% { transform: translateX(0); }
@@ -14553,7 +14582,7 @@
       }
       #greenRoomMicChip[aria-pressed="false"]::after,
       #greenRoomCamChip[aria-pressed="false"]::after {
-        background: rgba(255, 255, 255, 0.22);
+        background: rgba(var(--lob-fg), 0.22);
       }
       /* the filters button carries the open ring while its popover is shown */
       .greenroom__filterswrap { position: relative; }
@@ -14675,30 +14704,32 @@
       }
       .greenroom__finetune:hover { color: var(--text-1); }
       .greenroom__finetune[hidden] { display: none; }
-      /* lobby mount: the stage is black in every theme, so the tile + controls
-         wear the white-alpha idiom and the popover the dark-glass idiom */
+      /* lobby mount: the preview TILE stays a dark video inset in both themes
+         (its inner text/scrim keep white literals), while the controls +
+         filters popover around it ride the lobby ink channel so they read on
+         paper and on black alike */
       /* mock canon: the preview reads as a dark stage inset, not a raised chip */
-      .room-empty .greenroom__tile { background: rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
-      .room-empty .greenroom__tile:hover { border-color: rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.8); }
-      .room-empty .greenroom__ctl { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.85); }
-      .room-empty .greenroom__ctl:hover { border-color: rgba(255, 255, 255, 0.35); }
-      .room-empty .greenroom__ctl[aria-pressed="false"] { color: rgba(255, 255, 255, 0.42); }
-      .room-empty .greenroom__filtersbtn[aria-expanded="true"] { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.55); }
+      .room-empty .greenroom__tile { background: rgba(0, 0, 0, 0.4); border-color: rgba(var(--lob-fg), 0.1); color: rgba(255, 255, 255, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+      .room-empty .greenroom__tile:hover { border-color: rgba(var(--lob-fg), 0.35); color: rgba(255, 255, 255, 0.8); }
+      .room-empty .greenroom__ctl { background: rgba(var(--lob-fg), 0.06); border-color: rgba(var(--lob-fg), 0.14); color: rgba(var(--lob-fg), 0.85); }
+      .room-empty .greenroom__ctl:hover { border-color: rgba(var(--lob-fg), 0.35); }
+      .room-empty .greenroom__ctl[aria-pressed="false"] { color: rgba(var(--lob-fg), 0.42); }
+      .room-empty .greenroom__filtersbtn[aria-expanded="true"] { box-shadow: 0 0 0 3px rgba(var(--lob-fg), 0.18); border-color: rgba(var(--lob-fg), 0.55); }
       .room-empty .greenroom__filters {
-        background: rgba(24, 24, 27, 0.95);
-        border-color: rgba(255, 255, 255, 0.12);
+        background: var(--lob-pop-bg);
+        border-color: rgba(var(--lob-fg), 0.12);
         box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
       }
       .room-empty .greenroom__filters-label,
-      .room-empty .greenroom__swatch-label { color: rgba(255, 255, 255, 0.5); }
-      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-fill { box-shadow: 0 0 0 2px #fff; }
-      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-label { color: #fff; }
-      .room-empty .greenroom__filters-divider { background: rgba(255, 255, 255, 0.12); }
-      .room-empty .greenroom__blur-label { color: rgba(255, 255, 255, 0.85); }
-      .room-empty .greenroom__switch-track { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.16); }
-      .room-empty .greenroom__switch-thumb { background: rgba(255, 255, 255, 0.7); }
-      .room-empty .greenroom__finetune { color: rgba(255, 255, 255, 0.42); }
-      .room-empty .greenroom__finetune:hover { color: rgba(255, 255, 255, 0.8); }
+      .room-empty .greenroom__swatch-label { color: rgba(var(--lob-fg), 0.5); }
+      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-fill { box-shadow: 0 0 0 2px var(--lob-ink); }
+      .room-empty .greenroom__swatch.is-selected .greenroom__swatch-label { color: var(--lob-ink); }
+      .room-empty .greenroom__filters-divider { background: rgba(var(--lob-fg), 0.12); }
+      .room-empty .greenroom__blur-label { color: rgba(var(--lob-fg), 0.85); }
+      .room-empty .greenroom__switch-track { background: rgba(var(--lob-fg), 0.08); border-color: rgba(var(--lob-fg), 0.16); }
+      .room-empty .greenroom__switch-thumb { background: rgba(var(--lob-fg), 0.7); }
+      .room-empty .greenroom__finetune { color: rgba(var(--lob-fg), 0.42); }
+      .room-empty .greenroom__finetune:hover { color: rgba(var(--lob-fg), 0.8); }
       /* gate mount: tighter block inside the login card. Canon guest sizing
          (Surface 2): 48px control buttons, a 24px micOff badge, a 56px avatar,
          and a 270px filters popover anchored at right:58px. */
@@ -14724,9 +14755,9 @@
         gap: 6px;
         padding: 12px;
         border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.035);
-        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(var(--lob-fg), 0.08);
+        background: rgba(var(--lob-fg), 0.035);
+        box-shadow: var(--lob-rail-shadow);
         text-align: left;
       }
       .lobby__rail[hidden] { display: none; }
@@ -14734,7 +14765,7 @@
         padding: 2px 8px 6px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.45);
+        color: rgba(var(--lob-fg), 0.45);
       }
       /* the rows list is quiet — the rail card is the surface; rows are
          rounded and only light up on hover/selection (no separators) */
@@ -14753,9 +14784,9 @@
         border-radius: 12px;
         transition: background var(--dur-fast) var(--ease);
       }
-      .lobby__row:hover { background: rgba(255, 255, 255, 0.04); }
+      .lobby__row:hover { background: rgba(var(--lob-fg), 0.04); }
       .lobby__row.is-selected {
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(var(--lob-fg), 0.08);
       }
       .lobby__pick {
         flex: 1;
@@ -14767,16 +14798,16 @@
         padding: 10px 12px;
         border: 0;
         background: none;
-        color: #fff;
+        color: var(--lob-ink);
         text-align: left;
         cursor: pointer;
       }
-      .lobby__dot { width: 7px; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); flex: none; }
+      .lobby__dot { width: 7px; height: 7px; border-radius: 999px; background: rgba(var(--lob-fg), 0.22); flex: none; }
       .lobby__dot.is-live { background: var(--live); }
       .lobby__name {
         font: 600 13.5px var(--font-sans);
         letter-spacing: -0.01em;
-        color: #fff;
+        color: var(--lob-ink);
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -14789,7 +14820,7 @@
         margin-left: auto;
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.42);
+        color: rgba(var(--lob-fg), 0.42);
         flex: none;
       }
       .lobby__meta svg { width: 12px; height: 12px; flex: none; }
@@ -14806,13 +14837,13 @@
         border: 0;
         border-radius: 10px;
         background: none;
-        color: rgba(255, 255, 255, 0.55);
+        color: rgba(var(--lob-fg), 0.55);
         font: 600 14px var(--font-sans);
         cursor: pointer;
       }
-      .lobby__more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
-      /* focus on the dark stage: the ink-accent ring washes out over black
-         glass — lobby + green-room controls carry a white ring instead */
+      .lobby__more:hover { background: rgba(var(--lob-fg), 0.08); color: var(--lob-ink); }
+      /* lobby focus rings ride the lobby ink channel: white over the dark
+         glass, ink over paper — the token pair keeps both legible */
       .lobby__pick:focus-visible,
       .lobby__more:focus-visible,
       .lobby__new:focus-visible,
@@ -14821,7 +14852,7 @@
       .lobby__archived-toggle:focus-visible,
       .greenroom__tile:focus-visible,
       .greenroom__ctl:focus-visible {
-        outline: 2px solid rgba(255, 255, 255, 0.85);
+        outline: 2px solid rgba(var(--lob-fg), 0.85);
         outline-offset: 2px;
         box-shadow: none;
       }
@@ -14835,15 +14866,15 @@
         margin-top: 4px;
         padding: 0 14px;
         border-radius: 12px;
-        border: 1px dashed rgba(255, 255, 255, 0.22);
+        border: 1px dashed rgba(var(--lob-fg), 0.22);
         background: none;
-        color: rgba(255, 255, 255, 0.75);
+        color: rgba(var(--lob-fg), 0.75);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         cursor: pointer;
       }
       .lobby__new svg { flex: none; }
-      .lobby__new:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+      .lobby__new:hover { color: var(--lob-ink); border-color: rgba(var(--lob-fg), 0.4); }
       /* archived rooms fold under a toggle row (chevron + "N archived") */
       .lobby__archived-toggle {
         display: flex;
@@ -14853,7 +14884,7 @@
         padding: 0 6px;
         border: 0;
         background: none;
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(var(--lob-fg), 0.5);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         cursor: pointer;
@@ -14877,19 +14908,19 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font: var(--type-body);
-        color: rgba(255, 255, 255, 0.42);
+        color: rgba(var(--lob-fg), 0.42);
       }
       .lobby__restore {
         flex: none;
         border: 0;
         background: none;
-        color: rgba(255, 255, 255, 0.72);
+        color: rgba(var(--lob-fg), 0.72);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         cursor: pointer;
       }
-      .lobby__restore:hover { color: #fff; }
-      .lobby__restore:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
+      .lobby__restore:hover { color: var(--lob-ink); }
+      .lobby__restore:focus-visible { outline: 2px solid rgba(var(--lob-fg), 0.85); outline-offset: 2px; }
       /* canon create form — border-top separated, stacked inputs, a Switch for
          allow-guests, and a ghost cancel beside the primary create */
       .lobby__form {
@@ -14898,22 +14929,22 @@
         gap: 10px;
         margin-top: 6px;
         padding-top: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid rgba(var(--lob-fg), 0.1);
       }
       .lobby__form[hidden] { display: none; }
       .lobby__input {
         height: 38px;
         padding: 0 12px;
         border-radius: var(--r-md);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.06);
-        color: #fff;
+        border: 1px solid rgba(var(--lob-fg), 0.16);
+        background: rgba(var(--lob-fg), 0.06);
+        color: var(--lob-ink);
         font: 500 12.5px var(--font-sans);
         outline: none;
         min-width: 0;
         width: 100%;
       }
-      .lobby__input:focus { border-color: rgba(255, 255, 255, 0.42); }
+      .lobby__input:focus { border-color: rgba(var(--lob-fg), 0.42); }
       .lobby__switch {
         position: relative;
         display: flex;
@@ -14921,7 +14952,7 @@
         gap: 10px;
         cursor: pointer;
         font: var(--type-body-medium);
-        color: rgba(255, 255, 255, 0.78);
+        color: rgba(var(--lob-fg), 0.78);
       }
       .lobby__switch input {
         position: absolute;
@@ -14942,20 +14973,20 @@
         padding: 2px;
         flex: none;
         border-radius: var(--r-full);
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(var(--lob-fg), 0.08);
+        border: 1px solid rgba(var(--lob-fg), 0.16);
         transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
       }
       .lobby__switch-thumb {
         width: 18px;
         height: 18px;
         border-radius: var(--r-full);
-        background: rgba(255, 255, 255, 0.7);
+        background: rgba(var(--lob-fg), 0.7);
         transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
       }
       .lobby__switch input:checked ~ .lobby__switch-track { background: var(--accent); border-color: transparent; }
       .lobby__switch input:checked ~ .lobby__switch-track .lobby__switch-thumb { transform: translateX(16px); background: #fff; }
-      .lobby__switch input:focus-visible ~ .lobby__switch-track { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
+      .lobby__switch input:focus-visible ~ .lobby__switch-track { outline: 2px solid rgba(var(--lob-fg), 0.85); outline-offset: 2px; }
       .lobby__switch-label { font: var(--type-body-medium); }
       .lobby__formactions { display: flex; gap: 8px; }
       .lobby__formcancel {
@@ -14963,21 +14994,21 @@
         min-width: 0;
         height: 38px;
         border-radius: var(--r-full);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(var(--lob-fg), 0.2);
         background: none;
-        color: rgba(255, 255, 255, 0.75);
+        color: rgba(var(--lob-fg), 0.75);
         font: 600 12.5px var(--font-sans);
         cursor: pointer;
       }
-      .lobby__formcancel:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+      .lobby__formcancel:hover { color: var(--lob-ink); border-color: rgba(var(--lob-fg), 0.4); }
       .lobby__submit {
         flex: 1;
         min-width: 0;
         height: 38px;
         border-radius: var(--r-full);
         border: 0;
-        background: #fff;
-        color: #0E0E10;
+        background: var(--lob-join-bg);
+        color: var(--lob-join-ink);
         font: 600 12.5px var(--font-sans);
         cursor: pointer;
       }
@@ -15001,8 +15032,8 @@
         max-width: 300px;
         padding: 6px;
         border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(24, 24, 27, 0.92);
+        border: 1px solid rgba(var(--lob-fg), 0.12);
+        background: var(--lob-pop-bg);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
@@ -15017,21 +15048,21 @@
         border: 0;
         border-radius: 10px;
         background: none;
-        color: rgba(255, 255, 255, 0.85);
+        color: rgba(var(--lob-fg), 0.85);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         text-align: left;
         cursor: pointer;
       }
-      .lobby-pop__item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      .lobby-pop__item:hover { background: rgba(var(--lob-fg), 0.08); color: var(--lob-ink); }
       .lobby-pop__item--danger { color: var(--danger); }
       .lobby-pop__item--danger:hover { background: var(--danger-soft); color: var(--danger); }
-      .lobby-pop__divider { display: block; height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.12); }
+      .lobby-pop__divider { display: block; height: 1px; margin: 4px 6px; background: rgba(var(--lob-fg), 0.12); }
       .lobby-pop__note {
         padding: 8px 10px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: rgba(255, 255, 255, 0.45);
+        color: rgba(var(--lob-fg), 0.45);
       }
       .lobby-pop__consent { display: flex; flex-direction: column; gap: 10px; padding: 6px; }
       .lobby-pop__consent-copy {
@@ -23152,9 +23183,12 @@
       let lastMeetingArchivedUrl = ''
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
-      /* renderTheme paints; applyTheme = renderTheme + persist. The pre-paint
-         script treats an absent key as "follow system", so the 'system'
-         preference simply removes the key and paints without persisting. */
+      /* renderTheme paints; applyTheme = renderTheme + persist. Storage
+         contract (founder default 2026-07-10): the key holds 'light' | 'dark'
+         | 'system'; an ABSENT key means the LIGHT product default (OS
+         preference is only consulted for an explicit 'system' choice). A
+         signed-in user's choice also syncs to their account (pushThemePref /
+         session bootstrap re-apply), so it follows them across devices. */
       function renderTheme(theme) {
         const next = theme === 'dark' ? 'dark' : 'light'
         if (next === 'dark') {
@@ -23168,6 +23202,7 @@
       function applyTheme(theme) {
         const next = renderTheme(theme)
         try { window.localStorage?.setItem(themeStorageKey, next) } catch (err) { /* private mode */ }
+        pushThemePref(next)
         return next
       }
       function toggleTheme() {
@@ -23176,7 +23211,8 @@
       function storedThemePreference() {
         let stored = null
         try { stored = window.localStorage?.getItem(themeStorageKey) } catch (err) { stored = null }
-        return stored === 'light' || stored === 'dark' ? stored : 'system'
+        /* absent/unknown = the light product default, NOT system */
+        return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
       }
       function systemTheme() {
         return systemThemeQuery?.matches ? 'dark' : 'light'
@@ -23186,8 +23222,35 @@
           syncThemeToggles(applyTheme(mode))
           return
         }
-        try { window.localStorage?.removeItem(themeStorageKey) } catch (err) { /* private mode */ }
+        /* explicit "follow system": stored as its own value so boot honors it */
+        try { window.localStorage?.setItem(themeStorageKey, 'system') } catch (err) { /* private mode */ }
+        pushThemePref('system')
         syncThemeToggles(renderTheme(systemTheme()))
+      }
+      /* account-side persistence: fire-and-forget; only meaningful signed in
+         (the endpoint 401s otherwise, which we ignore). */
+      function pushThemePref(mode) {
+        try {
+          fetch('/auth/theme', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ theme: mode }),
+          }).catch(() => {})
+        } catch (err) { /* fetch unavailable */ }
+      }
+      /* session bootstrap re-apply: the account preference wins over this
+         device's localStorage (it followed the user from another device). */
+      function applyAccountThemePref(mode) {
+        if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return
+        if (mode === storedThemePreference()) return
+        if (mode === 'system') {
+          try { window.localStorage?.setItem(themeStorageKey, 'system') } catch (err) { /* private mode */ }
+          syncThemeToggles(renderTheme(systemTheme()))
+          return
+        }
+        const next = renderTheme(mode)
+        try { window.localStorage?.setItem(themeStorageKey, next) } catch (err) { /* private mode */ }
+        syncThemeToggles(next)
       }
       /* live OS theme flips repaint only while no explicit choice is stored */
       systemThemeQuery?.addEventListener?.('change', () => {
@@ -25831,6 +25894,9 @@
           const response = await fetch('/auth/me', { cache: 'no-store' })
           if (response.ok) {
             authedUser = await response.json()
+            // the account theme preference followed the user here from
+            // wherever they last set it — it outranks this device's storage
+            applyAccountThemePref(authedUser?.themePref)
           } else if (response.status === 401 || response.status === 403) {
             // only a real auth rejection signs the tab out
             authedUser = null
